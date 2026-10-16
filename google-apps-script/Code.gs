@@ -60,133 +60,16 @@ const GV_SHEET_NAME = String(PropertiesService.getScriptProperties().getProperty
 const TAG_REQUEST_SPREADSHEET_ID = '13eyCSDnXysQM-nWymBE5yPeKw8fnbVCY-hCTqJSPUsM';
 const TAG_REQUEST_DEFAULT_TAB = 'Tag Requests';
 
-/**
- * 📗 Tag Request column-order safety (v3.66).
- * The admin can reorder columns after a tab already has data. Never append values
- * against a stale row-1 header: migrate the existing data by header name first.
- * The selected columns become the first columns in the exact saved order; existing
- * non-selected columns are retained at the end so historical information is not lost.
- */
-function tagSheetColumnKey_(value) {
-  var key = String(value == null ? '' : value).trim().toLowerCase()
-    .replace(/[^a-z0-9%]+/g, ' ').replace(/\s+/g, ' ').trim();
-  var aliases = {
-    'agent name': 'agent',
-    'tl name': 'tl',
-    'employee name': 'employee',
-    'suggested after stock': 'suggested stock',
-    'suggested stock': 'suggested stock',
-    'suggested without stock': 'suggested without stock',
-    'suggested w o stock': 'suggested without stock'
-  };
-  return aliases[key] || key;
-}
-
-function alignTagRequestSheetColumns_(sh, desiredHeader, incomingRows) {
-  var incomingHeader = Array.isArray(desiredHeader) ? desiredHeader.map(function (h) { return String(h == null ? '' : h).trim(); }) : [];
-  var rows = Array.isArray(incomingRows) ? incomingRows : [];
-  if (!incomingHeader.length || sh.getLastRow() < 1) return { header: incomingHeader, rows: rows };
-
-  var lastRow = sh.getLastRow();
-  var lastCol = sh.getLastColumn();
-  if (lastCol < 1) return { header: incomingHeader, rows: rows };
-
-  var oldRange = sh.getRange(1, 1, lastRow, lastCol);
-  var oldValues = oldRange.getValues();
-  var oldFormulas = oldRange.getFormulas();
-  var oldFormats = oldRange.getNumberFormats();
-  var oldHeader = oldRange.getDisplayValues()[0].map(function (h) { return String(h == null ? '' : h).trim(); });
-  var nonEmptyOld = oldHeader.filter(function (h) { return !!h; });
-  if (!nonEmptyOld.length) {
-    throw new Error('Existing sheet me row 1 par column headings nahi mile. Pehli row me headings rakho ya naya tab select karo; wrong-column entry rok di gayi.');
-  }
-
-  var incomingKeys = incomingHeader.map(tagSheetColumnKey_);
-  var seenIncoming = {};
-  incomingKeys.forEach(function (k) {
-    if (!k) throw new Error('Selected columns me blank heading hai; settings me columns check karo.');
-    if (seenIncoming[k]) throw new Error('Duplicate column heading "' + k + '" hai; settings me duplicate column hatao.');
-    seenIncoming[k] = true;
-  });
-
-  var oldKeys = oldHeader.map(tagSheetColumnKey_);
-  var seenOld = {};
-  oldKeys.forEach(function (k, col) {
-    if (!k) {
-      // A blank title is harmless when the column is truly empty. If it HAS data, do not block the
-      // approval: give it a stable name ("Column F") so the data is kept (moved to the end) and
-      // the header row is filled in.
-      for (var rr = 1; rr < lastRow; rr++) {
-        var v = oldValues[rr][col];
-        var formula = oldFormulas[rr][col];
-        if ((v !== '' && v !== null) || formula) {
-          var letter = '', n = col + 1;
-          while (n > 0) { var m = (n - 1) % 26; letter = String.fromCharCode(65 + m) + letter; n = Math.floor((n - 1) / 26); }
-          oldHeader[col] = 'Column ' + letter;
-          oldKeys[col] = tagSheetColumnKey_(oldHeader[col]);
-          k = oldKeys[col];
-          break;
-        }
-      }
-      if (!k) return;
-    }
-    if (seenOld[k]) throw new Error('Existing sheet me duplicate heading "' + k + '" hai. Duplicate headings fix karo; wrong-column entry roki gayi.');
-    seenOld[k] = true;
-  });
-
-  var matches = incomingKeys.filter(function (k) { return !!seenOld[k]; }).length;
-  if (matches < Math.min(2, incomingHeader.length)) {
-    throw new Error('Google Sheet ki row 1 ke headings selected columns se match nahi hue. Headings ko Tag Request settings ke labels se match karo ya naya tab select karo; data galat column me likhne se rok diya.');
-  }
-
-  // Desired order first. Keep legacy/unselected columns afterwards, including their data.
-  var targetHeader = incomingHeader.slice();
-  var targetKeys = {};
-  incomingKeys.forEach(function (k) { targetKeys[k] = true; });
-  oldHeader.forEach(function (h, idx) {
-    var k = oldKeys[idx];
-    if (h && k && !targetKeys[k]) {
-      targetHeader.push(h);
-      targetKeys[k] = true;
-    }
-  });
-
-  var sameLayout = targetHeader.length === oldHeader.length &&
-    targetHeader.every(function (h, idx) { return tagSheetColumnKey_(h) === oldKeys[idx]; });
-  if (sameLayout) return { header: incomingHeader, rows: rows };
-
-  var oldColByKey = {};
-  oldKeys.forEach(function (k, idx) { if (k) oldColByKey[k] = idx; });
-  var rewritten = [targetHeader.slice()];
-  var rewrittenFormats = [targetHeader.map(function () { return '@'; })];
-  for (var r = 1; r < lastRow; r++) {
-    var newRow = [];
-    var newFormats = [];
-    targetHeader.forEach(function (h) {
-      var oldCol = oldColByKey[tagSheetColumnKey_(h)];
-      if (oldCol === undefined) {
-        newRow.push('');
-        newFormats.push('@');
-      } else {
-        newRow.push(oldFormulas[r][oldCol] || oldValues[r][oldCol]);
-        newFormats.push(oldFormats[r][oldCol] || '@');
-      }
-    });
-    rewritten.push(newRow);
-    rewrittenFormats.push(newFormats);
-  }
-
-  if (sh.getMaxColumns() < targetHeader.length) {
-    sh.insertColumnsAfter(sh.getMaxColumns(), targetHeader.length - sh.getMaxColumns());
-  }
-  var destination = sh.getRange(1, 1, rewritten.length, targetHeader.length);
-  destination.setValues(rewritten);
-  destination.setNumberFormats(rewrittenFormats);
-  try { sh.getRange(1, 1, 1, targetHeader.length).setFontWeight('bold'); } catch (e) { /* cosmetic */ }
-  return { header: incomingHeader, rows: rows };
-}
-
-
+// 📋 Tag Request column/order settings.
+// Dashboard Admin Settings may send body.columnOrder as an array of header names,
+// e.g. ['Name', 'Agent ID', 'Date', 'Mobile', 'Address'].
+// Any selected columns not mentioned in columnOrder are kept after the requested order.
+// These are server-side fallbacks only; dashboard/admin settings can override them per request.
+const TAG_REQUEST_DEFAULT_COLUMN_ORDER = ['Name', 'Agent ID', 'Date'];
+const TAG_REQUEST_DEFAULT_AGENT_COLUMN = 'Agent Name';
+const TAG_REQUEST_SPACER_DEFAULT = true;
+const TAG_REQUEST_COLUMN_ORDER_PROPERTY = 'TAG_REQUEST_COLUMN_ORDER';
+const TAG_REQUEST_AGENT_COLUMN_PROPERTY = 'TAG_REQUEST_AGENT_COLUMN';
 const TAB = 'APP_STORAGE';
 const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
@@ -481,75 +364,118 @@ function doPost(e) {
       var ss = target_(body.spreadsheetId || TAG_REQUEST_SPREADSHEET_ID);
       var sh = ss.getSheetByName(tabName);
       if (!sh) sh = ss.insertSheet(tabName);
-      var header = Array.isArray(body.header) ? body.header.map(function (h) { return String(h == null ? '' : h); }) : [];
+      var incomingHeader = Array.isArray(body.header)
+        ? body.header.map(function (h) { return String(h == null ? '' : h).trim(); })
+        : [];
       var rows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
-      rows.forEach(function (r) { if (!Array.isArray(r)) throw new Error('rows must be arrays of values'); });
-      // Reconcile the existing tab with the saved column order before calculating row positions.
-      // Without this step, changing the admin order would append new values under the old headings.
-      var aligned = alignTagRequestSheetColumns_(sh, header, rows);
-      header = aligned.header;
-      rows = aligned.rows;
-      var startRow = sh.getLastRow() + 1;
-
-      // 🧩 Tag Requests: Agent groups are separated by exactly one blank row.
-      // This works even when Admin changes the column order, because the Agent column
-      // is located from the actual header rather than a fixed position.
-      if (/^tag requests$/i.test(tabName) && header.length && rows.length) {
-        var agentCol = -1;
-        for (var hi = 0; hi < header.length; hi++) {
-          if (/^agent(?:\s+name)?$/i.test(String(header[hi] || '').trim())) { agentCol = hi; break; }
-        }
-        if (agentCol >= 0) {
-          var firstIncoming = null;
-          for (var ri = 0; ri < rows.length; ri++) {
-            var rv = rows[ri] || [];
-            var rowHas = rv.some(function (v) { return String(v == null ? '' : v).trim() !== ''; });
-            if (rowHas) { firstIncoming = rv; break; }
-          }
-          var lastDataRow = sh.getLastRow();
-          if (firstIncoming && lastDataRow >= 2) {
-            var widthCheck = Math.max(header.length, agentCol + 1);
-            if (sh.getMaxColumns() < widthCheck) sh.insertColumnsAfter(sh.getMaxColumns(), widthCheck - sh.getMaxColumns());
-            var prevVals = sh.getRange(lastDataRow, 1, 1, widthCheck).getDisplayValues()[0];
-            var prevHasData = prevVals.some(function (v) { return String(v || '').trim() !== ''; });
-            var prevAgent = String(prevVals[agentCol] || '').trim().replace(/\s+/g, ' ').toUpperCase();
-            var firstAgent = String(firstIncoming[agentCol] || '').trim().replace(/\s+/g, ' ').toUpperCase();
-            var spacerAlreadyThere = false;
-            if (lastDataRow > 2) {
-              var beforeVals = sh.getRange(lastDataRow - 1, 1, 1, widthCheck).getDisplayValues()[0];
-              spacerAlreadyThere = beforeVals.every(function (v) { return String(v || '').trim() === ''; });
-            }
-            if (prevHasData && prevAgent && firstAgent && prevAgent !== firstAgent && !spacerAlreadyThere) {
-              sh.insertRowsAfter(lastDataRow, 1);
-              startRow = lastDataRow + 2;
+      rows.forEach(function (r) {
+        if (!Array.isArray(r)) throw new Error('rows must be arrays of values');
+      });
+      if (!incomingHeader.length && rows.length) {
+        throw new Error('header is required when rows are supplied');
+      }
+      // Admin setting can control exact column order. The same API works with
+      // { columnOrder: ['Name', 'Agent ID', 'Date', ...] } from the dashboard.
+      var desiredOrder = tagRequestColumnOrder_(body, incomingHeader);
+      var orderedHeader = reorderHeader_(incomingHeader, desiredOrder);
+      var orderedRows = reorderRows_(rows, desiredOrder);
+      // Create/update the header only when the sheet is new/empty.
+      // Existing sheets keep their physical columns; incoming rows are mapped to that header.
+      var sheetHeader = [];
+      if (sh.getLastRow() >= 1 && sh.getLastColumn() >= 1) {
+        sheetHeader = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
+          .map(function (h) { return String(h == null ? '' : h).trim(); });
+        if (sheetHeader.every(function (h) { return !h; })) {
+          if (sh.getLastRow() > 1) {
+            var existingRows = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getDisplayValues();
+            var hasUnlabelledData = existingRows.some(function (row) {
+              return row.some(function (v) { return String(v == null ? '' : v).trim() !== ''; });
+            });
+            if (hasUnlabelledData) {
+              throw new Error('Google Sheet me row 1 ke headings khaali hain, lekin purana data maujood hai. Pehle headings sahi karo ya naya tab use karo; wrong-column entry rok di gayi.');
             }
           }
+          sheetHeader = [];
         }
       }
-
-      if (startRow <= 1 && header.length) {
-        if (sh.getMaxColumns() < header.length) sh.insertColumnsAfter(sh.getMaxColumns(), header.length - sh.getMaxColumns());
-        sh.getRange(1, 1, 1, header.length).setValues([header]);
-        try { sh.getRange(1, 1, 1, header.length).setFontWeight('bold'); } catch (e) { /* cosmetic */ }
-        startRow = 2;
+      if (!sheetHeader.length && orderedHeader.length) {
+        sheetHeader = orderedHeader.slice();
+        if (sh.getMaxColumns() < sheetHeader.length) {
+          sh.insertColumnsAfter(sh.getMaxColumns(), sheetHeader.length - sh.getMaxColumns());
+        }
+        sh.getRange(1, 1, 1, sheetHeader.length).setValues([sheetHeader]);
+        try { sh.getRange(1, 1, 1, sheetHeader.length).setFontWeight('bold'); } catch (e) {}
       }
-      var added = 0;
-      if (rows.length) {
-        var width = header.length;
-        rows.forEach(function (r) { if (r.length > width) width = r.length; });
-        if (sh.getMaxColumns() < width) sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
-        var padded = rows.map(function (r) {
-          var c = r.slice(0, width).map(function (v) { return typeof v === 'object' && v !== null ? JSON.stringify(v) : v; });
-          while (c.length < width) c.push('');
-          return c;
+      // Add newly selected columns first without deleting any legacy/unselected columns.
+      // The following reorder step applies this request's incoming Admin order to the physical
+      // sheet too, while retaining all existing data in its matching column.
+      var finalHeader = sheetHeader.slice();
+      orderedHeader.forEach(function (h) {
+        if (!h) return;
+        if (finalHeader.map(normalizeTagHeader_).indexOf(normalizeTagHeader_(h)) < 0) finalHeader.push(h);
+      });
+      if (finalHeader.length !== sheetHeader.length) {
+        if (sh.getMaxColumns() < finalHeader.length) {
+          sh.insertColumnsAfter(sh.getMaxColumns(), finalHeader.length - sh.getMaxColumns());
+        }
+        sh.getRange(1, 1, 1, finalHeader.length).setValues([finalHeader]);
+        sheetHeader = finalHeader;
+        try { sh.getRange(1, 1, 1, sheetHeader.length).setFontWeight('bold'); } catch (e) {}
+      }
+      // ✅ Critical fix: keep the actual Google Sheet columns in the same order as the UI and
+      // incoming rows. Earlier versions mapped values by header but left the old physical order,
+      // which made the saved Date → Agent → Agent ID order appear to write into the wrong layout.
+      if (orderedHeader.length && sheetHeader.length) {
+        sheetHeader = reorderExistingTagSheetColumns_(sh, sheetHeader, orderedHeader);
+      }
+
+      var headerIndex = {};
+      sheetHeader.forEach(function (h, i) {
+        var key = normalizeTagHeader_(h);
+        if (key && headerIndex[key] === undefined) headerIndex[key] = i;
+      });
+      var padded = orderedRows.map(function (r) {
+        var outRow = new Array(sheetHeader.length).fill('');
+        orderedHeader.forEach(function (h, orderedIdx) {
+          var hi = headerIndex[normalizeTagHeader_(h)];
+          if (hi === undefined) return;
+          var v = r[orderedIdx];
+          outRow[hi] = typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
         });
-        sh.getRange(startRow, 1, padded.length, width).setValues(padded);
+        return outRow;
+      });
+      var added = 0;
+      if (padded.length) {
+        var spacerEnabled = body.blankRowBetweenAgents === undefined
+          ? tagRequestSpacerEnabled_()
+          : body.blankRowBetweenAgents !== false;
+        var agentColumnName = String(
+          body.agentColumn ||
+          PropertiesService.getScriptProperties().getProperty(TAG_REQUEST_AGENT_COLUMN_PROPERTY) ||
+          TAG_REQUEST_DEFAULT_AGENT_COLUMN
+        ).trim();
+        var agentIdx = findAgentColumnIndex_(sheetHeader, agentColumnName);
+        appendRowsWithAgentSpacers_(sh, sheetHeader, padded, {
+          agentIndex: agentIdx,
+          enabled: spacerEnabled
+        });
         added = padded.length;
       }
       SpreadsheetApp.flush();
-      return json_({ ok: true, tab: tabName, added: added, atRow: startRow, spreadsheet: ss.getName(), spreadsheetId: ss.getId(), url: ss.getUrl() });
+      return json_({
+        ok: true,
+        tab: tabName,
+        added: added,
+        atRow: Math.max(2, sh.getLastRow() - Math.max(0, padded.length) + 1),
+        columns: sheetHeader,
+        columnOrderApplied: orderedHeader,
+        blankRowBetweenAgents: padded.length ? (body.blankRowBetweenAgents === undefined ? tagRequestSpacerEnabled_() : body.blankRowBetweenAgents !== false) : false,
+        agentColumn: sheetHeader[findAgentColumnIndex_(sheetHeader, String(body.agentColumn || '').trim())] || '',
+        spreadsheet: ss.getName(),
+        spreadsheetId: ss.getId(),
+        url: ss.getUrl()
+      });
     }
-
     // 📇 Agent Address Book — central sheet tab, automatically created and de-duplicated.
     // body: { tab: 'Address', rows: [{key,agentId,agent,channel,mobile,address,pincode,tl,updatedAt}], spreadsheetId?: '<sheet id>' }
     if (body.action === 'readaddresses') {
@@ -737,6 +663,308 @@ function doPost(e) {
 
 /** Entry kis sheet me jaani hai — ID diya ho to wahi (alag sheet), warna wahi sheet jisme ye
  *  script bana hai. Alag sheet par is Google account ka EDIT access hona chahiye. */
+/**
+ * 🧩 Tag Request helpers
+ *
+ * Admin/dashboard may send:
+ *   columnOrder: ['Name', 'Agent ID', 'Date', ...]
+ *   agentColumn: 'Agent Name'
+ *   blankRowBetweenAgents: true/false
+ *
+ * If columnOrder is omitted, the dashboard's incoming header order is authoritative.
+ * This is important because Admin already sends header + values in the saved UI order.
+ * TAG_REQUEST_COLUMN_ORDER remains available for the explicit one-time reorder helper only.
+ */
+function normalizeTagHeader_(value) {
+  var key = String(value == null ? '' : value).trim().toLowerCase().replace(/\s+/g, ' ');
+  // Common heading variations resolve to the same logical column.
+  var aliases = {
+    'agent name': 'agent',
+    'tag issuing agent name': 'agent',
+    'agent_name': 'agent',
+    'name': 'agent',
+    'tl name': 'tl'
+  };
+  return aliases[key] || key;
+}
+
+function tagRequestColumnOrder_(body, header) {
+  // The dashboard already sends header + row values in the saved Admin UI order.
+  // Respect that order unless the caller explicitly includes columnOrder. In particular,
+  // do NOT apply a hard-coded default that silently changes Date → Agent → Agent ID back
+  // to the old Agent ID → Date → Agent order.
+  var requested = Array.isArray(body && body.columnOrder) ? body.columnOrder.slice() : [];
+  if (!requested.length) return header.map(function (_, idx) { return idx; });
+
+  var headerNorm = header.map(normalizeTagHeader_);
+  var used = {};
+  var order = [];
+  requested.forEach(function (wanted) {
+    var w = normalizeTagHeader_(wanted);
+    if (!w) return;
+    var idx = headerNorm.indexOf(w);
+    if (idx >= 0 && !used[idx]) {
+      used[idx] = true;
+      order.push(idx);
+    }
+  });
+  // Keep every header not explicitly ordered. Nothing is silently dropped.
+  header.forEach(function (_, idx) {
+    if (!used[idx]) {
+      used[idx] = true;
+      order.push(idx);
+    }
+  });
+  return order;
+}
+
+function reorderHeader_(header, order) {
+  return order.map(function (idx) { return header[idx]; });
+}
+function reorderRows_(rows, order) {
+  return rows.map(function (row) {
+    return order.map(function (idx) {
+      return row[idx] === undefined ? '' : row[idx];
+    });
+  });
+}
+
+
+/**
+ * Reorder physical columns in an existing Tag Requests tab to match Admin's saved order.
+ * Uses Sheet.moveColumns so values, formulas, and formatting move together. All columns not
+ * selected by Admin stay to the right in their existing relative order.
+ */
+function reorderExistingTagSheetColumns_(sh, currentHeader, desiredHeader) {
+  var liveHeader = currentHeader.slice();
+  var liveKeys = liveHeader.map(normalizeTagHeader_);
+  var desiredKeys = desiredHeader.map(normalizeTagHeader_);
+  var seenLive = {};
+  var seenDesired = {};
+
+  liveKeys.forEach(function (key, idx) {
+    if (!key) return; // Preserve legacy blank-header columns at the far right.
+    if (seenLive[key]) {
+      throw new Error('Google Sheet row 1 me duplicate heading "' + liveHeader[idx] + '" hai. Duplicate header fix karo; wrong-column entry rok di gayi.');
+    }
+    seenLive[key] = true;
+  });
+  desiredKeys.forEach(function (key, idx) {
+    if (!key) throw new Error('Admin settings me blank column heading hai; settings me columns check karo.');
+    if (seenDesired[key]) {
+      throw new Error('Admin settings me duplicate column "' + desiredHeader[idx] + '" select hai. Duplicate selection hatao.');
+    }
+    seenDesired[key] = true;
+    if (liveKeys.indexOf(key) < 0) {
+      throw new Error('Google Sheet me "' + desiredHeader[idx] + '" column nahi mila. Sheet header row 1 check karo; wrong-column entry rok di gayi.');
+    }
+  });
+
+  // Insertion-sort each selected column into its target position. Since earlier columns have
+  // already been fixed, the next desired column must be at or to the right of its target.
+  desiredKeys.forEach(function (key, targetIdx) {
+    var fromIdx = liveKeys.indexOf(key);
+    if (fromIdx < 0) throw new Error('Column "' + desiredHeader[targetIdx] + '" reorder ke dauran nahi mila.');
+    if (fromIdx === targetIdx) return;
+    if (fromIdx < targetIdx) {
+      throw new Error('Column order ambiguous near "' + desiredHeader[targetIdx] + '". Duplicate headings check karo.');
+    }
+    // Apps Script destinationIndex is 1-based and inserts the selected source columns before it.
+    sh.moveColumns(sh.getRange(1, fromIdx + 1, sh.getMaxRows(), 1), targetIdx + 1);
+    var movedHeader = liveHeader.splice(fromIdx, 1)[0];
+    var movedKey = liveKeys.splice(fromIdx, 1)[0];
+    liveHeader.splice(targetIdx, 0, movedHeader);
+    liveKeys.splice(targetIdx, 0, movedKey);
+  });
+
+  // Normalize selected legacy aliases (e.g. Agent Name → Agent) to current canonical labels.
+  var finalHeader = desiredHeader.slice().concat(liveHeader.slice(desiredHeader.length));
+  if (finalHeader.length) {
+    sh.getRange(1, 1, 1, finalHeader.length).setValues([finalHeader]);
+    try { sh.getRange(1, 1, 1, finalHeader.length).setFontWeight('bold'); } catch (e) {}
+  }
+  return finalHeader;
+}
+function findAgentColumnIndex_(header, preferred) {
+  var pref = normalizeTagHeader_(preferred);
+  if (pref) {
+    var exact = header.map(normalizeTagHeader_).indexOf(pref);
+    if (exact >= 0) return exact;
+  }
+  var aliases = [
+    'agent name',
+    'agent',
+    'agent name/id',
+    'agent_name',
+    'tag issuing agent name',
+    'name'
+  ];
+  var norm = header.map(normalizeTagHeader_);
+  for (var i = 0; i < aliases.length; i++) {
+    var idx = norm.indexOf(normalizeTagHeader_(aliases[i]));
+    if (idx >= 0) return idx;
+  }
+  // Agent ID is a safer fallback than using an unrelated column.
+  for (var j = 0; j < norm.length; j++) {
+    if (norm[j] === 'agent id' || norm[j] === 'agent_id' || norm[j] === 'agentid') return j;
+  }
+  return -1;
+}
+function tagRequestSpacerEnabled_() {
+  var saved = PropertiesService.getScriptProperties().getProperty('TAG_REQUEST_SPACER_ENABLED');
+  if (saved === null || saved === '') return TAG_REQUEST_SPACER_DEFAULT;
+  return String(saved).toLowerCase() !== 'false';
+}
+/**
+ * Append rows while inserting exactly one physical blank row whenever the
+ * Agent value changes. It also avoids adding a duplicate blank row at the
+ * existing sheet boundary.
+ */
+function appendRowsWithAgentSpacers_(sh, header, rows, options) {
+  if (!rows || !rows.length) return 0;
+  options = options || {};
+  var enabled = options.enabled !== false;
+  var agentIndex = Number.isFinite(options.agentIndex) ? options.agentIndex : -1;
+  var width = header.length;
+  if (sh.getMaxColumns() < width) {
+    sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
+  }
+  if (!enabled || agentIndex < 0) {
+    var start = Math.max(2, sh.getLastRow() + 1);
+    sh.getRange(start, 1, rows.length, width).setValues(rows);
+    return rows.length;
+  }
+  function agentKey_(row) {
+    if (!row || agentIndex < 0 || agentIndex >= row.length) return '';
+    return normalizeAgentValue_(row[agentIndex]);
+  }
+  var lastDataAgent = '';
+  var lastRow = sh.getLastRow();
+  if (lastRow >= 2) {
+    var previous = sh.getRange(lastRow, 1, 1, width).getValues()[0];
+    lastDataAgent = agentKey_(previous);
+  }
+  var expanded = [];
+  var previousAgent = lastDataAgent;
+  rows.forEach(function (row) {
+    var currentAgent = agentKey_(row);
+    var lastOut = expanded.length ? expanded[expanded.length - 1] : null;
+    var lastWasBlank = !!lastOut && lastOut.every(function (v) { return String(v == null ? '' : v).trim() === ''; });
+    // The dashboard may already send its own blank spacer row — never add a second one.
+    if (currentAgent && previousAgent && currentAgent !== previousAgent && !lastWasBlank) {
+      expanded.push(new Array(width).fill(''));
+    }
+    expanded.push(row.slice(0, width));
+    while (expanded[expanded.length - 1].length < width) expanded[expanded.length - 1].push('');
+    if (currentAgent) previousAgent = currentAgent;
+  });
+  var startRow = Math.max(2, sh.getLastRow() + 1);
+  sh.getRange(startRow, 1, expanded.length, width).setValues(expanded);
+  return rows.length;
+}
+function normalizeAgentValue_(value) {
+  return String(value == null ? '' : value).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+/**
+ * 🔧 Save the admin's default column order in Script Properties.
+ * Example:
+ *   setTagRequestColumnOrderOnce(['Name', 'Agent ID', 'Date', 'Mobile', 'TL']);
+ */
+function setTagRequestColumnOrderOnce(order) {
+  if (!Array.isArray(order) || !order.length) {
+    throw new Error('order must be a non-empty array of column names.');
+  }
+  var cleaned = order.map(function (x) {
+    return String(x == null ? '' : x).trim();
+  }).filter(Boolean);
+  if (!cleaned.length) throw new Error('No valid column names supplied.');
+  PropertiesService.getScriptProperties().setProperty(
+    TAG_REQUEST_COLUMN_ORDER_PROPERTY,
+    JSON.stringify(cleaned)
+  );
+  Logger.log('TAG_REQUEST_COLUMN_ORDER saved: ' + JSON.stringify(cleaned));
+  return cleaned;
+}
+/** Save which header should be used to group agents for blank spacer rows. */
+function setTagRequestAgentColumnOnce(columnName) {
+  columnName = String(columnName || '').trim();
+  if (!columnName) throw new Error('Agent column name required.');
+  PropertiesService.getScriptProperties().setProperty(
+    TAG_REQUEST_AGENT_COLUMN_PROPERTY,
+    columnName
+  );
+  Logger.log('TAG_REQUEST_AGENT_COLUMN saved: ' + columnName);
+  return columnName;
+}
+/**
+ * Existing-sheet one-time fixer:
+ * Inserts exactly one blank row between consecutive Agent groups.
+ * It does not reorder or delete existing data.
+ */
+function fixTagRequestAgentSpacersNow() {
+  var ss = target_(TAG_REQUEST_SPREADSHEET_ID);
+  var sh = ss.getSheetByName(TAG_REQUEST_DEFAULT_TAB);
+  if (!sh) throw new Error('Tag Requests sheet not found.');
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return 'No data to fix.';
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  var agentIdx = findAgentColumnIndex_(header, '');
+  if (agentIdx < 0) {
+    throw new Error('Agent column not found. Run setTagRequestAgentColumnOnce("Agent Name") first.');
+  }
+  var values = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var dataRows = [];
+  var prevAgent = '';
+  // Remove old spacer rows and rebuild them from Agent changes, so the final
+  // layout has exactly one blank row between Agent groups.
+  values.forEach(function (row) {
+    var rowHasAnyValue = row.some(function (v) { return String(v == null ? '' : v).trim() !== ''; });
+    if (!rowHasAnyValue) return;
+    var key = normalizeAgentValue_(row[agentIdx]);
+    if (!key) {
+      // Rows without an Agent value are ignored by the fixer. New imports will
+      // still use the configured agentColumn, preventing accidental grouping.
+      return;
+    }
+    if (prevAgent && key !== prevAgent) {
+      dataRows.push(new Array(lastCol).fill(''));
+    }
+    dataRows.push(row);
+    prevAgent = key;
+  });
+  sh.getRange(2, 1, Math.max(1, lastRow - 1), lastCol).clearContent();
+  if (dataRows.length) {
+    sh.getRange(2, 1, dataRows.length, lastCol).setValues(dataRows);
+  }
+  SpreadsheetApp.flush();
+  return 'Done — existing Tag Requests sheet now has exactly one blank row between Agent groups.';
+}
+/**
+ * Optional utility for admin:
+ * Reorders the physical sheet columns once, using the supplied order.
+ * Existing data is preserved; unspecified columns remain after the requested ones.
+ */
+function reorderTagRequestColumnsNow(order) {
+  var ss = target_(TAG_REQUEST_SPREADSHEET_ID);
+  var sh = ss.getSheetByName(TAG_REQUEST_DEFAULT_TAB);
+  if (!sh) throw new Error('Tag Requests sheet not found.');
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return 'No columns to reorder.';
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (x) { return String(x || '').trim(); });
+  var idxOrder = tagRequestColumnOrder_({ columnOrder: order }, header);
+  var newHeader = reorderHeader_(header, idxOrder);
+  var values = lastRow > 1 ? sh.getRange(1, 1, lastRow, lastCol).getValues() : [header];
+  var reordered = values.map(function (row) {
+    return idxOrder.map(function (idx) { return row[idx]; });
+  });
+  sh.getRange(1, 1, lastRow, lastCol).clearContent();
+  sh.getRange(1, 1, lastRow, lastCol).setValues(reordered);
+  SpreadsheetApp.flush();
+  setTagRequestColumnOrderOnce(newHeader);
+  return newHeader;
+}
 function target_(ssId) {
   var id = String(ssId || '').trim();
   if (!id) return SpreadsheetApp.getActive();

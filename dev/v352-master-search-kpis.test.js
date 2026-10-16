@@ -205,9 +205,9 @@ test('📗 Tag Request Sheet — configurable column order + one Agent spacer ro
   const server = await read('server.js');
   assert.match(server, /rowMode: 'agent-class-gap'/);
   const gs = await read('google-apps-script/Code.gs');
-  assert.match(gs, /Tag Requests: Agent groups are separated by exactly one blank row/);
-  assert.match(gs, /sh\.insertRowsAfter\(lastDataRow, 1\)/);
-  assert.match(gs, /var agentCol = -1/);
+  assert.match(gs, /exactly one physical blank row whenever the\s*\n?\s*\* ?Agent value changes|exactly one physical blank row/);
+  assert.match(gs, /function appendRowsWithAgentSpacers_/);
+  assert.match(gs, /never add a second one/);
 });
 
 test('🧹 global Master Search suggestion closes before navigation', async () => {
