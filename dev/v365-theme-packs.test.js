@@ -40,3 +40,9 @@ test('FASTag Mapping shows 16-digit barcodes sheet-style with dashes (display on
   assert.match(fm, /inputValue: dashBar\(it\.barcode\)/);
   assert.match(fm, /value: it\.barcode,/, 'raw digits stay in value for lookup');
 });
+
+test('🔁 Dual channel — FF TL ApnaPayment => ghost, review flag nahi', () => {
+  const src = read('insights.js');
+  assert.match(src, /isGvChannelTl\(ffTl\)/);
+  assert.match(src, /const isGvChannelTl/);
+});

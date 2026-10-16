@@ -1479,6 +1479,12 @@ FF.pages = FF.pages || {};
     if (normId(id) === normId(FF.config.eir.gvMasterId || '5845036')) return true;
     return /^apna\s*pay/i.test(clean(name));
   };
+  // TL = ApnaPayment (GV channel TL) → us TL ke neeche FF StockDataa me jo stock hai wo GV channel ka hai; GV agent ke paas hona normal flow hai.
+  const isGvChannelTl = (tl) => {
+    const n = normName(tl); if (!n) return false;
+    const cfg = normName((FF.config.eir && FF.config.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.');
+    return (!!cfg && n === cfg) || /^apna\s*pay/i.test(clean(tl));
+  };
   const isUnassignedGvHolder = (name, id) => {
     const i = clean(id), n = clean(name);
     if (!i && !n) return true;
@@ -1498,10 +1504,11 @@ FF.pages = FF.pages || {};
       const ffDup = b.ffOccurrences > 1 || b.ffOwnerCount > 1;
       const gvDup = b.gvOccurrences > 1 || b.gvOwnerCount > 1;
       const crossOwner = barcodeOwnerKey('ff', b) !== barcodeOwnerKey('gv', b);
-      const ffGhost = isGvMasterFfHolder(b.ffAgent, b.ffId);
+      const ffTl = b.ffTl || (b.ff && b.ff.tlName) || b.ffTlName || '';
+      const ffGhost = isGvMasterFfHolder(b.ffAgent, b.ffId) || isGvChannelTl(ffTl);
       const gvGhost = isUnassignedGvHolder(b.gvAgent, b.gvId);
       if (ffGhost || gvGhost) {
-        const reasons = [ffGhost ? 'FF side GV master (Apna Payment) — GV channel stock, double count nahi' : '', gvGhost ? 'GV side not-assigned/blank — abhi kisi agent ke paas nahi' : ''].filter(Boolean);
+        const reasons = [ffGhost ? 'FF side GV master / TL ApnaPayment — GV channel stock, double count nahi' : '', gvGhost ? 'GV side not-assigned/blank — abhi kisi agent ke paas nahi' : ''].filter(Boolean);
         return { ...b, ffDup, gvDup, crossOwner, ffGhost, gvGhost, ghost: true, doubleMapped: false, reasons };
       }
       const reasons = [ffDup ? 'FF me ek se zyada rows/owners' : '', gvDup ? 'GV me ek se zyada rows/owners' : '', crossOwner ? 'FF aur GV me alag agent' : ''].filter(Boolean);
@@ -1835,7 +1842,7 @@ FF.pages = FF.pages || {};
       const e = byKey.get(k);
       const ffH = e.ff.map((r) => r.agentName || r.agentId).sort()[0] || '';
       const gvH = e.gv.map((r) => r.agentName || r.agentId).sort()[0] || '';
-      if (normName(ffH) !== normName(gvH) && !isGvMasterFfHolder(ffH, '') && !isUnassignedGvHolder(gvH, '')) mismatch.push({ barcode: U.barcode(k), ff: ffH, gv: gvH, cls: (e.ff[0] && e.ff[0].cls) || (e.gv[0] && e.gv[0].cls) || '' });
+      if (normName(ffH) !== normName(gvH) && !isGvMasterFfHolder(ffH, '') && !isGvChannelTl((e.ff[0] && e.ff[0].tlName) || '') && !isUnassignedGvHolder(gvH, '')) mismatch.push({ barcode: U.barcode(k), ff: ffH, gv: gvH, cls: (e.ff[0] && e.ff[0].cls) || (e.gv[0] && e.gv[0].cls) || '' });
     });
     // Aged stock alert (v3.8.3): kitna FF stock kitne din se ek hi jagah pada hai.
     const aged30 = [], aged60 = [];
