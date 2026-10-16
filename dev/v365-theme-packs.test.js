@@ -75,3 +75,11 @@ test('🧠 AI Analyst — FF/GV master-ID separation + clickable drill', () => {
   assert.match(src, /function openDrill/);
   assert.match(src, /data-drill/);
 });
+
+test('🏷️ Tag Request label — Deliver To + sender sirf naam, Req/Emp/TL meta aur #ID nahi', () => {
+  const src = read('tagRequest.js');
+  assert.doesNotMatch(src, /Req #\$\{/);
+  assert.doesNotMatch(src, /Emp: \$\{/);
+  assert.doesNotMatch(src, /<span class="lbl-id">/);
+  assert.match(src, /FROM \(SENDER\): Name - \$\{f\.name\}`/);
+});

@@ -62,7 +62,8 @@ test('🖨️ print selected — har request ka label sirf EK baar, TO = agent k
   assert.ok(!/VC5 × 0/.test(html));
   assert.match(html, /Agent: Agent X \+1/, 'purani multi-agent request — employee ke address par, agents line');
   assert.match(html, /VC4 × 14 · VC7 × 2 = <b>16 tags<\/b>/);
-  assert.match(html, /FROM:<\/b> Apna Payment Pvt Ltd/);
+  assert.match(html, /<b>Apna Payment Pvt Ltd<\/b>/);
+  assert.doesNotMatch(html, /Plot 12, RIICO|Req #/); // sender: sirf naam
   assert.ok(html.includes('font-size: 12pt'));
   assert.ok(html.includes('@page { size: A4'));
   for (const n of [4, 5, 6]) assert.ok(html.includes(`data-rows="${n}"`), `per page ${n * 2} button`);
@@ -81,7 +82,7 @@ test('🖨️ print selected — har request ka label sirf EK baar, TO = agent k
 test('📋 labelText — agent ka mobile/address/PIN; purani request me employee + agent line', () => {
   const t = TR.labelText(rahul);
   assert.ok(t.includes('Item Name: FASTag'), 'legacy request defaults to FASTag item label');
-  for (const s of ['FROM: Apna Payment Pvt Ltd', 'TO: Rahul Sharma', 'Mob: 9876500001', 'Address: 12, Gandhi Nagar', 'Pincode: 302015', 'tagreq_aaa111', '20 tags', 'VC4×20']) assert.ok(t.includes(s), `labelText me "${s}"`);
+  for (const s of ['Name - Apna Payment Pvt Ltd', 'TO: Rahul Sharma', 'Mob: 9876500001', 'Address: 12, Gandhi Nagar', 'Pincode: 302015', '20 tags', 'VC4×20']) assert.ok(t.includes(s), `labelText me "${s}"`);
   assert.ok(!t.includes('VC5×0'));
   const old = TR.labelText(legacy);
   for (const s of ['TO: Suresh Kumar', 'Pincode: 302019', 'Agent: Agent X +1', '16 tags']) assert.ok(old.includes(s), `legacy labelText me "${s}"`);

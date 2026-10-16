@@ -667,7 +667,7 @@ FF.pages = FF.pages || {};
     const it = labelItem(r);
     const t = it.to;
     return [
-      `📬 DELIVER TO (RECEIVER) · Req #${it.id}`,
+      `📬 DELIVER TO (RECEIVER)`,
       `TO: ${t.name || ''}`,
       `Name - ${t.name || '—'}`,
       t.mobile ? `Mobile Number - ${t.mobile} (Mob: ${t.mobile})` : '',
@@ -680,8 +680,7 @@ FF.pages = FF.pages || {};
       it.courier ? `🚚 Courier: ${it.courier}` : '',
       '',
       `📤 FROM (SENDER):`,
-      `FROM: ${f.name}${f.address ? `, ${f.address}` : ''}${f.phone ? ` · Ph: ${f.phone}` : ''}`,
-      `Name - ${f.name}${f.phone ? ` | Mobile Number - ${f.phone}` : ''}`
+      `Name - ${f.name}`
     ].filter((x) => x !== '' && x !== undefined).join('\n');
   }
   /** Poora printable HTML — har item ka EK label (dobara repeat nahi).
@@ -694,15 +693,14 @@ FF.pages = FF.pages || {};
     const rowsPerPage = [3, 4, 5, 6].includes(Number(o.rows)) ? Number(o.rows) : 5;
     const colorful = o.colorful !== false;
     const hOf = (n) => ((283 - (n - 1) * 2.5) / n).toFixed(1); // label height (mm)
-    const fromLine = `<div class="from"><div class="from-hdr"><span class="from-badge">📤 FROM (SENDER)</span><span class="from-req">FASTag Dispatch</span></div><div class="from-body"><span class="lbl-k">Name - </span><b>FROM:</b> ${esc(f.name)}${f.phone ? ` <span class="from-sep">·</span> <span class="lbl-k">Mobile Number - </span><b>☏ ${esc(f.phone)}</b>` : ''}${f.address ? `<div class="from-addr"><span class="lbl-k">Address - </span>${esc(f.address)}</div>` : ''}</div></div>`;
+    const fromLine = `<div class="from"><div class="from-hdr"><span class="from-badge">📤 FROM (SENDER)</span></div><div class="from-body"><span class="lbl-k">Name - </span><b>${esc(f.name)}</b></div></div>`;
     const cells = list.map((it) => {
       const t = it.to || {};
       const cls = it.classes.length ? it.classes.map((c) => `${esc(c.cls)} × ${fmt(c.qty)}`).join(' · ') : '—';
       const agentLine = agentRef(it) ? `<div class="to-agent">${esc(agentRef(it))}</div>` : '';
-      const meta = `Req #${esc(it.id.slice(-10))} · ${esc(it.date)}${it.courier ? ` · 🚚 Courier: ${esc(it.courier)}` : ''}${it.employee ? ` · Emp: ${esc(it.employee)}` : ''}${it.tl ? ` · TL ${esc(it.tl)}` : ''}${it.agentId && t.who === 'agent' ? ` · ID ${esc(it.agentId)}` : ''}`;
       const courierChip = it.courier ? `<div class="to-courier">🚚 Courier: <b>${esc(it.courier)}</b></div>` : '';
       const itemNameChip = `<div class="to-item-name">📦 Item Name: <b>${esc(it.itemName || 'FASTag')}</b></div>`;
-      return `<div class="lbl"><div class="lbl-top-bar"><span class="tag">TO</span><span class="to-hdr-title">📬 DELIVER TO (RECEIVER)</span><span class="lbl-id">#${esc(it.id.slice(-10))}</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${itemNameChip}${courierChip}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}<div class="meta">${meta}</div></div>`;
+      return `<div class="lbl"><div class="lbl-top-bar"><span class="tag">TO</span><span class="to-hdr-title">📬 DELIVER TO (RECEIVER)</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${itemNameChip}${courierChip}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}</div>`;
     }).join('');
     const totalTags = list.reduce((s, it) => s + num(it.total), 0);
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -812,9 +810,6 @@ body.colorful .from-hdr { color: #166534; }
         fnt(0.68, 800);
         ctx.fillStyle = colorful ? '#ffffff' : '#111111';
         ctx.fillText('TO · DELIVER TO (RECEIVER)', px(ix), px(y0 + 3.8));
-        const reqStr = `#${String(it.id).slice(-10)}`;
-        const reqW = ctx.measureText(reqStr).width / pg.k;
-        ctx.fillText(reqStr, px(ix + iw - reqW), px(y0 + 3.8));
         if (!colorful) line(ix, y0 + 5.2, ix + iw, false);
 
         let y = y0 + 6.2;
@@ -837,9 +832,9 @@ body.colorful .from-hdr { color: #166534; }
 
         // 2. BOTTOM ANCHOR: Class summary + FROM (SENDER) AT THE BOTTOM
         const cls = it.classes.length ? it.classes.map((c) => `${c.cls} × ${fmt(c.qty)}`).join(' · ') : '—';
-        const fromStr1 = `FROM (SENDER): Name - ${f.name}${f.phone ? ` · Mobile - ${f.phone}` : ''}`;
-        const fromStr2 = f.address ? `Address - ${f.address}` : '';
-        const meta = `Req #${String(it.id).slice(-10)} · ${it.date}${it.employee ? ` · Emp: ${it.employee}` : ''}${it.tl ? ` · TL ${it.tl}` : ''}`;
+        const fromStr1 = `FROM (SENDER): Name - ${f.name}`; // sirf naam — mobile/address label par nahi
+        const fromStr2 = '';
+        const meta = ''; // Req / Emp / TL line label par nahi
 
         fnt(0.76, 700);
         const clsLines = FF.pdf.wrap(ctx, `FASTags: ${cls} = ${fmt(it.total)} tags`, px(iw)).slice(0, 2);
@@ -848,7 +843,7 @@ body.colorful .from-hdr { color: #166534; }
         fnt(0.60, 500);
         const fromLines2 = fromStr2 ? FF.pdf.wrap(ctx, fromStr2, px(iw)).slice(0, 2) : [];
         fnt(0.54, 400);
-        const metaLines = FF.pdf.wrap(ctx, meta, px(iw)).slice(0, 1);
+        const metaLines = meta ? FF.pdf.wrap(ctx, meta, px(iw)).slice(0, 1) : [];
 
         const sCls = pt * MMPT * 0.76 * 1.22;
         const sFr1 = pt * MMPT * 0.64 * 1.22;
