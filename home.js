@@ -836,18 +836,42 @@ FF.pages = FF.pages || {};
     if (todoMount) {
       const canReq = FF.auth.can('tagRequest') || (u.role === 'admin');
       const link = (href, icon, label, n, tone) => `<a class="todo-item ${tone || ''}" href="${href}"><span class="todo-ic">${icon}</span><span class="todo-tx"><b>${n == null ? '' : esc(U.fmt(n))}</b> ${esc(label)}</span><span class="todo-go">→</span></a>`;
-      const paint = (pending) => {
+      // `info` = summary of the tag-request list (null while loading). Extra rows only appear when they are non-zero.
+      const paint = (info) => {
         const items = [];
-        if (canReq) items.push(pending == null ? link('#/tagRequest', '📝', 'Tag requests — open', null) : link('#/tagRequest', pending ? '⏳' : '✅', pending ? `pending tag request${pending === 1 ? '' : 's'}` : 'No pending tag requests', pending || null, pending ? 'warn' : 'ok'));
+        if (canReq) {
+          const pending = info ? info.pending : null;
+          items.push(pending == null ? link('#/tagRequest', '📝', 'Tag requests — open', null) : link('#/tagRequest', pending ? '⏳' : '✅', pending ? `pending tag request${pending === 1 ? '' : 's'}` : 'No pending tag requests', pending || null, pending ? 'warn' : 'ok'));
+          if (info && info.late) items.push(link('#/tagRequest', '🔥', `request${info.late === 1 ? '' : 's'} waiting 2+ days (oldest ${info.lateDays}d)`, info.late, 'warn'));
+          if (info && info.toDispatch) items.push(link('#/tagRequest', '🚚', `approved — dispatch pending`, info.toDispatch, 'warn'));
+          if (info && info.sheetFail) items.push(link('#/tagRequest', '📗', `Google Sheet entry failed — resend`, info.sheetFail, 'warn'));
+        }
         if (FF.auth.can('stock')) items.push(link('#/stock', '📦', 'Check low-stock agents', null));
         if (FF.auth.can('performance')) items.push(link('#/performance', '🏁', 'Agent performance', null));
+        if (FF.auth.can('fastagMapping')) items.push(link('#/fastagMapping', '🔗', 'FASTag Mapping — map & report', null));
         todoMount.innerHTML = items.length ? `<section class="card todo-card"><div class="card-head"><h3>✅ Today's work</h3></div><div class="todo-row">${items.join('')}</div></section>` : '';
+      };
+      const summarize = (list) => {
+        const now = Date.now(), DAY = 24 * 3600e3;
+        let pending = 0, late = 0, lateDays = 0, toDispatch = 0, sheetFail = 0;
+        list.forEach((r) => {
+          const st = String((r && r.status) || 'pending').toLowerCase();
+          const t = Date.parse((r && (r.at || r.updatedAt)) || '') || 0;
+          if (st === 'pending') {
+            pending++;
+            const days = t ? Math.floor((now - t) / DAY) : 0;
+            if (days >= 2) { late++; lateDays = Math.max(lateDays, days); }
+          }
+          if (st === 'approved') toDispatch++;
+          if (st === 'approved' && r.sheetSync && r.sheetSync.error && !(r.sheetApprovalSync && r.sheetApprovalSync.at)) sheetFail++;
+        });
+        return { pending, late, lateDays, toDispatch, sheetFail };
       };
       paint(null);
       if (canReq && FF.auth.api) {
         FF.auth.api('/api/tag-requests').then((out) => {
           const list = (out && out.requests) || [];
-          paint(list.filter((r) => String(r && r.status || 'pending').toLowerCase() === 'pending').length);
+          paint(summarize(list));
         }).catch(() => {});
       }
     }

@@ -5694,9 +5694,11 @@ async function handleApi(req, res, url) {
     for (const r of (workspaceStore().tagRequests || [])) {
       if (!r) continue;
       const status = String(r.status || 'pending').toLowerCase();
-      if (status !== 'pending' && status !== 'approved') continue;
+      if (status !== 'pending' && status !== 'approved' && status !== 'dispatched') continue;
       const t = new Date(r.at || r.updatedAt || 0).getTime();
-      if (t && nowMs - t > 30 * 24 * 3600e3) continue;
+      // Pending/approved stay "active" for 30 days; a request that was already DISPATCHED only counts for the last 7 days
+      // (agent ko abhi tag mile hain — dobara maangna shayad galti hai).
+      if (t && nowMs - t > (status === 'dispatched' ? 7 : 30) * 24 * 3600e3) continue;
       const rMob = tagDigits(r.agent && r.agent.mobile).slice(-10);
       const matched = [];
       for (const want of wanted) {
