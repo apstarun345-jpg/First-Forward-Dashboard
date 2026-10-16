@@ -1416,6 +1416,7 @@ FF.pages = FF.pages || {};
     { key: 'issuance', icon: '📅', label: 'Date & Agent Issuance' },
     { key: 'performance', icon: '🏆', label: 'Performance & Growth' },
     { key: 'ageing', icon: '⏳', label: 'Stock Ageing' },
+    { key: 'requests', icon: '🏷️', label: 'My Tag Requests (status)' },
     { key: 'export', icon: '⬇', label: 'CSV & PDF Download' }
   ];
   async function linksTab(body) {

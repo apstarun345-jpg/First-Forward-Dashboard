@@ -799,7 +799,7 @@ window.FF = window.FF || {};
     if (!host || !summary) return;
     let ready = 0, done = 0;
     for (const r of state.rows) { if (r.mapped) done++; else if (rowReady(r)) ready++; }
-    summary.innerHTML = '<div class="grid g-4"><div class="card"><div class="card-body"><small>Rows</small><h2>' + U.fmt(state.rows.length) + '</h2></div></div><div class="card"><div class="card-body"><small>Ready to map</small><h2>' + U.fmt(ready) + '</h2></div></div><div class="card"><div class="card-body"><small>Mapped successfully</small><h2>' + U.fmt(done) + '</h2></div></div><div class="card"><div class="card-body"><small>Needs review</small><h2>' + U.fmt(state.rows.length - ready - done) + '</h2></div></div></div>';
+    summary.innerHTML = '<div class="grid g-4"><div class="card"><div class="card-body"><small>Rows</small><h2>' + U.fmt(state.rows.length) + '</h2></div></div><div class="card"><div class="card-body"><small>Ready to map</small><h2>' + U.fmt(ready) + '</h2></div></div><div class="card"><div class="card-body"><small>Mapped successfully</small><h2>' + U.fmt(done) + '</h2></div></div><div class="card"><div class="card-body"><small>Needs review</small><h2>' + U.fmt(state.rows.length - ready - done) + '</h2></div></div></div>' + reportHtml();
     if (!state.rows.length) { host.innerHTML = '<div class="empty-state">Add tags in step 1, then click “Lookup StockDataa”.</div>'; syncSteps(); return; }
     const limit = Math.max(SHOW_STEP, state.showLimit || SHOW_STEP), shown = state.rows.slice(0, limit);
     const body = shown.map((r, i) => {
@@ -809,6 +809,71 @@ window.FF = window.FF || {};
     const more = state.rows.length > limit ? '<div class="btn-row" style="margin-top:8px"><span class="dim small">Pehli ' + U.fmt(limit) + ' / ' + U.fmt(state.rows.length) + ' rows dikh rahi hain (mapping + CSV me sab rows shamil hain).</span><button class="btn small" id="fm-more">Aur dikhao</button></div>' : '';
     host.innerHTML = '<div class="table-wrap"><table class="tbl compact"><thead><tr><th><input type="checkbox" id="fm-select-all" aria-label="Select ready rows"></th><th>Sheet row</th><th>Barcode</th><th>Tag ID</th><th>Serial No</th><th>VC Type</th><th>Stock Agent ID</th><th>Agent ID to map</th><th>Agent name</th><th>TL</th><th>Mapping status</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>' + more;
     syncSteps();
+  }
+
+  // ===== 📊 Mapping report (v3.80) — agent × class counts, not-found list, cannot-map sheet =====
+  const isDupSkipped = (r) => String(r.status || '').startsWith('Duplicate skipped');
+  const isNotFound = (r) => r.status === 'Not found in StockDataa' || !r.stock || !Object.keys(r.stock).length;
+  const rowAgent = (r) => clean(r.agentId) || '(Agent ID missing)';
+  function reportModel() {
+    const rows = state.rows.filter((r) => !isDupSkipped(r));
+    const classes = new Set();
+    const byAgent = new Map();
+    const agentOf = (id) => { if (!byAgent.has(id)) byAgent.set(id, { agentId: id, name: '', tl: '', cls: new Map(), found: 0, notFound: 0, mapped: 0, blocked: 0 }); return byAgent.get(id); };
+    const notFound = [], cannotMap = [];
+    rows.forEach((r) => {
+      const a = agentOf(rowAgent(r));
+      if (isNotFound(r)) {
+        a.notFound++; notFound.push(r);
+      } else {
+        a.found++;
+        const c = clean(r.vcType) || '(no class)'; classes.add(c); a.cls.set(c, (a.cls.get(c) || 0) + 1);
+        if (!a.name && r.stockAgentName) a.name = r.stockAgentName;
+        if (!a.tl && r.tlName) a.tl = r.tlName;
+        if (r.mapped) a.mapped++;
+      }
+      if (!r.mapped && (!rowReady(r) || r.apiStatus)) { a.blocked++; cannotMap.push(r); }
+    });
+    const classList = [...classes].sort();
+    const agents = [...byAgent.values()].sort((x, y) => (y.found + y.notFound) - (x.found + x.notFound) || x.agentId.localeCompare(y.agentId));
+    return { rows, classList, agents, notFound, cannotMap };
+  }
+  const reasonOf = (r) => clean(r.apiStatus && !r.mapped ? (r.apiStatus + (r.message ? ' — ' + r.message : '')) : (r.status + (r.message ? ' — ' + r.message : '')));
+  function reportHtml() {
+    if (!state.rows.length) return '';
+    const m = reportModel();
+    const th = m.classList.map((c) => '<th class="num">' + esc(c) + '</th>').join('');
+    const tot = { found: 0, notFound: 0, cls: new Map() };
+    const body = m.agents.map((a) => {
+      tot.found += a.found; tot.notFound += a.notFound;
+      return '<tr><td><b>' + esc(a.agentId) + '</b></td><td>' + esc(a.name) + '</td><td>' + esc(a.tl) + '</td>' + m.classList.map((c) => { const n = a.cls.get(c) || 0; tot.cls.set(c, (tot.cls.get(c) || 0) + n); return '<td class="num">' + (n ? num(n) : '–') + '</td>'; }).join('') + '<td class="num"><b>' + num(a.found) + '</b></td><td class="num">' + (a.notFound ? '<span class="badge red">' + num(a.notFound) + '</span>' : '–') + '</td><td class="num">' + num(a.mapped) + '</td></tr>';
+    }).join('');
+    const foot = '<tr class="fm-rep-total"><td colspan="3"><b>TOTAL</b></td>' + m.classList.map((c) => '<td class="num"><b>' + num(tot.cls.get(c) || 0) + '</b></td>').join('') + '<td class="num"><b>' + num(tot.found) + '</b></td><td class="num"><b>' + num(tot.notFound) + '</b></td><td class="num"><b>' + num(m.agents.reduce((n, a) => n + a.mapped, 0)) + '</b></td></tr>';
+    const nfRows = m.notFound.slice(0, 300).map((r) => '<tr><td>' + esc(r.request || r.barcode || r.tagId) + '</td><td><b>' + esc(rowAgent(r)) + '</b></td><td>' + esc(r.sheetRow || '') + '</td></tr>').join('');
+    const cmRows = m.cannotMap.slice(0, 300).map((r) => '<tr><td>' + esc(r.barcode || r.request) + '</td><td>' + esc(r.tagId) + '</td><td>' + esc(r.vcType) + '</td><td><b>' + esc(rowAgent(r)) + '</b></td><td>' + esc(r.sheetRow || '') + '</td><td>' + esc(reasonOf(r)) + '</td></tr>').join('');
+    return '<section class="card fm-report" id="fm-report"><div class="card-head"><div><h3>📊 Mapping report</h3><p class="dim small">Agent ID ke hisaab se class-wise barcode count · jo nahi mile unki list · jo map nahi ho sakte unki alag sheet.</p></div><div class="head-actions"><button class="btn small primary" id="fm-report-xlsx" type="button">⬇ Report Excel (3 sheets)</button><button class="btn small" id="fm-report-csv" type="button">⬇ Cannot-map CSV</button></div></div><div class="card-body">' +
+      '<div class="fm-rep-grid"><div class="fm-rep-main"><h4>Agent × Class</h4><div class="table-wrap"><table class="tbl compact fm-rep-tbl"><thead><tr><th>Agent ID</th><th>Agent</th><th>TL</th>' + th + '<th class="num">Total found</th><th class="num">Not found</th><th class="num">Mapped</th></tr></thead><tbody>' + body + foot + '</tbody></table></div></div>' +
+      '<div class="fm-rep-side"><h4>❌ Nahi mile <span class="badge ' + (m.notFound.length ? 'red' : 'green') + '">' + num(m.notFound.length) + '</span></h4>' + (m.notFound.length ? '<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / Tag</th><th>Agent ID</th><th>Sheet row</th></tr></thead><tbody>' + nfRows + '</tbody></table></div>' + (m.notFound.length > 300 ? '<small class="dim">Pehli 300 dikh rahi hain — Excel me sab hain.</small>' : '') : '<p class="dim small">Sab barcode StockDataa me mile ✅</p>') + '</div></div>' +
+      '<h4 style="margin-top:14px">🚫 Mapping nahi ho sakti <span class="badge ' + (m.cannotMap.length ? 'amber' : 'green') + '">' + num(m.cannotMap.length) + '</span></h4>' + (m.cannotMap.length ? '<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode</th><th>Tag ID</th><th>Class</th><th>Agent ID</th><th>Sheet row</th><th>Reason</th></tr></thead><tbody>' + cmRows + '</tbody></table></div>' + (m.cannotMap.length > 300 ? '<small class="dim">Pehli 300 dikh rahi hain — Excel me sab hain.</small>' : '') : '<p class="dim small">Koi row blocked nahi ✅</p>') +
+      '</div></section>';
+  }
+  function reportSheets() {
+    const m = reportModel();
+    const sumHeader = ['Agent ID', 'Agent', 'TL'].concat(m.classList, ['Total found', 'Not found', 'Mapped']);
+    const sumRows = m.agents.map((a) => [a.agentId, a.name, a.tl].concat(m.classList.map((c) => a.cls.get(c) || 0), [a.found, a.notFound, a.mapped]));
+    sumRows.push(['TOTAL', '', ''].concat(m.classList.map((c) => m.agents.reduce((n, a) => n + (a.cls.get(c) || 0), 0)), [m.agents.reduce((n, a) => n + a.found, 0), m.agents.reduce((n, a) => n + a.notFound, 0), m.agents.reduce((n, a) => n + a.mapped, 0)]));
+    const nfHeader = ['Barcode / Tag ID', 'Agent ID', 'Sheet row', 'Source', 'Reason'];
+    const nfRows = m.notFound.map((r) => [r.request || r.barcode || r.tagId || '', rowAgent(r), r.sheetRow || '', r.source || '', reasonOf(r)]);
+    const cmHeader = ['Sheet row', 'Request', 'Barcode', 'Tag ID', 'Serial No', 'VC Type', 'Tag Type', 'Stock Agent ID', 'Agent ID to map', 'Agent Name', 'TL', 'Inventory', 'Barcode Allocated At', 'Agent Allocated At', 'Matched By', 'Reason'];
+    const cmRows = m.cannotMap.map((r) => [r.sheetRow || '', r.request || '', r.barcode || '', r.tagId || '', r.serialNo || '', r.vcType || '', r.tagType || '', r.stockAgentId || '', r.agentId || '', r.stockAgentName || '', r.tlName || '', r.inventoryName || '', r.barcodeAllocatedAt || '', r.agentAllocatedAt || '', r.matchedBy || '', reasonOf(r)]);
+    return { summary: { name: 'Agent x Class', header: sumHeader, rows: sumRows }, notFound: { name: 'Not Found', header: nfHeader, rows: nfRows }, cannot: { name: 'Cannot Map', header: cmHeader, rows: cmRows } };
+  }
+  function reportDownload(kind) {
+    if (!state.rows.length) { setStatus('Pehle lookup chalao — tabhi report banegi.', 'warn'); return; }
+    const sh = reportSheets();
+    if (kind === 'csv') { saveCsvFile('fastag-cannot-map-' + U.stamp() + '.csv', sh.cannot.header, sh.cannot.rows); return; }
+    if (FF.xlsx && FF.xlsx.download) { FF.xlsx.download('fastag-mapping-report-' + U.stamp() + '.xlsx', [sh.summary, sh.notFound, sh.cannot]); return; }
+    saveCsvFile('fastag-cannot-map-' + U.stamp() + '.csv', sh.cannot.header, sh.cannot.rows);
   }
   function checkDuplicates() {
     const byTag = new Map();
@@ -1429,6 +1494,8 @@ window.FF = window.FF || {};
       if (target.id === 'fm-lookup') return lookup();
       if (target.id === 'fm-map') return mapReady();
       if (target.id === 'fm-csv') return downloadCsv();
+      if (target.id === 'fm-report-xlsx') return reportDownload('xlsx');
+      if (target.id === 'fm-report-csv') return reportDownload('csv');
       if (target.id === 'fm-clear') { if (state.busy) return; state.items = []; state.rows = []; state.sheetCtx = null; state.showLimit = SHOW_STEP; renderTable(); setStatus('Queue clear ho gayi.', 'info'); return; }
       if (target.id === 'fm-select-all') { const checks = state.root.querySelectorAll('[data-fm-select]'); checks.forEach((cb) => { const r = state.rows[Number(cb.dataset.fmSelect)]; if (r && !cb.disabled) r.selected = target.checked; }); renderTable(); return; }
       if (target.hasAttribute('data-fm-remove')) { const idx = Number(target.dataset.fmRemove); if (!state.busy && Number.isInteger(idx)) { state.rows.splice(idx, 1); renderTable(); } }

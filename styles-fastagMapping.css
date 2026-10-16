@@ -36,3 +36,11 @@
 @media (max-width: 760px) {
 html .fm-pane .grid.g-3, html.mobile-ui .fm-pane .grid.g-3 { grid-template-columns: minmax(0, 1fr) !important; }
 }
+.fm-report { margin-top: 14px; }
+.fm-rep-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 14px; align-items: start; }
+.fm-report h4 { margin: 0 0 8px; font-size: 14px; }
+.fm-rep-tbl td.num, .fm-rep-tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.fm-rep-total td { border-top: 2px solid var(--line); background: color-mix(in srgb, var(--muted) 8%, transparent); }
+@media (max-width: 860px) {
+.fm-rep-grid { grid-template-columns: minmax(0, 1fr); }
+}

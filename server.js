@@ -5063,7 +5063,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: !!(out && (out.agent || out.tl)), agent: out && out.agent ? out.agent.title : null, tl: out && out.tl ? out.tl.title : null });
   }
   // 🔗 Personal read-only links (agent + TL) — CRUD + Admin Access Control + Auth (TL/Agent ID + Mobile)
-  const PL_ALL_SECTIONS = ['overview', 'stock', 'issuance', 'performance', 'ageing', 'export'];
+  const PL_ALL_SECTIONS = ['overview', 'stock', 'issuance', 'performance', 'ageing', 'requests', 'export'];
   const normPlSections = (arr) => {
     if (!Array.isArray(arr)) return [...PL_ALL_SECTIONS];
     // An explicitly empty allow-list is an intentional lock-down. Export is only a capability
@@ -8275,6 +8275,32 @@ function personalStats(rows) {
   return { mtd, mtdActiveDays, prevSame, monthDays, streak, best, cls, clsTotal, asOfDay, activeDays: monthDays.filter((x) => x.n > 0).length };
 }
 
+/** 🏷️ Personal page: sirf is agent/TL ki apni Tag Requests (status + class-wise qty). Dusre agents ka data nahi. */
+function personalRequestsHtml(link) {
+  const norm = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const me = norm(link && link.name);
+  const isTl = link && link.kind === 'tl';
+  const list = (workspaceStore().tagRequests || []).filter((r) => r && Array.isArray(r.rows));
+  const mine = [];
+  list.forEach((r) => {
+    const rows = r.rows.filter((x) => x && (isTl ? norm(x.tl || x.tlName) === me : norm(x.agentName || x.name) === me));
+    if (rows.length) mine.push({ r, rows });
+  });
+  mine.sort((a, b) => Date.parse(b.r.at || 0) - Date.parse(a.r.at || 0));
+  if (!mine.length) return '<section class="pb-card"><h3>🏷️ My Tag Requests</h3><p class="dim">Abhi tak koi Tag Request nahi mili.</p></section>';
+  const badge = (st) => {
+    const v = String(st || 'pending').toLowerCase();
+    const map = { approved: ['#16a34a', 'Approved'], dispatched: ['#2563eb', 'Dispatched'], rejected: ['#dc2626', 'Rejected'], pending: ['#d97706', 'Pending'] };
+    const m = map[v] || ['#64748b', v];
+    return `<span style="background:${m[0]};color:#fff;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700">${escHtml(m[1])}</span>`;
+  };
+  const body = mine.slice(0, 100).map(({ r, rows }) => {
+    const cls = rows.filter((x) => x.cls && (Number(x.approved) || Number(x.requested))).map((x) => `${escHtml(x.cls)}: <b>${Number(x.approved) || 0}</b>${x.requested !== undefined && Number(x.requested) !== Number(x.approved) ? ` <small>(asked ${Number(x.requested) || 0})</small>` : ''}`).join(' · ');
+    const who = isTl ? `<td>${escHtml([...new Set(rows.map((x) => x.agentName || x.name).filter(Boolean))].slice(0, 3).join(', '))}</td>` : '';
+    return `<tr><td>${escHtml(String(r.at || '').slice(0, 10))}</td>${who}<td>${cls || '—'}</td><td>${badge(r.status)}</td><td>${escHtml(r.courier || '')}</td></tr>`;
+  }).join('');
+  return `<section class="pb-card"><h3>🏷️ My Tag Requests</h3><div class="pb-tbl-wrap" style="overflow:auto"><table class="pb-tbl"><thead><tr><th>Date</th>${isTl ? '<th>Agent</th>' : ''}<th>Class-wise qty</th><th>Status</th><th>Courier</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
+}
 async function servePersonalPage(req, res, rawToken) {
   const token = String(rawToken || '').split(/[/?#]/)[0].trim();
   const noStore = { 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' };
@@ -8303,7 +8329,7 @@ async function servePersonalPage(req, res, rawToken) {
     return sendHtml(res, 200, html, noStore);
   }
   const def = (db.settings && db.settings.personalLinkDefaults) || {};
-  const allSections = ['overview', 'stock', 'issuance', 'performance', 'ageing', 'export'];
+  const allSections = ['overview', 'stock', 'issuance', 'performance', 'ageing', 'requests', 'export'];
   const allowedSecs = Array.isArray(savedLink.sections)
     ? savedLink.sections.filter((key) => allSections.includes(key))
     : (Array.isArray(def.sections) ? def.sections.filter((key) => allSections.includes(key)) : allSections);
@@ -8546,7 +8572,8 @@ async function servePersonalPage(req, res, rawToken) {
       { id: 'stock', label: '📦 Class-wise Stock', show: hasSec('stock') },
       { id: 'issuance', label: `📅 Date${link.kind === 'tl' ? ' & Agent' : ''} Issuance`, show: hasSec('issuance') },
       { id: 'performance', label: '🏆 Performance', show: hasSec('performance') },
-      { id: 'ageing', label: '⏳ Stock Ageing', show: hasSec('ageing') }
+      { id: 'ageing', label: '⏳ Stock Ageing', show: hasSec('ageing') },
+      { id: 'requests', label: '🏷️ My Tag Requests', show: hasSec('requests') }
     ].filter((t) => t.show);
     if (tabDefs.length > 1) tabDefs.push({ id: 'all', label: '🌐 All Allowed Sections', show: true });
     const firstTab = (tabDefs[0] && tabDefs[0].id) || 'overview';
@@ -8591,6 +8618,7 @@ async function servePersonalPage(req, res, rawToken) {
         ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div>` : ''}
         ${hasSec('performance') ? `<div class="pl-pane" data-pl-pane="performance" hidden>${perfCardHtml}${teamHtml}</div>` : ''}
         ${hasSec('ageing') ? `<div class="pl-pane" data-pl-pane="ageing" hidden>${ageHtml}${agentAgeTable}</div>` : ''}
+        ${hasSec('requests') ? `<div class="pl-pane" data-pl-pane="requests" hidden>${personalRequestsHtml(link)}</div>` : ''}
         <p class="pb-foot">Read-only link · data live sheet se · ${escHtml(db.settings.brand || 'Dashboard')}</p>
         </div>
       </div></div>`
