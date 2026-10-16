@@ -2813,18 +2813,64 @@ body.colorful .from-hdr { color: #166534; }
   }
   function setStatus(dr, status, btn) {
     if (btn) { btn.disabled = true; }
-    // ⚡ Pending / Approved / Rejected / Dispatched — status UI turant badlo.
+    // ⚡ Pending / Approved / Rejected / Dispatched — status UI turant badlo; save slow ho to "1 / 1" progress card.
+    const ui = progressUi(`${STATUS[status] ? STATUS[status].label : status} · updating`, 1, 500);
+    ui.label(dr.agent && dr.agent.name ? dr.agent.name : 'Saving…');
     const p = putRequest(dr.req, { status });
     renderReqTable();
     p.then(() => {
-      U.toast(`${STATUS[status] ? STATUS[status].label : status} — ${dr.agent.name}`, 'ok');
+      ui.set(1);
+      return ui.close().then(() => U.toast(`${STATUS[status] ? STATUS[status].label : status} — ${dr.agent.name}`, 'ok'));
     }).catch((err) => {
+      ui.close();
       U.toast('Status update fail: ' + ((err && err.message) || ''), 'err');
       renderReqTable();
     });
     return p;
   }
-  /** Selected requests → ek saath naya status (Approved / Dispatched / Rejected / Pending). Admin only; sirf wahi requests badalti hain jinka status alag hai. */
+  /** Full-screen progress card: "3 / 20" counter that ticks up one by one + bar, so a long save never looks stuck. */
+  function progressUi(title, total, delayMs) {
+    let el = null, shown = 0, target = 0, timer = null, closed = false, nowText = '', waiters = [];
+    const step = Math.max(15, Math.min(70, Math.round(900 / Math.max(1, total))));
+    const paint = () => {
+      if (!el) return;
+      const pct = total ? Math.round((shown / total) * 100) : 0;
+      el.querySelector('.tr-prog-count').innerHTML = `<b>${fmt(shown)}</b> / ${fmt(total)}`;
+      el.querySelector('.tr-prog-bar i').style.width = pct + '%';
+      el.querySelector('.tr-prog-now').textContent = shown >= total ? '✅ Done' : (nowText || 'Saving…');
+      el.classList.toggle('is-done', shown >= total);
+    };
+    const build = () => {
+      if (el || closed) return;
+      el = document.createElement('div');
+      el.className = 'tr-prog'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
+      el.innerHTML = `<div class="tr-prog-card"><div class="tr-prog-title">${esc(title)}</div><div class="tr-prog-count"></div><div class="tr-prog-bar"><i></i></div><div class="tr-prog-now"></div></div>`;
+      document.body.appendChild(el);
+      paint();
+    };
+    const tick = () => {
+      timer = null;
+      if (shown < target) { shown++; paint(); }
+      if (shown < target) timer = setTimeout(tick, step);
+      else { const w = waiters; waiters = []; w.forEach((fn) => fn()); }
+    };
+    const startTimer = delayMs > 0 ? setTimeout(build, delayMs) : (build(), null);
+    return {
+      /** n requests confirmed so far (counter ticks up to it). */
+      set(n, label) { target = Math.min(total, Math.max(target, n)); if (label) nowText = label; paint(); if (!timer) timer = setTimeout(tick, 0); },
+      label(label) { nowText = label; paint(); },
+      /** Resolves once the counter has caught up with the confirmed count. */
+      settled() { return shown >= target ? Promise.resolve() : new Promise((r) => waiters.push(r)); },
+      async close() {
+        await this.settled();
+        closed = true;
+        if (startTimer) clearTimeout(startTimer);
+        if (el) { el.classList.add('is-done'); await new Promise((r) => setTimeout(r, 650)); el.remove(); el = null; }
+      }
+    };
+  }
+  /** Selected requests → ek saath naya status (Approved / Dispatched / Rejected / Pending). Admin only; sirf wahi requests badalti hain jinka status alag hai.
+   *  Server ko 10-10 ki chunk me ek bulk call (har chunk = ek hi storage save) — progress card me "n / total" live. */
   async function bulkSetStatus(status) {
     if (!isAdmin()) { U.toast('Only admin can change status', 'err'); return; }
     if (!STATUS[status]) { U.toast('Choose a status first', 'info'); return; }
@@ -2834,17 +2880,30 @@ body.colorful .from-hdr { color: #166534; }
     const msg = `Mark ${list.length} request${list.length > 1 ? 's' : ''} as ${STATUS[status].label}?${skipped ? `\n(${skipped} already in this status will be skipped.)` : ''}`;
     if (!window.confirm(msg)) return;
     rootEl.querySelectorAll('[data-tr-bulk="approve"],[data-tr-bulk="dispatch"],[data-tr-bulk="apply-status"],[data-tr-bulk-status]').forEach((b) => { b.disabled = true; });
-    const busy = rootEl.querySelector('[data-tr-bulk="apply-status"]');
-    if (busy) busy.textContent = '⏳ Updating…';
-    // Optimistic UI turant; server calls 6-6 ke batch me (storage ek hi workspace hai — hazaron parallel PUT nahi).
-    const results = [];
-    for (let i = 0; i < list.length; i += 6) {
-      const chunk = list.slice(i, i + 6).map((r) => putRequest(r, { status }));
-      if (i === 0) renderReqTable();
-      results.push(...await Promise.allSettled(chunk));
+    const ui = progressUi(`${STATUS[status].label} · updating requests`, list.length, 0);
+    let ok = 0, fail = 0;
+    for (let i = 0; i < list.length; i += 10) {
+      const chunk = list.slice(i, i + 10);
+      ui.label(`Saving ${fmt(i + 1)}–${fmt(i + chunk.length)}…`);
+      const locals = chunk.map((r) => ({ r, local: optimisticRequest(r, { status }) }));
+      renderReqTable();
+      try {
+        const out = await FF.auth.api('/api/tag-requests/bulk-status', 'POST', { ids: chunk.map((r) => r.id), status });
+        const done = new Set(((out && out.requests) || []).map((x) => x.id));
+        locals.forEach(({ r, local }) => {
+          const fresh = ((out && out.requests) || []).find((x) => x.id === r.id);
+          if (reqMutationSeq.get(r.id) === local.token) { if (fresh) replaceRequest(fresh); reqMutationSeq.delete(r.id); }
+          if (!done.has(r.id) && local.before && local.before.id) replaceRequest(local.before);
+        });
+        ok += done.size; fail += chunk.length - done.size;
+      } catch (err) {
+        locals.forEach(({ r, local }) => { if (reqMutationSeq.get(r.id) === local.token) { reqMutationSeq.delete(r.id); if (local.before && local.before.id) replaceRequest(local.before); } });
+        fail += chunk.length;
+      }
+      ui.set(ok + fail);
+      renderReqTable();
     }
-    const ok = results.filter((x) => x.status === 'fulfilled').length;
-    const fail = results.length - ok;
+    await ui.close();
     state.sel.clear();
     renderReqTable();
     U.toast(`${STATUS[status].label}: ${ok} updated${fail ? ` · ⚠️ ${fail} failed (restored)` : ''}`, fail ? 'warn' : 'ok');

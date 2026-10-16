@@ -58,6 +58,9 @@
 .tr-req-toolbar { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 10px; }
 .tr-selall { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; cursor: pointer; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .tr-bulk-status { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tr-prog-title { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+.tr-prog-count { font-size: 38px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tr-prog-bar { height: 10px; margin: 14px 0 10px; border-radius: 99px; background: rgba(120, 130, 150, .25); overflow: hidden; }
 .tr-req-tbl col.tr-col-sel { width: 36px; }
 .tr-req-tbl col.tr-col-date { width: 88px; }
 .tr-req-tbl col.tr-col-employee { width: 140px; }

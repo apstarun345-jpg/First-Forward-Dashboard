@@ -20,9 +20,19 @@ test('bulkSetStatus: admin guard, skips same-status rows, confirms, batches PUTs
   assert.match(fn, /if \(!isAdmin\(\)\)/);
   assert.match(fn, /\(r\.status \|\| 'pending'\) !== status/);
   assert.match(fn, /window\.confirm/);
-  assert.match(fn, /i \+= 6/);
-  assert.match(fn, /putRequest\(r, \{ status \}\)/);
+  assert.match(fn, /i \+= 10/);
+  assert.match(fn, /\/api\/tag-requests\/bulk-status/);
+  assert.match(fn, /progressUi\(/);
   assert.match(fn, /state\.sel\.clear\(\)/);
   assert.match(src, /op === 'dispatch'\) bulkSetStatus\('dispatched'\)/);
   assert.match(src, /op === 'apply-status'/);
+});
+
+test('progress card shows "n / total" and server has a single-save bulk endpoint', () => {
+  assert.match(src, /function progressUi\(title, total, delayMs\)/);
+  assert.match(src, /<b>\$\{fmt\(shown\)\}<\/b> \/ \$\{fmt\(total\)\}/);
+  const server = readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+  const ep = server.slice(server.indexOf("p === '/api/tag-requests/bulk-status'"));
+  assert.match(ep, /user\.role !== 'admin'/);
+  assert.equal((ep.slice(0, ep.indexOf('tagReqPath')).match(/await persist\('notify'\)/g) || []).length, 1, 'one storage save for the whole chunk');
 });

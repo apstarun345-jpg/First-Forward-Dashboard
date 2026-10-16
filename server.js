@@ -6300,6 +6300,50 @@ async function handleApi(req, res, url) {
     logAudit(user, 'tag_request_created', { target: row.id, note: `${rows.length} rows · ${total} tags`, ip: clientIp(req) });
     return sendJson(res, 201, { ok: true, request: row });
   }
+  // ⚡ Bulk status: ek call me kai requests, ek hi storage save (pehle har request ka alag save → 20 requests ≈ 1 minute).
+  if (p === '/api/tag-requests/bulk-status' && method === 'POST') {
+    if (user.role !== 'admin') throw new HttpError(403, 'Status sirf admin badal sakta hai.');
+    const body = await readBody(req);
+    const status = String(body.status || '');
+    if (!['pending', 'approved', 'dispatched', 'rejected'].includes(status)) throw new HttpError(400, 'Status invalid hai.');
+    const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map((x) => String(x || '').slice(0, 40)).filter(Boolean))].slice(0, 200);
+    if (!ids.length) throw new HttpError(400, 'Kam se kam ek request chuno.');
+    const w = workspaceStore();
+    const byId = new Map((w.tagRequests || []).map((r) => [r.id, r]));
+    const now = new Date().toISOString();
+    const updated = [], missing = [], toSheet = [];
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row) { missing.push(id); continue; }
+      const prev = row.status;
+      row.status = status; row.updatedAt = now; row.updatedBy = user.username;
+      updated.push(row);
+      if (status === 'approved' && prev !== 'approved') toSheet.push(row);
+    }
+    if (updated.length) await persist('notify');
+    // 📗 Sheet sync sirf pehli baar Approved par (PUT wala rule) — background me ek-ek karke.
+    if (toSheet.length && tagSheetConfig().enabled) {
+      (async () => {
+        for (const row of toSheet) {
+          try { await pushTagRequestToSheet(row, 'status:approved'); } catch (err) {
+            console.warn('tag-request sheet sync (bulk approved):', err.message);
+            row.sheetSync = { at: new Date().toISOString(), event: 'status:approved', error: String(err.message || err).slice(0, 160) };
+          }
+        }
+        persist('notify').catch(() => {});
+      })();
+    }
+    // Requester ko ek notification (apni requests ke count ke saath), har request ka alag nahi.
+    try {
+      const perUser = new Map();
+      for (const row of updated) if (row.by && row.by !== user.username) perUser.set(row.by, (perUser.get(row.by) || 0) + 1);
+      for (const [who, n] of perUser) {
+        recordNotification({ type: 'request', title: `🏷️ Tag request · ${status}`, body: `${n} of your tag request${n > 1 ? 's were' : ' was'} marked ${status}.`, target: `user:${who}`, meta: { link: '#/tagRequest?view=requests' } });
+      }
+    } catch { /* optional */ }
+    logAudit(user, 'tag_request_bulk_status', { target: status, note: `${updated.length} requests → ${status}${missing.length ? ` · ${missing.length} not found` : ''}`.slice(0, 300), ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, status, requests: updated, missing });
+  }
   const tagReqPath = p.match(/^\/api\/tag-requests\/([^/]+)$/);
   if (tagReqPath && method === 'PUT') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
