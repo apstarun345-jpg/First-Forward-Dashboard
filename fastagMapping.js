@@ -799,6 +799,7 @@ window.FF = window.FF || {};
     if (!host || !summary) return;
     let ready = 0, done = 0;
     for (const r of state.rows) { if (r.mapped) done++; else if (rowReady(r)) ready++; }
+    renderPending();
     summary.innerHTML = '<div class="grid g-4"><div class="card"><div class="card-body"><small>Rows</small><h2>' + U.fmt(state.rows.length) + '</h2></div></div><div class="card"><div class="card-body"><small>Ready to map</small><h2>' + U.fmt(ready) + '</h2></div></div><div class="card"><div class="card-body"><small>Mapped successfully</small><h2>' + U.fmt(done) + '</h2></div></div><div class="card"><div class="card-body"><small>Needs review</small><h2>' + U.fmt(state.rows.length - ready - done) + '</h2></div></div></div>' + reportHtml();
     if (!state.rows.length) { host.innerHTML = '<div class="empty-state">Add tags in step 1, then click “Lookup StockDataa”.</div>'; syncSteps(); return; }
     const limit = Math.max(SHOW_STEP, state.showLimit || SHOW_STEP), shown = state.rows.slice(0, limit);
@@ -1207,6 +1208,67 @@ window.FF = window.FF || {};
     const show = (id, on) => { const el = U.$('#fm-gs-' + id + '-wrap', root); if (el && el.style) el.style.display = on ? '' : 'none'; };
     show('first', mode === 'range'); show('last', mode === 'range'); show('barcode', mode !== 'range');
   }
+
+  // ===== 🔎 Sheet pending finder — agent / class wise + individual, group aur sab ek saath map =====
+  function pendingModel() {
+    const rows = state.rows.filter((r) => r.sheetRow && !r.mapped && !isDupSkipped(r));
+    const byAgent = new Map();
+    rows.forEach((r) => {
+      const id = rowAgent(r), cls = clean(r.vcType) || '(no class)';
+      if (!byAgent.has(id)) byAgent.set(id, { agentId: id, name: '', tl: '', rows: [], cls: new Map(), ready: 0, blocked: 0 });
+      const a = byAgent.get(id);
+      if (!a.name && r.stockAgentName) a.name = r.stockAgentName;
+      if (!a.tl && r.tlName) a.tl = r.tlName;
+      a.rows.push(r);
+      const c = a.cls.get(cls) || { cls, total: 0, ready: 0 }; c.total++;
+      if (rowReady(r)) { a.ready++; c.ready++; } else a.blocked++;
+      a.cls.set(cls, c);
+    });
+    const agents = [...byAgent.values()].sort((x, y) => y.rows.length - x.rows.length || x.agentId.localeCompare(y.agentId));
+    const byClass = new Map();
+    rows.forEach((r) => { const c = clean(r.vcType) || '(no class)'; const e = byClass.get(c) || { cls: c, total: 0, ready: 0 }; e.total++; if (rowReady(r)) e.ready++; byClass.set(c, e); });
+    return { rows, agents, classes: [...byClass.values()].sort((a, b) => b.total - a.total), ready: rows.filter(rowReady).length };
+  }
+  function renderPending() {
+    const host = U.$('#fm-pending', state.root); if (!host) return;
+    if (!state.sheetCtx || !state.rows.some((r) => r.sheetRow)) { host.innerHTML = ''; return; }
+    const m = pendingModel();
+    if (!m.rows.length) { host.innerHTML = '<div class="empty-state">✅ Sheet me ab koi pending mapping nahi bachi.</div>'; return; }
+    const open = state.pendOpen || (state.pendOpen = new Set());
+    const clsBtns = (a) => [...a.cls.values()].map((c) => '<button class="btn small" data-fm-pm-ac="' + esc(a.agentId + '\u0001' + c.cls) + '"' + (c.ready ? '' : ' disabled') + ' title="Sirf is agent ki ' + esc(c.cls) + ' class map karo">' + esc(c.cls) + ' · ' + c.ready + '/' + c.total + '</button>').join(' ');
+    const agentRows = m.agents.map((a) => {
+      const isOpen = open.has(a.agentId);
+      const detail = isOpen ? '<tr><td colspan="6"><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Sheet row</th><th>Barcode</th><th>Tag ID</th><th>Class</th><th>Status</th><th></th></tr></thead><tbody>' + a.rows.slice(0, 200).map((r) => '<tr><td>' + esc(r.sheetRow) + '</td><td>' + esc(dashBar(r.barcode || r.serialNo)) + '</td><td>' + esc(r.tagId) + '</td><td>' + esc(r.vcType) + '</td><td>' + esc(r.status) + '</td><td><button class="btn small" data-fm-pm-one="' + esc(r.id) + '"' + (rowReady(r) ? '' : ' disabled') + '>Map yeh</button></td></tr>').join('') + '</tbody></table></div>' + (a.rows.length > 200 ? '<small class="dim">Pehli 200 / ' + a.rows.length + ' rows dikh rahi hain — "Map agent" me sab shamil hain.</small>' : '') + '</td></tr>' : '';
+      return '<tr><td><b>' + esc(a.agentId) + '</b><br><small class="dim">' + esc(a.name) + (a.tl ? ' · ' + esc(a.tl) : '') + '</small></td><td class="num">' + U.fmt(a.rows.length) + '</td><td class="num">' + U.fmt(a.ready) + '</td><td class="num">' + U.fmt(a.blocked) + '</td><td>' + clsBtns(a) + '</td><td><button class="btn small" data-fm-pm-toggle="' + esc(a.agentId) + '">' + (isOpen ? 'Chhupao' : 'Rows') + '</button> <button class="btn small primary" data-fm-pm-agent="' + esc(a.agentId) + '"' + (a.ready ? '' : ' disabled') + '>Map agent (' + a.ready + ')</button></td></tr>' + detail;
+    }).join('');
+    const classChips = m.classes.map((c) => '<button class="btn small" data-fm-pm-class="' + esc(c.cls) + '"' + (c.ready ? '' : ' disabled') + '>' + esc(c.cls) + ' · ' + c.ready + '/' + c.total + ' map karo</button>').join(' ');
+    host.innerHTML = '<section class="card" style="margin-bottom:12px"><div class="card-head"><div><h3>🔎 Sheet me pending mapping</h3><p class="dim small">' + U.fmt(m.rows.length) + ' pending tag · ' + U.fmt(m.ready) + ' abhi map ho sakte hain · ' + U.fmt(m.rows.length - m.ready) + ' blocked (stock me nahi / class / agent missing) · ' + U.fmt(m.agents.length) + ' agent</p></div><div class="head-actions"><button class="btn primary" data-fm-pm-all="1"' + (m.ready ? '' : ' disabled') + '>🚀 Sab ek saath map karo (' + U.fmt(m.ready) + ')</button></div></div><div class="card-body"><p class="small"><b>Class wise:</b> ' + classChips + '</p><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent ID</th><th class="num">Pending</th><th class="num">Ready</th><th class="num">Blocked</th><th>Class wise (ready/total)</th><th></th></tr></thead><tbody>' + agentRows + '</tbody></table></div></div></section>';
+  }
+  /** Chuni hui pending rows hi select karke mapping (mapReady confirm maangta hai). */
+  async function mapPending(filter) {
+    state.rows.forEach((r) => { r.selected = !!(r.sheetRow && rowReady(r) && filter(r)); });
+    renderTable();
+    await mapReady();
+  }
+  function pendingClick(target) {
+    if (!target || typeof target.hasAttribute !== 'function') return false;
+    const d = target.dataset || {};
+    if (d.fmPmAll) { mapPending(() => true); return true; }
+    if (d.fmPmAgent != null && target.hasAttribute('data-fm-pm-agent')) { mapPending((r) => rowAgent(r) === d.fmPmAgent); return true; }
+    if (target.hasAttribute('data-fm-pm-class')) { mapPending((r) => (clean(r.vcType) || '(no class)') === d.fmPmClass); return true; }
+    if (target.hasAttribute('data-fm-pm-ac')) { const [ag, cl] = String(d.fmPmAc).split('\u0001'); mapPending((r) => rowAgent(r) === ag && (clean(r.vcType) || '(no class)') === cl); return true; }
+    if (target.hasAttribute('data-fm-pm-one')) { mapPending((r) => String(r.id) === d.fmPmOne); return true; }
+    if (target.hasAttribute('data-fm-pm-toggle')) { const o = state.pendOpen || (state.pendOpen = new Set()); if (o.has(d.fmPmToggle)) o.delete(d.fmPmToggle); else o.add(d.fmPmToggle); renderPending(); return true; }
+    return false;
+  }
+  /** Fresh sheet read: purani sheet-rows hata kar pending dobara nikalo. */
+  async function sheetPending() {
+    if (state.busy) return;
+    state.items = state.items.filter((i) => !i.sheetRow); state.rows = state.rows.filter((r) => !r.sheetRow);
+    await sheetRun(false);
+    const m = pendingModel();
+    if (m.rows.length) setStatus(U.fmt(m.rows.length) + ' pending mapping mili (' + U.fmt(m.agents.length) + ' agent, ' + U.fmt(m.ready) + ' ready). Neeche agent/class wise map karein ya sab ek saath.', 'success');
+  }
   /** Sheet read → queue items → lookup. auto=true: ready rows turant map bhi karo (+ done likho). */
   async function sheetRun(auto) {
     if (state.busy) return;
@@ -1345,9 +1407,9 @@ window.FF = window.FF || {};
         '<div class="grid g-3"><div><label>Mapping type</label><select class="input" id="fm-gs-mode"><option value="range">Barcode range (First + Last)</option><option value="barcode">Alag-alag Barcode</option><option value="tagId">Alag-alag Tag ID</option></select></div>' +
         '<div id="fm-gs-first-wrap"><label>First barcode column</label><input class="input" id="fm-gs-first" maxlength="3" placeholder="A" value="A"></div><div id="fm-gs-last-wrap"><label>Last barcode column</label><input class="input" id="fm-gs-last" maxlength="3" placeholder="B" value="B"></div><div id="fm-gs-barcode-wrap" style="display:none"><label>Barcode / Tag ID column</label><input class="input" id="fm-gs-barcode" maxlength="3" placeholder="A" value="A"></div></div>' +
         '<div class="grid g-3"><div><label>Agent ID column</label><input class="input" id="fm-gs-agent" maxlength="3" placeholder="C" value="C"></div><div><label>Done likhne wala column</label><input class="input" id="fm-gs-done" maxlength="3" placeholder="D" value="D"></div><div><label>Done me kya likhna hai</label><input class="input" id="fm-gs-donetext" placeholder="done" value="done"></div></div>' +
-        '<div class="btn-row"><button class="btn" id="fm-gs-load">📥 Sheet se load + lookup</button><button class="btn primary" id="fm-gs-auto">⚡ Turant map karo + done likho</button></div><p class="dim small">Pehli baar: Apps Script me naya <code>Code.gs</code> (v3.71) paste karke New version deploy karein, aur sheet ko us Google account ke saath Editor share karein jisse Apps Script chalta hai.</p></div>' +
+        '<div class="btn-row"><button class="btn primary" id="fm-gs-pending">🔎 Pending mapping dhundo (Agent + Class wise)</button><button class="btn" id="fm-gs-load">📥 Sheet se load + lookup</button><button class="btn primary" id="fm-gs-auto">⚡ Turant map karo + done likho</button></div><p class="dim small">Pehli baar: Apps Script me naya <code>Code.gs</code> (v3.71) paste karke New version deploy karein, aur sheet ko us Google account ke saath Editor share karein jisse Apps Script chalta hai.</p></div>' +
       '</div></section>' +
-      '<section class="card fm-queue-card"><div class="card-head"><div><h3><span class="fm-step-no">2–4</span> Lookup, review &amp; map</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-progress" class="fm-progress" hidden></div><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-results"><div class="empty-state">Add tags in step 1, then click “Lookup StockDataa”.</div></div></div></section>';
+      '<section class="card fm-queue-card"><div class="card-head"><div><h3><span class="fm-step-no">2–4</span> Lookup, review &amp; map</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-progress" class="fm-progress" hidden></div><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-pending"></div><div id="fm-results"><div class="empty-state">Add tags in step 1, then click “Lookup StockDataa”.</div></div></div></section>';
     state.items = []; state.rows = []; state.busy = false; state.sheetCtx = null; state.showLimit = SHOW_STEP;
     state.index = null; state.indexAt = 0; state.rateLimited = false;
     ensureProgressStyles();
@@ -1475,6 +1537,8 @@ window.FF = window.FF || {};
         } catch (err) { setStatus('File read error: ' + (err.message || err), 'error'); }
         return;
       }
+      if (target.id === 'fm-gs-pending') return sheetPending();
+      if (pendingClick(target)) return;
       if (target.id === 'fm-gs-load') return sheetRun(false);
       if (target.id === 'fm-gs-auto') return sheetRun(true);
       if (target.id === 'fm-more') { state.showLimit = (state.showLimit || SHOW_STEP) + 500; renderTable(); return; }

@@ -84,3 +84,14 @@ test('🏷️ Tag Request label — Deliver To + sender sirf naam, Req/Emp/TL me
   assert.match(src, /FROM: Name - \$\{f\.name\}`/);
   assert.doesNotMatch(src, /\(RECEIVER\)|\(SENDER\)/);
 });
+
+test('📗 FASTag Mapping — Sheet pending finder: agent/class wise + single/group/all map', () => {
+  const src = read('fastagMapping.js');
+  assert.match(src, /function pendingModel/);
+  assert.match(src, /id="fm-gs-pending"/);
+  assert.match(src, /data-fm-pm-all/);
+  assert.match(src, /data-fm-pm-agent/);
+  assert.match(src, /data-fm-pm-class/);
+  assert.match(src, /data-fm-pm-one/);
+  assert.match(src, /id="fm-pending"/);
+});
