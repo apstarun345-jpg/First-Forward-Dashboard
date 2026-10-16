@@ -3870,6 +3870,8 @@ html[data-theme="dark"] .tr-sb-tbl .tr-sb-mtd b { color: #c4b5fd; }
 .tr-selall { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; cursor: pointer; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .tr-selall input, .tr-c-sel input { width: 17px; height: 17px; accent-color: var(--brand); cursor: pointer; }
 .tr-selcount { font-size: 12.5px; color: var(--muted); min-width: 80px; }
+.tr-bulk-status { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tr-bulk-status select.input { width: auto; min-width: 130px; padding: 6px 8px; }
 .tr-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .tr-chips .chip { padding: 4px 10px; font-size: 12px; }
 .tr-channel-filter { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 2px 9px 2px 0; border-right: 1px solid var(--line); }

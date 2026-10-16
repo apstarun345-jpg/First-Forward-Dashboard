@@ -57,6 +57,7 @@
 .tr-st-cls { font-size: 12.5px; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; background: color-mix(in srgb, var(--brand) 5%, transparent); }
 .tr-req-toolbar { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 10px; }
 .tr-selall { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; cursor: pointer; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.tr-bulk-status { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .tr-req-tbl col.tr-col-sel { width: 36px; }
 .tr-req-tbl col.tr-col-date { width: 88px; }
 .tr-req-tbl col.tr-col-employee { width: 140px; }

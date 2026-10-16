@@ -2498,7 +2498,15 @@ body.colorful .from-hdr { color: #166534; }
           <button type="button" class="btn primary" data-tr-bulk="print" disabled>🖨️ Print selected</button>
           <button type="button" class="btn" data-tr-bulk="color-print" disabled title="Selected requests ke Colorful Courier Labels print / preview">🎨 Colorful Label</button>
           <button type="button" class="btn" data-tr-bulk="pdf" disabled title="Selected requests ke labels ki PDF file (address ka same format) — seedha download">📄 Download PDF</button>
-          ${isAdmin() ? '<button type="button" class="btn" data-tr-bulk="approve" disabled>✅ Approve selected</button>' : ''}
+          ${isAdmin() ? `<span class="tr-bulk-status" role="group" aria-label="Change status of selected requests">
+            <button type="button" class="btn" data-tr-bulk="approve" disabled>✅ Approve selected</button>
+            <button type="button" class="btn" data-tr-bulk="dispatch" disabled>🚚 Dispatch selected</button>
+            <select class="input" data-tr-bulk-status aria-label="Set status for selected requests" disabled>
+              <option value="">Set status…</option>
+              ${STATUS_KEYS.map((k) => `<option value="${k}">${esc(STATUS[k].label)}</option>`).join('')}
+            </select>
+            <button type="button" class="btn" data-tr-bulk="apply-status" disabled>Apply</button>
+          </span>` : ''}
           <button type="button" class="btn" data-tr-bulk="csv" title="Selected (ya saari dikhti) rows ka CSV">⬇ CSV</button>
           <button type="button" class="btn small" data-tr-bulk="none" hidden>✕ Selection hatao</button>
           ${isAdmin() ? '<button type="button" class="btn small" data-tr-act="recover" title="Google Sheet ki purani saves (APP_STORAGE_HISTORY) se gayab ho chuki tag requests wapas laao — kuch delete nahi hota">⏪ Wapas lao</button>' : ''}
@@ -2667,6 +2675,12 @@ body.colorful .from-hdr { color: #166534; }
     if (pf) { pf.disabled = !n; pf.textContent = n ? `📄 Download PDF (${fmt(selectedRequests().length)})` : '📄 Download PDF'; }
     const ap = card.querySelector('[data-tr-bulk="approve"]');
     if (ap) { const p = selectedRequests().filter((r) => (r.status || 'pending') === 'pending').length; ap.disabled = !p; ap.textContent = p ? `✅ Approve selected (${fmt(p)})` : '✅ Approve selected'; }
+    const dp = card.querySelector('[data-tr-bulk="dispatch"]');
+    if (dp) { const p = selectedRequests().filter((r) => (r.status || 'pending') !== 'dispatched').length; dp.disabled = !p; dp.textContent = p ? `🚚 Dispatch selected (${fmt(p)})` : '🚚 Dispatch selected'; }
+    const sel = card.querySelector('[data-tr-bulk-status]');
+    if (sel) sel.disabled = !n;
+    const apply = card.querySelector('[data-tr-bulk="apply-status"]');
+    if (apply) apply.disabled = !n || !(sel && sel.value);
     const none = card.querySelector('[data-tr-bulk="none"]');
     if (none) none.hidden = !n;
     card.querySelectorAll('tr[data-tr-key]').forEach((tr) => { if (tr.classList) tr.classList.toggle('tr-sel', state.sel.has(tr.dataset.trKey)); });
@@ -2810,21 +2824,32 @@ body.colorful .from-hdr { color: #166534; }
     });
     return p;
   }
-  async function bulkApprove() {
-    const list = selectedRequests().filter((r) => (r.status || 'pending') === 'pending');
-    if (!list.length) { U.toast('Selected me koi pending request nahi', 'info'); return; }
-    if (!window.confirm(`${list.length} pending request${list.length > 1 ? 's' : ''} approve karein?`)) return;
-    const btn = rootEl.querySelector('[data-tr-bulk="approve"]');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Approve ho rahi hain…'; }
-    // ⚡ Bulk approve sequential nahi — selected requests parallel update hoti hain.
-    const pending = list.map((r) => putRequest(r, { status: 'approved' }));
-    renderReqTable(); // optimistic status sabhi selected rows me turant dikhao
-    const results = await Promise.allSettled(pending);
+  /** Selected requests → ek saath naya status (Approved / Dispatched / Rejected / Pending). Admin only; sirf wahi requests badalti hain jinka status alag hai. */
+  async function bulkSetStatus(status) {
+    if (!isAdmin()) { U.toast('Only admin can change status', 'err'); return; }
+    if (!STATUS[status]) { U.toast('Choose a status first', 'info'); return; }
+    const list = selectedRequests().filter((r) => (r.status || 'pending') !== status);
+    if (!list.length) { U.toast(`All selected requests are already ${STATUS[status].label}`, 'info'); return; }
+    const skipped = selectedRequests().length - list.length;
+    const msg = `Mark ${list.length} request${list.length > 1 ? 's' : ''} as ${STATUS[status].label}?${skipped ? `\n(${skipped} already in this status will be skipped.)` : ''}`;
+    if (!window.confirm(msg)) return;
+    rootEl.querySelectorAll('[data-tr-bulk="approve"],[data-tr-bulk="dispatch"],[data-tr-bulk="apply-status"],[data-tr-bulk-status]').forEach((b) => { b.disabled = true; });
+    const busy = rootEl.querySelector('[data-tr-bulk="apply-status"]');
+    if (busy) busy.textContent = '⏳ Updating…';
+    // Optimistic UI turant; server calls 6-6 ke batch me (storage ek hi workspace hai — hazaron parallel PUT nahi).
+    const results = [];
+    for (let i = 0; i < list.length; i += 6) {
+      const chunk = list.slice(i, i + 6).map((r) => putRequest(r, { status }));
+      if (i === 0) renderReqTable();
+      results.push(...await Promise.allSettled(chunk));
+    }
     const ok = results.filter((x) => x.status === 'fulfilled').length;
     const fail = results.length - ok;
+    state.sel.clear();
     renderReqTable();
-    U.toast(`✅ ${ok} approve${fail ? ` · ⚠️ ${fail} fail` : ''}`, fail ? 'warn' : 'ok');
+    U.toast(`${STATUS[status].label}: ${ok} updated${fail ? ` · ⚠️ ${fail} failed (restored)` : ''}`, fail ? 'warn' : 'ok');
   }
+  const bulkApprove = () => bulkSetStatus('approved');
   function exportCsv() {
     if (FF.auth && FF.auth.can && !FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     const rows = state.sel.size ? displayRows(state.requests).filter((dr) => state.sel.has(dr.key)) : state.dview;
@@ -2860,6 +2885,8 @@ body.colorful .from-hdr { color: #166534; }
         else if (op === 'color-print') openPrint(selectedRequests(), { colorful: true });
         else if (op === 'pdf') downloadPdf(selectedRequests(), { colorful: true });
         else if (op === 'approve') bulkApprove();
+        else if (op === 'dispatch') bulkSetStatus('dispatched');
+        else if (op === 'apply-status') { const sv = card.querySelector('[data-tr-bulk-status]'); bulkSetStatus(sv ? sv.value : ''); }
         else if (op === 'csv') exportCsv();
         else if (op === 'none') { state.sel.clear(); updateSelUi(); card.querySelectorAll('[data-tr-sel]').forEach((x) => { x.checked = false; }); }
         return;
@@ -2925,6 +2952,7 @@ body.colorful .from-hdr { color: #166534; }
         renderReqTable();
         return;
       }
+      if (t.matches && t.matches('[data-tr-bulk-status]')) { updateSelUi(); return; }
       if (t.matches && t.matches('[data-tr-sel]')) {
         if (t.checked) state.sel.add(t.dataset.trSel); else state.sel.delete(t.dataset.trSel);
         updateSelUi();
