@@ -1727,6 +1727,7 @@ body.colorful .from-hdr { color: #166534; }
       const key = inp.dataset.trEmp;
       state.employee[key] = inp.value;
       if (key === 'name') {
+        try { if (clean(inp.value).length >= 2) window.dispatchEvent(new CustomEvent('ff-employee-name', { detail: { name: clean(inp.value) } })); } catch { /* optional */ }
         const card = root.querySelector('#tr-employee-card');
         if (card && card.classList) card.classList.toggle('tr-employee-todo', clean(inp.value).length < 2);
         if (clean(inp.value).length >= 2 && errOf('employee', 'name')) {

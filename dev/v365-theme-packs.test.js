@@ -95,3 +95,29 @@ test('📗 FASTag Mapping — Sheet pending finder: agent/class wise + single/gr
   assert.match(src, /data-fm-pm-one/);
   assert.match(src, /id="fm-pending"/);
 });
+
+test('🤖 v177 — Gems assistant: animated robot FAB, states, overlap-free header, mobile nav safe', () => {
+  const src = read('assistant.js'), css = read('dev/styles-full.css');
+  assert.match(src, /const robotSvg/);
+  assert.match(src, /function setState/);
+  assert.match(src, /setState\('listening'\)/);
+  assert.match(src, /setState\('speaking'\)/);
+  assert.doesNotMatch(src, /fab\.innerHTML = '🎙️'/);
+  assert.match(css, /\.ask-title b \{[^}]*text-overflow: ellipsis/);
+  assert.match(css, /bottom: calc\(76px \+ env\(safe-area-inset-bottom/);
+  assert.match(css, /prefers-reduced-motion/);
+});
+
+test('👤 v177 — public Tag Request open notification carries employee name (form / remembered / IP)', () => {
+  const srv = read('server.js'), pf = read('publicForm.js'), tr = read('tagRequest.js');
+  assert.match(srv, /function visitorNameFor/);
+  assert.match(srv, /ne Tag Request form open kiya/);
+  assert.match(srv, /body\.name/);
+  assert.match(pf, /ff-employee-name/);
+  assert.match(pf, /name: rememberedName/);
+  assert.match(tr, /dispatchEvent\(new CustomEvent\('ff-employee-name'/);
+});
+
+test('⚡ v177 — GV liveDailyRows memoized', () => {
+  assert.match(read('gv.js'), /liveDailyMemo/);
+});

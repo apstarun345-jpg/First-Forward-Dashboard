@@ -536,10 +536,11 @@ window.FF = window.FF || {};
   function speak(text, opts) {
     const o = opts || {};
     let done = false;
-    const finish = () => { if (!done) { done = true; if (o.onEnd) { try { o.onEnd(); } catch { /* listener */ } } } };
+    const finish = () => { if (!done) { done = true; if (robotState === 'speaking') setState('idle'); if (o.onEnd) { try { o.onEnd(); } catch { /* listener */ } } } };
     const fail = (reason) => { if (done) return; if (o.onError) { try { o.onError(reason); } catch { /* listener */ } } finish(); };
     if (!('speechSynthesis' in window)) { fail('unsupported'); return; }
     if (!speakOn && !o.force) { fail('muted'); return; }
+    setState('speaking');
     try {
       if (o.cancel !== false) window.speechSynthesis.cancel();
       const plain = String(text).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
@@ -615,6 +616,7 @@ window.FF = window.FF || {};
   async function ask(text) {
     if (!text || busy) return;
     busy = true;
+    setState('thinking');
     ctx.chips = [];
     const oldChips = panel && panel.querySelector('.ask-followups');
     if (oldChips) oldChips.remove();
@@ -638,6 +640,7 @@ window.FF = window.FF || {};
       try { await FF.wowzone.chatChart(text, botEl); } catch { /* chart optional */ }
     }
     ctx.lastBot = a;
+    if (robotState === 'thinking') setState('idle');
     speak(a, { onEnd: () => { if (convMode) scheduleListen(); } });
     renderFollowups();
     busy = false;
@@ -747,7 +750,8 @@ window.FF = window.FF || {};
   function micListen(btn) {
     try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch { /* barge-in */ }
     wakePause(); // ek waqt par ek hi mic session
-    U.voiceInput((t) => ask(t), MIC_HINT[lang], { lang: lang === 'en' ? 'en-IN' : 'hi-IN', button: btn, onEnd: () => { if (!convMode) wakeResumeSoon(); } });
+    setState('listening');
+    U.voiceInput((t) => ask(t), MIC_HINT[lang], { lang: lang === 'en' ? 'en-IN' : 'hi-IN', button: btn, onEnd: () => { if (robotState === 'listening') setState('idle'); if (!convMode) wakeResumeSoon(); } });
   }
 
   // 🎧 hands-free loop — jawab bolne ke baad khud dobara sunna shuru (Alexa-style).
@@ -1169,8 +1173,7 @@ window.FF = window.FF || {};
     }
     const inp = panel.querySelector('.ask-input');
     if (inp) inp.placeholder = PLACEHOLDER[lang];
-    const small = panel.querySelector('.ask-head small');
-    if (small) small.textContent = HINT[lang];
+    setState(robotState);
     const mic = panel.querySelector('.ask-mic');
     if (mic) { mic.title = MIC_TITLE[lang]; }
     const dic = panel.querySelector('.ask-dictate');
@@ -1184,6 +1187,35 @@ window.FF = window.FF || {};
     if (langBtn) { langBtn.textContent = lang === 'en' ? 'हिं' : 'EN'; langBtn.title = lang === 'en' ? 'Switch to Hinglish' : 'English me switch karo'; }
   }
 
+
+  // ---------- 🤖 Animated robot (FAB + header + hero) — state: idle / listening / thinking / speaking ----------
+  const robotSvg = (cls) => `<svg class="ff-robot ${cls || ''}" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+    <line class="rb-ant-stem" x1="32" y1="9" x2="32" y2="15" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+    <circle class="rb-ant" cx="32" cy="7" r="3.4"/>
+    <rect class="rb-ear" x="5" y="29" width="6" height="12" rx="3"/><rect class="rb-ear" x="53" y="29" width="6" height="12" rx="3"/>
+    <rect class="rb-head" x="9" y="15" width="46" height="38" rx="14"/>
+    <rect class="rb-face" x="14" y="22" width="36" height="24" rx="10"/>
+    <g class="rb-eyes"><ellipse class="rb-eye" cx="25" cy="32" rx="3.6" ry="4.6"/><ellipse class="rb-eye" cx="39" cy="32" rx="3.6" ry="4.6"/></g>
+    <path class="rb-mouth" d="M25 40 Q32 45 39 40" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+    <g class="rb-wave"><rect x="22" y="38" width="3" height="4" rx="1.5"/><rect x="27" y="36" width="3" height="8" rx="1.5"/><rect x="32" y="35" width="3" height="10" rx="1.5"/><rect x="37" y="36" width="3" height="8" rx="1.5"/></g>
+  </svg>`;
+  const STATE_TXT = () => ({
+    idle: T('Online · bolo ya likho', 'Online · speak or type'),
+    listening: T('Sun raha hoon… boliye', 'Listening… go ahead'),
+    thinking: T('Soch raha hoon…', 'Thinking…'),
+    speaking: T('Bol raha hoon…', 'Speaking…')
+  });
+  let robotState = 'idle';
+  function setState(next) {
+    robotState = next || 'idle';
+    const fab = typeof document !== 'undefined' ? document.getElementById('ask-fab') : null;
+    if (fab) fab.dataset.state = robotState;
+    if (!panel) return;
+    panel.dataset.state = robotState;
+    const small = panel.querySelector('.ask-head small');
+    if (small) small.textContent = STATE_TXT()[robotState];
+  }
+
   function build() {
     if (mounted || !(FF.config.feat ? FF.config.feat('askBox') !== false : true)) return;
     // 🔐 Admin decide karta hai kise voice assistant milega (Settings → Access matrix → voiceAssistant).
@@ -1193,16 +1225,17 @@ window.FF = window.FF || {};
     fab.id = 'ask-fab';
     fab.className = 'ask-fab';
     fab.type = 'button';
-    fab.title = '🎙 Dashboard assistant — pucho kuch bhi';
+    fab.title = '🤖 Gems assistant — pucho kuch bhi';
     fab.setAttribute('aria-label', 'Dashboard assistant kholo');
-    fab.innerHTML = '🎙️';
+    fab.dataset.state = 'idle';
+    fab.innerHTML = '<span class="ask-ring"></span><span class="ask-ring r2"></span>' + robotSvg('fab-robot') + '<span class="ask-fab-mic" aria-hidden="true">🎙</span>';
     document.body.appendChild(fab);
 
     const wrap = document.createElement('div');
     wrap.id = 'ask-panel';
     wrap.hidden = true;
     wrap.innerHTML = `
-      <div class="ask-head"><span class="ask-dot"></span><b>Dashboard Assistant</b><small>${HINT[lang]}</small><span style="flex:1"></span>
+      <div class="ask-head"><span class="ask-avatar">${robotSvg('head-robot')}</span><div class="ask-title"><b>Gems Assistant</b><small>${STATE_TXT().idle}</small></div>
         <button class="ask-ico" data-act="lang" title="${lang === 'en' ? 'Switch to Hinglish' : 'English me switch karo'}">${lang === 'en' ? 'हिं' : 'EN'}</button>
         <button class="ask-ico" data-act="voice" title="🎛 Voice Studio — default voices / meri awaaz">🎛️</button>
         <button class="ask-ico${convMode ? ' on' : ''}" data-act="conv" title="${convMode ? '🎧 Hands-free ON — jawab ke baad khud sunta hai' : '🎧 Hands-free mode chalu karo (Alexa-style)'}">🎧</button>
@@ -1218,7 +1251,13 @@ window.FF = window.FF || {};
     fab.addEventListener('click', () => {
       log = wrap.querySelector('.ask-log');
       wrap.hidden = !wrap.hidden;
-      if (!wrap.hidden && !log.children.length) bubble(WELCOME[lang], 'bot');
+      if (!wrap.hidden && !log.children.length) {
+        const hero = document.createElement('div');
+        hero.className = 'ask-hero';
+        hero.innerHTML = robotSvg('hero-robot') + `<div><b>${T('Namaste! Main Gems hoon 👋', 'Hi! I am Gems 👋')}</b><small>${esc(HINT[lang])}</small></div>`;
+        log.appendChild(hero);
+        bubble(WELCOME[lang], 'bot');
+      }
       if (!wrap.hidden) wrap.querySelector('.ask-input').focus();
     });
     wrap.querySelector('[data-act="close"]').addEventListener('click', () => { wrap.hidden = true; });

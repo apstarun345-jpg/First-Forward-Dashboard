@@ -718,6 +718,27 @@ const livePresence = new Map();
 // Optional, explicitly consented sessions for the public employee Tag Request link.
 // Tokens stay server-side; public GET responses never include them. Sessions are ephemeral by design.
 const publicLiveSessions = new Map();
+// 👤 v177 — employee ka naam: form me likha hua (ya pichhli baar yaad rakha hua) + IP se pehchan.
+// Memory-only, 30 din; sirf admin notification me naam dikhane ke kaam aata hai.
+const publicIpNames = new Map();
+const PUBLIC_IP_NAME_TTL = 30 * 24 * 60 * 60e3;
+function cleanVisitorName(v) {
+  const t = String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return t.length >= 2 ? t : '';
+}
+function visitorNameFor(ip, given) {
+  const n = cleanVisitorName(given);
+  if (n) { publicIpNames.set(ip, { name: n, at: Date.now() }); if (publicIpNames.size > 2000) publicIpNames.delete(publicIpNames.keys().next().value); return n; }
+  const hit = publicIpNames.get(ip);
+  return hit && Date.now() - hit.at < PUBLIC_IP_NAME_TTL ? hit.name : '';
+}
+function notifyVisitorOpened(entry, who, ip, late) {
+  try {
+    recordNotification({ type: 'activity', title: who ? `👤 ${who} ne Tag Request form open kiya` : '🔗 Employee Tag Request link opened',
+      body: who ? `${who} abhi Employee Tag Request form par hai${late ? ' (naam form me likha)' : ''}. Admin Notifications → Employee link activity me status dekho.` : 'A visitor opened the public Employee Tag Request link. Open Admin Notifications → Employee link activity to see status and page preview.',
+      target: 'admin', routeKey: 'tagRequest', meta: { publicSessionId: entry.sessionId, publicLink: true, employeeName: who || '', ip: ip || '', link: '#/tagRequest?view=requests' } });
+  } catch { /* notification must not block public form */ }
+}
 const PUBLIC_LIVE_TTL_MS = 15 * 60 * 1000;
 function prunePublicLiveSessions(now = Date.now()) {
   for (const [id, entry] of publicLiveSessions) {
@@ -6673,13 +6694,19 @@ async function handleApi(req, res, url) {
       id = crypto.randomBytes(18).toString('base64url');
       entry = { sessionId: id, mode: 'visit', name: 'New Link Visitor', startedAt: now, lastSeen: now, updatedAt: now, visible: true, engaged: true, pointer: null, viewport: null, scroll: null, events: [{ at: now, kind: 'open', label: 'Employee Tag Request link opened', page: 'tag-request' }], requestIds: [] };
       publicLiveSessions.set(id, entry);
-      try {
-        recordNotification({ type: 'activity', title: '🔗 Employee Tag Request link opened', body: 'A visitor opened the public Employee Tag Request link. Open Admin Notifications → Employee link activity to see status and page preview.', target: 'admin', routeKey: 'tagRequest', meta: { publicSessionId: id, publicLink: true, link: '#/tagRequest?view=requests' } });
-      } catch { /* notification must not block public form */ }
+      const who = visitorNameFor(ip, body.name);
+      if (who) { entry.name = who; entry.named = true; }
+      notifyVisitorOpened(entry, who, ip, false);
     } else {
       entry.lastSeen = now; entry.updatedAt = now;
       entry.visible = body.visible !== false;
       entry.engaged = entry.visible;
+      const who = visitorNameFor(ip, body.name);
+      if (who && (!entry.named || entry.name !== who)) {
+        const first = !entry.named;
+        entry.name = who; entry.named = true;
+        if (first || now - (entry.nameNotifiedAt || 0) > 10 * 60e3) { entry.nameNotifiedAt = now; notifyVisitorOpened(entry, who, ip, true); }
+      }
     }
     return sendJson(res, 200, { ok: true, visitId: id, active: true, checkAt: new Date(now).toISOString() });
   }

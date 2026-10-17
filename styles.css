@@ -2344,6 +2344,7 @@ html[data-theme='dark'] .skel::after { background: linear-gradient(100deg, trans
 .ask-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; background: linear-gradient(135deg, #6366f1, #ec4899); color: #fff; }
 .ask-head b { font-size: 14px; }
 .ask-head small { display: block; font-size: 10.5px; opacity: .85; }
+.ask-dot { width: 9px; height: 9px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 4px rgba(74, 222, 128, .3); flex: none; }
 .ask-ico { border: 0; background: rgba(255,255,255,.18); color: #fff; width: 28px; height: 28px; border-radius: 8px; cursor: pointer; font-size: 13px; flex: none; }
 .ask-ico:hover { background: rgba(255,255,255,.3); }
 .ask-ico.on { background: rgba(255,255,255,.5); box-shadow: 0 0 0 2px rgba(255,255,255,.65); }
@@ -6161,6 +6162,7 @@ tr.clickable[data-pick-agent], tr.clickable[data-pick-tl] { cursor: pointer; }
 .ps-tip > div small { color: var(--muted); font-size: 10.5px; min-width: 48px; text-align: right; }
 .ps-tip .pi-tip-t { grid-template-columns: 1fr auto auto; border-top: 1px dashed var(--line); margin-top: 3px; padding-top: 4px; font-weight: 800; }
 .ps-tip .pi-tip-l { display: block; margin-top: 5px; font-size: 11px; line-height: 1.35; }
+.ps-cls-tbl td, .ps-cls-tbl th { white-space: nowrap; }
 .ps-cls-tbl tfoot td { font-weight: 800; border-top: 2px solid var(--line); }
 /* compact stock card on the Overview tab */
 /* rebalance plan */
@@ -6383,5 +6385,53 @@ body[data-cc] .kpi:not(.ua-kpi-card) .kpi-title, body[data-cc] .kpi:not(.ua-kpi-
 body[data-cc] .kpi:not(.ua-kpi-card) .kpi-value, body[data-cc] .kpi:not(.ua-kpi-card) .kpi-val, body[data-cc] .kpi:not(.ua-kpi-card) .kpi-num { color: var(--cc-a) !important; }
 /* ===== v170 · AI Business Analyst ===== */
 .aa-home-btn { background: linear-gradient(135deg, #7c3aed, #2563eb) !important; color: #fff !important; border: 0 !important; font-weight: 700; }
+.aa-lines li { padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); border-left: 4px solid var(--muted); background: var(--card); line-height: 1.5; font-size: 13.5px; }
+.aa-actions li { counter-increment: aa; position: relative; padding: 9px 12px 9px 40px; border-radius: 10px; background: color-mix(in srgb, var(--brand) 7%, var(--card)); font-size: 13.5px; line-height: 1.5; }
+.aa-mini > div { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.aa-mini small { display: block; color: var(--muted); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.aa-mini b { display: block; font-size: 22px; margin: 2px 0; }
+.aa-mini span { color: var(--muted); font-size: 11.5px; }
 /* ===== v171 · AI Business Analyst redesign ===== */
+.aa-hero h1 { margin: 0 0 4px; font-size: 24px; color: #fff; background: none; -webkit-text-fill-color: #fff; }
+.aa-hero p { margin: 0; font-size: 13px; line-height: 1.5; opacity: .93; max-width: 760px; }
+.aa-month select { border-radius: 9px; min-height: 34px; }
+.aa-trio small, .aa-mini small { display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.aa-trio b { font-size: 18px; color: var(--ink); }
+.aa-mini b { display: block; font-size: 22px; margin: 2px 0; color: var(--ink); }
+.aa-mini span { color: var(--muted); font-size: 11.5px; }
 .aa-lines li[data-drill], .aa-actions li[data-drill], tr[data-drill], .aa-bar.clickable, tr[data-prof] { cursor: pointer; }
+.aa-bt i { display: block; height: 100%; border-radius: 6px; }
+.aa-bar b { text-align: right; }
+.aa-dialog::backdrop { background: rgba(15,23,42,.55); backdrop-filter: blur(3px); }
+.aa-dh h3 { margin: 0; font-size: 17px; }
+.aa-dt input { flex: 1; min-height: 36px; border-radius: 9px; border: 1px solid var(--line); padding: 0 12px; background: var(--card); color: var(--ink); }
+@media (max-width: 640px) {
+.aa-hero h1 { font-size: 20px; }
+}
+/* ===== 🤖 v177 — Gems assistant: animated robot (FAB / header / hero), overlap-free layout ===== */
+.ask-fab { width: 62px; height: 62px; right: 18px; bottom: 18px; padding: 0; font-size: 0; overflow: visible; background: linear-gradient(145deg, #6366f1 0%, #8b5cf6 55%, #ec4899 100%); color: #fff; animation: rbFloat 3.6s ease-in-out infinite; }
+.ask-fab:hover { animation-play-state: paused; }
+.ask-fab .ff-robot { width: 44px; height: 44px; position: relative; z-index: 2; overflow: visible; }
+.ask-fab[data-state="listening"] { background: linear-gradient(145deg, #16a34a, #0d9488); }
+.ask-fab[data-state="thinking"] { background: linear-gradient(145deg, #f59e0b, #ef4444); }
+@keyframes rbFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes rbRing { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(1.7); opacity: 0; } }
+/* robot parts */
+.ff-robot .rb-eye { fill: #67e8f9; transform-box: fill-box; transform-origin: center; animation: rbBlink 4.2s infinite; }
+.ff-robot .rb-ant { fill: #fde047; transform-box: fill-box; transform-origin: center; animation: rbAnt 1.8s ease-in-out infinite; }
+@keyframes rbBlink { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(.08); } }
+@keyframes rbAnt { 0%,100% { transform: scale(1); filter: drop-shadow(0 0 0 #fde047); } 50% { transform: scale(1.35); filter: drop-shadow(0 0 5px #fde047); } }
+@keyframes rbWave { 0%,100% { transform: scaleY(.35); } 50% { transform: scaleY(1.25); } }
+@keyframes rbThink { 0%,100% { transform: translateX(-2px); } 50% { transform: translateX(2px); } }
+/* panel — header ab overlap nahi karta (title ellipsis, status ek line, icons fixed row) */
+.ask-avatar .ff-robot { width: 34px; height: 34px; overflow: visible; }
+.ask-hero .ff-robot { flex: none; width: 54px; height: 54px; padding: 6px; border-radius: 16px; background: linear-gradient(145deg, #6366f1, #ec4899); animation: rbFloat 3.6s ease-in-out infinite; }
+/* sound-nudge panel ke upar na aaye */
+body:has(#ask-panel:not([hidden])) .bell-unlock { display: none; }
+/* mobile — bottom nav ke upar, poori width panel (pehle FAB nav ke peeche chhup jata tha) */
+@media (max-width: 760px) {
+.ask-fab { right: 12px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: 54px; height: 54px; }
+}
+@media (prefers-reduced-motion: reduce) {
+.ask-fab, .ask-hero .ff-robot, .ff-robot .rb-eye, .ff-robot .rb-ant, .ff-robot .rb-wave rect, .ask-ring { animation: none !important; }
+}

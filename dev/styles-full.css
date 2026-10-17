@@ -7357,3 +7357,65 @@ html[data-theme="dark"] .aa-chip.up { background: #064e3b; color: #6ee7b7; } htm
 @media (max-width: 1100px) { .aa-top.grid.g-2 { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) { .aa-big { font-size: 30px; } .aa-bar { grid-template-columns: 90px 1fr 56px; } .aa-hero h1 { font-size: 20px; } }
 .aa-pill.warn { border-color: #f59e0b; color: #b45309; background: color-mix(in srgb, #f59e0b 10%, var(--card)); }
+
+/* ===== 🤖 v177 — Gems assistant: animated robot (FAB / header / hero), overlap-free layout ===== */
+.ask-fab { width: 62px; height: 62px; right: 18px; bottom: 18px; padding: 0; font-size: 0; overflow: visible; background: linear-gradient(145deg, #6366f1 0%, #8b5cf6 55%, #ec4899 100%); color: #fff; animation: rbFloat 3.6s ease-in-out infinite; }
+.ask-fab:hover { animation-play-state: paused; }
+.ask-fab .ff-robot { width: 44px; height: 44px; position: relative; z-index: 2; overflow: visible; }
+.ask-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(255,255,255,.55); opacity: 0; pointer-events: none; }
+.ask-fab[data-state="listening"] .ask-ring { animation: rbRing 1.4s ease-out infinite; }
+.ask-fab[data-state="listening"] .ask-ring.r2 { animation-delay: .6s; }
+.ask-fab[data-state="listening"] { background: linear-gradient(145deg, #16a34a, #0d9488); }
+.ask-fab[data-state="thinking"] { background: linear-gradient(145deg, #f59e0b, #ef4444); }
+.ask-fab-mic { position: absolute; right: -3px; bottom: -3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; color: #4f46e5; font-size: 12px; display: grid; place-items: center; box-shadow: 0 3px 10px rgba(15,23,42,.35); z-index: 3; }
+@keyframes rbFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes rbRing { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(1.7); opacity: 0; } }
+/* robot parts */
+.ff-robot .rb-head { fill: #fff; }
+.ff-robot .rb-face { fill: #312e81; }
+.ff-robot .rb-ear { fill: rgba(255,255,255,.85); }
+.ff-robot .rb-eye { fill: #67e8f9; transform-box: fill-box; transform-origin: center; animation: rbBlink 4.2s infinite; }
+.ff-robot .rb-mouth { stroke: #67e8f9; }
+.ff-robot .rb-ant { fill: #fde047; transform-box: fill-box; transform-origin: center; animation: rbAnt 1.8s ease-in-out infinite; }
+.ff-robot .rb-wave { fill: #67e8f9; opacity: 0; }
+.ff-robot .rb-wave rect { transform-box: fill-box; transform-origin: center bottom; }
+.ff-robot .rb-ant-stem { color: #fff; }
+@keyframes rbBlink { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(.08); } }
+@keyframes rbAnt { 0%,100% { transform: scale(1); filter: drop-shadow(0 0 0 #fde047); } 50% { transform: scale(1.35); filter: drop-shadow(0 0 5px #fde047); } }
+@keyframes rbWave { 0%,100% { transform: scaleY(.35); } 50% { transform: scaleY(1.25); } }
+@keyframes rbThink { 0%,100% { transform: translateX(-2px); } 50% { transform: translateX(2px); } }
+[data-state="speaking"] .ff-robot .rb-mouth, [data-state="listening"] .ff-robot .rb-mouth { opacity: 0; }
+[data-state="speaking"] .ff-robot .rb-wave, [data-state="listening"] .ff-robot .rb-wave { opacity: 1; }
+[data-state="speaking"] .ff-robot .rb-wave rect, [data-state="listening"] .ff-robot .rb-wave rect { animation: rbWave .55s ease-in-out infinite; }
+[data-state="speaking"] .ff-robot .rb-wave rect:nth-child(2), [data-state="listening"] .ff-robot .rb-wave rect:nth-child(2) { animation-delay: .12s; }
+[data-state="speaking"] .ff-robot .rb-wave rect:nth-child(3), [data-state="listening"] .ff-robot .rb-wave rect:nth-child(3) { animation-delay: .24s; }
+[data-state="speaking"] .ff-robot .rb-wave rect:nth-child(4), [data-state="listening"] .ff-robot .rb-wave rect:nth-child(4) { animation-delay: .36s; }
+[data-state="thinking"] .ff-robot .rb-eyes { animation: rbThink .7s ease-in-out infinite; }
+[data-state="listening"] .ff-robot .rb-eye { fill: #86efac; }
+/* panel — header ab overlap nahi karta (title ellipsis, status ek line, icons fixed row) */
+#ask-panel { right: 18px; bottom: 90px; width: min(400px, calc(100vw - 24px)); max-height: min(600px, calc(100vh - 120px)); border-radius: 20px; }
+.ask-head { gap: 10px; padding: 10px 12px; align-items: center; }
+.ask-avatar { flex: none; width: 42px; height: 42px; border-radius: 14px; background: rgba(255,255,255,.18); display: grid; place-items: center; }
+.ask-avatar .ff-robot { width: 34px; height: 34px; overflow: visible; }
+.ask-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ask-title b { font-size: 14px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-title small { display: block; margin: 0; font-size: 11px; line-height: 1.2; opacity: .92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-head .ask-ico { flex: none; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; font-size: 13px; }
+.ask-hero { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, #6366f1 14%, var(--card)), color-mix(in srgb, #ec4899 12%, var(--card))); border: 1px solid color-mix(in srgb, #6366f1 25%, var(--line)); }
+.ask-hero .ff-robot { flex: none; width: 54px; height: 54px; padding: 6px; border-radius: 16px; background: linear-gradient(145deg, #6366f1, #ec4899); animation: rbFloat 3.6s ease-in-out infinite; }
+.ask-hero b { display: block; font-size: 13.5px; }
+.ask-hero small { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+.ask-msg { overflow-wrap: anywhere; }
+.ask-chips button { white-space: nowrap; }
+.ask-form { align-items: center; }
+.ask-input { min-width: 0; }
+/* sound-nudge panel ke upar na aaye */
+body:has(#ask-panel:not([hidden])) .bell-unlock { display: none; }
+/* mobile — bottom nav ke upar, poori width panel (pehle FAB nav ke peeche chhup jata tha) */
+@media (max-width: 760px) {
+  .ask-fab { right: 12px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: 54px; height: 54px; }
+  .ask-fab .ff-robot { width: 38px; height: 38px; }
+  #ask-panel { left: 8px; right: 8px; width: auto; bottom: calc(138px + env(safe-area-inset-bottom, 0px)); max-height: calc(100vh - 210px); z-index: 130; }
+  .ask-head .ask-ico { width: 26px; height: 26px; }
+}
+@media (prefers-reduced-motion: reduce) { .ask-fab, .ask-hero .ff-robot, .ff-robot .rb-eye, .ff-robot .rb-ant, .ff-robot .rb-wave rect, .ask-ring { animation: none !important; } }

@@ -932,13 +932,19 @@ window.FF = window.FF || {};
     };
   }
   /** GV daily series: EIR history + AAJ ki rows GV Master se (master load hone par). */
+  // ⚡ v177 — result memoized: har KPI / page-switch par poori EIR (10-50k rows) dobara filter + sort hoti thi.
+  // Cache tab tak valid jab tak EIR array, GV Master array aur aaj ki date wahi hon.
+  let liveDailyMemo = null;
   function liveDailyRows() {
     const eir = eirDailyRows();
     if (!masterTodayReady()) return eir;
-    const tk = todayKey();
+    const tk = todayKey(), master = state.data.master;
+    if (liveDailyMemo && liveDailyMemo.src === eirRowsMemo && liveDailyMemo.master === master && liveDailyMemo.tk === tk && liveDailyMemo.n === master.length) return liveDailyMemo.out.slice();
     const live = masterTodayRows();
     const rest = eir.filter((r) => U.dateKey(r.date || r.d || new Date(0)) !== tk);
-    return rest.concat(live).sort((a, b) => (a.d && b.d ? a.d - b.d : 0));
+    const out = rest.concat(live).sort((a, b) => (a.d && b.d ? a.d - b.d : 0));
+    liveDailyMemo = { src: eirRowsMemo, master, tk, n: master.length, out };
+    return out.slice();
   }
 
   // ---- EIR-authoritative issuance views (kal se pichhle din) --------------------------------------

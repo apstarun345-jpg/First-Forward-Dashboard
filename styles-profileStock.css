@@ -56,7 +56,6 @@
 .ps-vdot.v-high { background: #f59e0b; }
 .ps-vdot.v-required { background: #ef4444; }
 .ps-vdot.v-dead { background: #94a3b8; }
-.ps-cls-tbl td, .ps-cls-tbl th { white-space: nowrap; }
 @media (max-width: 760px) {
 .ps-cls-viz { grid-template-columns: minmax(0, 1fr); }
 }

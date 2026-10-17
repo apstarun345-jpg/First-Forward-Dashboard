@@ -226,8 +226,10 @@ window.FF = window.FF || {};
     if (isLiveMirror() || publicVisit.busy) return;
     publicVisit.busy = true;
     try {
+      let rememberedName = '';
+      try { const o = JSON.parse(localStorage.getItem('ff_public_employee') || '{}'); rememberedName = String((o && o.name) || '').trim(); } catch { /* private mode */ }
       const out = await api('/api/public/tag-request/visit', 'POST', {
-        visitId: publicVisit.id || '', visible: document.visibilityState === 'visible'
+        visitId: publicVisit.id || '', visible: document.visibilityState === 'visible', name: rememberedName
       });
       publicVisit.id = String(out.visitId || publicVisit.id || '');
       if (publicVisit.id) try { sessionStorage.setItem(PUBLIC_VISIT_KEY, publicVisit.id); } catch { /* optional */ }
@@ -243,6 +245,9 @@ window.FF = window.FF || {};
       publicVisit.bound = true;
       document.addEventListener('visibilitychange', pulsePublicVisit);
       window.addEventListener('pageshow', pulsePublicVisit);
+      // 👤 employee ne form me naam likha → admin ko naam ke saath batao (debounced)
+      let nameTimer = null;
+      window.addEventListener('ff-employee-name', () => { clearTimeout(nameTimer); nameTimer = setTimeout(pulsePublicVisit, 1500); });
     }
   }
 
