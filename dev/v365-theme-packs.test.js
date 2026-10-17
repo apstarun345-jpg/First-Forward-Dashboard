@@ -172,3 +172,10 @@ test('🧠 v184 — personal link Insights tab (inactive, growth, de-growth, dea
   assert.match(srv, /Stock hai par issuance nahi/);
   assert.match(st, /key: 'insights'/);
 });
+
+test('🧠 v186 — old personal links with Performance get Insights unless admin saved sections (secV)', () => {
+  const srv = read('server.js');
+  assert.match(srv, /plBackfill/);
+  assert.match(srv, /link\.secV = 2/);
+  assert.match(srv, /effSecs/);
+});

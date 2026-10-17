@@ -5087,6 +5087,8 @@ async function handleApi(req, res, url) {
   }
   // 🔗 Personal read-only links (agent + TL) — CRUD + Admin Access Control + Auth (TL/Agent ID + Mobile)
   const PL_ALL_SECTIONS = ['overview', 'stock', 'issuance', 'performance', 'insights', 'ageing', 'requests', 'export'];
+  // 🧠 v186 — purane links (secV nahi) jinke paas Performance tha unhe naya Insights tab bhi mil jaata hai; admin ke save ke baad (secV=2) uska apna choice chalta hai.
+  const plBackfill = (l) => { const a = Array.isArray(l && l.sections) ? l.sections : null; return a && !(l && l.secV) && a.includes('performance') && !a.includes('insights') ? [...a, 'insights'] : a; };
   const normPlSections = (arr) => {
     if (!Array.isArray(arr)) return [...PL_ALL_SECTIONS];
     // An explicitly empty allow-list is an intentional lock-down. Export is only a capability
@@ -5114,7 +5116,7 @@ async function handleApi(req, res, url) {
       mobile: String(l.mobile || '').replace(/\D/g, '').slice(-10),
       ...(l.kind === 'group' ? { members: normPlMembers(l.members), tlLabel: String(l.tlLabel || '').slice(0, 80) } : {}),
       requireAuth: true,
-      sections: Array.isArray(l.sections) ? normPlSections(l.sections) : def.sections
+      sections: Array.isArray(l.sections) ? normPlSections(plBackfill(l)) : def.sections
     };
   };
   if (p === '/api/personal-links' && method === 'GET') {
@@ -5130,6 +5132,7 @@ async function handleApi(req, res, url) {
       db.settings.personalLinks.forEach((l) => {
         l.requireAuth = true;
         l.sections = [...db.settings.personalLinkDefaults.sections];
+        l.secV = 2;
         revokePersonalLinkSessions(l.id);
       });
     }
@@ -5205,7 +5208,7 @@ async function handleApi(req, res, url) {
       if (Array.isArray(body.members)) { const m = normPlMembers(body.members); if (!m.length) throw new HttpError(400, 'Kam se kam ek agent chahiye.'); link.members = m; }
       if (body.tlLabel !== undefined) link.tlLabel = String(body.tlLabel || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80);
     }
-    if (Array.isArray(body.sections)) link.sections = normPlSections(body.sections);
+    if (Array.isArray(body.sections)) { link.sections = normPlSections(body.sections); link.secV = 2; }
     if (body.enabled !== undefined) link.enabled = body.enabled !== false;
     if (credentialsChanged || Array.isArray(body.sections) || link.enabled === false) revokePersonalLinkSessions(link.id);
     await persist('settings');
@@ -8426,8 +8429,9 @@ async function servePersonalPage(req, res, rawToken) {
   }
   const def = (db.settings && db.settings.personalLinkDefaults) || {};
   const allSections = ['overview', 'stock', 'issuance', 'performance', 'insights', 'ageing', 'requests', 'export'];
-  const allowedSecs = Array.isArray(savedLink.sections)
-    ? savedLink.sections.filter((key) => allSections.includes(key))
+  const effSecs = (() => { const a = Array.isArray(savedLink.sections) ? savedLink.sections : null; return a && !savedLink.secV && a.includes('performance') && !a.includes('insights') ? [...a, 'insights'] : a; })();
+  const allowedSecs = Array.isArray(effSecs)
+    ? effSecs.filter((key) => allSections.includes(key))
     : (Array.isArray(def.sections) ? def.sections.filter((key) => allSections.includes(key)) : allSections);
   const hasSec = (k) => allowedSecs.includes(k);
   const hasVisibleSection = allowedSecs.some((key) => key !== 'export');
