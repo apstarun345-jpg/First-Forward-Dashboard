@@ -718,6 +718,7 @@ const livePresence = new Map();
 // Optional, explicitly consented sessions for the public employee Tag Request link.
 // Tokens stay server-side; public GET responses never include them. Sessions are ephemeral by design.
 const publicLiveSessions = new Map();
+const sheetFreshCache = new Map();   // v178 — /api/sheet-freshness 60s cache
 // 👤 v177 — employee ka naam: form me likha hua (ya pichhli baar yaad rakha hua) + IP se pehchan.
 // Memory-only, 30 din; sirf admin notification me naam dikhane ke kaam aata hai.
 const publicIpNames = new Map();
@@ -7422,6 +7423,42 @@ async function handleApi(req, res, url) {
       ok: true, ...mappingStock.status(),
       rateLimited: gvizCooldownActive(), cooldownSec: Math.ceil(gvizCooldownLeft() / 1000)
     });
+  }
+  // 🕒 v178 — Home "Sheets last data update": har sheet ki last filled row + Drive edit history (Apps Script `sheetmeta`).
+  if (p === '/api/sheet-freshness' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const url0 = (process.env.APPS_SCRIPT_URL || '').trim(), secret0 = (process.env.APPS_SCRIPT_SECRET || '').trim();
+    if (!url0 || !secret0) return sendJson(res, 200, { ok: false, unavailable: 'Apps Script connect nahi hai (APPS_SCRIPT_URL / APPS_SCRIPT_SECRET).' });
+    const body = await readBody(req);
+    const items = (Array.isArray(body && body.items) ? body.items : []).slice(0, 8).map((i) => ({
+      key: String((i && i.key) || '').slice(0, 30),
+      source: i && i.source === 'gv' ? 'gv' : 'ff',
+      tab: String((i && i.tab) || '').trim().slice(0, 80),
+      keyCol: /^[A-Za-z]{1,3}$/.test(String((i && i.keyCol) || '')) ? String(i.keyCol).toUpperCase() : 'A'
+    })).filter((i) => i.tab);
+    if (!items.length) throw new HttpError(400, 'items required');
+    const idOf = (src) => String((src === 'gv' ? db.settings.gvSheetId : db.settings.sheetId) || '').replace(/[^A-Za-z0-9_-]/g, '');
+    const cacheKey = JSON.stringify([idOf('ff'), idOf('gv'), items]);
+    const hit = sheetFreshCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < 60e3 && !body.fresh) return sendJson(res, 200, { ...hit.out, cached: true });
+    const store = new AppsScriptStore({ url: url0, secret: secret0 });
+    store.timeoutMs = 40000; store.attempts = 2; store.label = 'Sheet freshness';
+    const out = { ok: true, at: Date.now(), files: {}, tabs: {} };
+    for (const src of ['ff', 'gv']) {
+      const mine = items.filter((i) => i.source === src);
+      const id = idOf(src);
+      if (!mine.length || !id) continue;
+      try {
+        const r = await store.call('sheetmeta', { spreadsheetId: id, tabs: mine.map((i) => ({ tab: i.tab, keyCol: i.keyCol })) });
+        out.files[src] = r.file || {};
+        (r.tabs || []).forEach((t) => { const it = mine.find((i) => i.tab === t.tab); if (it) out.tabs[it.key] = t; });
+      } catch (err) {
+        const m = String((err && err.message) || err);
+        out.files[src] = { error: /unknown action/i.test(m) ? 'Apps Script purana hai — google-apps-script/Code.gs (v3.73) dobara paste karke New version deploy karein.' : m.slice(0, 220) };
+      }
+    }
+    sheetFreshCache.set(cacheKey, { at: Date.now(), out });
+    return sendJson(res, 200, out);
   }
   if ((p === '/api/fastag-mapping/sheet/read' || p === '/api/fastag-mapping/sheet/mark') && method === 'POST') {
     requireAdmin(user);

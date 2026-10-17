@@ -75,7 +75,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.72';
+const CODE_VERSION = 'v3.73';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -574,6 +574,50 @@ function doPost(e) {
     //             Har row ki values usi order me jis order me columns diye; row i ki sheet row = startRow + i.
     // writecells: { spreadsheetId, tab, column:'F', writes:[{row, value}] } → { written }
     //             Sirf us ek column ke cells badalte hain; formulas wale baaki cells jaise the waise rehte hain.
+    // 🕒 v3.73 — Home "Sheets last data update": har tab ki LAST FILLED row + file ka edit history.
+    // body: { spreadsheetId, tabs: [{ tab, keyCol }] }  →  { file: { updated, by, revisions[] }, tabs: [{ tab, lastRow, cells:[{h,v}] }] }
+    // (Google row-level edit time nahi deta; file ki last edit + revision history aur last row ke date/time cells milte hain.)
+    if (body.action === 'sheetmeta') {
+      var ssM = target_(body.spreadsheetId);
+      var tz = Session.getScriptTimeZone();
+      var fmtM = function (v) {
+        if (v === null || v === undefined) return '';
+        if (v instanceof Date) return Utilities.formatDate(v, tz, 'yyyy-MM-dd HH:mm:ss');
+        return String(v).slice(0, 80);
+      };
+      var fileM = { updated: '', by: '', revisions: [], note: '' };
+      try { fileM.updated = Utilities.formatDate(DriveApp.getFileById(ssM.getId()).getLastUpdated(), tz, 'yyyy-MM-dd HH:mm:ss'); }
+      catch (eF) { fileM.note = 'Drive permission nahi: ' + String(eF && eF.message || eF).slice(0, 120); }
+      try {
+        if (typeof Drive !== 'undefined' && Drive.Revisions) {
+          var revs = [];
+          try { var r2 = Drive.Revisions.list(ssM.getId(), { maxResults: 200 }); revs = (r2.items || []).map(function (x) { return { time: x.modifiedDate, by: (x.lastModifyingUserName || (x.lastModifyingUser && x.lastModifyingUser.displayName) || '') }; }); }
+          catch (e2) { var r3 = Drive.Revisions.list(ssM.getId(), { fields: 'revisions(modifiedTime,lastModifyingUser(displayName))', pageSize: 200 }); revs = (r3.revisions || []).map(function (x) { return { time: x.modifiedTime, by: (x.lastModifyingUser && x.lastModifyingUser.displayName) || '' }; }); }
+          revs = revs.slice(-3).reverse();
+          fileM.revisions = revs.map(function (x) { return { time: x.time ? Utilities.formatDate(new Date(x.time), tz, 'yyyy-MM-dd HH:mm:ss') : '', by: x.by || '' }; });
+          if (fileM.revisions[0]) { fileM.by = fileM.revisions[0].by; if (!fileM.updated) fileM.updated = fileM.revisions[0].time; }
+        }
+      } catch (eR) { fileM.note = (fileM.note ? fileM.note + ' · ' : '') + 'Revision history: ' + String(eR && eR.message || eR).slice(0, 100); }
+      var tabsM = (Array.isArray(body.tabs) ? body.tabs : []).slice(0, 6).map(function (t) {
+        var name = String(t && t.tab || '').slice(0, 80);
+        var shM = ssM.getSheetByName(name);
+        if (!shM) return { tab: name, error: 'Tab nahi mila' };
+        var keyIdx = colIndex_(t && t.keyCol) || 1;
+        var lastAny = shM.getLastRow();
+        if (lastAny < 1) return { tab: name, lastRow: 0, cells: [] };
+        var keyVals = shM.getRange(1, keyIdx, lastAny, 1).getValues();
+        var lastFilled = 0;
+        for (var i = keyVals.length - 1; i >= 0; i--) { if (String(keyVals[i][0]).replace(/\s+/g, '') !== '') { lastFilled = i + 1; break; } }
+        if (!lastFilled) return { tab: name, lastRow: 0, cells: [] };
+        var width = Math.min(shM.getLastColumn(), 60);
+        var headers = shM.getRange(1, 1, 1, width).getValues()[0];
+        var row = shM.getRange(lastFilled, 1, 1, width).getValues()[0];
+        var cells = [];
+        for (var c = 0; c < width; c++) { var cv = fmtM(row[c]); if (cv !== '') cells.push({ h: fmtM(headers[c]), v: cv, col: c + 1 }); }
+        return { tab: name, lastRow: lastFilled, totalRows: lastAny, cells: cells };
+      });
+      return json_({ ok: true, file: fileM, tabs: tabsM, tz: tz, spreadsheet: ssM.getName() });
+    }
     if (body.action === 'readrange') {
       var ssR = target_(body.spreadsheetId);
       var shR = ssR.getSheetByName(String(body.tab || '').slice(0, 80));

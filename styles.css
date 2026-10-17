@@ -6461,3 +6461,6 @@ body:has(#ask-panel:not([hidden])) .bell-unlock { display: none; }
 .fresh-row { flex-wrap: wrap; }
 .fresh-val { text-align: left; align-items: flex-start; max-width: 100%; }
 }
+.fresh-row { flex-wrap: wrap; }
+.fresh-extra { flex: 1 1 100%; border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 2px; font-size: 12px; line-height: 1.55; display: grid; gap: 1px; }
+.fresh-extra b { display: inline; }

@@ -753,7 +753,51 @@ FF.pages = FF.pages || {};
       return best;
     }
     const D = () => FF.data;
-    async function compute() {
+    // ---- Apps Script (sheetmeta): last filled row + Drive edit history — sabse sahi source ----
+    const plausible = (x) => x && x.d && x.d.getFullYear() >= 2015 && x.d.getTime() <= Date.now() + 36 * 3600e3;
+    const HDR_RX = /time|date|(^|[^a-z])at([^a-z]|$)|allocat|issue|created|updated/i;
+    function rowTimeOf(cells) {
+      let best = null, bestScore = -1;
+      (cells || []).forEach((c) => {
+        const x = parseText(c.v);
+        if (!plausible(x)) return;
+        const score = (HDR_RX.test(c.h || '') ? 2 : 0) + (x.hasTime ? 1 : 0);
+        if (score > bestScore || (score === bestScore && best && x.d > best.d)) { best = { ...x, col: c.h || '' }; bestScore = score; }
+      });
+      // GV Master jaisi sheets: DATE aur TIME alag columns me → dono jod do
+      if (best && !best.hasTime) {
+        const tc = (cells || []).find((c) => /time/i.test(c.h || '') && /^\d{1,2}:\d{2}/.test(String(c.v || '').trim()));
+        const sec = tc ? timeOfDay(tc.v) : null;
+        if (sec != null) {
+          const d = new Date(best.d.getFullYear(), best.d.getMonth(), best.d.getDate(), 0, 0, sec);
+          best = { d, hasTime: true, col: `${best.col} + ${tc.h}` };
+        }
+      }
+      return best;
+    }
+    async function serverCompute() {
+      const cfgE = FF.config.eir, cfgS = FF.config.stock, gvc = FF.config.gv || {};
+      const tabOf = (n) => { const t = FF.config.sheetByName && FF.config.sheetByName(n); return (t && t.tab) || n; };
+      const items = [
+        { key: 'ff-eir', source: 'ff', tab: tabOf(cfgE.sheet), keyCol: cfgE.tagId || 'A' },
+        { key: 'ff-stock', source: 'ff', tab: tabOf(cfgS.sheet), keyCol: cfgS.tagId || 'C' },
+        { key: 'gv-master', source: 'gv', tab: tabOf('GV Master'), keyCol: (gvc.master && gvc.master.tagId) || 'I' },
+        { key: 'gv-assign', source: 'gv', tab: tabOf('Tag Assignment'), keyCol: (gvc.assignment && gvc.assignment.tagId) || 'B' }
+      ];
+      const res = await fetch('/api/sheet-freshness', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ items }) });
+      let json = {}; try { json = await res.json(); } catch { /* ignore */ }
+      if (!res.ok || !json.ok) throw new Error(json.unavailable || json.error || `HTTP ${res.status}`);
+      const parseFile = (f) => { const x = f && f.updated ? parseText(f.updated) : null; return { updated: plausible(x) ? x : null, by: (f && f.by) || '', error: (f && (f.error || f.note)) || '', revisions: ((f && f.revisions) || []).map((r) => ({ at: parseText(r.time), by: r.by })).filter((r) => plausible(r.at)) }; };
+      const meta = [['ff-eir', '🟦', 'First Forward', 'EIR', 'ff'], ['ff-stock', '🟦', 'First Forward', 'StockDataa', 'ff'], ['gv-master', '🟩', 'GV Partner', 'GV Master', 'gv'], ['gv-assign', '🟩', 'GV Partner', 'Tag Assignment', 'gv']];
+      return meta.map(([key, icon, title, tabName, src]) => {
+        const t = (json.tabs || {})[key] || {};
+        const file = parseFile((json.files || {})[src]);
+        const rowTime = t.cells ? rowTimeOf(t.cells) : null;
+        const value = rowTime || file.updated || null;
+        return { key, icon, title, tab: tabName, exact: true, value, rowTime, file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' };
+      });
+    }
+    async function gvizCompute() {
       const cfgE = FF.config.eir, cfgS = FF.config.stock;
       const out = [];
       const add = (key, icon, title, tab, fn, note) => out.push({ key, icon, title, tab, run: fn, note });
@@ -794,6 +838,15 @@ FF.pages = FF.pages || {};
       }));
       return res;
     }
+    async function compute() {
+      let list = null, svErr = '';
+      try { list = await serverCompute(); } catch (e) { svErr = String((e && e.message) || e); }
+      if (list && list.every((r) => r.value)) return list;
+      const g = await gvizCompute();   // sirf tab chalta hai jab Apps Script se value nahi mili
+      if (!list) return g.map((r) => ({ ...r, approx: true, svErr }));
+      // server se value na mile (tab nahi / row empty) to gviz wali approx value fallback
+      return list.map((r) => { if (r.value) return r; const f = g.find((x) => x.key === r.key); return f && f.value ? { ...r, value: f.value, approx: true } : r; });
+    }
     const dayDiff = (dt) => { const a = new Date(); a.setHours(0, 0, 0, 0); const b = new Date(dt); b.setHours(0, 0, 0, 0); return Math.round((a - b) / 86400000); };
     function ago(x) {
       if (!x.hasTime) { const n = dayDiff(x.d); return n <= 0 ? 'aaj' : n === 1 ? 'kal' : `${n} din pehle`; }
@@ -812,12 +865,21 @@ FF.pages = FF.pages || {};
     function html(list, loading) {
       const rows = list.map((r) => {
         let val;
-        if (!r.value) val = r.noCol ? '<span class="dim">Is sheet me date/time column nahi mila (ALLOCATED_AT jaisa column add karo to yahan dikhega)</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'check ho raha hai…' : (r.err ? 'padh nahi paya' : '—')}</span>`;
+        if (!r.value) val = r.noCol ? '<span class="dim">Is sheet me date/time column nahi mila</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'check ho raha hai…' : (r.err ? 'padh nahi paya' : '—')}</span>`;
         else val = `<b>${esc(fmtDT(r.value))}</b>${r.value.hasTime ? '' : ' <small class="dim">(sirf date)</small>'}`;
         const pill = r.value ? `<span class="fresh-pill ${tone(r.value)}">${esc(ago(r.value))}</span>` : '';
-        return `<div class="fresh-row"><div class="fresh-src"><span class="fresh-ic">${r.icon}</span><div><b>${esc(r.tab)}</b><small class="dim">${esc(r.title)} · ${esc(r.note)}</small></div></div><div class="fresh-val">${val}${pill}</div></div>`;
+        const lines = [];
+        if (r.exact) {
+          if (r.lastRow) lines.push(`Last filled row <b>#${esc(U.fmt(r.lastRow))}</b>${r.totalRows && r.totalRows !== r.lastRow ? ` <span class="dim">(tab me ${esc(U.fmt(r.totalRows))} rows)</span>` : ''}`);
+          if (r.rowTime) lines.push(`Row ka time: ${esc(fmtDT(r.rowTime))}${r.rowTime.col ? ` <span class="dim">· ${esc(r.rowTime.col)}</span>` : ''}`);
+          else if (r.lastRow) lines.push('<span class="dim">Is row me date/time cell nahi mila</span>');
+          if (r.file && r.file.updated) lines.push(`Sheet file last edit: ${esc(fmtDT(r.file.updated))}${r.file.by ? ` · ${esc(r.file.by)}` : ''} <span class="dim">(poori file)</span>`);
+          else if (r.file && r.file.error) lines.push(`<span class="dim" title="${esc(r.file.error)}">Edit history: ${esc(r.file.error.slice(0, 90))}</span>`);
+        } else if (r.approx) lines.push('<span class="dim">Approx — exact ke liye Apps Script Code.gs v3.73 deploy karein</span>');
+        const extra = lines.length ? `<div class="fresh-extra">${lines.map((l) => `<div>${l}</div>`).join('')}</div>` : '';
+        return `<div class="fresh-row"><div class="fresh-src"><span class="fresh-ic">${r.icon}</span><div><b>${esc(r.tab)}</b><small class="dim">${esc(r.title)}${r.note ? ' · ' + esc(r.note) : ''}</small></div></div><div class="fresh-val">${val}${pill}</div>${extra}</div>`;
       }).join('');
-      return `<section class="card fresh-card"><div class="card-head"><div><h3>🕒 Sheets — last data update</h3><p class="dim small">Har sheet me sabse naye record ka date aur time. Site ne ye data abhi load kiya: <b>${esc(U.timeLabel(S.loadedAt || G.loadedAt || Date.now()))}</b></p></div><div class="head-actions"><button class="btn small" data-fresh-refresh="1">↻ Dobara check</button></div></div><div class="card-body fresh-grid">${rows}</div></section>`;
+      return `<section class="card fresh-card"><div class="card-head"><div><h3>🕒 Sheets — last data update</h3><p class="dim small">Har sheet ki <b>last filled row</b> ka date + time, aur Google Sheet ki edit history. Site ne ye data abhi load kiya: <b>${esc(U.timeLabel(S.loadedAt || G.loadedAt || Date.now()))}</b></p></div><div class="head-actions"><button class="btn small" data-fresh-refresh="1">↻ Dobara check</button></div></div><div class="card-body fresh-grid">${rows}</div></section>`;
     }
     async function mount(root, force) {
       const host = U.$('#home-freshness', root); if (!host) return;

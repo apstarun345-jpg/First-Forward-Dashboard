@@ -130,3 +130,15 @@ test('🕒 v178 — Home: Sheets last data update card (EIR · StockDataa · GV 
   assert.match(src, /max\(\$\{l\}\)/);
   assert.match(src, /sirf date/);
 });
+
+test('🕒 v179 — Sheets freshness: last filled row + Drive edit history via Apps Script sheetmeta', () => {
+  const gs = read('google-apps-script/Code.gs'), srv = read('server.js'), home = read('home.js');
+  assert.match(gs, /body\.action === 'sheetmeta'/);
+  assert.match(gs, /getLastUpdated\(\)/);
+  assert.match(gs, /Drive\.Revisions\.list/);
+  assert.match(gs, /CODE_VERSION = 'v3\.73'/);
+  assert.match(srv, /\/api\/sheet-freshness/);
+  assert.match(home, /serverCompute/);
+  assert.match(home, /Last filled row/);
+  assert.match(home, /DATE\b|\+ \$\{tc\.h\}/);
+});

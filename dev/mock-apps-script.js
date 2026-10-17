@@ -72,6 +72,14 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
           out = { ok: true, tab, added: rows.length, atRow, spreadsheet, spreadsheetId: targetId, url: `https://docs.google.com/spreadsheets/d/${targetId}/edit` };
         }
       }
+      else if (body.action === 'sheetmeta') {
+        const now = new Date(); const pad = (n) => String(n).padStart(2, '0');
+        const f = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        const edit = new Date(now.getTime() - 25 * 60e3);
+        out = { ok: true, spreadsheet, tz: 'Asia/Kolkata',
+          file: { updated: f(edit), by: 'Mock Editor', revisions: [{ time: f(edit), by: 'Mock Editor' }], note: '' },
+          tabs: (body.tabs || []).map((t, i) => ({ tab: t.tab, lastRow: 1200 + i, totalRows: 1500 + i, cells: [{ h: 'TAG_ID', v: 'T1234', col: 1 }, { h: 'ALLOCATED_AT', v: f(new Date(now.getTime() - (40 + i * 70) * 60e3)), col: 7 }] })) };
+      }
       else out = { ok: false, error: 'unknown action' };
       const id = String(++seq);
       results.set(id, out);
