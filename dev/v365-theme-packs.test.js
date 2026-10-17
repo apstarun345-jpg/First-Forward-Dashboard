@@ -193,3 +193,14 @@ test('🚪 v189 — common /portal login (ID + password) + settings copy card', 
   assert.match(srv, /pathname === '\/portal'/);
   assert.match(st, /id="pt-copy"/);
 });
+
+test('🔥 v191 — Tag Request dispatch priority (per-row, bulk, filter, sort)', () => {
+  const tr = read('tagRequest.js'), srv = read('server.js');
+  assert.match(tr, /data-tr-dprio\b/);
+  assert.match(tr, /data-tr-bulk-prio/);
+  assert.match(tr, /bulkSetPriority/);
+  assert.match(tr, /data-tr-dprio-filter/);
+  assert.match(tr, /data-tr-dprio-sort/);
+  assert.match(srv, /\/api\/tag-requests\/bulk-priority/);
+  assert.match(srv, /body\.dispatchPriority !== undefined && user\.role === 'admin'/);
+});

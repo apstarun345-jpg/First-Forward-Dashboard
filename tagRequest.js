@@ -53,6 +53,17 @@ FF.pages = FF.pages || {};
     rejected: { label: '⛔ Rejected', tone: 'red' }
   };
   const STATUS_KEYS = ['pending', 'approved', 'dispatched', 'rejected'];
+  /** 🔥 Dispatch priority (admin) — pehle kaunsi request bhejni hai. Khaali = normal ki tarah (rank 2). */
+  const DPRIO = {
+    urgent: { label: '🔥 Urgent', tone: 'red', rank: 0 },
+    high: { label: '🔴 High', tone: 'amber', rank: 1 },
+    normal: { label: '🟡 Normal', tone: 'blue', rank: 2 },
+    low: { label: '🟢 Low', tone: 'green', rank: 3 }
+  };
+  const DPRIO_KEYS = ['urgent', 'high', 'normal', 'low'];
+  const dprioOf = (r) => (r && DPRIO[r.dispatchPriority] ? r.dispatchPriority : '');
+  const dprioRank = (r) => (dprioOf(r) ? DPRIO[dprioOf(r)].rank : 2);
+  const dprioBadge = (r) => (dprioOf(r) ? `<span class="badge ${DPRIO[dprioOf(r)].tone} tr-dprio-badge" title="Dispatch priority">${DPRIO[dprioOf(r)].label}</span>` : '');
   const PAGE_ROWS = 150; // requests table — pehle itni rows, phir "⬇ Aur dikhao" (mobile par fast)
   const EMPLOYEE_STATUS_PAGE_SIZE = 10;
   const EMPLOYEE_STATUS_FILTERS = [
@@ -79,7 +90,7 @@ FF.pages = FF.pages || {};
     notifyCheck: { open: false, busy: false, data: null, err: '' },
     // 📥 requests table
     requests: [], requestsAt: 0, reqLoaded: false, reqError: '',
-    sel: new Set(), filter: { status: 'all', channel: 'both', q: '', fromDate: '', toDate: '' }, edit: null, limit: PAGE_ROWS, dview: [],
+    sel: new Set(), filter: { status: 'all', channel: 'both', q: '', fromDate: '', toDate: '', dprio: 'all' }, sortPrio: true, edit: null, limit: PAGE_ROWS, dview: [],
     // 📦 "sabhi agents ka stock" board — employee link par bhi (search + channel filter + paging)
     stockBoard: { q: '', channel: 'both', limit: 40 },
     sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '', publicForm: null }
@@ -2247,6 +2258,7 @@ body.colorful .from-hdr { color: #166534; }
     const dq = digits(f.q);
     return list.filter((dr) => {
       if (f.status !== 'all' && (dr.req.status || 'pending') !== f.status) return false;
+      if (f.dprio && f.dprio !== 'all' && (f.dprio === 'none' ? dprioOf(dr.req) : dprioOf(dr.req) !== f.dprio)) return false;
       const at = new Date(dr.req.at || 0).getTime();
       if (f.fromDate) { const from = new Date(f.fromDate + 'T00:00:00').getTime(); if (Number.isFinite(from) && at < from) return false; }
       if (f.toDate) { const to = new Date(f.toDate + 'T23:59:59.999').getTime(); if (Number.isFinite(to) && at > to) return false; }
@@ -2351,12 +2363,13 @@ body.colorful .from-hdr { color: #166534; }
     const v = statusOf(r);
     const dup = r.dupCount || (r.dupOf || []).length;
     const sheet = r.sheetSync && r.sheetSync.error ? ` <span class="badge red" title="Sheet sync fail: ${esc(r.sheetSync.error || '')}">📗!</span>` : r.sheetSync ? ' <span class="badge green" title="Sheet me entry ho chuki hai">📗</span>' : '';
-    const top = `<span class="badge ${v.tone}">${v.label}</span>${sheet}${dup ? ` <span class="badge amber" title="Pehle se active request: ${esc((r.dupOf || []).join(', '))}">🔁 dup</span>` : ''}`;
+    const top = `<span class="badge ${v.tone}">${v.label}</span>${dprioBadge(r)}${sheet}${dup ? ` <span class="badge amber" title="Pehle se active request: ${esc((r.dupOf || []).join(', '))}">🔁 dup</span>` : ''}`;
     if (!isAdmin()) return `<div class="tr-st-cell">${top}${r.adminNote ? `<small class="dim tr-note" title="${esc(r.adminNote)}">💬 ${esc(String(r.adminNote).slice(0, 60))}</small>` : ''}</div>`;
     const status = r.status || 'pending';
     return `<div class="tr-st-cell">${top}
       ${status === 'pending' ? `<button class="btn small primary tr-approve" data-tr-op="approve" data-key="${esc(dr.key)}">✅ Approve</button>` : ''}
       <select class="input tr-status-sel" data-tr-status data-key="${esc(dr.key)}" aria-label="Status badlo">${STATUS_KEYS.map((k) => `<option value="${k}" ${k === status ? 'selected' : ''}>${STATUS[k].label}</option>`).join('')}</select>
+      <select class="input tr-dprio-sel" data-tr-dprio data-key="${esc(dr.key)}" aria-label="Dispatch priority" title="🔥 Dispatch priority — pehle kaunsi request bhejni hai"><option value="" ${dprioOf(r) ? '' : 'selected'}>⚡ dispatch priority…</option>${DPRIO_KEYS.map((k) => `<option value="${k}" ${dprioOf(r) === k ? 'selected' : ''}>${DPRIO[k].label}</option>`).join('')}</select>
       <select class="input tr-courier-sel" data-tr-courier data-key="${esc(dr.key)}" aria-label="Courier chuno" title="🚚 Courier — label par yahi naam chhapta hai">${courierPickOptions(r.courier).map((c) => `<option value="${esc(c)}" ${String(r.courier || '').toLowerCase() === c.toLowerCase() ? 'selected' : ''}>${c ? `🚚 ${esc(c)}` : '🚚 courier chuno'}</option>`).join('')}</select>
       ${r.adminNote ? `<small class="dim tr-note" title="${esc(r.adminNote)}">💬 ${esc(String(r.adminNote).slice(0, 60))}</small>` : ''}</div>`;
   }
@@ -2385,7 +2398,7 @@ body.colorful .from-hdr { color: #166534; }
     const status = r.status || 'pending';
     const empName = e.name || r.byName || r.by || '—';
     const entryBy = r.byName && r.byName !== empName ? `<small class="dim">entry: ${esc(r.byName)}</small>` : '';
-    return `<tr class="tr-req-row st-${esc(status)}${sel ? ' tr-sel' : ''}${editing ? ' tr-editing' : ''}" data-tr-key="${esc(dr.key)}">
+    return `<tr class="tr-req-row st-${esc(status)}${dprioOf(r) ? ' dp-' + dprioOf(r) : ''}${sel ? ' tr-sel' : ''}${editing ? ' tr-editing' : ''}" data-tr-key="${esc(dr.key)}">
       <td class="tr-c-sel"><input type="checkbox" data-tr-sel="${esc(dr.key)}" ${sel ? 'checked' : ''} aria-label="Select"></td>
       <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="${esc(r.id)}">#${esc(String(r.id || '').slice(-6))}</small></td>
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
@@ -2527,6 +2540,12 @@ body.colorful .from-hdr { color: #166534; }
               ${STATUS_KEYS.map((k) => `<option value="${k}">${esc(STATUS[k].label)}</option>`).join('')}
             </select>
             <button type="button" class="btn" data-tr-bulk="apply-status" disabled>Apply</button>
+            <select class="input" data-tr-bulk-prio aria-label="Set dispatch priority for selected requests" disabled>
+              <option value="">🔥 Dispatch priority…</option>
+              ${DPRIO_KEYS.map((k) => `<option value="${k}">${esc(DPRIO[k].label)}</option>`).join('')}
+              <option value="__clear">✕ Priority hatao</option>
+            </select>
+            <button type="button" class="btn" data-tr-bulk="apply-prio" disabled>Set</button>
           </span>` : ''}
           <button type="button" class="btn" data-tr-bulk="csv" title="Selected (ya saari dikhti) rows ka CSV">⬇ CSV</button>
           <button type="button" class="btn small" data-tr-bulk="none" hidden>✕ Selection hatao</button>
@@ -2537,6 +2556,7 @@ body.colorful .from-hdr { color: #166534; }
           ${channelFilterHtml(displayRows(state.requests))}
           ${isAdmin() ? `<label class="tr-date-filter"><b>From</b><input class="input" type="date" data-tr-date="fromDate" aria-label="From date" value="${esc(state.filter.fromDate || '')}"></label><label class="tr-date-filter"><b>To</b><input class="input" type="date" data-tr-date="toDate" aria-label="To date" value="${esc(state.filter.toDate || '')}"></label><button type="button" class="btn small" data-tr-act="date-clear">Clear dates</button>` : ''}
           <div class="tr-chips" data-tr-chips>${chipsHtml(displayRows(state.requests))}</div>
+          ${isAdmin() ? `<label class="tr-dprio-filter"><b>🔥 Priority</b><select class="input" data-tr-dprio-filter aria-label="Dispatch priority filter"><option value="all">Sab</option>${DPRIO_KEYS.map((k) => `<option value="${k}" ${state.filter.dprio === k ? 'selected' : ''}>${esc(DPRIO[k].label)}</option>`).join('')}<option value="none" ${state.filter.dprio === 'none' ? 'selected' : ''}>Set nahi</option></select></label><label class="tr-dprio-sort" title="Urgent → High → Normal → Low order me upar"><input type="checkbox" data-tr-dprio-sort ${state.sortPrio ? 'checked' : ''}> Priority pehle</label>` : ''}
           <input class="input tr-req-search" data-tr-search type="search" placeholder="🔎 Agent / employee / mobile / PIN / ID" value="${esc(state.filter.q)}">
           <button type="button" class="btn" data-tr-act="req-refresh" title="Nayi requests laao">↻</button>
           <button type="button" class="btn tr-card-toggle" data-tr-act="card-toggle" title="Phone ke liye card view / poori table">▦ Cards</button>
@@ -2689,6 +2709,7 @@ body.colorful .from-hdr { color: #166534; }
     const keys = new Set(all.map((dr) => dr.key));
     [...state.sel].forEach((k) => { if (!keys.has(k)) state.sel.delete(k); });
     state.dview = filterRows(all);
+    if (isAdmin() && state.sortPrio && state.dview.some((dr) => dprioOf(dr.req))) state.dview = state.dview.map((dr, i) => ({ dr, i })).sort((a, b) => dprioRank(a.dr.req) - dprioRank(b.dr.req) || a.i - b.i).map((x) => x.dr);
     const tbody = card.querySelector('[data-tr-tbody]');
     const shown = state.dview.slice(0, state.limit);
     if (tbody) {
@@ -2759,6 +2780,10 @@ body.colorful .from-hdr { color: #166534; }
     if (sel) sel.disabled = !n;
     const apply = card.querySelector('[data-tr-bulk="apply-status"]');
     if (apply) apply.disabled = !n || !(sel && sel.value);
+    const psel = card.querySelector('[data-tr-bulk-prio]');
+    if (psel) psel.disabled = !n;
+    const papply = card.querySelector('[data-tr-bulk="apply-prio"]');
+    if (papply) papply.disabled = !n || !(psel && psel.value);
     const none = card.querySelector('[data-tr-bulk="none"]');
     if (none) none.hidden = !n;
     card.querySelectorAll('tr[data-tr-key]').forEach((tr) => { if (tr.classList) tr.classList.toggle('tr-sel', state.sel.has(tr.dataset.trKey)); });
@@ -2791,6 +2816,7 @@ body.colorful .from-hdr { color: #166534; }
     const next = { ...before, rows: Array.isArray(before.rows) ? before.rows.map((x) => ({ ...x })) : [] };
 
     if (payload.status !== undefined) next.status = payload.status;
+    if (payload.dispatchPriority !== undefined) { if (DPRIO[payload.dispatchPriority]) next.dispatchPriority = payload.dispatchPriority; else delete next.dispatchPriority; }
     if (payload.adminNote !== undefined) next.adminNote = String(payload.adminNote || '');
     if (payload.note !== undefined && (next.status || 'pending') === 'pending') next.note = String(payload.note || '');
     if (payload.courier !== undefined) {
@@ -2946,6 +2972,34 @@ body.colorful .from-hdr { color: #166534; }
   }
   /** Selected requests → ek saath naya status (Approved / Dispatched / Rejected / Pending). Admin only; sirf wahi requests badalti hain jinka status alag hai.
    *  Rows turant flip hote hain, server ko ek bulk call; progress card me "n / total" live. */
+  async function bulkSetPriority(val) {
+    if (!isAdmin()) { U.toast('Only admin can set priority', 'err'); return; }
+    const prio = val === '__clear' ? '' : val;
+    if (val !== '__clear' && !DPRIO[prio]) { U.toast('Pehle priority chuno', 'info'); return; }
+    const list = selectedRequests();
+    if (!list.length) { U.toast('Pehle requests select karo', 'info'); return; }
+    const locals = list.map((r) => ({ r, local: optimisticRequest(r, { dispatchPriority: prio }) }));
+    renderReqTable();
+    let ok = 0, fail = 0;
+    for (let i = 0; i < locals.length; i += 200) {
+      const chunk = locals.slice(i, i + 200);
+      try {
+        const out = await FF.auth.api('/api/tag-requests/bulk-priority', 'POST', { ids: chunk.map((x) => x.r.id), priority: prio });
+        const fresh = new Map(((out && out.requests) || []).map((x) => [x.id, x]));
+        chunk.forEach(({ r, local }) => {
+          const f = fresh.get(r.id);
+          if (reqMutationSeq.get(r.id) === local.token) { if (f) replaceRequest(f); reqMutationSeq.delete(r.id); }
+          if (!f && local.before && local.before.id) replaceRequest(local.before);
+        });
+        ok += fresh.size; fail += chunk.length - fresh.size;
+      } catch (err) {
+        chunk.forEach(({ r, local }) => { if (reqMutationSeq.get(r.id) === local.token) { reqMutationSeq.delete(r.id); if (local.before && local.before.id) replaceRequest(local.before); } });
+        fail += chunk.length;
+      }
+    }
+    renderReqTable(); updateSelUi();
+    U.toast(fail ? `Priority: ${ok} update, ${fail} fail` : `${prio ? DPRIO[prio].label : 'Priority hata di'} · ${ok} request${ok > 1 ? 's' : ''}`, fail ? 'err' : 'ok');
+  }
   async function bulkSetStatus(status) {
     if (!isAdmin()) { U.toast('Only admin can change status', 'err'); return; }
     if (!STATUS[status]) { U.toast('Choose a status first', 'info'); return; }
@@ -2990,7 +3044,7 @@ body.colorful .from-hdr { color: #166534; }
     if (FF.auth && FF.auth.can && !FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     const rows = state.sel.size ? displayRows(state.requests).filter((dr) => state.sel.has(dr.key)) : state.dview;
     if (!rows.length) { U.toast('Koi row nahi', 'warn'); return; }
-    const header = ['Date', 'Request ID', 'Status', 'Employee', 'Office', 'Agent', 'Agent ID', 'TL', 'Channel', 'Mobile', 'Address', 'Pincode',
+    const header = ['Date', 'Request ID', 'Status', 'Dispatch priority', 'Employee', 'Office', 'Agent', 'Agent ID', 'TL', 'Channel', 'Mobile', 'Address', 'Pincode',
       'Stock total', 'Stock VC4+VC20', 'Stock VC5+', `Last month (${U.labelYM(ymLast())})`, 'Current MTD', 'Run rate / day', 'Expected month-end', 'Growth %',
       ...(isAdmin() ? ['Suggested after stock', 'Suggested without stock deduction'] : []),
       ...CLASS_LIST.flatMap((c) => [`${c} requested`, `${c} approved`]), 'Total requested', 'Total approved', 'Note', 'Admin note', 'Source'];
@@ -2998,7 +3052,7 @@ body.colorful .from-hdr { color: #166534; }
       const r = dr.req, e = r.employee || {}, n = metricNumbers(metricsFor(dr));
       const cls = (c) => { const x = dr.rows.find((y) => String(y.cls).toUpperCase() === c); return x ? [x.requested === undefined ? num(x.approved) : num(x.requested), num(x.approved)] : ['', '']; };
       return [
-        new Date(r.at).toLocaleString('en-IN'), r.id, r.status || 'pending', e.name || r.byName || '', e.office || '', dr.agent.name, dr.agent.agentId, dr.agent.tl,
+        new Date(r.at).toLocaleString('en-IN'), r.id, r.status || 'pending', dprioOf(r) ? DPRIO[dprioOf(r)].label.replace(/^\S+\s/, '') : '', e.name || r.byName || '', e.office || '', dr.agent.name, dr.agent.agentId, dr.agent.tl,
         dr.agent.channel === 'gv' ? 'GV Partner' : 'First Forward', dr.contact.mobile, dr.contact.address, dr.contact.pincode,
         n.total.stock, n.core.stock, n.comm.stock, n.total.last, n.total.cur, round1(n.total.rate), n.total.exp, n.total.growth === null ? 'new' : round1(n.total.growth),
         ...(isAdmin() ? [n.total.suggest.net, n.total.suggest.gross] : []),
@@ -3023,6 +3077,7 @@ body.colorful .from-hdr { color: #166534; }
         else if (op === 'approve') bulkApprove();
         else if (op === 'dispatch') bulkSetStatus('dispatched');
         else if (op === 'apply-status') { const sv = card.querySelector('[data-tr-bulk-status]'); bulkSetStatus(sv ? sv.value : ''); }
+        else if (op === 'apply-prio') { const pv = card.querySelector('[data-tr-bulk-prio]'); bulkSetPriority(pv ? pv.value : ''); }
         else if (op === 'csv') exportCsv();
         else if (op === 'none') { state.sel.clear(); updateSelUi(); card.querySelectorAll('[data-tr-sel]').forEach((x) => { x.checked = false; }); }
         return;
@@ -3090,7 +3145,24 @@ body.colorful .from-hdr { color: #166534; }
         renderReqTable();
         return;
       }
-      if (t.matches && t.matches('[data-tr-bulk-status]')) { updateSelUi(); return; }
+      if (t.matches && t.matches('[data-tr-bulk-status],[data-tr-bulk-prio]')) { updateSelUi(); return; }
+      if (t.matches && t.matches('[data-tr-dprio-filter]')) { state.filter.dprio = t.value || 'all'; state.limit = PAGE_ROWS; state.edit = null; renderReqTable(); return; }
+      if (t.matches && t.matches('[data-tr-dprio-sort]')) { state.sortPrio = !!t.checked; renderReqTable(); return; }
+      if (t.matches && t.matches('[data-tr-dprio]')) {
+        const dr = findDr(t.dataset.key);
+        if (!dr) return;
+        const val = DPRIO[t.value] ? t.value : '';
+        if (val === dprioOf(dr.req)) return;
+        t.disabled = true;
+        putRequest(dr.req, { dispatchPriority: val }).then(() => {
+          U.toast(val ? `Dispatch priority: ${DPRIO[val].label}` : 'Dispatch priority hata di', 'ok');
+          renderReqTable();
+        }).catch((err) => {
+          U.toast('Priority save nahi hui: ' + ((err && err.message) || ''), 'err');
+          renderReqTable();
+        });
+        return;
+      }
       if (t.matches && t.matches('[data-tr-sel]')) {
         if (t.checked) state.sel.add(t.dataset.trSel); else state.sel.delete(t.dataset.trSel);
         updateSelUi();
