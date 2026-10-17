@@ -8496,7 +8496,7 @@ async function servePersonalPage(req, res, rawToken) {
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
     const nf = (n) => Number(n || 0).toLocaleString('en-IN');
     const maxBar = Math.max(1, ...st.monthDays.map((x) => x.n));
-    const bars = st.monthDays.map((x) => `<div class="pb-col" title="${escHtml(x.date)}: ${nf(x.n)} tags"><div class="pb-bar" style="height:${Math.max(4, Math.round((x.n / maxBar) * 100))}%"></div><span>${escHtml(x.date.slice(8, 10))}</span></div>`).join('');
+    const bars = st.monthDays.map((x) => `<div class="pb-col" title="${escHtml(x.date)}: ${nf(x.n)} tags"><b class="pb-val">${x.n ? nf(x.n) : '0'}</b><div class="pb-bar" style="height:${Math.max(4, Math.round((x.n / maxBar) * 100))}%"></div><span>${escHtml(x.date.slice(8, 10))}</span></div>`).join('');
     const clsRows = Object.entries(st.cls).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="pb-kv"><span>${escHtml(k)}</span><b>${v}</b> <i>${pct(v, st.clsTotal)}%</i></div>`).join('') || '<p class="dim">—</p>';
     const goalHtml = goal ? `<div class="pb-goal"><div class="pb-goal-top"><span>🎯 TL goal ${escHtml(ym)}</span><b>${st.mtd} / ${Number(goal.target) || 0} (${pct(st.mtd, Number(goal.target))}%)</b></div><div class="pb-track"><div class="pb-fill" style="width:${Math.min(100, pct(st.mtd, Number(goal.target)))}%"></div></div></div>` : '';
     const targetHtml = target ? `<div class="pb-kv"><span>🎯 Your target ${escHtml(ym)}</span><b>${st.mtd} / ${Number(target.target) || 0} (${pct(st.mtd, Number(target.target))}%)</b></div>` : '';
@@ -8753,8 +8753,9 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-kpi{background:#fff;border:1px solid #e5e9f5;border-radius:15px;padding:15px 12px;text-align:center;box-shadow:0 3px 12px rgba(15,23,42,.035);transition:transform .16s,box-shadow .16s}.pb-kpi:hover{transform:translateY(-2px);box-shadow:0 7px 18px rgba(15,23,42,.075)}.pb-kpis .pb-kpi:nth-child(4n+1){background:linear-gradient(140deg,#eef2ff,#fff);border-color:#c7d2fe}.pb-kpis .pb-kpi:nth-child(4n+2){background:linear-gradient(140deg,#ecfeff,#fff);border-color:#a5f3fc}.pb-kpis .pb-kpi:nth-child(4n+3){background:linear-gradient(140deg,#fff7ed,#fff);border-color:#fed7aa}.pb-kpis .pb-kpi:nth-child(4n+4){background:linear-gradient(140deg,#fdf2f8,#fff);border-color:#fbcfe8}
 .pb-kpi small{color:#64748b;font-size:11.5px;display:block}.pb-kpi b{font-size:26px;display:block;margin:2px 0}.pb-kpi span{font-size:12px;color:#64748b}
 .pb-kpi .up,.pb-up{color:#10b981;font-weight:700}.pb-kpi .down{color:#ef4444;font-weight:700}
-.pb-bars{display:flex;align-items:flex-end;gap:5px;height:120px;margin-top:8px;overflow-x:auto;padding-bottom:4px}
-.pb-col{flex:1 0 16px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
+.pb-val{font-size:11px;font-weight:800;line-height:1;margin-bottom:3px;color:var(--ink,#334155)}
+.pb-bars{display:flex;align-items:flex-end;gap:5px;height:140px;margin-top:8px;overflow-x:auto;padding-bottom:4px}
+.pb-col{flex:1 0 22px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
 .pb-bar{width:100%;background:linear-gradient(180deg,var(--a),#93c5fd);border-radius:5px 5px 2px 2px;min-height:4px}
 .pb-col span{font-size:9.5px;color:#94a3b8;margin-top:3px}
 .pb-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
