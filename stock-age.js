@@ -194,10 +194,12 @@ export function summaryOf(index, opts = {}) {
  *  → { t:[core,comm], c, o, agents:[packNode…], byCls:{VC4:{t,c,o}}, personId } ya null (index me nahi mila). */
 export function personalStock(index, ch, kind, name) {
   const c = index && index[ch === 'gv' ? 'gv' : 'ff'];
-  if (!c || !str(name)) return null;
+  const names = (Array.isArray(name) ? name : [name]).filter((x) => str(x));
+  if (!c || !names.length) return null;
   const isTl = kind === 'tl';
+  const isGroup = kind === 'group';   // v180 — admin ke chune hue agents ka custom team
   const map = isTl ? c.tls : c.agents;
-  const keys = [...resolveKeys(c, ch === 'gv' ? 'gv' : 'ff', isTl ? 'tl' : 'agent', [name])];
+  const keys = [...resolveKeys(c, ch === 'gv' ? 'gv' : 'ff', isTl ? 'tl' : 'agent', names)];
   if (!keys.length) return null;
   const keySet = new Set(keys);
   const nodes = keys.map((k) => map.get(k)).filter(Boolean);
@@ -218,6 +220,10 @@ export function personalStock(index, ch, kind, name) {
       if (age > ce.o) ce.o = age;
       for (let i = 0; i < AGE_THRESH.length; i++) if (age >= AGE_THRESH[i]) ce.c[i]++;
     }
+  }
+  if (isGroup) {
+    nodes.forEach((n) => out.agents.push(packNode(n)));
+    out.agents.sort((a, b) => (b.t[0] + b.t[1]) - (a.t[0] + a.t[1]));
   }
   if (isTl) {
     const want = normName(name);

@@ -1480,6 +1480,26 @@ FF.pages = FF.pages || {};
         <span class="dim small" id="pl-msg" style="display:block;margin-top:6px"></span>
       </div>
 
+      <div class="card compact-card" style="margin-bottom:12px;background:var(--bg-subtle,#f8fafc)" id="pg-card">
+        <div class="card-head"><h3>👥 Custom Team Link <span class="dim small">(manual agents)</span></h3><span class="dim small">Khud agents chuno + TL naam rakho → link me sirf unhi agents ka poora data (issuance, stock, ageing…)</span></div>
+        <div class="finder-row" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
+          <select class="input" id="pg-source" style="width:auto"><option value="ff">🟦 First Forward</option><option value="gv">🟩 GV Partner</option></select>
+          <input class="input" id="pg-name" placeholder="👥 Team / group ka naam (e.g. Rahul Team)" style="min-width:210px;flex:1" maxlength="80">
+          <input class="input" id="pg-tl" placeholder="🧑‍💼 TL ka naam (link me dikhega)" style="min-width:190px;flex:1" maxlength="80">
+        </div>
+        <div class="finder-row" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
+          <div class="finder-input" style="min-width:260px;flex:1"><span class="finder-ico">🔎</span><input class="input" id="pg-agent" placeholder="Agent ka naam / ID type karo → click karke add karo" maxlength="80"></div>
+          <button class="btn small" id="pg-clear" type="button">🧹 Sab hatao</button>
+        </div>
+        <div id="pg-chips" class="chip-row" style="margin-bottom:8px;min-height:30px"><span class="dim small">Abhi koi agent nahi chuna</span></div>
+        <div class="finder-row" style="flex-wrap:wrap;gap:8px">
+          <input class="input" id="pg-person-id" placeholder="🪪 Team ID (verification ke liye, koi bhi code)" style="width:250px" maxlength="40">
+          <input class="input" id="pg-mobile" type="tel" inputmode="numeric" placeholder="📱 10-digit Mobile" style="width:170px" maxlength="14">
+          <button class="btn primary" id="pg-create">🔗 Team link banao</button>
+        </div>
+        <span class="dim small" id="pg-msg" style="display:block;margin-top:6px">Allowed sections global default se lagte hain (⚙️ Access me badal sakte ho). Same naam se dobara banaoge to agents list update ho jayegi.</span>
+      </div>
+
       <div class="card compact-card" style="margin-bottom:12px">
         <div class="card-head"><h3>🛡️ Admin Global Default Access Control</h3><span class="dim small">Naye links aur existing links ke liye default tabs · identity verification always stays on</span></div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
@@ -1498,7 +1518,7 @@ FF.pages = FF.pages || {};
           : '<span class="badge red" title="Report stays locked until both credentials are configured">⚠️ Setup needed</span>';
         return `<tr>
         <td>${l.source === 'gv' ? '🟩 GV' : '🟦 FF'}</td>
-        <td>${l.kind === 'tl' ? '👥 TL' : '🧑‍💼 Agent'}</td>
+        <td>${l.kind === 'tl' ? '👥 TL' : (l.kind === 'group' ? `🧩 Team (${(l.members || []).length})` : '🧑‍💼 Agent')}</td>
         <td><b>${esc(l.name)}</b><div class="dim small">${esc(String(l.createdAt || '').slice(0, 10))}</div></td>
         <td>${authBadge}</td>
         <td><div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:center">${secBadges}</div></td>
@@ -1522,9 +1542,10 @@ FF.pages = FF.pages || {};
     wireSectionGroup(body, 'input[type="checkbox"][data-new-sec]', 'newSec');
     wireSectionGroup(body, 'input[type="checkbox"][data-def-sec]', 'defSec');
 
-    const suggestionItems = () => {
+    const suggestionItems = (srcOv, kindOv, qOv) => {
+      const srcV = srcOv || sourceEl.value, kindV = kindOv || kindEl.value, qV = qOv !== undefined ? qOv : nameEl.value;
       let people;
-      if (sourceEl.value === 'gv' && FF.gv && FF.gv.people) people = FF.gv.people();
+      if (srcV === 'gv' && FF.gv && FF.gv.people) people = FF.gv.people();
       else {
         const agents = new Map(), tls = new Map();
         const rows = FF.store && FF.store.get ? (FF.store.get('agents') || []) : [];
@@ -1540,12 +1561,12 @@ FF.pages = FF.pages || {};
         people = { agents: [...agents.values()], tls: [...tls.entries()].map(([name, n]) => ({ name, n })) };
       }
       let out;
-      if (kindEl.value === 'tl') out = (people.tls || []).map((t) => ({ kind: 'tl', kindLabel: 'TL', label: t.name, id: t.id || t.tlId || '', mobile: t.mobile || '', sub: t.n ? `${U.fmtShort(t.n)} tags` : '', value: t.name }));
+      if (kindV === 'tl') out = (people.tls || []).map((t) => ({ kind: 'tl', kindLabel: 'TL', label: t.name, id: t.id || t.tlId || '', mobile: t.mobile || '', sub: t.n ? `${U.fmtShort(t.n)} tags` : '', value: t.name }));
       else out = (people.agents || []).map((a) => ({ kind: 'agent', kindLabel: 'Agent', label: a.name, id: a.id || a.agentId || '', mobile: a.mobile || '', sub: a.tl || (a.id ? `ID ${a.id}` : ''), keywords: a.id || '', value: a.name }));
       // 🔎 v3.79 — REPORT alone misses TLs/agents that only appear in StockDataa / EIR / GV Master. Add everyone
       // the Master Search index knows for this source + kind (same names the top search bar finds).
       if (msPeople && msPeople.length) {
-        const want = (sourceEl.value === 'gv' ? 'gv-' : 'ff-') + (kindEl.value === 'tl' ? 'tl' : 'agent');
+        const want = (srcV === 'gv' ? 'gv-' : 'ff-') + (kindV === 'tl' ? 'tl' : 'agent');
         const nk = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
         const have = new Map(out.map((it) => [nk(it.label), it]));
         for (const p of msPeople) {
@@ -1562,7 +1583,7 @@ FF.pages = FF.pages || {};
         }
       }
       // ⏳ Master Search index abhi load ho raha ho to "No match" nahi, saaf loading line dikhao (pick nahi hota).
-      if (msPeople === null && !out.length) return [{ kind: 'cls', kindLabel: 'Loading', label: '⏳ Names load ho rahe hain…', sub: 'thodi der me suggestions aayenge', keywords: nameEl.value, value: '', _pending: true }];
+      if (msPeople === null && !out.length) return [{ kind: 'cls', kindLabel: 'Loading', label: '⏳ Names load ho rahe hain…', sub: 'thodi der me suggestions aayenge', keywords: qV, value: '', _pending: true }];
       return out;
     };
     let msPeople = null;
@@ -1589,6 +1610,42 @@ FF.pages = FF.pages || {};
       onEnter: (q) => { nameEl.value = q; }
     });
     [sourceEl, kindEl].forEach((el) => el.addEventListener('change', () => { nameEl.value = ''; if (pidEl) pidEl.value = ''; if (mobEl) mobEl.value = ''; nameEl.focus(); }));
+
+    // 👥 Custom team link — admin manually agents chunta hai
+    (() => {
+      const gSrc = U.$('#pg-source', body), gName = U.$('#pg-name', body), gTl = U.$('#pg-tl', body), gAgent = U.$('#pg-agent', body);
+      const gChips = U.$('#pg-chips', body), gPid = U.$('#pg-person-id', body), gMob = U.$('#pg-mobile', body), gBtn = U.$('#pg-create', body), gMsg = U.$('#pg-msg', body), gClear = U.$('#pg-clear', body);
+      if (!gSrc || !gAgent || !gBtn) return;
+      const members = new Map();
+      const drawChips = () => {
+        gChips.innerHTML = members.size ? [...members.values()].map((m) => `<span class="chip on" style="display:inline-flex;gap:6px;align-items:center">${esc(m.name)}${m.id ? ` <small class="dim">${esc(m.id)}</small>` : ''}<button type="button" data-rm="${esc(m.name)}" style="border:0;background:transparent;cursor:pointer" aria-label="Hatao ${esc(m.name)}">✕</button></span>`).join(' ') + ` <span class="dim small">· ${members.size} agents</span>` : '<span class="dim small">Abhi koi agent nahi chuna</span>';
+        gChips.querySelectorAll('[data-rm]').forEach((x) => x.addEventListener('click', () => { members.delete(x.dataset.rm); drawChips(); }));
+      };
+      U.suggest(gAgent, {
+        min: 1,
+        items: () => suggestionItems(gSrc.value, 'agent', gAgent.value),
+        onPick: (it) => { if (!it || it._pending) return; const name = it.value || it.label; if (name) { members.set(name, { name, id: it.id || '' }); drawChips(); } gAgent.value = ''; },
+        onEnter: (q) => { const name = String(q || '').trim(); if (name) { members.set(name, { name, id: '' }); drawChips(); } gAgent.value = ''; }
+      });
+      gSrc.addEventListener('change', () => { members.clear(); drawChips(); });
+      gClear.addEventListener('click', () => { members.clear(); drawChips(); });
+      gBtn.addEventListener('click', async () => {
+        const name = (gName.value || '').trim(), tlLabel = (gTl.value || '').trim();
+        const personId = (gPid.value || '').trim(), mobile = (gMob.value || '').replace(/\D/g, '').slice(-10);
+        if (!name) return U.toast('Team / group ka naam likho', 'err');
+        if (!members.size) return U.toast('Kam se kam ek agent chuno', 'err');
+        if (personId.length < 2) return U.toast('Team ID (verification code) zaroori hai', 'err');
+        if (mobile.length !== 10) return U.toast('Registered 10-digit mobile zaroori hai', 'err');
+        await U.withButtonBusy(gBtn, async () => {
+          try {
+            const out = await A.api('/api/personal-links', 'POST', { source: gSrc.value === 'gv' ? 'gv' : 'ff', kind: 'group', name, tlLabel, members: [...members.values()], personId, mobile });
+            await U.copyText(`${origin}/p/${out.link.token}`).catch(() => false);
+            U.toast(`🔗 Team link ${out.reused ? 'update' : 'ban'} gaya (${members.size} agents) aur copy ho gaya ✓`, 'ok');
+            await draw();
+          } catch (err) { U.toast(err.message, 'err'); if (gMsg) gMsg.textContent = err.message; }
+        }, 'Link save ho raha hai…');
+      });
+    })();
 
     create.addEventListener('click', async () => {
       const source = sourceEl.value === 'gv' ? 'gv' : 'ff';

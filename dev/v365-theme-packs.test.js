@@ -142,3 +142,15 @@ test('🕒 v179 — Sheets freshness: last filled row + Drive edit history via A
   assert.match(home, /Last filled row/);
   assert.match(home, /DATE\b|\+ \$\{tc\.h\}/);
 });
+
+test('👥 v180 — custom team personal link + last active date in agent/TL summary', () => {
+  const srv = read('server.js'), st = read('settings.js'), ms = read('masterSearch.js'), sa = read('stock-age.js');
+  assert.match(srv, /kind === 'group'/);
+  assert.match(srv, /personalNameFilter/);
+  assert.match(srv, /isTeamLink/);
+  assert.match(sa, /kind === 'group'/);
+  assert.match(st, /id="pg-create"/);
+  assert.match(st, /kind: 'group'/);
+  assert.match(ms, /lastActiveHtml/);
+  assert.match(ms, /Last active/);
+});

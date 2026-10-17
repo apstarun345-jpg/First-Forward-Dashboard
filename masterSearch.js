@@ -1469,6 +1469,32 @@ FF.pages = FF.pages || {};
     const prioChip = (p) => (p ? `<span class="badge ${/high/i.test(p) ? 'red' : /medium/i.test(p) ? 'amber' : 'green'}">${esc(p)}</span>` : '<span class="dim">—</span>');
     const sugPair = (net, gross) => `<span class="sug-pair sug-pair-tight"><span class="sug-result net" title="Required − stock"><small>After stock</small><b class="sug-chip">${U.fmt(net)}</b></span><span class="sug-result gross" title="Run-rate × din, stock ghata kar nahi"><small>W/o stock</small><b class="sug-chip wo">${U.fmt(gross)}</b></span></span>`;
     const ymLabel = (ym) => { try { return ym ? U.labelYM(ym, true) : ''; } catch { return String(ym || ''); } };
+    /** 🕒 Last active — is agent / TL ka sabse latest issuance (n>0) wala din + kitne din pehle. */
+    function lastActiveHtml(pr, isTl, ch) {
+      try {
+        let rows = [];
+        if (ch === 'gv' && FF.gv && FF.gv.liveDailyRows) { try { rows = FF.gv.liveDailyRows() || []; } catch { rows = []; } }
+        if (!rows.length) rows = (FF.store && FF.store.get && FF.store.get('daily')) || [];
+        const nk = normName(pr.name), id = normName(pr.id || '');
+        const isGv = (r) => r.channel === 'GV Partner';
+        let best = '', qty = 0;
+        for (const r of rows) {
+          if ((ch === 'gv') !== isGv(r)) continue;
+          if (!(Number(r.n) > 0)) continue;
+          const hit = isTl ? (normName(r.tlName) === nk || normName(r.agentName) === nk) : (normName(r.agentName) === nk || (id && normName(r.agentId) === id));
+          if (!hit) continue;
+          const k = String(r.key || ''); if (!k) continue;
+          if (k > best) { best = k; qty = 0; }
+          if (k === best) qty += Number(r.n) || 0;
+        }
+        if (!best) return ' · <span class="badge amber" title="Is naam ka koi issuance data nahi mila">🕒 Last active: —</span>';
+        const tk = U.dateKey(new Date());
+        const days = Math.max(0, Math.round((new Date(tk + 'T00:00:00') - new Date(best + 'T00:00:00')) / 86400000));
+        const ago = days === 0 ? 'aaj' : days === 1 ? 'kal' : `${days} din pehle`;
+        const cls = days <= 3 ? 'green' : days <= 10 ? 'amber' : 'red';
+        return ` · <span class="badge ${cls}" title="Latest issuance wala din (${esc(U.fmt(qty))} tags)">🕒 Last active: ${esc(U.labelDateKey(best))} · ${ago}</span>`;
+      } catch { return ''; }
+    }
     function kpiStripHtml(pr) {
       if (!pr) return '';
       const isTl = /tl$/.test(String(pr.kind || '')), ch = pr.ch || chOfP(pr);
@@ -1514,7 +1540,7 @@ FF.pages = FF.pages || {};
         ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — stock / priority sheet se nahi aa paaye (naam ki spelling check karo); issuance tag-ledger (EIR) se hai.</p>` : '';
       return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
           <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL summary' : 'Agent summary'}</h3>
-          <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
+          <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
           <div class="card-right">${prioChip(pr.priority)}</div></div>
         <div class="card-body"><div class="mp-kpis msp-kpis">
           ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, U.fmt(s.total), `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}`, spec('stock'))}

@@ -5094,6 +5094,13 @@ async function handleApi(req, res, url) {
     const clean = [...new Set(arr.map((x) => String(x || '').trim()).filter((x) => PL_ALL_SECTIONS.includes(x)))];
     return clean.some((key) => key !== 'export') ? clean : clean.filter((key) => key !== 'export');
   };
+  const normPlMembers = (arr) => {
+    const seen = new Set();
+    return (Array.isArray(arr) ? arr : []).map((m) => ({
+      name: String((m && m.name) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80),
+      id: String((m && m.id) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40)
+    })).filter((m) => { const k = m.name.toLowerCase(); if (!m.name || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 80);
+  };
   const plDefaults = () => {
     const d = (db.settings && db.settings.personalLinkDefaults) || {};
     return { requireAuth: true, sections: normPlSections(d.sections) };
@@ -5105,6 +5112,7 @@ async function handleApi(req, res, url) {
       source: l.source === 'gv' ? 'gv' : 'ff',
       personId: String(l.personId || '').trim().slice(0, 40),
       mobile: String(l.mobile || '').replace(/\D/g, '').slice(-10),
+      ...(l.kind === 'group' ? { members: normPlMembers(l.members), tlLabel: String(l.tlLabel || '').slice(0, 80) } : {}),
       requireAuth: true,
       sections: Array.isArray(l.sections) ? normPlSections(l.sections) : def.sections
     };
@@ -5131,14 +5139,17 @@ async function handleApi(req, res, url) {
   if (p === '/api/personal-links' && method === 'POST') {
     requireAdmin(user);
     const body = await readBody(req);
-    const kind = body.kind === 'tl' ? 'tl' : 'agent';
+    const kind = body.kind === 'tl' ? 'tl' : (body.kind === 'group' ? 'group' : 'agent');
     const source = body.source === 'gv' ? 'gv' : 'ff';
     const name = String(body.name || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80);
-    if (!name) throw new HttpError(400, 'Agent/TL ka exact naam likho.');
+    if (!name) throw new HttpError(400, kind === 'group' ? 'Group / team ka naam likho.' : 'Agent/TL ka exact naam likho.');
+    const members = kind === 'group' ? normPlMembers(body.members) : [];
+    const tlLabel = kind === 'group' ? String(body.tlLabel || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80) : '';
+    if (kind === 'group' && !members.length) throw new HttpError(400, 'Kam se kam ek agent chuno.');
     if (feats().personalLinks === false) throw new HttpError(403, 'Personal links feature band hai — Features tab se ON karo.');
     const personId = String(body.personId || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40);
     const mobile = String(body.mobile || '').replace(/\D/g, '').slice(-10);
-    if (personId.length < 2) throw new HttpError(400, `Admin ko pehle exact ${kind === 'tl' ? 'TL ID' : 'Agent ID'} configure karni hogi.`);
+    if (personId.length < 2) throw new HttpError(400, `Admin ko pehle exact ${kind === 'tl' ? 'TL ID' : (kind === 'group' ? 'Team ID (koi bhi code)' : 'Agent ID')} configure karni hogi.`);
     if (mobile.length !== 10) throw new HttpError(400, 'Personal link ke liye registered 10-digit mobile configure karo.');
     const def = plDefaults();
     const sections = Array.isArray(body.sections) ? normPlSections(body.sections) : def.sections;
@@ -5148,6 +5159,7 @@ async function handleApi(req, res, url) {
       duplicate.personId = personId;
       duplicate.mobile = mobile;
       duplicate.requireAuth = true;
+      if (kind === 'group') { duplicate.members = members; duplicate.tlLabel = tlLabel; }
       if (Array.isArray(body.sections)) duplicate.sections = sections;
       if (credentialsChanged || Array.isArray(body.sections)) revokePersonalLinkSessions(duplicate.id);
       await persist('settings');
@@ -5158,6 +5170,7 @@ async function handleApi(req, res, url) {
     const link = {
       id: `pl_${crypto.randomBytes(6).toString('hex')}`, source, kind, name,
       personId, mobile, requireAuth: true, sections,
+      ...(kind === 'group' ? { members, tlLabel } : {}),
       token: crypto.randomBytes(18).toString('hex'), enabled: true, by: user.username, createdAt: new Date().toISOString()
     };
     if (!Array.isArray(db.settings.personalLinks)) db.settings.personalLinks = [];
@@ -5166,7 +5179,7 @@ async function handleApi(req, res, url) {
     logAudit(user, 'link_create', { target: `${source}:${kind}:${name}`, ip: clientIp(req) });
     // User WhatsApp/open kare usse pehle Google query warm kar do; response ko is par block nahi karte.
     void personalDailyRows(link).catch(() => {});
-    if (kind === 'tl') void personalTeamAgents(link).catch(() => {});
+    if (kind !== 'agent') void personalTeamAgents(link).catch(() => {});
     return sendJson(res, 200, { ok: true, link: normPlLink(link) });
   }
   const plItem = p.match(/^\/api\/personal-links\/([^/]+)$/);
@@ -5182,12 +5195,16 @@ async function handleApi(req, res, url) {
     const mobile = body.mobile !== undefined
       ? String(body.mobile || '').replace(/\D/g, '').slice(-10)
       : String(link.mobile || '').replace(/\D/g, '').slice(-10);
-    if (personId.length < 2) throw new HttpError(400, `Exact ${link.kind === 'tl' ? 'TL ID' : 'Agent ID'} zaroori hai.`);
+    if (personId.length < 2) throw new HttpError(400, `Exact ${link.kind === 'tl' ? 'TL ID' : (link.kind === 'group' ? 'Team ID' : 'Agent ID')} zaroori hai.`);
     if (mobile.length !== 10) throw new HttpError(400, 'Registered mobile number 10 digit ka hona chahiye.');
     const credentialsChanged = String(link.personId || '') !== personId || String(link.mobile || '').replace(/\D/g, '').slice(-10) !== mobile;
     link.personId = personId;
     link.mobile = mobile;
     link.requireAuth = true;
+    if (link.kind === 'group') {
+      if (Array.isArray(body.members)) { const m = normPlMembers(body.members); if (!m.length) throw new HttpError(400, 'Kam se kam ek agent chahiye.'); link.members = m; }
+      if (body.tlLabel !== undefined) link.tlLabel = String(body.tlLabel || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80);
+    }
     if (Array.isArray(body.sections)) link.sections = normPlSections(body.sections);
     if (body.enabled !== undefined) link.enabled = body.enabled !== false;
     if (credentialsChanged || Array.isArray(body.sections) || link.enabled === false) revokePersonalLinkSessions(link.id);
@@ -8203,6 +8220,18 @@ function personalWindow() {
   const reportThrough = `${yesterday.getUTCFullYear()}-${pad2(yesterday.getUTCMonth() + 1)}-${pad2(yesterday.getUTCDate())}`;
   return { start, currentStart: `${todayKey.slice(0, 7)}-01`, today: reportThrough };
 }
+// 👥 v180 — "group" link: admin ne manually kuch agents chune + ek TL/group naam rakha → sirf unhi agents ka data.
+const isTeamLink = (l) => !!l && (l.kind === 'tl' || l.kind === 'group');
+function personalMemberNames(link) {
+  return (Array.isArray(link && link.members) ? link.members : []).map((m) => String((m && m.name) || '').trim()).filter(Boolean).slice(0, 80);
+}
+function personalNameFilter(link, c) {
+  if (link && link.kind === 'group') {
+    const names = personalMemberNames(link);
+    return names.length ? `(${names.map((n) => `${c.nameCol} = ${gvizLiteral(n)}`).join(' or ')})` : `${c.nameCol} = ''`;
+  }
+  return `${c.nameCol} = ${gvizLiteral(link.name)}`;
+}
 function personalConfig(link) {
   const source = link.source === 'gv' ? 'gv' : 'ff';
   const e = db.settings.eir || {};
@@ -8228,7 +8257,7 @@ async function personalDailyRows(link) {
   const c = personalConfig(link);
   const { start, today } = personalWindow();
   const extra = `, ${c.masterCol}, ${c.tlCol}`;
-  const tq = `select ${c.dateCol}, ${c.clsCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${c.nameCol} = ${gvizLiteral(link.name)} group by ${c.dateCol}, ${c.clsCol}${extra} order by ${c.dateCol} desc limit 5000`;
+  const tq = `select ${c.dateCol}, ${c.clsCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.dateCol}, ${c.clsCol}${extra} order by ${c.dateCol} desc limit 5000`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
   const out = await fetchUpstreamCached(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
@@ -8262,7 +8291,7 @@ async function personalTeamAgents(link) {
   const c = personalConfig(link);
   const { start, today } = personalWindow();
   const extra = `, ${c.masterCol}, ${c.tlCol}`;
-  const tq = `select ${c.agentCol}, ${c.dateCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${c.nameCol} = ${gvizLiteral(link.name)} group by ${c.agentCol}, ${c.dateCol}${extra} order by ${c.dateCol} desc limit 5000`;
+  const tq = `select ${c.agentCol}, ${c.dateCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${c.dateCol}${extra} order by ${c.dateCol} desc limit 5000`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
   const out = await fetchUpstreamCached(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
@@ -8287,7 +8316,7 @@ async function personalAgentTl(link) {
   try {
     const c = personalConfig(link);
     const { start, today } = personalWindow();
-    const tq = `select ${c.tlCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${c.nameCol} = ${gvizLiteral(link.name)} group by ${c.tlCol}, ${c.masterCol}`;
+    const tq = `select ${c.tlCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.tlCol}, ${c.masterCol}`;
     const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
     const out = await fetchUpstreamCached(upstreamUrl(params));
     if (out.status < 200 || out.status >= 300) return '';
@@ -8378,7 +8407,7 @@ async function servePersonalPage(req, res, rawToken) {
   if (savedLink.enabled === false) return fail(403, 'The admin has disabled this link.');
   const hasSession = personalLinkSession(req, savedLink);
   if (!hasSession) {
-    const idLabel = savedLink.kind === 'tl' ? 'TL ID' : 'Agent ID';
+    const idLabel = savedLink.kind === 'tl' ? 'TL ID' : (savedLink.kind === 'group' ? 'Team ID' : 'Agent ID');
     const credentialsReady = String(savedLink.personId || '').trim().length >= 2 && String(savedLink.mobile || '').replace(/\D/g, '').length === 10;
     const gate = `<section class="pb-card pb-auth-card" id="pl-auth-gate">
       <div class="pb-auth-ico">🔐</div>
@@ -8410,10 +8439,10 @@ async function servePersonalPage(req, res, rawToken) {
     const needsStock = hasSec('stock') || hasSec('ageing');
     // Start independent sheet/index work together so verified links don't wait for serial requests.
     const rowsPromise = needsIssuance ? personalDailyRows(link) : Promise.resolve([]);
-    const teamPromise = link.kind === 'tl' && (hasSec('issuance') || hasSec('performance'))
+    const teamPromise = isTeamLink(link) && (hasSec('issuance') || hasSec('performance'))
       ? personalTeamAgents(link) : Promise.resolve(new Map());
-    const tlNamePromise = link.kind !== 'tl' && hasVisibleSection
-      ? personalAgentTl(link) : Promise.resolve('');
+    const tlNamePromise = link.kind === 'group' ? Promise.resolve(String(link.tlLabel || '')) : (!isTeamLink(link) && hasVisibleSection
+      ? personalAgentTl(link) : Promise.resolve(''));
     // 📦 Stock ka state batana zaroori hai — pehle timeout par chupchap "—" dikhta tha (user ko lagta tha data hi nahi hai).
     const stockMeta = { state: 'off' };   // off | ok | loading (index ban raha) | nomatch (naam StockDataa me nahi) | error
     const stockPromise = needsStock ? (async () => {
@@ -8426,7 +8455,7 @@ async function servePersonalPage(req, res, rawToken) {
             if (timer && timer.unref) timer.unref();
           })
         ]);
-        const sres = personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : 'agent', link.name);
+        const sres = personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : (link.kind === 'group' ? 'group' : 'agent'), link.kind === 'group' ? personalMemberNames(link) : link.name);
         stockMeta.state = sres ? 'ok' : 'nomatch';
         return sres;
       } catch (err) {
@@ -8451,7 +8480,7 @@ async function servePersonalPage(req, res, rawToken) {
     const ym = dateKeyNow().slice(0, 7);
     const normPerson = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
     let byAgentMap = new Map();
-    if (link.kind === 'tl' && (hasSec('overview') || hasSec('issuance') || hasSec('performance'))) {
+    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance'))) {
       goal = ((Array.isArray(db.settings.tlTargets) ? db.settings.tlTargets : []).find((t) => t && t.ym === ym && normPerson(t.tl) === normPerson(link.name)) || null);
       if (hasSec('issuance') || hasSec('performance')) byAgentMap = await teamPromise;
       for (const [name, m] of byAgentMap) {
@@ -8461,7 +8490,7 @@ async function servePersonalPage(req, res, rawToken) {
       }
       team.sort((a, b) => b.mtd - a.mtd);
       team = team.slice(0, 15);
-    } else if (link.kind !== 'tl' && (hasSec('overview') || hasSec('performance'))) {
+    } else if (!isTeamLink(link) && (hasSec('overview') || hasSec('performance'))) {
       target = ((Array.isArray(db.settings.targets) ? db.settings.targets : []).find((t) => t && t.ym === ym && (t.source || 'ff') === link.source && normPerson(t.agent) === normPerson(link.name)) || null);
     }
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -8521,7 +8550,7 @@ async function servePersonalPage(req, res, rawToken) {
     // Agent links show their own row; TL links show each agent in that TL's team.
     const matrixDates = st.monthDays.map((x) => x.date);
     const matrixAgentMaps = new Map();
-    if (link.kind === 'tl') {
+    if (isTeamLink(link)) {
       for (const [agentName, dayMap] of byAgentMap) matrixAgentMaps.set(agentName, dayMap);
     } else {
       const ownDays = new Map();
@@ -8533,7 +8562,7 @@ async function servePersonalPage(req, res, rawToken) {
         const counts = matrixDates.map((date) => dayMap.get(date) || 0);
         return { name, counts, total: counts.reduce((sum, n) => sum + n, 0) };
       })
-      .filter((r) => link.kind !== 'tl' || r.total > 0)
+      .filter((r) => !isTeamLink(link) || r.total > 0)
       .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
       .slice(0, 80);
     const matrixTableHtml = `<section class="pb-card pb-matrix-card">
@@ -8554,7 +8583,7 @@ async function servePersonalPage(req, res, rawToken) {
     const ageHtml = stockInfo ? `<section class="pb-card"><div class="pb-card-head"><h3>🧓 Stock ageing</h3>${expBtns('pl-tbl-ageing', `${link.name} - Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ageing"><thead><tr><th>Group</th><th>Total</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th><th>Oldest</th></tr></thead><tbody>${[['🚗 VC4+VC20', 0], ['🚚 VC5+', 1]].map(([lbl, g]) => `<tr><td>${lbl}</td><td>${nf(stockInfo.t[g])}</td>${stockInfo.c[g].map((x, i) => `<td class="${i >= 2 && x ? 'pb-hot' : i === 1 && x ? 'pb-warn' : ''}">${nf(x)}</td>`).join('')}<td>${stockInfo.o[g] ? `${nf(stockInfo.o[g])}d` : '—'}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(stTotal)}</td>${totAgeC.map((x) => `<td>${nf(x)}</td>`).join('')}<td>${maxOld ? `${nf(maxOld)}d` : '—'}</td></tr></tfoot></table></div></section>` : '<section class="pb-card"><h3>🧓 Stock ageing</h3><p class="dim">Stock ageing data abhi uplabdh nahi hai.</p></section>';
 
     let agentAgeTable = '';
-    if (link.kind === 'tl' && stockInfo && stockInfo.agents && stockInfo.agents.length) {
+    if (isTeamLink(link) && stockInfo && stockInfo.agents && stockInfo.agents.length) {
       const agList = stockInfo.agents.slice(0, 80);
       const agTot = agList.reduce((a, x) => a + x.t[0] + x.t[1], 0);
       const ag1m = agList.reduce((a, x) => a + x.c[0][0] + x.c[1][0], 0);
@@ -8566,7 +8595,7 @@ async function servePersonalPage(req, res, rawToken) {
 
     // 4. 👥 TL Agent-wise Issuance — inventory fields live only in the stock section.
     let teamTable = '';
-    if (link.kind === 'tl' && hasSec('issuance')) {
+    if (isTeamLink(link) && hasSec('issuance')) {
       const agentRows = [];
       for (const [name, m] of byAgentMap) {
         let mtdA = 0, lastA = 0;
@@ -8637,7 +8666,7 @@ async function servePersonalPage(req, res, rawToken) {
     const tabDefs = [
       { id: 'overview', label: '📊 Overview', show: hasSec('overview') },
       { id: 'stock', label: '📦 Class-wise Stock', show: hasSec('stock') },
-      { id: 'issuance', label: `📅 Date${link.kind === 'tl' ? ' & Agent' : ''} Issuance`, show: hasSec('issuance') },
+      { id: 'issuance', label: `📅 Date${isTeamLink(link) ? ' & Agent' : ''} Issuance`, show: hasSec('issuance') },
       { id: 'performance', label: '🏆 Performance', show: hasSec('performance') },
       { id: 'ageing', label: '⏳ Stock Ageing', show: hasSec('ageing') },
       { id: 'requests', label: '🏷️ My Tag Requests', show: hasSec('requests') }
@@ -8652,7 +8681,7 @@ async function servePersonalPage(req, res, rawToken) {
     const html = personalShell({
       title: `${link.name} · Performance`,
       heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`,
-      sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : 'Agent'}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
+      sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
       token,
       requireAuth,
       authorized: true,
