@@ -154,3 +154,10 @@ test('👥 v180 — custom team personal link + last active date in agent/TL sum
   assert.match(ms, /lastActiveHtml/);
   assert.match(ms, /Last active/);
 });
+
+test('✏️ v183 — team link edit: add/remove agents + TL name in drawer', () => {
+  const st = read('settings.js');
+  assert.match(st, /id="ple-agent"/);
+  assert.match(st, /payload\.members/);
+  assert.match(st, /payload\.tlLabel/);
+});

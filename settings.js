@@ -1526,7 +1526,7 @@ FF.pages = FF.pages || {};
         <td class="mono small"><a href="/p/${esc(l.token)}" target="_blank" rel="noopener">${esc(origin)}/p/${esc(String(l.token).slice(0, 10))}…</a></td>
         <td>${l.enabled !== false ? '<span class="badge green">✅ ON</span>' : '<span class="badge red">⛔ OFF</span>'}</td>
         <td class="num" style="white-space:nowrap">
-          <button class="btn small pl-edit" data-id="${esc(l.id)}" title="Access sections aur ID/Mobile Auth edit karo">⚙️ Access</button>
+          <button class="btn small pl-edit" data-id="${esc(l.id)}" title="Access, ID/Mobile aur (Team link me) agents / TL naam edit karo">⚙️ ${l.kind === 'group' ? 'Edit' : 'Access'}</button>
           <button class="btn small pl-copy" data-token="${esc(l.token)}" title="Poora URL copy karo">📋</button>
           <button class="btn small pl-wa" data-token="${esc(l.token)}" data-name="${esc(l.name)}" data-id="${esc(l.personId || '')}" title="WhatsApp par bhejo">💬</button>
           <button class="btn small pl-toggle" data-id="${esc(l.id)}" data-on="${l.enabled === false ? '1' : ''}">${l.enabled !== false ? '⏸️' : '▶️'}</button>
@@ -1684,15 +1684,19 @@ FF.pages = FF.pages || {};
       const curSecs = Array.isArray(link.sections) ? link.sections : defSecs;
       FF.app.openDrawer({
         kicker: `🔗 Personal Link Access · ${link.source === 'gv' ? 'GV Partner' : 'First Forward'}`,
-        title: `${link.kind === 'tl' ? '👥' : '🧑‍💼'} ${link.name}`,
+        title: `${link.kind === 'tl' ? '👥' : (link.kind === 'group' ? '🧩' : '🧑‍💼')} ${link.name}`,
         sub: 'Set the exact registered ID/mobile and control which report sections this link may return',
         body: `<div class="kd-sec">
           <div class="form-grid">
-            <label class="fld"><span>🪪 ${link.kind === 'tl' ? 'TL ID' : 'Agent ID'} (Auth ke liye)</span>
+            <label class="fld"><span>🪪 ${link.kind === 'tl' ? 'TL ID' : (link.kind === 'group' ? 'Team ID' : 'Agent ID')} (Auth ke liye)</span>
               <input class="input" id="ple-id" value="${esc(link.personId || '')}" placeholder="e.g. 1001 ya TL-01"></label>
             <label class="fld"><span>📱 Registered Mobile Number (10 digit)</span>
               <input class="input" id="ple-mob" type="tel" inputmode="numeric" value="${esc(link.mobile || '')}" placeholder="e.g. 9876543210" maxlength="14"></label>
           </div>
+          ${link.kind === 'group' ? `<h4 class="drawer-section-title" style="margin-top:14px">🧩 Team agents &amp; TL naam</h4>
+          <input class="input" id="ple-tl" value="${esc(link.tlLabel || '')}" placeholder="🧑‍💼 TL ka naam (link me dikhega)" maxlength="80" style="margin-bottom:8px">
+          <div class="finder-input" style="margin-bottom:8px"><span class="finder-ico">🔎</span><input class="input" id="ple-agent" placeholder="Agent naam / ID type karo → click karke add karo" maxlength="80"></div>
+          <div id="ple-chips" class="chip-row" style="min-height:30px"></div>` : ''}
           <p class="check" style="margin-top:8px">🔐 <b>ID + exact registered mobile verification is mandatory.</b> No personal report HTML/data is returned until both match.</p>
           <h4 class="drawer-section-title" style="margin-top:14px">🎛️ Allowed Tabs &amp; Features</h4>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
@@ -1706,6 +1710,21 @@ FF.pages = FF.pages || {};
       const dBody = document.getElementById('drawer-body');
       if (!dBody) return;
       wireSectionGroup(dBody, 'input[data-ple-sec]', 'pleSec');
+      const eMembers = new Map((Array.isArray(link.members) ? link.members : []).map((m) => [m.name, { name: m.name, id: m.id || '' }]));
+      if (link.kind === 'group') {
+        const eChips = dBody.querySelector('#ple-chips'), eAgent = dBody.querySelector('#ple-agent');
+        const drawE = () => {
+          eChips.innerHTML = eMembers.size ? [...eMembers.values()].map((m) => `<span class="chip on" style="display:inline-flex;gap:6px;align-items:center">${esc(m.name)}${m.id ? ` <small class="dim">${esc(m.id)}</small>` : ''}<button type="button" data-rm="${esc(m.name)}" style="border:0;background:transparent;cursor:pointer" aria-label="Hatao ${esc(m.name)}">✕</button></span>`).join(' ') + ` <span class="dim small">· ${eMembers.size} agents</span>` : '<span class="dim small">Koi agent nahi — kam se kam ek chahiye</span>';
+          eChips.querySelectorAll('[data-rm]').forEach((x) => x.addEventListener('click', () => { eMembers.delete(x.dataset.rm); drawE(); }));
+        };
+        drawE();
+        if (eAgent) U.suggest(eAgent, {
+          min: 1,
+          items: () => suggestionItems(link.source, 'agent', eAgent.value),
+          onPick: (it) => { if (!it || it._pending) return; const nm = it.value || it.label; if (nm) { eMembers.set(nm, { name: nm, id: it.id || '' }); drawE(); } eAgent.value = ''; },
+          onEnter: (q) => { const nm = String(q || '').trim(); if (nm) { eMembers.set(nm, { name: nm, id: '' }); drawE(); } eAgent.value = ''; }
+        });
+      }
       const saveBtn = dBody.querySelector('#ple-save');
       if (saveBtn) saveBtn.addEventListener('click', () => U.withButtonBusy(saveBtn, async () => {
         const personId = (dBody.querySelector('#ple-id') && dBody.querySelector('#ple-id').value || '').trim();
@@ -1713,7 +1732,13 @@ FF.pages = FF.pages || {};
         const sections = [...dBody.querySelectorAll('[data-ple-sec]:checked')].map((x) => x.dataset.pleSec);
         if (personId.length < 2) return U.toast(`Exact ${link.kind === 'tl' ? 'TL ID' : 'Agent ID'} zaroori hai`, 'err');
         if (mobile.length !== 10) return U.toast('Registered 10-digit mobile number zaroori hai', 'err');
-        await A.api(`/api/personal-links/${encodeURIComponent(link.id)}`, 'PUT', { personId, mobile, sections });
+        const payload = { personId, mobile, sections };
+        if (link.kind === 'group') {
+          if (!eMembers.size) return U.toast('Kam se kam ek agent rakho', 'err');
+          payload.members = [...eMembers.values()];
+          payload.tlLabel = (dBody.querySelector('#ple-tl') && dBody.querySelector('#ple-tl').value || '').trim();
+        }
+        await A.api(`/api/personal-links/${encodeURIComponent(link.id)}`, 'PUT', payload);
         U.toast(`✅ ${link.name} ka Personal Link access update ho gaya`, 'ok');
         if (FF.app.closeDrawer) FF.app.closeDrawer();
         await draw();
