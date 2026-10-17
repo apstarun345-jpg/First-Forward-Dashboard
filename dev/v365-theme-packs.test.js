@@ -121,3 +121,12 @@ test('👤 v177 — public Tag Request open notification carries employee name (
 test('⚡ v177 — GV liveDailyRows memoized', () => {
   assert.match(read('gv.js'), /liveDailyMemo/);
 });
+
+test('🕒 v178 — Home: Sheets last data update card (EIR · StockDataa · GV Master · Tag Assignment)', () => {
+  const src = read('home.js');
+  assert.match(src, /id="home-freshness"/);
+  assert.match(src, /home-freshness', '🕒/);
+  for (const t of ["'EIR'", "'StockDataa'", "'GV Master'", "'Tag Assignment'"]) assert.ok(src.includes(t), t);
+  assert.match(src, /max\(\$\{l\}\)/);
+  assert.match(src, /sirf date/);
+});

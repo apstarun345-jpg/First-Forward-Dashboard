@@ -52,12 +52,8 @@
 .ask-head { gap: 10px; padding: 10px 12px; align-items: center; }
 .ask-avatar { flex: none; width: 42px; height: 42px; border-radius: 14px; background: rgba(255,255,255,.18); display: grid; place-items: center; }
 .ask-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ask-title b { font-size: 14px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ask-title small { display: block; margin: 0; font-size: 11px; line-height: 1.2; opacity: .92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ask-head .ask-ico { flex: none; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; font-size: 13px; }
 .ask-hero { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, #6366f1 14%, var(--card)), color-mix(in srgb, #ec4899 12%, var(--card))); border: 1px solid color-mix(in srgb, #6366f1 25%, var(--line)); }
-.ask-hero b { display: block; font-size: 13.5px; }
-.ask-hero small { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
 .ask-msg { overflow-wrap: anywhere; }
 .ask-chips button { white-space: nowrap; }
 .ask-form { align-items: center; }

@@ -703,6 +703,135 @@ FF.pages = FF.pages || {};
   // ---------------------------------------------------------------- render
   // renderCtx.bootGate (app.js splash): true ho to render apne SAARE sections ke data paint karne
   // ke baad hi resolve hota hai — "Opening your workspace" animation hatate hi Home poora bhara dikhe.
+
+  // ===== 🕒 v178 — Sheets ka "last data update" (GV Master · Tag Assignment · EIR · StockDataa) =====
+  // Sheet ka asli "last edited" Google se gviz me nahi milta; isliye har sheet ke sabse naye record ka
+  // date + time dikhate hain (EIR: issue date · StockDataa: allocation time · GV Master: date + time
+  // column · Tag Assignment: allocation/date column). Time column na ho to sirf date aur saaf note.
+  const freshness = (() => {
+    let memo = null, memoAt = 0, inflight = null;
+    const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+    function fromParts(y, mo, d, hh, mi, ss, hasTimeHint) {
+      const dt = new Date(+y, +mo, +d, +(hh || 0), +(mi || 0), +(ss || 0));
+      if (isNaN(dt)) return null;
+      return { d: dt, hasTime: hasTimeHint !== undefined ? hasTimeHint : !!(+hh || +mi || +ss) };
+    }
+    function parseText(str) {
+      const t = String(str == null ? '' : str).trim();
+      if (!t) return null;
+      let m = t.match(/^Date\((\d{4}),(\d{1,2}),(\d{1,2})(?:,(\d{1,2}),(\d{1,2})(?:,(\d{1,2}))?)?/);
+      if (m) return fromParts(m[1], m[2], m[3], m[4], m[5], m[6]);
+      m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+      if (m) return fromParts(m[1], +m[2] - 1, m[3], m[4], m[5], m[6]);
+      m = t.match(/^(\d{1,2})[-/. ](\d{1,2}|[A-Za-z]{3,9})[-/. ,]+(\d{2,4})(?:[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?)?/);
+      if (m) {
+        let mo = /^\d+$/.test(m[2]) ? +m[2] - 1 : MONTHS[m[2].slice(0, 3).toLowerCase()];
+        if (mo === undefined || isNaN(mo)) return null;
+        let y = +m[3]; if (y < 100) y += 2000;
+        let hh = +(m[4] || 0); const ap = (m[7] || '').toLowerCase();
+        if (ap === 'pm' && hh < 12) hh += 12; if (ap === 'am' && hh === 12) hh = 0;
+        return fromParts(y, mo, m[1], hh, m[5], m[6], m[4] !== undefined);
+      }
+      return null;
+    }
+    const cellDT = (cell) => (!cell || cell.v == null || cell.v === '' ? null : (parseText(cell.v) || parseText(cell.f)));
+    const timeOfDay = (v) => {   // "14:32:10" / "2:32 PM" / gviz Date(1899,11,30,14,32,10)
+      const t = String(v == null ? '' : v).trim();
+      let m = t.match(/^Date\(\d+,\d+,\d+,(\d{1,2}),(\d{1,2})(?:,(\d{1,2}))?/);
+      if (!m) m = t.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?/);
+      if (!m) return null;
+      let hh = +m[1]; const ap = (m[4] || '').toLowerCase();
+      if (ap === 'pm' && hh < 12) hh += 12; if (ap === 'am' && hh === 12) hh = 0;
+      return hh * 3600 + (+m[2]) * 60 + (+(m[3] || 0));
+    };
+    const later = (a, b) => (a && (!b || a.d > b.d) ? a : b);
+    async function maxOf(sheet, letters) {
+      let best = null;
+      const t = await D().query(sheet, `select ${letters.map((l) => `max(${l})`).join(', ')}`, { fresh: true });
+      const row = (t.rows || [])[0] || [];
+      row.forEach((c) => { best = later(cellDT(c), best); });
+      return best;
+    }
+    const D = () => FF.data;
+    async function compute() {
+      const cfgE = FF.config.eir, cfgS = FF.config.stock;
+      const out = [];
+      const add = (key, icon, title, tab, fn, note) => out.push({ key, icon, title, tab, run: fn, note });
+      add('ff-eir', '🟦', 'First Forward', 'EIR', async () => {
+        try { const v = await maxOf(cfgE.sheet, [cfgE.date]); if (v) return v; } catch { /* loaded data se fallback */ }
+        const daily = S.get && S.get('daily');
+        const last = Array.isArray(daily) && M.latestDate ? M.latestDate(daily) : null;
+        return last ? { d: last, hasTime: false } : null;
+      }, 'Sabse naya issue date (EIR)');
+      add('ff-stock', '🟦', 'First Forward', 'StockDataa', async () => maxOf(cfgS.sheet, [cfgS.bcAllocatedAt, cfgS.agentAllocatedAt].filter(Boolean)), 'Sabse nayi tag / agent allocation');
+      add('gv-master', '🟩', 'GV Partner', 'GV Master', async () => {
+        const G = FF.gv;
+        try { if (G && G.need) await G.need('master'); } catch { /* sheet load fail */ }
+        const rows = G && G.rows ? G.rows() : [];
+        let best = null;
+        for (const r of rows) {
+          if (!r.date) continue;
+          if (best && r.date < best.date) continue;
+          const sec = timeOfDay(r.time);
+          const cand = { date: r.date, sec };
+          if (!best || r.date > best.date || (sec != null && (best.sec == null || sec > best.sec))) best = cand;
+        }
+        if (!best) return null;
+        const dt = new Date(best.date.getFullYear(), best.date.getMonth(), best.date.getDate(), 0, 0, best.sec || 0);
+        return { d: dt, hasTime: best.sec != null };
+      }, 'Sabse naya issuance (date + time column)');
+      add('gv-assign', '🟩', 'GV Partner', 'Tag Assignment', async () => {
+        const G = FF.gv; if (G && G.ensureAssignmentMap) { try { await G.ensureAssignmentMap({}); } catch { /* optional */ } }
+        const labels = (G && G.labels && G.labels.assignment) || [];
+        const idx = labels.findIndex((l) => /allocat|assign.*(date|time|at)|updated|modified|(^|[^a-z])(date|time)([^a-z]|$)/i.test(String(l || '')));
+        if (idx < 0) return { none: true };
+        return maxOf('Tag Assignment', [FF.util.colLetter(idx)]);
+      }, 'Sabse nayi allocation / date column');
+      const res = await Promise.all(out.map(async (x) => {
+        let v = null, err = '';
+        try { v = await x.run(); } catch (e) { err = String((e && e.message) || e); }
+        return { key: x.key, icon: x.icon, title: x.title, tab: x.tab, note: x.note, value: v && !v.none ? v : null, noCol: !!(v && v.none), err };
+      }));
+      return res;
+    }
+    const dayDiff = (dt) => { const a = new Date(); a.setHours(0, 0, 0, 0); const b = new Date(dt); b.setHours(0, 0, 0, 0); return Math.round((a - b) / 86400000); };
+    function ago(x) {
+      if (!x.hasTime) { const n = dayDiff(x.d); return n <= 0 ? 'aaj' : n === 1 ? 'kal' : `${n} din pehle`; }
+      const mins = Math.max(0, Math.round((Date.now() - x.d.getTime()) / 60000));
+      if (mins < 1) return 'abhi abhi';
+      if (mins < 60) return `${mins} min pehle`;
+      const h = Math.floor(mins / 60);
+      if (h < 48) return `${h} ghante${mins % 60 ? ` ${mins % 60} min` : ''} pehle`;
+      return `${Math.floor(h / 24)} din pehle`;
+    }
+    function tone(x) {
+      if (!x.hasTime) { const n = dayDiff(x.d); return n <= 1 ? 'ok' : n <= 3 ? 'warn' : 'bad'; }
+      const h = (Date.now() - x.d.getTime()) / 3600000; return h <= 6 ? 'ok' : h <= 30 ? 'warn' : 'bad';
+    }
+    const fmtDT = (x) => x.d.toLocaleString('en-IN', x.hasTime ? { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true } : { day: '2-digit', month: 'short', year: 'numeric' });
+    function html(list, loading) {
+      const rows = list.map((r) => {
+        let val;
+        if (!r.value) val = r.noCol ? '<span class="dim">Is sheet me date/time column nahi mila (ALLOCATED_AT jaisa column add karo to yahan dikhega)</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'check ho raha hai…' : (r.err ? 'padh nahi paya' : '—')}</span>`;
+        else val = `<b>${esc(fmtDT(r.value))}</b>${r.value.hasTime ? '' : ' <small class="dim">(sirf date)</small>'}`;
+        const pill = r.value ? `<span class="fresh-pill ${tone(r.value)}">${esc(ago(r.value))}</span>` : '';
+        return `<div class="fresh-row"><div class="fresh-src"><span class="fresh-ic">${r.icon}</span><div><b>${esc(r.tab)}</b><small class="dim">${esc(r.title)} · ${esc(r.note)}</small></div></div><div class="fresh-val">${val}${pill}</div></div>`;
+      }).join('');
+      return `<section class="card fresh-card"><div class="card-head"><div><h3>🕒 Sheets — last data update</h3><p class="dim small">Har sheet me sabse naye record ka date aur time. Site ne ye data abhi load kiya: <b>${esc(U.timeLabel(S.loadedAt || G.loadedAt || Date.now()))}</b></p></div><div class="head-actions"><button class="btn small" data-fresh-refresh="1">↻ Dobara check</button></div></div><div class="card-body fresh-grid">${rows}</div></section>`;
+    }
+    async function mount(root, force) {
+      const host = U.$('#home-freshness', root); if (!host) return;
+      const skeleton = [['ff-eir', '🟦', 'First Forward', 'EIR', 'Sabse naya issue date (EIR)'], ['ff-stock', '🟦', 'First Forward', 'StockDataa', 'Sabse nayi tag / agent allocation'], ['gv-master', '🟩', 'GV Partner', 'GV Master', 'Sabse naya issuance (date + time column)'], ['gv-assign', '🟩', 'GV Partner', 'Tag Assignment', 'Sabse nayi allocation / date column']].map(([key, icon, title, tab, note]) => ({ key, icon, title, tab, note, value: null }));
+      const paint = (list, loading) => { if (host.isConnected) host.innerHTML = html(list, loading); };
+      if (!force && memo && Date.now() - memoAt < 90000) { paint(memo, false); return; }
+      paint(memo || skeleton, true);
+      if (!inflight) inflight = compute().finally(() => { inflight = null; });
+      try { memo = await inflight; memoAt = Date.now(); paint(memo, false); } catch { paint(skeleton, false); }
+    }
+    return { mount, parseText, timeOfDay };
+  })();
+  FF.homeFreshness = freshness;
+
   const homeLayout = (() => {
     const SECTIONS = [
       ['home-todo', "✅ Today's work"],
@@ -711,7 +840,8 @@ FF.pages = FF.pages || {};
       ['home-target-achievement', '🎯 Target achievement'],
       ['home-pulse', '📡 Management pulse'],
       ['home-charts', '📊 Charts'],
-      ['home-stock', '📦 Stock']
+      ['home-stock', '📦 Stock'],
+      ['home-freshness', '🕒 Sheets last update']
     ];
     const ids = SECTIONS.map((x) => x[0]);
     const label = (id) => (SECTIONS.find((x) => x[0] === id) || [id, id])[1];
@@ -822,10 +952,13 @@ FF.pages = FF.pages || {};
       <div id="home-pulse"></div>
       <div id="home-charts">${U.spinner('Charts…')}</div>
       <div id="home-stock">${U.spinner('Stock (StockDataa + Tag Assignment)…')}</div>
+      <div id="home-freshness"></div>
       <p class="foot-note">🟩 GV aaj = <b>GV Master sheet</b> (live) · 🧾 Issuance history = <b>EIR</b> (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF) · 📦 Stock = <b>StockDataa</b> (FF) + <b>Tag Assignment</b> (GV) · 🟦 FF ka issuance T+1 aata hai · 🔎 Global search top bar par hai · full profile/results Management → Master Search me.</p>`;
 
     // ⚙ v3.79 — Customize Home: reorder / hide sections, saved per user on this device.
     homeLayout.apply(root);
+    freshness.mount(root, false);
+    root.addEventListener('click', (ev) => { const b = ev.target && ev.target.closest && ev.target.closest('[data-fresh-refresh]'); if (b) freshness.mount(root, true); });
     const custBtn = U.$('#home-customize', root);
     if (custBtn) custBtn.addEventListener('click', () => homeLayout.toggle(root, custBtn));
 
