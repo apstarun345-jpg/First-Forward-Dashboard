@@ -1357,7 +1357,7 @@ window.FF = window.FF || {};
 
   // ===== 🔎 Sheet pending finder — agent / class wise + individual, group aur sab ek saath map =====
   function pendingModel() {
-    const rows = state.rows.filter((r) => r.sheetRow && !r.mapped && !isDupSkipped(r));
+    const rows = state.rows.filter((r) => r.sheetRow && !r.mapped && !isDupSkipped(r) && !alreadyOnAgent(r));
     const byAgent = new Map();
     rows.forEach((r) => {
       const id = rowAgent(r), cls = clean(r.vcType) || '(no class)';
@@ -1392,7 +1392,7 @@ window.FF = window.FF || {};
   }
   /** Chuni hui pending rows hi select karke mapping (mapReady confirm maangta hai). */
   async function mapPending(filter) {
-    state.rows.forEach((r) => { r.selected = !!(r.sheetRow && rowReady(r) && filter(r)); });
+    state.rows.forEach((r) => { r.selected = !!(r.sheetRow && rowReady(r) && !alreadyOnAgent(r) && filter(r)); });
     renderTable();
     await mapReady();
   }
@@ -1415,6 +1415,17 @@ window.FF = window.FF || {};
     const m = pendingModel();
     if (m.rows.length) setStatus(U.fmt(m.rows.length) + ' pending mapping mili (' + U.fmt(m.agents.length) + ' agent, ' + U.fmt(m.ready) + ' ready). Neeche agent/class wise map karein ya sab ek saath.', 'success');
   }
+  /** Done column ka cell "done" maana jaaye: khaali nahi ho aur "pending / fail / error / no" jaisa na ho (Done, DONE ✔, done 12/10, mapped, ok … sab). */
+  function isDoneCell(val, doneText) {
+    const t = clean(val).toLowerCase();
+    if (!t) return false;
+    const want = clean(doneText).toLowerCase();
+    if (want && t.includes(want)) return true;
+    if (/^(pending|fail|failed|error|retry|no|not|na|n\/a|false|0|-|❌|✗|✘)\b/.test(t) || /^[-–—.]+$/.test(t)) return false;
+    return true;
+  }
+  /** StockDataa me tag pehle se isi target agent par hai → mapping ki zaroorat nahi, pending nahi. */
+  const alreadyOnAgent = (r) => !!(r.stock && r.stockAgentId && clean(r.agentId) && clean(r.stockAgentId).toUpperCase() === clean(r.agentId).toUpperCase());
   /** Sheet read → queue items → lookup. auto=true: ready rows turant map bhi karo (+ done likho). */
   async function sheetRun(auto) {
     if (state.busy) return;
@@ -1440,7 +1451,7 @@ window.FF = window.FF || {};
         const rowNo = (json.startRow || startRow) + i, v = r.map(clean);
         const agentId = v[nVal], doneVal = colDone ? v[nVal + 1] : '';
         if (!v.slice(0, nVal + 1).some(Boolean)) { blank++; return; }
-        if (doneVal && doneVal.toLowerCase() === doneText.toLowerCase()) { skippedDone++; return; }
+        if (isDoneCell(doneVal, doneText)) { skippedDone++; return; }
         if (!agentId) { invalid++; return; }
         if (mode === 'range') {
           if (!v[0] || !v[1]) { invalid++; return; }

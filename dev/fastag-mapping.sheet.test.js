@@ -159,3 +159,32 @@ test('Alag-alag barcode upload: header-less (A=barcode, B=agent) and "barcode,ag
     assert.deepEqual(lk.body.items.map((i) => [i.type, i.barcode]), [['barcode', '8900000000000001'], ['barcode', '8900000000000002']]);
   }
 });
+
+test('pending finder: "Done ✔ / DONE / mapped" wali sheet rows skip, "pending" wali nahi; jo tag StockDataa me pehle se isi agent par hai wo pending nahi', async () => {
+  const calls = [];
+  const fetchImpl = async (url, opts = {}) => {
+    const body = opts.body ? JSON.parse(opts.body) : null; calls.push({ url, body });
+    if (url.endsWith('/status')) return jsonRes(200, { configured: true });
+    if (url.endsWith('/sheet/read')) return jsonRes(200, { ok: true, startRow: 2, rows: [
+      ['8900000000000001', 'AG1', 'Done ✔'],     // done → skip
+      ['8900000000000002', 'AG1', 'DONE'],       // done → skip
+      ['8900000000000003', 'AG1', 'mapped 12/10'], // done (kuch bhi likha) → skip
+      ['8900000000000004', 'AG1', 'pending'],    // pending likha → nahi skip
+      ['8900000000000005', 'AG1', ''],           // blank → pending
+      ['8900000000000006', 'AG6', '']            // stock me pehle se AG6 par → pending nahi
+    ] });
+    if (url.endsWith('/lookup')) return jsonRes(200, { ok: true, results: body.items.map((it, index) => ({ index, rows: [Object.assign(stockRow(Number(it.barcode.slice(-1))), it.barcode.endsWith('6') ? { stockAgentId: 'ag6' } : {})] })) });
+    return jsonRes(404, {});
+  };
+  const { root, selectors } = makePage('VC4', fetchImpl);
+  await new Promise((r) => setTimeout(r, 5));
+  const set = (id, v) => { selectors.get('#fm-gs-' + id).value = v; };
+  set('link', 'https://docs.google.com/spreadsheets/d/13eyCSDnXysQM-nWymBE5yPeKw8fnbVCY-hCTqJSPUsM/edit');
+  set('tab', 'Sheet1'); set('start', '2'); set('mode', 'barcode'); set('barcode', 'A'); set('agent', 'B'); set('done', 'C'); set('donetext', 'done');
+  await click(root, 'fm-gs-pending');
+  const lookup = calls.find((c) => c.url.endsWith('/lookup'));
+  assert.deepEqual(lookup.body.items.map((i) => i.barcode), ['8900000000000004', '8900000000000005', '8900000000000006'], 'sirf bina-done rows lookup hui');
+  const html = selectors.get('#fm-pending').innerHTML;
+  assert.match(html, /2 pending tag/, 'AG6 wali tag (already on agent) pending me nahi ginti');
+  assert.doesNotMatch(html, /AG6/, 'already-mapped agent pending list me nahi');
+});
