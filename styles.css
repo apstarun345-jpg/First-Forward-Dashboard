@@ -3604,12 +3604,6 @@ body.public-form .main { padding: 10px 8px 48px; }
 .tr-req-row td { border-bottom-color: color-mix(in srgb, var(--line) 76%, transparent); }
 .tr-req-row:nth-child(even) td { background: color-mix(in srgb, var(--brand) 2.5%, transparent); }
 .tr-req-row:hover td { background: color-mix(in srgb, var(--brand) 7%, transparent); }
-.tr-req-row.dp-urgent td:first-child { box-shadow: inset 6px 0 0 #dc2626; }
-.tr-req-row.dp-urgent td { background: rgba(254,226,226,.35); }
-.tr-req-row.dp-high td:first-child { box-shadow: inset 6px 0 0 #f97316; }
-.tr-req-row.dp-low td:first-child { box-shadow: inset 6px 0 0 #22c55e; }
-.tr-dprio-sel { font-size: 12px; margin-top: 4px; }
-.tr-dprio-filter .input { padding: 4px 8px; min-width: 110px; }
 .tr-req-row.st-rejected td { opacity: .75; }
 .tr-req-row.tr-sel td { background: color-mix(in srgb, var(--brand) 12%, transparent); }
 .tr-req-row.tr-editing td { background: #fffbeb; }

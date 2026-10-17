@@ -6353,29 +6353,6 @@ async function handleApi(req, res, url) {
     });
   };
   // ⚡ Bulk status: ek call me kai requests, ek hi storage save (pehle har request ka alag save → 20 requests ≈ 1 minute).
-  // 🔥 v191 — Dispatch priority (admin): urgent / high / normal / low — bulk set.
-  if (p === '/api/tag-requests/bulk-priority' && method === 'POST') {
-    if (user.role !== 'admin') throw new HttpError(403, 'Dispatch priority sirf admin set kar sakta hai.');
-    const body = await readBody(req);
-    const prio = String(body.priority || '');
-    if (!['urgent', 'high', 'normal', 'low', ''].includes(prio)) throw new HttpError(400, 'Priority invalid hai.');
-    const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map((x) => String(x || '').slice(0, 40)).filter(Boolean))].slice(0, 200);
-    if (!ids.length) throw new HttpError(400, 'Kam se kam ek request chuno.');
-    const w = workspaceStore();
-    const byId = new Map((w.tagRequests || []).map((r) => [r.id, r]));
-    const now = new Date().toISOString();
-    const updated = [], missing = [];
-    for (const id of ids) {
-      const row = byId.get(id);
-      if (!row) { missing.push(id); continue; }
-      if (prio) row.dispatchPriority = prio; else delete row.dispatchPriority;
-      row.updatedAt = now; row.updatedBy = user.username;
-      updated.push(row);
-    }
-    if (updated.length) persistBackground('notify');
-    logAudit(user, 'tag_request_bulk_priority', { target: prio || 'cleared', note: `${updated.length} requests → priority ${prio || 'none'}`.slice(0, 300), ip: clientIp(req) });
-    return sendJson(res, 200, { ok: true, priority: prio, requests: updated, missing });
-  }
   if (p === '/api/tag-requests/bulk-status' && method === 'POST') {
     if (user.role !== 'admin') throw new HttpError(403, 'Status sirf admin badal sakta hai.');
     const body = await readBody(req);
@@ -6477,11 +6454,6 @@ async function handleApi(req, res, url) {
     if (body.status !== undefined) {
       if (!['pending', 'approved', 'dispatched', 'rejected'].includes(body.status)) throw new HttpError(400, 'Status invalid hai.');
       row.status = body.status;
-    }
-    if (body.dispatchPriority !== undefined && user.role === 'admin') {
-      const dp = String(body.dispatchPriority || '');
-      if (!['urgent', 'high', 'normal', 'low', ''].includes(dp)) throw new HttpError(400, 'Priority invalid hai.');
-      if (dp) row.dispatchPriority = dp; else delete row.dispatchPriority;
     }
     if (body.adminNote !== undefined) row.adminNote = shortText(body.adminNote, 300);
     if (body.note !== undefined && row.status === 'pending') row.note = shortText(body.note, 300);
