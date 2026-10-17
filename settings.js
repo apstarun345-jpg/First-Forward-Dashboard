@@ -1419,7 +1419,8 @@ FF.pages = FF.pages || {};
     { key: 'requests', icon: '🏷️', label: 'My Tag Requests (status)' },
     { key: 'export', icon: '⬇', label: 'CSV & PDF Download' }
   ];
-  async function linksTab(body) {
+  async function linksTab(body, redraw) {
+    const draw = async () => { if (typeof redraw === 'function') await redraw(); else await linksTab(body, draw); };
     let links = [];
     let plDef = { requireAuth: true, sections: PL_SECTIONS_META.map((s) => s.key) };
     try {
