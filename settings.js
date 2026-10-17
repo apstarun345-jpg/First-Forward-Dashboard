@@ -1420,7 +1420,7 @@ FF.pages = FF.pages || {};
     { key: 'export', icon: '⬇', label: 'CSV & PDF Download' }
   ];
   async function linksTab(body, redraw) {
-    const draw = async () => { if (typeof redraw === 'function') await redraw(); else await linksTab(body, draw); };
+    const draw = async () => { if (typeof redraw === 'function') await redraw(); else await linksTab(body); };
     let links = [];
     let plDef = { requireAuth: true, sections: PL_SECTIONS_META.map((s) => s.key) };
     try {
@@ -2404,7 +2404,7 @@ FF.pages = FF.pages || {};
       else if (tab === 'rules') body.innerHTML = rulesTab();
       else if (tab === 'features') body.innerHTML = featuresTab();
       else if (tab === 'audit') { body.innerHTML = U.spinner('Audit log…'); await auditTab(body); }
-      else if (tab === 'links') { body.innerHTML = U.spinner('Personal links…'); await linksTab(body); }
+      else if (tab === 'links') { body.innerHTML = U.spinner('Personal links…'); await linksTab(body, draw); }
       else if (tab === 'contacts') body.innerHTML = contactsTab();
       else if (tab === 'backup') body.innerHTML = backupTab();
       else if (tab === 'users') { body.innerHTML = U.spinner('Users…'); await usersTab(body); }
