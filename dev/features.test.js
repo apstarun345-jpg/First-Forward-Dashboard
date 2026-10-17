@@ -573,6 +573,15 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.equal(verifiedA.json.name, undefined, 'verify endpoint returns no report or identity data');
     assert.match(verifiedA.setCookie || '', /HttpOnly/, 'verification grants an HttpOnly session cookie');
     const agentCookie = (verifiedA.setCookie || '').split(';')[0];
+    const portalPage = await fetch(`${server.base}/portal`);
+    assert.equal(portalPage.status, 200, 'common /portal login page opens');
+    assert.ok((await portalPage.text()).includes('pt-form'), 'portal login form present');
+    const portalBad = await call('/api/public/portal-login', 'POST', { personId: 'AG-1001', password: '9876543211' });
+    assert.equal(portalBad.res.status, 403, 'wrong password rejected');
+    const portalOk = await call('/api/public/portal-login', 'POST', { personId: ' ag 1001 ', password: '98765-43210' });
+    assert.equal(portalOk.res.status, 200, 'ID + mobile password logs in via common portal');
+    assert.equal(portalOk.json.url, `/p/${agentToken}`, 'portal redirects to the matching personal report');
+    assert.match(portalOk.setCookie || '', /HttpOnly/, 'portal grants HttpOnly session cookie');
     const pageAAuth = await fetch(`${server.base}/p/${agentToken}`, { headers: { cookie: agentCookie } });
     assert.equal(pageAAuth.status, 200, `verified agent report 200 — ${pageAAuth.status}`);
     const htmlA = await pageAAuth.text();

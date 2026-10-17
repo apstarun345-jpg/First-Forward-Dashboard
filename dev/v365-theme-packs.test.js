@@ -186,3 +186,10 @@ test('⚡ v187 — personal page never hangs: 3s time-box loading page + prewarm
   assert.match(srv, /Aapka report load ho raha hai/);
   assert.match(srv, /sheet data background me garam karo/);
 });
+
+test('🚪 v189 — common /portal login (ID + password) + settings copy card', () => {
+  const srv = read('server.js'), st = read('settings.js');
+  assert.match(srv, /\/api\/public\/portal-login/);
+  assert.match(srv, /pathname === '\/portal'/);
+  assert.match(st, /id="pt-copy"/);
+});

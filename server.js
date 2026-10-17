@@ -7072,6 +7072,28 @@ async function handleApi(req, res, url) {
   }
   // 🔐 Public Personal Link Auth Verification — credentials must be configured by an admin.
   // A successful check creates an HttpOnly server-side session; the page never trusts DOM hiding.
+  // 🚪 v189 — ek common Portal link: har agent/TL apna ID + registered mobile (password) daal ke seedha apni report kholta hai.
+  if (p === '/api/public/portal-login' && method === 'POST') {
+    if (feats().personalLinks === false) throw new HttpError(404, 'Ye feature admin ne band kar rakha hai.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`plportal:${ip}`, 30, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada attempts — thodi der baad try karo.');
+    const body = await readBody(req);
+    const normId = (v) => String(v || '').trim().toUpperCase().replace(/[\s#-]+/g, '');
+    const rawId = normId(body.personId);
+    const rawMob = String(body.password || body.mobile || '').replace(/\D/g, '').slice(-10);
+    if (rawId.length < 2) throw new HttpError(400, 'Apna ID daalo.');
+    if (rawMob.length !== 10) throw new HttpError(400, 'Password (registered 10-digit mobile) daalo.');
+    const all = Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : [];
+    let hits = all.filter((l) => l && l.enabled !== false && normId(l.personId) === rawId && String(l.mobile || '').replace(/\D/g, '').slice(-10) === rawMob);
+    if (!hits.length) throw new HttpError(403, 'ID ya password match nahi hua — sahi ID aur registered mobile daalo.');
+    if (body.linkId) hits = hits.filter((l) => l.id === String(body.linkId));
+    if (hits.length > 1) return sendJson(res, 200, { ok: true, choices: hits.slice(0, 8).map((l) => ({ id: l.id, name: l.name, kind: l.kind, source: l.source === 'gv' ? 'gv' : 'ff' })) }, { 'Cache-Control': 'no-store' });
+    if (!hits.length) throw new HttpError(403, 'Link nahi mila.');
+    const link = hits[0];
+    const session = createPersonalLinkSession(req, link);
+    try { const wl = { ...link, source: link.source === 'gv' ? 'gv' : 'ff' }; personalDailyRows(wl).catch(() => {}); if (isTeamLink(wl)) personalTeamAgents(wl).catch(() => {}); } catch { /* best-effort */ }
+    return sendJson(res, 200, { ok: true, url: `/p/${link.token}` }, { 'Set-Cookie': session.cookie, 'Cache-Control': 'no-store' });
+  }
   if (p === '/api/public/personal-link/verify' && method === 'POST') {
     const ip = clientIp(req);
     if (!publicRateOk(`plauth:${ip}`, 40, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada attempts — thodi der baad try karo.');
@@ -9205,6 +9227,31 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/p-portal.js') {
       return sendMaybeCompressed(req, res, 200, 'application/javascript; charset=utf-8', PERSONAL_PORTAL_JS, { 'Cache-Control': 'no-cache' });
+    }
+    if (url.pathname === '/portal' || url.pathname === '/portal/') {
+      if (feats().personalLinks === false) return sendText(res, 404, 'Not found');
+      const loginBody = `<section class="pb-card pb-auth-card" id="pl-auth-gate">
+        <div class="pb-auth-ico">🔐</div>
+        <h2>Apni Report Kholo</h2>
+        <p class="dim">Apna <b>ID</b> aur <b>password</b> (registered 10-digit mobile) daalo — sirf aapki apni report khulegi.</p>
+        <form class="pb-auth-form" id="pt-form" autocomplete="off">
+          <label class="pb-fld"><span>🪪 Agent / TL ID *</span><input class="pb-inp" id="pt-id" required maxlength="40" autocomplete="username" placeholder="Apna ID"></label>
+          <label class="pb-fld"><span>🔑 Password (registered mobile) *</span><input class="pb-inp" id="pt-pw" type="password" inputmode="numeric" required maxlength="14" autocomplete="current-password" placeholder="10-digit mobile"></label>
+          <div class="pb-auth-err" id="pt-err" hidden></div>
+          <div id="pt-choices" style="display:grid;gap:8px"></div>
+          <button type="submit" class="pb-auth-btn" id="pt-btn">🔓 Login</button>
+        </form>
+        <p class="dim" style="font-size:11.5px;margin-top:10px">🔒 ID + password sahi hone par hi data bheja jaata hai.</p>
+      </section>
+      <script>(function(){var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');
+      function go(extra){e.hidden=true;b.disabled=true;b.textContent='⏳ Login ho raha hai…';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;
+      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){
+        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}
+        if(x.j.url){location.href=x.j.url;return;}
+        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'🟩 ':'🟦 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='🔓 Login';}
+      }).catch(function(err){e.textContent='⚠️ '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='🔓 Login';});}
+      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();</script>`;
+      return sendHtml(res, 200, personalShell({ title: 'Personal Report Login', heading: '🔐 Personal Report Login', sub: 'ID + password se apni report kholo · read-only', requireAuth: false, authorized: true, body: loginBody }), { 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' });
     }
     if (url.pathname.startsWith('/p/')) {
       try { return await servePersonalPage(req, res, url.pathname.slice(3)); } catch (err) { console.error(err); return sendText(res, 500, 'Server error'); }

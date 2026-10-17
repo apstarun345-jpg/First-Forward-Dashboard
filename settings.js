@@ -1482,6 +1482,16 @@ FF.pages = FF.pages || {};
         <span class="dim small" id="pl-msg" style="display:block;margin-top:6px"></span>
       </div>
 
+      <div class="card compact-card" style="margin-bottom:12px" id="pt-card">
+        <div class="card-head"><h3>🚪 Common Login Link <span class="dim small">(ek link sab ke liye)</span></h3><span class="dim small">Sabko yehi ek link do — agent/TL apna ID + password (registered mobile) daal ke apni hi report dekhega. Alag alag link bhejne ki zarurat nahi.</span></div>
+        <div class="finder-row" style="gap:8px;flex-wrap:wrap">
+          <input class="input" id="pt-url" readonly value="${esc(origin)}/portal" style="min-width:260px;flex:1">
+          <button class="btn primary" id="pt-copy" type="button">📋 Copy</button>
+          <a class="btn" href="${esc(origin)}/portal" target="_blank" rel="noopener">↗ Open</a>
+        </div>
+        <span class="dim small" style="display:block;margin-top:6px">Login un hi logo ka chalega jinka personal link (⬇ niche list) bana hua hai, ID + mobile ke saath. Jis link ko ⏸ disable karoge uska login bhi band.</span>
+      </div>
+
       <div class="card compact-card" style="margin-bottom:12px;background:var(--bg-subtle,#f8fafc)" id="pg-card">
         <div class="card-head"><h3>👥 Custom Team Link <span class="dim small">(manual agents)</span></h3><span class="dim small">Khud agents chuno + TL naam rakho → link me sirf unhi agents ka poora data (issuance, stock, ageing…)</span></div>
         <div class="finder-row" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
@@ -1612,6 +1622,9 @@ FF.pages = FF.pages || {};
       onEnter: (q) => { nameEl.value = q; }
     });
     [sourceEl, kindEl].forEach((el) => el.addEventListener('change', () => { nameEl.value = ''; if (pidEl) pidEl.value = ''; if (mobEl) mobEl.value = ''; nameEl.focus(); }));
+
+    const ptCopy = U.$('#pt-copy', body);
+    if (ptCopy) ptCopy.addEventListener('click', async () => { const ok = await U.copyText(`${origin}/portal`).catch(() => false); U.toast(ok === false ? 'Copy nahi hua — link select karke copy karo' : '📋 Common login link copy ho gaya ✓', ok === false ? 'err' : 'ok'); });
 
     // 👥 Custom team link — admin manually agents chunta hai
     (() => {
