@@ -1415,6 +1415,7 @@ FF.pages = FF.pages || {};
     { key: 'stock', icon: '📦', label: 'Class-wise Stock' },
     { key: 'issuance', icon: '📅', label: 'Date & Agent Issuance' },
     { key: 'performance', icon: '🏆', label: 'Performance & Growth' },
+    { key: 'insights', icon: '🧠', label: 'Insights (inactive · growth · de-growth)' },
     { key: 'ageing', icon: '⏳', label: 'Stock Ageing' },
     { key: 'requests', icon: '🏷️', label: 'My Tag Requests (status)' },
     { key: 'export', icon: '⬇', label: 'CSV & PDF Download' }

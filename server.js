@@ -5086,7 +5086,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: !!(out && (out.agent || out.tl)), agent: out && out.agent ? out.agent.title : null, tl: out && out.tl ? out.tl.title : null });
   }
   // 🔗 Personal read-only links (agent + TL) — CRUD + Admin Access Control + Auth (TL/Agent ID + Mobile)
-  const PL_ALL_SECTIONS = ['overview', 'stock', 'issuance', 'performance', 'ageing', 'requests', 'export'];
+  const PL_ALL_SECTIONS = ['overview', 'stock', 'issuance', 'performance', 'insights', 'ageing', 'requests', 'export'];
   const normPlSections = (arr) => {
     if (!Array.isArray(arr)) return [...PL_ALL_SECTIONS];
     // An explicitly empty allow-list is an intentional lock-down. Export is only a capability
@@ -8425,7 +8425,7 @@ async function servePersonalPage(req, res, rawToken) {
     return sendHtml(res, 200, html, noStore);
   }
   const def = (db.settings && db.settings.personalLinkDefaults) || {};
-  const allSections = ['overview', 'stock', 'issuance', 'performance', 'ageing', 'requests', 'export'];
+  const allSections = ['overview', 'stock', 'issuance', 'performance', 'insights', 'ageing', 'requests', 'export'];
   const allowedSecs = Array.isArray(savedLink.sections)
     ? savedLink.sections.filter((key) => allSections.includes(key))
     : (Array.isArray(def.sections) ? def.sections.filter((key) => allSections.includes(key)) : allSections);
@@ -8435,11 +8435,11 @@ async function servePersonalPage(req, res, rawToken) {
   const requireAuth = true;
   const link = { ...savedLink, source: savedLink.source === 'gv' ? 'gv' : 'ff' };
   try {
-    const needsIssuance = hasSec('overview') || hasSec('issuance') || hasSec('performance');
-    const needsStock = hasSec('stock') || hasSec('ageing');
+    const needsIssuance = hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights');
+    const needsStock = hasSec('stock') || hasSec('ageing') || (hasSec('insights') && isTeamLink(link));
     // Start independent sheet/index work together so verified links don't wait for serial requests.
     const rowsPromise = needsIssuance ? personalDailyRows(link) : Promise.resolve([]);
-    const teamPromise = isTeamLink(link) && (hasSec('issuance') || hasSec('performance'))
+    const teamPromise = isTeamLink(link) && (hasSec('issuance') || hasSec('performance') || hasSec('insights'))
       ? personalTeamAgents(link) : Promise.resolve(new Map());
     const tlNamePromise = link.kind === 'group' ? Promise.resolve(String(link.tlLabel || '')) : (!isTeamLink(link) && hasVisibleSection
       ? personalAgentTl(link) : Promise.resolve(''));
@@ -8480,9 +8480,9 @@ async function servePersonalPage(req, res, rawToken) {
     const ym = dateKeyNow().slice(0, 7);
     const normPerson = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
     let byAgentMap = new Map();
-    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance'))) {
+    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights'))) {
       goal = ((Array.isArray(db.settings.tlTargets) ? db.settings.tlTargets : []).find((t) => t && t.ym === ym && normPerson(t.tl) === normPerson(link.name)) || null);
-      if (hasSec('issuance') || hasSec('performance')) byAgentMap = await teamPromise;
+      if (hasSec('issuance') || hasSec('performance') || hasSec('insights')) byAgentMap = await teamPromise;
       for (const [name, m] of byAgentMap) {
         let mtdA = 0;
         for (const [d, n] of m) if (d.startsWith(ym)) mtdA += n;
@@ -8662,12 +8662,78 @@ async function servePersonalPage(req, res, rawToken) {
     const summaryHtml = `<section class="pb-kpis pb-kpis-sum">${summaryTiles.join('')}</section>${stockNote && stockMeta.state !== 'loading' ? `<p class="pb-note">⚠️ ${escHtml(stockNote)}</p>` : stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>${stockPendingEl}` : ''}`;
     const tlName = await tlNamePromise;
 
+    // 🧠 Insights — inactive agents · high growth · de-growth · top performers · dead stock · projection
+    let insightsHtml = '';
+    if (hasSec('insights')) {
+      const nrm = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
+      const todayK = dateKeyNow();
+      const dayNo = Math.max(0, Number(todayK.slice(8, 10)) - 1);            // completed days this month
+      const daysInMonth = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0)).getUTCDate();
+      const daysBetween = (a, b) => Math.round((new Date(`${b}T00:00:00Z`) - new Date(`${a}T00:00:00Z`)) / 86400000);
+      const people = new Map();                                              // key -> {name, dates:Map}
+      const addP = (name, dates) => { const k = nrm(name); if (!k) return; if (!people.has(k)) people.set(k, { name: String(name).trim(), dates: new Map() }); if (dates) for (const [d, n] of dates) people.get(k).dates.set(d, (people.get(k).dates.get(d) || 0) + n); };
+      if (isTeamLink(link)) {
+        for (const [nm, m] of byAgentMap) addP(nm, m);
+        if (link.kind === 'group') personalMemberNames(link).forEach((nm) => addP(nm, null));
+        if (stockInfo && stockInfo.agents) stockInfo.agents.forEach((a) => addP(a.n, null));
+      } else {
+        const m = new Map(); rows.forEach((r) => m.set(r.date, (m.get(r.date) || 0) + r.n)); addP(link.name, m);
+      }
+      const stockBy = new Map();
+      if (stockInfo && stockInfo.agents) stockInfo.agents.forEach((a) => stockBy.set(nrm(a.n), (a.t[0] || 0) + (a.t[1] || 0)));
+      const list = [...people.values()].map((pp) => {
+        let mtd = 0, prevTot = 0, prevSame = 0, last = '';
+        for (const [d, n] of pp.dates) {
+          if (!(n > 0)) continue;
+          if (d > last) last = d;
+          if (d.startsWith(ym)) mtd += n;
+          else if (d.startsWith(prevYm)) { prevTot += n; if (Number(d.slice(8, 10)) <= dayNo) prevSame += n; }
+        }
+        const gap = last ? daysBetween(last, todayK) : null;
+        const growth = prevSame > 0 ? Math.round(((mtd - prevSame) / prevSame) * 100) : null;
+        return { name: pp.name, mtd, prevTot, prevSame, last, gap, growth, stock: stockBy.get(nrm(pp.name)) || 0 };
+      });
+      const lastLbl = (a) => (a.last ? `${escHtml(a.last)} · ${a.gap <= 1 ? 'kal' : a.gap + ' din pehle'}` : '<span class="pb-warn">60+ din — data nahi</span>');
+      const growthLbl = (g) => (g === null ? '<span class="dim">new</span>' : `<b class="${g >= 0 ? 'pb-up' : 'pb-down'}">${g >= 0 ? '▲' : '▼'} ${Math.abs(g)}%</b>`);
+      const inactive = list.filter((a) => a.gap === null || a.gap >= 7).sort((a, b) => (b.gap === null ? 999 : b.gap) - (a.gap === null ? 999 : a.gap));
+      const active3 = list.filter((a) => a.gap !== null && a.gap <= 3).length;
+      const zeroMtd = list.filter((a) => a.mtd === 0).length;
+      const high = list.filter((a) => a.growth !== null ? a.growth > 0 : false).sort((a, b) => b.growth - a.growth || b.mtd - a.mtd);
+      const fresh = list.filter((a) => a.growth === null && a.mtd > 0 && a.prevSame === 0).sort((a, b) => b.mtd - a.mtd);
+      const down = list.filter((a) => a.growth !== null && a.growth < 0).sort((a, b) => a.growth - b.growth || b.prevSame - a.prevSame);
+      const top = [...list].filter((a) => a.mtd > 0).sort((a, b) => b.mtd - a.mtd).slice(0, 5);
+      const dead = list.filter((a) => a.stock > 0 && a.mtd === 0).sort((a, b) => b.stock - a.stock);
+      const totMtd = list.reduce((x, a) => x + a.mtd, 0);
+      const totPrev = list.reduce((x, a) => x + a.prevTot, 0);
+      const proj = dayNo ? Math.round((totMtd / dayNo) * daysInMonth) : 0;
+      const tile = (cls, label, val, sub) => `<div class="pb-kpi ${cls}"><small>${label}</small><b>${val}</b><span>${sub}</span></div>`;
+      const tbl = (id, title, heads, body, empty) => `<section class="pb-card"><div class="pb-card-head"><h3>${title}</h3>${expBtns(id, `${link.name} - ${title.replace(/<[^>]+>/g, '').replace(/[^\w\s-]/g, '').trim()}`)}</div>${body ? `<div class="pb-scroll"><table class="pb-tbl" id="${id}"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>` : `<p class="dim" style="padding:8px 4px">${empty}</p>`}</section>`;
+      const inactiveBody = inactive.map((a) => `<tr data-gap="${a.gap === null ? 999 : a.gap}"><td><b>${escHtml(a.name)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td><td>${nf(a.mtd)}</td><td class="${a.stock ? 'pb-warn' : ''}">${stockInfo ? nf(a.stock) : '—'}</td></tr>`).join('');
+      const growthBody = (arr) => arr.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td>${nf(a.prevSame)}</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(a.growth)}</td><td>${lastLbl(a)}</td></tr>`).join('');
+      const freshBody = fresh.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td>0</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(null)}</td><td>${lastLbl(a)}</td></tr>`).join('');
+      const gHeads = ['Agent', `Last month (1–${dayNo || 1})`, 'MTD', 'Growth', 'Last active'];
+      const isT = isTeamLink(link);
+      insightsHtml = `<section class="pb-kpis">
+        ${tile('issuance', '📈 MTD issued', nf(totMtd), `${isT ? list.length + ' agents' : escHtml(ym)}`)}
+        ${tile('best', '🔮 Month-end expected', nf(proj), `last month ${nf(totPrev)}`)}
+        ${isT ? tile('streak', '🟢 Active (≤3 din)', nf(active3), `${list.length ? Math.round(active3 / list.length * 100) : 0}% team`) : ''}
+        ${isT ? tile('previous', '😴 Inactive (7+ din)', nf(inactive.length), `${zeroMtd} agents ka MTD zero`) : ''}
+      </section>
+      ${isT ? `<section class="pb-card"><div class="pb-card-head"><h3>😴 Inactive agents</h3><div class="pb-ins-filter" id="pl-ins-filter"><span class="dim small">Kitne din se issuance nahi:</span> ${[7, 10, 15, 30].map((d, i) => `<button type="button" class="pb-btn${i === 0 ? ' on' : ''}" data-ins-days="${d}">${d}+ din</button>`).join('')}</div>${expBtns('pl-tbl-inactive', `${link.name} - Inactive agents`)}</div>${inactiveBody ? `<div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-inactive"><thead><tr><th>Agent</th><th>Last active</th><th>Last month</th><th>MTD</th><th>Stock</th></tr></thead><tbody>${inactiveBody}</tbody></table></div><p class="dim small" id="pl-ins-empty" hidden style="padding:8px 4px">✅ Is filter me koi inactive agent nahi.</p>` : '<p class="dim" style="padding:8px 4px">✅ Sab agents active hain (pichhle 7 din me issuance).</p>'}<p class="pb-matrix-note">Aaj ka incomplete din count nahi hota · "60+ din" = pichhle 2 mahine me koi issuance nahi.</p></section>` : `<section class="pb-card"><h3>🕒 Last active</h3><div class="pb-kv"><span>Last issuance</span><b>${list[0] ? lastLbl(list[0]) : '—'}</b></div></section>`}
+      ${isT ? tbl('pl-tbl-high', `🚀 High growth <small class="dim">(pichhle mahine ke same din se zyada)</small>`, gHeads, growthBody(high), 'Abhi koi agent growth me nahi hai.') : ''}
+      ${isT && fresh.length ? tbl('pl-tbl-new', '🆕 Naye active <small class="dim">(pichhle mahine same period me 0, ab issuance)</small>', gHeads, freshBody, '') : ''}
+      ${isT ? tbl('pl-tbl-down', `📉 De-growth <small class="dim">(pichhle mahine ke same din se kam)</small>`, gHeads, growthBody(down), '✅ Koi agent de-growth me nahi.') : ''}
+      ${isT ? tbl('pl-tbl-top', '🥇 Top performers (MTD)', ['#', 'Agent', 'MTD', 'Share', 'Last active'], top.map((a, i) => `<tr><td>${i + 1}</td><td><b>${escHtml(a.name)}</b></td><td><b>${nf(a.mtd)}</b></td><td>${pct(a.mtd, totMtd)}%</td><td>${lastLbl(a)}</td></tr>`).join(''), 'Is mahine abhi issuance nahi.') : `<section class="pb-card"><h3>📈 Growth</h3><div class="pb-kv"><span>Last month same period (1–${dayNo || 1})</span><b>${nf(list[0] ? list[0].prevSame : 0)}</b></div><div class="pb-kv"><span>MTD</span><b>${nf(totMtd)}</b></div><div class="pb-kv"><span>Growth</span><b>${list[0] ? growthLbl(list[0].growth) : '—'}</b></div></section>`}
+      ${isT && stockInfo ? tbl('pl-tbl-dead', '📦 Stock hai par issuance nahi <small class="dim">(is mahine 0)</small>', ['Agent', 'Stock', 'Last active', 'Last month'], dead.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td class="pb-warn"><b>${nf(a.stock)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td></tr>`).join(''), '✅ Jinke paas stock hai sabne is mahine issue kiya hai.') : ''}`;
+    }
+
     // Build only tabs that the admin granted; an "All" view can expose only emitted sections.
     const tabDefs = [
       { id: 'overview', label: '📊 Overview', show: hasSec('overview') },
       { id: 'stock', label: '📦 Class-wise Stock', show: hasSec('stock') },
       { id: 'issuance', label: `📅 Date${isTeamLink(link) ? ' & Agent' : ''} Issuance`, show: hasSec('issuance') },
       { id: 'performance', label: '🏆 Performance', show: hasSec('performance') },
+      { id: 'insights', label: '🧠 Insights', show: hasSec('insights') },
       { id: 'ageing', label: '⏳ Stock Ageing', show: hasSec('ageing') },
       { id: 'requests', label: '🏷️ My Tag Requests', show: hasSec('requests') }
     ].filter((t) => t.show);
@@ -8713,6 +8779,7 @@ async function servePersonalPage(req, res, rawToken) {
         ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${!stockInfo && stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>` : ''}${classStockCardHtml}</div>` : ''}
         ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div>` : ''}
         ${hasSec('performance') ? `<div class="pl-pane" data-pl-pane="performance" hidden>${perfCardHtml}${teamHtml}</div>` : ''}
+        ${hasSec('insights') ? `<div class="pl-pane" data-pl-pane="insights" hidden>${insightsHtml}</div>` : ''}
         ${hasSec('ageing') ? `<div class="pl-pane" data-pl-pane="ageing" hidden>${ageHtml}${agentAgeTable}</div>` : ''}
         ${hasSec('requests') ? `<div class="pl-pane" data-pl-pane="requests" hidden>${personalRequestsHtml(link)}</div>` : ''}
         <p class="pb-foot">Read-only link · data live sheet se · ${escHtml(db.settings.brand || 'Dashboard')}</p>
@@ -8791,6 +8858,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pl-side .pb-tab{text-align:left;width:100%}
 .pl-side-exp{display:flex;flex-direction:column;gap:6px;margin-top:10px;padding-top:10px;border-top:1px dashed #e2e8f0}
 .pl-side-exp .pb-btn{width:100%;text-align:center}
+.pb-up{color:#16a34a}.pb-down{color:#dc2626}.pb-ins-filter{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.pb-ins-filter .pb-btn.on{background:#4338ca;color:#fff;border-color:#4338ca}
 .pb-note{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:8px 12px;margin:0 0 12px}
 @media(max-width:760px){.pl-layout{grid-template-columns:1fr}.pl-side{position:static;padding:8px}.pl-side-title{display:none}.pl-side .pb-tabs{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.pl-side .pb-tab{width:auto;white-space:nowrap}.pl-side-exp{flex-direction:row;flex-wrap:wrap;margin-top:8px;padding-top:8px}.pl-side-exp .pb-btn{width:auto}}
 </style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
@@ -8901,6 +8969,24 @@ const PERSONAL_PORTAL_JS = `(function () {
       });
     });
   });
+
+  // Inactive-agent filter (7/10/15/30+ din)
+  var insF = document.getElementById('pl-ins-filter');
+  if (insF) {
+    var applyIns = function (days) {
+      var rowsI = document.querySelectorAll('#pl-tbl-inactive tbody tr'), shown = 0;
+      Array.prototype.forEach.call(rowsI, function (tr) { var ok = Number(tr.getAttribute('data-gap')) >= days; tr.hidden = !ok; if (ok) shown++; });
+      var tb = document.getElementById('pl-tbl-inactive'), em = document.getElementById('pl-ins-empty');
+      if (tb && tb.parentNode) tb.parentNode.hidden = !shown;
+      if (em) em.hidden = !!shown;
+    };
+    insF.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('[data-ins-days]') : null; if (!b) return;
+      Array.prototype.forEach.call(insF.querySelectorAll('[data-ins-days]'), function (x) { x.classList.toggle('on', x === b); });
+      applyIns(Number(b.getAttribute('data-ins-days')));
+    });
+    applyIns(7);
+  }
 
   function extractTable(tbl) {
     if (!tbl) return null;

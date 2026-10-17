@@ -577,6 +577,7 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.equal(pageAAuth.status, 200, `verified agent report 200 — ${pageAAuth.status}`);
     const htmlA = await pageAAuth.text();
     assert.ok(htmlA.includes('Rahul Dravid'), 'verified page contains agent name');
+    assert.ok(htmlA.includes('data-pl-pane="insights"') && htmlA.includes('Month-end expected'), 'agent report has the Insights tab');
     assert.ok(htmlA.includes('Welcome Back, <b>Rahul Dravid</b>'), 'verified personal report greets the authenticated agent');
     assert.ok(htmlA.includes('Daily Issuance · Current Month') && htmlA.includes('MTD ISSUED') && htmlA.includes("today's incomplete report excluded"), 'current-month graph shows an issued-count total through yesterday');
     assert.ok(htmlA.includes('pl-tbl-date-matrix') && htmlA.includes('Agent Name') && htmlA.includes('MTD Total'), 'date matrix uses agent rows and current-month date columns');
@@ -616,6 +617,7 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.equal(pageTAuth.status, 200, 'verified TL report 200');
     const htmlT = await pageTAuth.text();
     assert.ok(htmlT.includes('Zoya Khan'), 'verified TL name appears');
+    assert.ok(htmlT.includes('data-pl-pane="insights"') && htmlT.includes('Inactive agents') && htmlT.includes('High growth') && htmlT.includes('De-growth') && htmlT.includes('Top performers'), 'TL report has the Insights tab');
     assert.ok(htmlT.includes('Welcome Back, <b>Zoya Khan</b>'), 'verified TL report greets the authenticated team leader');
     assert.ok(htmlT.includes('pl-tbl-date-matrix') && htmlT.includes('Agent Name') && htmlT.includes('MTD Total'), 'TL report includes the current-month agent-by-date issuance matrix');
     assert.ok(htmlT.includes('Daily Issuance · Current Month') && htmlT.includes('MTD ISSUED'), 'TL graph shows current-month total through yesterday');

@@ -161,3 +161,14 @@ test('✏️ v183 — team link edit: add/remove agents + TL name in drawer', ()
   assert.match(st, /payload\.members/);
   assert.match(st, /payload\.tlLabel/);
 });
+
+test('🧠 v184 — personal link Insights tab (inactive, growth, de-growth, dead stock)', () => {
+  const srv = read('server.js'), st = read('settings.js');
+  assert.match(srv, /data-pl-pane="insights"/);
+  assert.match(srv, /Inactive agents/);
+  assert.match(srv, /High growth/);
+  assert.match(srv, /De-growth/);
+  assert.match(srv, /data-ins-days/);
+  assert.match(srv, /Stock hai par issuance nahi/);
+  assert.match(st, /key: 'insights'/);
+});
