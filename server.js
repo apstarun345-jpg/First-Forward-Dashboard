@@ -8475,7 +8475,7 @@ async function servePersonalPage(req, res, rawToken) {
         const sidx = await Promise.race([
           stockAgeIndex(false),
           new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('stock timeout')), 3500);
+            timer = setTimeout(() => reject(new Error('stock timeout')), 400);
             if (timer && timer.unref) timer.unref();
           })
         ]);
