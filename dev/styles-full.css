@@ -3945,6 +3945,11 @@ html[data-theme="dark"] .tr-sb-tbl .tr-sb-mtd b { color: #c4b5fd; }
 .tr-req-row td { border-bottom-color: color-mix(in srgb, var(--line) 76%, transparent); }
 .tr-req-row:nth-child(even) td { background: color-mix(in srgb, var(--brand) 2.5%, transparent); }
 .tr-req-row:hover td { background: color-mix(in srgb, var(--brand) 7%, transparent); }
+.tr-need { margin-top: 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.tr-need .badge { font-weight: 800; }
+.tr-need-filter { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+.tr-need-filter .input { padding: 4px 8px; min-width: 150px; }
+.tr-need-sort { display: inline-flex; align-items: center; gap: 4px; }
 .tr-req-row.st-rejected td { opacity: .75; }
 .tr-req-row.tr-sel td { background: color-mix(in srgb, var(--brand) 12%, transparent); }
 .tr-req-row.tr-editing td { background: #fffbeb; }

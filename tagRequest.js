@@ -79,7 +79,7 @@ FF.pages = FF.pages || {};
     notifyCheck: { open: false, busy: false, data: null, err: '' },
     // 📥 requests table
     requests: [], requestsAt: 0, reqLoaded: false, reqError: '',
-    sel: new Set(), filter: { status: 'all', channel: 'both', q: '', fromDate: '', toDate: '' }, edit: null, limit: PAGE_ROWS, dview: [],
+    sel: new Set(), filter: { status: 'all', channel: 'both', q: '', fromDate: '', toDate: '', need: 'all' }, sortNeed: false, edit: null, limit: PAGE_ROWS, dview: [],
     // 📦 "sabhi agents ka stock" board — employee link par bhi (search + channel filter + paging)
     stockBoard: { q: '', channel: 'both', limit: 40 },
     sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '', publicForm: null }
@@ -538,6 +538,52 @@ FF.pages = FF.pages || {};
     const core = part(m && m.core), comm = part(m && m.comm);
     const total = part({ stock: core.stock + comm.stock, last: core.last + comm.last, cur: core.cur + comm.cur });
     return { core, comm, total, days, ym };
+  }
+  /** 🔥 v192 — Dispatch priority (agent ki NEED): stock kitne din chalega (cover) + issuance run-rate + growth se nikalti hai.
+   *  Urgent: stock 0 ya <3 din · High: <7 din · Medium: <15 din · Low: baaki · growth ≥25% ho to ek level upar. */
+  const NEED = {
+    urgent: { label: '🔥 Urgent', tone: 'red', rank: 0 },
+    high: { label: '🔴 High', tone: 'amber', rank: 1 },
+    medium: { label: '🟡 Medium', tone: 'blue', rank: 2 },
+    low: { label: '🟢 Low', tone: 'green', rank: 3 },
+    none: { label: '⚪ No demand', tone: 'gray', rank: 4 }
+  };
+  const NEED_KEYS = ['urgent', 'high', 'medium', 'low', 'none'];
+  const NEED_ORDER = ['urgent', 'high', 'medium', 'low'];
+  function needFromNumbers(n) {
+    const t = n.total;
+    const monthly = t.last / 30;                      // pichhle mahine ka per-day (agar is mahine abhi issuance kam ho)
+    const rate = Math.max(t.rate, monthly);
+    if (!(rate > 0) && !(t.exp > 0)) return { key: 'none', cover: null, rate: 0, need: 0, bumped: false };
+    const cover = rate > 0 ? t.stock / rate : null;
+    let idx = t.stock <= 0 ? 0 : cover === null ? 3 : cover < 3 ? 0 : cover < 7 ? 1 : cover < 15 ? 2 : 3;
+    const g = t.growth;
+    let bumped = false;
+    if (idx > 0 && ((g === null && t.exp > 0) || (g !== null && g >= 25))) { idx -= 1; bumped = true; }
+    return { key: NEED_ORDER[idx], cover, rate, need: t.suggest.net, bumped };
+  }
+  const needCache = new WeakMap();
+  function needOf(dr) {
+    try {
+      const m = metricsFor(dr);
+      const hit = needCache.get(dr);
+      const sig = [m.src, m.days, num(m.core && m.core.stock), num(m.comm && m.comm.stock), num(m.core && m.core.cur), num(m.comm && m.comm.cur), num(m.core && m.core.last), num(m.comm && m.comm.last)].join('|');
+      if (hit && hit.sig === sig) return hit.v;
+      const v = needFromNumbers(metricNumbers(m));
+      needCache.set(dr, { sig, v });
+      return v;
+    } catch { return { key: 'none', cover: null, rate: 0, need: 0, bumped: false }; }
+  }
+  function needBadgeHtml(dr) {
+    const v = needOf(dr), d = NEED[v.key];
+    const sub = v.key === 'none' ? 'koi issuance nahi' : `${v.cover === null ? 'cover —' : `cover ${fmt(v.cover, 1)} din`} · need ${fmt(v.need)}${v.bumped ? ' · 📈 growth' : ''}`;
+    return `<div class="tr-need" data-tr-need="${v.key}" title="Dispatch priority = stock kitne din chalega (stock ÷ run-rate), growth ≥25% par ek level upar. Need = suggested after stock."><span class="badge ${d.tone}">${d.label}</span><small class="tr-m-sub">${esc(sub)}</small></div>`;
+  }
+  function needFilterHtml(all) {
+    const counts = { all: all.length };
+    NEED_KEYS.forEach((k) => { counts[k] = 0; });
+    all.forEach((dr) => { counts[needOf(dr).key]++; });
+    return `<label class="tr-need-filter" data-tr-need-wrap><b>🔥 Dispatch priority</b><select class="input" data-tr-need-filter aria-label="Dispatch priority filter"><option value="all">Sab (${fmt(counts.all)})</option>${NEED_KEYS.map((k) => `<option value="${k}" ${state.filter.need === k ? 'selected' : ''}>${esc(NEED[k].label)} (${fmt(counts[k])})</option>`).join('')}</select><span class="tr-need-sort" title="Urgent → High → Medium → Low order me upar"><input type="checkbox" data-tr-need-sort ${state.sortNeed ? 'checked' : ''}> Priority pehle</span></label>`;
   }
   /** TL-wise phir agent-wise sort (preview result ke liye). */
   const tlSortKey = (t) => (!t || t === '—' ? 'zzzz' : norm(t));
@@ -2247,6 +2293,7 @@ body.colorful .from-hdr { color: #166534; }
     const dq = digits(f.q);
     return list.filter((dr) => {
       if (f.status !== 'all' && (dr.req.status || 'pending') !== f.status) return false;
+      if (isAdmin() && f.need && f.need !== 'all' && needOf(dr).key !== f.need) return false;
       const at = new Date(dr.req.at || 0).getTime();
       if (f.fromDate) { const from = new Date(f.fromDate + 'T00:00:00').getTime(); if (Number.isFinite(from) && at < from) return false; }
       if (f.toDate) { const to = new Date(f.toDate + 'T23:59:59.999').getTime(); if (Number.isFinite(to) && at > to) return false; }
@@ -2310,7 +2357,7 @@ body.colorful .from-hdr { color: #166534; }
       `<td class="num tr-m tr-m-current" data-tr-m="cur"><b class="tr-big-num">${fmt(n.total.cur)}</b><div class="tr-class-grid">${classLineHtml('cur')}</div></td>`,
       `<td class="num tr-m" data-tr-m="rate" title="${fmt(n.total.cur)} ÷ ${fmt(n.days)} din"><b>${fmt(n.total.rate, 1)}</b>${subLine(n.core.rate, n.comm.rate, 1)}</td>`,
       `<td class="num tr-m" data-tr-m="exp"><b>${fmt(n.total.exp)}</b>${subLine(n.core.exp, n.comm.exp)}</td>`,
-      `<td class="num tr-m" data-tr-m="growth">${growthHtml(n.total.growth)}<small class="tr-m-sub">🚗 ${growthSmall(n.core.growth)} · 🚚 ${growthSmall(n.comm.growth)}</small></td>`
+      `<td class="num tr-m" data-tr-m="growth">${growthHtml(n.total.growth)}<small class="tr-m-sub">🚗 ${growthSmall(n.core.growth)} · 🚚 ${growthSmall(n.comm.growth)}</small>${isAdmin() ? needBadgeHtml(dr) : ''}</td>`
     ];
     if (isAdmin()) cells.push(`<td class="num tr-m tr-c-suggest" data-tr-m="suggest" title="The no-deduction quantity does not subtract current stock.">
       <div class="tr-suggest-pair"><span class="tr-suggest-net"><small>After stock</small><b>${fmt(n.total.suggest.net)}</b></span><span class="tr-suggest-gross"><small>Without stock deduction</small><b>${fmt(n.total.suggest.gross)}</b></span></div>
@@ -2537,6 +2584,7 @@ body.colorful .from-hdr { color: #166534; }
           ${channelFilterHtml(displayRows(state.requests))}
           ${isAdmin() ? `<label class="tr-date-filter"><b>From</b><input class="input" type="date" data-tr-date="fromDate" aria-label="From date" value="${esc(state.filter.fromDate || '')}"></label><label class="tr-date-filter"><b>To</b><input class="input" type="date" data-tr-date="toDate" aria-label="To date" value="${esc(state.filter.toDate || '')}"></label><button type="button" class="btn small" data-tr-act="date-clear">Clear dates</button>` : ''}
           <div class="tr-chips" data-tr-chips>${chipsHtml(displayRows(state.requests))}</div>
+          ${isAdmin() ? needFilterHtml(displayRows(state.requests)) : ''}
           <input class="input tr-req-search" data-tr-search type="search" placeholder="🔎 Agent / employee / mobile / PIN / ID" value="${esc(state.filter.q)}">
           <button type="button" class="btn" data-tr-act="req-refresh" title="Nayi requests laao">↻</button>
           <button type="button" class="btn tr-card-toggle" data-tr-act="card-toggle" title="Phone ke liye card view / poori table">▦ Cards</button>
@@ -2689,6 +2737,9 @@ body.colorful .from-hdr { color: #166534; }
     const keys = new Set(all.map((dr) => dr.key));
     [...state.sel].forEach((k) => { if (!keys.has(k)) state.sel.delete(k); });
     state.dview = filterRows(all);
+    if (isAdmin() && state.sortNeed) state.dview = state.dview.map((dr, i) => ({ dr, i, k: NEED[needOf(dr).key].rank })).sort((a, b) => a.k - b.k || a.i - b.i).map((x) => x.dr);
+    const needWrap = card.querySelector('[data-tr-need-wrap]');
+    if (needWrap && isAdmin()) { const keepFocus = needWrap.contains(document.activeElement); if (!keepFocus) needWrap.outerHTML = needFilterHtml(all); }
     const tbody = card.querySelector('[data-tr-tbody]');
     const shown = state.dview.slice(0, state.limit);
     if (tbody) {
@@ -2990,7 +3041,7 @@ body.colorful .from-hdr { color: #166534; }
     if (FF.auth && FF.auth.can && !FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
     const rows = state.sel.size ? displayRows(state.requests).filter((dr) => state.sel.has(dr.key)) : state.dview;
     if (!rows.length) { U.toast('Koi row nahi', 'warn'); return; }
-    const header = ['Date', 'Request ID', 'Status', 'Employee', 'Office', 'Agent', 'Agent ID', 'TL', 'Channel', 'Mobile', 'Address', 'Pincode',
+    const header = ['Date', 'Request ID', 'Status', ...(isAdmin() ? ['Dispatch priority', 'Cover (days)'] : []), 'Employee', 'Office', 'Agent', 'Agent ID', 'TL', 'Channel', 'Mobile', 'Address', 'Pincode',
       'Stock total', 'Stock VC4+VC20', 'Stock VC5+', `Last month (${U.labelYM(ymLast())})`, 'Current MTD', 'Run rate / day', 'Expected month-end', 'Growth %',
       ...(isAdmin() ? ['Suggested after stock', 'Suggested without stock deduction'] : []),
       ...CLASS_LIST.flatMap((c) => [`${c} requested`, `${c} approved`]), 'Total requested', 'Total approved', 'Note', 'Admin note', 'Source'];
@@ -2998,7 +3049,7 @@ body.colorful .from-hdr { color: #166534; }
       const r = dr.req, e = r.employee || {}, n = metricNumbers(metricsFor(dr));
       const cls = (c) => { const x = dr.rows.find((y) => String(y.cls).toUpperCase() === c); return x ? [x.requested === undefined ? num(x.approved) : num(x.requested), num(x.approved)] : ['', '']; };
       return [
-        new Date(r.at).toLocaleString('en-IN'), r.id, r.status || 'pending', e.name || r.byName || '', e.office || '', dr.agent.name, dr.agent.agentId, dr.agent.tl,
+        new Date(r.at).toLocaleString('en-IN'), r.id, r.status || 'pending', ...(isAdmin() ? (() => { const nv = needOf(dr); return [NEED[nv.key].label.replace(/^\S+\s/, ''), nv.cover === null ? '' : round1(nv.cover)]; })() : []), e.name || r.byName || '', e.office || '', dr.agent.name, dr.agent.agentId, dr.agent.tl,
         dr.agent.channel === 'gv' ? 'GV Partner' : 'First Forward', dr.contact.mobile, dr.contact.address, dr.contact.pincode,
         n.total.stock, n.core.stock, n.comm.stock, n.total.last, n.total.cur, round1(n.total.rate), n.total.exp, n.total.growth === null ? 'new' : round1(n.total.growth),
         ...(isAdmin() ? [n.total.suggest.net, n.total.suggest.gross] : []),
@@ -3091,6 +3142,8 @@ body.colorful .from-hdr { color: #166534; }
         return;
       }
       if (t.matches && t.matches('[data-tr-bulk-status]')) { updateSelUi(); return; }
+      if (t.matches && t.matches('[data-tr-need-filter]')) { state.filter.need = t.value || 'all'; state.limit = PAGE_ROWS; state.edit = null; renderReqTable(); return; }
+      if (t.matches && t.matches('[data-tr-need-sort]')) { state.sortNeed = !!t.checked; renderReqTable(); return; }
       if (t.matches && t.matches('[data-tr-sel]')) {
         if (t.checked) state.sel.add(t.dataset.trSel); else state.sel.delete(t.dataset.trSel);
         updateSelUi();

@@ -193,3 +193,13 @@ test('🚪 v189 — common /portal login (ID + password) + settings copy card', 
   assert.match(srv, /pathname === '\/portal'/);
   assert.match(st, /id="pt-copy"/);
 });
+
+test('🔥 v192 — Tag Request dispatch priority computed from need (stock cover + run-rate + growth), filter + sort', () => {
+  const tr = read('tagRequest.js'), srv = read('server.js');
+  assert.match(tr, /function needFromNumbers/);
+  assert.match(tr, /needBadgeHtml\(dr\)/);
+  assert.match(tr, /data-tr-need-filter/);
+  assert.match(tr, /data-tr-need-sort/);
+  assert.doesNotMatch(tr, /data-tr-dprio/);
+  assert.doesNotMatch(srv, /bulk-priority/);
+});

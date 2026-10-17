@@ -3604,6 +3604,8 @@ body.public-form .main { padding: 10px 8px 48px; }
 .tr-req-row td { border-bottom-color: color-mix(in srgb, var(--line) 76%, transparent); }
 .tr-req-row:nth-child(even) td { background: color-mix(in srgb, var(--brand) 2.5%, transparent); }
 .tr-req-row:hover td { background: color-mix(in srgb, var(--brand) 7%, transparent); }
+.tr-need .badge { font-weight: 800; }
+.tr-need-filter .input { padding: 4px 8px; min-width: 150px; }
 .tr-req-row.st-rejected td { opacity: .75; }
 .tr-req-row.tr-sel td { background: color-mix(in srgb, var(--brand) 12%, transparent); }
 .tr-req-row.tr-editing td { background: #fffbeb; }

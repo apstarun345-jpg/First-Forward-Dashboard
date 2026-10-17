@@ -81,6 +81,9 @@
 .tr-req-tbl col.tr-col-status { width: 160px; }
 .tr-req-tbl col.tr-col-actions { width: 154px; }
 .tr-req-tbl .tr-th-suggest .tr-th-sub { color: rgba(255, 255, 255, .88); }
+.tr-need { margin-top: 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.tr-need-filter { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+.tr-need-sort { display: inline-flex; align-items: center; gap: 4px; }
 .tr-c-sel { width: 34px; text-align: center !important; vertical-align: middle !important; }
 .tr-c-date { white-space: nowrap; vertical-align: top !important; padding-top: 14px !important; }
 .tr-c-addr .tr-pin {
