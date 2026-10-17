@@ -203,3 +203,17 @@ test('🔥 v192 — Tag Request dispatch priority computed from need (stock cove
   assert.doesNotMatch(tr, /data-tr-dprio/);
   assert.doesNotMatch(srv, /bulk-priority/);
 });
+
+/* ⚡ v193 — FASTag mapping: adaptive gate, auto-retry rounds, failed-rows retry, coloured progress */
+test('v193 mapping: server gate + deadline + ambiguous-409, client auto-retry + coloured progress', async () => {
+  const fs = await import('node:fs/promises');
+  const srv = await fs.readFile(new URL('../server.js', import.meta.url), 'utf8');
+  const cli = await fs.readFile(new URL('../fastagMapping.js', import.meta.url), 'utf8');
+  assert.match(srv, /const mappingGate = /);
+  assert.match(srv, /FF_MAPPING_API_URL/);
+  assert.match(srv, /ambiguous/);
+  assert.match(srv, /Pehle se mapped/);
+  assert.match(cli, /MAX_ROUNDS/);
+  assert.match(cli, /fm-prog-track2/);
+  assert.match(cli, /dobara map karo/);
+});

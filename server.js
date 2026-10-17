@@ -2830,6 +2830,23 @@ function startStockAgeBuild(key) {
 }
 /** Stock ageing index. Stale-while-revalidate: ready index turant milta hai (purana ho to background me refresh),
  *  sirf pehli baar (ya fresh=1) build ka intezaar karna padta hai. */
+/** ⚡ v193 — Mapping API ke liye shared adaptive concurrency gate (AIMD): +1 har 8 safal calls, aadha throttle par. */
+const mappingGate = (() => {
+  const cfg = { min: 2, max: 14, limit: 6, active: 0, streak: 0, pausedUntil: 0, throttled: 0 };
+  const waiters = [];
+  const pump = () => {
+    while (waiters.length && cfg.active < cfg.limit && Date.now() >= cfg.pausedUntil) { cfg.active++; waiters.shift()(); }
+    if (waiters.length && Date.now() < cfg.pausedUntil) { const t = setTimeout(pump, Math.max(20, cfg.pausedUntil - Date.now())); if (t.unref) t.unref(); }
+  };
+  return {
+    acquire() { return new Promise((resolve) => { waiters.push(resolve); pump(); }); },
+    release() { cfg.active = Math.max(0, cfg.active - 1); pump(); },
+    good() { cfg.streak++; if (cfg.streak >= 8) { cfg.streak = 0; cfg.limit = Math.min(cfg.max, cfg.limit + 1); } this.release(); },
+    throttle(pauseMs) { cfg.streak = 0; cfg.throttled++; cfg.limit = Math.max(cfg.min, Math.floor(cfg.limit / 2)); cfg.pausedUntil = Math.max(cfg.pausedUntil, Date.now() + Math.max(0, pauseMs || 0)); },
+    snapshot() { return { limit: cfg.limit, active: cfg.active, queued: waiters.length, throttled: cfg.throttled }; }
+  };
+})();
+
 async function stockAgeIndex(fresh) {
   const key = stockAgeKey();
   const have = stockAgeState.index && stockAgeState.key === key ? stockAgeState.index : null;
@@ -7551,7 +7568,12 @@ async function handleApi(req, res, url) {
     const rows = Array.isArray(body && body.rows) ? body.rows : [];
     if (!rows.length) throw new HttpError(400, 'Mapping rows required.');
     if (rows.length > 100) throw new HttpError(413, 'Ek API batch me maximum 100 mapping rows allowed hain.');
-    const apiUrl = 'https://www.apnapayment.com/api/agent/inventory/update';
+    const apiUrl = process.env.FF_MAPPING_API_URL || 'https://www.apnapayment.com/api/agent/inventory/update';
+    // ⚡ v193 — Adaptive speed: saare requests ka milkar ek shared gate. Upstream theek ho to speed dheere-dheere badhti hai,
+    // 429 / timeout / 5xx par aadhi ho jaati hai + Retry-After tak sab ruk jaate hain (har request apne-apne 10 workers se
+    // upstream ko dabaata tha → rate-limit + 100s gateway timeout → poori mapping fail).
+    const gate = mappingGate;
+    const deadline = Date.now() + 70e3;      // Render ka proxy ~100s par kaat deta hai — usse pehle jawab de do
     const callOne = async (row, index) => {
       const data = {
         tagId: String(row && row.tagId || '').trim().slice(0, 180),
@@ -7567,10 +7589,14 @@ async function handleApi(req, res, url) {
       if ([data.tagId, data.serialNo, data.vcType, data.agentId].some((v) => /[,\r\n]/.test(v))) {
         return { index, success: false, status: 'Invalid characters', message: 'Mapping values me comma ya newline allowed nahi.' };
       }
-      let lastMessage = 'API unavailable', lastCode = 0;
-      for (let attempt = 0; attempt <= 2; attempt++) {
+      let lastMessage = 'API unavailable', lastCode = 0, ambiguous = false;
+      const MAX_ATTEMPTS = 5;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (Date.now() > deadline) return { index, success: false, httpCode: lastCode, status: 'Deferred', message: 'Server busy tha — ye row auto-retry me dobara bheji jaayegi.', retryable: true };
+        await gate.acquire();
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 25000);
+        const timer = setTimeout(() => controller.abort(), 20000);
+        let waitMs = 0;
         try {
           const response = await fetch(apiUrl, {
             method: 'POST', signal: controller.signal,
@@ -7584,32 +7610,43 @@ async function handleApi(req, res, url) {
           lastCode = response.status;
           const success = response.ok && parsed && parsed.success === true;
           const limited = response.status === 429;
-          const message = String(success ? (parsed.message || 'Mapping successful') : (limited ? 'Mapping API rate limit (429 Too Many Requests)' : ((parsed && (parsed.message || parsed.error || parsed.errors)) || text || ('HTTP ' + response.status)))).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 350);
-          if (success) return { index, success: true, httpCode: response.status, status: 'Success', message };
-          lastMessage = message;
-          if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) {
-            return { index, success: false, httpCode: response.status, status: response.status === 409 ? 'Conflict' : 'Failed', message: lastMessage, retryable: limited || response.status >= 500 };
+          const message = String(success ? (parsed.message || 'Mapping successful') : (limited ? 'Mapping API rate limit (429 Too Many Requests)' : ((parsed && (parsed.message || parsed.error || parsed.errors)) || text || ('HTTP ' + response.status))) || 'Mapping failed').slice(0, 400);
+          if (success) { gate.good(); return { index, success: true, httpCode: response.status, status: 'Success', message }; }
+          // Pichhli koshish beech me ruk gayi thi (timeout/5xx) — ho sakta hai mapping lag chuki ho. Ab "already mapped" aaye to success maano.
+          if (ambiguous && (response.status === 409 || /already|exist|duplicate|mapped/i.test(message))) {
+            gate.good();
+            return { index, success: true, httpCode: response.status, status: 'Success', message: 'Pehle se mapped (retry me confirm hua) — ' + message.slice(0, 120) };
           }
-          // Retry-After ho to wahi maano, warna 0.6s → 1.2s → 2.4s (jitter ke saath).
+          lastMessage = message;
+          const transient = [408, 425, 429, 500, 502, 503, 504].includes(response.status);
+          if (!transient || attempt === MAX_ATTEMPTS - 1) {
+            gate.release();
+            return { index, success: false, httpCode: response.status, status: response.status === 409 ? 'Conflict' : (transient ? 'Busy' : 'Failed'), message: lastMessage, retryable: transient };
+          }
           const retryAfterSec = Number(response.headers.get('retry-after') || 0);
-          const wait = retryAfterSec > 0 ? Math.min(10e3, retryAfterSec * 1000) : Math.min(8000, 600 * Math.pow(2, attempt) + Math.random() * 400);
-          await new Promise((resolve) => setTimeout(resolve, wait));
+          waitMs = retryAfterSec > 0 ? Math.min(12e3, retryAfterSec * 1000) : Math.min(9000, 700 * Math.pow(2, attempt) + Math.random() * 500);
+          gate.throttle(limited ? Math.max(waitMs, 1500) : 600);
+          if (response.status >= 500) ambiguous = true;
         } catch (err) {
           clearTimeout(timer);
+          ambiguous = true;                      // request upstream tak pahunchi ho sakti hai
           lastMessage = err && err.name === 'AbortError' ? 'Mapping API timeout' : 'Mapping API network error: ' + String(err && err.message || err).slice(0, 180);
-          if (attempt === 2) return { index, success: false, httpCode: lastCode, status: 'Network error', message: lastMessage, retryable: true };
-          await new Promise((resolve) => setTimeout(resolve, 600 * Math.pow(2, attempt) + Math.random() * 300));
+          gate.throttle(800);
+          waitMs = 800 * Math.pow(2, attempt) + Math.random() * 400;
+          if (attempt === MAX_ATTEMPTS - 1) { gate.release(); return { index, success: false, httpCode: lastCode, status: 'Network error', message: lastMessage, retryable: true }; }
         }
+        gate.release();
+        await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, Math.max(0, deadline - Date.now()))));
       }
       return { index, success: false, httpCode: lastCode, status: 'Failed', message: lastMessage, retryable: true };
     };
     const results = new Array(rows.length);
     let cursor = 0;
-    const workers = Array.from({ length: Math.min(10, rows.length) }, async () => {
+    const workers = Array.from({ length: Math.min(14, rows.length) }, async () => {
       while (cursor < rows.length) { const i = cursor++; results[i] = await callOne(rows[i], i); }
     });
     await Promise.all(workers);
-    return sendJson(res, 200, { ok: true, results, success: results.filter((r) => r.success).length, failed: results.filter((r) => !r.success).length });
+    return sendJson(res, 200, { ok: true, results, success: results.filter((r) => r.success).length, failed: results.filter((r) => !r.success).length, speed: gate.snapshot() });
   }
 
   // ---- gviz ----

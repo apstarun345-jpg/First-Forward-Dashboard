@@ -55,9 +55,17 @@ window.FF = window.FF || {};
       '.fm-prog-pill+.fm-prog-pill{margin-left:0}',
       '.fm-prog-track{position:relative;height:9px;margin:10px 0 8px;border-radius:99px;background:#e9edf6;overflow:hidden}',
       '.fm-prog-track>i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--brand,#4f46e5),var(--brand-2,#ec4899));transition:width .35s ease}',
-      '.fm-prog-nums{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;font-weight:650;color:var(--muted,#64748b)}',
-      '.fm-prog-nums b{color:var(--text,#0f172a)}',
-      '.fm-prog-nums .ok b{color:#047857}.fm-prog-nums .bad b{color:#b91c1c}',
+      '.fm-prog-nums{display:flex;gap:10px;flex-wrap:wrap;font-size:13px;font-weight:800;color:var(--muted,#64748b)}',
+      '.fm-prog-nums>span{padding:6px 12px;border-radius:12px;background:rgba(100,116,139,.12);border:1px solid rgba(100,116,139,.22)}',
+      '.fm-prog-nums b{color:var(--text,#0f172a);font-size:20px;font-weight:900;margin-left:4px;letter-spacing:-.3px}',
+      '.fm-prog-nums .ok{background:rgba(16,185,129,.16);border-color:rgba(16,185,129,.5);color:#065f46}.fm-prog-nums .ok b{color:#047857}',
+      '.fm-prog-nums .bad{background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.5);color:#991b1b}.fm-prog-nums .bad b{color:#b91c1c}',
+      '.fm-prog-nums .left{background:rgba(245,158,11,.16);border-color:rgba(245,158,11,.5);color:#92400e}.fm-prog-nums .left b{color:#b45309}',
+      '.fm-prog-track2{height:14px;display:flex}.fm-prog-track2>i{height:100%;border-radius:0;transition:width .35s ease}',
+      '.fm-prog-track2>i.g{background:linear-gradient(90deg,#10b981,#34d399)}.fm-prog-track2>i.r{background:linear-gradient(90deg,#ef4444,#f87171)}',
+      '.fm-prog-head b{font-weight:900}.fm-prog-pill{font-size:13px;font-weight:900}',
+      '.fm-prog-note{font-weight:700}',
+      '.fm-prog-retry .btn{font-weight:800;background:#dc2626;color:#fff;border-color:#b91c1c;padding:8px 16px}',
       '.fm-prog-note{margin-top:7px;font-size:12px;color:var(--muted,#64748b)}',
       '.fm-prog-note.warn{color:#b45309;font-weight:700}',
       '.fm-prog-retry{margin-top:9px}',
@@ -88,11 +96,13 @@ window.FF = window.FF || {};
     parts.push('<div class="fm-prog-head">' + (active ? '<span class="fm-prog-live"></span>' : '') + '<b>' + esc(prog.title || 'Progress') + '</b>' +
       '<span class="fm-prog-pill">' + esc(prog.done + (prog.total ? ' / ' + prog.total : '')) + ' rows</span>' +
       '<span class="fm-prog-pill">' + percent + '%</span></div>');
-    parts.push('<div class="fm-prog-track"><i style="width:' + percent + '%"></i></div>');
+    if (prog.phase === 'map' && prog.total) {
+      parts.push('<div class="fm-prog-track fm-prog-track2"><i class="g" style="width:' + pctOf(prog.ok, prog.total) + '%"></i><i class="r" style="width:' + pctOf(prog.failed, prog.total) + '%"></i></div>');
+    } else parts.push('<div class="fm-prog-track"><i style="width:' + percent + '%"></i></div>');
     parts.push('<div class="fm-prog-nums">' +
       '<span class="ok">✅ Mapped / done <b>' + num(prog.ok) + '</b></span>' +
       '<span class="bad">❌ Failed <b>' + num(prog.failed) + '</b></span>' +
-      (prog.total ? '<span>⏳ Bachhe <b>' + num(Math.max(0, prog.total - prog.done)) + '</b></span>' : '') +
+      (prog.total ? '<span class="left">⏳ Bachhe <b>' + num(Math.max(0, prog.total - prog.done)) + '</b></span>' : '') +
       '<span>⏱ ' + fmtDur(elapsed) + (remain ? ' · ETA ~' + fmtDur(remain) : '') + '</span>' +
       (rate > 0.03 ? '<span>⚡ ' + rate.toFixed(1) + '/s</span>' : '') + '</div>');
     if (prog.detail) parts.push('<div class="fm-prog-note">' + esc(prog.detail) + '</div>');
@@ -1100,87 +1110,94 @@ window.FF = window.FF || {};
     state.busy = true; setStatus('Mapping API call chal rahi hai… please page band na karein.', 'info');
     progressStart('map', '🚀 Mapping API', ready.length, 'Har ' + MAP_BATCH + '-row batch ka result aate hi live counters update hote hain…');
     const mapBtn = U.$('#fm-map', state.root); if (mapBtn) mapBtn.disabled = true;
-    let success = 0, failed = 0, doneCount = 0, batchesDone = 0, fatal = null;   // catch me bhi chahiye
+    let success = 0, failed = 0, fatal = null;   // catch me bhi chahiye
+    ready.forEach((r) => { r.apiStatus = ''; r.message = ''; r.retryable = false; });
+    const tally = () => { let ok = 0, bad = 0; ready.forEach((r) => { if (r.mapped) ok++; else if (r.apiStatus) bad++; }); success = ok; failed = bad; return { ok, bad }; };
+    const markFailed = (batch, apiStatus, message, retryable) => batch.forEach((r) => {
+      if (r.mapped) return;
+      r.retryable = retryable; r.status = 'Mapping failed'; r.apiStatus = apiStatus; r.message = message;
+    });
+    const MAX_ROUNDS = 4, ROUND_WAIT = [1500, 4000, 9000, 15000];
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    let doneCount = 0, batchesDone = 0;
+    /** Ek batch bhejo — kabhi poori run nahi giraata: network / gateway / rate-limit par rows "retryable" ho jaati hain. */
+    const sendBatch = async (batch) => {
+      let res, json = {};
+      try {
+        res = await fetch(API_MAP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ rows: batch.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: normalizeVcType(r.vcType), agentId: r.agentId })) }) });
+      } catch (err) { markFailed(batch, 'Network error', 'Internet / network issue: ' + ((err && err.message) || err), true); return 'network'; }
+      try { json = await res.json(); } catch (_) { json = {}; }
+      if (res.status === 401 || res.status === 403) throw Object.assign(new Error(json.error || 'Login / admin permission issue — page refresh karke dobara login karein.'), { fatal: true });
+      if (res.status === 429 || json.rateLimited) { markFailed(batch, 'Rate limited', json.error || 'Mapping API rate limit (429).', true); return 'rate'; }
+      if (!res.ok || !Array.isArray(json.results)) {
+        markFailed(batch, 'Server ' + res.status, json.error || ('Mapping server HTTP ' + res.status + ' (gateway / timeout)'), !(res.status >= 400 && res.status < 500 && res.status !== 408));
+        return 'server';
+      }
+      const seen = new Set();
+      json.results.forEach((out, j) => {
+        const idx = out.index == null ? j : out.index; const r = batch[idx]; if (!r) return;
+        seen.add(idx);
+        r.apiStatus = out.status || (out.success ? 'Success' : 'Failed'); r.message = out.message || ''; r.mapped = !!out.success;
+        r.retryable = !out.success && !!out.retryable;
+        r.status = out.success ? 'Mapped successfully' : 'Mapping failed';
+      });
+      batch.forEach((r, i) => { if (!seen.has(i) && !r.mapped) markFailed([r], 'No result', 'Server ne is row ka result nahi diya — auto-retry me dobara bheji jaayegi.', true); });
+      return 'ok';
+    };
     try {
       const batches = [];
       for (let i = 0; i < ready.length; i += MAP_BATCH) batches.push(ready.slice(i, i + MAP_BATCH));
       const totalBatches = batches.length;
       let next = 0;
-      const runBatch = async (batch) => {
-        const res = await fetch(API_MAP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ rows: batch.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: normalizeVcType(r.vcType), agentId: r.agentId })) }) });
-        let json = {}; try { json = await res.json(); } catch (_) {}
-        if (res.status === 429 || json.rateLimited) throw Object.assign(new Error(json.error || 'Mapping API rate limit (429).'), { rateLimited: true });
-        if (!res.ok || !Array.isArray(json.results)) throw new Error(json.error || ('Mapping API HTTP ' + res.status));
-        json.results.forEach((out, j) => {
-          const r = batch[out.index == null ? j : out.index]; if (!r) return;
-          r.apiStatus = out.status || (out.success ? 'Success' : 'Failed'); r.message = out.message || ''; r.mapped = !!out.success;
-          r.retryable = !out.success && !!out.retryable;
-          r.status = out.success ? 'Mapped successfully' : 'Mapping failed'; if (out.success) success++; else failed++;
-        });
-        doneCount += batch.length; batchesDone++;
-        // 📊 Live counters — har 25-row batch ke baad screen par turant update.
-        progressSet({
-          done: Math.min(doneCount, ready.length), ok: success, failed,
-          detail: 'Batch ' + batchesDone + ' / ' + totalBatches + ' ho gaya — last batch me ' + batch.filter((r) => r.mapped).length + ' success, ' + batch.filter((r) => !r.mapped).length + ' fail. Bheja ja raha hai: ' + Math.min(MAP_PARALLEL, totalBatches - batchesDone) + ' row-batch(es) parallel.'
-        });
-        setStatus('Progress ' + Math.min(doneCount, ready.length) + '/' + ready.length + ' · Success ' + success + ' · Failed ' + failed, 'info');
-      };
-      // MAP_PARALLEL batches ek saath (har batch me server 10 rows parallel) — pehle ek-ek karke chalte the.
       const pool = Array.from({ length: Math.min(MAP_PARALLEL, batches.length) }, async () => {
         while (next < batches.length && !fatal) {
           const batch = batches[next++];
-          try { await runBatch(batch); }
-          catch (err) {
-            // Rate limit par poori run band nahi — rows retryable rehti hain aur neeche retry pass
-            // me dobara bheji jaati hain (baaki batches chalti rehti hain).
-            if (err && err.rateLimited) {
-              batch.forEach((r) => {
-                if (r.mapped) return;
-                r.retryable = true; r.status = 'Mapping failed';
-                r.apiStatus = 'Rate limited'; r.message = err.message || 'Mapping API rate limit';
-              });
-              doneCount += batch.length; batchesDone++;
-              failed += batch.filter((r) => !r.mapped).length;
-              progressSet({ done: Math.min(doneCount, ready.length), failed, detail: '⚠️ Mapping API ne rate limit kiya — ye ' + batch.length + ' rows retry pass me dobara bheji jaayengi.' });
-              setStatus('Progress ' + Math.min(doneCount, ready.length) + '/' + ready.length + ' · Success ' + success + ' · Failed ' + failed, 'info');
-              await new Promise((r2) => setTimeout(r2, 700));
-              continue;
-            }
-            fatal = err;
-          }
+          let kind;
+          try { kind = await sendBatch(batch); } catch (err) { fatal = err; break; }
+          doneCount += batch.length; batchesDone++;
+          const t = tally();
+          progressSet({
+            done: Math.min(doneCount, ready.length), ok: t.ok, failed: t.bad,
+            detail: 'Batch ' + batchesDone + ' / ' + totalBatches + ' ho gaya — ' + batch.filter((r) => r.mapped).length + ' success, ' + batch.filter((r) => !r.mapped).length + ' fail' + (kind === 'ok' ? '' : ' (auto-retry hoga)') + '.'
+          });
+          setStatus('Progress ' + Math.min(doneCount, ready.length) + '/' + ready.length + ' · Success ' + t.ok + ' · Failed ' + t.bad, 'info');
+          if (kind === 'rate') await sleep(1200);
         }
       });
       await Promise.all(pool);
       if (fatal) throw fatal;
-      // 🔁 Retry pass: sirf woh rows jo rate limit / network / 5xx ki wajah se fail hui (mapped rows chhoote nahi).
-      const retryRows = ready.filter((r) => !r.mapped && r.retryable);
-      if (retryRows.length) {
-        progressSet({ detail: '🔁 Retry pass: ' + num(retryRows.length) + ' row dobara bheji jaa rahi hain…' });
-        const retryBatches = [];
-        for (let i = 0; i < retryRows.length; i += MAP_BATCH) retryBatches.push(retryRows.slice(i, i + MAP_BATCH));
-        let retryNext = 0;
-        const retryPool = Array.from({ length: Math.min(2, retryBatches.length) }, async () => {
-          while (retryNext < retryBatches.length) {
-            const batch = retryBatches[retryNext++];
-            const res = await fetch(API_MAP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ rows: batch.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: normalizeVcType(r.vcType), agentId: r.agentId })) }) });
-            let json = {}; try { json = await res.json(); } catch (_) {}
-            if (!res.ok || !Array.isArray(json.results)) continue;
-            json.results.forEach((out, j) => {
-              const r = batch[out.index == null ? j : out.index]; if (!r) return;
-              if (out.success && !r.mapped) { r.mapped = true; success++; failed = Math.max(0, failed - 1); }
-              if (out.success) { r.apiStatus = out.status || 'Success'; r.message = out.message || ''; r.status = 'Mapped successfully'; r.retryable = false; }
-            });
-            progressSet({ ok: success, failed, detail: '🔁 Retry pass chal raha hai… ab tak ' + num(success) + ' mapped, ' + num(failed) + ' failed.' });
+      // 🔁 Auto-retry rounds: rate limit / network / 5xx / busy wali rows chhoti-chhoti rounds me dobara (4 baar tak) — mapped rows ko haath nahi lagta.
+      for (let round = 1; round <= MAX_ROUNDS; round++) {
+        const retryRows = ready.filter((r) => !r.mapped && r.retryable);
+        if (!retryRows.length) break;
+        progressSet({ detail: '🔁 Auto-retry round ' + round + ' / ' + MAX_ROUNDS + ': ' + num(retryRows.length) + ' row dobara bheji jaa rahi hain…' });
+        await sleep(ROUND_WAIT[round - 1] || 15000);
+        const rb = [];
+        for (let i = 0; i < retryRows.length; i += MAP_BATCH) rb.push(retryRows.slice(i, i + MAP_BATCH));
+        let rn = 0;
+        const rpool = Array.from({ length: Math.min(2, rb.length) }, async () => {
+          while (rn < rb.length && !fatal) {
+            const batch = rb[rn++];
+            try { await sendBatch(batch); } catch (err) { fatal = err; break; }
+            const t = tally();
+            progressSet({ ok: t.ok, failed: t.bad, detail: '🔁 Round ' + round + ' / ' + MAX_ROUNDS + ' chal raha hai… ab tak ' + num(t.ok) + ' mapped, ' + num(t.bad) + ' failed.' });
           }
         });
-        await Promise.all(retryPool);
+        await Promise.all(rpool);
+        if (fatal) throw fatal;
       }
+      tally();
       let sheetNote = '';
       if (state.sheetCtx && state.sheetCtx.colDone) progressSet({ title: '📗 Sheet me "done" likha jaa raha hai', detail: 'Mapped rows ke Done column me "' + state.sheetCtx.doneText + '" likha jaa raha hai…' });
       try { const w = await markSheetDone(); if (w != null) sheetNote = ' · Sheet me "' + state.sheetCtx.doneText + '" likha: ' + w + ' row'; }
       catch (err) { sheetNote = ' · ⚠ Sheet me done nahi likha ja saka: ' + (err.message || err); }
+      tally();
       progressSet({ done: ready.length, ok: success, failed });
-      progressEnd('✅ Mapping complete — ' + num(success) + ' mapped, ' + num(failed) + ' failed' + sheetNote + '. Full CSV download kar sakte hain.');
+      const reasons = new Map();
+      ready.forEach((r) => { if (!r.mapped && r.apiStatus) reasons.set(r.apiStatus, (reasons.get(r.apiStatus) || 0) + 1); });
+      const reasonTxt = reasons.size ? ' · Failed wajah: ' + [...reasons.entries()].map(([k, v]) => k + ' ×' + v).join(', ') : '';
+      progressEnd((failed ? '⚠️ Mapping complete — ' : '✅ Mapping complete — ') + num(success) + ' mapped, ' + num(failed) + ' failed' + reasonTxt + sheetNote + '. Full CSV download kar sakte hain.');
+      if (failed) { prog.retry = 'Failed ' + num(failed) + ' rows dobara map karo'; prog.retryAction = 'map'; renderProgress(); }
       setStatus('Mapping complete. Success: ' + success + ' · Failed: ' + failed + sheetNote + '. Full CSV download kar sakte hain.', (failed || /⚠/.test(sheetNote)) ? 'warn' : 'success');
     } catch (err) {
       // Jo rows map ho chuki hain unka "done" phir bhi sheet me likh do.
