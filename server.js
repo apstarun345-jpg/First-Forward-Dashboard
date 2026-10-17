@@ -6745,13 +6745,16 @@ async function handleApi(req, res, url) {
     prunePublicLiveSessions(now);
     let id = String(body.visitId || '').slice(0, 100);
     let entry = id ? publicLiveSessions.get(id) : null;
+    // 🔕 v195 — deploy / server restart par in-memory sessions ud jaate hain, par khule hue employee tabs apna purana visitId bhejte rehte hain.
+    // Pehle wo "naya visitor" ginkar har deploy ke baad "link opened" notification deta tha. Ab valid purane id wali visit chupchaap resume hoti hai.
+    const resumed = !!(id && /^[A-Za-z0-9_-]{16,64}$/.test(id) && !publicLiveSessions.has(id));
     if (!entry || entry.mode !== 'visit') {
-      id = crypto.randomBytes(18).toString('base64url');
+      if (!resumed) id = crypto.randomBytes(18).toString('base64url');
       entry = { sessionId: id, mode: 'visit', name: 'New Link Visitor', startedAt: now, lastSeen: now, updatedAt: now, visible: true, engaged: true, pointer: null, viewport: null, scroll: null, events: [{ at: now, kind: 'open', label: 'Employee Tag Request link opened', page: 'tag-request' }], requestIds: [] };
       publicLiveSessions.set(id, entry);
       const who = visitorNameFor(ip, body.name);
-      if (who) { entry.name = who; entry.named = true; }
-      notifyVisitorOpened(entry, who, ip, false);
+      if (who) { entry.name = who; entry.named = true; if (resumed) entry.nameNotifiedAt = now; }
+      if (!resumed) notifyVisitorOpened(entry, who, ip, false);
     } else {
       entry.lastSeen = now; entry.updatedAt = now;
       entry.visible = body.visible !== false;

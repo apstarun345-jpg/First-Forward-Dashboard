@@ -450,6 +450,18 @@ test('public Tag Request link visit — admin notification feed, passive preview
     assert.equal(heartbeat.res.status, 200, JSON.stringify(heartbeat.json));
     assert.equal(heartbeat.json.visitId, opened.json.visitId, 'same tab heartbeat keeps the same visit');
 
+    // 🔕 v195 — server restart/deploy ke baad khula tab purana visitId bhejta hai → chupchaap resume, naya "link opened" notification nahi.
+    const countOpened = async () => ((await jsonCall(server.base, '/api/notifications', 'GET', undefined, admin)).json.items || []).filter((n) => /link opened/i.test(n.title || '')).length;
+    const before = await countOpened();
+    assert.ok(before >= 1, 'pehli asli visit par notification aaya');
+    const staleId = 'AbCdEfGhIjKlMnOpQrStUvWx';   // server ko yaad nahi (restart jaisa)
+    const resumed = await jsonCall(server.base, '/api/public/tag-request/visit', 'POST', { visitId: staleId, visible: true }, '', '10.2.0.9');
+    assert.equal(resumed.json.visitId, staleId, 'purana id resume hua');
+    assert.equal(await countOpened(), before, 'resume par nayi notification nahi');
+    const fresh = await jsonCall(server.base, '/api/public/tag-request/visit', 'POST', { visible: true }, '', '10.2.0.10');
+    assert.ok(fresh.json.visitId && fresh.json.visitId !== staleId);
+    assert.equal(await countOpened(), before + 1, 'bilkul nayi visit par notification aata hai');
+
     const submit = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
       employee: { name: 'Public Link Employee', mobile: '9876501122', address: '9, Public Link Road, Jaipur', pincode: '302019' },
       publicVisitId: opened.json.visitId,
