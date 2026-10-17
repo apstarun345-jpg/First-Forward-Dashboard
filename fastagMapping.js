@@ -25,7 +25,7 @@ window.FF = window.FF || {};
   // ── 📊 Live progress (v3.72) ────────────────────────────────────────────────────────────────────
   // Sheet read / StockDataa lookup / mapping — teeno phases ka live counter (kitne ho gaye,
   // kitne bache, success/failed, %, ETA) screen par lagataar update hota rehta hai.
-  const prog = { phase: '', title: '', total: 0, done: 0, ok: 0, failed: 0, detail: '', note: '', startedAt: 0, endedAt: 0, retry: '', retryAction: '', rateSec: 0 };
+  const prog = { phase: '', title: '', total: 0, done: 0, ok: 0, failed: 0, retrying: 0, sheet: null, reasons: null, lastError: '', speed: null, detail: '', note: '', startedAt: 0, endedAt: 0, retry: '', retryAction: '', rateSec: 0 };
   const progTimers = { tick: null, index: null };
   const canInterval = () => typeof setInterval === 'function' && typeof clearInterval === 'function';
   const later = (fn, ms) => (typeof setTimeout === 'function' ? setTimeout(fn, ms) : 0);
@@ -70,6 +70,27 @@ window.FF = window.FF || {};
       '.fm-prog-note.warn{color:#b45309;font-weight:700}',
       '.fm-prog-retry{margin-top:9px}',
       '.fm-prog-live{display:inline-block;width:7px;height:7px;border-radius:99px;background:#22c55e;margin-right:5px;animation:fmProgPulse 1.1s ease-in-out infinite}',
+      '.fm-progress.big{padding:16px 18px;border-width:2px;border-radius:18px;box-shadow:0 6px 22px rgba(79,70,229,.14)}',
+      '.fm-progress.big.run{border-color:#6366f1;background:linear-gradient(135deg,rgba(99,102,241,.16),rgba(14,165,233,.10))}',
+      '.fm-progress.big.good{border-color:#10b981;background:linear-gradient(135deg,rgba(16,185,129,.18),rgba(52,211,153,.08))}',
+      '.fm-progress.big.warn{border-color:#f59e0b;background:linear-gradient(135deg,rgba(245,158,11,.20),rgba(239,68,68,.08))}',
+      '.fm-prog-big{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-weight:900}',
+      '.fm-prog-big .t{font-size:17px;font-weight:900}',
+      '.fm-prog-big .n{font-size:15px;font-weight:800;color:var(--muted,#64748b)}.fm-prog-big .n b{font-size:30px;font-weight:900;color:var(--text,#0f172a);letter-spacing:-.8px}',
+      '.fm-prog-big .pc{margin-left:auto;font-size:28px;font-weight:900;color:#4338ca;letter-spacing:-.8px}',
+      '.fm-stop{border:1px solid #b91c1c;background:#fff;color:#b91c1c;border-radius:10px;padding:5px 12px;font-weight:800;cursor:pointer}',
+      '.fm-prog-nums b{font-size:26px}.fm-prog-nums small{font-size:11px;font-weight:700;opacity:.85}',
+      '.fm-prog-sheet{margin-top:9px;padding:8px 12px;border-radius:12px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.4);color:#065f46;font-weight:700;font-size:13px}.fm-prog-sheet b{font-weight:900;font-size:15px}',
+      '.fm-prog-why{margin-top:8px;padding:8px 12px;border-radius:12px;background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.4);color:#991b1b;font-size:12.5px;font-weight:700}',
+      '.fm-pill{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:100000;width:min(520px,94vw);padding:10px 14px;border-radius:16px;color:#fff;cursor:pointer;box-shadow:0 10px 30px rgba(15,23,42,.35)}',
+      '.fm-pill[hidden]{display:none}',
+      '.fm-pill.run{background:linear-gradient(135deg,#4338ca,#0ea5e9)}.fm-pill.good{background:linear-gradient(135deg,#059669,#10b981)}.fm-pill.warn{background:linear-gradient(135deg,#d97706,#dc2626)}',
+      '.fm-pill-top{display:flex;align-items:center;gap:8px;font-size:14px}.fm-pill-top b{font-weight:900}',
+      '.fm-pill-pct{margin-left:auto;font-size:22px;font-weight:900}',
+      '.fm-pill button{border:0;background:rgba(255,255,255,.22);color:#fff;border-radius:8px;padding:3px 9px;font-weight:900;cursor:pointer}',
+      '.fm-pill .fm-prog-track{margin:8px 0;background:rgba(255,255,255,.3)}',
+      '.fm-pill-nums{display:flex;gap:10px;flex-wrap:wrap;font-size:13px;font-weight:900}.fm-pill-nums .tap{margin-left:auto;opacity:.85;font-weight:700}',
+      '.fm-pill-top .tap{margin-left:auto;font-size:12px;opacity:.9}',
       '@keyframes fmProgPulse{0%,100%{opacity:1}50%{opacity:.25}}'
     ].join('');
     document.head.appendChild(style);
@@ -85,27 +106,38 @@ window.FF = window.FF || {};
   function renderProgress() {
     const host = state.root ? U.$('#fm-progress', state.root) : null;
     if (!host) return;
-    if (!prog.phase) { if (host.style) host.style.display = 'none'; host.innerHTML = ''; return; }
+    if (!prog.phase) { host.hidden = true; if (host.style) host.style.display = 'none'; host.innerHTML = ''; host.className = 'fm-progress'; return; }
+    host.hidden = false;   // ⚠ HTML me `hidden` attr tha jo kabhi hataya nahi jaata tha — isi wajah se panel dikhta hi nahi tha
     if (host.style) host.style.display = '';
     const active = !prog.endedAt;
+    const isMap = prog.phase === 'map' && prog.total > 0;
+    host.className = 'fm-progress' + (isMap ? ' big ' + (active ? 'run' : (prog.failed ? 'warn' : 'good')) : '');
     const elapsed = Math.max(0, ((prog.endedAt || Date.now()) - prog.startedAt) / 1000);
     const rate = elapsed > 1 ? prog.done / elapsed : 0;
     const percent = pctOf(prog.done, prog.total);
     const remain = active && rate > 0.03 && prog.total > prog.done ? (prog.total - prog.done) / rate : 0;
     const parts = [];
-    parts.push('<div class="fm-prog-head">' + (active ? '<span class="fm-prog-live"></span>' : '') + '<b>' + esc(prog.title || 'Progress') + '</b>' +
-      '<span class="fm-prog-pill">' + esc(prog.done + (prog.total ? ' / ' + prog.total : '')) + ' rows</span>' +
-      '<span class="fm-prog-pill">' + percent + '%</span></div>');
+    if (isMap) {
+      parts.push('<div class="fm-prog-big">' + (active ? '<span class="fm-prog-live"></span>' : '') + '<span class="t">' + esc(prog.title || 'Mapping') + '</span>' +
+        '<span class="n"><b>' + num(prog.done) + '</b> / ' + num(prog.total) + '</span><span class="pc">' + percent + '%</span>' +
+        (active && track.id ? '<button type="button" class="fm-stop" id="fm-stop" title="Mapping roko">⏹ Roko</button>' : '') + '</div>');
+    } else {
+      parts.push('<div class="fm-prog-head">' + (active ? '<span class="fm-prog-live"></span>' : '') + '<b>' + esc(prog.title || 'Progress') + '</b>' +
+        '<span class="fm-prog-pill">' + esc(prog.done + (prog.total ? ' / ' + prog.total : '')) + ' rows</span>' +
+        '<span class="fm-prog-pill">' + percent + '%</span></div>');
+    }
     if (prog.phase === 'map' && prog.total) {
       parts.push('<div class="fm-prog-track fm-prog-track2"><i class="g" style="width:' + pctOf(prog.ok, prog.total) + '%"></i><i class="r" style="width:' + pctOf(prog.failed, prog.total) + '%"></i></div>');
     } else parts.push('<div class="fm-prog-track"><i style="width:' + percent + '%"></i></div>');
     parts.push('<div class="fm-prog-nums">' +
       '<span class="ok">✅ Mapped / done <b>' + num(prog.ok) + '</b></span>' +
-      '<span class="bad">❌ Failed <b>' + num(prog.failed) + '</b></span>' +
+      '<span class="bad">❌ Failed <b>' + num(prog.failed) + '</b>' + (active && prog.retrying ? '<small> · ' + num(prog.retrying) + ' auto-retry me</small>' : '') + '</span>' +
       (prog.total ? '<span class="left">⏳ Bachhe <b>' + num(Math.max(0, prog.total - prog.done)) + '</b></span>' : '') +
       '<span>⏱ ' + fmtDur(elapsed) + (remain ? ' · ETA ~' + fmtDur(remain) : '') + '</span>' +
       (rate > 0.03 ? '<span>⚡ ' + rate.toFixed(1) + '/s</span>' : '') + '</div>');
+    if (prog.sheet && prog.sheet.enabled) parts.push('<div class="fm-prog-sheet">📗 Sheet me <b>done</b> likha: <b>' + num(prog.sheet.written) + '</b> row' + (prog.sheet.pending ? ' · ' + num(prog.sheet.pending) + ' likhna baaki' : '') + (prog.sheet.error ? ' · ⚠ ' + esc(prog.sheet.error) : '') + '</div>');
     if (prog.detail) parts.push('<div class="fm-prog-note">' + esc(prog.detail) + '</div>');
+    if (prog.failed && prog.reasons && prog.reasons.length) parts.push('<div class="fm-prog-why">⚠ Fail ki wajah: ' + prog.reasons.slice(0, 3).map(([k, v]) => '<b>' + esc(k) + '</b> ×' + num(v)).join(' · ') + '</div>');
     if (prog.rateSec) parts.push('<div class="fm-prog-note warn">⏳ Google rate limit — ' + fmtDur(prog.rateSec) + ' me apne aap retry hoga (purana cache data dikh raha hai).</div>');
     if (prog.note) parts.push('<div class="fm-prog-note">' + esc(prog.note) + '</div>');
     if (prog.retry) parts.push('<div class="btn-row fm-prog-retry"><button class="btn small" id="fm-retry" type="button">🔁 ' + esc(prog.retry) + '</button></div>');
@@ -113,7 +145,7 @@ window.FF = window.FF || {};
   }
   function startProgTimer() {
     if (!canInterval() || progTimers.tick) return;
-    progTimers.tick = setInterval(() => { if (prog.endedAt) stopProgTimer(); else renderProgress(); }, 1000);
+    progTimers.tick = setInterval(() => { if (prog.endedAt) stopProgTimer(); else { renderProgress(); if (track.id) updatePill(); } }, 1000);
   }
   function stopProgTimer() {
     if (progTimers.tick && typeof clearInterval === 'function') clearInterval(progTimers.tick);
@@ -122,14 +154,14 @@ window.FF = window.FF || {};
   function progressStart(phase, title, total, detail) {
     ensureProgressStyles();
     stopProgTimer();
-    Object.assign(prog, { phase, title, total: Math.max(0, Number(total) || 0), done: 0, ok: 0, failed: 0, detail: detail || '', note: '', startedAt: Date.now(), endedAt: 0, retry: '', retryAction: '', rateSec: 0 });
+    Object.assign(prog, { phase, title, total: Math.max(0, Number(total) || 0), done: 0, ok: 0, failed: 0, retrying: 0, sheet: null, reasons: null, lastError: '', speed: null, detail: detail || '', note: '', startedAt: Date.now(), endedAt: 0, retry: '', retryAction: '', rateSec: 0 });
     startProgTimer();
     renderProgress();
   }
   function progressSet(patch) { if (!prog.phase) return; Object.assign(prog, patch || {}); renderProgress(); }
   function progressReset() {
     stopProgTimer();
-    Object.assign(prog, { phase: '', title: '', total: 0, done: 0, ok: 0, failed: 0, detail: '', note: '', startedAt: 0, endedAt: 0, retry: '', retryAction: '', rateSec: 0 });
+    Object.assign(prog, { phase: '', title: '', total: 0, done: 0, ok: 0, failed: 0, retrying: 0, sheet: null, reasons: null, lastError: '', speed: null, detail: '', note: '', startedAt: 0, endedAt: 0, retry: '', retryAction: '', rateSec: 0 });
     renderProgress();
   }
   function progressEnd(note) {
@@ -1101,112 +1133,209 @@ window.FF = window.FF || {};
     state.rows.forEach((r) => { if (previous.has(r.id)) r.selected = previous.get(r.id); });
     renderTable();
   }
+  // ===== ⚡ v194 — Background mapping job (server-side) =====
+  // Rows server par ek job ban jaati hain: server shared adaptive gate se upstream ko bhejta hai, fail rows ko khud 4 round retry karta hai
+  // aur Google Sheet me "done" row-by-row likhta hai. Browser sirf progress poll karta hai — page badlo / refresh karo, job chalti rehti hai.
+  const API_JOB = '/api/fastag-mapping/job';
+  const JOB_KEY = 'ffFmJob', JOB_DONE_KEY = 'ffFmJobDone', POLL_MS = 1000;
+  const track = { id: '', timer: null, next: 0, fails: 0, byTag: new Map(), lastId: '', lastRender: 0, finishing: false, snap: null };
+  const lsGet = (k) => { try { return localStorage.getItem(k) || ''; } catch (_) { return ''; } };
+  const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (_) { /* private mode */ } };
+  const jobHeaders = { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' };
+  function buildByTag() { track.byTag = new Map(); state.rows.forEach((r) => { if (r && r.tagId && !track.byTag.has(String(r.tagId))) track.byTag.set(String(r.tagId), r); }); }
   async function mapReady() {
     if (!state.configured) { setStatus('Mapping API secret configured nahi hai. Render me GV_TAG_MAPPING_SECRET set karein; lookup/CSV abhi bhi use kar sakte hain.', 'warn'); return; }
-    if (state.busy) return;
+    if (state.busy || track.id) { setStatus('Ek mapping pehle se chal rahi hai — upar progress dekhein.', 'warn'); return; }
     const ready = state.rows.filter((r) => r.selected && r.stock && r.tagId && r.serialNo && r.vcType && r.agentId && !r.status.startsWith('Duplicate') && !r.mapped);
     if (!ready.length) { setStatus('Koi selected, complete row ready nahi hai. Pehle lookup karein aur Agent ID verify karein.', 'warn'); return; }
-    if (!confirm('StockDataa se verify ki gayi ' + ready.length + ' mapping(s) external API par bhejni hain?')) return;
-    state.busy = true; setStatus('Mapping API call chal rahi hai… please page band na karein.', 'info');
-    progressStart('map', '🚀 Mapping API', ready.length, 'Har ' + MAP_BATCH + '-row batch ka result aate hi live counters update hote hain…');
-    const mapBtn = U.$('#fm-map', state.root); if (mapBtn) mapBtn.disabled = true;
-    let success = 0, failed = 0, fatal = null;   // catch me bhi chahiye
-    ready.forEach((r) => { r.apiStatus = ''; r.message = ''; r.retryable = false; });
-    const tally = () => { let ok = 0, bad = 0; ready.forEach((r) => { if (r.mapped) ok++; else if (r.apiStatus) bad++; }); success = ok; failed = bad; return { ok, bad }; };
-    const markFailed = (batch, apiStatus, message, retryable) => batch.forEach((r) => {
-      if (r.mapped) return;
-      r.retryable = retryable; r.status = 'Mapping failed'; r.apiStatus = apiStatus; r.message = message;
-    });
-    const MAX_ROUNDS = 4, ROUND_WAIT = [1500, 4000, 9000, 15000];
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    let doneCount = 0, batchesDone = 0;
-    /** Ek batch bhejo — kabhi poori run nahi giraata: network / gateway / rate-limit par rows "retryable" ho jaati hain. */
-    const sendBatch = async (batch) => {
-      let res, json = {};
-      try {
-        res = await fetch(API_MAP, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ rows: batch.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: normalizeVcType(r.vcType), agentId: r.agentId })) }) });
-      } catch (err) { markFailed(batch, 'Network error', 'Internet / network issue: ' + ((err && err.message) || err), true); return 'network'; }
-      try { json = await res.json(); } catch (_) { json = {}; }
-      if (res.status === 401 || res.status === 403) throw Object.assign(new Error(json.error || 'Login / admin permission issue — page refresh karke dobara login karein.'), { fatal: true });
-      if (res.status === 429 || json.rateLimited) { markFailed(batch, 'Rate limited', json.error || 'Mapping API rate limit (429).', true); return 'rate'; }
-      if (!res.ok || !Array.isArray(json.results)) {
-        markFailed(batch, 'Server ' + res.status, json.error || ('Mapping server HTTP ' + res.status + ' (gateway / timeout)'), !(res.status >= 400 && res.status < 500 && res.status !== 408));
-        return 'server';
-      }
-      const seen = new Set();
-      json.results.forEach((out, j) => {
-        const idx = out.index == null ? j : out.index; const r = batch[idx]; if (!r) return;
-        seen.add(idx);
-        r.apiStatus = out.status || (out.success ? 'Success' : 'Failed'); r.message = out.message || ''; r.mapped = !!out.success;
-        r.retryable = !out.success && !!out.retryable;
-        r.status = out.success ? 'Mapped successfully' : 'Mapping failed';
-      });
-      batch.forEach((r, i) => { if (!seen.has(i) && !r.mapped) markFailed([r], 'No result', 'Server ne is row ka result nahi diya — auto-retry me dobara bheji jaayegi.', true); });
-      return 'ok';
-    };
-    try {
-      const batches = [];
-      for (let i = 0; i < ready.length; i += MAP_BATCH) batches.push(ready.slice(i, i + MAP_BATCH));
-      const totalBatches = batches.length;
-      let next = 0;
-      const pool = Array.from({ length: Math.min(MAP_PARALLEL, batches.length) }, async () => {
-        while (next < batches.length && !fatal) {
-          const batch = batches[next++];
-          let kind;
-          try { kind = await sendBatch(batch); } catch (err) { fatal = err; break; }
-          doneCount += batch.length; batchesDone++;
-          const t = tally();
-          progressSet({
-            done: Math.min(doneCount, ready.length), ok: t.ok, failed: t.bad,
-            detail: 'Batch ' + batchesDone + ' / ' + totalBatches + ' ho gaya — ' + batch.filter((r) => r.mapped).length + ' success, ' + batch.filter((r) => !r.mapped).length + ' fail' + (kind === 'ok' ? '' : ' (auto-retry hoga)') + '.'
-          });
-          setStatus('Progress ' + Math.min(doneCount, ready.length) + '/' + ready.length + ' · Success ' + t.ok + ' · Failed ' + t.bad, 'info');
-          if (kind === 'rate') await sleep(1200);
-        }
-      });
-      await Promise.all(pool);
-      if (fatal) throw fatal;
-      // 🔁 Auto-retry rounds: rate limit / network / 5xx / busy wali rows chhoti-chhoti rounds me dobara (4 baar tak) — mapped rows ko haath nahi lagta.
-      for (let round = 1; round <= MAX_ROUNDS; round++) {
-        const retryRows = ready.filter((r) => !r.mapped && r.retryable);
-        if (!retryRows.length) break;
-        progressSet({ detail: '🔁 Auto-retry round ' + round + ' / ' + MAX_ROUNDS + ': ' + num(retryRows.length) + ' row dobara bheji jaa rahi hain…' });
-        await sleep(ROUND_WAIT[round - 1] || 15000);
-        const rb = [];
-        for (let i = 0; i < retryRows.length; i += MAP_BATCH) rb.push(retryRows.slice(i, i + MAP_BATCH));
-        let rn = 0;
-        const rpool = Array.from({ length: Math.min(2, rb.length) }, async () => {
-          while (rn < rb.length && !fatal) {
-            const batch = rb[rn++];
-            try { await sendBatch(batch); } catch (err) { fatal = err; break; }
-            const t = tally();
-            progressSet({ ok: t.ok, failed: t.bad, detail: '🔁 Round ' + round + ' / ' + MAX_ROUNDS + ' chal raha hai… ab tak ' + num(t.ok) + ' mapped, ' + num(t.bad) + ' failed.' });
-          }
-        });
-        await Promise.all(rpool);
-        if (fatal) throw fatal;
-      }
-      tally();
-      let sheetNote = '';
-      if (state.sheetCtx && state.sheetCtx.colDone) progressSet({ title: '📗 Sheet me "done" likha jaa raha hai', detail: 'Mapped rows ke Done column me "' + state.sheetCtx.doneText + '" likha jaa raha hai…' });
-      try { const w = await markSheetDone(); if (w != null) sheetNote = ' · Sheet me "' + state.sheetCtx.doneText + '" likha: ' + w + ' row'; }
-      catch (err) { sheetNote = ' · ⚠ Sheet me done nahi likha ja saka: ' + (err.message || err); }
-      tally();
-      progressSet({ done: ready.length, ok: success, failed });
-      const reasons = new Map();
-      ready.forEach((r) => { if (!r.mapped && r.apiStatus) reasons.set(r.apiStatus, (reasons.get(r.apiStatus) || 0) + 1); });
-      const reasonTxt = reasons.size ? ' · Failed wajah: ' + [...reasons.entries()].map(([k, v]) => k + ' ×' + v).join(', ') : '';
-      progressEnd((failed ? '⚠️ Mapping complete — ' : '✅ Mapping complete — ') + num(success) + ' mapped, ' + num(failed) + ' failed' + reasonTxt + sheetNote + '. Full CSV download kar sakte hain.');
-      if (failed) { prog.retry = 'Failed ' + num(failed) + ' rows dobara map karo'; prog.retryAction = 'map'; renderProgress(); }
-      setStatus('Mapping complete. Success: ' + success + ' · Failed: ' + failed + sheetNote + '. Full CSV download kar sakte hain.', (failed || /⚠/.test(sheetNote)) ? 'warn' : 'success');
-    } catch (err) {
-      // Jo rows map ho chuki hain unka "done" phir bhi sheet me likh do.
-      try { await markSheetDone(); } catch (_) { /* original error dikhana zyada zaroori */ }
-      progressFail('Mapping request fail: ' + (err.message || err) + ' · ' + num(success) + ' rows map ho chuki hain (table/CSV me dikhti hain).', 'Adhoori rows dobara try karo', 'map');
-      setStatus('Mapping request fail: ' + (err.message || err) + '. Result table se CSV download kar sakte hain.', 'error');
+    if (!confirm('StockDataa se verify ki gayi ' + ready.length + ' mapping(s) external API par bhejni hain?\n\nMapping server par background me chalegi — beech me page badal sakte ho, refresh bhi kar sakte ho.')) return;
+    const payload = { rows: ready.map((r) => ({ tagId: r.tagId, serialNo: r.serialNo, vcType: normalizeVcType(r.vcType), agentId: r.agentId, sheetRow: r.sheetRow || 0 })) };
+    const ctx = state.sheetCtx;
+    if (ctx && ctx.colDone) {
+      // Sheet row tabhi "done" jab uske SAARE tags map hon — server ko batao kitne map hone baaki hain; baaki rows (lookup fail / not ready) wali row block rehti hai.
+      const total = new Map(), okc = new Map(), inJob = new Map();
+      state.rows.forEach((r) => { if (!r.sheetRow || String(r.status || '').startsWith('Duplicate skipped')) return; total.set(r.sheetRow, (total.get(r.sheetRow) || 0) + 1); if (r.mapped) okc.set(r.sheetRow, (okc.get(r.sheetRow) || 0) + 1); });
+      ready.forEach((r) => { if (r.sheetRow) inJob.set(r.sheetRow, (inJob.get(r.sheetRow) || 0) + 1); });
+      const plan = {};
+      inJob.forEach((n, row) => { if (n === (total.get(row) || 0) - (okc.get(row) || 0)) plan[row] = n; });
+      payload.sheet = { link: ctx.link, tab: ctx.tab, column: ctx.colDone, doneText: ctx.doneText };
+      payload.sheetPlan = plan;
     }
-    finally { state.busy = false; if (mapBtn) mapBtn.disabled = !state.configured; renderTable(); }
+    await startJob(payload, ready);
   }
+  async function startJob(payload, readyRows) {
+    state.busy = true; setStatus('Mapping job server par shuru ho rahi hai…', 'info');
+    const mapBtn = U.$('#fm-map', state.root); if (mapBtn) mapBtn.disabled = true;
+    readyRows && readyRows.forEach((r) => { r.apiStatus = ''; r.message = ''; r.retryable = false; });
+    let res, json = {};
+    try {
+      res = await fetch(API_JOB, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: jobHeaders, body: JSON.stringify(payload) });
+      try { json = await res.json(); } catch (_) { json = {}; }
+    } catch (err) {
+      state.busy = false; if (mapBtn) mapBtn.disabled = !state.configured;
+      progressFail('Mapping shuru nahi ho payi (internet / server): ' + ((err && err.message) || err), 'Dobara try karo', payload.retryOf ? 'job' : 'map');
+      setStatus('Mapping shuru nahi ho payi: ' + ((err && err.message) || err), 'error');
+      return;
+    }
+    if (res.status === 409 && json.runningId) { state.busy = false; setStatus('Pehli mapping abhi chal rahi hai — uska progress dikha raha hu.', 'warn'); trackJob(json.runningId, true); return; }
+    if (!res.ok || !json.ok || !json.id) {
+      state.busy = false; if (mapBtn) mapBtn.disabled = !state.configured;
+      const msg = json.error || ('HTTP ' + res.status);
+      progressFail('Mapping shuru nahi ho payi: ' + msg, res.status === 401 || res.status === 403 ? '' : 'Dobara try karo', payload.retryOf ? 'job' : 'map');
+      setStatus('Mapping shuru nahi ho payi: ' + msg, 'error');
+      return;
+    }
+    if (readyRows) buildByTag();
+    track.lastId = json.id;
+    trackJob(json.id, false);
+  }
+  /** Job ko poll karte raho (naya start ho ya refresh ke baad resume). */
+  function trackJob(id, resumed) {
+    ensureProgressStyles();
+    if (track.timer) { clearTimeout(track.timer); track.timer = null; }
+    track.id = id; track.next = 0; track.fails = 0; track.finishing = false; track.snap = null;
+    if (!state.rows.length) buildByTag(); else if (!track.byTag.size) buildByTag();
+    state.busy = true;
+    lsSet(JOB_KEY, JSON.stringify({ id, at: Date.now() })); lsSet(JOB_DONE_KEY, null);
+    if (prog.phase !== 'map' || prog.endedAt || resumed) progressStart('map', '🚀 Mapping chal rahi hai', 0, 'Server par background me chal rahi hai — page badal sakte ho.');
+    updatePill();
+    pollJob();
+  }
+  function schedulePoll(ms) { if (track.id) track.timer = setTimeout(pollJob, ms == null ? POLL_MS : ms); }
+  async function pollJob() {
+    if (!track.id) return;
+    track.timer = null;
+    let json = null;
+    try {
+      const res = await fetch(API_JOB + '?id=' + encodeURIComponent(track.id) + '&from=' + track.next, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } });
+      if (res.status === 401 || res.status === 403) { track.fails = 99; throw new Error('Login expire — page refresh karke login karein (mapping server par chalti rahegi).'); }
+      json = await res.json();
+      track.fails = 0;
+    } catch (err) {
+      track.fails++;
+      progressSet({ note: '📡 Server se progress nahi mil raha (' + ((err && err.message) || 'network') + ') — mapping server par chal rahi hai, dobara try ho raha hai…' });
+      if (track.fails >= 99) { stopTracking(); progressFail(String(err.message || err), '', ''); return; }
+      schedulePoll(Math.min(8000, 1500 * track.fails)); return;
+    }
+    if (!json || json.gone || json.ok === false) {
+      const gone = track.id; stopTracking(true);
+      progressFail('Server restart / purani job expire ho gayi, isliye live progress nahi mil sakta. Jo rows map ho chuki thi wo table / sheet me hain — baaki ko dobara map karo.', state.rows.some((r) => !r.mapped && r.selected) ? 'Baaki rows dobara map karo' : '', 'map');
+      setStatus('Mapping job ' + gone + ' server par nahi mili (restart ho gaya hoga).', 'warn');
+      return;
+    }
+    applySnapshot(json);
+    if (json.status === 'done') { finishJob(json); return; }
+    schedulePoll();
+  }
+  function applySnapshot(s) {
+    track.snap = s;
+    let touched = false;
+    (s.events || []).forEach((e) => {
+      const r = track.byTag.get(String(e.k)); if (!r) return;
+      r.mapped = !!e.s; r.apiStatus = e.s ? 'Success' : (e.st || 'Failed'); r.message = e.m || ''; r.retryable = !e.s && !!e.rt;
+      r.status = e.s ? 'Mapped successfully' : 'Mapping failed'; touched = true;
+    });
+    track.next = s.next != null ? s.next : track.next;
+    const offset = (Number(s.serverNow) || Date.now()) - (Number(s.startedAt) || Date.now());
+    const done = Math.max(0, (s.total || 0) - (s.left || 0));
+    Object.assign(prog, { phase: 'map', total: s.total || 0, done, ok: s.okCount || 0, failed: s.failed || 0, retrying: s.retrying || 0, startedAt: Date.now() - offset, title: s.status === 'done' ? (prog.title || 'Mapping') : '🚀 Mapping chal rahi hai', detail: s.note || '', sheet: s.sheet || null, reasons: s.reasons || null, lastError: s.lastError || '', speed: s.speed || null });
+    if (s.status !== 'done') prog.endedAt = 0;
+    renderProgress(); updatePill();
+    setStatus('Progress ' + done + '/' + s.total + ' · Success ' + (s.okCount || 0) + ' · Failed ' + (s.failed || 0), 'info');
+    if (touched && Date.now() - track.lastRender > 2500 && isMounted()) { track.lastRender = Date.now(); renderTable(); }
+  }
+  function stopTracking(clearStore) {
+    if (track.timer) clearTimeout(track.timer);
+    track.timer = null; track.id = ''; state.busy = false;
+    if (clearStore) { lsSet(JOB_KEY, null); }
+    const mapBtn = state.root ? U.$('#fm-map', state.root) : null; if (mapBtn) mapBtn.disabled = !state.configured;
+    updatePill();
+  }
+  async function finishJob(s) {
+    track.lastId = s.id;
+    const ok = s.okCount || 0, failed = s.failed || 0;
+    let sheetNote = '';
+    if (s.sheet && s.sheet.enabled) {
+      sheetNote = ' · Sheet me "' + ((state.sheetCtx && state.sheetCtx.doneText) || 'done') + '" likha: ' + num(s.sheet.written) + ' row';
+      if ((s.sheet.pending || s.sheet.error) && state.sheetCtx) {
+        try { const w = await markSheetDone(); if (w) sheetNote += ' (+' + w + ' browser se)'; } catch (err) { sheetNote += ' · ⚠ Sheet me done nahi likha ja saka: ' + (err.message || err); }
+      }
+    }
+    const reasons = (s.reasons || []).map(([k, v]) => k + ' ×' + v).join(' · ');
+    progressSet({ done: s.total, ok, failed, retrying: 0 });
+    const msg = (s.cancelled ? '⏹ Roki gayi — ' : (failed ? '⚠️ Mapping complete — ' : '✅ Mapping complete — ')) + num(ok) + ' mapped, ' + num(failed) + ' failed' + (reasons && failed ? ' · Wajah: ' + reasons : '') + sheetNote + '. Full CSV download kar sakte hain.';
+    progressEnd(msg);
+    stopTracking(true);
+    lsSet(JOB_DONE_KEY, JSON.stringify({ id: s.id, ok, failed, total: s.total, at: Date.now() }));
+    if (failed) { prog.retry = 'Failed ' + num(failed) + ' rows dobara map karo'; prog.retryAction = 'job'; renderProgress(); }
+    updatePill();
+    setStatus('Mapping complete. Success: ' + ok + ' · Failed: ' + failed + sheetNote + '. Full CSV download kar sakte hain.', failed ? 'warn' : 'success');
+    renderTable();
+  }
+  /** Failed rows ko server-side dobara map karo (page refresh ke baad bhi chalta hai). */
+  async function retryFailedJob() {
+    if (!track.lastId) { return mapReady(); }
+    state.rows.forEach((r) => { if (!r.mapped && r.apiStatus) { r.apiStatus = ''; r.message = ''; } });
+    progressStart('map', '🔁 Failed rows dobara', 0, 'Server par dobara shuru ho raha hai…');
+    await startJob({ retryOf: track.lastId }, null);
+  }
+  /** Pichhli (khatam) mapping ka summary + failed-retry button — tab dobara kholne par bhi dikhe. */
+  function restoreDoneSummary() {
+    if (track.id || prog.phase) return;
+    let d = null; try { d = JSON.parse(lsGet(JOB_DONE_KEY) || 'null'); } catch (_) { d = null; }
+    if (!d || !d.id) return;
+    track.lastId = d.id;
+    Object.assign(prog, { phase: 'map', title: 'Pichhli mapping ka result', total: d.total || 0, done: d.total || 0, ok: d.ok || 0, failed: d.failed || 0, retrying: 0, startedAt: d.at, endedAt: d.at, detail: '', note: d.failed ? 'Failed rows server par bachi hain — neeche button se dobara map karo (6 ghante tak).' : '', retry: d.failed ? 'Failed ' + num(d.failed) + ' rows dobara map karo' : '', retryAction: d.failed ? 'job' : '' });
+    renderProgress();
+  }
+  async function stopJob() {
+    if (!track.id) return;
+    try { await fetch(API_JOB + '/cancel', { method: 'POST', credentials: 'same-origin', headers: jobHeaders, body: JSON.stringify({ id: track.id }) }); progressSet({ note: '⏹ Rok rahe hain — chal rahi calls khatam hone par job band ho jayegi…' }); } catch (_) { /* poll se pata chalega */ }
+  }
+  // ── 📌 Floating pill: mapping chalte waqt kisi bhi page par upar dikhta hai ──────────────────────
+  function pillEl(create) {
+    if (typeof document === 'undefined' || !document.body) return null;
+    let el = document.getElementById('fm-pill');
+    if (!el && create && document.createElement) {
+      el = document.createElement('div'); el.id = 'fm-pill'; el.className = 'fm-pill'; el.hidden = true;
+      el.addEventListener('click', (ev) => {
+        const t = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+        if (t && t.id === 'fm-pill-x') { lsSet(JOB_DONE_KEY, null); updatePill(); return; }
+        if (t && t.id === 'fm-pill-stop') { stopJob(); return; }
+        try { location.hash = '#/fastagMapping'; } catch (_) { /* ignore */ }
+      });
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  const isMounted = () => !!(typeof document !== 'undefined' && state.root && document.body && document.body.contains(state.root) && state.root.querySelector && state.root.querySelector('#fm-progress'));
+  function updatePill() {
+    ensureProgressStyles();
+    const mounted = isMounted();
+    const done = (() => { try { return JSON.parse(lsGet(JOB_DONE_KEY) || 'null'); } catch (_) { return null; } })();
+    const el = pillEl(!!(track.id || done));
+    if (!el) return;
+    if (track.id && !mounted) {
+      const p = prog, pct = pctOf(p.done, p.total);
+      el.className = 'fm-pill run'; el.hidden = false;
+      el.innerHTML = '<div class="fm-pill-top"><span class="fm-prog-live"></span><b>🔗 Mapping chal rahi hai</b><span class="fm-pill-pct">' + pct + '%</span><button type="button" id="fm-pill-stop" title="Roko">⏹</button></div>' +
+        '<div class="fm-prog-track fm-prog-track2"><i class="g" style="width:' + pctOf(p.ok, p.total) + '%"></i><i class="r" style="width:' + pctOf(p.failed, p.total) + '%"></i></div>' +
+        '<div class="fm-pill-nums"><span>' + num(p.done) + ' / ' + num(p.total) + '</span><span class="ok">✅ ' + num(p.ok) + '</span><span class="bad">❌ ' + num(p.failed) + '</span><span class="tap">Dekhne ke liye dabao ›</span></div>';
+    } else if (!track.id && done && !mounted) {
+      el.className = 'fm-pill ' + (done.failed ? 'warn' : 'good'); el.hidden = false;
+      el.innerHTML = '<div class="fm-pill-top"><b>' + (done.failed ? '⚠️ Mapping complete' : '✅ Mapping complete') + '</b><span class="fm-pill-nums"><span class="ok">✅ ' + num(done.ok) + '</span><span class="bad">❌ ' + num(done.failed) + '</span></span><span class="tap">Kholo ›</span><button type="button" id="fm-pill-x" title="Band karo">✕</button></div>';
+    } else { el.hidden = true; el.innerHTML = ''; }
+  }
+  /** Module load hote hi (page refresh / login ke baad) chalti job ko wapas pakad lo. */
+  function resumeFromStorage() {
+    try {
+      const raw = lsGet(JOB_KEY); if (!raw || track.id) { try { const d = JSON.parse(lsGet(JOB_DONE_KEY) || 'null'); if (d && d.id) track.lastId = d.id; } catch (_) { /* ignore */ } updatePill(); return; }
+      const j = JSON.parse(raw); if (!j || !j.id) return;
+      state.configured = true;
+      trackJob(j.id, true);
+    } catch (_) { /* ignore */ }
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('visibilitychange', () => { if (!document.hidden && track.id) { if (track.timer) clearTimeout(track.timer); pollJob(); } });
   // ===== 📗 Google Sheet se mapping (v3.71) =====
   const gs = (id) => { const el = U.$('#fm-gs-' + id, state.root); return el ? clean(el.value) : ''; };
   const colLetterOk = (v) => /^[A-Za-z]{1,3}$/.test(clean(v));
@@ -1403,6 +1532,7 @@ window.FF = window.FF || {};
     state.root = root;
     root.innerHTML = '<div class="page-head"><div><h1>🧭 FASTag Mapping</h1><p class="sub">GV Partner · StockDataa se Tag ID, Serial/Barcode, VC Type aur Agent details fetch karke securely map karein.</p></div><div class="head-actions"><span id="fm-index-status" class="badge gray">StockDataa index status…</span><button class="btn small" id="fm-index-refresh" title="StockDataa index dobara banao (ape ke aap 5 min me refresh hota rehta hai)">🔄 Index refresh</button><span id="fm-api-status" class="badge amber">Mapping API status checking…</span></div></div>' +
       // v3.79 — 4-step flow: 1 Add tags (tabs) → 2 Lookup → 3 Review → 4 Map. All input IDs are unchanged.
+      '<div id="fm-progress" class="fm-progress" hidden></div>' +
       '<ol class="fm-steps" id="fm-steps" aria-label="Mapping steps">' +
         '<li class="fm-step" data-fm-step="1"><span class="fm-step-dot">1</span><span class="fm-step-tx"><b>Add tags</b><small id="fm-step-1-note">Queue empty</small></span></li>' +
         '<li class="fm-step" data-fm-step="2"><span class="fm-step-dot">2</span><span class="fm-step-tx"><b>Lookup</b><small id="fm-step-2-note">Find tags in StockDataa</small></span></li>' +
@@ -1426,16 +1556,18 @@ window.FF = window.FF || {};
         '<div class="grid g-3"><div><label>Agent ID column</label><input class="input" id="fm-gs-agent" maxlength="3" placeholder="C" value="C"></div><div><label>Done likhne wala column</label><input class="input" id="fm-gs-done" maxlength="3" placeholder="D" value="D"></div><div><label>Done me kya likhna hai</label><input class="input" id="fm-gs-donetext" placeholder="done" value="done"></div></div>' +
         '<div class="btn-row"><button class="btn primary" id="fm-gs-pending">🔎 Pending mapping dhundo (Agent + Class wise)</button><button class="btn" id="fm-gs-load">📥 Sheet se load + lookup</button><button class="btn primary" id="fm-gs-auto">⚡ Turant map karo + done likho</button></div><p class="dim small">Pehli baar: Apps Script me naya <code>Code.gs</code> (v3.71) paste karke New version deploy karein, aur sheet ko us Google account ke saath Editor share karein jisse Apps Script chalta hai.</p></div>' +
       '</div></section>' +
-      '<section class="card fm-queue-card"><div class="card-head"><div><h3><span class="fm-step-no">2–4</span> Lookup, review &amp; map</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-progress" class="fm-progress" hidden></div><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-pending"></div><div id="fm-results"><div class="empty-state">Add tags in step 1, then click “Lookup StockDataa”.</div></div></div></section>';
-    state.items = []; state.rows = []; state.busy = false; state.sheetCtx = null; state.showLimit = SHOW_STEP;
+      '<section class="card fm-queue-card"><div class="card-head"><div><h3><span class="fm-step-no">2–4</span> Lookup, review &amp; map</h3><p class="dim small">Lookup ke baad preview/review karein. Target Agent ID edit kar sakte hain; API call sirf selected complete rows par hoga.</p></div><div class="head-actions"><button class="btn" id="fm-lookup">🔎 Lookup StockDataa</button><button class="btn primary" id="fm-map" disabled>🚀 Map ready rows</button><button class="btn" id="fm-api-csv">⬇ API CSV · 4 columns</button><button class="btn" id="fm-csv">⬇ Full details CSV</button><button class="btn" id="fm-clear">Clear</button></div></div><div class="card-body"><div id="fm-message" class="notice info">API status check ho raha hai…</div><div id="fm-summary"></div><div id="fm-pending"></div><div id="fm-results"><div class="empty-state">Add tags in step 1, then click “Lookup StockDataa”.</div></div></div></section>';
+    // Mapping job chal rahi ho to tab badalne par queue/rows/progress mat mitao — wahi dikhao.
+    if (!track.id) { state.items = []; state.rows = []; state.busy = false; state.sheetCtx = null; }
+    state.showLimit = SHOW_STEP;
     state.index = null; state.indexAt = 0; state.rateLimited = false;
     ensureProgressStyles();
-    progressReset();   // naya render = saaf panel (purane run ka status leak na ho)
+    if (!track.id) { progressReset(); restoreDoneSummary(); } else renderProgress();   // naya render = saaf panel (purane run ka status leak na ho); chalti job ho to uska progress
     const status = U.$('#fm-api-status', root);
     fetch(API_STATUS, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } }).then((r) => r.json()).then((j) => {
       state.configured = !!j.configured;
       if (status) { status.className = 'badge ' + (state.configured ? 'green' : 'amber'); status.textContent = state.configured ? 'Mapping API configured' : 'API secret missing in Render'; }
-      const mapButton = U.$('#fm-map', root); if (mapButton) mapButton.disabled = !state.configured;
+      const mapButton = U.$('#fm-map', root); if (mapButton) mapButton.disabled = !state.configured || !!track.id;
       if (j && j.index) { state.index = Object.assign({}, j.index, { cooldownSec: j.cooldownSec }); state.indexAt = Date.now(); state.rateLimited = !!j.rateLimited; renderIndexChip(); }
       setStatus(state.configured ? 'Ready. Upload file ya manual barcode / Tag ID add karein.' : 'API key configure nahi hai. Render environment me GV_TAG_MAPPING_SECRET set karne ke baad mapping enabled hogi; secret browser/GitHub me save nahi hota.', state.configured ? 'success' : 'warn');
     }).catch(() => { if (status) status.textContent = 'API status unavailable'; setStatus('API status verify nahi ho paya. Login/session aur server status check karein.', 'warn'); });
@@ -1524,12 +1656,14 @@ window.FF = window.FF || {};
       if (target.id === 'fm-bc-template') return barcodeTemplate('csv');
       if (target.id === 'fm-bc-template-xlsx') return barcodeTemplate('xlsx');
       if (target.id === 'fm-api-csv') return apiCsv();
+      if (target.id === 'fm-stop') return stopJob();
       if (target.id === 'fm-retry') {
         const action = prog.retryAction;
         prog.retry = ''; prog.retryAction = '';
         renderProgress();
         if (action === 'sheet') return sheetRun(false);
         if (action === 'map') return mapReady();
+        if (action === 'job') return retryFailedJob();
         if (!state.items.length) { setStatus('Queue khaali hai — pehle file / sheet se rows load karein.', 'warn'); return; }
         return lookup();
       }
@@ -1601,5 +1735,6 @@ window.FF = window.FF || {};
     renderTable();
   }
   // normalizeVcType bhi expose hai — tests + doosre pages (bulk tag status) same rule use karein.
+  resumeFromStorage();
   FF.pages.fastagMapping = { title: 'FASTag Mapping', render, normalizeVcType };
 })(window.FF);

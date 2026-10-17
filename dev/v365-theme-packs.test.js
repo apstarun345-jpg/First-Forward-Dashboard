@@ -213,7 +213,27 @@ test('v193 mapping: server gate + deadline + ambiguous-409, client auto-retry + 
   assert.match(srv, /FF_MAPPING_API_URL/);
   assert.match(srv, /ambiguous/);
   assert.match(srv, /Pehle se mapped/);
-  assert.match(cli, /MAX_ROUNDS/);
   assert.match(cli, /fm-prog-track2/);
   assert.match(cli, /dobara map karo/);
+});
+
+/* ⚡ v194 — FASTag mapping: server-side background job + floating pill + resume + sheet done row-by-row */
+test('v194 mapping: background job (server), polling client, floating pill, resume, bold coloured progress at top', async () => {
+  const fs = await import('node:fs/promises');
+  const srv = await fs.readFile(new URL('../server.js', import.meta.url), 'utf8');
+  const job = await fs.readFile(new URL('../mapping-job.js', import.meta.url), 'utf8');
+  const cli = await fs.readFile(new URL('../fastagMapping.js', import.meta.url), 'utf8');
+  const app = await fs.readFile(new URL('../app.js', import.meta.url), 'utf8');
+  assert.match(srv, /\/api\/fastag-mapping\/job'/);
+  assert.match(srv, /createMappingJobs/);
+  assert.match(job, /roundWaits/);
+  assert.match(job, /writecells/);
+  assert.match(cli, /pollJob/);
+  assert.match(cli, /fm-pill/);
+  assert.match(cli, /resumeFromStorage/);
+  assert.match(cli, /fm-prog-big/);
+  assert.match(cli, /retryOf/);
+  assert.match(app, /ffFmJob/);
+  // progress host sabse upar (steps se pehle), card ke andar nahi
+  assert.ok(cli.indexOf('id="fm-progress"') > 0 && cli.indexOf('id="fm-progress"') < cli.indexOf('id="fm-steps"'), 'progress panel steps se upar');
 });

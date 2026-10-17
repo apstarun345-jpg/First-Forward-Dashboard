@@ -906,6 +906,10 @@ window.FF = window.FF || {};
       if (FF.lazy && FF.lazy.shell) FF.lazy.shell({ afterWave: hooks }).catch(() => {});
       else hooks(['notifications', 'liveView', 'masterSearch', 'officeBell', 'liveAssist']);   // loader na ho to jo loaded hai wahi
     }, touch ? 1800 : 700);
+    // ⚡ v194 — FASTag mapping background job chal rahi ho (refresh ke baad) to uska floating progress wapas laao.
+    try {
+      if (localStorage.getItem('ffFmJob') || localStorage.getItem('ffFmJobDone')) setTimeout(() => { if (FF.lazy && FF.lazy.ensure && FF.auth && FF.auth.can && FF.auth.can('fastagMapping')) FF.lazy.ensure('fastagMapping').catch(() => {}); }, 2500);
+    } catch (_) { /* private mode */ }
     return Promise.resolve(true);
   }
   /** 🔔 Bell / alert center — module abhi load nahi hua to load karke kholo (click kabhi dead nahi hota). */

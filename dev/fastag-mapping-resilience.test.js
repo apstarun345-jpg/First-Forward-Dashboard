@@ -53,8 +53,9 @@ async function startApp(apiUrl) {
     const res = await fetch(`${base}${p}`, { method: 'POST', headers: { cookie, 'X-Forwarded-Proto': 'https', 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify(body) });
     return { status: res.status, json: await res.json().catch(() => null) };
   };
+  const get = async (p) => { const res = await fetch(`${base}${p}`, { headers: { cookie, 'X-Forwarded-Proto': 'https', 'X-Requested-With': 'FF-Dashboard' } }); return { status: res.status, json: await res.json().catch(() => null) }; };
   const stop = async () => { child.kill('SIGTERM'); await once(child, 'exit').catch(() => {}); };
-  return { post, stop };
+  return { post, get, stop };
 }
 const row = (i) => ({ tagId: `T${i}`, serialNo: `S${i}`, vcType: '4', agentId: `A${i}` });
 const key = (i) => `T${i},S${i},VC4,A${i}`;
@@ -94,5 +95,30 @@ test('adaptive gate: concurrency to the mapping API never exceeds its limit and 
     assert.equal(out.status, 200);
     assert.equal(out.json.success, 60, 'all 60 mapped');
     assert.ok(api.peak() <= 14, 'peak concurrency stays within the gate max (' + api.peak() + ')');
+  } finally { await app.stop(); api.server.close(); api.server.closeAllConnections?.(); }
+});
+
+test('v194 job endpoints: start, poll with cursor, retry failed (retryOf), 409 while running, unauthenticated blocked', async () => {
+  const api = await makeApi((k) => (k === key(4) ? { status: 409, json: { message: 'Tag not available' } } : { delay: 30 }));
+  const app = await startApp(api.url);
+  try {
+    const start = await app.post('/api/fastag-mapping/job', { rows: [1, 2, 3, 4, 5].map(row) });
+    assert.equal(start.status, 200); assert.ok(start.json.id);
+    const dup = await app.post('/api/fastag-mapping/job', { rows: [row(9)] });
+    assert.equal(dup.status, 409); assert.equal(dup.json.runningId, start.json.id);
+    let snap, next = 0, events = [];
+    for (let i = 0; i < 100; i++) {
+      snap = await app.get(`/api/fastag-mapping/job?id=${start.json.id}&from=${next}`);
+      events = events.concat(snap.json.events); next = snap.json.next;
+      if (snap.json.status === 'done') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal(snap.json.status, 'done');
+    assert.equal(snap.json.okCount, 4); assert.equal(snap.json.failed, 1);
+    assert.equal(events.length, 5, 'cursor delivered each event exactly once');
+    const retry = await app.post('/api/fastag-mapping/job', { retryOf: start.json.id });
+    assert.equal(retry.status, 200); assert.equal(retry.json.total, 1);
+    const missing = await app.get('/api/fastag-mapping/job?id=nope');
+    assert.equal(missing.json.gone, true);
   } finally { await app.stop(); api.server.close(); api.server.closeAllConnections?.(); }
 });

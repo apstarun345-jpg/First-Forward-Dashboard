@@ -103,7 +103,7 @@ const jsonRes = (status, body) => ({ ok: status >= 200 && status < 300, status, 
 const stockRow = (n) => ({ stockRowId: 'S' + n, inventoryName: 'inv', tagId: 'TAG' + n, barcode: String(8900000000000000 + n), serialNo: String(8900000000000000 + n), vcType: 'VC4', tagType: 'RFID', barcodeAllocatedAt: '', stockAgentId: '', stockAgentName: '', agentAllocatedAt: '', tlName: 'TL' });
 
 test('Google Sheet flow: reads rows, server-side lookup (no gviz paging), maps, writes "done" only for fully-mapped rows, skips already-done rows', async () => {
-  const calls = [];
+  const calls = []; let jobBody = null;
   const fetchImpl = async (url, opts = {}) => {
     const body = opts.body ? JSON.parse(opts.body) : null;
     calls.push({ url, body });
@@ -115,7 +115,8 @@ test('Google Sheet flow: reads rows, server-side lookup (no gviz paging), maps, 
       ['', '', '', '']                                         // blank
     ] });
     if (url.endsWith('/lookup')) return jsonRes(200, { ok: true, results: body.items.map((it, index) => ({ index, rows: it.first === '8900000000000001' ? [1, 2, 3].map(stockRow) : [] })) });
-    if (url.endsWith('/map')) return jsonRes(200, { ok: true, results: body.rows.map((r, index) => ({ index, success: true, status: 'Success' })) });
+    if (url.includes('/fastag-mapping/job') && opts.method === 'POST') { jobBody = body; return jsonRes(200, { ok: true, id: 'J1', status: 'running', total: body.rows.length, okCount: 0, failed: 0, left: body.rows.length, events: [], next: 0, startedAt: Date.now(), serverNow: Date.now() }); }
+    if (url.includes('/fastag-mapping/job')) return jsonRes(200, { ok: true, id: 'J1', status: 'done', total: jobBody.rows.length, okCount: jobBody.rows.length, failed: 0, left: 0, reasons: [], startedAt: Date.now() - 3000, serverNow: Date.now(), sheet: { enabled: true, written: 0, pending: 1, error: '' }, events: jobBody.rows.map((r, i) => ({ i, k: r.tagId, s: 1, st: 'Success', m: 'ok', rt: 0 })), next: jobBody.rows.length });
     if (url.endsWith('/sheet/mark')) return jsonRes(200, { ok: true, written: body.writes.length });
     return jsonRes(404, {});
   };
@@ -125,15 +126,19 @@ test('Google Sheet flow: reads rows, server-side lookup (no gviz paging), maps, 
   set('link', 'https://docs.google.com/spreadsheets/d/13eyCSDnXysQM-nWymBE5yPeKw8fnbVCY-hCTqJSPUsM/edit');
   set('tab', 'Sheet1'); set('start', '2'); set('mode', 'range'); set('first', 'A'); set('last', 'B'); set('agent', 'C'); set('done', 'D'); set('donetext', 'done');
   await click(root, 'fm-gs-auto');
+  for (let i = 0; i < 60 && !calls.some((c) => c.url.endsWith('/sheet/mark')); i++) await new Promise((r) => setTimeout(r, 10));
   const lookup = calls.find((c) => c.url.endsWith('/lookup'));
   assert.equal(lookup.body.items.length, 2, 'already-done + blank rows are not looked up');
   assert.ok(!calls.some((c) => /gviz/.test(c.url)), 'no browser-side gviz paging');
   const mark = calls.find((c) => c.url.endsWith('/sheet/mark'));
   assert.deepEqual(mark.body.writes, [{ row: 2, value: 'done' }]);
   assert.equal(mark.body.column, 'D');
-  const map = calls.find((c) => c.url.endsWith('/map'));
+  const map = calls.find((c) => c.url.includes('/fastag-mapping/job') && c.body && c.body.rows);
   assert.equal(map.body.rows.length, 3);
   assert.equal(map.body.rows[0].agentId, 'AG1');
+  assert.equal(map.body.rows[0].sheetRow, 2, 'har row ke saath sheet row number server ko jaata hai (done row-by-row ke liye)');
+  assert.deepEqual(map.body.sheetPlan, { 2: 3 }, 'sheet row 2 tabhi done jab uske 3 tag map hon');
+  assert.equal(map.body.sheet.column, 'D'); assert.equal(map.body.sheet.tab, 'Sheet1'); assert.equal(map.body.sheet.doneText, 'done');
 });
 
 test('Alag-alag barcode upload: header-less (A=barcode, B=agent) and "barcode,agentId" header both queue exact rows', async () => {

@@ -18,6 +18,7 @@ import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.j
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
 import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
+import { createMappingJobs } from './mapping-job.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
@@ -2832,7 +2833,7 @@ function startStockAgeBuild(key) {
  *  sirf pehli baar (ya fresh=1) build ka intezaar karna padta hai. */
 /** ⚡ v193 — Mapping API ke liye shared adaptive concurrency gate (AIMD): +1 har 8 safal calls, aadha throttle par. */
 const mappingGate = (() => {
-  const cfg = { min: 2, max: 14, limit: 6, active: 0, streak: 0, pausedUntil: 0, throttled: 0 };
+  const cfg = { min: 2, max: 20, limit: 8, active: 0, streak: 0, pausedUntil: 0, throttled: 0 };
   const waiters = [];
   const pump = () => {
     while (waiters.length && cfg.active < cfg.limit && Date.now() >= cfg.pausedUntil) { cfg.active++; waiters.shift()(); }
@@ -2846,6 +2847,22 @@ const mappingGate = (() => {
     snapshot() { return { limit: cfg.limit, active: cfg.active, queued: waiters.length, throttled: cfg.throttled }; }
   };
 })();
+
+/** ⚡ v194 — FASTag mapping background jobs (server par chalti hain; page badlo / refresh karo, job chalti rehti hai). */
+const mappingJobs = createMappingJobs({
+  gate: mappingGate,
+  normalizeVcType: (v) => normalizeVcType(v),
+  getApiUrl: () => process.env.FF_MAPPING_API_URL || 'https://www.apnapayment.com/api/agent/inventory/update',
+  getSecret: () => String(process.env.GV_TAG_MAPPING_SECRET || '').trim(),
+  sheetIdFrom,
+  makeSheetStore: () => {
+    const url0 = (process.env.APPS_SCRIPT_URL || '').trim(), secret0 = (process.env.APPS_SCRIPT_SECRET || '').trim();
+    if (!url0 || !secret0) throw new Error('Apps Script connect nahi hai (APPS_SCRIPT_URL / SECRET).');
+    const store = new AppsScriptStore({ url: url0, secret: secret0 });
+    store.timeoutMs = 55000; store.attempts = 2; store.label = 'Google Sheet';
+    return store;
+  }
+});
 
 async function stockAgeIndex(fresh) {
   const key = stockAgeKey();
@@ -7647,6 +7664,42 @@ async function handleApi(req, res, url) {
     });
     await Promise.all(workers);
     return sendJson(res, 200, { ok: true, results, success: results.filter((r) => r.success).length, failed: results.filter((r) => !r.success).length, speed: gate.snapshot() });
+  }
+
+  // ⚡ v194 — Background mapping job: POST = shuru, GET = progress (events cursor `from`), cancel = roko.
+  if (p === '/api/fastag-mapping/job' && method === 'GET') {
+    requireAdmin(user);
+    const id = url.searchParams.get('id');
+    const job = id ? mappingJobs.find(id, user.username) : (url.searchParams.get('latest') ? mappingJobs.latest(user.username) : null);
+    if (!job) return sendJson(res, 200, { ok: true, gone: true });
+    return sendJson(res, 200, mappingJobs.snapshot(job, url.searchParams.get('from')));
+  }
+  if (p === '/api/fastag-mapping/job' && method === 'POST') {
+    requireAdmin(user);
+    if (!String(process.env.GV_TAG_MAPPING_SECRET || '').trim()) throw new HttpError(503, 'Mapping API configured nahi hai. Render environment me GV_TAG_MAPPING_SECRET set karein.');
+    const body = await readBody(req);
+    let sheet = null;
+    if (body && body.sheet && body.sheet.link) {
+      const spreadsheetId = sheetIdFrom(body.sheet.link);
+      const column = String(body.sheet.column || '').trim().toUpperCase();
+      if (spreadsheetId && /^[A-Z]{1,3}$/.test(column) && String(body.sheet.tab || '').trim()) sheet = { spreadsheetId, tab: String(body.sheet.tab).trim(), column, doneText: String(body.sheet.doneText || 'done') };
+    }
+    try {
+      const job = mappingJobs.create({ owner: user.username, rows: body && body.rows, sheet, sheetPlan: body && body.sheetPlan, retryOf: body && body.retryOf });
+      return sendJson(res, 200, mappingJobs.snapshot(job, 0));
+    } catch (err) {
+      if (err && err.code === 'RUNNING') return sendJson(res, 409, { ok: false, error: err.message, runningId: err.runningId });
+      if (err && (err.code === 'GONE' || err.code === 'EMPTY')) throw new HttpError(err.code === 'GONE' ? 410 : 400, err.message);
+      throw err;
+    }
+  }
+  if (p === '/api/fastag-mapping/job/cancel' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const job = mappingJobs.find(body && body.id, user.username);
+    if (!job) throw new HttpError(404, 'Job nahi mili.');
+    mappingJobs.cancel(job);
+    return sendJson(res, 200, { ok: true });
   }
 
   // ---- gviz ----

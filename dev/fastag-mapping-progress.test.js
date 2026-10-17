@@ -33,6 +33,7 @@ function makePage(opts = {}) {
   const queryLog = [];
   const requests = { lookup: 0, map: [], index: 0, status: 0 };
   const mapPlans = (opts.mapPlans || []).slice();
+  let jobRows = [];
   const selectors = new Map();
   const fakeNode = () => ({ value: '', innerHTML: '', textContent: '', className: '', disabled: false, files: [], checked: false });
   for (const sel of ['#fm-api-status', '#fm-index-status', '#fm-message', '#fm-summary', '#fm-results', '#fm-progress',
@@ -61,12 +62,18 @@ function makePage(opts = {}) {
     if (path_.includes('/api/fastag-mapping/status')) { requests.status++; return jsonRes({ ok: true, configured: true, index: { ready: true, building: false, rows: 120 }, rateLimited: rateState.active }); }
     if (path_.includes('/api/fastag-mapping/index-status')) { requests.index++; return jsonRes({ ok: true, ready: true, building: false, rows: 120, ageSec: 3 }); }
     if (path_.includes('/api/fastag-mapping/lookup')) { requests.lookup++; return jsonRes({ error: 'missing' }, 404); }   // legacy → client fallback
-    if (path_.includes('/api/fastag-mapping/map')) {
-      const body = JSON.parse(init.body);
-      requests.map.push(body.rows);
-      const plan = mapPlans.length ? mapPlans.shift() : { ok: true, results: body.rows.map((_, i) => ({ index: i, success: true, status: 'Success', message: 'Mapped' })) };
-      if (plan.status) return jsonRes(plan.body || {}, plan.status);
-      return jsonRes(plan);
+    // ⚡ v194 — mapping ab server-side background job hai: POST /job shuru, GET /job?id=… progress.
+    if (path_.includes('/api/fastag-mapping/job')) {
+      if (init && init.method === 'POST') {
+        const body = JSON.parse(init.body);
+        requests.map.push(body.rows || body);
+        jobRows = body.rows || jobRows;
+        return jsonRes({ ok: true, id: 'J' + requests.map.length, status: 'running', total: jobRows.length, okCount: 0, failed: 0, left: jobRows.length, events: [], next: 0, startedAt: Date.now(), serverNow: Date.now() });
+      }
+      requests.poll = (requests.poll || 0) + 1;
+      const plan = mapPlans.length ? mapPlans.shift() : null;
+      const base = { ok: true, id: 'J' + requests.map.length, status: 'done', total: jobRows.length, okCount: jobRows.length, failed: 0, retrying: 0, left: 0, startedAt: Date.now() - 5000, serverNow: Date.now(), reasons: [], sheet: { enabled: false }, events: jobRows.map((r, i) => ({ i, k: r.tagId, s: 1, st: 'Success', m: 'Mapped', rt: 0 })), next: jobRows.length };
+      return jsonRes(plan ? Object.assign(base, plan(jobRows)) : base);
     }
     return jsonRes({}, 404);
   };
@@ -101,7 +108,7 @@ const uploadCsv = async (root, selectors, csv) => {
   await click(root, 'fm-upload-add');
 };
 
-test('live counters: mapping ke dauraan done/total + success/failed screen par update hote hain (25-row batches)', async () => {
+test('live counters (v194): mapping server-side job banti hai, progress done/total + success/failed + % dikhata hai', async () => {
   const { root, selectors, requests } = makePage();
   const csv = ['barcode,agentId'].concat(Array.from({ length: 30 }, (_, i) => `8900000000${String(1000 + i)},AGT-${i}`)).join('\n');
   await uploadCsv(root, selectors, csv);
@@ -109,32 +116,37 @@ test('live counters: mapping ke dauraan done/total + success/failed screen par u
   assert.match(selectors.get('#fm-progress').innerHTML, /StockDataa lookup/, 'lookup ka live counter dikhta hai');
 
   await click(root, 'fm-map');
+  for (let i = 0; i < 50 && !/Mapping complete/.test(selectors.get('#fm-progress').innerHTML); i++) await new Promise((r) => setImmediate(r));
   const html = selectors.get('#fm-progress').innerHTML;
   assert.match(html, /Mapped \/ done/, 'success counter');
   assert.match(html, /Failed/, 'failed counter');
-  assert.match(html, /30\s*\/\s*30|30 \/ 30/, 'done == total');
+  assert.match(html, /30<\/b> \/ 30/, 'done == total (bada bold number)');
   assert.match(html, /100%/, 'progress 100%');
   assert.match(html, /Mapping complete/, 'summary line');
-  assert.equal(requests.map.length, 2, '30 rows = 25 + 5 ke do batch');
-  assert.equal(requests.map[0].length, 25, 'pehla batch 25 rows');
-  assert.equal(requests.map[1].length, 5, 'doosra batch 5 rows');
-  assert.equal(requests.map.flat().length, 30, 'sab rows API par gayi');
+  assert.match(html, /fm-prog-big/, 'bada coloured heading');
+  assert.equal(requests.map.length, 1, 'ek hi server job (browser batch nahi bhejta)');
+  assert.equal(requests.map[0].length, 30, 'sab 30 rows ek job me');
 });
 
-test('mapping API 429: rows retryable mark hote hain aur retry pass me dobara bheji jaati hain', async () => {
+test('mapping job: live failed + auto-retry + wajah dikhte hain, phir complete; failures par "dobara map karo" button', async () => {
   const plans = [
-    { status: 429, body: { error: 'Mapping API rate limit (429 Too Many Requests)', rateLimited: true } },
-    { ok: true, results: [{ index: 0, success: true, status: 'Success', message: 'Mapping successful' }] }
+    (rows) => ({ status: 'running', okCount: 0, failed: 1, retrying: 1, left: 0, reasons: [['Rate limited — Mapping API rate limit (429)', 1]], events: [{ i: 0, k: rows[0].tagId, s: 0, st: 'Rate limited', m: '429', rt: 1 }], next: 1, note: '🔁 Auto-retry round 1 / 4: 1 failed row 3s baad dobara…' }),
+    (rows) => ({ status: 'done', okCount: 0, failed: 1, retrying: 0, left: 0, reasons: [['Conflict — Tag not available', 1]], events: [{ i: 0, k: rows[0].tagId, s: 0, st: 'Conflict', m: 'Tag not available', rt: 0 }], next: 2 })
   ];
   const { root, selectors, requests } = makePage({ mapPlans: plans });
   await uploadCsv(root, selectors, 'barcode,agentId\n8900000000111111,AGT-1');
   await click(root, 'fm-lookup');
   await click(root, 'fm-map');
-  assert.equal(requests.map.length, 2, 'pehli call 429, retry pass me dobara');
-  assert.equal(requests.map[1].length, 1, 'retry pass wahi row bhejta hai');
+  for (let i = 0; i < 50 && !/dobara map karo/.test(selectors.get('#fm-progress').innerHTML); i++) await new Promise((r) => setImmediate(r));
   const html = selectors.get('#fm-progress').innerHTML;
-  assert.match(html, /Mapping complete/, 'retry ke baad complete');
-  assert.match(html, /Mapped \/ done <b>1<\/b>/, 'retry se success ginti 1');
+  assert.match(html, /Mapping complete/, 'job khatam');
+  assert.match(html, /Failed <b>1<\/b>/, 'failed ginti 1');
+  assert.match(html, /Conflict/, 'fail ki wajah dikhti hai');
+  assert.match(html, /id="fm-retry"[^>]*>[^<]*Failed 1 rows dobara map karo/, 'failed rows ko dobara map karne ka button');
+  // button dabane par server ko retryOf job id ke saath POST jaata hai
+  await click(root, 'fm-retry');
+  const lastPost = requests.map[requests.map.length - 1];
+  assert.equal(lastPost.retryOf, 'J1', 'purani job ki failed rows server-side dobara');
 });
 
 test('Google rate limit par lookup saaf message + retry button deta hai (HTML page nahi)', async () => {
