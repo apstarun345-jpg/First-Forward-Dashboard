@@ -576,6 +576,11 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     const portalPage = await fetch(`${server.base}/portal`);
     assert.equal(portalPage.status, 200, 'common /portal login page opens');
     assert.ok((await portalPage.text()).includes('pt-form'), 'portal login form present');
+    const portalHtmlTxt = await (await fetch(`${server.base}/portal`)).text();
+    assert.ok(!/<script>/.test(portalHtmlTxt) && portalHtmlTxt.includes('src="/portal.js"'), 'portal uses external script (CSP blocks inline)');
+    const portalJs = await fetch(`${server.base}/portal.js`);
+    assert.equal(portalJs.status, 200, 'portal.js served');
+    assert.match(await portalJs.text(), /portal-login/);
     const portalBad = await call('/api/public/portal-login', 'POST', { personId: 'AG-1001', password: '9876543211' });
     assert.equal(portalBad.res.status, 403, 'wrong password rejected');
     const portalOk = await call('/api/public/portal-login', 'POST', { personId: ' ag 1001 ', password: '98765-43210' });

@@ -8424,6 +8424,8 @@ function personalRequestsHtml(link) {
   }).join('');
   return `<section class="pb-card"><h3>🏷️ My Tag Requests</h3><div class="pb-tbl-wrap" style="overflow:auto"><table class="pb-tbl"><thead><tr><th>Date</th>${isTl ? '<th>Agent</th>' : ''}<th>Class-wise qty</th><th>Status</th><th>Courier</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
 }
+const PORTAL_LOGIN_JS = "(function(){var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');\n      function go(extra){e.hidden=true;b.disabled=true;b.textContent='\u23f3 Login ho raha hai\u2026';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;\n      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){\n        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}\n        if(x.j.url){location.href=x.j.url;return;}\n        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'\ud83d\udfe9 ':'\ud83d\udfe6 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='\ud83d\udd13 Login';}\n      }).catch(function(err){e.textContent='\u26a0\ufe0f '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='\ud83d\udd13 Login';});}\n      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();";
+
 async function servePersonalPage(req, res, rawToken) {
   const token = String(rawToken || '').split(/[/?#]/)[0].trim();
   const noStore = { 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' };
@@ -8483,7 +8485,7 @@ async function servePersonalPage(req, res, rawToken) {
           heading: `👋 Welcome, <b>${escHtml(link.name)}</b>`,
           sub: 'Report taiyar ho rahi hai…',
           token, requireAuth, authorized: true, personName: link.name,
-          body: '<section class="pb-card" style="text-align:center;padding:36px 18px"><div style="font-size:34px">⏳</div><h3>Aapka report load ho raha hai…</h3><p class="dim" style="margin-top:6px">Sheet se live data aa raha hai — yeh page apne aap khul jayega.</p></section><script>setTimeout(function(){location.reload();},2500);</script>'
+          body: '<section class="pb-card" style="text-align:center;padding:36px 18px"><div style="font-size:34px">⏳</div><h3>Aapka report load ho raha hai…</h3><p class="dim" style="margin-top:6px">Sheet se live data aa raha hai — yeh page apne aap khul jayega.</p></section><div id="pl-reload" data-reload-ms="2500" hidden></div>'
         }), noStore);
       }
     }
@@ -8964,6 +8966,8 @@ const PERSONAL_PORTAL_JS = `(function () {
   var lockBtn = document.getElementById('pl-lock-btn');
   var form = document.getElementById('pl-auth-form');
   // Stock index abhi ban raha ho to thodi der baad page apne aap refresh (CSP ki wajah se inline script nahi).
+  var rl = document.getElementById('pl-reload');
+  if (rl) setTimeout(function () { window.location.reload(); }, Number(rl.getAttribute('data-reload-ms')) || 2500);
   var pend = document.getElementById('pl-stock-pending');
   if (pend) setTimeout(function () { window.location.reload(); }, Number(pend.getAttribute('data-refresh-ms')) || 8000);
 
@@ -9228,6 +9232,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/p-portal.js') {
       return sendMaybeCompressed(req, res, 200, 'application/javascript; charset=utf-8', PERSONAL_PORTAL_JS, { 'Cache-Control': 'no-cache' });
     }
+    if (url.pathname === '/portal.js') {
+      return sendMaybeCompressed(req, res, 200, 'application/javascript; charset=utf-8', PORTAL_LOGIN_JS, { 'Cache-Control': 'no-cache' });
+    }
     if (url.pathname === '/portal' || url.pathname === '/portal/') {
       if (feats().personalLinks === false) return sendText(res, 404, 'Not found');
       const loginBody = `<section class="pb-card pb-auth-card" id="pl-auth-gate">
@@ -9243,14 +9250,7 @@ const server = http.createServer(async (req, res) => {
         </form>
         <p class="dim" style="font-size:11.5px;margin-top:10px">🔒 ID + password sahi hone par hi data bheja jaata hai.</p>
       </section>
-      <script>(function(){var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');
-      function go(extra){e.hidden=true;b.disabled=true;b.textContent='⏳ Login ho raha hai…';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;
-      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){
-        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}
-        if(x.j.url){location.href=x.j.url;return;}
-        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'🟩 ':'🟦 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='🔓 Login';}
-      }).catch(function(err){e.textContent='⚠️ '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='🔓 Login';});}
-      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();</script>`;
+      <script src="/portal.js"></script>`;
       return sendHtml(res, 200, personalShell({ title: 'Personal Report Login', heading: '🔐 Personal Report Login', sub: 'ID + password se apni report kholo · read-only', requireAuth: false, authorized: true, body: loginBody }), { 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' });
     }
     if (url.pathname.startsWith('/p/')) {
