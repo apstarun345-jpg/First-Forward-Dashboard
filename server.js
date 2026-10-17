@@ -7093,6 +7093,8 @@ async function handleApi(req, res, url) {
     if (cfgMob !== rawMob) throw new HttpError(403, 'Mobile number match nahi hua — registered 10-digit mobile number daalo.');
 
     const session = createPersonalLinkSession(req, savedLink);
+    // 🔥 v187 — verify hote hi sheet data background me garam karo, page reload par seedha cache se khule.
+    try { const wl = { ...savedLink, source: savedLink.source === 'gv' ? 'gv' : 'ff' }; personalDailyRows(wl).catch(() => {}); if (isTeamLink(wl)) personalTeamAgents(wl).catch(() => {}); } catch { /* best-effort */ }
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': session.cookie, 'Cache-Control': 'no-store' });
   }
   if (p === '/api/public/personal-link/logout' && method === 'POST') {
@@ -8445,6 +8447,24 @@ async function servePersonalPage(req, res, rawToken) {
     const rowsPromise = needsIssuance ? personalDailyRows(link) : Promise.resolve([]);
     const teamPromise = isTeamLink(link) && (hasSec('issuance') || hasSec('performance') || hasSec('insights'))
       ? personalTeamAgents(link) : Promise.resolve(new Map());
+    // ⚡ v187 — page kabhi latka nahi: sheet data 3s me na aaye to turant "ready ho raha hai" page (auto-retry);
+    // upar ke fetch background me chalte rehte hain (inflight + cache) isliye agla try seedha cache se khulta hai.
+    if (needsIssuance) {
+      const quiet = (pr) => pr.catch(() => null);
+      const ready = await Promise.race([
+        Promise.all([quiet(rowsPromise), quiet(teamPromise)]).then(() => true),
+        new Promise((resolve) => { const t = setTimeout(() => resolve(false), 3000); if (t.unref) t.unref(); })
+      ]);
+      if (!ready) {
+        return sendHtml(res, 200, personalShell({
+          title: `${link.name} · Loading`,
+          heading: `👋 Welcome, <b>${escHtml(link.name)}</b>`,
+          sub: 'Report taiyar ho rahi hai…',
+          token, requireAuth, authorized: true, personName: link.name,
+          body: '<section class="pb-card" style="text-align:center;padding:36px 18px"><div style="font-size:34px">⏳</div><h3>Aapka report load ho raha hai…</h3><p class="dim" style="margin-top:6px">Sheet se live data aa raha hai — yeh page apne aap khul jayega.</p></section><script>setTimeout(function(){location.reload();},2500);</script>'
+        }), noStore);
+      }
+    }
     const tlNamePromise = link.kind === 'group' ? Promise.resolve(String(link.tlLabel || '')) : (!isTeamLink(link) && hasVisibleSection
       ? personalAgentTl(link) : Promise.resolve(''));
     // 📦 Stock ka state batana zaroori hai — pehle timeout par chupchap "—" dikhta tha (user ko lagta tha data hi nahi hai).
@@ -8455,7 +8475,7 @@ async function servePersonalPage(req, res, rawToken) {
         const sidx = await Promise.race([
           stockAgeIndex(false),
           new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('stock timeout')), 5000);
+            timer = setTimeout(() => reject(new Error('stock timeout')), 3500);
             if (timer && timer.unref) timer.unref();
           })
         ]);
@@ -8662,7 +8682,7 @@ async function servePersonalPage(req, res, rawToken) {
     if (hasSec('stock') || hasSec('ageing')) summaryTiles.push(stockInfo
       ? tile('stock', '🧓', 'Purana stock ≥3M', nf(totAgeC[1]), `≥6M: ${nf(totAgeC[3])} · ${stTotal ? Math.round((totAgeC[1] / stTotal) * 100) : 0}% stock`)
       : tile('stock', '🧓', 'Purana stock ≥3M', '—', escHtml(stockNote)));
-    const stockPendingEl = stockMeta.state === 'loading' ? '<div id="pl-stock-pending" data-refresh-ms="8000" hidden></div>' : '';
+    const stockPendingEl = stockMeta.state === 'loading' ? '<div id="pl-stock-pending" data-refresh-ms="6000" hidden></div>' : '';
     const summaryHtml = `<section class="pb-kpis pb-kpis-sum">${summaryTiles.join('')}</section>${stockNote && stockMeta.state !== 'loading' ? `<p class="pb-note">⚠️ ${escHtml(stockNote)}</p>` : stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>${stockPendingEl}` : ''}`;
     const tlName = await tlNamePromise;
 

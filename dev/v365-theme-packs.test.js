@@ -179,3 +179,10 @@ test('🧠 v186 — old personal links with Performance get Insights unless admi
   assert.match(srv, /link\.secV = 2/);
   assert.match(srv, /effSecs/);
 });
+
+test('⚡ v187 — personal page never hangs: 3s time-box loading page + prewarm on verify', () => {
+  const srv = read('server.js');
+  assert.match(srv, /Report taiyar ho rahi hai/);
+  assert.match(srv, /Aapka report load ho raha hai/);
+  assert.match(srv, /sheet data background me garam karo/);
+});
