@@ -8451,7 +8451,7 @@ async function servePersonalPage(req, res, rawToken) {
         const sidx = await Promise.race([
           stockAgeIndex(false),
           new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('stock timeout')), 22000);
+            timer = setTimeout(() => reject(new Error('stock timeout')), 5000);
             if (timer && timer.unref) timer.unref();
           })
         ]);
@@ -8658,7 +8658,7 @@ async function servePersonalPage(req, res, rawToken) {
     if (hasSec('stock') || hasSec('ageing')) summaryTiles.push(stockInfo
       ? tile('stock', '🧓', 'Purana stock ≥3M', nf(totAgeC[1]), `≥6M: ${nf(totAgeC[3])} · ${stTotal ? Math.round((totAgeC[1] / stTotal) * 100) : 0}% stock`)
       : tile('stock', '🧓', 'Purana stock ≥3M', '—', escHtml(stockNote)));
-    const stockPendingEl = stockMeta.state === 'loading' ? '<div id="pl-stock-pending" data-refresh-ms="25000" hidden></div>' : '';
+    const stockPendingEl = stockMeta.state === 'loading' ? '<div id="pl-stock-pending" data-refresh-ms="8000" hidden></div>' : '';
     const summaryHtml = `<section class="pb-kpis pb-kpis-sum">${summaryTiles.join('')}</section>${stockNote && stockMeta.state !== 'loading' ? `<p class="pb-note">⚠️ ${escHtml(stockNote)}</p>` : stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>${stockPendingEl}` : ''}`;
     const tlName = await tlNamePromise;
 
@@ -8919,7 +8919,7 @@ const PERSONAL_PORTAL_JS = `(function () {
   var form = document.getElementById('pl-auth-form');
   // Stock index abhi ban raha ho to thodi der baad page apne aap refresh (CSP ki wajah se inline script nahi).
   var pend = document.getElementById('pl-stock-pending');
-  if (pend) setTimeout(function () { window.location.reload(); }, Number(pend.getAttribute('data-refresh-ms')) || 25000);
+  if (pend) setTimeout(function () { window.location.reload(); }, Number(pend.getAttribute('data-refresh-ms')) || 8000);
 
   if (lockBtn) lockBtn.addEventListener('click', function () {
     lockBtn.disabled = true;
