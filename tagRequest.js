@@ -1028,9 +1028,9 @@ body.colorful .from-hdr { color: #166534; }
         <td class="num">${x.m ? fmt(x.m.stock) : '—'}</td>
         <td class="num">${x.m ? fmt(x.m.cur) : '—'}</td>
         <td class="num">${x.m ? fmt(x.m.last) : '—'}</td>
-        <td style="min-width:220px"><span class="badge ${x.verdict.tone}" style="white-space:normal;display:inline-block;line-height:1.35">${esc(x.verdict.text)}</span></td></tr>`).join('');
+</tr><tr><td colspan="6" style="border-top:0;padding-top:0"><span class="badge ${x.verdict.tone}" style="white-space:normal;display:inline-block;line-height:1.35">${esc(x.verdict.text)}</span></td></tr>`).join('');
     return `<div class="tr-dup-review" id="tr-dup-review"><h4 style="margin:10px 0 4px">📊 Review — asli issuance aur stock</h4>
-      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Agent</th><th>Ab maang rahe</th><th>Pehle maange</th><th>📦 Stock abhi</th><th>▶ Issued (is mahine)</th><th>📅 Pichhle mahine</th><th>Nateeja</th></tr></thead><tbody>${body}</tbody></table></div>
+      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Agent</th><th>Ab maang rahe</th><th>Pehle maange</th><th>📦 Stock abhi</th><th>▶ Issued (is mahine)</th><th>📅 Pichhle mahine</th></tr></thead><tbody>${body}</tbody></table></div>
       <small class="dim">Issuance / stock sheet ke latest data se (FF = kal tak, GV = live). Tags = sirf FASTag quantity.</small></div>`;
   }
   function dupWarningHtml() {
@@ -1046,8 +1046,8 @@ body.colorful .from-hdr { color: #166534; }
     const dup = state.dup || {};
     const reasons = DUP_REASONS.map(([k, label]) => `<option value="${esc(k)}"${dup.reason === k ? ' selected' : ''}>${esc(label)}</option>`).join('');
     const ready = !!(dup.ok && dup.reason);
-    return `<section class="card tr-dup-warn" id="tr-dup-card"><div class="card-body">
-      <h3 style="margin:0 0 6px">🔁 Repeat request — pehle confirm karo</h3>
+    return `<div class="tr-dup-backdrop" data-tr-dup-backdrop role="dialog" aria-modal="true" aria-label="Repeat request warning"><section class="card tr-dup-warn" id="tr-dup-card"><div class="card-body">
+      <h3 style="margin:0 0 6px">⚠️ Repeat request — pichhle 7 din me isi agent ki request ja chuki hai</h3>
       <p style="margin:0 0 8px"><b>${esc(state.employee.name || '')}</b>, isi agent (wahi class) ki <b>${fmt(list.length)} request pehle se hai</b>${recent ? ` (<b>${fmt(recent)}</b> pichhle 7 din ki)` : ''} — kisi bhi employee ne daali ho. Neeche asli stock aur issuance dekh lo, phir tabhi dobara bhejo jab sach me zaroorat ho.</p>
       <ul class="tr-dup-list">${rows}</ul>
       ${dupReviewHtml(list)}
@@ -1059,7 +1059,7 @@ body.colorful .from-hdr { color: #166534; }
         <button class="btn primary" data-tr-act="dup-status" data-id="${esc(list[0].id || '')}">🔎 Status dekho</button>
         <button class="btn" data-tr-act="dup-force" ${ready ? '' : 'disabled'}>✅ Confirm — phir bhi bhejo</button>
         <button class="btn" data-tr-act="dup-edit">✏️ Form me wapas</button>
-      </div></div></section>`;
+      </div></div></section></div>`;
   }
 
   // ---- 🖼️ shell: head + tabs ------------------------------------------------------------------------
@@ -1877,6 +1877,12 @@ body.colorful .from-hdr { color: #166534; }
     if (dupOk) dupOk.addEventListener('change', () => { state.dup.ok = !!dupOk.checked; syncDupBtn(); });
     if (dupReason) dupReason.addEventListener('change', () => { state.dup.reason = dupReason.value; syncDupBtn(); });
     act('dup-edit', () => { state.dup.list = []; renderForm(); });
+    const dupBackdrop = root.querySelector('[data-tr-dup-backdrop]');
+    if (dupBackdrop) {
+      dupBackdrop.addEventListener('click', (e) => { if (e.target === dupBackdrop) { state.dup.list = []; renderForm(); } });
+      const onEsc = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onEsc); if (state.dup.list.length) { state.dup.list = []; renderForm(); } } };
+      document.addEventListener('keydown', onEsc);
+    }
     act('dup-status', (e) => {
       const id = (e.currentTarget && e.currentTarget.dataset.id) || '';
       state.dup.list = [];

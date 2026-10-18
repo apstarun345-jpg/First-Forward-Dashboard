@@ -5767,27 +5767,37 @@ async function handleApi(req, res, url) {
     }).filter((x) => (x.id || x.name || x.mobile.length === 10) && x.classes.size);
     if (!wanted.length) return [];
     const nowMs = Date.now();
+    const DAY = 24 * 3600e3;
     const out = [];
     for (const r of (workspaceStore().tagRequests || [])) {
       if (!r) continue;
       const status = String(r.status || 'pending').toLowerCase();
-      if (status !== 'pending' && status !== 'approved' && status !== 'dispatched') continue;
       const t = new Date(r.at || r.updatedAt || 0).getTime();
-      // Pending/approved stay "active" for 30 days; a request that was already DISPATCHED only counts for the last 7 days
-      // (agent ko abhi tag mile hain — dobara maangna shayad galti hai).
-      if (t && nowMs - t > (status === 'dispatched' ? 7 : 30) * 24 * 3600e3) continue;
+      // 🔁 v206 — PICHHLE 7 DIN me us agent ki koi bhi request (kisi bhi stage par: pending / approved / dispatched /
+      // rejected…, kisi bhi class me, kisi bhi employee/admin ki) = repeat. Pending/approved 7 din se purani bhi
+      // 30 din tak "active" hai (same class par) — dispatched/rejected sirf 7 din.
+      const recent7 = !t || nowMs - t <= 7 * DAY;
+      if (!recent7) {
+        if (status !== 'pending' && status !== 'approved') continue;
+        if (nowMs - t > 30 * DAY) continue;
+      }
       const rMob = tagDigits(r.agent && r.agent.mobile).slice(-10);
+      const rAgentId = String((r.agent && r.agent.agentId) || '').trim();
+      const rAgentName = tagNameKey((r.agent && r.agent.name) || '');
       const matched = [];
-      const matchedQty = [];   // review panel ke liye: pehle kis agent × class par kitne tag maange gaye the
+      const matchedQty = [];
       for (const want of wanted) {
+        const headSame = (want.id && rAgentId && rAgentId === want.id) || (want.name && rAgentName && rAgentName === want.name) || (want.mobile.length === 10 && rMob === want.mobile);
         for (const x of (r.rows || [])) {
           const cls = String((x && x.cls) || '').toUpperCase();
-          if (!want.classes.has(cls) || !(Number(x.approved) > 0)) continue;
-          const same = (want.id && String(x.agentId || '').trim() === want.id) || (want.name && tagNameKey(x.agentName) === want.name) || (want.mobile.length === 10 && rMob === want.mobile);
-          const label = `${x.agentName || want.label} · ${cls}`;
-          if (same && !matched.includes(label)) {
+          const q = Math.round(Number(x && (x.requested ?? x.approved)) || Number(x && x.approved) || 0);
+          if (!recent7 && (!want.classes.has(cls) || !(Number(x.approved) > 0))) continue;
+          const same = headSame || (want.id && String(x.agentId || '').trim() === want.id) || (want.name && tagNameKey(x.agentName) === want.name) || (want.mobile.length === 10 && rMob === want.mobile);
+          if (!same) continue;
+          const label = `${x.agentName || (r.agent && r.agent.name) || want.label} · ${cls}`;
+          if (!matched.includes(label)) {
             matched.push(label);
-            matchedQty.push({ agentName: String(x.agentName || want.label || ''), agentId: String(x.agentId || ''), cls, qty: Math.round(Number(x.approved) || 0) });
+            matchedQty.push({ agentName: String(x.agentName || (r.agent && r.agent.name) || want.label || ''), agentId: String(x.agentId || rAgentId || ''), cls, qty: q });
           }
         }
       }
@@ -5795,7 +5805,7 @@ async function handleApi(req, res, url) {
       out.push({
         id: r.id, at: r.at || '', status: r.status || 'pending', total: Number(r.total) || 0, rows: (r.rows || []).length,
         byName: r.byName || '', agentName: (r.agent && r.agent.name) || ((r.rows || [])[0] || {}).agentName || '', matched: matched.slice(0, 8), matchedQty: matchedQty.slice(0, 16),
-        repeat7: !t || nowMs - t <= 7 * 24 * 3600e3
+        repeat7: recent7
       });
     }
     return out.slice(-8).reverse();

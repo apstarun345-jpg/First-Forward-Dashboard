@@ -200,7 +200,8 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     const byMobile = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Suresh Kumar' }, agents: [{ agentName: 'R. Sharma (naya naam)', mobile: '9876500001', rows: [{ cls: 'VC5', approved: 2 }] }] }, '', '10.1.0.3');
     assert.equal(byMobile.json.duplicates.length, 1, 'naam alag ho par mobile same → bhi duplicate');
     const otherCls = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Suresh Kumar' }, agents: [{ agentName: 'Rahul Sharma', agentId: '1001', rows: [{ cls: 'VC16', approved: 2 }] }] }, '', '10.1.0.3');
-    assert.equal(otherCls.json.duplicates.length, 0, 'alag class → duplicate nahi');
+    assert.equal(otherCls.json.duplicates.length, 1, 'v206: pichhle 7 din me isi agent ki koi bhi request (alag class bhi) = repeat');
+    assert.equal(otherCls.json.duplicates[0].repeat7, true);
     const resubmit = await jsonCall(server.base, '/api/public/tag-request', 'POST', {
       employee: { name: 'Ramesh Yadav', office: 'Jaipur office' }, employeeToken,
       agents: [rahul({ address: '99, New Road, Jaipur', pincode: '302016', rows: [{ cls: 'VC16', requested: 2, approved: 2 }] })]
@@ -212,13 +213,13 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.equal(updatedContact.json.contact.pincode, '302016');
     const again = await jsonCall(server.base, '/api/public/tag-request', 'POST', { employee: { name: 'Suresh Kumar' }, agents: [rahul({ rows: [{ cls: 'VC4', approved: 8 }] })] }, '', '10.1.0.4');
     assert.equal(again.res.status, 201, JSON.stringify(again.json));
-    assert.equal(again.json.requests[0].duplicates, 1);
+    assert.equal(again.json.requests[0].duplicates, 2, 'v206: rq1 + resubmit (alag class) dono pichhle 7 din ke andar');
     assert.equal(again.json.warnings[0].code, 'duplicate');
 
 
     const list2 = await jsonCall(server.base, '/api/tag-requests', 'GET', undefined, admin);
     const dupRow = list2.json.requests.find((r) => r.id === again.json.request.id);
-    assert.deepEqual(dupRow.dupOf, [rq1.id], 'admin list me 🔁 dupOf');
+    assert.ok(dupRow.dupOf.includes(rq1.id) && dupRow.dupOf.length === 2, 'admin list me 🔁 dupOf');
 
     // 6) ✏️ admin inline class edit — VC4 25→20, VC5 5→0, nayi VC7 4 (classData snapshot) + approve
     const edit = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(rq1.id)}`, 'PUT', {
@@ -247,6 +248,9 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.deepEqual(mine.classes.find((c) => c.cls === 'VC4'), { cls: 'VC4', requested: 25, approved: 20 });
     const rej = await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(rq2.id)}`, 'PUT', { status: 'rejected', adminNote: 'Pincode detail confirm karein' }, admin);
     assert.equal(rej.json.request.status, 'rejected');
+    // v206: REJECTED request bhi pichhle 7 din me repeat maani jaati hai (kisi bhi stage par popup)
+    const afterReject = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Suresh Kumar' }, agents: [{ agentName: rq2.agentName, mobile: rq2.mobile, rows: [{ cls: 'VC4', approved: 3 }] }] }, '', '10.1.0.77');
+    assert.ok(afterReject.json.duplicates.some((d) => d.id === rq2.id && d.status === 'rejected' && d.repeat7 === true), 'rejected request bhi repeat warning me aati hai');
     const employeeStatusUpdated = await jsonCall(server.base, `/api/public/tag-request/employee-status?token=${encodeURIComponent(employeeToken)}`);
     assert.equal(employeeStatusUpdated.json.totalRequests, 4);
     assert.equal(employeeStatusUpdated.json.pending, 2, 'repeat submission remains pending');

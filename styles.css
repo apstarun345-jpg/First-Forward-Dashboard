@@ -3484,7 +3484,9 @@ html[data-theme="dark"] .tr-sb-tbl .tr-sb-mtd b { color: #c4b5fd; }
 .tr-status-row .input { flex: 1; min-width: 220px; }
 .tr-status-line { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
 /* 🔁 duplicate warning (public employee form) — submit se pehle "already pending" block */
+.tr-dup-backdrop .tr-dup-warn { width: min(920px, 100%); margin: 0; box-shadow: 0 24px 70px rgba(0,0,0,.35); }
 .tr-dup-warn { border-left: 4px solid #f59e0b; background: #fffbeb; }
+html[data-theme="dark"] .tr-dup-warn { background: #2a2110; }
 .tr-dup-warn h3 { color: #92400e; }
 .tr-dup-list li { line-height: 1.45; }
 .tr-dup-list .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
