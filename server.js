@@ -724,7 +724,15 @@ const sheetFreshCache = new Map();   // v178 — /api/sheet-freshness 60s cache
 let sheetFreshLastItems = null;
 const SHEET_ROWS_FILE = path.join(DATA_DIR, 'sheet-rows.json');
 let sheetRowsState = null;
-function sheetRowsLoad() { if (!sheetRowsState) { try { sheetRowsState = JSON.parse(readFileSync(SHEET_ROWS_FILE, 'utf8')) || {}; } catch { sheetRowsState = {}; } } return sheetRowsState; }
+function sheetRowsLoad() {
+  if (!sheetRowsState) {
+    const fromDb = db && db.settings && db.settings.sheetRows;
+    if (fromDb && typeof fromDb === 'object') sheetRowsState = fromDb;
+    else { try { sheetRowsState = JSON.parse(readFileSync(SHEET_ROWS_FILE, 'utf8')) || {}; } catch { sheetRowsState = {}; } }
+  }
+  return sheetRowsState;
+}
+/** Durable (settings me) — deploy/restart ke baad bhi "nayi rows kab aayi" yaad rahe. */
 function trackSheetRows(sheetKey, t) {
   const st = sheetRowsLoad();
   const sig = `${Number(t.totalRows) || 0}/${Number(t.lastRow) || 0}`;
@@ -732,13 +740,31 @@ function trackSheetRows(sheetKey, t) {
   if (!prev) st[sheetKey] = { sig, ms: 0 };
   else if (prev.sig !== sig) st[sheetKey] = { sig, ms: Date.now() };
   else return prev.ms || 0;
+  try { if (db && db.settings) { db.settings.sheetRows = st; persist('settings').catch(() => {}); } } catch { /* optional */ }
   try { writeFileSync(SHEET_ROWS_FILE, JSON.stringify(st)); } catch { /* optional */ }
   return st[sheetKey].ms || 0;
 }
 async function computeSheetFreshness(items, url0, secret0, idOf) {
+  const out = { ok: true, at: Date.now(), files: {}, tabs: {} };
+  // 📊 gviz row count — Apps Script ke bina bhi chalta hai (nayi rows aayi = sheet update hui)
+  const counts = Promise.all(items.map(async (it) => {
+    const id = idOf(it.source) || (it.source === 'ff' ? DEFAULT_SHEET_ID : '');
+    if (!id) return;
+    try {
+      const r = await gvizPageServer(new URLSearchParams({ id, sheet: it.tab, tq: `select count(${it.keyCol})` }), it.tab);
+      const c = r.rows && r.rows[0] && r.rows[0].c && r.rows[0].c[0];
+      const n = c && Number(c.v);
+      if (Number.isFinite(n)) it.gvizMs = trackSheetRows(`gviz|${it.source}|${it.tab}`, { totalRows: n, lastRow: n });
+    } catch { /* optional */ }
+  }));
+  if (!url0 || !secret0) {
+    await counts;
+    out.unavailableAS = 'Apps Script connect nahi hai';
+    items.forEach((it) => { out.tabs[it.key] = { tab: it.tab, changedMs: it.gvizMs || 0, gvizOnly: true }; });
+    return out;
+  }
   const store = new AppsScriptStore({ url: url0, secret: secret0 });
   store.timeoutMs = 40000; store.attempts = 2; store.label = 'Sheet freshness';
-  const out = { ok: true, at: Date.now(), files: {}, tabs: {} };
   await Promise.all(['ff', 'gv'].map(async (src) => {   // dono spreadsheets parallel
     const mine = items.filter((i) => i.source === src);
     const id = idOf(src);
@@ -752,6 +778,12 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
       out.files[src] = { error: /unknown action/i.test(m) ? 'Apps Script purana hai — google-apps-script/Code.gs (v3.73) dobara paste karke New version deploy karein.' : m.slice(0, 220) };
     }
   }));
+  await counts;
+  items.forEach((it) => {
+    const t = out.tabs[it.key] || (out.tabs[it.key] = { tab: it.tab, gvizOnly: true });
+    if (it.gvizMs && it.gvizMs > (t.changedMs || 0)) t.changedMs = it.gvizMs;
+    else if (t.changedMs == null) t.changedMs = it.gvizMs || 0;
+  });
   return out;
 }
 // 👤 v177 — employee ka naam: form me likha hua (ya pichhli baar yaad rakha hua) + IP se pehchan.
@@ -7565,7 +7597,6 @@ async function handleApi(req, res, url) {
   if (p === '/api/sheet-freshness' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
     const url0 = (process.env.APPS_SCRIPT_URL || '').trim(), secret0 = (process.env.APPS_SCRIPT_SECRET || '').trim();
-    if (!url0 || !secret0) return sendJson(res, 200, { ok: false, unavailable: 'Apps Script connect nahi hai (APPS_SCRIPT_URL / APPS_SCRIPT_SECRET).' });
     const body = await readBody(req);
     const items = (Array.isArray(body && body.items) ? body.items : []).slice(0, 8).map((i) => ({
       key: String((i && i.key) || '').slice(0, 30),
@@ -9715,7 +9746,7 @@ async function start() {
     // 🕒 v209 — har 15 min sheet row-count check (home khule na khule), taaki "data kab aaya" ka time sahi rahe
     setInterval(() => {
       const u = (process.env.APPS_SCRIPT_URL || '').trim(), sc = (process.env.APPS_SCRIPT_SECRET || '').trim();
-      if (!sheetFreshLastItems || !u || !sc) return;
+      if (!sheetFreshLastItems) return;
       computeSheetFreshness(sheetFreshLastItems, u, sc, (src) => String((src === 'gv' ? db.settings.gvSheetId : db.settings.sheetId) || '').replace(/[^A-Za-z0-9_-]/g, '')).catch(() => {});
     }, 15 * 60e3).unref();
     // 🌅 Scheduled checks: daily digest (subah 8 IST ke baad roz ek baar) + mid-month target +
