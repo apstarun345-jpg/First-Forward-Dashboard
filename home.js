@@ -793,8 +793,10 @@ FF.pages = FF.pages || {};
         const t = (json.tabs || {})[key] || {};
         const file = parseFile((json.files || {})[src]);
         const rowTime = t.cells ? rowTimeOf(t.cells) : null;
-        const value = rowTime || file.updated || null;
-        return { key, icon, title, tab: tabName, exact: true, value, rowTime, file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' };
+        // 🕒 v209 — nayi rows aayi (purani date ki ho tab bhi) = server ka row-count change time; pehli baar → file ka last edit
+        const changed = t.changedMs ? { d: new Date(t.changedMs), hasTime: true, col: 'new rows' } : (t.changedMs === 0 ? file.updated : null);
+        const value = later(rowTime, changed) || file.updated || null;
+        return { key, icon, title, tab: tabName, exact: true, value, rowTime: later(rowTime, changed), file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' };
       });
     }
     async function gvizCompute() {

@@ -720,6 +720,40 @@ const livePresence = new Map();
 // Tokens stay server-side; public GET responses never include them. Sessions are ephemeral by design.
 const publicLiveSessions = new Map();
 const sheetFreshCache = new Map();   // v178 — /api/sheet-freshness 60s cache
+// 🕒 v209 — row-count tracker: sheet me nayi rows aayi (chahe purani date ki ho) to "changedMs" = tab badalne ka time.
+let sheetFreshLastItems = null;
+const SHEET_ROWS_FILE = path.join(DATA_DIR, 'sheet-rows.json');
+let sheetRowsState = null;
+function sheetRowsLoad() { if (!sheetRowsState) { try { sheetRowsState = JSON.parse(readFileSync(SHEET_ROWS_FILE, 'utf8')) || {}; } catch { sheetRowsState = {}; } } return sheetRowsState; }
+function trackSheetRows(sheetKey, t) {
+  const st = sheetRowsLoad();
+  const sig = `${Number(t.totalRows) || 0}/${Number(t.lastRow) || 0}`;
+  const prev = st[sheetKey];
+  if (!prev) st[sheetKey] = { sig, ms: 0 };
+  else if (prev.sig !== sig) st[sheetKey] = { sig, ms: Date.now() };
+  else return prev.ms || 0;
+  try { writeFileSync(SHEET_ROWS_FILE, JSON.stringify(st)); } catch { /* optional */ }
+  return st[sheetKey].ms || 0;
+}
+async function computeSheetFreshness(items, url0, secret0, idOf) {
+  const store = new AppsScriptStore({ url: url0, secret: secret0 });
+  store.timeoutMs = 40000; store.attempts = 2; store.label = 'Sheet freshness';
+  const out = { ok: true, at: Date.now(), files: {}, tabs: {} };
+  await Promise.all(['ff', 'gv'].map(async (src) => {   // dono spreadsheets parallel
+    const mine = items.filter((i) => i.source === src);
+    const id = idOf(src);
+    if (!mine.length || !id) return;
+    try {
+      const r = await store.call('sheetmeta', { spreadsheetId: id, tabs: mine.map((i) => ({ tab: i.tab, keyCol: i.keyCol })) });
+      out.files[src] = r.file || {};
+      (r.tabs || []).forEach((t) => { const it = mine.find((i) => i.tab === t.tab); if (it) { if (!t.error) t.changedMs = trackSheetRows(`${src}|${t.tab}`, t); out.tabs[it.key] = t; } });
+    } catch (err) {
+      const m = String((err && err.message) || err);
+      out.files[src] = { error: /unknown action/i.test(m) ? 'Apps Script purana hai — google-apps-script/Code.gs (v3.73) dobara paste karke New version deploy karein.' : m.slice(0, 220) };
+    }
+  }));
+  return out;
+}
 // 👤 v177 — employee ka naam: form me likha hua (ya pichhli baar yaad rakha hua) + IP se pehchan.
 // Memory-only, 30 din; sirf admin notification me naam dikhane ke kaam aata hai.
 const publicIpNames = new Map();
@@ -7544,22 +7578,8 @@ async function handleApi(req, res, url) {
     const cacheKey = JSON.stringify([idOf('ff'), idOf('gv'), items]);
     const hit = sheetFreshCache.get(cacheKey);
     if (hit && Date.now() - hit.at < 60e3 && !body.fresh) return sendJson(res, 200, { ...hit.out, cached: true });
-    const store = new AppsScriptStore({ url: url0, secret: secret0 });
-    store.timeoutMs = 40000; store.attempts = 2; store.label = 'Sheet freshness';
-    const out = { ok: true, at: Date.now(), files: {}, tabs: {} };
-    await Promise.all(['ff', 'gv'].map(async (src) => {   // dono spreadsheets parallel — pehle ek ke baad ek (40s × 2) chalta tha
-      const mine = items.filter((i) => i.source === src);
-      const id = idOf(src);
-      if (!mine.length || !id) return;
-      try {
-        const r = await store.call('sheetmeta', { spreadsheetId: id, tabs: mine.map((i) => ({ tab: i.tab, keyCol: i.keyCol })) });
-        out.files[src] = r.file || {};
-        (r.tabs || []).forEach((t) => { const it = mine.find((i) => i.tab === t.tab); if (it) out.tabs[it.key] = t; });
-      } catch (err) {
-        const m = String((err && err.message) || err);
-        out.files[src] = { error: /unknown action/i.test(m) ? 'Apps Script purana hai — google-apps-script/Code.gs (v3.73) dobara paste karke New version deploy karein.' : m.slice(0, 220) };
-      }
-    }));
+    sheetFreshLastItems = items;
+    const out = await computeSheetFreshness(items, url0, secret0, idOf);
     sheetFreshCache.set(cacheKey, { at: Date.now(), out });
     return sendJson(res, 200, out);
   }
@@ -9692,6 +9712,12 @@ async function start() {
     setInterval(() => checkReports(false).catch(() => {}), 30e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
+    // 🕒 v209 — har 15 min sheet row-count check (home khule na khule), taaki "data kab aaya" ka time sahi rahe
+    setInterval(() => {
+      const u = (process.env.APPS_SCRIPT_URL || '').trim(), sc = (process.env.APPS_SCRIPT_SECRET || '').trim();
+      if (!sheetFreshLastItems || !u || !sc) return;
+      computeSheetFreshness(sheetFreshLastItems, u, sc, (src) => String((src === 'gv' ? db.settings.gvSheetId : db.settings.sheetId) || '').replace(/[^A-Za-z0-9_-]/g, '')).catch(() => {});
+    }, 15 * 60e3).unref();
     // 🌅 Scheduled checks: daily digest (subah 8 IST ke baad roz ek baar) + mid-month target +
     //    weekly inactive users + 🔴 cover alert / 📉 stock history — boot par aur har 30 min.
     setTimeout(() => runScheduledChecks(), 15000);
