@@ -5778,19 +5778,24 @@ async function handleApi(req, res, url) {
       if (t && nowMs - t > (status === 'dispatched' ? 7 : 30) * 24 * 3600e3) continue;
       const rMob = tagDigits(r.agent && r.agent.mobile).slice(-10);
       const matched = [];
+      const matchedQty = [];   // review panel ke liye: pehle kis agent × class par kitne tag maange gaye the
       for (const want of wanted) {
         for (const x of (r.rows || [])) {
           const cls = String((x && x.cls) || '').toUpperCase();
           if (!want.classes.has(cls) || !(Number(x.approved) > 0)) continue;
           const same = (want.id && String(x.agentId || '').trim() === want.id) || (want.name && tagNameKey(x.agentName) === want.name) || (want.mobile.length === 10 && rMob === want.mobile);
           const label = `${x.agentName || want.label} · ${cls}`;
-          if (same && !matched.includes(label)) matched.push(label);
+          if (same && !matched.includes(label)) {
+            matched.push(label);
+            matchedQty.push({ agentName: String(x.agentName || want.label || ''), agentId: String(x.agentId || ''), cls, qty: Math.round(Number(x.approved) || 0) });
+          }
         }
       }
       if (!matched.length) continue;
       out.push({
         id: r.id, at: r.at || '', status: r.status || 'pending', total: Number(r.total) || 0, rows: (r.rows || []).length,
-        byName: r.byName || '', agentName: (r.agent && r.agent.name) || ((r.rows || [])[0] || {}).agentName || '', matched: matched.slice(0, 8)
+        byName: r.byName || '', agentName: (r.agent && r.agent.name) || ((r.rows || [])[0] || {}).agentName || '', matched: matched.slice(0, 8), matchedQty: matchedQty.slice(0, 16),
+        repeat7: !t || nowMs - t <= 7 * 24 * 3600e3
       });
     }
     return out.slice(-8).reverse();

@@ -195,6 +195,8 @@ test('v3.30 per-agent tag requests — split, validation, mobile status, duplica
     assert.equal(dup.json.duplicates.length, 1);
     assert.equal(dup.json.duplicates[0].id, rq1.id);
     assert.equal(dup.json.duplicates[0].byName, 'Ramesh Yadav');
+    assert.equal(dup.json.duplicates[0].repeat7, true, 'taaza request = pichhle 7 din ke andar');
+    assert.ok(dup.json.duplicates[0].matchedQty.some((q) => q.cls === 'VC4' && q.qty > 0), 'review panel ko pehle ka class-wise qty milta hai');
     const byMobile = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Suresh Kumar' }, agents: [{ agentName: 'R. Sharma (naya naam)', mobile: '9876500001', rows: [{ cls: 'VC5', approved: 2 }] }] }, '', '10.1.0.3');
     assert.equal(byMobile.json.duplicates.length, 1, 'naam alag ho par mobile same → bhi duplicate');
     const otherCls = await jsonCall(server.base, '/api/public/tag-request/check', 'POST', { employee: { name: 'Suresh Kumar' }, agents: [{ agentName: 'Rahul Sharma', agentId: '1001', rows: [{ cls: 'VC16', approved: 2 }] }] }, '', '10.1.0.3');

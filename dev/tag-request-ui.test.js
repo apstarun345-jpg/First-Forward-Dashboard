@@ -393,3 +393,15 @@ test('📦 Item Name — options, FASTag default, payload and print label', () =
   const req = { id: 'tagreq_item', at: Date.now(), status: 'pending', itemName: 'Matarial', rows: [{ cls: 'VC4', approved: 1, agentName: 'Agent X' }] };
   assert.ok(TR.labelText(TR._test.labelItem(req)).includes('Item Name: Matarial'));
 });
+
+test('v203 repeat request: confirm checkbox + wajah zaroori, force button tab tak disabled, review panel', () => {
+  const html = TR.dupWarning([
+    { id: '1234', status: 'pending', total: 40, rows: 1, byName: 'Ravi', agentName: 'AMIT SHARMA', at: new Date().toISOString(), repeat7: true, matched: ['AMIT SHARMA · VC4'], matchedQty: [{ agentName: 'AMIT SHARMA', agentId: '5846001', cls: 'VC4', qty: 40 }] }
+  ], 'Ravi');
+  assert.match(html, /Repeat request/);
+  assert.match(html, /pichhle 7 din/);
+  assert.match(html, /7 din ke andar/);
+  assert.match(html, /data-tr-dup-ok/);
+  assert.match(html, /data-tr-dup-reason/);
+  assert.match(html, /data-tr-act="dup-force" disabled/, 'confirm + wajah ke bina force button band');
+});

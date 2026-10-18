@@ -73,7 +73,7 @@ FF.pages = FF.pages || {};
     status: { q: '', list: null, busy: false, err: '', searched: '' },
     employeeHistoryFilter: 'all', employeeHistoryPage: 1, employeeHistoryOpen: false,
     // 🔁 submit se pehle duplicate check (wahi agent + class pehle se active?)
-    dup: { list: [], force: false, busy: false },
+    dup: { list: [], force: false, busy: false, ok: false, reason: '' },
     // ⏪ v3.50 — recovery (sheet history se gayab requests wapas) + 🔔 notification check (admin)
     recovery: { open: false, busy: false, data: null, err: '' }, recoveryInfo: null,
     notifyCheck: { open: false, busy: false, data: null, err: '' },
@@ -982,22 +982,82 @@ body.colorful .from-hdr { color: #166534; }
   }
 
   // ---- 🔁 duplicate warning (submit se pehle) ----------------------------------------------------
+  /** 🔁 Repeat review — har repeat agent ke liye asli stock + issuance (sheet data) + pehle kitna maanga tha. */
+  const DUP_REASONS = [
+    ['stock-khatam', 'Stock khatam / bahut kam hai, issuance chal rahi hai'],
+    ['not-received', 'Pehle ki request ke tags abhi tak nahi mile'],
+    ['extra-class', 'Agent ne extra / alag quantity maangi'],
+    ['mistake', 'Pehle galti se kam quantity bheji thi'],
+    ['other', 'Koi aur wajah (note me likhunga)']
+  ];
+  function dupReviewRows(list) {
+    const names = new Set();
+    (list || []).forEach((d) => (d.matched || []).forEach((m) => names.add(norm(String(m).split(' · ')[0]))));
+    const out = [];
+    state.rows.filter(rowHasContent).forEach((r) => {
+      const rec = state.index ? exactAgent(r) : null;
+      const nm = norm(r.name);
+      if (!(names.has(nm) || (rec && names.has(norm(rec.name))))) return;
+      const ask = rowTotal(r);
+      let prev = 0, prevCount = 0;
+      (list || []).forEach((d) => {
+        const mine = (d.matchedQty || []).filter((q) => norm(q.agentName) === nm || (rec && norm(q.agentName) === norm(rec.name)) || (rec && rec.agentId && String(q.agentId) === String(rec.agentId)));
+        if (mine.length) { prevCount++; prev += mine.reduce((n, q) => n + (Number(q.qty) || 0), 0); }
+      });
+      let verdict = { tone: 'amber', text: 'Agent sheet data me nahi mila — stock / issuance verify nahi ho sakta, manager se confirm karo.' };
+      let m = null;
+      if (rec && !rec.isTl) {
+        m = metricNumbers(groupMetrics(rec)).total;
+        const cover = coverOf(m.rate, m.stock);
+        if (m.stock >= ask + prev && (cover == null || cover >= 15)) verdict = { tone: 'red', text: `Stock abhi ${fmt(m.stock)} hai${cover != null ? ` (≈ ${fmt(cover, true)} din ka cover)` : ''} — dobara tag bhejna shayad zaroori nahi.` };
+        else if (m.cur <= 0 && prev > 0) verdict = { tone: 'amber', text: `Is mahine abhi issuance 0 hai jabki pehle ${fmt(prev)} tag maange gaye — pehle wale tags use nahi hue lagte.` };
+        else if (cover != null && cover < 7) verdict = { tone: 'green', text: `Stock sirf ≈ ${fmt(cover, true)} din ka bacha hai aur issuance chal rahi hai — request jaayiz lagti hai.` };
+        else verdict = { tone: 'amber', text: 'Numbers dekh ke khud decide karo — upar stock aur issuance diya hai.' };
+      }
+      out.push({ name: (rec && rec.name) || r.name, ask, prev, prevCount, m, verdict });
+    });
+    return out;
+  }
+  function dupReviewHtml(list) {
+    const rows = dupReviewRows(list);
+    if (!rows.length) return '';
+    const body = rows.map((x) => `<tr>
+        <td><b>${esc(x.name)}</b></td>
+        <td class="num">${fmt(x.ask)}</td>
+        <td class="num">${x.prev ? fmt(x.prev) : '—'}${x.prevCount > 1 ? `<small class="dim"> (${fmt(x.prevCount)} req)</small>` : ''}</td>
+        <td class="num">${x.m ? fmt(x.m.stock) : '—'}</td>
+        <td class="num">${x.m ? fmt(x.m.cur) : '—'}</td>
+        <td class="num">${x.m ? fmt(x.m.last) : '—'}</td>
+        <td style="min-width:220px"><span class="badge ${x.verdict.tone}" style="white-space:normal;display:inline-block;line-height:1.35">${esc(x.verdict.text)}</span></td></tr>`).join('');
+    return `<div class="tr-dup-review" id="tr-dup-review"><h4 style="margin:10px 0 4px">📊 Review — asli issuance aur stock</h4>
+      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Agent</th><th>Ab maang rahe</th><th>Pehle maange</th><th>📦 Stock abhi</th><th>▶ Issued (is mahine)</th><th>📅 Pichhle mahine</th><th>Nateeja</th></tr></thead><tbody>${body}</tbody></table></div>
+      <small class="dim">Issuance / stock sheet ke latest data se (FF = kal tak, GV = live). Tags = sirf FASTag quantity.</small></div>`;
+  }
   function dupWarningHtml() {
     const list = (state.dup && state.dup.list) || [];
     if (!list.length) return '';
+    const recent = list.filter((d) => d.repeat7 !== false).length;
     const rows = list.map((d) => {
       const v = STATUS[d.status] || STATUS.pending;
       const same = (d.matched || []).slice(0, 4).join(', ');
-      return `<li><b class="mono">${esc(d.id)}</b> <span class="badge ${v.tone}">${v.label}</span>
+      return `<li><b class="mono">${esc(d.id)}</b> <span class="badge ${v.tone}">${v.label}</span>${d.repeat7 === false ? '' : ' <span class="badge red">7 din ke andar</span>'}
         <small class="dim"> · ${fmt(d.total)} tags${d.agentName ? ` · ${esc(d.agentName)}` : ` · ${fmt(d.rows)} rows`}${d.byName ? ` · by ${esc(d.byName)}` : ''} · ${esc(ago(d.at))}${same ? ` · same: ${esc(same)}${(d.matched || []).length > 4 ? '…' : ''}` : ''}</small></li>`;
     }).join('');
+    const dup = state.dup || {};
+    const reasons = DUP_REASONS.map(([k, label]) => `<option value="${esc(k)}"${dup.reason === k ? ' selected' : ''}>${esc(label)}</option>`).join('');
+    const ready = !!(dup.ok && dup.reason);
     return `<section class="card tr-dup-warn" id="tr-dup-card"><div class="card-body">
-      <h3 style="margin:0 0 6px">🔁 Ye entry pehle se hai</h3>
-      <p style="margin:0 0 8px"><b>${esc(state.employee.name || '')}</b>, isi agent (wahi class) ki <b>${fmt(list.length)} request already active</b> hai — kisi bhi employee ne daali ho. Status dekh lo, dobara bhejne ki zaroorat nahi. Phir bhi nayi request chahiye to <b>"🔁 Phir bhi bhejo"</b> dabao.</p>
+      <h3 style="margin:0 0 6px">🔁 Repeat request — pehle confirm karo</h3>
+      <p style="margin:0 0 8px"><b>${esc(state.employee.name || '')}</b>, isi agent (wahi class) ki <b>${fmt(list.length)} request pehle se hai</b>${recent ? ` (<b>${fmt(recent)}</b> pichhle 7 din ki)` : ''} — kisi bhi employee ne daali ho. Neeche asli stock aur issuance dekh lo, phir tabhi dobara bhejo jab sach me zaroorat ho.</p>
       <ul class="tr-dup-list">${rows}</ul>
+      ${dupReviewHtml(list)}
+      <div class="tr-dup-confirm" style="margin-top:10px;display:grid;gap:8px">
+        <label><input type="checkbox" data-tr-dup-ok${dup.ok ? ' checked' : ''}> Maine stock aur issuance dekh liya — mujhe phir bhi nayi request bhejni hai</label>
+        <label class="dim small">Wajah (zaroori) <select data-tr-dup-reason><option value="">— wajah chuno —</option>${reasons}</select></label>
+      </div>
       <div class="btn-row" style="margin-top:8px">
         <button class="btn primary" data-tr-act="dup-status" data-id="${esc(list[0].id || '')}">🔎 Status dekho</button>
-        <button class="btn" data-tr-act="dup-force">🔁 Phir bhi bhejo</button>
+        <button class="btn" data-tr-act="dup-force" ${ready ? '' : 'disabled'}>✅ Confirm — phir bhi bhejo</button>
         <button class="btn" data-tr-act="dup-edit">✏️ Form me wapas</button>
       </div></div></section>`;
   }
@@ -1804,7 +1864,18 @@ body.colorful .from-hdr { color: #166534; }
       renderForm();
     });
     act('send', () => submit());
-    act('dup-force', () => { state.dup.force = true; state.dup.list = []; submit(); });
+    act('dup-force', () => {
+      if (!state.dup.ok || !state.dup.reason) { U.toast('Pehle checkbox tick karo aur wajah chuno', 'warn'); return; }
+      const why = (DUP_REASONS.find((r) => r[0] === state.dup.reason) || [])[1] || state.dup.reason;
+      const tag = `🔁 Repeat confirmed: ${why}`;
+      if (!String(state.note || '').includes('🔁 Repeat confirmed:')) state.note = clean(`${state.note || ''} ${tag}`.trim());
+      state.dup.force = true; state.dup.list = []; submit();
+    });
+    const dupOk = root.querySelector('[data-tr-dup-ok]');
+    const dupReason = root.querySelector('[data-tr-dup-reason]');
+    const syncDupBtn = () => { const b = root.querySelector('[data-tr-act="dup-force"]'); if (b) b.disabled = !(state.dup.ok && state.dup.reason); };
+    if (dupOk) dupOk.addEventListener('change', () => { state.dup.ok = !!dupOk.checked; syncDupBtn(); });
+    if (dupReason) dupReason.addEventListener('change', () => { state.dup.reason = dupReason.value; syncDupBtn(); });
     act('dup-edit', () => { state.dup.list = []; renderForm(); });
     act('dup-status', (e) => {
       const id = (e.currentTarget && e.currentTarget.dataset.id) || '';
