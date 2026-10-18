@@ -4180,19 +4180,19 @@ async function checkReports(force = false, selectedSources = null) {
   return reportCheckPromise;
 }
 
-const etagCache = new Map();   // body-key → etag (chhota LRU, sirf header banane ke liye)
+/** Poori body ka hash (ek baar per cache entry) — pehle sirf length + pehle/aakhri 64 chars se key banti thi,
+ *  isliye beech ki same-length value badalne par purana ETag chala jaata aur client ko 304 (purana data) milta. */
 function bodyEtag(body) {
-  const key = `${body.length}:${body.slice(0, 64)}:${body.slice(-64)}`;
-  if (etagCache.has(key)) return etagCache.get(key);
-  const h = crypto.createHash('sha1').update(body).digest('base64url').slice(0, 20);
-  const tag = `W/"${h}"`;
-  if (etagCache.size > 500) etagCache.delete(etagCache.keys().next().value);
-  etagCache.set(key, tag);
-  return tag;
+  return `W/"${crypto.createHash('sha1').update(body).digest('base64url').slice(0, 20)}"`;
+}
+function entryEtag(entry) {
+  if (!entry.etag) entry.etag = bodyEtag(entry.body);
+  return entry.etag;
 }
 function sendCached(req, res, entry, tag) {
   // 🏷️ ETag: same query dobara aaye to 304 (sirf header) — payload dobara transfer nahi hota.
-  const etag = bodyEtag(entry.body);
+  const etag = entryEtag(entry);
+  if (!entry.enc) entry.enc = {};   // compressed copy entry ke saath jeeti hai (body badle = naya entry = naya memo)
   const inm = String(req.headers['if-none-match'] || '');
   if (inm && inm.split(',').map((x) => x.trim()).includes(etag)) {
     res.writeHead(304, headers({ ETag: etag, 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000)) }));
@@ -4200,7 +4200,7 @@ function sendCached(req, res, entry, tag) {
   }
   return sendMaybeCompressed(req, res, 200, 'text/plain; charset=utf-8', entry.body, {
     'Cache-Control': 'private, no-cache', ETag: etag, 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000))
-  });
+  }, entry.enc);
 }
 const HOT = new Map();                 // url → { hits, at } — jo queries sach me use hoti hain
 const HOT_LIMIT = 300;
@@ -8273,6 +8273,27 @@ async function shellHtml(abs) {
 /** Deploy/test ke baad memo hatana ho to (settings se bhi call hota hai). */
 function resetAssetMemo() { ASSET_FP.clear(); assetMapMemo = { at: 0, versions: null }; shellMemo = { at: 0, html: '', etag: '' }; }
 
+// Static memo: abs path → { etag, raw, enc:{br,gzip} }. Total size cap (FIFO eviction) — Render free 512 MB.
+const STATIC_MEMO = new Map();
+const STATIC_MEMO_MAX_BYTES = 32 * 1024 * 1024;
+const STATIC_MEMO_MAX_FILE = 4 * 1024 * 1024;
+function staticMemoBytes() {
+  let n = 0;
+  for (const s of STATIC_MEMO.values()) n += s.raw.length + (s.enc.br ? s.enc.br.length : 0) + (s.enc.gzip ? s.enc.gzip.length : 0);
+  return n;
+}
+async function staticSlot(candidate, etag, size) {
+  const hit = STATIC_MEMO.get(candidate);
+  if (hit && hit.etag === etag) return hit;
+  const raw = await fs.readFile(candidate);
+  const slot = { etag, raw, enc: {} };
+  if (size > STATIC_MEMO_MAX_FILE) return slot;          // bahut bada file memo me nahi (har baar normal path)
+  STATIC_MEMO.delete(candidate);
+  STATIC_MEMO.set(candidate, slot);
+  while (STATIC_MEMO.size > 1 && staticMemoBytes() > STATIC_MEMO_MAX_BYTES) STATIC_MEMO.delete(STATIC_MEMO.keys().next().value);
+  return slot;
+}
+
 async function serveStatic(req, res, pathname, search) {
   let requested = decodeURIComponent(pathname);
   if (requested === '/' || requested === '') requested = '/index.html';
@@ -8313,9 +8334,17 @@ async function serveStatic(req, res, pathname, search) {
         res.writeHead(304, headers({ ETag: etag, 'Cache-Control': cache, 'X-FF-Cache': 'not-modified' }));
         return res.end();
       }
-      const content = await fs.readFile(candidate);
       const type = MIME[ext] || 'application/octet-stream';
-      return sendMaybeCompressed(req, res, 200, type, content, { 'Cache-Control': cache, ETag: etag, 'X-FF-Cache': versioned && !isShell ? 'immutable' : 'revalidate' });
+      const extraHeaders = { 'Cache-Control': cache, ETag: etag, 'X-FF-Cache': versioned && !isShell ? 'immutable' : 'revalidate' };
+      // ⚡ Compressible files (js/css/svg…): disk read + brotli/gzip ek baar, phir memory se (etag = size+mtime,
+      // isliye file badalte hi naya slot). 100+ file wali first-visit burst me CPU/disk dobara nahi lagta.
+      if (COMPRESSIBLE.test(type)) {
+        const slot = await staticSlot(candidate, etag, stat.size);
+        await warmEncoding(req, slot.raw, slot.enc);
+        return sendMaybeCompressed(req, res, 200, type, slot.raw, extraHeaders, slot.enc);
+      }
+      const content = await fs.readFile(candidate);
+      return sendMaybeCompressed(req, res, 200, type, content, extraHeaders);
     } catch { /* try next */ }
   }
   if (!path.extname(requested)) return serveStatic(req, res, '/index.html', search); // pretty URLs → app shell
@@ -9028,7 +9057,39 @@ function accepts(req, enc) {
   return h.includes(enc);
 }
 /** Buffer/string ko best available encoding me bhejo (brotli → gzip → plain). */
-function sendMaybeCompressed(req, res, status, contentType, body, extra = {}) {
+/**
+ * `memo` (optional) = `{}` jo body ke saath hi jeeta hai (cache entry / static slot). Pehli request par
+ * compress hokar `memo.br` / `memo.gzip` me rakh diya jaata hai, uske baad har request par seedha wahi
+ * buffer jaata hai — CPU dobara nahi lagta (Render free par 0.1 CPU me ye bada fark hai). Body badalte
+ * hi naya memo banta hai (entry/slot naya), isliye purana compressed data kabhi serve nahi hota.
+ * `false` = "compress karne se fayda nahi" (dobara try nahi karte).
+ */
+const BR_QUALITY_FRESH = 5;   // memo ke bina (har request par compute) — halka rakho
+const BR_QUALITY_MEMO = 7;    // memo ke saath (ek baar compute) — ~6% chhota output
+function encodingFor(req) { return accepts(req, 'br') ? 'br' : accepts(req, 'gzip') ? 'gzip' : ''; }
+function compressSync(buf, encoding, quality) {
+  if (encoding === 'br') return zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length } });
+  return zlib.gzipSync(buf, { level: 6 });
+}
+/** Event loop block kiye bina compress (static files ke liye) + same file ki parallel requests dedupe. */
+const compressAsync = (buf, encoding, quality) => new Promise((resolve, reject) => {
+  const done = (err, out) => (err ? reject(err) : resolve(out));
+  if (encoding === 'br') zlib.brotliCompress(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length } }, done);
+  else zlib.gzip(buf, { level: 6 }, done);
+});
+async function warmEncoding(req, buf, memo) {
+  const encoding = encodingFor(req);
+  if (!encoding || !memo || memo[encoding] !== undefined || buf.length <= 1024) return;
+  if (!memo.pending) memo.pending = {};
+  if (!memo.pending[encoding]) {
+    memo.pending[encoding] = compressAsync(buf, encoding, BR_QUALITY_MEMO)
+      .then((out) => { memo[encoding] = out.length < buf.length ? out : false; })
+      .catch(() => { /* sync fallback neeche sendMaybeCompressed me */ })
+      .finally(() => { delete memo.pending[encoding]; });
+  }
+  await memo.pending[encoding];
+}
+function sendMaybeCompressed(req, res, status, contentType, body, extra = {}, memo = null) {
   let buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body));
   const base = { 'Content-Type': contentType, ...extra };
   const canZip = buf.length > 1024 && COMPRESSIBLE.test(contentType);
@@ -9038,11 +9099,18 @@ function sendMaybeCompressed(req, res, status, contentType, body, extra = {}) {
   }
   const headersOut = { ...base, Vary: 'Accept-Encoding' };
   let encoded = buf;
-  let encoding = '';
+  const encoding = encodingFor(req);
   try {
-    if (accepts(req, 'br')) { encoded = zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } }); encoding = 'br'; }
-    else if (accepts(req, 'gzip')) { encoded = zlib.gzipSync(buf, { level: 6 }); encoding = 'gzip'; }
-  } catch { encoded = buf; encoding = ''; }
+    if (encoding) {
+      const cached = memo ? memo[encoding] : undefined;
+      if (cached === false) encoded = buf;
+      else if (cached) encoded = cached;
+      else {
+        encoded = compressSync(buf, encoding, memo ? BR_QUALITY_MEMO : BR_QUALITY_FRESH);
+        if (memo) memo[encoding] = encoded.length < buf.length ? encoded : false;
+      }
+    }
+  } catch { encoded = buf; }
   // Sirf tab compress bhejo jab sach me fayda ho.
   if (!encoding || encoded.length >= buf.length) {
     res.writeHead(status, headers({ ...base, 'Content-Length': buf.length }));

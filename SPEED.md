@@ -202,3 +202,16 @@ Upar wale fixes ke BAAD bhi phone par leg bacha tha, isliye ye teen cheezein ki 
 
 Naya module banate waqt: index.html me sirf tab daalo jab wo pehle paint ke liye zaroori ho; warna
 `lazy.js` ke `SHELL_WAVES` (shell extras) ya `GROUPS` (page modules) me daalo.
+
+## v202 — server-side compression memo
+- Static JS/CSS/SVG ka brotli/gzip ab **ek baar** banta hai aur memory me rehta hai (`STATIC_MEMO`, key =
+  path + size/mtime ETag, 32 MB cap). Pehle har request par dobara compress hota tha — Render free
+  (0.1 CPU) par deploy ke baad 100+ file wali first-visit burst me ye CPU ka bada hissa tha.
+  Local benchmark: 70 static requests 400–500 ms → ~40 ms. Compress `zlib.brotliCompress` (async) se hota
+  hai, event loop block nahi hota; same file ki parallel requests ek hi compress share karti hain.
+- `/api/gviz` cache entry ke saath compressed copy + ETag jeeta hai (`entry.enc`, `entry.etag`).
+- **Bug fix:** gviz ETag pehle sirf `length + pehle/aakhri 64 chars` se banta tha — sheet me beech ki
+  cell same length me badle (5555 → 5556) to ETag nahi badalta tha aur client ko 304 (purana data)
+  milta tha. Ab poori body ka sha1 (ek baar per entry).
+- Measure karke **rejected**: i18n runtime translation (profile me ~3.5% CPU) — site ka English isi se aata
+  hai, isliye lazy/skip nahi kiya. Baaki browser time zyada tar native layout/style hai.
