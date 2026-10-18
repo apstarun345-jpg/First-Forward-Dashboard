@@ -838,15 +838,32 @@ FF.pages = FF.pages || {};
       }));
       return res;
     }
-    async function compute() {
-      let list = null, svErr = '';
-      try { list = await serverCompute(); } catch (e) { svErr = String((e && e.message) || e); }
-      if (list && list.every((r) => r.value)) return list;
-      const g = await gvizCompute();   // sirf tab chalta hai jab Apps Script se value nahi mili
-      if (!list) return g.map((r) => ({ ...r, approx: true, svErr }));
-      // server se value na mile (tab nahi / row empty) to gviz wali approx value fallback
-      return list.map((r) => { if (r.value) return r; const f = g.find((x) => x.key === r.key); return f && f.value ? { ...r, value: f.value, approx: true } : r; });
+    const KEYS = ['ff-eir', 'ff-stock', 'gv-master', 'gv-assign'];
+    /** Server (Apps Script last-row) + poore column ka MAX (gviz) — jo bhi LATER ho wahi "last update".
+     *  Last row hamesha sabse naya nahi hoti (unsorted / backfilled rows), column max kabhi galat nahi hota. */
+    function mergeList(server, g, svErr) {
+      return KEYS.map((key) => {
+        const sv = server && server.find((x) => x.key === key);
+        const gv = (g || []).find((x) => x.key === key);
+        const base = sv || gv || { key };
+        const best = later(sv && sv.rowTime, gv && gv.value);
+        const value = best || (sv && sv.value) || null;
+        const fromCol = !!(best && gv && gv.value && best === gv.value);
+        const out = { ...base, value, colMax: fromCol, approx: !sv, svErr: sv ? '' : svErr };
+        if (gv) { out.tab = out.tab || gv.tab; out.note = out.note || gv.note; out.noCol = !value && !!gv.noCol; if (!out.err) out.err = gv.err || ''; }
+        return out;
+      });
     }
+    async function compute(onPartial) {
+      const gP = gvizCompute().catch(() => []);
+      const sP = serverCompute().then((list) => ({ list }), (e) => ({ err: String((e && e.message) || e) }));
+      const g = await gP;
+      if (onPartial) { try { onPartial(mergeList(null, g, '')); } catch { /* optional */ } }   // gviz pehle aa jaye to turant dikhao
+      const s = await sP;
+      return mergeList(s.list || null, g, s.err || '');
+    }
+    /** Update "nahi aaya" = date-only sheet ka latest data kal se purana, ya time wali sheet 24 ghante se purani. */
+    const isStaleVal = (x) => !!(x && x.d && (x.hasTime ? (Date.now() - x.d.getTime()) / 3600000 > 24 : dayDiff(x.d) >= 2));
     const dayDiff = (dt) => { const a = new Date(); a.setHours(0, 0, 0, 0); const b = new Date(dt); b.setHours(0, 0, 0, 0); return Math.round((a - b) / 86400000); };
     function ago(x) {
       if (!x.hasTime) { const n = dayDiff(x.d); return n <= 0 ? 'aaj' : n === 1 ? 'kal' : `${n} din pehle`; }
@@ -875,22 +892,48 @@ FF.pages = FF.pages || {};
           else if (r.lastRow) lines.push('<span class="dim">Is row me date/time cell nahi mila</span>');
           if (r.file && r.file.updated) lines.push(`Sheet file last edit: ${esc(fmtDT(r.file.updated))}${r.file.by ? ` · ${esc(r.file.by)}` : ''} <span class="dim">(poori file)</span>`);
           else if (r.file && r.file.error) lines.push(`<span class="dim" title="${esc(r.file.error)}">Edit history: ${esc(r.file.error.slice(0, 90))}</span>`);
-        } else if (r.approx) lines.push('<span class="dim">Approx — exact ke liye Apps Script Code.gs v3.73 deploy karein</span>');
+        } else if (r.approx) lines.push('<span class="dim">Sheet ke poore date column ka sabse naya record (exact last-row / edit history ke liye Apps Script Code.gs v3.73 deploy karein)</span>');
+        if (r.exact && r.colMax) lines.push('<span class="dim">✔ Poore column ka sabse naya date (last row se bhi naya mila)</span>');
         const extra = lines.length ? `<div class="fresh-extra">${lines.map((l) => `<div>${l}</div>`).join('')}</div>` : '';
         return `<div class="fresh-row"><div class="fresh-src"><span class="fresh-ic">${r.icon}</span><div><b>${esc(r.tab)}</b><small class="dim">${esc(r.title)}${r.note ? ' · ' + esc(r.note) : ''}</small></div></div><div class="fresh-val">${val}${pill}</div>${extra}</div>`;
       }).join('');
       return `<section class="card fresh-card"><div class="card-head"><div><h3>🕒 Sheets — last data update</h3><p class="dim small">Har sheet ki <b>last filled row</b> ka date + time, aur Google Sheet ki edit history. Site ne ye data abhi load kiya: <b>${esc(U.timeLabel(S.loadedAt || G.loadedAt || Date.now()))}</b></p></div><div class="head-actions"><button class="btn small" data-fresh-refresh="1">↻ Dobara check</button></div></div><div class="card-body fresh-grid">${rows}</div></section>`;
     }
-    async function mount(root, force) {
-      const host = U.$('#home-freshness', root); if (!host) return;
-      const skeleton = [['ff-eir', '🟦', 'First Forward', 'EIR', 'Sabse naya issue date (EIR)'], ['ff-stock', '🟦', 'First Forward', 'StockDataa', 'Sabse nayi tag / agent allocation'], ['gv-master', '🟩', 'GV Partner', 'GV Master', 'Sabse naya issuance (date + time column)'], ['gv-assign', '🟩', 'GV Partner', 'Tag Assignment', 'Sabse nayi allocation / date column']].map(([key, icon, title, tab, note]) => ({ key, icon, title, tab, note, value: null }));
-      const paint = (list, loading) => { if (host.isConnected) host.innerHTML = html(list, loading); };
-      if (!force && memo && Date.now() - memoAt < 90000) { paint(memo, false); return; }
-      paint(memo || skeleton, true);
-      if (!inflight) inflight = compute().finally(() => { inflight = null; });
-      try { memo = await inflight; memoAt = Date.now(); paint(memo, false); } catch { paint(skeleton, false); }
+    const DISMISS_KEY = 'ff_fresh_alert_dismiss';
+    const staleSig = (list) => list.filter((r) => isStaleVal(r.value)).map((r) => `${r.key}:${r.value.d.getTime()}`).join('|');
+    function alertHtml(list) {
+      const stale = list.filter((r) => isStaleVal(r.value));
+      if (!stale.length) return '';
+      const sig = staleSig(list);
+      try { const d = JSON.parse(localStorage.getItem(DISMISS_KEY) || 'null'); if (d && d.sig === sig && Date.now() - d.at < 3 * 3600e3) return ''; } catch { /* ignore */ }
+      const li = stale.map((r) => `<li><b>${esc(r.icon)} ${esc(r.tab)}</b> <span class="dim">(${esc(r.title)})</span> — last data: <b>${esc(fmtDT(r.value))}</b> · <span class="fresh-pill bad">${esc(ago(r.value))}</span></li>`).join('');
+      return `<div class="fresh-alert" role="alert" data-fresh-sig="${esc(sig)}"><div class="fresh-alert-ic">⚠️</div>
+        <div class="fresh-alert-body"><b>${stale.length === 1 ? 'Ek sheet' : stale.length + ' sheets'} me naya data nahi aaya</b><ul>${li}</ul><small class="dim">Apps Script import chala ya nahi check karo — dashboard abhi purana data dikha raha hai.</small></div>
+        <div class="fresh-alert-act"><button class="btn small" data-fresh-refresh>↻ Dobara check</button><button class="btn small" data-fresh-dismiss title="3 ghante ke liye chhupao">✕</button></div></div>`;
     }
-    return { mount, parseText, timeOfDay };
+    let alertToasted = '';
+    function paintAlert(root, list, final) {
+      const slot = U.$('#home-fresh-alert', root); if (!slot) return;
+      const html = alertHtml(list);
+      slot.innerHTML = html;
+      const sig = staleSig(list);
+      if (final && html && alertToasted !== sig) { alertToasted = sig; try { U.toast('⚠️ Kisi sheet me naya data nahi aaya — Home ke upar dekho', 'warn'); } catch { /* ignore */ } }
+    }
+    function dismiss(root) {
+      const el = U.$('.fresh-alert', root);
+      try { localStorage.setItem(DISMISS_KEY, JSON.stringify({ sig: (el && el.dataset.freshSig) || '', at: Date.now() })); } catch { /* ignore */ }
+      const slot = U.$('#home-fresh-alert', root); if (slot) slot.innerHTML = '';
+    }
+    async function mount(root, force) {
+      const host = U.$('#home-freshness', root);   // section hide ho tab bhi alert ke liye check chalta hai
+      const skeleton = [['ff-eir', '🟦', 'First Forward', 'EIR', 'Sabse naya issue date (EIR)'], ['ff-stock', '🟦', 'First Forward', 'StockDataa', 'Sabse nayi tag / agent allocation'], ['gv-master', '🟩', 'GV Partner', 'GV Master', 'Sabse naya issuance (date + time column)'], ['gv-assign', '🟩', 'GV Partner', 'Tag Assignment', 'Sabse nayi allocation / date column']].map(([key, icon, title, tab, note]) => ({ key, icon, title, tab, note, value: null }));
+      const paint = (list, loading, final) => { if (host && host.isConnected) host.innerHTML = html(list, loading); paintAlert(root, list, final); };
+      if (!force && memo && Date.now() - memoAt < 90000) { paint(memo, false, true); return; }
+      paint(memo || skeleton, true, false);
+      if (!inflight) inflight = compute((partial) => { if (!memo || force) paint(partial, true, false); }).finally(() => { inflight = null; });
+      try { memo = await inflight; memoAt = Date.now(); paint(memo, false, true); } catch { paint(memo || skeleton, false, false); }
+    }
+    return { mount, dismiss, parseText, timeOfDay, mergeList, isStaleVal, alertHtml };
   })();
   FF.homeFreshness = freshness;
 
@@ -988,7 +1031,7 @@ FF.pages = FF.pages || {};
     const canFf = FF.auth.can('dashboard') || FF.auth.can('trend') || FF.auth.can('stock') || FF.auth.can('performance');
     const canGv = FF.auth.can('gvDashboard') || FF.auth.can('gvTrend') || FF.auth.can('gvStock') || FF.auth.can('gvPerformance');
 
-    root.innerHTML = `<div class="home-hero v2">
+    root.innerHTML = `<div id="home-fresh-alert"></div><div class="home-hero v2">
         <div class="home-hero-main">
           ${avatar}
           <div>
@@ -1020,7 +1063,7 @@ FF.pages = FF.pages || {};
     // ⚙ v3.79 — Customize Home: reorder / hide sections, saved per user on this device.
     homeLayout.apply(root);
     freshness.mount(root, false);
-    root.addEventListener('click', (ev) => { const b = ev.target && ev.target.closest && ev.target.closest('[data-fresh-refresh]'); if (b) freshness.mount(root, true); });
+    root.addEventListener('click', (ev) => { const b = ev.target && ev.target.closest && ev.target.closest('[data-fresh-refresh]'); if (b) { freshness.mount(root, true); return; } const d = ev.target && ev.target.closest && ev.target.closest('[data-fresh-dismiss]'); if (d) freshness.dismiss(root); });
     const custBtn = U.$('#home-customize', root);
     if (custBtn) custBtn.addEventListener('click', () => homeLayout.toggle(root, custBtn));
 

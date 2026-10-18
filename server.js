@@ -7530,10 +7530,10 @@ async function handleApi(req, res, url) {
     const store = new AppsScriptStore({ url: url0, secret: secret0 });
     store.timeoutMs = 40000; store.attempts = 2; store.label = 'Sheet freshness';
     const out = { ok: true, at: Date.now(), files: {}, tabs: {} };
-    for (const src of ['ff', 'gv']) {
+    await Promise.all(['ff', 'gv'].map(async (src) => {   // dono spreadsheets parallel — pehle ek ke baad ek (40s × 2) chalta tha
       const mine = items.filter((i) => i.source === src);
       const id = idOf(src);
-      if (!mine.length || !id) continue;
+      if (!mine.length || !id) return;
       try {
         const r = await store.call('sheetmeta', { spreadsheetId: id, tabs: mine.map((i) => ({ tab: i.tab, keyCol: i.keyCol })) });
         out.files[src] = r.file || {};
@@ -7542,7 +7542,7 @@ async function handleApi(req, res, url) {
         const m = String((err && err.message) || err);
         out.files[src] = { error: /unknown action/i.test(m) ? 'Apps Script purana hai — google-apps-script/Code.gs (v3.73) dobara paste karke New version deploy karein.' : m.slice(0, 220) };
       }
-    }
+    }));
     sheetFreshCache.set(cacheKey, { at: Date.now(), out });
     return sendJson(res, 200, out);
   }
