@@ -151,7 +151,6 @@ html[data-theme="dark"] .tr-req-tbl .tr-th-suggest .tr-th-sub { color: rgba(255,
 .tr-emp-sum{display:grid;gap:2px;min-width:0}
 .tr-emp-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .tr-emp-chips-loading{font-size:10.5px}
-.tr-emp-panel .tr-employee-summary{margin:0;background:none;border:0;padding:10px 0 0}
 .tr-contact-slot:not(:empty){margin:8px 0 0}
 .tr-contact-suggest{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px dashed var(--brand);border-radius:12px;background:color-mix(in srgb,var(--brand) 6%,transparent)}
 .tr-cs-label{flex:0 0 auto}

@@ -88,16 +88,14 @@ test('Trend tiles carry a drill spec with the page channel + TL/agent filter', (
   const without = calls.filter((l) => !/Spec\(/.test(l));
   assert.deepEqual(without.map((l) => l.trim().slice(0, 80)), [], 'har tile ke saath spec');
 });
-test('Tag Issued FF / GV breakdown tiles are clickable with their own channel + class filter', () => {
+test('Tag Issued KPI cards (VC4 / VC20 / VC5+ / Commercial) drill with range + channel + class filter', () => {
   const ti = read('tagIssued.js');
-  assert.match(ti, /const mini = \(label, value, foot, cls, spec\)/);
-  const lines = ti.split('\n').filter((l) => /FF Breakdown|GV Breakdown/.test(l));
-  assert.equal(lines.length, 2);
-  for (const l of lines) assert.equal((l.match(/mini\('/g) || []).length, 4, 'chaar tile');
-  assert.ok(lines[0].includes('src=ff&scope=day') && !lines[0].includes('src=gv'), 'FF tiles sirf FF');
-  assert.ok(lines[1].includes('src=gv&scope=day') && !lines[1].includes('src=ff'), 'GV tiles sirf GV');
-  assert.match(lines[0], /f=vc4/); assert.match(lines[0], /f=comm/); assert.match(lines[0], /f=repl/);
-  assert.match(lines[1], /f=vc4/); assert.match(lines[1], /f=comm/); assert.match(lines[1], /cls=/, 'Top class apni class kholta hai');
+  assert.match(ti, /function specFor\(m, src, f\)/);
+  assert.match(ti, /scope=range&from=\$\{m\.from\}&to=\$\{m\.to\}/);
+  for (const f of ['vc4', 'vc20', 'vc5p', 'comm']) assert.match(ti, new RegExp(`f: '${f}'`), `${f} KPI`);
+  assert.match(ti, /specFor\(m, 'both', k\.f\)/, 'card = dono channel');
+  assert.match(ti, /row\('ff', 'First Forward'[^\n]*'ff'\)/, 'FF row sirf FF');
+  assert.match(ti, /row\('gv', 'GV Partner'[^\n]*'gv'\)/, 'GV row sirf GV');
 });
 
 // ---------------------------------------------------------------------------------------------

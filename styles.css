@@ -1551,6 +1551,8 @@ html .boot-progress::after { animation: boot-slide 1.2s ease-in-out infinite alt
 .kpi-clickable:focus-visible { outline: 3px solid #fde047; outline-offset: 2px; }
 .ti-range-controls { flex-wrap: wrap; }
 .ti-range-controls label { display: flex; align-items: center; gap: 8px; }
+.range-summary { margin: 0 0 18px; }
+.range-total-row { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin: 6px 0 18px; }
 .range-total-row > div { padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(135deg,#f8faff,#fff); display: flex; flex-direction: column; gap: 3px; }
 .range-total-row small { color: var(--muted); font-weight: 700; }
 .range-total-row b { font-size: 25px; }
@@ -1566,6 +1568,7 @@ html .boot-progress::after { animation: boot-slide 1.2s ease-in-out infinite alt
 .ti-range-controls { align-items: stretch; }
 .ti-range-controls label { flex: 1 1 100%; justify-content: space-between; }
 .ti-range-controls .input { width: min(68%,280px); }
+.range-total-row { grid-template-columns: 1fr; gap: 7px; }
 }
 .presence-title small { color: var(--muted); font-size: 10px; font-weight: 500; }
 .presence-row > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -4694,6 +4697,7 @@ html[data-theme="dark"] .tr-emp-chip-pending{background:rgba(245,158,11,.14);col
 html[data-theme="dark"] .tr-emp-chip-approved{background:rgba(22,163,74,.14);color:#86efac}
 html[data-theme="dark"] .tr-emp-chip-dispatched{background:rgba(37,99,235,.16);color:#93c5fd}
 html[data-theme="dark"] .tr-emp-chip-rejected{background:rgba(220,38,38,.14);color:#fca5a5}
+.tr-emp-panel .tr-employee-summary{margin:0;background:none;border:0;padding:10px 0 0}
 /* 📇 Purana address suggestion — wahi agent dobara chuno to purana mobile/address/pincode ek click me.
    Auto-fill sirf khaali fields me hota hai; chip hamesha dikhta hai taaki employee dekh kar khud bhare. */
 .tr-cs-last{flex:0 0 100%;font-size:12px;font-weight:800;color:var(--ink);padding-bottom:2px}
@@ -6028,8 +6032,11 @@ html:not(.mobile-ui) .top-more-pop .icon-btn::after { content: attr(data-label);
 /* v3.79 — FASTag Mapping 4-step flow */
 .fm-step-tx b { font-size: 13px; }
 .fm-step-tx small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fm-step.active { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 16%, transparent); }
 .fm-step.done .fm-step-dot::after { content: '✓'; font-size: 14px; }
 .fm-tabs::-webkit-scrollbar { display: none; }
+.fm-tab:hover { color: var(--ink); }
+.fm-tab.active { color: var(--brand); border-bottom-color: var(--brand); }
 @media (max-width: 760px) {
 .fm-step-tx b { font-size: 11.5px; }
 .fm-step-tx small { display: none; }
@@ -6466,3 +6473,4 @@ body:has(#ask-panel:not([hidden])) .bell-unlock { display: none; }
 .fresh-row { flex-wrap: wrap; }
 .fresh-extra { flex: 1 1 100%; border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 2px; font-size: 12px; line-height: 1.55; display: grid; gap: 1px; }
 .fresh-extra b { display: inline; }
+/* ---------- v198 · GV & FF Tag Issued redesign ---------- */

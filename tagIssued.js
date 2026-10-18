@@ -1,5 +1,8 @@
-/* GV & FF Tag Issued — date-wise detailed issuance page
-   Date chunne par GV aur FF ka niche issuance batata hai detailed me — VC4, Commercial, class-wise up/down */
+/* GV & FF Tag Issued — redesigned (v198)
+   Upar date shortcuts (Today / Yesterday / Last 7 / This month …) + custom From–To.
+   KPI cards: Total · VC4 · VC20 · VC5+ · VC20+VC5+ (Commercial) — har card me FF aur GV dono ka count, % share,
+   combined sum, kaun aage / kaun down (previous period ke mukable). Neeche charts, head-to-head table, insights.
+   Data rules: FF = EIR daily (T+1 — aaj ka FF kal aata hai, isliye FF growth like-for-like), GV = GV Master (live). */
 window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
@@ -7,317 +10,450 @@ FF.pages = FF.pages || {};
   const U = FF.util, M = FF.model, S = FF.store, G = FF.gv, C = FF.charts;
   const esc = U.esc;
 
-  const kpi = (cls, title, icon, value, foot, spec) => `<button type="button" class="kpi ${cls} kpi-clickable" ${spec ? `data-kpi="${esc(spec)}"` : ''} data-kpi-title="${esc(title)}" data-kpi-value="${esc(String(value).replace(/<[^>]*>/g, ' '))}" data-kpi-foot="${esc(String(foot || '').replace(/<[^>]*>/g, ' '))}"><span class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></span><span class="kpi-value">${value}</span><span class="kpi-foot">${foot || ''}</span></button>`;
-  const card = (title, body, right) => `<section class="card"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
-  const mini = (label, value, foot, cls, spec) => `<div class="mini-kpi ${cls||''}"${spec ? ` data-kpi="${esc(spec)}" data-kpi-title="${esc(label)}" role="button" tabindex="0" title="Click karo — is number ki rows"` : ''}><span class="mini-label">${esc(label)}</span><span class="mini-value">${value}</span>${foot?`<span class="mini-foot">${foot}</span>`:''}</div>`;
+  const FF_COLOR = '#6366f1', GV_COLOR = '#0d9488';
+  const PRESETS = [
+    ['today', 'Today'], ['yesterday', 'Yesterday'], ['last7', 'Last 7 days'], ['last14', 'Last 14 days'],
+    ['last30', 'Last 30 days'], ['thisWeek', 'This week'], ['thisMonth', 'This month'], ['lastMonth', 'Last month']
+  ];
+  const KPIS = [
+    { key: 'total', label: 'Total Issued', short: 'Total', icon: '🏷️', accent: '#6366f1', f: '' },
+    { key: 'vc4', label: 'VC4', short: 'VC4', icon: '🚗', accent: '#10b981', f: 'vc4' },
+    { key: 'vc20', label: 'VC20', short: 'VC20', icon: '🚚', accent: '#f59e0b', f: 'vc20' },
+    { key: 'vc5p', label: 'VC5+', short: 'VC5+', icon: '🚛', accent: '#ec4899', f: 'vc5p' },
+    { key: 'comm', label: 'VC20 + VC5+', short: 'Commercial', icon: '🏭', accent: '#0ea5e9', f: 'comm', sub: 'Commercial (NVC4)' }
+  ];
 
-  function todayKey() {
-    const d = new Date();
-    return `${d.getFullYear()}-${U.pad2(d.getMonth()+1)}-${U.pad2(d.getDate())}`;
+  const card = (title, body, right, cls) => `<section class="card ${cls || ''}"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
+
+  // ---------------------------------------------------------------- date helpers (local, string keys)
+  const keyOf = (d) => `${d.getFullYear()}-${U.pad2(d.getMonth() + 1)}-${U.pad2(d.getDate())}`;
+  const todayKey = () => keyOf(new Date());
+  const toDate = (key) => { const [y, m, d] = String(key).split('-').map(Number); return new Date(y, (m || 1) - 1, d || 1); };
+  const shiftKey = (key, days) => { const d = toDate(key); d.setDate(d.getDate() + days); return keyOf(d); };
+  const dayCount = (from, to) => Math.round((toDate(to) - toDate(from)) / 86400000) + 1;
+  const monthLen = (y, m0) => new Date(y, m0 + 1, 0).getDate();
+  const lbl = (key, withYear) => U.labelDate(toDate(key), withYear);
+  const rangeLabel = (from, to, withYear) => (from === to ? lbl(from, withYear) : `${lbl(from)} – ${lbl(to, withYear)}`);
+
+  function presetRange(id, now) {
+    const t = keyOf(now || new Date());
+    const d = toDate(t);
+    switch (id) {
+      case 'today': return [t, t];
+      case 'yesterday': { const y = shiftKey(t, -1); return [y, y]; }
+      case 'last7': return [shiftKey(t, -6), t];
+      case 'last14': return [shiftKey(t, -13), t];
+      case 'last30': return [shiftKey(t, -29), t];
+      case 'thisWeek': { const wd = (d.getDay() + 6) % 7; return [shiftKey(t, -wd), t]; }
+      case 'thisMonth': return [keyOf(new Date(d.getFullYear(), d.getMonth(), 1)), t];
+      case 'lastMonth': { const a = new Date(d.getFullYear(), d.getMonth() - 1, 1); return [keyOf(a), keyOf(new Date(d.getFullYear(), d.getMonth(), 0))]; }
+      default: return [shiftKey(t, -6), t];
+    }
+  }
+  function detectPreset(from, to, now) {
+    for (const [id] of PRESETS) { const r = presetRange(id, now); if (r[0] === from && r[1] === to) return id; }
+    return 'custom';
+  }
+  /** Previous comparable period. Month-aligned range (1st se) → pichhle mahine ke utne hi din; warna barabar length ka pichhla range. */
+  function prevRange(from, to) {
+    if (!from || !to || from > to) return null;
+    const f = toDate(from), t = toDate(to);
+    if (f.getDate() === 1 && f.getFullYear() === t.getFullYear() && f.getMonth() === t.getMonth()) {
+      const pm = new Date(f.getFullYear(), f.getMonth() - 1, 1);
+      const len = Math.min(t.getDate(), monthLen(pm.getFullYear(), pm.getMonth()));
+      return [keyOf(pm), keyOf(new Date(pm.getFullYear(), pm.getMonth(), len))];
+    }
+    const n = dayCount(from, to);
+    return [shiftKey(from, -n), shiftKey(from, -1)];
   }
 
-  function inRange(row, from, to) {
-    const key = row.key || (row.date ? U.dateKey(row.date) : '');
-    return key && key >= from && key <= to;
-  }
-  function rangeSummary(rows, channel) {
-    const out = { total: 0, vc4: 0, vc20: 0, vc5p: 0, replacement: 0, chassis: 0, wrongVrn: 0, issuance: 0 };
+  // ---------------------------------------------------------------- data
+  /** Ek hi pass me total / class / ops / per-day numbers. */
+  function scan(rows, from, to) {
+    const out = { total: 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, issuance: 0, replacement: 0, chassis: 0, wrongVrn: 0, byClass: {}, byDay: new Map() };
+    if (!from || !to || from > to) return out;
     for (const r of rows) {
-      if (channel && r.channel && r.channel !== channel) continue;
-      const n = r.n === undefined ? 1 : r.n;
+      const key = r.key || (r.date ? U.dateKey(r.date) : '');
+      if (!key || key < from || key > to) continue;
+      const n = r.n === undefined ? 1 : (Number(r.n) || 0);
+      if (!n) continue;
       out.total += n;
       if (r.group === 'VC4') out.vc4 += n; else if (r.group === 'VC20') out.vc20 += n; else out.vc5p += n;
       if (/replacement/i.test(r.type || r.status || '')) out.replacement += n; else out.issuance += n;
       if (/chassis/i.test(r.vrnType || r.tagType || '')) out.chassis += n;
       if (/wrong/i.test(r.vrnType || '')) out.wrongVrn += n;
+      const cls = r.cls || '—';
+      out.byClass[cls] = (out.byClass[cls] || 0) + n;
+      const dd = out.byDay.get(key) || { total: 0, vc4: 0, comm: 0 };
+      dd.total += n; if (r.group === 'VC4') dd.vc4 += n; else dd.comm += n;
+      out.byDay.set(key, dd);
     }
     out.comm = out.vc20 + out.vc5p;
     return out;
   }
 
-  function parseInputDate(val) {
-    if (!val) return null;
-    const d = new Date(val);
-    return isNaN(d) ? null : d;
-  }
-
-  function getDailyForDate(daily, dateObj) {
-    const ym = U.ymKey(dateObj);
-    const day = dateObj.getDate();
-    const rows = daily.filter(r => r.ym === ym && r.day === day);
-    const total = U.sum(rows, r => r.n);
-    const vc4 = U.sum(rows.filter(r => r.group === 'VC4'), r => r.n);
-    const vc20 = U.sum(rows.filter(r => r.group === 'VC20'), r => r.n);
-    const vc5p = U.sum(rows.filter(r => r.group === 'VC5+'), r => r.n);
-    const comm = vc20 + vc5p;
-    const byClass = {};
-    rows.forEach(r => { byClass[r.cls] = (byClass[r.cls]||0)+r.n; });
-    const byType = {};
-    rows.forEach(r => { const t = r.type || 'ISSUANCE'; byType[t] = (byType[t]||0)+r.n; });
-    const byChannel = {};
-    rows.forEach(r => { const ch = r.channel || 'First Forward'; byChannel[ch] = (byChannel[ch]||0)+r.n; });
-    return { date: dateObj, ym, day, total, vc4, vc20, vc5p, comm, byClass, byType, byChannel, rows };
-  }
-
-  function getGvForDate(dateObj) {
-    const ym = U.ymKey(dateObj);
-    const day = dateObj.getDate();
-    // GV Master is the authoritative GV issuance ledger when available; EIR daily remains
-    // the historical fallback while the Master dataset is still loading.
+  function channelRows() {
+    const rawDaily = S.get('daily') || [];
+    const dailyRows = FF.filters ? FF.filters.dropLaggedFf(rawDaily) : rawDaily;
     const masterReady = !!(G && G.get && Array.isArray(G.get('master')));
-    const all = masterReady && typeof G.issuanceRows === 'function'
-      ? (G.issuanceRows() || []).filter(r => r.channel === 'GV Partner' && r.ym === ym && r.day === day)
-      : (S.get('daily') || []).filter(r => r.channel === 'GV Partner' && r.ym === ym && r.day === day);
-    const count = (rows) => U.sum(rows, r => Number(r.n) || 1);
-    const total = count(all);
-    const vc4 = count(all.filter(r => r.group === 'VC4'));
-    const vc20 = count(all.filter(r => r.group === 'VC20'));
-    const vc5p = count(all.filter(r => r.group === 'VC5+'));
-    const comm = vc20 + vc5p;
-    const byClass = {};
-    all.forEach(r => { byClass[r.cls] = (byClass[r.cls]||0)+(Number(r.n) || 1); });
-    return { date: dateObj, ym, day, total, vc4, vc20, vc5p, comm, byClass, rows: all };
+    const gvTodayRows = (G && typeof G.masterTodayRows === 'function') ? (G.masterTodayRows() || [])
+      : ((G && typeof G.issuanceRows === 'function') ? (G.issuanceRows() || []).filter((r) => r.channel === 'GV Partner' && r.key === todayKey()) : []);
+    const gvAuthoritative = masterReady && typeof G.issuanceRows === 'function'
+      ? (G.issuanceRows() || []).filter((r) => r.channel === 'GV Partner')
+      : dailyRows.filter((r) => r.channel === 'GV Partner');
+    const gvRows = gvAuthoritative.filter((r) => r.key !== todayKey()).concat(gvTodayRows).filter((r) => r.channel === 'GV Partner');
+    const ffRows = dailyRows.filter((r) => r.channel !== 'GV Partner');
+    return { ffRows, gvRows, dailyRows };
   }
 
-  function growthBadge(cur, prev) {
-    if (prev === null || prev === undefined) return '<span class="badge gray">—</span>';
+  /** Dono channels ka current + previous period (FF T+1: FF like-for-like). */
+  function buildModel(rows, from, to) {
+    const ffThrough = (FF.filters && FF.filters.isFfPending && FF.filters.ffReportedThrough) ? FF.filters.ffReportedThrough() : to;
+    const ffTo = to <= ffThrough ? to : ffThrough;
+    const ffPending = ffTo < to;
+    const ffComparable = ffTo >= from;
+    const prevGv = prevRange(from, to);
+    const prevFf = ffComparable ? prevRange(from, ffTo) : null;
+    const m = {
+      from, to, days: dayCount(from, to), ffTo, ffPending, ffComparable, ffThrough,
+      prevGvRange: prevGv, prevFfRange: prevFf,
+      ff: scan(rows.ffRows, from, to),
+      gv: scan(rows.gvRows, from, to),
+      ffPrev: prevFf ? scan(rows.ffRows, prevFf[0], prevFf[1]) : scan([], '', ''),
+      gvPrev: prevGv ? scan(rows.gvRows, prevGv[0], prevGv[1]) : scan([], '', '')
+    };
+    return m;
+  }
+
+  // ---------------------------------------------------------------- view helpers
+  function dirOf(cur, prev) {
+    const g = U.growth(cur, prev);
+    if (g === null) return prev ? 'flat' : (cur > 0 ? 'new' : 'none');
+    return g > 0.5 ? 'up' : g < -0.5 ? 'down' : 'flat';
+  }
+  function growthBadge(cur, prev, na) {
+    if (na) return '<span class="badge gray" title="FF ka data T+1 — is range ka FF kal aayega">T+1</span>';
+    const d = dirOf(cur, prev);
+    if (d === 'none') return '<span class="badge gray">—</span>';
+    if (d === 'new') return '<span class="badge green">▲ new</span>';
     const g = U.growth(cur, prev);
     if (g === null) return '<span class="badge gray">—</span>';
-    const up = g > 0.5;
-    const down = g < -0.5;
-    const cls = up ? 'green' : down ? 'red' : 'gray';
-    const arrow = up ? '▲' : down ? '▼' : '•';
-    return `<span class="badge ${cls}">${arrow} ${U.fmtSigned(g,0)}</span>`;
+    const cls = d === 'up' ? 'green' : d === 'down' ? 'red' : 'gray';
+    return `<span class="badge ${cls}">${d === 'up' ? '▲' : d === 'down' ? '▼' : '•'} ${U.fmtSigned(g, 0)}</span>`;
+  }
+  const pct = (part, total) => { const p = U.pctOf(part, total); return p === null ? 0 : p; };
+
+  function specFor(m, src, f) {
+    const base = m.from === m.to ? `src=${src}&scope=day&date=${m.from}` : `src=${src}&scope=range&from=${m.from}&to=${m.to}`;
+    return f ? `${base}&f=${f}` : base;
   }
 
+  function verdictHtml(ffV, gvV, ffD, gvD, ffNA) {
+    const sum = ffV + gvV;
+    if (!sum) return '<span class="tix-v dim">Is range me data nahi</span>';
+    let lead;
+    if (ffV === gvV) lead = '⚖️ FF aur GV barabar';
+    else if (gvV > ffV) lead = `🏆 <b>GV aage</b> · +${U.fmt(gvV - ffV)} (${U.fmtPct(pct(gvV, sum), 0)} vs ${U.fmtPct(pct(ffV, sum), 0)})`;
+    else lead = `🏆 <b>FF aage</b> · +${U.fmt(ffV - gvV)} (${U.fmtPct(pct(ffV, sum), 0)} vs ${U.fmtPct(pct(gvV, sum), 0)})`;
+    const downs = [];
+    if (!ffNA && ffD === 'down') downs.push('FF');
+    if (gvD === 'down') downs.push('GV');
+    let trend;
+    if (downs.length) trend = `<span class="tix-down">🔻 ${downs.join(' + ')} down</span>`;
+    else if ((ffNA || ffD === 'none') && gvD === 'none') trend = '';
+    else trend = '<span class="tix-up">✅ Koi down nahi</span>';
+    return `<span class="tix-v">${lead}</span>${trend ? `<span class="tix-v">${trend}</span>` : ''}`;
+  }
+
+  function kpiCard(k, m) {
+    const ffV = m.ff[k.key], gvV = m.gv[k.key];
+    const ffP = m.ffPrev[k.key], gvP = m.gvPrev[k.key];
+    const sum = ffV + gvV, sumP = ffP + gvP;
+    const ffNA = !m.ffComparable;
+    const ffShare = pct(ffV, sum), gvShare = pct(gvV, sum);
+    const ofTotal = k.key === 'total' ? null : U.pctOf(sum, m.ff.total + m.gv.total);
+    const ffD = dirOf(ffV, ffP), gvD = dirOf(gvV, gvP), sumD = dirOf(sum, sumP);
+    const row = (cls, name, v, share, prev, d, na, src) => `<div class="tix-row ${cls}" data-kpi="${esc(specFor(m, src, k.f))}" data-kpi-title="${esc(`${name} · ${k.short}`)}" role="button" tabindex="0" title="Click karo — ${esc(name)} ki rows">
+        <span class="tix-dot"></span><span class="tix-name">${name}</span><b class="tix-num">${U.fmt(v)}</b><span class="tix-pct">${sum ? U.fmtPct(share, 0) : '—'}</span><span class="tix-gr">${growthBadge(v, prev, na)}</span>
+        <span class="tix-prev">prev ${na ? '—' : U.fmt(prev)}</span></div>`;
+    return `<div class="tix-card ${d2(sumD)}" style="--accent:${k.accent}" data-kpi="${esc(specFor(m, 'both', k.f))}" data-kpi-title="${esc(`${k.label} · ${rangeLabel(m.from, m.to)}`)}" role="button" tabindex="0" title="Click karo — is number ki rows">
+      <div class="tix-card-top"><span class="tix-title"><span class="tix-ico">${k.icon}</span>${esc(k.label)}${k.sub ? `<small>${esc(k.sub)}</small>` : ''}</span>${ofTotal === null ? '' : `<span class="tix-chip" title="Total issuance me is class ka hissa">${U.fmtPct(ofTotal, 0)} of total</span>`}</div>
+      <div class="tix-big"><span class="tix-big-n">${U.fmt(sum)}</span><span class="tix-big-g">${growthBadge(sum, sumP)}</span></div>
+      <div class="tix-bigsub">FF + GV combined · prev ${U.fmt(sumP)}</div>
+      <div class="tix-split" title="FF vs GV share">${sum ? `<i class="ff" style="width:${ffShare.toFixed(1)}%"></i><i class="gv" style="width:${gvShare.toFixed(1)}%"></i>` : ''}</div>
+      ${row('ff', 'First Forward', ffV, ffShare, ffP, ffD, ffNA, 'ff')}
+      ${row('gv', 'GV Partner', gvV, gvShare, gvP, gvD, false, 'gv')}
+      <div class="tix-verdict">${verdictHtml(ffV, gvV, ffD, gvD, ffNA)}</div>
+    </div>`;
+  }
+  const d2 = (d) => (d === 'up' ? 'is-up' : d === 'down' ? 'is-down' : '');
+
+  // ---------------------------------------------------------------- sections
+  function trendWindow(m) {
+    let from = m.from, to = m.to;
+    if (dayCount(from, to) < 7) { from = shiftKey(to, -13); }
+    if (dayCount(from, to) > 120) from = shiftKey(to, -119);
+    return [from, to];
+  }
+
+  function chartsHtml(m, rows) {
+    const { ff, gv, ffPrev, gvPrev } = m;
+    const classLabels = ['VC4', 'VC20', 'VC5+', 'Commercial'];
+    const vals = (o) => [o.vc4, o.vc20, o.vc5p, o.comm];
+    const clsChart = C.bars({ labels: classLabels, height: 240, legendAlways: true, series: [
+      { name: 'First Forward', values: vals(ff), color: FF_COLOR }, { name: 'GV Partner', values: vals(gv), color: GV_COLOR }] });
+    const totalAll = ff.total + gv.total;
+    const shareDonut = C.donut({ size: 150, title: U.fmtShort(totalAll), subtitle: 'Total tags', items: [
+      { label: 'First Forward', value: ff.total, color: FF_COLOR }, { label: 'GV Partner', value: gv.total, color: GV_COLOR }] });
+    const mixDonut = C.donut({ size: 150, title: U.fmtShort(totalAll), subtitle: 'Class mix', items: [
+      { label: 'VC4', value: ff.vc4 + gv.vc4, color: '#10b981' }, { label: 'VC20', value: ff.vc20 + gv.vc20, color: '#f59e0b' }, { label: 'VC5+', value: ff.vc5p + gv.vc5p, color: '#ec4899' }] });
+    const [tf, tt] = trendWindow(m);
+    const labels = [], ffV = [], gvV = [], totV = [], tipLabels = [];
+    for (let k = tf; k <= tt; k = shiftKey(k, 1)) {
+      const ffPend = !!(FF.filters && FF.filters.isFfPending && FF.filters.isFfPending(k));
+      const a = rows.ffMap.get(k), b = rows.gvMap.get(k);
+      const av = a ? a.total : 0, bv = b ? b.total : 0;
+      labels.push(lbl(k)); tipLabels.push(lbl(k, true));
+      ffV.push(ffPend ? null : av); gvV.push(bv); totV.push(ffPend ? null : av + bv);
+    }
+    const trend = C.lines({ labels, tipLabels, height: 240, series: [
+      { name: 'Total', values: totV, color: '#f97316', dash: true, area: false },
+      { name: 'First Forward', values: ffV, color: FF_COLOR }, { name: 'GV Partner', values: gvV, color: GV_COLOR }] });
+    const dailyBars = C.bars({ labels, tipLabels, height: 230, legendAlways: true, series: [
+      { name: 'First Forward', values: ffV.map((v) => v || 0), color: FF_COLOR }, { name: 'GV Partner', values: gvV, color: GV_COLOR }] });
+    const cmpLabels = ['Total', 'VC4', 'VC20', 'VC5+', 'Commercial'];
+    const keys = ['total', 'vc4', 'vc20', 'vc5p', 'comm'];
+    const prevName = m.prevGvRange ? `Prev ${rangeLabel(m.prevGvRange[0], m.prevGvRange[1])}` : 'Prev';
+    const ffCmp = C.bars({ labels: cmpLabels, height: 220, legendAlways: true, series: [
+      { name: m.ffComparable ? 'Prev' : 'Prev (T+1)', values: keys.map((k) => ffPrev[k]), color: '#c7d2fe' }, { name: 'Selected', values: keys.map((k) => ff[k]), color: FF_COLOR }] });
+    const gvCmp = C.bars({ labels: cmpLabels, height: 220, legendAlways: true, series: [
+      { name: 'Prev', values: keys.map((k) => gvPrev[k]), color: '#99f6e4' }, { name: 'Selected', values: keys.map((k) => gv[k]), color: GV_COLOR }] });
+    const growthBars = C.hbars({ valueLabel: 'Selected', compareLabel: 'Prev', items: KPIS.map((k) => ({
+      label: k.short, sub: `FF ${U.fmt(ff[k.key])} · GV ${U.fmt(gv[k.key])}`, value: ff[k.key] + gv[k.key], compare: ffPrev[k.key] + gvPrev[k.key], color: k.accent })) });
+    return `
+      <div class="grid g-2">
+        ${card('📊 Class-wise · FF vs GV', clsChart, `<span class="badge indigo">${U.fmt(totalAll)} total</span>`)}
+        ${card('🥧 Share · kaun kitna', `<div class="tix-donuts"><div><h4>FF vs GV</h4>${shareDonut}</div><div><h4>Class mix (combined)</h4>${mixDonut}</div></div>`)}
+      </div>
+      <div class="grid g-2">
+        ${card(`📈 Daily trend · ${esc(rangeLabel(tf, tt))}`, trend + (FF.filters && FF.filters.isFfPending && FF.filters.isFfPending(tt) ? '<p class="dim small">FF T+1 hai — aaj ka FF graph me gap dikhta hai (kal aayega).</p>' : ''))}
+        ${card('🗓️ Daily volume · FF + GV', dailyBars)}
+      </div>
+      <div class="grid g-2">
+        ${card(`🔁 Selected vs ${esc(prevName)} · Combined`, growthBars, '<span class="dim small">bar = selected, line = pichhla period</span>')}
+        <div class="tix-stack">
+          ${card('🟦 First Forward · prev vs selected', ffCmp, `<span class="badge indigo">${U.fmt(ff.total)} tags</span>`)}
+          ${card('🟩 GV Partner · prev vs selected', gvCmp, `<span class="badge teal">${U.fmt(gv.total)} tags</span>`)}
+        </div>
+      </div>`;
+  }
+
+  function insightsHtml(m, rows, presetId) {
+    const { ff, gv, ffPrev, gvPrev } = m;
+    const total = ff.total + gv.total, totalP = ffPrev.total + gvPrev.total;
+    const out = [];
+    if (!total) return '<p class="dim">Is range me koi issuance data nahi mila.</p>';
+    const leadName = gv.total === ff.total ? null : gv.total > ff.total ? 'GV' : 'FF';
+    out.push(`Total <b>${U.fmt(total)}</b> tags · FF <b>${U.fmt(ff.total)}</b> (${U.fmtPct(pct(ff.total, total), 0)}) · GV <b>${U.fmt(gv.total)}</b> (${U.fmtPct(pct(gv.total, total), 0)})${leadName ? ` — <b>${leadName}</b> ${U.fmt(Math.abs(gv.total - ff.total))} se aage.` : ' — dono barabar.'}`);
+    const g = (c, p) => U.growth(c, p);
+    const gT = g(total, totalP), gF = m.ffComparable ? g(ff.total, ffPrev.total) : null, gG = g(gv.total, gvPrev.total);
+    const word = (x) => (x === null ? '—' : `${x > 0.5 ? '▲' : x < -0.5 ? '▼' : '•'} ${U.fmtSigned(x, 0)}`);
+    out.push(`Previous period ke mukable: Total <b>${word(gT)}</b> · FF <b>${m.ffComparable ? word(gF) : 'T+1 (kal aayega)'}</b> · GV <b>${word(gG)}</b>.${gG !== null && gG < -0.5 && (gF === null || gF >= 0) ? ' ⚠️ GV down hai.' : ''}${gF !== null && gF < -0.5 && (gG === null || gG >= 0) ? ' ⚠️ FF down hai.' : ''}`);
+    const mix = (o, key) => pct(o[key], o.total);
+    out.push(`VC4 mix: FF <b>${U.fmtPct(mix(ff, 'vc4'), 0)}</b> vs GV <b>${U.fmtPct(mix(gv, 'vc4'), 0)}</b> — ${mix(gv, 'vc4') > mix(ff, 'vc4') ? 'GV ka VC4 (payable) mix behtar hai' : mix(gv, 'vc4') < mix(ff, 'vc4') ? 'FF ka VC4 (payable) mix behtar hai' : 'dono barabar'}.`);
+    out.push(`Commercial (VC20 + VC5+) <b>${U.fmt(ff.comm + gv.comm)}</b> — FF ${U.fmt(ff.comm)} (VC20 ${U.fmt(ff.vc20)} + VC5+ ${U.fmt(ff.vc5p)}) vs GV ${U.fmt(gv.comm)} (VC20 ${U.fmt(gv.vc20)} + VC5+ ${U.fmt(gv.vc5p)}).`);
+    const leaders = ['vc4', 'vc20', 'vc5p'].map((k) => ({ k: k === 'vc5p' ? 'VC5+' : k.toUpperCase(), lead: gv[k] === ff[k] ? '=' : gv[k] > ff[k] ? 'GV' : 'FF' }));
+    out.push(`Class leader: ${leaders.map((x) => `${x.k} → <b>${x.lead}</b>`).join(' · ')}.`);
+    // best / lowest day
+    const days = new Map();
+    ff.byDay.forEach((v, k) => days.set(k, (days.get(k) || 0) + v.total));
+    gv.byDay.forEach((v, k) => days.set(k, (days.get(k) || 0) + v.total));
+    const arr = [...days].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    if (arr.length > 1) {
+      out.push(`Best din <b>${esc(lbl(arr[0][0], true))}</b> (${U.fmt(arr[0][1])}) · sabse kam <b>${esc(lbl(arr[arr.length - 1][0], true))}</b> (${U.fmt(arr[arr.length - 1][1])}).`);
+    }
+    if (m.days > 1) {
+      const ffDays = m.ffComparable ? dayCount(m.from, m.ffTo) : 0;
+      out.push(`Daily average: GV <b>${U.fmt(gv.total / m.days, 1)}</b>/din${ffDays ? ` · FF <b>${U.fmt(ff.total / ffDays, 1)}</b>/din` : ''}.`);
+    }
+    // biggest class movement (combined)
+    const cls = U.uniq([...Object.keys(ff.byClass), ...Object.keys(gv.byClass), ...Object.keys(ffPrev.byClass), ...Object.keys(gvPrev.byClass)]);
+    const moves = cls.map((c) => { const cur = (ff.byClass[c] || 0) + (gv.byClass[c] || 0); const pv = (ffPrev.byClass[c] || 0) + (gvPrev.byClass[c] || 0); return { c, cur, diff: cur - pv }; }).filter((x) => x.diff !== 0).sort((a, b) => b.diff - a.diff);
+    if (moves.length) {
+      const up = moves[0], dn = moves[moves.length - 1];
+      out.push(`Class movement: ${up.diff > 0 ? `<b>${esc(up.c)}</b> sabse zyada up (+${U.fmt(up.diff)})` : ''}${up.diff > 0 && dn.diff < 0 ? ' · ' : ''}${dn.diff < 0 ? `<b>${esc(dn.c)}</b> sabse zyada down (${U.fmt(dn.diff)})` : ''}.`);
+    }
+    // month projection
+    const nowKey = todayKey();
+    const t = toDate(m.to);
+    if (m.from.slice(8) === '01' && m.from.slice(0, 7) === m.to.slice(0, 7) && m.to.slice(0, 7) === nowKey.slice(0, 7) && m.days >= 3) {
+      const ml = monthLen(t.getFullYear(), t.getMonth());
+      out.push(`Run-rate: GV is raftaar se month-end tak ~<b>${U.fmt(Math.round(gv.total / m.days * ml))}</b> tags${m.ffComparable ? ` · FF ~<b>${U.fmt(Math.round(ff.total / dayCount(m.from, m.ffTo) * ml))}</b>` : ''}.`);
+    }
+    if (m.ffPending) out.push(`🟦 FF data T+1 hai — <b>${esc(lbl(m.ffThrough, true))}</b> tak ka FF aaya hai; uske baad ka FF kal aayega. FF growth isi wajah se like-for-like dikhaya gaya hai.`);
+    return `<ul class="insight-list">${out.map((x) => `<li>${x}</li>`).join('')}</ul>`;
+  }
+
+  function h2hTable(m) {
+    const { ff, gv, ffPrev, gvPrev } = m;
+    const defs = [['Total', 'total'], ['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+', 'vc5p'], ['VC20 + VC5+ (Commercial)', 'comm'], ['Issuance', 'issuance'], ['Replacement', 'replacement'], ['Chassis', 'chassis'], ['Wrong VRN', 'wrongVrn']];
+    const rowsHtml = defs.map(([label, key]) => {
+      const a = ff[key], b = gv[key], s = a + b;
+      const lead = !s ? '—' : a === b ? '=' : b > a ? `GV +${U.fmt(b - a)}` : `FF +${U.fmt(a - b)}`;
+      const strong = key === 'total' || key === 'comm' ? ' class="tix-strong"' : '';
+      return `<tr${strong}><td>${esc(label)}</td><td class="num">${U.fmt(a)}</td><td class="num dim">${s ? U.fmtPct(pct(a, s), 0) : '—'}</td><td class="num">${U.fmt(b)}</td><td class="num dim">${s ? U.fmtPct(pct(b, s), 0) : '—'}</td><td class="num"><b>${U.fmt(s)}</b></td><td>${lead}</td><td>${growthBadge(a, ffPrev[key], !m.ffComparable)}</td><td>${growthBadge(b, gvPrev[key])}</td><td>${growthBadge(s, ffPrev[key] + gvPrev[key])}</td></tr>`;
+    }).join('');
+    return `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Metric</th><th class="num">FF</th><th class="num">FF %</th><th class="num">GV</th><th class="num">GV %</th><th class="num">Combined</th><th>Lead</th><th>FF vs prev</th><th>GV vs prev</th><th>Total vs prev</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+      <p class="dim small">GV Master me Wrong VRN alag field nahi hai (GV ke liye 0 / unavailable). Chassis = chassis type wale tags.</p>`;
+  }
+
+  function classTable(m) {
+    const { ff, gv, ffPrev, gvPrev } = m;
+    const all = U.uniq([...Object.keys(ff.byClass), ...Object.keys(gv.byClass), ...Object.keys(ffPrev.byClass), ...Object.keys(gvPrev.byClass)]).sort((a, b) => (parseInt(a.replace(/\D/g, ''), 10) || 999) - (parseInt(b.replace(/\D/g, ''), 10) || 999));
+    const rows = all.map((c) => {
+      const a = ff.byClass[c] || 0, ap = ffPrev.byClass[c] || 0, b = gv.byClass[c] || 0, bp = gvPrev.byClass[c] || 0;
+      return `<tr><td><b>${esc(c)}</b> <small class="dim">${esc(M.classGroup(c))}</small></td>
+        <td class="num"><b>${U.fmt(a)}</b></td><td class="num">${m.ffComparable ? U.fmt(ap) : '—'}</td><td>${growthBadge(a, ap, !m.ffComparable)}</td>
+        <td class="num"><b>${U.fmt(b)}</b></td><td class="num">${U.fmt(bp)}</td><td>${growthBadge(b, bp)}</td>
+        <td class="num"><b>${U.fmt(a + b)}</b></td><td class="num">${U.fmt(ap + bp)}</td><td>${growthBadge(a + b, ap + bp)}</td></tr>`;
+    }).join('');
+    return `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">FF</th><th class="num">FF prev</th><th>FF Δ</th><th class="num">GV</th><th class="num">GV prev</th><th>GV Δ</th><th class="num">Total</th><th class="num">Total prev</th><th>Total Δ</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="empty">Is range me koi data nahi</td></tr>'}</tbody></table></div>`;
+  }
+
+  function peopleHtml(m, rows) {
+    const rankCount = Math.max(5, Math.min(20, Number((function () { try { return localStorage.getItem('ti_chart_limit'); } catch (e) { return 0; } })()) || 10));
+    const gvAgentMap = new Map(), gvTlMap = new Map();
+    rows.gvRows.forEach((r) => {
+      const key = r.key || '';
+      if (key < m.from || key > m.to) return;
+      const n = r.n === undefined ? 1 : (Number(r.n) || 0);
+      const k = r.agentName || r.agentId || 'Unknown';
+      const o = gvAgentMap.get(k) || { total: 0, vc4: 0, comm: 0 };
+      o.total += n; if (r.group === 'VC4') o.vc4 += n; else o.comm += n; gvAgentMap.set(k, o);
+      const tl = FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r.tlName || 'Unassigned');
+      gvTlMap.set(tl, (gvTlMap.get(tl) || 0) + n);
+    });
+    const top = (sel) => [...gvAgentMap].sort((a, b) => sel(b[1]) - sel(a[1])).slice(0, rankCount);
+    const ffMonths = new Set(rows.ffRows.filter((r) => (r.key || '') >= m.from && (r.key || '') <= m.to).map((r) => r.ym));
+    const ffAgentTotals = new Map();
+    (S.get('agents') || []).forEach((a) => { if (a.channel === 'First Forward' && ffMonths.has(a.ym)) ffAgentTotals.set(a.name, (ffAgentTotals.get(a.name) || 0) + a.n); });
+    const topFf = U.topEntries(ffAgentTotals, rankCount);
+    const hb = (list, sel, valueLabel, off) => C.hbars({ valueLabel, items: list.map(([name, o], i) => ({ label: name, sub: sel === 'total' ? `VC4 ${U.fmt(o.vc4)} · Commercial ${U.fmt(o.comm)}` : '', value: o[sel], color: C.PALETTE[(i + off) % C.PALETTE.length] })) });
+    return `<div class="grid g-2">${card('🏆 Top GV agents', hb(top((o) => o.total), 'total', 'Tags', 0))}${card('⭐ Top First Forward agents', `${C.hbars({ valueLabel: 'Tags', items: topFf.map(([name, n], i) => ({ label: name, value: n, color: C.PALETTE[i % C.PALETTE.length] })) })}<small class="dim">FF agent source month-level hai — partial month me poora month judta hai.</small>`)}</div>
+      <div class="grid g-2">${card('🚗 Top GV VC4 agents', hb(top((o) => o.vc4), 'vc4', 'VC4 tags', 0))}${card('🚚 Top GV Commercial agents', hb(top((o) => o.comm), 'comm', 'Commercial tags', 3))}</div>
+      ${card('🏢 Top GV teams / supervisors', C.hbars({ valueLabel: 'Tags', items: U.topEntries(gvTlMap, rankCount).map(([name, n], i) => ({ label: name, value: n, color: C.PALETTE[(i + 5) % C.PALETTE.length] })) }))}`;
+  }
+
+  // ---------------------------------------------------------------- page
+  const store = {
+    get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
+  };
+
   async function render(root, params) {
-    const initialDate = params.date || todayKey();
-    root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">Date-wise detailed issuance — VC4 / Commercial / class-wise up-down, GV + First Forward</p></div>
+    params = params || {};
+    const now = new Date();
+    let from, to, preset;
+    if (params.from || params.to || params.date) {
+      to = params.to || params.date || params.from; from = params.from || to;
+      preset = detectPreset(from, to, now);
+    } else {
+      preset = PRESETS.some(([id]) => id === store.get('ti_preset', '')) ? store.get('ti_preset', 'last7') : 'last7';
+      [from, to] = presetRange(preset, now);
+    }
+    if (from > to) { const t = from; from = to; to = t; }
+
+    root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">GV Partner vs First Forward — VC4 · VC20 · VC5+ · Commercial, share %, up/down aur graphs</p></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
-      <div class="card controls"><div class="ctrl-row ti-range-controls">
-        <label>📅 From <input type="date" class="input" id="ti-from" value="${esc(params.from || initialDate)}" max="${todayKey()}"></label>
-        <label>To <input type="date" class="input" id="ti-date" value="${esc(params.to || initialDate)}" max="${todayKey()}"></label>
-        <button class="btn" id="ti-today">Today</button>
-        <button class="btn" id="ti-yest">Yesterday</button>
-        <span class="dim small">Selected date range ka total aur GV vs FF comparison niche dekhein.</span>
-      </div></div>
-      <div id="ti-range-summary"></div>
+      <div class="card tix-toolbar">
+        <div class="tix-presets" id="ti-presets" role="group" aria-label="Date shortcuts">${PRESETS.map(([id, label]) => `<button type="button" class="tix-chipbtn" data-preset="${id}">${label}</button>`).join('')}<button type="button" class="tix-chipbtn" data-preset="custom">Custom</button></div>
+        <div class="tix-dates">
+          <label>📅 From <input type="date" class="input" id="ti-from" value="${esc(from)}" max="${todayKey()}"></label>
+          <label>To <input type="date" class="input" id="ti-date" value="${esc(to)}" max="${todayKey()}"></label>
+          <button class="btn small" type="button" id="ti-apply">Apply</button>
+        </div>
+        <div class="tix-rangeinfo" id="ti-info"></div>
+      </div>
       <div id="ti-body">${U.spinner('Data load ho raha hai…')}</div>`;
 
-    const body = U.$('#ti-body', root);
-    const dateInput = U.$('#ti-date', root);
-    const fromInput = U.$('#ti-from', root);
-    const rangeRoot = U.$('#ti-range-summary', root);
+    const body = U.$('#ti-body', root), fromInput = U.$('#ti-from', root), toInput = U.$('#ti-date', root), info = U.$('#ti-info', root), presetBox = U.$('#ti-presets', root);
 
-    // Ensure data loaded
     try {
-      await Promise.all([S.need('daily').catch(()=>[]), G.need('master').catch(()=>[])]);
+      await Promise.all([S.need('daily').catch(() => []), G.need('master').catch(() => [])]);
     } catch (e) {
       body.innerHTML = U.errorBox(e, 'data-action="refresh"');
       return;
     }
-    if (!params.date && !params.to) {
-      const ffLatest = M.latestDate(S.get('daily') || []);
-      const gvLatest = G.latestDate();
-      const latest = [ffLatest, gvLatest].filter(Boolean).sort((a, b) => b - a)[0];
-      if (latest) {
-        const endKey = U.dateKey(latest);
-        dateInput.value = endKey;
-        if (!params.from) {
-          const span = Math.max(1, Math.min(90, Number(localStorage.getItem('ti_range_days')) || 1));
-          const start = new Date(latest); start.setDate(start.getDate() - span + 1);
-          fromInput.value = U.dateKey(start);
-        }
-      }
+
+    function paintPresets() {
+      U.$$('[data-preset]', presetBox).forEach((b) => b.classList.toggle('active', b.getAttribute('data-preset') === preset));
     }
 
-    async function draw() {
-      const val = dateInput.value || todayKey();
-      const dateObj = parseInputDate(val);
-      if (!dateObj) { body.innerHTML = `<div class="empty-state">Invalid date</div>`; return; }
-      const fromVal = fromInput.value || val;
-      if (fromVal > val) { rangeRoot.innerHTML = '<div class="warn-box">From date, To date se baad nahi ho sakti.</div>'; return; }
-
-      // Date interval analytics (daily EIR aggregates + row-level GV Master).
-      // 🔁 FF (EIR) T+1 hai — aaj ka FF data kal aata hai; GV live. Isliye lagged FF rows yahan bhi drop.
-      const rawDaily = S.get('daily') || [];
-      const dailyRows = FF.filters ? FF.filters.dropLaggedFf(rawDaily) : rawDaily;
-      // 🟢 GV today/current range is authoritative from GV Master, not the lagged daily/EIR snapshot.
-      const gvTodayRows = (G && typeof G.masterTodayRows === 'function') ? (G.masterTodayRows() || []) :
-        ((G && typeof G.issuanceRows === 'function') ? (G.issuanceRows() || []).filter((r) => r.channel === 'GV Partner' && r.key === todayKey()) : []);
-      // Historical GV stays on the daily/EIR snapshot; only today's GV is replaced by live Master.
-      const masterReady = !!(G && G.get && Array.isArray(G.get('master')));
-      // GV issuance rows are deduplicated by the GV module (EIR + GV Master supplement).
-      // Prefer them for all dates, not just today, once Master has loaded.
-      const gvAuthoritativeRows = masterReady && typeof G.issuanceRows === 'function'
-        ? (G.issuanceRows() || []).filter((r) => r.channel === 'GV Partner')
-        : dailyRows.filter((r) => r.channel === 'GV Partner');
-      const gvHistoricalRows = gvAuthoritativeRows.filter((r) => r.key !== todayKey());
-      const ffPending = !!(FF.filters && FF.filters.isFfPending(val));
-      const ffLagBadge = ffPending ? `<span class="badge amber" title="First Forward ka issuance data T+1 aata hai — ${esc(val)} ka FF kal aayega, isliye FF abhi 0 dikh raha hai. GV live hai.">🟦 FF T+1 · kal aayega</span>` : '';
-      const ffRangeRows = dailyRows.filter((r) => r.channel !== 'GV Partner' && inRange(r, fromVal, val));
-      const gvRangeRows = gvHistoricalRows.concat(gvTodayRows).filter((r) => r.channel === 'GV Partner' && inRange(r, fromVal, val));
-      const ffRange = rangeSummary(ffRangeRows);
-      const gvRange = rangeSummary(gvRangeRows);
-      const combined = ffRange.total + gvRange.total;
-      const rangeLabel = `${U.labelDate(parseInputDate(fromVal), true)} – ${U.labelDate(dateObj, true)}`;
-      const cmpChart = C.bars({ labels: ['VC4', 'VC20', 'VC5+', 'Commercial'], height: 230, series: [
-        { name: 'First Forward', values: [ffRange.vc4, ffRange.vc20, ffRange.vc5p, ffRange.comm], color: '#6366f1' },
-        { name: 'GV Partner', values: [gvRange.vc4, gvRange.vc20, gvRange.vc5p, gvRange.comm], color: '#0d9488' }
-      ], legendAlways: true });
-      const opsChart = C.bars({ labels: ['Issuance', 'Replacement', 'Chassis', 'Wrong VRN'], height: 220, series: [
-        { name: 'First Forward', values: [ffRange.issuance, ffRange.replacement, ffRange.chassis, ffRange.wrongVrn], color: '#6366f1' },
-        { name: 'GV Partner', values: [gvRange.issuance, gvRange.replacement, gvRange.chassis, gvRange.wrongVrn], color: '#0d9488' }
-      ], legendAlways: true });
-      const rankCount = Math.max(5, Math.min(20, Number(localStorage.getItem('ti_chart_limit')) || 10));
-      const gvAgentMap = new Map(), gvTlMap = new Map();
-      gvRangeRows.forEach((r) => { const n = Number(r.n) || 1; const k = r.agentName || r.agentId || 'Unknown'; const o = gvAgentMap.get(k) || { total: 0, vc4: 0, comm: 0 }; o.total += n; if (r.group === 'VC4') o.vc4 += n; else o.comm += n; gvAgentMap.set(k, o); const tl = FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r.tlName || 'Unassigned'); gvTlMap.set(tl, (gvTlMap.get(tl) || 0) + n); });
-      const gvTopRows = [...gvAgentMap].sort((a,b)=>b[1].total-a[1].total).slice(0,rankCount);
-      const gvTopVc4 = [...gvAgentMap].sort((a,b)=>b[1].vc4-a[1].vc4).slice(0,rankCount);
-      const gvTopCommercial = [...gvAgentMap].sort((a,b)=>b[1].comm-a[1].comm).slice(0,rankCount);
-      const ffMonths = new Set(dailyRows.filter(r => r.channel !== 'GV Partner' && inRange(r, fromVal, val)).map(r => r.ym));
-      const ffAgentTotals = new Map();
-      (S.get('agents') || []).forEach((a) => { if (a.channel === 'First Forward' && ffMonths.has(a.ym)) ffAgentTotals.set(a.name, (ffAgentTotals.get(a.name)||0)+a.n); });
-      const topFfAgents = U.topEntries(ffAgentTotals, rankCount);
-      const classMetrics = [['Total', 'total'], ['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+', 'vc5p'], ['Commercial', 'comm'], ['Issuance', 'issuance'], ['Replacement', 'replacement'], ['Chassis', 'chassis'], ['Wrong VRN', 'wrongVrn']];
-      const compareRows = classMetrics.map(([label,key]) => `<tr><td>${esc(label)}</td><td class="num">${U.fmt(ffRange[key])}</td><td class="num">${U.fmt(gvRange[key])}</td><td class="num"><b>${U.fmt(ffRange[key] + gvRange[key])}</b></td></tr>`).join('');
-      rangeRoot.innerHTML = `<section class="range-summary card"><div class="card-head"><h3>📊 GV vs First Forward · ${esc(rangeLabel)}</h3><div class="card-right">${ffLagBadge}<span class="badge indigo">${U.fmt(combined)} tags total</span></div></div>
-        <div class="range-total-row"><div><small>First Forward</small><b>${U.fmt(ffRange.total)}</b></div><div><small>GV Partner</small><b>${U.fmt(gvRange.total)}</b></div><div><small>Combined total</small><b>${U.fmt(combined)}</b></div></div>
-        <div class="grid g-2">${card('🏷️ Tag class comparison · VC4 / VC20 / VC5+', cmpChart)}${card('🔧 Issuance, replacement & exceptions', opsChart)}</div>
-        <div class="grid g-2">${card('🏆 Top GV agents · selected date range', C.hbars({items:gvTopRows.map(([name,o],i)=>({label:name,sub:`VC4 ${U.fmt(o.vc4)} · Commercial ${U.fmt(o.comm)}`,value:o.total,color:C.PALETTE[i%C.PALETTE.length]})),valueLabel:'Tags'}))}${card('⭐ Top First Forward agents · available month summaries', `${C.hbars({items:topFfAgents.map(([name,n],i)=>({label:name,value:n,color:C.PALETTE[i%C.PALETTE.length]})),valueLabel:'Tags'})}<small class="dim">Agent source is month-level, so partial-month selections include the full selected month(s).</small>`)}</div>
-        <div class="grid g-2">${card('🚗 Top GV VC4 agents', C.hbars({items:gvTopVc4.map(([name,o],i)=>({label:name,value:o.vc4,color:C.PALETTE[i%C.PALETTE.length]})),valueLabel:'VC4 tags'}))}${card('🚚 Top GV Commercial agents', C.hbars({items:gvTopCommercial.map(([name,o],i)=>({label:name,value:o.comm,color:C.PALETTE[(i+3)%C.PALETTE.length]})),valueLabel:'Commercial tags'}))}</div>
-        ${card('🏢 Top GV teams / supervisors', C.hbars({items:U.topEntries(gvTlMap,rankCount).map(([name,n],i)=>({label:name,value:n,color:C.PALETTE[(i+5)%C.PALETTE.length]})),valueLabel:'Tags'}))}
-        ${card('🔢 Exact range totals', `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Metric</th><th class="num">First Forward</th><th class="num">GV Partner</th><th class="num">Combined</th></tr></thead><tbody>${compareRows}</tbody></table></div><p class="dim small">GV Master does not expose a separate Wrong VRN field; GV Wrong VRN is shown as 0 / unavailable. Chassis counts GV tags typed as chassis.</p>`)}</section>`;
-      C.mount(rangeRoot);
-
-      // Update URL without reload
-      const newHash = `#/tagIssued?from=${fromVal}&to=${val}&date=${val}`;
-      if (location.hash !== newHash) history.replaceState(null, '', newHash);
-
-      const daily = FF.filters ? FF.filters.dropLaggedFf(S.get('daily') || []) : (S.get('daily') || []);
-      const ffData = getDailyForDate(daily.filter(r => r.channel !== 'GV Partner'), dateObj);
-      const allData = getDailyForDate(daily, dateObj);
-      const gvData = getGvForDate(dateObj);
-
-      // Previous day for growth
-      const prevDate = new Date(dateObj); prevDate.setDate(prevDate.getDate()-1);
-      const ffPrev = getDailyForDate(daily.filter(r => r.channel !== 'GV Partner'), prevDate);
-      const gvPrev = getGvForDate(prevDate);
-      const allPrev = getDailyForDate(daily, prevDate);
-
-      // Week ago same weekday
-      const weekAgo = new Date(dateObj); weekAgo.setDate(weekAgo.getDate()-7);
-      const ffWeek = getDailyForDate(daily.filter(r => r.channel !== 'GV Partner'), weekAgo);
-      const gvWeek = getGvForDate(weekAgo);
-
-      const total = ffData.total + gvData.total;
-      const totalPrev = ffPrev.total + gvPrev.total;
-
-      const dk = U.dateKey(dateObj);
-      const kpis = [
-        kpi('g2', `Total Issued · ${U.labelDate(dateObj,true)}`, '🏷️', U.fmt(total), `${growthBadge(total, totalPrev)} vs prev day (${U.fmt(totalPrev)}) · FF <b>${U.fmt(ffData.total)}</b>${ffPending ? ' <small>(kal aayega)</small>' : ''} · GV <b>${U.fmt(gvData.total)}</b>`, `src=both&scope=day&date=${dk}`),
-        kpi('g3', 'FF · VC4', '🚗', U.fmt(ffData.vc4), `${growthBadge(ffData.vc4, ffPrev.vc4)} vs prev · Commercial <b>${U.fmt(ffData.comm)}</b> · share ${U.fmtPct(U.pctOf(ffData.vc4, ffData.total),0)}`, `src=both&scope=day&date=${dk}&f=ff,vc4`),
-        kpi('g5', 'GV · VC4', '🚀', U.fmt(gvData.vc4), `${growthBadge(gvData.vc4, gvPrev.vc4)} vs prev · Commercial <b>${U.fmt(gvData.comm)}</b> · share ${U.fmtPct(U.pctOf(gvData.vc4, gvData.total),0)}`, `src=gv&scope=day&date=${dk}&f=vc4`),
-        kpi('g4', 'Commercial Total', '🚚', U.fmt(ffData.comm + gvData.comm), `FF ${U.fmt(ffData.comm)} (VC20 ${U.fmt(ffData.vc20)} + VC5+ ${U.fmt(ffData.vc5p)}) · GV ${U.fmt(gvData.comm)}`, `src=both&scope=day&date=${dk}&f=comm`),
-        kpi('g1', 'FF Growth vs Week Ago', '📈', growthBadge(ffData.total, ffWeek.total), `Week ago ${U.labelDate(weekAgo,true)}: <b>${U.fmt(ffWeek.total)}</b> · GV week ago: <b>${U.fmt(gvWeek.total)}</b>`, `src=both&scope=day&date=${dk}&f=ff`),
-        kpi('g9', 'Class Mix Today', '🔖', Object.keys(allData.byClass).length ? Object.entries(allData.byClass).sort((a,b)=>b[1]-a[1])[0][0] : '—', Object.entries(allData.byClass).map(([k,v])=>`${k} <b>${U.fmt(v)}</b>`).join(' · '), `src=both&scope=day&date=${dk}`)
-      ];
-
-      // Class-wise table
-      const allClasses = U.uniq([...Object.keys(ffData.byClass), ...Object.keys(gvData.byClass), ...Object.keys(ffPrev.byClass), ...Object.keys(gvPrev.byClass)]).sort((a,b)=>{
-        const na = parseInt(a.replace(/\D/g,''),10)||999;
-        const nb = parseInt(b.replace(/\D/g,''),10)||999;
-        return na-nb;
-      });
-      const classRows = allClasses.map(cls => {
-        const ffCur = ffData.byClass[cls]||0;
-        const gvCur = gvData.byClass[cls]||0;
-        const ffPr = ffPrev.byClass[cls]||0;
-        const gvPr = gvPrev.byClass[cls]||0;
-        const totCur = ffCur+gvCur;
-        const totPr = ffPr+gvPr;
-        return `<tr><td><b>${esc(cls)}</b> <small class="dim">${esc(M.classGroup(cls))}</small></td>
-          <td class="num"><b>${U.fmt(ffCur)}</b></td><td class="num">${U.fmt(ffPr)}</td><td class="num">${growthBadge(ffCur, ffPr)}</td>
-          <td class="num"><b>${U.fmt(gvCur)}</b></td><td class="num">${U.fmt(gvPr)}</td><td class="num">${growthBadge(gvCur, gvPr)}</td>
-          <td class="num"><b>${U.fmt(totCur)}</b></td><td class="num">${U.fmt(totPr)}</td><td class="num">${growthBadge(totCur, totPr)}</td></tr>`;
-      }).join('');
-
-      // Detailed breakdown cards
-      const ffChart = C.bars({
-        labels: ['VC4','VC20','VC5+','Commercial','Total'],
-        height: 200,
-        series: [
-          { name: U.labelDate(prevDate), values: [ffPrev.vc4, ffPrev.vc20, ffPrev.vc5p, ffPrev.comm, ffPrev.total], color: '#c7d2fe' },
-          { name: U.labelDate(dateObj), values: [ffData.vc4, ffData.vc20, ffData.vc5p, ffData.comm, ffData.total], color: '#6366f1' }
-        ],
-        legendAlways: true
-      });
-      const gvChart = C.bars({
-        labels: ['VC4','VC20','VC5+','Commercial','Total'],
-        height: 200,
-        series: [
-          { name: U.labelDate(prevDate), values: [gvPrev.vc4, gvPrev.vc20, gvPrev.vc5p, gvPrev.comm, gvPrev.total], color: '#99f6e4' },
-          { name: U.labelDate(dateObj), values: [gvData.vc4, gvData.vc20, gvData.vc5p, gvData.comm, gvData.total], color: '#0d9488' }
-        ],
-        legendAlways: true
-      });
-
-      // Hourly? Not available, but show TL wise for that day if possible
-      const tlMapFF = new Map();
-      allData.rows.forEach(r => {
-        // EIR daily doesn't have TL in daily aggregation, so we need to approximate from agents? 
-        // We'll show class-wise instead
-      });
+    function draw() {
+      paintPresets();
+      fromInput.value = from; toInput.value = to;
+      const rows = channelRows();
+      rows.ffMap = scanDays(rows.ffRows);
+      rows.gvMap = scanDays(rows.gvRows);
+      const m = buildModel(rows, from, to);
+      const prevTxt = m.prevGvRange ? `vs ${esc(rangeLabel(m.prevGvRange[0], m.prevGvRange[1], true))}` : '';
+      info.innerHTML = `<span class="badge indigo">${esc(rangeLabel(from, to, true))}</span> <span class="dim">${m.days} din ${prevTxt ? `· ${prevTxt}` : ''}</span> ${m.ffPending ? `<span class="badge amber" title="First Forward ka issuance T+1 aata hai — ${esc(lbl(m.ffThrough, true))} ke baad ka FF kal aayega. GV live hai.">🟦 FF T+1 · ${m.ffComparable ? `FF ${esc(lbl(m.ffThrough))} tak` : 'FF kal aayega'}</span>` : ''}`;
+      const total = m.ff.total + m.gv.total;
+      const totalP = m.ffPrev.total + m.gvPrev.total;
 
       body.innerHTML = `
-        <div class="kpi-grid">${kpis.join('')}</div>
+        <div class="tix-grid">${KPIS.map((k) => kpiCard(k, m)).join('')}</div>
+        ${card(`⚔️ Head-to-head · FF vs GV · ${esc(rangeLabel(from, to, true))}`, h2hTable(m), `<span class="badge indigo">${U.fmt(total)} tags</span> <span class="dim small">prev ${U.fmt(totalP)}</span> <button class="btn small" data-action="export" data-name="tag-issued-${esc(from)}-${esc(to)}">⬇ CSV</button>`)}
+        ${chartsHtml(m, rows)}
         <div class="grid g-2">
-          ${card(`🟦 First Forward · ${U.labelDate(dateObj,true)} <span class="dim">vs ${U.labelDate(prevDate,true)}</span>`, ffPending ? `<div class="warn-box">🟦 First Forward ka data T+1 aata hai — <b>${esc(U.labelDate(dateObj,true))}</b> ka FF issuance kal aayega, isliye aaj <b>0</b> dikh raha hai. GV Partner live hai (upar ka card).</div>${ffChart}` : ffChart, `<span class="badge indigo">${U.fmt(ffData.total)} tags</span>`)}
-          ${card(`🟩 GV Partner · ${U.labelDate(dateObj,true)} <span class="dim">vs ${U.labelDate(prevDate,true)}</span>`, gvChart, `<span class="badge teal">${U.fmt(gvData.total)} tags</span>`)}
+          ${card('💡 Insights · data ko dekh kar', insightsHtml(m, rows, preset))}
+          ${card('📋 Class-wise detail', classTable(m), '')}
         </div>
-        ${card(`📋 Class-wise Detailed · ${U.labelDate(dateObj,true)}`, `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">FF Today</th><th class="num">FF Prev</th><th>FF Growth</th><th class="num">GV Today</th><th class="num">GV Prev</th><th>GV Growth</th><th class="num">Total Today</th><th class="num">Total Prev</th><th>Total Growth</th></tr></thead><tbody>${classRows || '<tr><td colspan="10" class="empty">Is date par koi data nahi</td></tr>'}</tbody></table></div>`, `<button class="btn small" data-action="export" data-name="tag-issued-${val}">⬇ CSV</button>`)}
-        <div class="grid g-2">
-          ${card(`🔍 FF Breakdown · ${U.labelDate(dateObj,true)}`, `<div class="grid g-2" style="margin-bottom:0">${mini('FF Total', U.fmt(ffData.total), `Prev ${U.fmt(ffPrev.total)} · ${U.fmtSigned(U.growth(ffData.total, ffPrev.total)||0,0)}`, '', `src=ff&scope=day&date=${dk}`)}${mini('FF VC4 Share', U.fmtPct(U.pctOf(ffData.vc4, ffData.total),0), `VC4 ${U.fmt(ffData.vc4)} / ${U.fmt(ffData.total)}`, '', `src=ff&scope=day&date=${dk}&f=vc4`)}${mini('FF Commercial', U.fmt(ffData.comm), `VC20 ${U.fmt(ffData.vc20)} · VC5+ ${U.fmt(ffData.vc5p)}`, '', `src=ff&scope=day&date=${dk}&f=comm`)}${mini('FF Issuance vs Replacement', `${U.fmt(ffData.byType['ISSUANCE']||0)} / ${U.fmt(ffData.byType['REPLACEMENT']||0)}`, 'Type split', '', `src=ff&scope=day&date=${dk}&f=repl`)}</div>`, '')}
-          ${card(`🔍 GV Breakdown · ${U.labelDate(dateObj,true)}`, `<div class="grid g-2" style="margin-bottom:0">${mini('GV Total', U.fmt(gvData.total), `Prev ${U.fmt(gvPrev.total)} · ${U.fmtSigned(U.growth(gvData.total, gvPrev.total)||0,0)}`, '', `src=gv&scope=day&date=${dk}`)}${mini('GV VC4 Share', U.fmtPct(U.pctOf(gvData.vc4, gvData.total),0), `VC4 ${U.fmt(gvData.vc4)} / ${U.fmt(gvData.total)}`, '', `src=gv&scope=day&date=${dk}&f=vc4`)}${mini('GV Commercial', U.fmt(gvData.comm), `VC20 ${U.fmt(gvData.vc20)} · VC5+ ${U.fmt(gvData.vc5p)}`, '', `src=gv&scope=day&date=${dk}&f=comm`)}${(() => { const topCls = Object.entries(gvData.byClass).sort((a,b)=>b[1]-a[1])[0]?.[0] || ''; return mini('GV Top Class Today', topCls || '—', Object.entries(gvData.byClass).map(([k,v])=>`${k}:${v}`).join(' '), '', topCls ? `src=gv&scope=day&date=${dk}&cls=${encodeURIComponent(topCls)}` : `src=gv&scope=day&date=${dk}`); })()}</div>`, '')}
-        </div>
-        <div class="grid g-2">
-          ${card(`📈 Trend Last 14 Days (ending ${U.labelDate(dateObj)})`, (() => {
-            const days = [];
-            const ffVals = [];
-            const gvVals = [];
-            for (let i=13;i>=0;i--) {
-              const d = new Date(dateObj); d.setDate(d.getDate()-i);
-              const f = getDailyForDate(daily.filter(r=>r.channel!=='GV Partner'), d);
-              const g = getGvForDate(d);
-              days.push(U.labelDate(d));
-              ffVals.push(f.total);
-              gvVals.push(g.total);
-            }
-            return C.lines({ labels: days, height: 220, series: [
-              { name: 'First Forward', values: ffVals, color: '#6366f1' },
-              { name: 'GV Partner', values: gvVals, color: '#0d9488' }
-            ]});
-          })(), '')}
-          ${card('💡 Insights', `<ul class="insight-list">
-            <li>Selected date <b>${U.labelDate(dateObj,true)}</b> par total <b>${U.fmt(total)}</b> tags issued — FF <b>${U.fmt(ffData.total)}</b> (${U.fmtPct(U.pctOf(ffData.total,total),0)}) aur GV <b>${U.fmt(gvData.total)}</b> (${U.fmtPct(U.pctOf(gvData.total,total),0)}).</li>
-            <li>FF VC4 share <b>${U.fmtPct(U.pctOf(ffData.vc4, ffData.total),0)}</b> vs GV VC4 share <b>${U.fmtPct(U.pctOf(gvData.vc4, gvData.total),0)}</b> — ${U.pctOf(gvData.vc4, gvData.total) > U.pctOf(ffData.vc4, ffData.total) ? 'GV ka payable mix better hai' : 'FF ka payable mix better hai'}.</li>
-            <li>Growth vs previous day: FF <b>${U.fmtSigned(U.growth(ffData.total, ffPrev.total)||0,0)}</b>, GV <b>${U.fmtSigned(U.growth(gvData.total, gvPrev.total)||0,0)}</b>, Total <b>${U.fmtSigned(U.growth(total, totalPrev)||0,0)}</b>.</li>
-            <li>Commercial (NVC4) total <b>${U.fmt(ffData.comm + gvData.comm)}</b> — FF ${U.fmt(ffData.comm)} vs GV ${U.fmt(gvData.comm)}.</li>
-            <li>Top class today: <b>${Object.entries(allData.byClass).sort((a,b)=>b[1]-a[1])[0]?.[0]||'—'}</b> with ${U.fmt(Object.entries(allData.byClass).sort((a,b)=>b[1]-a[1])[0]?.[1]||0)} tags.</li>
-          </ul>`, '')}
-        </div>
-        <p class="foot-note">Source: EIR (FF) + GV Master (GV) · Selected date ${val} · Data ${U.timeLabel(S.loadedAt||G.loadedAt||Date.now())} · ↻ se fresh data</p>
-      `;
+        <details class="tix-people" open><summary>👥 Agents & Teams</summary>${peopleHtml(m, rows)}</details>
+        <p class="foot-note">Source: EIR (FF, T+1) + GV Master (GV, live) · ${esc(rangeLabel(from, to, true))} · Data ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())} · ↻ se fresh data</p>`;
       C.mount(body);
+
+      const newHash = `#/tagIssued?from=${from}&to=${to}&date=${to}`;
+      if (location.hash !== newHash) { try { history.replaceState(null, '', newHash); } catch (e) { /* ignore */ } }
     }
 
-    dateInput.addEventListener('change', draw);
-    fromInput.addEventListener('change', draw);
-    U.$('#ti-today', root).addEventListener('click', () => { fromInput.value = dateInput.value = todayKey(); draw(); });
-    U.$('#ti-yest', root).addEventListener('click', () => { const d = new Date(); d.setDate(d.getDate()-1); fromInput.value = dateInput.value = `${d.getFullYear()}-${U.pad2(d.getMonth()+1)}-${U.pad2(d.getDate())}`; draw(); });
+    function scanDays(list) {
+      const map = new Map();
+      for (const r of list) {
+        const key = r.key || (r.date ? U.dateKey(r.date) : '');
+        if (!key) continue;
+        const n = r.n === undefined ? 1 : (Number(r.n) || 0);
+        const o = map.get(key) || { total: 0 };
+        o.total += n; map.set(key, o);
+      }
+      return map;
+    }
 
-    await draw();
+    function applyCustom() {
+      let f = fromInput.value || toInput.value || todayKey(), t = toInput.value || f;
+      if (f > t) { const x = f; f = t; t = x; }
+      from = f; to = t;
+      preset = detectPreset(from, to, new Date());
+      if (preset !== 'custom') store.set('ti_preset', preset);
+      draw();
+    }
+
+    presetBox.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-preset]');
+      if (!b) return;
+      const id = b.getAttribute('data-preset');
+      if (id === 'custom') { preset = 'custom'; paintPresets(); fromInput.focus(); return; }
+      preset = id; [from, to] = presetRange(id, new Date());
+      store.set('ti_preset', id);
+      draw();
+    });
+    fromInput.addEventListener('change', applyCustom);
+    toInput.addEventListener('change', applyCustom);
+    U.$('#ti-apply', root).addEventListener('click', applyCustom);
+
+    draw();
   }
 
   FF.pages.tagIssued = { title: 'GV & FF Tag Issued', render };
+  FF.pages.tagIssued._test = { presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey };
 })(window.FF);
