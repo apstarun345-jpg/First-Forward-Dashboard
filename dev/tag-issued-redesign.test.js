@@ -92,3 +92,12 @@ test('data check: freshness strip + EIR vs GV Master reconciliation are wired an
   const buildModel = src.slice(src.indexOf('function buildModel'), src.indexOf('// ---------------------------------------------------------------- view helpers'));
   assert.ok(!/masterRows/.test(buildModel), 'totals me GV Master nahi');
 });
+
+test('v201: top search bar watchdog re-mounts #master-search when the module failed to load once', () => {
+  const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  assert.match(app, /function ensureSearchTopbar\(\)/);
+  assert.match(app, /ensureShell\(\['masterSearch'\]\)\.then\(/, 'module dobara load hota hai');
+  assert.match(app, /window\.addEventListener\('hashchange'/);
+  assert.match(app, /setInterval\(\(\) => \{ if \(document\.visibilityState !== 'hidden'\) ensureSearchTopbar\(\); \}, 6000\)/);
+  assert.match(app, /shellExtrasStarted = true;\n    startSearchWatchdog\(\);/);
+});

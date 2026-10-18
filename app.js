@@ -833,6 +833,28 @@ window.FF = window.FF || {};
     }
     if (FF.masterSearch && FF.masterSearch.mountTopbar) FF.masterSearch.mountTopbar(true);
   }
+  // 🛟 v201 — search bar watchdog: agar masterSearch module ek baar load fail ho gaya (deploy ke beech refresh, network blip,
+  //    purana service-worker cache) to bar us session me kabhi wapas nahi aata tha. Ab bar gayab ho to module dobara
+  //    load hota hai aur bar turant mount hota hai (route change / tab wapas aane / online hone par + har 6s check).
+  let searchWatchStarted = false;
+  function ensureSearchTopbar() {
+    try {
+      if (typeof document === 'undefined') return;
+      if (FF.config.feat && FF.config.feat('masterSearch') === false) return;
+      if (!(FF.auth && FF.auth.can && FF.auth.can('masterSearch'))) return;
+      if (document.getElementById('master-search') || !document.getElementById('top-actions')) return;
+      if (FF.masterSearch && FF.masterSearch.mountTopbar) { mountSearchTopbar(); return; }
+      ensureShell(['masterSearch']).then(() => { if (!document.getElementById('master-search')) mountSearchTopbar(); }).catch(() => {});
+    } catch (err) { console.warn('search watchdog', err && err.message); }
+  }
+  function startSearchWatchdog() {
+    if (searchWatchStarted || typeof window === 'undefined') return;
+    searchWatchStarted = true;
+    window.addEventListener('hashchange', () => setTimeout(ensureSearchTopbar, 400));
+    window.addEventListener('online', ensureSearchTopbar);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ensureSearchTopbar(); });
+    setInterval(() => { if (document.visibilityState !== 'hidden') ensureSearchTopbar(); }, 6000);
+  }
   // ---- ✨ small UX extras: success feedback (vibrate + optional sound) and the "?" shortcuts sheet ----
   U.feedback = function feedback(kind) {
     try {
@@ -892,6 +914,7 @@ window.FF = window.FF || {};
     bindShellHelp();
     if (shellExtrasStarted) return Promise.resolve(false);
     shellExtrasStarted = true;
+    startSearchWatchdog();
     const hooks = (wave) => {
       try {
         if (wave.includes('notifications')) { registerServiceWorker(); if (FF.notifications) FF.notifications.start(); }
