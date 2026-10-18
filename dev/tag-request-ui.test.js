@@ -399,8 +399,8 @@ test('v203 repeat request: confirm checkbox + wajah zaroori, force button tab ta
     { id: '1234', status: 'pending', total: 40, rows: 1, byName: 'Ravi', agentName: 'AMIT SHARMA', at: new Date().toISOString(), repeat7: true, matched: ['AMIT SHARMA · VC4'], matchedQty: [{ agentName: 'AMIT SHARMA', agentId: '5846001', cls: 'VC4', qty: 40 }] }
   ], 'Ravi');
   assert.match(html, /Repeat request/);
-  assert.match(html, /last 7 days/);
-  assert.match(html, /Within 7 days/);
+  assert.match(html, /last \d+ days/);
+  assert.match(html, /Within \d+ days/);
   assert.match(html, /data-tr-dup-ok/);
   assert.match(html, /data-tr-dup-reason/);
   assert.match(html, /data-tr-act="dup-force" disabled/, 'confirm + wajah ke bina force button band');

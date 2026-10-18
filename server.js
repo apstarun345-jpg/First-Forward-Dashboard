@@ -2260,10 +2260,12 @@ let tagReqRecoveryInfo = null; // boot scan / UI check ka summary (health + noti
 const PUBLIC_TAG_DEFAULTS = {
   enabled: true, showCheck: true, showStock: true, askMobile: true, askOffice: false, askNote: true,
   askAddress: true,          // 🏠 full address + 📮 pincode — dono mandatory (dispatch/delivery ke liye)
+  repeatDays: 7,             // 🔁 itne din ke andar same agent ki request = repeat popup (0 = band)
   askCourier: true,          // 🚚 courier naam (Delhivery / DTDC …) — label par bhi chhapta hai
   couriers: ['Delhivery', 'DTDC'],
   title: 'IDFC Agents Tag Request', intro: '', maxRows: 60
 };
+function repeatDaysOf(cfg) { const n = Math.round(Number(cfg && cfg.repeatDays)); return Number.isFinite(n) ? Math.min(60, Math.max(0, n)) : 7; }
 /** 🚚 Courier naam — free text bhi chalega, par list se select karna aasan (label + sheet me chhapta hai). */
 function courierList(cfg) {
   const raw = cfg && Array.isArray(cfg.couriers) ? cfg.couriers : (typeof (cfg && cfg.couriers) === 'string' ? String(cfg.couriers).split(',') : []);
@@ -5768,6 +5770,8 @@ async function handleApi(req, res, url) {
     if (!wanted.length) return [];
     const nowMs = Date.now();
     const DAY = 24 * 3600e3;
+    const repeatDays = repeatDaysOf(publicTagFormConfig());
+    if (!repeatDays) return [];
     const out = [];
     for (const r of (workspaceStore().tagRequests || [])) {
       if (!r) continue;
@@ -5776,10 +5780,10 @@ async function handleApi(req, res, url) {
       // 🔁 v206 — PICHHLE 7 DIN me us agent ki koi bhi request (kisi bhi stage par: pending / approved / dispatched /
       // rejected…, kisi bhi class me, kisi bhi employee/admin ki) = repeat. Pending/approved 7 din se purani bhi
       // 30 din tak "active" hai (same class par) — dispatched/rejected sirf 7 din.
-      const recent7 = !t || nowMs - t <= 7 * DAY;
+      const recent7 = !t || nowMs - t <= repeatDays * DAY;
       if (!recent7) {
         if (status !== 'pending' && status !== 'approved') continue;
-        if (nowMs - t > 30 * DAY) continue;
+        if (nowMs - t > Math.max(30, repeatDays) * DAY) continue;
       }
       const rMob = tagDigits(r.agent && r.agent.mobile).slice(-10);
       const rAgentId = String((r.agent && r.agent.agentId) || '').trim();
@@ -6699,6 +6703,7 @@ async function handleApi(req, res, url) {
       askNote: cfg.askNote !== false,
       askAddress: cfg.askAddress !== false,
       askCourier: cfg.askCourier !== false,
+      repeatDays: repeatDaysOf(cfg),
       couriers: courierList(cfg),
       maxRows: Math.min(150, Math.max(5, Number(cfg.maxRows) || 60)),
       title: shortText(cfg.title, 120) || 'IDFC Agents Tag Request',
@@ -7196,6 +7201,7 @@ async function handleApi(req, res, url) {
     if (c.askNote !== undefined) cfg.askNote = !!c.askNote;
     if (c.askAddress !== undefined) cfg.askAddress = !!c.askAddress;
     if (c.askCourier !== undefined) cfg.askCourier = !!c.askCourier;
+    if (c.repeatDays !== undefined) cfg.repeatDays = repeatDaysOf(c);
     if (c.couriers !== undefined) {
       const list = (Array.isArray(c.couriers) ? c.couriers : String(c.couriers || '').split(',')).map((x) => shortText(x, 40)).filter(Boolean);
       cfg.couriers = [...new Set(list)].slice(0, 12);
@@ -7257,6 +7263,7 @@ async function handleApi(req, res, url) {
       if (pc.askNote !== undefined) pcfg.askNote = !!pc.askNote;
       if (pc.askAddress !== undefined) pcfg.askAddress = !!pc.askAddress;
       if (pc.askCourier !== undefined) pcfg.askCourier = !!pc.askCourier;
+      if (pc.repeatDays !== undefined) pcfg.repeatDays = repeatDaysOf(pc);
       if (pc.couriers !== undefined) {
         const list = (Array.isArray(pc.couriers) ? pc.couriers : String(pc.couriers || '').split(',')).map((x) => shortText(x, 40)).filter(Boolean);
         pcfg.couriers = [...new Set(list)].slice(0, 12);

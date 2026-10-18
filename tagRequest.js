@@ -1038,7 +1038,7 @@ body.colorful .from-hdr { color: #166534; }
     const recent = list.filter((d) => d.repeat7 !== false).length;
     const rows = list.map((d) => {
       const v = STATUS[d.status] || STATUS.pending;
-      return `<li><b class="mono">${esc(d.id)}</b> <span class="badge ${v.tone}">${v.label}</span>${d.repeat7 === false ? '' : ' <span class="badge red">Within 7 days</span>'}
+      return `<li><b class="mono">${esc(d.id)}</b> <span class="badge ${v.tone}">${v.label}</span>${d.repeat7 === false ? '' : ` <span class="badge red">Within ${fmt(Number(formCfg().repeatDays) || 7)} days</span>`}
         <small class="dim"> · ${fmt(d.total)} tags${d.byName ? ` · by ${esc(d.byName)}` : ''} · ${esc(ago(d.at))}</small></li>`;
     }).join('');
     const dup = state.dup || {};
@@ -1047,7 +1047,7 @@ body.colorful .from-hdr { color: #166534; }
     const ready = !!(dup.ok && dup.reason);
     return `<div class="tr-dup-backdrop" data-tr-dup-backdrop role="dialog" aria-modal="true" aria-label="Repeat request warning"><section class="card tr-dup-warn" id="tr-dup-card"><div class="card-body">
       <h3 style="margin:0 0 6px">⚠️ Repeat request</h3>
-      <p style="margin:0 0 8px">${fmt(list.length)} earlier request${list.length === 1 ? '' : 's'} for this agent${recent ? ` (${fmt(recent)} in the last 7 days)` : ''}. Review stock and issuance before sending again.</p>
+      <p style="margin:0 0 8px">${fmt(list.length)} earlier request${list.length === 1 ? '' : 's'} for this agent${recent ? ` (${fmt(recent)} in the last ${fmt(Number(formCfg().repeatDays) || 7)} days)` : ''}. Review stock and issuance before sending again.</p>
       <ul class="tr-dup-list">${rows}</ul>
       ${dupReviewHtml(list)}
       <div class="tr-dup-confirm" style="margin-top:10px;display:grid;gap:8px">
@@ -3439,6 +3439,8 @@ body.colorful .from-hdr { color: #166534; }
             <input class="input" data-tr-pub="title" value="${esc(pub.title || '')}" placeholder="IDFC Agents Tag Request"></label>
           <label class="field"><span class="dim small">Upar ka message (optional)</span>
             <input class="input" data-tr-pub="intro" value="${esc(pub.intro || '')}" placeholder="Naam likho → agent ka block bharo → submit"></label>
+          <label class="field"><span class="dim small">🔁 Repeat popup — kitne din ke andar same agent ki request par (0 = band)</span>
+            <input class="input" type="number" min="0" max="60" data-tr-pub="repeatDays" value="${esc(String(pub.repeatDays != null ? pub.repeatDays : 7))}"></label>
           <label class="field"><span class="dim small">Agent ke fields aur check</span>
             <span class="tr-check-row">
               <label class="tr-col-opt"><input type="checkbox" data-tr-pub="askMobile" ${pub.askMobile !== false ? 'checked' : ''}> Agent mobile number (zaroori)</label>
@@ -3486,6 +3488,7 @@ body.colorful .from-hdr { color: #166534; }
         showCheck: !!(card.querySelector('[data-tr-pub="showCheck"]') || {}).checked,
         showStock: !!(card.querySelector('[data-tr-pub="showStock"]') || {}).checked,
         askCourier: !!(card.querySelector('[data-tr-pub="askCourier"]') || {}).checked,
+        repeatDays: Math.min(60, Math.max(0, Math.round(Number((card.querySelector('[data-tr-pub="repeatDays"]') || {}).value)) || 0)),
         couriers: String((card.querySelector('[data-tr-pub="couriers"]') || {}).value || '').split(',').map((x) => x.trim()).filter(Boolean)
       });
       const save = (patch, msg) => {
