@@ -60,3 +60,24 @@ test('page source: shortcuts, five KPI cards, share, charts and insights are wir
   for (const needle of ['tix-split', 'tix-row ff', 'verdictHtml', 'C.donut(', 'C.lines(', 'C.bars(', 'C.hbars(', 'insightsHtml', 'h2hTable', 'FF T+1']) assert.ok(src.includes(needle) || src.includes(needle.replace('tix-row ff', 'tix-row ${cls}')), needle);
   assert.match(src, /FF\.pages\.tagIssued = \{ title: 'GV & FF Tag Issued', render \}/);
 });
+
+test('GV totals come from the EIR sheet (master ID 5845036 rows); top agents from GV Master', () => {
+  assert.match(src, /const gvRows = dailyRows\.filter\(\(r\) => r\.channel === 'GV Partner'\)/, 'GV totals = EIR daily rows');
+  assert.match(src, /gvMasterRows = masterReady/, 'GV Master sirf agents/teams ke liye');
+  assert.match(src, /rows\.gvMasterRows\.forEach/, 'top agents GV Master se');
+  assert.ok(!/masterTodayRows/.test(src), 'GV Master ka today override totals me nahi');
+  assert.match(src, /&eir=1'/, 'drill bhi EIR rows kholta hai (count match)');
+});
+
+test('GV pending (EIR T+1) is trimmed to the latest EIR date for like-for-like growth', () => {
+  const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const now = new Date(); const y = new Date(now); y.setDate(y.getDate() - 1); const old = new Date(now); old.setDate(old.getDate() - 20);
+  const today = key(now), yest = key(y);
+  const rows = { ffRows: [], gvRows: [{ key: yest, group: 'VC4', cls: 'VC4', n: 4 }], gvLatest: yest };
+  const m = T.buildModel(rows, today, today);
+  assert.equal(m.gvPending, true); assert.equal(m.gvComparable, false, 'sirf aaj: GV kal aayega');
+  const w = T.buildModel(rows, key(old), today);
+  assert.equal(w.gvPending, true); assert.equal(w.gvComparable, true); assert.equal(w.gvTo, yest);
+  const past = T.buildModel(rows, key(old), key(old));
+  assert.equal(past.gvPending, false, 'purani date trim nahi hoti');
+});

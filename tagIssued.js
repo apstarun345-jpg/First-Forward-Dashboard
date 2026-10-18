@@ -2,7 +2,8 @@
    Upar date shortcuts (Today / Yesterday / Last 7 / This month …) + custom From–To.
    KPI cards: Total · VC4 · VC20 · VC5+ · VC20+VC5+ (Commercial) — har card me FF aur GV dono ka count, % share,
    combined sum, kaun aage / kaun down (previous period ke mukable). Neeche charts, head-to-head table, insights.
-   Data rules: FF = EIR daily (T+1 — aaj ka FF kal aata hai, isliye FF growth like-for-like), GV = GV Master (live). */
+   Data rules: totals = EIR sheet dono channel ke liye (GV = EIR me master ID 5845036 wali rows, FF = baaki). EIR T+1 hai —
+   aaj ka data kal aata hai, isliye growth like-for-like. Top agents / teams (GV) GV Master sheet se. */
 window.FF = window.FF || {};
 FF.pages = FF.pages || {};
 (function (FF) {
@@ -95,15 +96,16 @@ FF.pages = FF.pages || {};
   function channelRows() {
     const rawDaily = S.get('daily') || [];
     const dailyRows = FF.filters ? FF.filters.dropLaggedFf(rawDaily) : rawDaily;
-    const masterReady = !!(G && G.get && Array.isArray(G.get('master')));
-    const gvTodayRows = (G && typeof G.masterTodayRows === 'function') ? (G.masterTodayRows() || [])
-      : ((G && typeof G.issuanceRows === 'function') ? (G.issuanceRows() || []).filter((r) => r.channel === 'GV Partner' && r.key === todayKey()) : []);
-    const gvAuthoritative = masterReady && typeof G.issuanceRows === 'function'
-      ? (G.issuanceRows() || []).filter((r) => r.channel === 'GV Partner')
-      : dailyRows.filter((r) => r.channel === 'GV Partner');
-    const gvRows = gvAuthoritative.filter((r) => r.key !== todayKey()).concat(gvTodayRows).filter((r) => r.channel === 'GV Partner');
+    // 🧾 Totals: EIR daily rows. Channel EIR master ID se tay hota hai (5845036 = GV Partner) — model.channelOf.
     const ffRows = dailyRows.filter((r) => r.channel !== 'GV Partner');
-    return { ffRows, gvRows, dailyRows };
+    const gvRows = dailyRows.filter((r) => r.channel === 'GV Partner');
+    let gvLatest = '';
+    for (const r of gvRows) { const k = r.key || (r.date ? U.dateKey(r.date) : ''); if (k > gvLatest) gvLatest = k; }
+    // 👥 Top agents / teams: GV Master sheet (row-level, agent + TL names ke saath).
+    const masterReady = !!(G && G.get && Array.isArray(G.get('master')));
+    const gvMasterRows = masterReady && typeof G.issuanceRows === 'function'
+      ? (G.issuanceRows() || []).filter((r) => r.channel === 'GV Partner') : [];
+    return { ffRows, gvRows, gvLatest, gvMasterRows, dailyRows };
   }
 
   /** Dono channels ka current + previous period (FF T+1: FF like-for-like). */
@@ -112,17 +114,23 @@ FF.pages = FF.pages || {};
     const ffTo = to <= ffThrough ? to : ffThrough;
     const ffPending = ffTo < to;
     const ffComparable = ffTo >= from;
-    const prevGv = prevRange(from, to);
+    // GV bhi EIR se aata hai (T+1): agar range aaj/kal tak jaati hai aur GV ki latest EIR date usse pehle hai to GV bhi "pending".
+    const yesterday = shiftKey(todayKey(), -1);
+    const gvThrough = rows.gvLatest || '';
+    const gvTrim = !!gvThrough && to > gvThrough && to >= yesterday;
+    const gvTo = gvTrim ? gvThrough : to;
+    const gvPending = gvTo < to;
+    const gvComparable = gvTo >= from;
+    const prevGv = gvComparable ? prevRange(from, gvTo) : prevRange(from, to);
     const prevFf = ffComparable ? prevRange(from, ffTo) : null;
-    const m = {
-      from, to, days: dayCount(from, to), ffTo, ffPending, ffComparable, ffThrough,
+    return {
+      from, to, days: dayCount(from, to), ffTo, ffPending, ffComparable, ffThrough, gvTo, gvPending, gvComparable, gvThrough,
       prevGvRange: prevGv, prevFfRange: prevFf,
       ff: scan(rows.ffRows, from, to),
       gv: scan(rows.gvRows, from, to),
       ffPrev: prevFf ? scan(rows.ffRows, prevFf[0], prevFf[1]) : scan([], '', ''),
-      gvPrev: prevGv ? scan(rows.gvRows, prevGv[0], prevGv[1]) : scan([], '', '')
+      gvPrev: gvComparable && prevGv ? scan(rows.gvRows, prevGv[0], prevGv[1]) : scan([], '', '')
     };
-    return m;
   }
 
   // ---------------------------------------------------------------- view helpers
@@ -132,7 +140,7 @@ FF.pages = FF.pages || {};
     return g > 0.5 ? 'up' : g < -0.5 ? 'down' : 'flat';
   }
   function growthBadge(cur, prev, na) {
-    if (na) return '<span class="badge gray" title="FF ka data T+1 — is range ka FF kal aayega">T+1</span>';
+    if (na) return '<span class="badge gray" title="EIR data T+1 hai — is range ka data kal aayega">T+1</span>';
     const d = dirOf(cur, prev);
     if (d === 'none') return '<span class="badge gray">—</span>';
     if (d === 'new') return '<span class="badge green">▲ new</span>';
@@ -144,11 +152,11 @@ FF.pages = FF.pages || {};
   const pct = (part, total) => { const p = U.pctOf(part, total); return p === null ? 0 : p; };
 
   function specFor(m, src, f) {
-    const base = m.from === m.to ? `src=${src}&scope=day&date=${m.from}` : `src=${src}&scope=range&from=${m.from}&to=${m.to}`;
+    const base = (m.from === m.to ? `src=${src}&scope=day&date=${m.from}` : `src=${src}&scope=range&from=${m.from}&to=${m.to}`) + '&eir=1';
     return f ? `${base}&f=${f}` : base;
   }
 
-  function verdictHtml(ffV, gvV, ffD, gvD, ffNA) {
+  function verdictHtml(ffV, gvV, ffD, gvD, ffNA, gvNA) {
     const sum = ffV + gvV;
     if (!sum) return '<span class="tix-v dim">Is range me data nahi</span>';
     let lead;
@@ -157,10 +165,10 @@ FF.pages = FF.pages || {};
     else lead = `🏆 <b>FF aage</b> · +${U.fmt(ffV - gvV)} (${U.fmtPct(pct(ffV, sum), 0)} vs ${U.fmtPct(pct(gvV, sum), 0)})`;
     const downs = [];
     if (!ffNA && ffD === 'down') downs.push('FF');
-    if (gvD === 'down') downs.push('GV');
+    if (!gvNA && gvD === 'down') downs.push('GV');
     let trend;
     if (downs.length) trend = `<span class="tix-down">🔻 ${downs.join(' + ')} down</span>`;
-    else if ((ffNA || ffD === 'none') && gvD === 'none') trend = '';
+    else if ((ffNA || ffD === 'none') && (gvNA || gvD === 'none')) trend = '';
     else trend = '<span class="tix-up">✅ Koi down nahi</span>';
     return `<span class="tix-v">${lead}</span>${trend ? `<span class="tix-v">${trend}</span>` : ''}`;
   }
@@ -169,7 +177,7 @@ FF.pages = FF.pages || {};
     const ffV = m.ff[k.key], gvV = m.gv[k.key];
     const ffP = m.ffPrev[k.key], gvP = m.gvPrev[k.key];
     const sum = ffV + gvV, sumP = ffP + gvP;
-    const ffNA = !m.ffComparable;
+    const ffNA = !m.ffComparable, gvNA = !m.gvComparable;
     const ffShare = pct(ffV, sum), gvShare = pct(gvV, sum);
     const ofTotal = k.key === 'total' ? null : U.pctOf(sum, m.ff.total + m.gv.total);
     const ffD = dirOf(ffV, ffP), gvD = dirOf(gvV, gvP), sumD = dirOf(sum, sumP);
@@ -182,8 +190,8 @@ FF.pages = FF.pages || {};
       <div class="tix-bigsub">FF + GV combined · prev ${U.fmt(sumP)}</div>
       <div class="tix-split" title="FF vs GV share">${sum ? `<i class="ff" style="width:${ffShare.toFixed(1)}%"></i><i class="gv" style="width:${gvShare.toFixed(1)}%"></i>` : ''}</div>
       ${row('ff', 'First Forward', ffV, ffShare, ffP, ffD, ffNA, 'ff')}
-      ${row('gv', 'GV Partner', gvV, gvShare, gvP, gvD, false, 'gv')}
-      <div class="tix-verdict">${verdictHtml(ffV, gvV, ffD, gvD, ffNA)}</div>
+      ${row('gv', 'GV Partner', gvV, gvShare, gvP, gvD, gvNA, 'gv')}
+      <div class="tix-verdict">${verdictHtml(ffV, gvV, ffD, gvD, ffNA, gvNA)}</div>
     </div>`;
   }
   const d2 = (d) => (d === 'up' ? 'is-up' : d === 'down' ? 'is-down' : '');
@@ -214,20 +222,21 @@ FF.pages = FF.pages || {};
       const a = rows.ffMap.get(k), b = rows.gvMap.get(k);
       const av = a ? a.total : 0, bv = b ? b.total : 0;
       labels.push(lbl(k)); tipLabels.push(lbl(k, true));
-      ffV.push(ffPend ? null : av); gvV.push(bv); totV.push(ffPend ? null : av + bv);
+      const gvPend = m.gvPending && k > m.gvTo;
+      ffV.push(ffPend ? null : av); gvV.push(gvPend ? null : bv); totV.push(ffPend || gvPend ? null : av + bv);
     }
     const trend = C.lines({ labels, tipLabels, height: 240, series: [
       { name: 'Total', values: totV, color: '#f97316', dash: true, area: false },
       { name: 'First Forward', values: ffV, color: FF_COLOR }, { name: 'GV Partner', values: gvV, color: GV_COLOR }] });
     const dailyBars = C.bars({ labels, tipLabels, height: 230, legendAlways: true, series: [
-      { name: 'First Forward', values: ffV.map((v) => v || 0), color: FF_COLOR }, { name: 'GV Partner', values: gvV, color: GV_COLOR }] });
+      { name: 'First Forward', values: ffV.map((v) => v || 0), color: FF_COLOR }, { name: 'GV Partner', values: gvV.map((v) => v || 0), color: GV_COLOR }] });
     const cmpLabels = ['Total', 'VC4', 'VC20', 'VC5+', 'Commercial'];
     const keys = ['total', 'vc4', 'vc20', 'vc5p', 'comm'];
     const prevName = m.prevGvRange ? `Prev ${rangeLabel(m.prevGvRange[0], m.prevGvRange[1])}` : 'Prev';
     const ffCmp = C.bars({ labels: cmpLabels, height: 220, legendAlways: true, series: [
       { name: m.ffComparable ? 'Prev' : 'Prev (T+1)', values: keys.map((k) => ffPrev[k]), color: '#c7d2fe' }, { name: 'Selected', values: keys.map((k) => ff[k]), color: FF_COLOR }] });
     const gvCmp = C.bars({ labels: cmpLabels, height: 220, legendAlways: true, series: [
-      { name: 'Prev', values: keys.map((k) => gvPrev[k]), color: '#99f6e4' }, { name: 'Selected', values: keys.map((k) => gv[k]), color: GV_COLOR }] });
+      { name: m.gvComparable ? 'Prev' : 'Prev (T+1)', values: keys.map((k) => gvPrev[k]), color: '#99f6e4' }, { name: 'Selected', values: keys.map((k) => gv[k]), color: GV_COLOR }] });
     const growthBars = C.hbars({ valueLabel: 'Selected', compareLabel: 'Prev', items: KPIS.map((k) => ({
       label: k.short, sub: `FF ${U.fmt(ff[k.key])} · GV ${U.fmt(gv[k.key])}`, value: ff[k.key] + gv[k.key], compare: ffPrev[k.key] + gvPrev[k.key], color: k.accent })) });
     return `
@@ -236,7 +245,7 @@ FF.pages = FF.pages || {};
         ${card('🥧 Share · kaun kitna', `<div class="tix-donuts"><div><h4>FF vs GV</h4>${shareDonut}</div><div><h4>Class mix (combined)</h4>${mixDonut}</div></div>`)}
       </div>
       <div class="grid g-2">
-        ${card(`📈 Daily trend · ${esc(rangeLabel(tf, tt))}`, trend + (FF.filters && FF.filters.isFfPending && FF.filters.isFfPending(tt) ? '<p class="dim small">FF T+1 hai — aaj ka FF graph me gap dikhta hai (kal aayega).</p>' : ''))}
+        ${card(`📈 Daily trend · ${esc(rangeLabel(tf, tt))}`, trend + (m.ffPending || m.gvPending ? '<p class="dim small">EIR T+1 hai — aaj ka data graph me gap dikhta hai (kal aayega).</p>' : ''))}
         ${card('🗓️ Daily volume · FF + GV', dailyBars)}
       </div>
       <div class="grid g-2">
@@ -256,9 +265,9 @@ FF.pages = FF.pages || {};
     const leadName = gv.total === ff.total ? null : gv.total > ff.total ? 'GV' : 'FF';
     out.push(`Total <b>${U.fmt(total)}</b> tags · FF <b>${U.fmt(ff.total)}</b> (${U.fmtPct(pct(ff.total, total), 0)}) · GV <b>${U.fmt(gv.total)}</b> (${U.fmtPct(pct(gv.total, total), 0)})${leadName ? ` — <b>${leadName}</b> ${U.fmt(Math.abs(gv.total - ff.total))} se aage.` : ' — dono barabar.'}`);
     const g = (c, p) => U.growth(c, p);
-    const gT = g(total, totalP), gF = m.ffComparable ? g(ff.total, ffPrev.total) : null, gG = g(gv.total, gvPrev.total);
+    const gT = g(total, totalP), gF = m.ffComparable ? g(ff.total, ffPrev.total) : null, gG = m.gvComparable ? g(gv.total, gvPrev.total) : null;
     const word = (x) => (x === null ? '—' : `${x > 0.5 ? '▲' : x < -0.5 ? '▼' : '•'} ${U.fmtSigned(x, 0)}`);
-    out.push(`Previous period ke mukable: Total <b>${word(gT)}</b> · FF <b>${m.ffComparable ? word(gF) : 'T+1 (kal aayega)'}</b> · GV <b>${word(gG)}</b>.${gG !== null && gG < -0.5 && (gF === null || gF >= 0) ? ' ⚠️ GV down hai.' : ''}${gF !== null && gF < -0.5 && (gG === null || gG >= 0) ? ' ⚠️ FF down hai.' : ''}`);
+    out.push(`Previous period ke mukable: Total <b>${word(gT)}</b> · FF <b>${m.ffComparable ? word(gF) : 'T+1 (kal aayega)'}</b> · GV <b>${m.gvComparable ? word(gG) : 'T+1 (kal aayega)'}</b>.${gG !== null && gG < -0.5 && (gF === null || gF >= 0) ? ' ⚠️ GV down hai.' : ''}${gF !== null && gF < -0.5 && (gG === null || gG >= 0) ? ' ⚠️ FF down hai.' : ''}`);
     const mix = (o, key) => pct(o[key], o.total);
     out.push(`VC4 mix: FF <b>${U.fmtPct(mix(ff, 'vc4'), 0)}</b> vs GV <b>${U.fmtPct(mix(gv, 'vc4'), 0)}</b> — ${mix(gv, 'vc4') > mix(ff, 'vc4') ? 'GV ka VC4 (payable) mix behtar hai' : mix(gv, 'vc4') < mix(ff, 'vc4') ? 'FF ka VC4 (payable) mix behtar hai' : 'dono barabar'}.`);
     out.push(`Commercial (VC20 + VC5+) <b>${U.fmt(ff.comm + gv.comm)}</b> — FF ${U.fmt(ff.comm)} (VC20 ${U.fmt(ff.vc20)} + VC5+ ${U.fmt(ff.vc5p)}) vs GV ${U.fmt(gv.comm)} (VC20 ${U.fmt(gv.vc20)} + VC5+ ${U.fmt(gv.vc5p)}).`);
@@ -274,7 +283,8 @@ FF.pages = FF.pages || {};
     }
     if (m.days > 1) {
       const ffDays = m.ffComparable ? dayCount(m.from, m.ffTo) : 0;
-      out.push(`Daily average: GV <b>${U.fmt(gv.total / m.days, 1)}</b>/din${ffDays ? ` · FF <b>${U.fmt(ff.total / ffDays, 1)}</b>/din` : ''}.`);
+      const gvDays = m.gvComparable ? dayCount(m.from, m.gvTo) : 0;
+      out.push(`Daily average: ${gvDays ? `GV <b>${U.fmt(gv.total / gvDays, 1)}</b>/din` : ''}${gvDays && ffDays ? ' · ' : ''}${ffDays ? `FF <b>${U.fmt(ff.total / ffDays, 1)}</b>/din` : ''}.`);
     }
     // biggest class movement (combined)
     const cls = U.uniq([...Object.keys(ff.byClass), ...Object.keys(gv.byClass), ...Object.keys(ffPrev.byClass), ...Object.keys(gvPrev.byClass)]);
@@ -288,9 +298,9 @@ FF.pages = FF.pages || {};
     const t = toDate(m.to);
     if (m.from.slice(8) === '01' && m.from.slice(0, 7) === m.to.slice(0, 7) && m.to.slice(0, 7) === nowKey.slice(0, 7) && m.days >= 3) {
       const ml = monthLen(t.getFullYear(), t.getMonth());
-      out.push(`Run-rate: GV is raftaar se month-end tak ~<b>${U.fmt(Math.round(gv.total / m.days * ml))}</b> tags${m.ffComparable ? ` · FF ~<b>${U.fmt(Math.round(ff.total / dayCount(m.from, m.ffTo) * ml))}</b>` : ''}.`);
+      out.push(`Run-rate: ${m.gvComparable ? `GV is raftaar se month-end tak ~<b>${U.fmt(Math.round(gv.total / dayCount(m.from, m.gvTo) * ml))}</b> tags` : ''}${m.ffComparable ? ` · FF ~<b>${U.fmt(Math.round(ff.total / dayCount(m.from, m.ffTo) * ml))}</b>` : ''}.`);
     }
-    if (m.ffPending) out.push(`🟦 FF data T+1 hai — <b>${esc(lbl(m.ffThrough, true))}</b> tak ka FF aaya hai; uske baad ka FF kal aayega. FF growth isi wajah se like-for-like dikhaya gaya hai.`);
+    if (m.ffPending || m.gvPending) out.push(`🧾 EIR sheet T+1 hai — FF <b>${esc(lbl(m.ffThrough, true))}</b> tak, GV <b>${esc(lbl(m.gvThrough || m.gvTo, true))}</b> tak aaya hai; uske baad ka data kal aayega. Growth isi wajah se like-for-like dikhaya gaya hai.`);
     return `<ul class="insight-list">${out.map((x) => `<li>${x}</li>`).join('')}</ul>`;
   }
 
@@ -301,7 +311,7 @@ FF.pages = FF.pages || {};
       const a = ff[key], b = gv[key], s = a + b;
       const lead = !s ? '—' : a === b ? '=' : b > a ? `GV +${U.fmt(b - a)}` : `FF +${U.fmt(a - b)}`;
       const strong = key === 'total' || key === 'comm' ? ' class="tix-strong"' : '';
-      return `<tr${strong}><td>${esc(label)}</td><td class="num">${U.fmt(a)}</td><td class="num dim">${s ? U.fmtPct(pct(a, s), 0) : '—'}</td><td class="num">${U.fmt(b)}</td><td class="num dim">${s ? U.fmtPct(pct(b, s), 0) : '—'}</td><td class="num"><b>${U.fmt(s)}</b></td><td>${lead}</td><td>${growthBadge(a, ffPrev[key], !m.ffComparable)}</td><td>${growthBadge(b, gvPrev[key])}</td><td>${growthBadge(s, ffPrev[key] + gvPrev[key])}</td></tr>`;
+      return `<tr${strong}><td>${esc(label)}</td><td class="num">${U.fmt(a)}</td><td class="num dim">${s ? U.fmtPct(pct(a, s), 0) : '—'}</td><td class="num">${U.fmt(b)}</td><td class="num dim">${s ? U.fmtPct(pct(b, s), 0) : '—'}</td><td class="num"><b>${U.fmt(s)}</b></td><td>${lead}</td><td>${growthBadge(a, ffPrev[key], !m.ffComparable)}</td><td>${growthBadge(b, gvPrev[key], !m.gvComparable)}</td><td>${growthBadge(s, ffPrev[key] + gvPrev[key])}</td></tr>`;
     }).join('');
     return `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Metric</th><th class="num">FF</th><th class="num">FF %</th><th class="num">GV</th><th class="num">GV %</th><th class="num">Combined</th><th>Lead</th><th>FF vs prev</th><th>GV vs prev</th><th>Total vs prev</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
       <p class="dim small">GV Master me Wrong VRN alag field nahi hai (GV ke liye 0 / unavailable). Chassis = chassis type wale tags.</p>`;
@@ -314,7 +324,7 @@ FF.pages = FF.pages || {};
       const a = ff.byClass[c] || 0, ap = ffPrev.byClass[c] || 0, b = gv.byClass[c] || 0, bp = gvPrev.byClass[c] || 0;
       return `<tr><td><b>${esc(c)}</b> <small class="dim">${esc(M.classGroup(c))}</small></td>
         <td class="num"><b>${U.fmt(a)}</b></td><td class="num">${m.ffComparable ? U.fmt(ap) : '—'}</td><td>${growthBadge(a, ap, !m.ffComparable)}</td>
-        <td class="num"><b>${U.fmt(b)}</b></td><td class="num">${U.fmt(bp)}</td><td>${growthBadge(b, bp)}</td>
+        <td class="num"><b>${U.fmt(b)}</b></td><td class="num">${m.gvComparable ? U.fmt(bp) : '—'}</td><td>${growthBadge(b, bp, !m.gvComparable)}</td>
         <td class="num"><b>${U.fmt(a + b)}</b></td><td class="num">${U.fmt(ap + bp)}</td><td>${growthBadge(a + b, ap + bp)}</td></tr>`;
     }).join('');
     return `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">FF</th><th class="num">FF prev</th><th>FF Δ</th><th class="num">GV</th><th class="num">GV prev</th><th>GV Δ</th><th class="num">Total</th><th class="num">Total prev</th><th>Total Δ</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="empty">Is range me koi data nahi</td></tr>'}</tbody></table></div>`;
@@ -323,7 +333,7 @@ FF.pages = FF.pages || {};
   function peopleHtml(m, rows) {
     const rankCount = Math.max(5, Math.min(20, Number((function () { try { return localStorage.getItem('ti_chart_limit'); } catch (e) { return 0; } })()) || 10));
     const gvAgentMap = new Map(), gvTlMap = new Map();
-    rows.gvRows.forEach((r) => {
+    rows.gvMasterRows.forEach((r) => {
       const key = r.key || '';
       if (key < m.from || key > m.to) return;
       const n = r.n === undefined ? 1 : (Number(r.n) || 0);
@@ -363,7 +373,7 @@ FF.pages = FF.pages || {};
     }
     if (from > to) { const t = from; from = to; to = t; }
 
-    root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">GV Partner vs First Forward — VC4 · VC20 · VC5+ · Commercial, share %, up/down aur graphs</p></div>
+    root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">GV Partner (EIR master ID 5845036) vs First Forward — VC4 · VC20 · VC5+ · Commercial, share %, up/down aur graphs</p></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div class="card tix-toolbar">
         <div class="tix-presets" id="ti-presets" role="group" aria-label="Date shortcuts">${PRESETS.map(([id, label]) => `<button type="button" class="tix-chipbtn" data-preset="${id}">${label}</button>`).join('')}<button type="button" class="tix-chipbtn" data-preset="custom">Custom</button></div>
@@ -397,7 +407,7 @@ FF.pages = FF.pages || {};
       rows.gvMap = scanDays(rows.gvRows);
       const m = buildModel(rows, from, to);
       const prevTxt = m.prevGvRange ? `vs ${esc(rangeLabel(m.prevGvRange[0], m.prevGvRange[1], true))}` : '';
-      info.innerHTML = `<span class="badge indigo">${esc(rangeLabel(from, to, true))}</span> <span class="dim">${m.days} din ${prevTxt ? `· ${prevTxt}` : ''}</span> ${m.ffPending ? `<span class="badge amber" title="First Forward ka issuance T+1 aata hai — ${esc(lbl(m.ffThrough, true))} ke baad ka FF kal aayega. GV live hai.">🟦 FF T+1 · ${m.ffComparable ? `FF ${esc(lbl(m.ffThrough))} tak` : 'FF kal aayega'}</span>` : ''}`;
+      info.innerHTML = `<span class="badge indigo">${esc(rangeLabel(from, to, true))}</span> <span class="dim">${m.days} din ${prevTxt ? `· ${prevTxt}` : ''}</span> ${m.ffPending || m.gvPending ? `<span class="badge amber" title="EIR sheet T+1 aata hai — ${esc(lbl(m.ffThrough, true))} ke baad ka data kal aayega. Is wajah se growth like-for-like (utne hi din) dikhaya gaya hai.">🧾 EIR T+1 · ${m.ffComparable || m.gvComparable ? 'latest data tak' : 'kal aayega'}</span>` : ''}`;
       const total = m.ff.total + m.gv.total;
       const totalP = m.ffPrev.total + m.gvPrev.total;
 
@@ -410,7 +420,7 @@ FF.pages = FF.pages || {};
           ${card('📋 Class-wise detail', classTable(m), '')}
         </div>
         <details class="tix-people" open><summary>👥 Agents & Teams</summary>${peopleHtml(m, rows)}</details>
-        <p class="foot-note">Source: EIR (FF, T+1) + GV Master (GV, live) · ${esc(rangeLabel(from, to, true))} · Data ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())} · ↻ se fresh data</p>`;
+        <p class="foot-note">Source: EIR sheet (FF + GV = master ID 5845036, T+1) · Top agents: GV Master · ${esc(rangeLabel(from, to, true))} · Data ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())} · ↻ se fresh data</p>`;
       C.mount(body);
 
       const newHash = `#/tagIssued?from=${from}&to=${to}&date=${to}`;
