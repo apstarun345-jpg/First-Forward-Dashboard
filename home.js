@@ -795,6 +795,9 @@ FF.pages = FF.pages || {};
         const rowTime = t.cells ? rowTimeOf(t.cells) : null;
         // 🕒 v209 — nayi rows aayi (purani date ki ho tab bhi) = server ka row-count change time; pehli baar → file ka last edit
         const changed = t.changedMs ? { d: new Date(t.changedMs), hasTime: true, col: 'new rows' } : (t.changedMs === 0 ? file.updated : null);
+        // 📥 v211 — IMPORT_LOG (import script ka asli run time) mile to wahi final
+        const imp = t.importAt ? parseText(t.importAt) : null;
+        if (plausible(imp)) { const x = { ...imp, hasTime: true, col: 'import log', imported: true }; return { key, icon, title, tab: tabName, exact: true, value: x, rowTime: x, importAt: x, file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' }; }
         const value = later(rowTime, changed) || file.updated || null;
         return { key, icon, title, tab: tabName, exact: true, value, rowTime: later(rowTime, changed), file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' };
       });
@@ -848,7 +851,7 @@ FF.pages = FF.pages || {};
         const sv = server && server.find((x) => x.key === key);
         const gv = (g || []).find((x) => x.key === key);
         const base = sv || gv || { key };
-        const best = later(sv && sv.rowTime, gv && gv.value);
+        const best = sv && sv.importAt ? sv.importAt : later(sv && sv.rowTime, gv && gv.value);
         const value = best || (sv && sv.value) || null;
         const fromCol = !!(best && gv && gv.value && best === gv.value);
         const out = { ...base, value, colMax: fromCol, approx: !sv, svErr: sv ? '' : svErr };
