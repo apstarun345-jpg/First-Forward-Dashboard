@@ -105,7 +105,17 @@ FF.pages = FF.pages || {};
     const masterReady = !!(G && G.get && Array.isArray(G.get('master')));
     const gvMasterRows = masterReady && typeof G.issuanceRows === 'function'
       ? (G.issuanceRows() || []).filter((r) => r.channel === 'GV Partner') : [];
-    return { ffRows, gvRows, gvLatest, gvMasterRows, dailyRows };
+    let ffLatest = '';
+    for (const r of ffRows) { const k = r.key || (r.date ? U.dateKey(r.date) : ''); if (k > ffLatest) ffLatest = k; }
+    // 🔎 Raw GV Master (ek row = ek tag) — sirf data-check ke liye; totals me use nahi hota.
+    const rawMaster = (G && typeof G.masterRows === 'function' ? G.masterRows() : null) || [];
+    const masterRows = rawMaster.filter((r) => r && r.date).map((r) => ({
+      key: U.dateKey(r.date), group: r.group || (M.classGroup ? M.classGroup(r.cls) : 'VC4'), cls: r.cls, n: 1,
+      type: /replacement/i.test(`${r.status || ''} ${r.tagType || ''}`) ? 'REPLACEMENT' : 'ISSUANCE'
+    }));
+    let masterLatest = '';
+    for (const r of masterRows) if (r.key > masterLatest) masterLatest = r.key;
+    return { ffRows, gvRows, gvLatest, ffLatest, masterRows, masterLatest, gvMasterRows, dailyRows };
   }
 
   /** Dono channels ka current + previous period (FF T+1: FF like-for-like). */
@@ -330,6 +340,44 @@ FF.pages = FF.pages || {};
     return `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">FF</th><th class="num">FF prev</th><th>FF Δ</th><th class="num">GV</th><th class="num">GV prev</th><th>GV Δ</th><th class="num">Total</th><th class="num">Total prev</th><th>Total Δ</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="empty">Is range me koi data nahi</td></tr>'}</tbody></table></div>`;
   }
 
+  /** 🩺 Kaun si sheet ka data kab tak aaya — EIR T+1 me 1 din purana normal hai. */
+  function healthStrip(rows) {
+    const today = todayKey();
+    const age = (k) => (k ? Math.max(0, dayCount(k, today) - 1) : null);
+    const chip = (label, key, hint) => {
+      const a = age(key);
+      const cls = a === null ? 'gray' : a <= 1 ? 'green' : a === 2 ? 'amber' : 'red';
+      const txt = a === null ? 'data nahi' : `${lbl(key, true)} · ${a === 0 ? 'aaj' : `${a} din purana`}`;
+      return `<span class="badge ${cls}" title="${esc(hint)}">${esc(label)}: ${esc(txt)}</span>`;
+    };
+    return `<div class="tix-health"><b>🩺 Data freshness</b>${chip('FF (EIR)', rows.ffLatest, 'EIR sheet T+1 hai — 1 din purana normal')}${chip('GV (EIR)', rows.gvLatest, 'EIR me master ID 5845036 wali rows ki latest date')}${chip('GV Master', rows.masterLatest, 'GV Master sheet live hoti hai')}<span class="dim small">Loaded ${U.timeLabel(S.loadedAt || (G && G.loadedAt) || Date.now())}</span></div>`;
+  }
+
+  /** 🔎 GV ka EIR total vs GV Master total — fark ho to din-wise dikhao. EIR hi dashboard ka source hai. */
+  function reconHtml(m, rows) {
+    if (!rows.masterRows.length) return '<p class="dim">GV Master abhi load nahi hua, isliye match check nahi ho sakta.</p>';
+    if (!m.gvComparable) return '<p class="dim">Is range ka GV EIR T+1 hai (kal aayega) — EIR aane ke baad match check dikhega.</p>';
+    const to = m.gvTo;
+    const eir = scan(rows.gvRows, m.from, to), mas = scan(rows.masterRows, m.from, to);
+    const defs = [['Total', 'total'], ['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+', 'vc5p'], ['Commercial', 'comm']];
+    const tbl = defs.map(([label, key]) => {
+      const d = mas[key] - eir[key];
+      const p = eir[key] ? (d / eir[key]) * 100 : null;
+      const badge = d === 0 ? '<span class="badge green">✅ match</span>' : `<span class="badge ${Math.abs(p || 100) > 5 ? 'red' : 'amber'}">⚠️ ${d > 0 ? '+' : ''}${U.fmt(d)}${p === null ? '' : ` (${U.fmtSigned(p, 1)})`}</span>`;
+      return `<tr><td>${esc(label)}</td><td class="num"><b>${U.fmt(eir[key])}</b></td><td class="num">${U.fmt(mas[key])}</td><td>${badge}</td></tr>`;
+    }).join('');
+    const dayKeys = new Set([...eir.byDay.keys(), ...mas.byDay.keys()]);
+    const diffs = [...dayKeys].map((k) => ({ k, e: (eir.byDay.get(k) || { total: 0 }).total, a: (mas.byDay.get(k) || { total: 0 }).total })).filter((x) => x.e !== x.a).sort((x, y) => Math.abs(y.a - y.e) - Math.abs(x.a - x.e));
+    const dayRows = diffs.slice(0, 10).map((x) => `<tr><td>${esc(lbl(x.k, true))}</td><td class="num">${U.fmt(x.e)}</td><td class="num">${U.fmt(x.a)}</td><td><span class="badge ${x.a > x.e ? 'amber' : 'red'}">${x.a > x.e ? '+' : ''}${U.fmt(x.a - x.e)}</span></td></tr>`).join('');
+    const ok = !diffs.length && mas.total === eir.total;
+    const banner = ok
+      ? `<div class="tix-recon ok">✅ ${esc(rangeLabel(m.from, to, true))} — GV ka EIR total aur GV Master total <b>barabar</b> hai (${U.fmt(eir.total)}).</div>`
+      : `<div class="tix-recon warn">⚠️ GV Master EIR se <b>${U.fmt(Math.abs(mas.total - eir.total))} ${mas.total > eir.total ? 'zyada' : 'kam'}</b> hai (${diffs.length} din me fark). Dashboard ke totals EIR se hain — Master me late / duplicate / alag entries check karo.</div>`;
+    return `${banner}<div class="grid g-2"><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Metric</th><th class="num">GV · EIR</th><th class="num">GV · Master</th><th>Fark</th></tr></thead><tbody>${tbl}</tbody></table></div>
+      ${diffs.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Din (sabse bada fark)</th><th class="num">EIR</th><th class="num">Master</th><th>Fark</th></tr></thead><tbody>${dayRows}</tbody></table></div>` : '<p class="dim">Kisi din me fark nahi.</p>'}</div>
+      <p class="dim small">Compare sirf ${esc(lbl(to, true))} tak (EIR ki latest date). Master ke aaj ke live tags EIR me kal aate hain.</p>`;
+  }
+
   function peopleHtml(m, rows) {
     const rankCount = Math.max(5, Math.min(20, Number((function () { try { return localStorage.getItem('ti_chart_limit'); } catch (e) { return 0; } })()) || 10));
     const gvAgentMap = new Map(), gvTlMap = new Map();
@@ -412,6 +460,7 @@ FF.pages = FF.pages || {};
       const totalP = m.ffPrev.total + m.gvPrev.total;
 
       body.innerHTML = `
+        ${healthStrip(rows)}
         <div class="tix-grid">${KPIS.map((k) => kpiCard(k, m)).join('')}</div>
         ${card(`⚔️ Head-to-head · FF vs GV · ${esc(rangeLabel(from, to, true))}`, h2hTable(m), `<span class="badge indigo">${U.fmt(total)} tags</span> <span class="dim small">prev ${U.fmt(totalP)}</span> <button class="btn small" data-action="export" data-name="tag-issued-${esc(from)}-${esc(to)}">⬇ CSV</button>`)}
         ${chartsHtml(m, rows)}
@@ -419,6 +468,7 @@ FF.pages = FF.pages || {};
           ${card('💡 Insights · data ko dekh kar', insightsHtml(m, rows, preset))}
           ${card('📋 Class-wise detail', classTable(m), '')}
         </div>
+        ${card(`🔎 Data check · GV EIR vs GV Master`, reconHtml(m, rows), '<span class="dim small">dashboard totals = EIR</span>')}
         <details class="tix-people" open><summary>👥 Agents & Teams</summary>${peopleHtml(m, rows)}</details>
         <p class="foot-note">Source: EIR sheet (FF + GV = master ID 5845036, T+1) · Top agents: GV Master · ${esc(rangeLabel(from, to, true))} · Data ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())} · ↻ se fresh data</p>`;
       C.mount(body);
@@ -465,5 +515,5 @@ FF.pages = FF.pages || {};
   }
 
   FF.pages.tagIssued = { title: 'GV & FF Tag Issued', render };
-  FF.pages.tagIssued._test = { presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey };
+  FF.pages.tagIssued._test = { presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey, reconHtml, healthStrip };
 })(window.FF);

@@ -6474,3 +6474,4 @@ body:has(#ask-panel:not([hidden])) .bell-unlock { display: none; }
 .fresh-extra { flex: 1 1 100%; border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 2px; font-size: 12px; line-height: 1.55; display: grid; gap: 1px; }
 .fresh-extra b { display: inline; }
 /* ---------- v198 · GV & FF Tag Issued redesign ---------- */
+/* v200 · Tag Issued data health + EIR vs GV Master check */

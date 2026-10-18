@@ -81,3 +81,14 @@ test('GV pending (EIR T+1) is trimmed to the latest EIR date for like-for-like g
   const past = T.buildModel(rows, key(old), key(old));
   assert.equal(past.gvPending, false, 'purani date trim nahi hoti');
 });
+
+test('data check: freshness strip + EIR vs GV Master reconciliation are wired and never feed totals', () => {
+  assert.match(src, /function healthStrip\(rows\)/);
+  assert.match(src, /function reconHtml\(m, rows\)/);
+  assert.match(src, /\$\{healthStrip\(rows\)\}/);
+  assert.match(src, /reconHtml\(m, rows\)/);
+  assert.match(src, /G\.masterRows\(\)/, 'raw GV Master rows');
+  // masterRows sirf recon me use hota hai, buildModel/totals me nahi
+  const buildModel = src.slice(src.indexOf('function buildModel'), src.indexOf('// ---------------------------------------------------------------- view helpers'));
+  assert.ok(!/masterRows/.test(buildModel), 'totals me GV Master nahi');
+});

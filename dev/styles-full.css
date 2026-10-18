@@ -7494,3 +7494,9 @@ body:has(#ask-panel:not([hidden])) .bell-unlock { display: none; }
   .tix-dates .input { width: min(68%, 260px); }
   .tix-big-n { font-size: 28px; }
 }
+
+/* v200 · Tag Issued data health + EIR vs GV Master check */
+.tix-health { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: 12.5px; }
+.tix-recon { padding: 10px 14px; border-radius: 12px; margin-bottom: 12px; font-size: 13px; border: 1px solid; }
+.tix-recon.ok { background: color-mix(in srgb, #10b981 12%, transparent); border-color: color-mix(in srgb, #10b981 40%, transparent); }
+.tix-recon.warn { background: color-mix(in srgb, #f59e0b 14%, transparent); border-color: color-mix(in srgb, #f59e0b 45%, transparent); }
