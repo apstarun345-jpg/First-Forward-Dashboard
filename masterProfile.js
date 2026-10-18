@@ -1199,6 +1199,30 @@ window.FF = window.FF || {};
     return !!wantName && (!haveName || haveName === wantName);
   }
   /** Ek agent ka class-wise stock: pehle ID/TL-matched Tag Assignment rows, warna REPORT class split. */
+  /** Ek hi agent do rows me na aaye: REPORT row (issuance) + stock-detail holder (class-wise stock) agar ID/naam se
+   *  match nahi hue to pehle dono alag rows ban jaate the (same naam, same stock, ek me "Commercial" ek me VC5…VC16)
+   *  aur "Agent-wise × Class stock" ka jod double ho jaata tha. Naam (sirf akshar/ankh) + stock jod (±1) same ho to
+   *  merge: issuance REPORT row ki, class-wise stock detail row ki. */
+  function mergeSameStockRows(rows) {
+    const key = (r) => String((r && r.name) || '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+    const seen = new Map(), out = [];
+    for (const r of rows) {
+      const k = key(r);
+      const prev = k ? seen.get(k) : null;
+      if (prev && !prev.isSelf && !r.isSelf && Math.abs(num(prev.stockTotal) - num(r.stockTotal)) <= 1) {
+        const prevClasses = Object.keys(prev.classStock || {}).length, nextClasses = Object.keys(r.classStock || {}).length;
+        const hasIssue = (x) => num(x.cur) + num(x.last) > 0;
+        const base = hasIssue(prev) || !hasIssue(r) ? prev : r;            // issuance wali (REPORT) row base
+        const detail = nextClasses > prevClasses ? r : prev;               // zyada classes = class-wise stock detail
+        if (detail !== base) { base.classStock = { ...(detail.classStock || {}) }; base.stockVc4 = detail.stockVc4; base.stockComm = detail.stockComm; base.stockTotal = detail.stockTotal; }
+        if (base !== prev) { out[out.indexOf(prev)] = base; seen.set(k, base); }
+        continue;
+      }
+      if (k) seen.set(k, r);
+      out.push(r);
+    }
+    return out;
+  }
   function agentClassStock(src, detailRows, ch) {
     const name = src.agentName || src.name, id = src.agentId || src.id;
     const idx = stockIndex(detailRows);
@@ -1327,6 +1351,8 @@ window.FF = window.FF || {};
       return norm(r.tlName) === n;
     }).filter((r) => !safeCall(() => FF.config.isDirectAgent(r, 'ff'), false)).forEach((r) => {
       if (selfRow && isSameAgent(r, selfRow.name, selfRow.agentId || selfRow.id)) return;
+      // TL ka apna stock "TL · apna stock" row (selfA) me hi aata hai — agent holder banakar dobara nahi (double row/stock)
+      if (isSameAgent(r, p.name, tlId)) return;
       const key = stockHolderKey(r), holder = ffStockByHolder.get(key) || { ...r, n: 0, classStock: {} };
       holder.n += num(r.n);
       holder.classStock[r.cls] = (holder.classStock[r.cls] || 0) + num(r.n);
@@ -1357,6 +1383,7 @@ window.FF = window.FF || {};
       out.stockTotal = holder.n;
       rowsA.push(out);
     });
+    rowsA.splice(0, rowsA.length, ...mergeSameStockRows(rowsA));
     rowsA.sort((x, y) => y.cur - x.cur || y.stockTotal - x.stockTotal || String(x && x.name || '').localeCompare(String(y && y.name || '')));
     let selfA = selfRow ? agentRow({ ...selfRow, stockTotal: stockComposition.own.total, stockVc4: stockComposition.own.vc4, stockNvc4: stockComposition.own.comm }, true) : null;
     if (!selfA && num(stockComposition.own.total) > 0) selfA = agentRow({ name: p.name, agentId: tlId, tlName: p.name, stockTotal: stockComposition.own.total, stockVc4: stockComposition.own.vc4, stockNvc4: stockComposition.own.comm }, true);
@@ -1673,6 +1700,7 @@ window.FF = window.FF || {};
     });
     stockTlRows.forEach((r) => {
       if (safeCall(() => FF.config.isDirectAgent(r, 'gv'), false) || isSelfReport(r)) return;
+      if (isSameAgent(r, tlNameCanon || p.name, reportTlId || stockTlId)) return;   // TL ka apna stock selfA row me — double nahi
       const key = stockHolderKey(r), holder = gvStockByHolder.get(key) || { ...r, n: 0, stockVc4: 0, stockComm: 0 };
       holder.n += num(r.n);
       gvStockByHolder.set(key, holder);
@@ -1703,6 +1731,7 @@ window.FF = window.FF || {};
       out.stockTotal = holder.n;
       rowsA.push(out);
     });
+    rowsA.splice(0, rowsA.length, ...mergeSameStockRows(rowsA));
     rowsA.sort((x, y) => y.cur - x.cur || y.stockTotal - x.stockTotal || String(x && x.name || '').localeCompare(String(y && y.name || '')));
     let selfA = selfRow ? agentRow({ ...selfRow, stockTotal: stockComposition.own.total, stockVc4: stockComposition.own.vc4, stockComm: stockComposition.own.comm }, true) : null;
     if (!selfA && num(stockComposition.own.total) > 0) selfA = agentRow({ agentName: tlNameCanon || p.name, agentId: reportTlId || '', tlId: stockTlId, tlName: tlNameCanon || p.name, stockTotal: stockComposition.own.total, stockVc4: stockComposition.own.vc4, stockComm: stockComposition.own.comm }, true);

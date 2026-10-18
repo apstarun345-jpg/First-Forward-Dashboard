@@ -241,3 +241,35 @@ test('GV keeps calendar-month labels and surfaces the full previous-month issuan
     FF.gv.issuanceRows = priorIssuance;
   }
 });
+
+test('v204 TL profile: TL ka apna stock ek hi baar — "Agent-wise × Class stock" me double row/total nahi', async () => {
+  const savedAgents = agents.slice(), savedStock = stockAgents.slice();
+  // TL Two: stock sheet me TL ki apni inventory ALAG agent ID (X77) se, REPORT me TL ki apni row nahi.
+  agents.push(perfAgent({ name: 'Amit Two', agentId: 'A201', id: 'A201', tlName: 'TL Two', tlId: 'T2', tlMobile: '9000000002', priority: 'Low', stockVc4: 20, stockTotal: 20, curVc4: 10, curTotal: 10, tlStockVc4: 60, tlStockTotal: 60 }));
+  // TL Three: REPORT agent aur stock-detail holder ka ID/naam match nahi hota (ID alag, naam me extra punctuation)
+  // → pehle ek hi agent 2 rows me aata tha (ek me Commercial, ek me VC5…) aur class-matrix ka jod double hota tha.
+  agents.push(perfAgent({ name: 'Vijay Mali', agentId: 'V1', id: 'V1', tlName: 'TL Three', tlId: 'T3', tlMobile: '9000000003', priority: 'Low', stockVc4: 94, stockNvc4: 28, stockTotal: 122, curVc4: 0, curTotal: 0, tlStockVc4: 94, tlStockNvc4: 28, tlStockTotal: 122 }));
+  stockAgents.push(
+    { agentId: 'V1-X', agentName: 'VIJAY  MALI.', tlId: 'T3', tlName: 'TL Three', cls: 'VC4', group: 'VC4', n: 94 },
+    { agentId: 'V1-X', agentName: 'VIJAY  MALI.', tlId: 'T3', tlName: 'TL Three', cls: 'VC5', group: 'VC5+', n: 20 },
+    { agentId: 'V1-X', agentName: 'VIJAY  MALI.', tlId: 'T3', tlName: 'TL Three', cls: 'VC6', group: 'VC5+', n: 8 });
+  stockAgents.push(
+    { agentId: 'A201', agentName: 'Amit Two', tlId: 'T2', tlName: 'TL Two', cls: 'VC4', group: 'VC4', n: 20 },
+    { agentId: 'X77', agentName: 'TL Two', tlId: 'T2', tlName: 'TL Two', cls: 'VC4', group: 'VC4', n: 30 },
+    { agentId: 'X77', agentName: 'TL Two', tlId: 'T2', tlName: 'TL Two', cls: 'VC5', group: 'VC5+', n: 10 });
+  try {
+    for (const [kind, name, tlName] of [['ff-tl', 'TL One', 'TL One'], ['ff-tl', 'TL Two', 'TL Two'], ['ff-tl', 'TL Three', 'TL Three'], ['gv-tl', 'GV TL', 'GV TL']]) {
+      const pr = await MP.build(person(kind, name));
+      const rows = [...(pr.selfAgent ? [pr.selfAgent] : []), ...(pr.agents || [])];
+      const names = rows.map((r) => String(r.name).trim().toUpperCase());
+      assert.equal(new Set(names).size, names.length, `${name}: koi naam do baar nahi (${names.join(', ')})`);
+      assert.ok(names.filter((n) => n === tlName.toUpperCase()).length <= 1, `${name}: TL apni ek hi row me`);
+      assert.ok(names.filter((n) => /VIJAY/.test(n)).length <= 1, `${name}: Vijay Mali ek hi row`);
+      const rowsTotal = rows.reduce((s, r) => s + (Number(r.stockTotal) || 0), 0);
+      if (name !== 'TL Three') assert.equal(rowsTotal, pr.stock.total, `${name}: rows ka jod = TL total stock`);
+      else assert.equal(rowsTotal, 122, 'TL Three: Vijay Mali ka 122 ek hi baar');
+    }
+  } finally {
+    agents.length = 0; agents.push(...savedAgents); stockAgents.length = 0; stockAgents.push(...savedStock);
+  }
+});
