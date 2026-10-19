@@ -215,6 +215,22 @@ html[data-theme="dark"] .pct.neg { color: #f87171; }
 .msp-kpi.kpi-clickable:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 16%, transparent); transform: translateY(-1px); }
 .msp-kpi-note { margin: 8px 0 0; }
 @media (max-width: 640px) { .mp-kpis.msp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .msp-kpi b { font-size: 17px; } }
+/* 🧓 v214 — Stock ageing box (Master Search) + stock cover chip */
+.msp-kpi.msp-age-box { grid-column: span 2; text-align: left; }
+.msp-age-box > small { display: flex; justify-content: space-between; align-items: center; }
+.msp-age-dl { border: 0; background: rgba(99,102,241,.12); color: inherit; border-radius: 8px; padding: 2px 8px; cursor: pointer; font-weight: 800; }
+.msp-age-list { display: grid; gap: 4px; margin-top: 6px; }
+.msp-age-row { display: grid; grid-template-columns: 88px 1fr auto; align-items: center; gap: 8px; border: 0; background: transparent; padding: 3px 4px; border-radius: 8px; cursor: pointer; color: inherit; font: inherit; text-align: left; }
+.msp-age-row:hover { background: rgba(99,102,241,.08); }
+.msp-age-row span { font-size: 12px; font-weight: 600; opacity: .85; white-space: nowrap; }
+.msp-age-row i { height: 8px; border-radius: 6px; background: rgba(148,163,184,.2); position: relative; overflow: hidden; }
+.msp-age-row i::after { content: ''; position: absolute; inset: 0 auto 0 0; width: var(--w); border-radius: 6px; background: #22c55e; transition: width .5s ease; }
+.msp-age-row.ok2 i::after { background: #84cc16; } .msp-age-row.warn i::after { background: #f59e0b; } .msp-age-row.warn2 i::after { background: #f97316; } .msp-age-row.bad i::after { background: #ef4444; }
+.msp-kpi .msp-age-row b { font-size: 14px; min-width: 42px; text-align: right; }
+.msp-age-unk { margin-top: 2px; }
+.msp-cover { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; font-size: 12px; font-weight: 800; vertical-align: middle; background: rgba(34,197,94,.14); color: #15803d; }
+.msp-cover.warn { background: rgba(245,158,11,.16); color: #b45309; } .msp-cover.bad { background: rgba(239,68,68,.14); color: #b91c1c; }
+@media (max-width: 640px) { .msp-kpi.msp-age-box { grid-column: 1 / -1; } }
 html[data-theme="dark"] .sug-result.gross > small { color: #5eead4; }
 .g1 { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
 .g2 { background: linear-gradient(135deg, #ec4899, #f43f5e); }

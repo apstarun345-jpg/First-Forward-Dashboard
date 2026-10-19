@@ -206,11 +206,31 @@ html[data-theme="dark"] .pct.neg { color: #f87171; }
 .msp-kpi b { font-size: 20px; }
 .msp-kpi b .sug-pair { font-size: 12px; }
 .msp-kpi.k0 { border-top-color: #ec4899; }
+.msp-kpi.k9 { border-top-color: #22c55e; background: color-mix(in srgb, #22c55e 6%, var(--card)); }
 .msp-kpi.kpi-clickable { cursor: pointer; }
 .msp-kpi.kpi-clickable:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 16%, transparent); transform: translateY(-1px); }
 @media (max-width: 640px) {
 .mp-kpis.msp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .msp-kpi b { font-size: 17px; }
+}
+/* 🧓 v214 — Stock ageing box (Master Search) + stock cover chip */
+.msp-kpi.msp-age-box { grid-column: span 2; text-align: left; }
+.msp-age-box > small { display: flex; justify-content: space-between; align-items: center; }
+.msp-age-dl { border: 0; background: rgba(99,102,241,.12); color: inherit; border-radius: 8px; padding: 2px 8px; cursor: pointer; font-weight: 800; }
+.msp-age-row { display: grid; grid-template-columns: 88px 1fr auto; align-items: center; gap: 8px; border: 0; background: transparent; padding: 3px 4px; border-radius: 8px; cursor: pointer; color: inherit; font: inherit; text-align: left; }
+.msp-age-row span { font-size: 12px; font-weight: 600; opacity: .85; white-space: nowrap; }
+.msp-age-row i { height: 8px; border-radius: 6px; background: rgba(148,163,184,.2); position: relative; overflow: hidden; }
+.msp-age-row i::after { content: ''; position: absolute; inset: 0 auto 0 0; width: var(--w); border-radius: 6px; background: #22c55e; transition: width .5s ease; }
+.msp-age-row.ok2 i::after { background: #84cc16; }
+.msp-age-row.warn i::after { background: #f59e0b; }
+.msp-age-row.warn2 i::after { background: #f97316; }
+.msp-age-row.bad i::after { background: #ef4444; }
+.msp-kpi .msp-age-row b { font-size: 14px; min-width: 42px; text-align: right; }
+.msp-cover { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; font-size: 12px; font-weight: 800; vertical-align: middle; background: rgba(34,197,94,.14); color: #15803d; }
+.msp-cover.warn { background: rgba(245,158,11,.16); color: #b45309; }
+.msp-cover.bad { background: rgba(239,68,68,.14); color: #b91c1c; }
+@media (max-width: 640px) {
+.msp-kpi.msp-age-box { grid-column: 1 / -1; }
 }
 html[data-theme="dark"] .sug-result.gross > small { color: #5eead4; }
 .g1 { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
@@ -739,7 +759,6 @@ html[data-theme="dark"] .user-notify-prefs { background: #1a2444; }
 .auth-float em { font-style: normal; font-size: 10.5px; opacity: .85; text-transform: uppercase; letter-spacing: .1em; }
 .auth-float.a1 { top: 26px; right: 26px; animation-delay: 0s; }
 .auth-float.a2 { bottom: 90px; right: 46px; animation-delay: 1.4s; }
-.auth-float.a3 { bottom: 26px; left: 30px; animation-delay: 2.6s; }
 @keyframes floatY { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
 .auth-panel { padding: 34px 38px; display: flex; flex-direction: column; justify-content: center; gap: 12px; background: linear-gradient(180deg, #fff, #fbfbff); }
 .auth-panel .auth-card { width: 100%; min-height: 0; display: block; background: transparent; box-shadow: none; border-radius: 0; overflow: visible; }
@@ -2779,6 +2798,7 @@ html[data-theme="dark"] .direct-ff { background: #262a4a; color: #c7d2fe; border
 /* ---------- 🧾 MASTER PROFILE (v3.13) — poori report drawer / inline ---------- */
 .mp { display: grid; gap: 14px; min-width: 0; }
 .mp > *, .mp-head > *, .mp-sec, .mp-sec > *, .mp-chart, .mp-actions > * { min-width: 0; max-width: 100%; }
+.mp-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .mp-id { min-width: 0; flex: 1 1 220px; overflow-wrap: anywhere; }
 .mp-id b, .mp-id small { overflow-wrap: anywhere; word-break: break-word; }
 .mp-prio { min-width: 0; max-width: 100%; }
@@ -3239,6 +3259,7 @@ html.focus-mode .page-home #today-glance { max-width: 1280px; margin: 16px auto;
 .table-wrap > table th:first-child, .table-wrap > table td:first-child { max-width: 150px; }
 }
 /* Notification usability: explicit unread/read state and type filters. */
+.notify-filter-bar { display: flex; align-items: center; gap: 7px; padding: 7px 11px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 58%, var(--card)); }
 .notify-filter-bar label { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10.5px; font-weight: 800; }
 .notify-filter-bar select { max-width: 155px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 7px; background: var(--card); color: var(--ink); font-size: 11px; }
 .notification-item.unread small strong { color: var(--brand); letter-spacing: .08em; }
@@ -4539,6 +4560,7 @@ html[data-theme="dark"] .hm-toprow .rank { background: #1e293b; color: #a5b4fc; 
   background: color-mix(in srgb, #f59e0b 12%, transparent); border: 1px solid color-mix(in srgb, #f59e0b 34%, transparent); }
 /* Notification Center 2.0 */
 .notify-center-search .input{width:100%;min-width:0}
+.notify-center-filters{display:flex;gap:7px;flex-wrap:wrap}
 .notify-center-filters .input{min-width:125px}
 .notify-center-summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:9px 11px;margin-bottom:10px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:12px}
 .notify-center-summary span:first-child{margin-right:auto}
@@ -4550,6 +4572,7 @@ html[data-theme="dark"] .hm-toprow .rank { background: #1e293b; color: #a5b4fc; 
 .nci-meta{display:flex;gap:10px;color:#94a3b8;font-size:10px}
 @media(max-width:700px) {
 .notify-center-item>.btn{grid-column:2;justify-self:start}
+.notify-center-filters{width:100%}
 .notify-center-filters .input{flex:1}
 }
 /* ⚡ v3.48 Fast UI mode — less layout/paint work, especially on large reports. */
@@ -4660,6 +4683,7 @@ html[data-theme="dark"] .data-fresh-card>header{background:#111827}
 .tr-es-head small{font-size:11px}
 .tr-es-tags>span{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 9px;background:var(--card);color:var(--muted);font-size:11px}
 .tr-es-tags b{color:var(--ink);font-size:12px}
+.tr-emp-filters{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}
 .tr-emp-filter{display:inline-flex;align-items:center;justify-content:space-between;gap:9px;min-height:36px;padding:6px 10px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--ink);font:inherit;font-size:11.5px;font-weight:750;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}
 .tr-emp-filter:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(15,23,42,.1)}
 .tr-emp-filter b{display:inline-grid;place-items:center;min-width:21px;height:21px;padding:0 5px;border-radius:99px;background:color-mix(in srgb,var(--brand) 12%,transparent);font-size:10px}
@@ -4678,6 +4702,7 @@ html[data-theme="dark"] .tr-emp-filter-rejected.on{background:rgba(220,38,38,.16
 @media(max-width:600px) {
 .notification-btn{min-width:46px;width:46px;height:44px;font-size:21px}
 .notification-pop{top:58px;right:8px;width:calc(100vw - 16px)}
+.tr-emp-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
 .tr-emp-pagination .btn{min-width:0;padding:6px 8px}
 }
 /* 👤 Meri requests — employee link ke 📝 Form tab par (v3.57): collapsed card, summary me status counts
@@ -5345,6 +5370,13 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   font-size: 14px !important;
   line-height: 1.2 !important;
 }
+.tr-req-tbl tbody td.tr-c-agent > small {
+  display: block !important;
+  max-width: 100% !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
 .tr-req-tbl tbody td.tr-c-addr {
   min-width: 0 !important;
   max-width: none !important;
@@ -5415,6 +5447,18 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   text-align: center !important;
   white-space: nowrap !important;
   font-variant-numeric: tabular-nums;
+}
+.tr-req-tbl tbody tr.st-approved td.tr-c-emp,
+.tr-req-tbl tbody tr.st-approved td.tr-c-agent {
+  background: linear-gradient(180deg, rgba(240,253,244,.95), rgba(255,255,255,.7)) !important;
+}
+.tr-req-tbl tbody tr.st-pending td.tr-c-emp,
+.tr-req-tbl tbody tr.st-pending td.tr-c-agent {
+  background: linear-gradient(180deg, rgba(255,251,235,.95), rgba(255,255,255,.7)) !important;
+}
+.tr-req-tbl tbody tr.st-rejected td.tr-c-emp,
+.tr-req-tbl tbody tr.st-rejected td.tr-c-agent {
+  background: linear-gradient(180deg, rgba(254,242,242,.95), rgba(255,255,255,.7)) !important;
 }
 @media (max-width: 900px) {
 .tr-req-tbl {

@@ -1543,7 +1543,7 @@ FF.pages = FF.pages || {};
           <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
           <div class="card-right">${prioChip(pr.priority)}</div></div>
         <div class="card-body"><div class="mp-kpis msp-kpis">
-          ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, U.fmt(s.total), `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}`, spec('stock'))}
+          ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}${c.cover != null ? ` · run-rate ${U.fmt(c.rate, true)}/day → stock ~${U.fmt(Math.round(c.cover))} din chalega` : ''}`, spec('stock'))}
           ${isTl
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
     : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}` : '')}
@@ -1553,6 +1553,7 @@ FF.pages = FF.pages || {};
           ${sug}
           ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur))}
           ${box('k10', '🎯 Expected this month · Run-rate', U.fmt((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0)), `Current pace ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days · report cutoff: previous day`, spec('mtd', m.cur))}
+          ${ageBoxHtml(pr, isTl, ch)}
         </div>${notFound}</div></section>`;
     }
     const kpiLoadingHtml = (name, ch) => `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-body">${U.spinner(`${esc(name)} ka ${ch === 'gv' ? '🟩 GV' : '🟦 FF'} stock · issuance · priority · suggested load ho raha hai…`)}</div></section>`;
@@ -1569,18 +1570,23 @@ FF.pages = FF.pages || {};
         const activeKey = current && (current._sourceKey || current.key);
         if (host.isConnected !== false && current && (current === g || (sourceKey && activeKey === sourceKey))) {
           host.innerHTML = chans.map((ch) => html[ch] || '').join('');
+          fillAgeBoxes(host);
         }
       };
+      REPORT_CTX.name = g.name; REPORT_CTX.prs = {};
       chans.forEach((c) => {
         let q = null;
         try { q = MP().quick(g[c]); } catch { q = null; }
+        if (q) REPORT_CTX.prs[c] = q;
         html[c] = q ? kpiStripHtml({ ...q, partial: true }) : kpiLoadingHtml(g.name, c);
       });
       paint();
       await Promise.all(chans.map(async (c) => {
         try {
-          const pr = await MP()._buildSoon(g[c], (late) => { html[c] = kpiStripHtml(late); paint(); });
+          const pr = await MP()._buildSoon(g[c], (late) => { REPORT_CTX.prs[c] = late; html[c] = kpiStripHtml(late); paint(); });
+          REPORT_CTX.prs[c] = pr;
           html[c] = kpiStripHtml(pr);
+          prefetchReport(c, pr);
         } catch (err) {
           html[c] = `<section class="card msp-kpi-card" data-msp-kpi-ch="${c}"><div class="card-body dim small">⚠️ ${c === 'gv' ? 'GV' : 'FF'} profile nahi bana: ${esc((err && err.message) || err)}</div></section>`;
         }
@@ -1632,7 +1638,7 @@ FF.pages = FF.pages || {};
         <div class="msp-hero">
           <span class="ms-avatar ${viewGroup.gv ? 'gv' : 'ff'}">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
           <div class="msp-hero-id"><b>${esc(g.name)}</b><div class="msp-pills">${bits || '<span class="msp-pill">Report</span>'}</div></div>
-          ${person ? `<div class="msp-hero-act"><button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
+          ${person ? `<div class="msp-hero-act">${FF.auth && FF.auth.can && FF.auth.can('export') ? '<button class="btn small primary" data-msp-report title="Stock pivot + Issuance pivot + Ageing + tag rows — ek Excel me">⬇ Full report</button>' : ''}<button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
         <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => viewGroup[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
         ${gvStripHtml(viewGroup.gv)}${ffStripHtml(viewGroup.ff)}
@@ -1827,6 +1833,177 @@ FF.pages = FF.pages || {};
     if (asked) run(asked);
     else { buildLight().then(() => { paintState(); paintQuick(); }).catch(() => {}); }
   }
+
+  // ===== ⬇ v214 — Stock ageing box + Full report (Stock pivot · Issuance pivot · Ageing · tag rows) =====
+  const REPORT_CTX = { name: '', prs: {}, cache: new Map() };
+  const AGE_BUCKETS = [
+    { k: 'a0', label: '0–1 mahina', min: 0, max: 29, tone: 'ok' },
+    { k: 'a1', label: '1–3 mahine', min: 30, max: 89, tone: 'ok2' },
+    { k: 'a3', label: '3–5 mahine', min: 90, max: 149, tone: 'warn' },
+    { k: 'a5', label: '5–6 mahine', min: 150, max: 179, tone: 'warn2' },
+    { k: 'a6', label: '6 mahine +', min: 180, max: 1e9, tone: 'bad' }
+  ];
+  const bucketOfAge = (age) => (age === null || age === undefined || age === '' || !Number.isFinite(Number(age)) ? null : AGE_BUCKETS.find((b) => Number(age) >= b.min && Number(age) <= b.max) || null);
+  function ageScopeOfPr(pr, isTl, ch) {
+    return isTl ? { kind: 'tl', key: pr.name, ch, title: pr.name } : { kind: 'agent', key: pr.id || pr.name, keys: [pr.name, pr.id].filter(Boolean), ch, title: pr.name };
+  }
+  function ageBoxHtml(pr, isTl, ch) {
+    if (!FF.stockAge) return '';
+    const sc = ageScopeOfPr(pr, isTl, ch);
+    return `<div class="mp-kpi msp-kpi k11 msp-age-box" data-msp-age="${esc(JSON.stringify(sc))}"><small>🧓 Stock ageing <button type="button" class="msp-age-dl" data-msp-age-dl title="Saare stock tags (age ke saath) Excel">⬇</button></small><div class="msp-age-list">${U.loader ? U.loader('', { size: 'sm' }) : '…'}</div></div>`;
+  }
+  /** Node (cumulative ≥1/3/5/6 mahine) → alag-alag buckets. */
+  function ageSplit(node) {
+    const g = ['core', 'comm'];
+    const sum = (f) => g.reduce((t, x) => t + (f(x) || 0), 0);
+    const total = sum((x) => node.total[x]), unk = sum((x) => node.unknown[x]);
+    const c = (m) => sum((x) => node.counts[x][m]);
+    const known = total - unk;
+    return { total, unk, n: [known - c(1), c(1) - c(3), c(3) - c(5), c(5) - c(6), c(6)].map((v) => Math.max(0, v)) };
+  }
+  function fillAgeBoxes(host) {
+    const boxes = host ? host.querySelectorAll('[data-msp-age]') : [];
+    if (!boxes.length || !FF.stockAge) return;
+    FF.stockAge.ready().then(() => {
+      boxes.forEach((box) => {
+        if (!box.isConnected) return;
+        const list = box.querySelector('.msp-age-list');
+        let sc; try { sc = JSON.parse(box.dataset.mspAge); } catch { return; }
+        const node = FF.stockAge.nodeFor(sc);
+        if (!node) { list.innerHTML = `<span class="dim small">${FF.stockAge.error ? esc(FF.stockAge.error) : 'Ageing data nahi mila'}</span>`; return; }
+        const a = ageSplit(node);
+        const max = Math.max(1, ...a.n);
+        list.innerHTML = AGE_BUCKETS.map((b, i) => `<button type="button" class="msp-age-row ${b.tone}" data-msp-age-b="${i}" title="${esc(b.label)} wale tags dekho"><span>${b.label}</span><i style="--w:${Math.round((a.n[i] / max) * 100)}%"></i><b>${U.fmt(a.n[i])}</b></button>`).join('')
+          + (a.unk ? `<span class="dim small msp-age-unk">Date nahi: ${U.fmt(a.unk)}</span>` : '');
+      });
+    }).catch(() => {});
+  }
+  async function stockTagsFor(sc) {
+    const key = `age|${JSON.stringify(sc)}`;
+    if (!REPORT_CTX.cache.has(key)) {
+      const pr = FF.stockAge.ready().then(() => FF.stockAge.fetchTags(sc, 0, '', 150000)).then((r) => (r && r.rows) || []);
+      REPORT_CTX.cache.set(key, pr);
+      pr.catch(() => REPORT_CTX.cache.delete(key));
+    }
+    return REPORT_CTX.cache.get(key);
+  }
+  const ageRowCells = (x) => [x.ch === 'gv' ? 'GV Partner' : 'First Forward', x.tagId, U.barcode ? U.barcode(x.barcode) : x.barcode, x.cls, x.agent, x.agentId || '', x.tl, x.date, x.age === null || x.age === undefined ? '' : x.age, (bucketOfAge(x.age) || { label: 'Date nahi' }).label];
+  const AGE_HEAD = ['Channel', 'Tag ID', 'Barcode / serial', 'Class', 'Agent', 'Agent ID', 'TL', 'Allocated date', 'Age (days)', 'Age bucket'];
+  async function openAgeBucket(box, idx) {
+    let sc; try { sc = JSON.parse(box.dataset.mspAge); } catch { return; }
+    const b = AGE_BUCKETS[idx];
+    FF.app.openDrawer({ kicker: 'Stock ageing', title: `${sc.title} · ${b.label}`, body: U.spinner('Tags la rahe hain…'), wide: true, loading: true, age: false });
+    try {
+      const rows = (await stockTagsFor(sc)).filter((x) => bucketOfAge(x.age) === b);
+      const show = rows.slice(0, 500);
+      const byAgent = new Map(); rows.forEach((x) => byAgent.set(x.agent || '—', (byAgent.get(x.agent || '—') || 0) + 1));
+      const top = [...byAgent.entries()].sort((p, q) => q[1] - p[1]).slice(0, 12).map(([k, v]) => `<span class="kd-chip">${esc(k)} <b>${U.fmt(v)}</b></span>`).join('');
+      const body = `<p class="dim small">${U.fmt(rows.length)} tags · ${esc(b.label)} purane (allocation date se)${rows.length > show.length ? ' · pehli 500 dikh rahi — sab ke liye ⬇ Excel' : ''}</p>${top ? `<div class="kd-chips">${top}</div>` : ''}
+        <div class="table-wrap"><table class="tbl compact"><thead><tr>${AGE_HEAD.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${show.map((x) => `<tr>${ageRowCells(x).map((v) => `<td>${esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${AGE_HEAD.length}" class="empty">Is bucket me koi tag nahi 🎉</td></tr>`}</tbody></table></div>`;
+      const dl = FF.auth.can('export') ? '<button class="btn small" data-msp-age-xlsx>⬇ Excel</button>' : '';
+      FF.app.openDrawer({ kicker: 'Stock ageing', title: `${sc.title} · ${b.label}`, sub: `${U.fmt(rows.length)} tags`, body, wide: true, actions: dl, age: false, replace: true });
+      const btn = document.querySelector('#drawer-actions [data-msp-age-xlsx]');
+      if (btn) btn.onclick = () => FF.xlsx.download(`stock-age-${U.slug(sc.title)}-${b.k}-${U.stamp()}.xlsx`, [{ name: b.label, header: AGE_HEAD, rows: rows.map(ageRowCells) }]);
+    } catch (err) {
+      FF.app.openDrawer({ kicker: 'Stock ageing', title: sc.title, body: U.errorBox(err), wide: true, replace: true, age: false });
+    }
+  }
+  async function downloadAgeAll(box) {
+    let sc; try { sc = JSON.parse(box.dataset.mspAge); } catch { return; }
+    U.toast('⬇ Stock ageing Excel ban raha hai…', 'info');
+    const rows = await stockTagsFor(sc);
+    const piv = pivot(rows, (x) => x.agent || '—', (x) => (bucketOfAge(x.age) || { label: 'Date nahi' }).label, [...AGE_BUCKETS.map((b) => b.label), 'Date nahi']);
+    FF.xlsx.download(`stock-age-${U.slug(sc.title)}-${U.stamp()}.xlsx`, [
+      { name: 'Ageing pivot', header: ['Agent', ...piv.cols, 'Total'], rows: piv.rows },
+      { name: 'Stock tags', header: AGE_HEAD, rows: rows.map(ageRowCells) }
+    ]);
+  }
+  /** Rows → pivot (rowKey × colKey count) + Total row/column. */
+  function pivot(rows, rowKey, colKey, fixedCols) {
+    const m = new Map(), colSet = new Set(fixedCols || []);
+    rows.forEach((x) => { const r = rowKey(x), c = colKey(x); colSet.add(c); if (!m.has(r)) m.set(r, new Map()); const mm = m.get(r); mm.set(c, (mm.get(c) || 0) + 1); });
+    const cols = fixedCols ? [...colSet] : [...colSet].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+    const out = [...m.entries()].map(([r, mm]) => { const vals = cols.map((c) => mm.get(c) || 0); return [r, ...vals, vals.reduce((t, v) => t + v, 0)]; }).sort((a, b) => b[b.length - 1] - a[a.length - 1]);
+    const tot = cols.map((_, i) => out.reduce((t, r) => t + r[i + 1], 0));
+    out.push(['TOTAL', ...tot, tot.reduce((t, v) => t + v, 0)]);
+    return { cols, rows: out };
+  }
+  const ymOf = (d) => String(d || '').slice(0, 7);
+  function reportSpecs(pr, ch) {
+    const isTl = /tl$/.test(String(pr.kind || ''));
+    const m = pr.months || {};
+    const cur = m.cur || U.ymKey(new Date()), last = m.last || U.prevMonthKey(cur);
+    const spec = isTl ? { src: ch, tl: pr.name, tlId: ch === 'gv' ? (pr.id || '') : '' } : { src: ch, agent: pr.name, agentId: pr.id || '' };
+    return { isTl, spec, from: `${last}-01`, to: `${cur}-${U.pad2(U.daysInMonth(cur))}`, cur, last };
+  }
+  /** Data jutao (cache) — profile khulte hi peeche shuru, click par turant. */
+  function reportData(ch, pr) {
+    const key = `rep|${ch}|${pr.name}|${pr.id || ''}`;
+    if (REPORT_CTX.cache.has(key)) return REPORT_CTX.cache.get(key);
+    const r = reportSpecs(pr, ch);
+    const sc = ageScopeOfPr(pr, r.isTl, ch);
+    const job = Promise.all([
+      FF.stockAge ? stockTagsFor(sc).catch(() => []) : Promise.resolve([]),
+      (FF.kpiDetail && FF.kpiDetail.rawRowsFor ? FF.kpiDetail.rawRowsFor(r.spec, { from: r.from, to: r.to }) : Promise.resolve([])).catch(() => [])
+    ]).then(([stock, issue]) => ({ ...r, stock, issue, sc }));
+    REPORT_CTX.cache.set(key, job);
+    job.catch(() => REPORT_CTX.cache.delete(key));
+    setTimeout(() => REPORT_CTX.cache.delete(key), 10 * 60e3);
+    return job;
+  }
+  function prefetchReport(ch, pr) {
+    if (!pr || pr.partial || !(FF.auth && FF.auth.can && FF.auth.can('export'))) return;
+    const go = () => { if (FF.kpiDetail && FF.stockAge) reportData(ch, pr).catch(() => {}); else if (FF.lazy && FF.lazy.shellNeed) FF.lazy.shellNeed(['kpiDetail', 'stockAge']).then(() => reportData(ch, pr)).catch(() => {}); };
+    (window.requestIdleCallback || ((f) => setTimeout(f, 1200)))(go, { timeout: 4000 });
+  }
+  async function downloadFullReport(btn) {
+    const chans = ['ff', 'gv'].filter((c) => REPORT_CTX.prs[c]);
+    if (!chans.length) { U.toast('Profile abhi load ho raha hai — 2 sec baad try karo', 'warn'); return; }
+    const old = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Ban raha hai…'; }
+    try {
+      if (FF.lazy && FF.lazy.shellNeed) await FF.lazy.shellNeed(['kpiDetail', 'stockAge']);
+      const sets = await Promise.all(chans.map((c) => reportData(c, REPORT_CTX.prs[c]).then((d) => ({ ch: c, pr: REPORT_CTX.prs[c], d }))));
+      const sheets = [];
+      const two = sets.length > 1;
+      const sfx = (ch) => (two ? (ch === 'gv' ? ' GV' : ' FF') : '');
+      const summary = [['Naam', REPORT_CTX.name], ['Report time', new Date().toLocaleString('en-IN')]];
+      sets.forEach(({ ch, pr, d }) => {
+        const c = (pr.calc && pr.calc.total) || {}, t = pr.totals || {}, s = pr.stock || {};
+        const ages = AGE_BUCKETS.map((b) => d.stock.filter((x) => bucketOfAge(x.age) === b).length);
+        summary.push([], [`${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${d.isTl ? 'TL' : 'Agent'}`, pr.name],
+          ['Stock (total)', s.total || d.stock.length], ['Stock cover (din)', c.cover != null ? Math.round(c.cover) : ''], ['Run-rate / day', c.rate != null ? Math.round(c.rate * 10) / 10 : ''],
+          [`Issued ${U.labelYM ? U.labelYM(d.cur) : d.cur}`, t.curTotal || 0], [`Issued ${U.labelYM ? U.labelYM(d.last) : d.last}`, t.lastTotal || 0], ['Priority', pr.priority || ''],
+          ...AGE_BUCKETS.map((b, i) => [`Ageing · ${b.label}`, ages[i]]));
+        const sp = pivot(d.stock, (x) => x.agent || '—', (x) => x.cls || 'NA');
+        sheets.push({ name: `Stock pivot${sfx(ch)}`, header: ['Agent', ...sp.cols, 'Total'], rows: sp.rows });
+        const ap = pivot(d.stock, (x) => x.agent || '—', (x) => (bucketOfAge(x.age) || { label: 'Date nahi' }).label, [...AGE_BUCKETS.map((b) => b.label), 'Date nahi']);
+        sheets.push({ name: `Ageing pivot${sfx(ch)}`, header: ['Agent', ...ap.cols, 'Total'], rows: ap.rows });
+        [[d.cur, 'MTD'], [d.last, 'Last month']].forEach(([ym, lbl]) => {
+          const rows = d.issue.filter((r) => ymOf(r[0]) === ym);
+          const ip = pivot(rows, (r) => r[7] || '—', (r) => r[3] || 'NA');
+          sheets.push({ name: `Issuance ${lbl}${sfx(ch)}`.slice(0, 31), header: [`Agent · ${U.labelYM ? U.labelYM(ym) : ym}`, ...ip.cols, 'Total'], rows: ip.rows });
+        });
+        sheets.push({ name: `Stock tags${sfx(ch)}`, header: AGE_HEAD, rows: d.stock.map(ageRowCells) });
+        sheets.push({ name: `Issuance tags${sfx(ch)}`, header: (FF.kpiDetail && FF.kpiDetail.RAW_HEAD) || ['Date', 'Tag ID', 'VRN', 'Class', 'Type', 'VRN type', 'Status', 'Agent', 'Agent ID', 'TL', 'Channel', 'Barcode / serial'], rows: d.issue });
+      });
+      sheets.unshift({ name: 'Summary', header: ['Field', 'Value'], rows: summary });
+      FF.xlsx.download(`${U.slug(REPORT_CTX.name)}-full-report-${U.stamp()}.xlsx`, sheets);
+      U.toast('✅ Full report download ho gayi', 'ok');
+    } catch (err) {
+      U.toast('Report nahi bani: ' + ((err && err.message) || err), 'err');
+    } finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+  }
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const rep = t.closest('[data-msp-report]');
+    if (rep) { e.preventDefault(); downloadFullReport(rep); return; }
+    const dl = t.closest('[data-msp-age-dl]');
+    if (dl) { e.preventDefault(); e.stopPropagation(); const box = dl.closest('[data-msp-age]'); if (box) downloadAgeAll(box).catch((err) => U.toast(String((err && err.message) || err), 'err')); return; }
+    const row = t.closest('[data-msp-age-b]');
+    if (row) { e.preventDefault(); e.stopPropagation(); const box = row.closest('[data-msp-age]'); if (box) openAgeBucket(box, Number(row.dataset.mspAgeB)); }
+  }, true);
 
   FF.pages.masterSearch = { title: 'Master Search', render: pageRender };
 

@@ -743,8 +743,8 @@ window.FF = window.FF || {};
     if ((spec.agentId || spec.agent) && typeof G.agentIssuanceRows === 'function') return Array.isArray(G.agentIssuanceRows(spec.agentId, spec.agent));
     return true;
   }
-  async function loadRaw() {
-    const spec = state.spec, p = state.period;
+  async function loadRaw(specArg, pArg) {
+    const spec = specArg || state.spec, p = pArg || state.period, keep = !specArg;
     const out = [];
     const wantGv = spec.src === 'gv' || spec.src === 'both';
     const wantFf = spec.src === 'ff' || spec.src === 'both';
@@ -758,7 +758,18 @@ window.FF = window.FF || {};
     if (needsEir) {
       const e = FF.config.eir;
       const cols = [e.date, e.tagId, e.vrn, e.cls, e.type, e.vrnType, e.status, e.agentName, e.agentId, e.tlName, e.masterId, e.gvName, e.gvId];
-      const tq = `select ${cols.join(', ')} where toDate(${e.date}) >= date '${p.from}' and toDate(${e.date}) <= date '${p.to}' order by ${e.date} desc limit 60000`;
+      // ⚡ v214 — agent / TL ki report: Google side par hi naam ke sabse lambe shabd se pre-filter (poora network nahi aata, limit me nahi katta).
+      // Exact match neeche rowMatchesSpec karta hai.
+      let pre = '';
+      if (spec._pre) {
+        const tok = String(spec.tl || spec.agent || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length >= 3).sort((a, b) => b.length - a.length)[0];
+        const ors = [];
+        if (tok) [e.agentName, e.tlName, e.gvName].filter(Boolean).forEach((c) => ors.push(`lower(${c}) contains '${tok}'`));
+        const id = String(spec.agentId || spec.tlId || '').replace(/[^A-Za-z0-9]/g, '');
+        if (id) [e.agentId, e.gvId].filter(Boolean).forEach((c) => ors.push(`${c} = '${id}'`));
+        if (ors.length) pre = ` and (${ors.join(' or ')})`;
+      }
+      const tq = `select ${cols.join(', ')} where toDate(${e.date}) >= date '${p.from}' and toDate(${e.date}) <= date '${p.to}'${pre} order by ${e.date} desc limit 60000`;
       const t = await FF.data.query(e.sheet, tq, {});
       const D = FF.data;
       const filt = filterOf(spec.f);
@@ -781,6 +792,7 @@ window.FF = window.FF || {};
       }
     }
     out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
+    if (!keep) return out;
     state.raw = out;
     state.rawGv = gvRows.length;
     state.rawSrc = eirOnly ? 'EIR (FF + GV · master ID rows = GV)' : gvFromMaster && wantGv ? (wantFf ? 'EIR (FF) + GV Master (GV)' : 'GV Master') : (wantGv && wantFf ? 'EIR (FF + GV)' : wantFf ? 'EIR' : 'EIR');
@@ -1358,5 +1370,7 @@ window.FF = window.FF || {};
     if (chip && state.spec) { open({ ...state.spec, ...JSON.parse(chip.dataset.kdSpec || '{}') }); return; }
   });
 
-  FF.kpiDetail = { open, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _peopleDetail: peopleDetail, _issuanceDetail: issuanceDetail, _agentDetail: agentDetail, _limits: SOFT };
+  /** ⬇ v214 — Master Search full report: kisi bhi spec + period ki tag-level issuance rows (drawer state ko chhede bina). */
+  function rawRowsFor(spec, p) { return loadRaw({ ...spec, _pre: true }, p); }
+  FF.kpiDetail = { open, rawRowsFor, RAW_HEAD, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _peopleDetail: peopleDetail, _issuanceDetail: issuanceDetail, _agentDetail: agentDetail, _limits: SOFT };
 })(window.FF);

@@ -2,7 +2,6 @@
 @media (max-width: 420px) {
 .mp-prio { width: 100%; justify-items: start; }
 }
-.mp-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .mp-prio { display: grid; justify-items: end; gap: 2px; }
 .mp-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; }
 .mp-growth-sec { border-color: color-mix(in srgb, #6366f1 34%, var(--line)); }

@@ -138,11 +138,9 @@ html[data-theme="dark"] .tr-req-tbl .tr-th-suggest .tr-th-sub { color: rgba(255,
 .tr-es-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
 .tr-es-tags{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 8px}
 .tr-emp-history{margin-top:8px}
-.tr-emp-filters{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}
 .tr-emp-pagination{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:10px}
 .tr-emp-pagination .btn:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:600px) {
-.tr-emp-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
 .tr-emp-filter{min-width:0;font-size:10.5px;padding:6px 8px}
 .tr-emp-history-head{align-items:flex-start;font-size:10px}
 .tr-emp-pagination{gap:8px}
@@ -163,13 +161,6 @@ html[data-theme="dark"] .tr-req-tbl .tr-th-suggest .tr-th-sub { color: rgba(255,
 .tr-req-tbl tbody td.tr-c-sel {
   vertical-align: middle !important;
 }
-.tr-req-tbl tbody td.tr-c-agent > small {
-  display: block !important;
-  max-width: 100% !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-}
 .tr-req-tbl tbody td.tr-c-agent .tr-tags {
   display: flex !important;
   flex-wrap: wrap !important;
@@ -185,18 +176,6 @@ html[data-theme="dark"] .tr-req-tbl .tr-th-suggest .tr-th-sub { color: rgba(255,
 }
 .tr-req-tbl tbody tr:hover td.tr-c-addr {
   background: #ecfeff !important;
-}
-.tr-req-tbl tbody tr.st-approved td.tr-c-emp,
-.tr-req-tbl tbody tr.st-approved td.tr-c-agent {
-  background: linear-gradient(180deg, rgba(240,253,244,.95), rgba(255,255,255,.7)) !important;
-}
-.tr-req-tbl tbody tr.st-pending td.tr-c-emp,
-.tr-req-tbl tbody tr.st-pending td.tr-c-agent {
-  background: linear-gradient(180deg, rgba(255,251,235,.95), rgba(255,255,255,.7)) !important;
-}
-.tr-req-tbl tbody tr.st-rejected td.tr-c-emp,
-.tr-req-tbl tbody tr.st-rejected td.tr-c-agent {
-  background: linear-gradient(180deg, rgba(254,242,242,.95), rgba(255,255,255,.7)) !important;
 }
 .tr-req-tbl col.tr-col-stock-total { width: 166px !important; }
 .tr-req-tbl col.tr-col-last { width: 166px !important; }

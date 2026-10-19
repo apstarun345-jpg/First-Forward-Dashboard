@@ -4,8 +4,11 @@
 .msp-trend-chart { margin: 4px 0 12px; }
 .msp-trend-sum { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 10px; }
 .msp-kpis-wrap { display: grid; gap: 10px; margin: 0 0 12px; }
-.msp-kpi.k9 { border-top-color: #22c55e; background: color-mix(in srgb, #22c55e 6%, var(--card)); }
 .msp-kpi-note { margin: 8px 0 0; }
+.msp-age-list { display: grid; gap: 4px; margin-top: 6px; }
+.msp-age-row:hover { background: rgba(99,102,241,.08); }
+.msp-age-unk { margin-top: 2px; }
+.auth-float.a3 { bottom: 26px; left: 30px; animation-delay: 2.6s; }
 .master-search-input .ms-ico { position: absolute; left: 11px; font-size: 14px; opacity: .7; pointer-events: none; }
 .ms-range-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
 .ms-range-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
