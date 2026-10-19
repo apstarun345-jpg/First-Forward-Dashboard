@@ -11,9 +11,10 @@ test('every theme pack has CSS (vars, KPI palette, chart palette) in themes.css'
   assert.ok(keys.includes('navy'), 'Navy & White pack must exist');
   for (const k of keys) {
     assert.match(css, new RegExp(`html\\[data-theme-pack="${k}"\\] \\{`), k + ' vars block');
+    if (meta[k].vivid) continue;   // 💙 desk: KPI + charts default multi-colour palette hi rakhta hai
     assert.match(css, new RegExp(`html\\[data-theme-pack="${k}"\\] \\.g13 \\{`), k + ' KPI palette');
   }
-  assert.equal((css.match(/--chart-pal:/g) || []).length, keys.length);
+  assert.equal((css.match(/--chart-pal:/g) || []).length, keys.filter((k) => !meta[k].vivid).length);
 });
 
 test('ui-boot applies pack + mode before paint and knows every pack', () => {

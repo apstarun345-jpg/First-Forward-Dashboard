@@ -13,7 +13,7 @@ const PACKS = {
     brand: '#1d4ed8', brand2: '#0ea5e9', sideBg: '#0c2a80', sideBg2: '#2458e6', sideInk: '#e3ecff',
     surface2: '#ffffff', head: '#eef3fe', topbar: 'rgba(241,245,253,.86)', soft: '#eaf1ff',
     palette: ['#1d4ed8', '#0ea5e9', '#10b981', '#6366f1', '#f59e0b', '#0891b2', '#2563eb', '#14b8a6'],
-    auth: ['#0a1f5c', '#1741b8', '#3b82f6'] },
+    auth: ['#0a1f5c', '#1741b8', '#3b82f6'], vivid: true },
   navy: { name: 'Navy & White', icon: '🧭', mode: 'light', desc: 'Clean white workspace with deep navy accents',
     bg: '#f3f6fc', card: '#ffffff', ink: '#0b1f3a', muted: '#5b6b86', line: '#dbe4f3',
     brand: '#1e3a8a', brand2: '#2563eb', sideBg: '#08183a', sideBg2: '#13307a', sideInk: '#dbe7ff',
@@ -111,12 +111,11 @@ ${s} {
   --brand: ${p.brand}; --brand-2: ${p.brand2}; --brand2: ${p.brand2};
   --side-bg: ${p.sideBg}; --side-bg2: ${p.sideBg2}; --side-ink: ${p.sideInk};
   --pk-surface2: ${p.surface2}; --pk-head: ${p.head}; --pk-topbar: ${p.topbar}; --pk-soft: ${p.soft};
-  --chart-pal: ${chartPal(p)};
-  --auth-1: ${p.auth[0]}; --auth-2: ${p.auth[1]}; --auth-3: ${p.auth[2]};
+${p.vivid ? '' : `  --chart-pal: ${chartPal(p)};\n`}  --auth-1: ${p.auth[0]}; --auth-2: ${p.auth[1]}; --auth-3: ${p.auth[2]};
   --shadow: ${dark ? '0 8px 26px rgba(0, 0, 0, .5), 0 1px 2px rgba(0, 0, 0, .4)' : `0 6px 24px ${rgba(p.brand, .10)}, 0 1px 2px ${rgba(p.brand, .08)}`};
   --green: ${dark ? '#34d399' : '#10b981'}; --red: ${dark ? '#fb7185' : '#ef4444'}; --amber: ${dark ? '#fbbf24' : '#f59e0b'};
 }
-${kpiBlock(s, p.palette)}`;
+${p.vivid ? '/* vivid: KPI cards + charts keep the full multi-colour default palette */' : kpiBlock(s, p.palette)}`;
 }
 
 const GENERIC = `
@@ -152,10 +151,10 @@ html[data-theme-pack]:not([data-theme-pack=""]) .theme-pop { background: var(--c
 html[data-theme-pack]:not([data-theme-pack=""]) hr { border-color: var(--line); }
 html[data-theme-pack]:not([data-theme-pack=""]) .top-title { background: linear-gradient(90deg, var(--brand), var(--brand-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 html[data-theme-pack]:not([data-theme-pack=""]) .home-hero.v2::before { background: radial-gradient(600px 300px at 10% 0%, color-mix(in srgb, var(--brand) 14%, transparent), transparent 60%), radial-gradient(500px 260px at 100% 100%, color-mix(in srgb, var(--brand-2) 12%, transparent), transparent 60%) !important; }
-html[data-theme-pack]:not([data-theme-pack=""]) .chip.vc4 { border-color: color-mix(in srgb, var(--brand) 35%, var(--line)); background: color-mix(in srgb, var(--brand) 10%, var(--card)); color: var(--brand); }
-html[data-theme-pack]:not([data-theme-pack=""]) .chip.vc4.on { background: var(--brand); border-color: var(--brand); color: #fff; }
-html[data-theme-pack]:not([data-theme-pack=""]) .chip.comm { border-color: color-mix(in srgb, var(--brand-2) 35%, var(--line)); background: color-mix(in srgb, var(--brand-2) 10%, var(--card)); color: var(--brand-2); }
-html[data-theme-pack]:not([data-theme-pack=""]) .chip.comm.on { background: var(--brand-2); border-color: var(--brand-2); color: #fff; }
+html[data-theme-pack]:not([data-theme-pack=""]):not([data-theme-pack="desk"]) .chip.vc4 { border-color: color-mix(in srgb, var(--brand) 35%, var(--line)); background: color-mix(in srgb, var(--brand) 10%, var(--card)); color: var(--brand); }
+html[data-theme-pack]:not([data-theme-pack=""]):not([data-theme-pack="desk"]) .chip.vc4.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+html[data-theme-pack]:not([data-theme-pack=""]):not([data-theme-pack="desk"]) .chip.comm { border-color: color-mix(in srgb, var(--brand-2) 35%, var(--line)); background: color-mix(in srgb, var(--brand-2) 10%, var(--card)); color: var(--brand-2); }
+html[data-theme-pack]:not([data-theme-pack=""]):not([data-theme-pack="desk"]) .chip.comm.on { background: var(--brand-2); border-color: var(--brand-2); color: #fff; }
 /* KPI text stays white on the gradient, readable on every pack */
 html[data-theme-pack]:not([data-theme-pack=""]) .kpi, html[data-theme-pack]:not([data-theme-pack=""]) .gs-kpi { color: #fff; }
 html[data-theme-pack]:not([data-theme-pack=""]) .kpi .kpi-title, html[data-theme-pack]:not([data-theme-pack=""]) .kpi .kpi-value, html[data-theme-pack]:not([data-theme-pack=""]) .kpi .kpi-foot { color: #fff; }
@@ -268,7 +267,7 @@ css += '\n' + GENERIC + DESK + LOGIN;
 fs.writeFileSync(path.join(__dirname, '..', 'themes.css'), css);
 
 // metadata for ui-boot / wowzone picker
-const meta = Object.fromEntries(Object.entries(PACKS).map(([k, p]) => [k, { name: p.name, icon: p.icon, mode: p.mode, desc: p.desc, swatch: [p.brand, p.brand2, p.sideBg, p.bg] }]));
+const meta = Object.fromEntries(Object.entries(PACKS).map(([k, p]) => [k, { name: p.name, icon: p.icon, mode: p.mode, desc: p.desc, swatch: [p.brand, p.brand2, p.sideBg, p.bg], ...(p.vivid ? { vivid: true } : {}) }]));
 fs.writeFileSync(path.join(__dirname, '..', 'theme-packs.json'), JSON.stringify(meta, null, 1));
 const wz = path.join(__dirname, '..', 'wowzone.js');
 let src = fs.readFileSync(wz, 'utf8');

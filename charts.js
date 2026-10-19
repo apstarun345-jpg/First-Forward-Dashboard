@@ -55,12 +55,15 @@ window.FF = window.FF || {};
     const n = labels.length;
     const every = opts.labelEvery || (n > 40 ? 5 : n > 20 ? 2 : 1);
     const showValues = opts.showValues !== undefined ? opts.showValues : n <= 16;
+    // 🌈 v224 — ek hi series wale class charts (VC4 · VC5 · …) har bar alag rang me; har bar par halka gradient
+    const classy = series.length === 1 && opts.multicolor !== false && n > 1 && n <= 12 && labels.every((l) => /^(N?VC\s?\d+\+?|all|comm)/i.test(String(l)));
     const cols = labels.map((label, i) => {
       const total = totals[i];
       const segs = series.map((s) => {
         const v = s.values[i] || 0;
         if (v <= 0) return '';
-        return `<div class="vseg" style="flex:0 0 ${(v / total) * 100}%;background:${s.color}"></div>`;
+        const c = classy ? PALETTE[i % PALETTE.length] : s.color;
+        return `<div class="vseg" style="flex:0 0 ${(v / total) * 100}%;background:linear-gradient(180deg, color-mix(in srgb, ${c} 72%, #fff), ${c})"></div>`;
       }).join('');
       const tip = opts.tips && opts.tips[i] ? opts.tips[i] : `<b>${esc(opts.tipLabels ? opts.tipLabels[i] : label)}</b><br>${series.length > 1 ? series.map((s) => `<i style="background:${s.color}"></i>${esc(s.name)}: <b>${fmtVal(s.values[i] || 0, opts.format)}</b>`).join('<br>') + '<br>' : ''}Total: <b>${fmtVal(total, opts.format)}</b>`;
       const hl = opts.highlight === i ? ' hl' : '';

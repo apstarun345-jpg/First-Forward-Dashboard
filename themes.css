@@ -6,24 +6,11 @@ html[data-theme-pack="desk"] {
   --brand: #1d4ed8; --brand-2: #0ea5e9; --brand2: #0ea5e9;
   --side-bg: #0c2a80; --side-bg2: #2458e6; --side-ink: #e3ecff;
   --pk-surface2: #ffffff; --pk-head: #eef3fe; --pk-topbar: rgba(241,245,253,.86); --pk-soft: #eaf1ff;
-  --chart-pal: #1d4ed8, #0ea5e9, #10b981, #6366f1, #f59e0b, #0891b2, #2563eb, #14b8a6, #0ea5e9;
   --auth-1: #0a1f5c; --auth-2: #1741b8; --auth-3: #3b82f6;
   --shadow: 0 6px 24px rgba(29, 78, 216, 0.1), 0 1px 2px rgba(29, 78, 216, 0.08);
   --green: #10b981; --red: #ef4444; --amber: #f59e0b;
 }
-html[data-theme-pack="desk"] .g1 { --k1: #163ba2; --k2: #1c4bcf; --k3: #10b981; --kglow: rgba(28, 75, 207, 0.5); }
-html[data-theme-pack="desk"] .g2 { --k1: #0a7bad; --k2: #0d9ddd; --k3: #1519ea; --kglow: rgba(13, 157, 221, 0.5); }
-html[data-theme-pack="desk"] .g3 { --k1: #0c8a60; --k2: #10b981; --k3: #f59e0a; --kglow: rgba(16, 185, 129, 0.5); }
-html[data-theme-pack="desk"] .g4 { --k1: #0f12a8; --k2: #1317d7; --k3: #0891b2; --kglow: rgba(19, 23, 215, 0.5); }
-html[data-theme-pack="desk"] .g5 { --k1: #b07107; --k2: #e19109; --k3: #1558ea; --kglow: rgba(225, 145, 9, 0.5); }
-html[data-theme-pack="desk"] .g6 { --k1: #066981; --k2: #0891b2; --k3: #14b8a6; --kglow: rgba(8, 145, 178, 0.5); }
-html[data-theme-pack="desk"] .g7 { --k1: #103fa8; --k2: #1451d7; --k3: #1d4ed8; --kglow: rgba(20, 81, 215, 0.5); }
-html[data-theme-pack="desk"] .g8 { --k1: #0f8a7d; --k2: #14b8a6; --k3: #0ea5e9; --kglow: rgba(20, 184, 166, 0.5); }
-html[data-theme-pack="desk"] .g9 { --k1: #163ba2; --k2: #1c4bcf; --k3: #10b981; --kglow: rgba(28, 75, 207, 0.5); }
-html[data-theme-pack="desk"] .g10 { --k1: #0a7bad; --k2: #0d9ddd; --k3: #1519ea; --kglow: rgba(13, 157, 221, 0.5); }
-html[data-theme-pack="desk"] .g11 { --k1: #0c8a60; --k2: #10b981; --k3: #f59e0a; --kglow: rgba(16, 185, 129, 0.5); }
-html[data-theme-pack="desk"] .g12 { --k1: #0f12a8; --k2: #1317d7; --k3: #0891b2; --kglow: rgba(19, 23, 215, 0.5); }
-html[data-theme-pack="desk"] .g13 { --k1: #b07107; --k2: #e19109; --k3: #1558ea; --kglow: rgba(225, 145, 9, 0.5); }
+/* vivid: KPI cards + charts keep the full multi-colour default palette */
 
 /* ---------- Navy & White (light) ---------- */
 html[data-theme-pack="navy"] {
@@ -343,10 +330,10 @@ html[data-theme-pack]:not([data-theme-pack=""]) .theme-pop { background: var(--c
 html[data-theme-pack]:not([data-theme-pack=""]) hr { border-color: var(--line); }
 html[data-theme-pack]:not([data-theme-pack=""]) .top-title { background: linear-gradient(90deg, var(--brand), var(--brand-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 html[data-theme-pack]:not([data-theme-pack=""]) .home-hero.v2::before { background: radial-gradient(600px 300px at 10% 0%, color-mix(in srgb, var(--brand) 14%, transparent), transparent 60%), radial-gradient(500px 260px at 100% 100%, color-mix(in srgb, var(--brand-2) 12%, transparent), transparent 60%) !important; }
-html[data-theme-pack]:not([data-theme-pack=""]) .chip.vc4 { border-color: color-mix(in srgb, var(--brand) 35%, var(--line)); background: color-mix(in srgb, var(--brand) 10%, var(--card)); color: var(--brand); }
-html[data-theme-pack]:not([data-theme-pack=""]) .chip.vc4.on { background: var(--brand); border-color: var(--brand); color: #fff; }
-html[data-theme-pack]:not([data-theme-pack=""]) .chip.comm { border-color: color-mix(in srgb, var(--brand-2) 35%, var(--line)); background: color-mix(in srgb, var(--brand-2) 10%, var(--card)); color: var(--brand-2); }
-html[data-theme-pack]:not([data-theme-pack=""]) .chip.comm.on { background: var(--brand-2); border-color: var(--brand-2); color: #fff; }
+html[data-theme-pack]:not([data-theme-pack=""]):not([data-theme-pack="desk"]) .chip.vc4 { border-color: color-mix(in srgb, var(--brand) 35%, var(--line)); background: color-mix(in srgb, var(--brand) 10%, var(--card)); color: var(--brand); }
+html[data-theme-pack]:not([data-theme-pack=""]):not([data-theme-pack="desk"]) .chip.vc4.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+html[data-theme-pack]:not([data-theme-pack=""]):not([data-theme-pack="desk"]) .chip.comm { border-color: color-mix(in srgb, var(--brand-2) 35%, var(--line)); background: color-mix(in srgb, var(--brand-2) 10%, var(--card)); color: var(--brand-2); }
+html[data-theme-pack]:not([data-theme-pack=""]):not([data-theme-pack="desk"]) .chip.comm.on { background: var(--brand-2); border-color: var(--brand-2); color: #fff; }
 /* KPI text stays white on the gradient, readable on every pack */
 html[data-theme-pack]:not([data-theme-pack=""]) .kpi, html[data-theme-pack]:not([data-theme-pack=""]) .gs-kpi { color: #fff; }
 html[data-theme-pack]:not([data-theme-pack=""]) .kpi .kpi-title, html[data-theme-pack]:not([data-theme-pack=""]) .kpi .kpi-value, html[data-theme-pack]:not([data-theme-pack=""]) .kpi .kpi-foot { color: #fff; }
