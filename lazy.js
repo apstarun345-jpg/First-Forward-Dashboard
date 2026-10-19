@@ -220,7 +220,7 @@ window.FF = window.FF || {};
     ['masterSearch', 'palette', 'notifications', 'liveView'],
     ['kpiDetail', 'stockAge'],
     ['officeBell', 'pushVoice'],
-    ['assistant', 'liveAssist', 'morningCard', 'story']
+    ['assistant', 'liveAssist', 'morningCard']
   ];
   let shellPromise = null;
   /** First paint ke baad shell extras load karo; har wave ke baad `afterWave(wave)` hook chalta hai. */

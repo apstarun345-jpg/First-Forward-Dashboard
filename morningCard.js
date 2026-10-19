@@ -206,5 +206,5 @@ window.FF = window.FF || {};
     }
   }
 
-  FF.morningCard = { generate, yesterdayStats, mtdStats, expectedToday, topAgents, risks };
+  FF.morningCard = { generate, yesterdayStats, mtdStats, expectedToday };
 })(window.FF);
