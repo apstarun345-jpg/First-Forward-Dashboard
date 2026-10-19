@@ -411,7 +411,18 @@ window.FF = window.FF || {};
   }
   function toggleThemeMode() {
     // A theme pack fixes its own light/dark look — the toolbar toggle first returns to the default theme.
-    if (document.documentElement.dataset.themePack && FF.wowzone && FF.wowzone.applyThemePack) {
+    const curPack = document.documentElement.dataset.themePack;
+    // 💙 v223 — default Desk look: 🌙 = Midnight Navy (dark), dobara tap = wapas Desk
+    if (curPack === 'desk' || curPack === 'midnight') {
+      const to = curPack === 'desk' ? 'midnight' : 'desk';
+      if (FF.wowzone && FF.wowzone.applyThemePack) { FF.wowzone.applyThemePack(to); return; }
+      const r = document.documentElement;
+      r.dataset.themePack = to; r.dataset.theme = to === 'midnight' ? 'dark' : 'light';
+      try { localStorage.setItem('ff_theme_pack', to); } catch { /* ignore */ }
+      try { if (FF.charts && FF.charts.syncPackPalette) FF.charts.syncPackPalette(); if (FF.app && FF.app.renderCurrent) setTimeout(() => FF.app.renderCurrent(), 40); } catch { /* ignore */ }
+      return;
+    }
+    if (curPack && FF.wowzone && FF.wowzone.applyThemePack) {
       FF.wowzone.applyThemePack('default');
       U.toast('Theme pack off — default theme. Tap again for dark / auto.', 'info');
       return;

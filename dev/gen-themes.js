@@ -8,6 +8,12 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PACKS = {
+  desk: { name: 'Royal Blue Desk', icon: '💙', mode: 'light', desc: 'Blue hero cards, rounded white panels (default)',
+    bg: '#f1f5fd', card: '#ffffff', ink: '#0e1a3a', muted: '#62728f', line: '#e3eaf8',
+    brand: '#1d4ed8', brand2: '#0ea5e9', sideBg: '#0c2a80', sideBg2: '#2458e6', sideInk: '#e3ecff',
+    surface2: '#ffffff', head: '#eef3fe', topbar: 'rgba(241,245,253,.86)', soft: '#eaf1ff',
+    palette: ['#1d4ed8', '#0ea5e9', '#10b981', '#6366f1', '#f59e0b', '#0891b2', '#2563eb', '#14b8a6'],
+    auth: ['#0a1f5c', '#1741b8', '#3b82f6'] },
   navy: { name: 'Navy & White', icon: '🧭', mode: 'light', desc: 'Clean white workspace with deep navy accents',
     bg: '#f3f6fc', card: '#ffffff', ink: '#0b1f3a', muted: '#5b6b86', line: '#dbe4f3',
     brand: '#1e3a8a', brand2: '#2563eb', sideBg: '#08183a', sideBg2: '#13307a', sideInk: '#dbe7ff',
@@ -156,6 +162,76 @@ html[data-theme-pack]:not([data-theme-pack=""]) .kpi .kpi-title, html[data-theme
 html[data-theme-pack]:not([data-theme-pack=""]) .kpi .kpi-foot b, html[data-theme-pack]:not([data-theme-pack=""]) .kpi .kpi-foot small { color: inherit; }
 `;
 
+const DESK = `
+/* ---------- 💙 Royal Blue Desk — signature look (v223 default) ---------- */
+html[data-theme-pack="desk"] body { background: radial-gradient(1100px 380px at 60% -120px, #dbe7ff 0%, rgba(219, 231, 255, 0) 70%) fixed, #f1f5fd; }
+html[data-theme-pack="desk"] .card { border-radius: 22px; border: 1px solid #e6edfb; box-shadow: 0 12px 30px rgba(29, 78, 216, .06), 0 1px 2px rgba(29, 78, 216, .04); }
+html[data-theme-pack="desk"] .card-head h3 { font-weight: 800; letter-spacing: -.02em; }
+/* page header = blue hero card */
+html[data-theme-pack="desk"] .page-head { position: relative; overflow: hidden; padding: 20px 22px; border-radius: 26px; color: #fff;
+  background: linear-gradient(145deg, #2458e6 0%, #1741b8 55%, #0f2f8c 100%); box-shadow: 0 18px 40px rgba(23, 65, 184, .24); }
+html[data-theme-pack="desk"] .page-head::after { content: ""; position: absolute; right: -80px; bottom: -110px; width: 280px; height: 280px; border-radius: 50%; border: 38px solid rgba(255, 255, 255, .07); pointer-events: none; }
+html[data-theme-pack="desk"] .page-head > * { position: relative; z-index: 1; }
+html[data-theme-pack="desk"] .page-head h1 { background: none !important; -webkit-text-fill-color: #fff !important; color: #fff !important; font-weight: 800; letter-spacing: -.03em; }
+html[data-theme-pack="desk"] .page-head .sub, html[data-theme-pack="desk"] .page-head .dim, html[data-theme-pack="desk"] .page-head small, html[data-theme-pack="desk"] .page-head label { color: rgba(255, 255, 255, .82) !important; }
+html[data-theme-pack="desk"] .page-head b, html[data-theme-pack="desk"] .page-head strong { color: #fff; }
+html[data-theme-pack="desk"] .page-head .btn, html[data-theme-pack="desk"] .page-head .icon-btn { background: rgba(255, 255, 255, .14) !important; border-color: rgba(255, 255, 255, .3) !important; color: #fff !important; }
+html[data-theme-pack="desk"] .page-head .btn:hover { background: rgba(255, 255, 255, .24) !important; }
+html[data-theme-pack="desk"] .page-head .btn.primary { background: #fff !important; color: #1d4ed8 !important; border-color: #fff !important; }
+html[data-theme-pack="desk"] .page-head .seg { background: rgba(255, 255, 255, .14) !important; border: 1px solid rgba(255, 255, 255, .22); }
+html[data-theme-pack="desk"] .page-head .seg-btn { color: rgba(255, 255, 255, .88) !important; -webkit-text-fill-color: currentColor !important; background: transparent !important; border-color: transparent !important; }
+html[data-theme-pack="desk"] .page-head .seg-btn.on { background: #fff !important; color: #1d4ed8 !important; }
+html[data-theme-pack="desk"] .page-head .input, html[data-theme-pack="desk"] .page-head select { background: #fff !important; color: #0e1a3a !important; border-color: transparent !important; }
+html[data-theme-pack="desk"] .page-head .badge, html[data-theme-pack="desk"] .page-head .chip { background: rgba(255, 255, 255, .16); color: #fff; border-color: rgba(255, 255, 255, .3); }
+/* popups opened from inside the header keep normal colours */
+html[data-theme-pack="desk"] .page-head [class*="pop"], html[data-theme-pack="desk"] .page-head [class*="menu"], html[data-theme-pack="desk"] .page-head [class*="drop"], html[data-theme-pack="desk"] .page-head [class*="suggest"], html[data-theme-pack="desk"] .page-head [role="menu"], html[data-theme-pack="desk"] .page-head [role="listbox"] { color: #0e1a3a; }
+html[data-theme-pack="desk"] .page-head [class*="pop"] *, html[data-theme-pack="desk"] .page-head [class*="menu"] *, html[data-theme-pack="desk"] .page-head [class*="drop"] *, html[data-theme-pack="desk"] .page-head [role="menu"] * { color: inherit; }
+/* Home hero = same blue card */
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2, html[data-theme-pack="desk"]:not([data-theme-pack=""]) .page-home .home-hero { background: linear-gradient(145deg, #2458e6 0%, #1741b8 55%, #0f2f8c 100%) !important; border-color: transparent !important; box-shadow: 0 18px 40px rgba(23, 65, 184, .24) !important; color: #fff; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2::before { background: radial-gradient(420px 260px at 92% 120%, rgba(255, 255, 255, .12), transparent 70%) !important; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .home-greeting, html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .home-greeting-text, html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .home-name { color: #fff !important; -webkit-text-fill-color: #fff !important; background: none !important; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .sub { color: rgba(255, 255, 255, .8) !important; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .chip { background: rgba(255, 255, 255, .14) !important; border-color: rgba(255, 255, 255, .26) !important; color: #fff !important; -webkit-text-fill-color: #fff !important; opacity: 1 !important; box-shadow: none !important; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .chip.on { background: #fff !important; color: #1d4ed8 !important; -webkit-text-fill-color: #1d4ed8 !important; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .home-stat { background: rgba(255, 255, 255, .14) !important; border: 1px solid rgba(255, 255, 255, .24) !important; color: #fff !important; box-shadow: none !important; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .home-stat .dim, html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .home-stat b { color: #fff !important; -webkit-text-fill-color: #fff !important; background: none !important; box-shadow: none !important; border: 0 !important; padding: 0 !important; animation: none !important; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .home-stat .dim { opacity: .75; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .btn { background: rgba(255, 255, 255, .14) !important; border-color: rgba(255, 255, 255, .3) !important; color: #fff !important; box-shadow: none !important; }
+html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .btn.primary { background: #fff !important; color: #1d4ed8 !important; }
+html[data-theme-pack="desk"] .brand-logo:not(.has-img) { background: rgba(255, 255, 255, .16) !important; color: #fff !important; border: 1px solid rgba(255, 255, 255, .3); box-shadow: none !important; }
+/* sidebar */
+html[data-theme-pack="desk"] .sidebar { background: linear-gradient(170deg, #2458e6 0%, #1741b8 45%, #0c2a80 100%) !important; box-shadow: 8px 0 30px rgba(15, 47, 140, .18); }
+html[data-theme-pack="desk"] .nav-item { border-radius: 14px; }
+html[data-theme-pack="desk"] .nav-item:hover { background: rgba(255, 255, 255, .12); }
+html[data-theme-pack="desk"] .nav-item.active { background: #fff !important; color: #1d4ed8 !important; box-shadow: 0 8px 20px rgba(8, 24, 80, .25) !important; }
+html[data-theme-pack="desk"] .nav-item.active small { color: #5d7bc4 !important; }
+html[data-theme-pack="desk"] .nav-item.active .nav-ico { background: #eaf1ff; }
+html[data-theme-pack="desk"] .side-foot { border-top-color: rgba(255, 255, 255, .16); }
+/* topbar */
+html[data-theme-pack="desk"] .topbar { background: rgba(241, 245, 253, .82); border-bottom: 1px solid rgba(219, 229, 247, .8); backdrop-filter: blur(12px); }
+html[data-theme-pack="desk"] .top-title { background: none; -webkit-text-fill-color: currentColor; color: #0e1a3a; font-weight: 800; letter-spacing: -.02em; }
+html[data-theme-pack="desk"] .icon-btn { border-radius: 14px; }
+/* controls */
+html[data-theme-pack="desk"] .btn { border-radius: 999px; }
+html[data-theme-pack="desk"] .btn.primary, html[data-theme-pack="desk"] .btn.primary:hover { background: linear-gradient(135deg, #2a5bea, #1741b8); box-shadow: 0 8px 20px rgba(29, 78, 216, .28); }
+html[data-theme-pack="desk"] .input, html[data-theme-pack="desk"] select, html[data-theme-pack="desk"] textarea { border-radius: 12px; background: #f8faff; border-color: #dbe5f7; }
+html[data-theme-pack="desk"] .input:focus, html[data-theme-pack="desk"] select:focus, html[data-theme-pack="desk"] textarea:focus { background: #fff; border-color: #6f9cff; box-shadow: 0 0 0 4px rgba(29, 78, 216, .1); }
+html[data-theme-pack="desk"] .seg { background: transparent; gap: 6px; padding: 0; }
+html[data-theme-pack="desk"] .seg-btn { border-radius: 999px; background: #fff; border: 1px solid #dfe7f7; color: #4a5b7e; }
+html[data-theme-pack="desk"] .seg-btn.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; box-shadow: none; }
+html[data-theme-pack="desk"] .badge, html[data-theme-pack="desk"] .chip { border-radius: 999px; }
+/* tables */
+html[data-theme-pack="desk"] .tbl th { background: #eef3fe; color: #50628a; font-weight: 700; }
+html[data-theme-pack="desk"] .tbl thead tr:first-child th:first-child { border-top-left-radius: 12px; }
+html[data-theme-pack="desk"] .tbl thead tr:first-child th:last-child { border-top-right-radius: 12px; }
+html[data-theme-pack="desk"] .tbl tbody tr:hover td { background: #f3f7ff; }
+/* KPI tiles */
+html[data-theme-pack="desk"] .kpi { border-radius: 22px; }
+/* phone bottom nav */
+html[data-theme-pack="desk"] #mobile-nav.mobile-nav { background: rgba(255, 255, 255, .94) !important; border-top: 1px solid #e3eaf8 !important; backdrop-filter: blur(12px); }
+html[data-theme-pack="desk"] .mobile-nav-item.active, html[data-theme-pack="desk"] .mobile-nav-item[aria-current="page"] { color: #1d4ed8 !important; }
+`;
+
 const LOGIN = `
 /* ---------- login screen follows the active pack (and the default look) ---------- */
 :root { --auth-1: #0b1020; --auth-2: #14163a; --auth-3: #6366f1; }
@@ -188,7 +264,7 @@ const LOGIN = `
 
 let css = `/* themes.css — GENERATED by dev/gen-themes.js (do not edit by hand). Theme packs + login screen. */\n`;
 css += Object.entries(PACKS).map(([k, p]) => packCss(k, p)).join('\n\n');
-css += '\n' + GENERIC + LOGIN;
+css += '\n' + GENERIC + DESK + LOGIN;
 fs.writeFileSync(path.join(__dirname, '..', 'themes.css'), css);
 
 // metadata for ui-boot / wowzone picker

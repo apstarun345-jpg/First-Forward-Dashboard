@@ -1,4 +1,16 @@
 {
+ "desk": {
+  "name": "Royal Blue Desk",
+  "icon": "💙",
+  "mode": "light",
+  "desc": "Blue hero cards, rounded white panels (default)",
+  "swatch": [
+   "#1d4ed8",
+   "#0ea5e9",
+   "#0c2a80",
+   "#f1f5fd"
+  ]
+ },
  "navy": {
   "name": "Navy & White",
   "icon": "🧭",
