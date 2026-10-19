@@ -7599,6 +7599,27 @@ async function handleApi(req, res, url) {
       throw new HttpError(502, 'StockDataa index nahi ban paya: ' + String((err && err.message) || err).slice(0, 240));
     }
   }
+  // 🔢 v216 — Barcode Checker (multi): har barcode ka StockDataa row; na mile to aas-paas (±40) ke stock rows
+  // (client unse Tag ID ka andaza laga kar EIR me issued check karta hai).
+  if (p === '/api/barcode-lookup' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const list = (Array.isArray(body && body.barcodes) ? body.barcodes : []).map((x) => String(x || '').trim().slice(0, 60)).filter(Boolean).slice(0, 5000);
+    if (!list.length) throw new HttpError(400, 'Barcodes chahiye.');
+    const slim = (x) => ({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, tagType: x.tagType, inventory: x.inventoryName, bcAt: x.barcodeAllocatedAt, agentId: x.stockAgentId, agent: x.stockAgentName, agentAt: x.agentAllocatedAt, tl: x.tlName });
+    try {
+      const out = await mappingStock.lookup(list.map((b) => ({ type: 'barcode', barcode: b })), { fresh: !!(body && body.fresh) });
+      const results = list.map((b, i) => ({ barcode: b, rows: ((out.results[i] || {}).rows || []).map(slim) }));
+      const miss = results.filter((r) => !r.rows.length && /^\d{4,}$/.test(r.barcode.replace(/\D/g, '')));
+      if (miss.length) {
+        const near = await mappingStock.lookup(miss.map((r) => { const d = r.barcode.replace(/\D/g, ''); const n = BigInt(d); const w = d.length; const f = (v) => (v < 0n ? 0n : v).toString().padStart(w, '0'); return { type: 'range', first: f(n - 40n), last: f(n + 40n) }; }), {});
+        miss.forEach((r, i) => { r.near = (((near.results[i] || {}).rows) || []).slice(0, 80).map((x) => ({ tagId: x.tagId, barcode: x.barcode })); });
+      }
+      return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, results, meta: out.meta }), { 'Cache-Control': 'no-store' });
+    } catch (err) {
+      throw new HttpError(502, 'StockDataa index nahi ban paya: ' + String((err && err.message) || err).slice(0, 240));
+    }
+  }
   // 🔢 v215 — Barcode range checker (Master Search): range ke StockDataa rows (login wale sab users, read-only).
   if (p === '/api/barcode-range' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');

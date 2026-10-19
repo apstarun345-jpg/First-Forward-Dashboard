@@ -8,11 +8,7 @@
 .msp-age-list { display: grid; gap: 4px; margin-top: 6px; }
 .msp-age-row:hover { background: rgba(99,102,241,.08); }
 .msp-age-unk { margin-top: 2px; }
-.msp-bcr-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
-@media (max-width: 760px) {
-.msp-bcr-form { grid-template-columns: 1fr; }
-}
-.msp-bcr-sumrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.msp-bcr-link { margin: 0 0 12px; }
 .auth-float.a3 { bottom: 26px; left: 30px; animation-delay: 2.6s; }
 .master-search-input .ms-ico { position: absolute; left: 11px; font-size: 14px; opacity: .7; pointer-events: none; }
 .ms-range-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }

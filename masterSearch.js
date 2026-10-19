@@ -1269,7 +1269,7 @@ FF.pages = FF.pages || {};
         </div>
         <div class="msp-chips" id="msp-quick"></div>
       </div></div>
-      ${bcrCardHtml()}
+      <div class="msp-bcr-link"><a class="btn small" href="#/barcodeChecker">🔢 Barcode Checker — range / multiple barcodes →</a></div>
       <div id="msp-out"><div class="card"><div class="card-body empty">👆 <b>Naam ya ID type karo</b> — yahan us insaan ka poora FF + GV data aa jayega.</div></div></div>
       <div id="msp-trend"></div>
     </div>`;
@@ -2062,122 +2062,6 @@ FF.pages = FF.pages || {};
     if (old) old.outerHTML = html; else host.insertAdjacentHTML(ch === 'ff' ? 'afterbegin' : 'beforeend', html);
   }
 
-  // ===== 🔢 v215 — Barcode range checker =====
-  function bcrCardHtml() {
-    return `<details class="card msp-bcr" id="msp-bcr"><summary class="msp-bcr-sum">🔢 <b>Barcode range checker</b> <span class="dim small">— range daalo: kaunsa tag kis agent ke stock me, kaunsa issue hua, kaunsa gayab</span></summary>
-      <div class="card-body"><form class="msp-bcr-form" data-msp-bcr-form>
-        <label class="field"><span class="dim small">First barcode</span><input class="input" name="first" placeholder="608116-011-0558283" required></label>
-        <label class="field"><span class="dim small">Last barcode</span><input class="input" name="last" placeholder="608116-011-0558331" required></label>
-        <label class="field"><span class="dim small">First barcode ka Tag ID <em>(optional)</em></span><input class="input" name="tag" placeholder="34161FA820328EE817109960"></label>
-        <button class="btn primary" type="submit">🔎 Check</button>
-      </form><p class="dim small" style="margin:6px 0 0">Max 5,000 barcodes ek baar me. Stock = StockDataa · Issued = EIR (tag ID se). Range ka koi bhi tag stock me na ho tabhi Tag ID chahiye.</p>
-      <div data-msp-bcr-out></div></div></details>`;
-  }
-  const bcDigits = (v) => String(v || '').replace(/\D/g, '');
-  const strip0 = (d) => d.replace(/^0+(?=\d)/, '');
-  function expandRange(a, b) {
-    const da = bcDigits(a), db = bcDigits(b);
-    if (!da || !db) throw new Error('Barcode me digits chahiye');
-    const A = BigInt(da), B = BigInt(db);
-    if (B < A) throw new Error('First barcode last se bada hai');
-    if (B - A >= 5000n) throw new Error(`Range me ${(B - A + 1n).toString()} barcodes hain — max 5,000. Chhota karo.`);
-    const width = Math.max(da.length, db.length);
-    const fmt = (n) => { const d = n.toString().padStart(width, '0'); let k = 0; const tpl = da.length === width ? String(a).trim() : d; return /\D/.test(tpl) ? tpl.replace(/\d/g, () => d[k++] || '') : d; };
-    const out = [];
-    for (let n = A; n <= B; n++) out.push({ n, label: fmt(n), key: strip0(n.toString()) });
-    return out;
-  }
-  const isHex = (t) => /^[0-9A-F]{6,}$/i.test(String(t || ''));
-  /** Stock me mile tags se barcode → Tag ID ka step nikaalo (real data: har barcode par +0x20). */
-  function tagInfer(found, firstTag, firstN) {
-    const pts = found.filter((x) => isHex(x.tagId)).map((x) => ({ n: x.n, t: BigInt('0x' + x.tagId), len: x.tagId.length }));
-    if (firstTag && isHex(firstTag)) pts.push({ n: firstN, t: BigInt('0x' + firstTag), len: firstTag.length });
-    if (!pts.length) return null;
-    pts.sort((p, q) => (p.n < q.n ? -1 : 1));
-    let step = 32n;
-    if (pts.length >= 2) {
-      const a = pts[0], b = pts[pts.length - 1];
-      const dn = b.n - a.n;
-      if (dn > 0n && (b.t - a.t) % dn === 0n && (b.t - a.t) / dn > 0n) step = (b.t - a.t) / dn;
-    }
-    return (n) => {
-      let best = pts[0];
-      for (const p of pts) if ((p.n > n ? p.n - n : n - p.n) < (best.n > n ? best.n - n : n - best.n)) best = p;
-      const t = best.t + (n - best.n) * step;
-      return t > 0n ? t.toString(16).toUpperCase().padStart(best.len, '0') : '';
-    };
-  }
-  async function eirByTags(tags) {
-    const e = FF.config.eir, D = FF.data;
-    const out = new Map();
-    const chunks = []; for (let i = 0; i < tags.length; i += 120) chunks.push(tags.slice(i, i + 120));
-    let next = 0;
-    const worker = async () => {
-      while (next < chunks.length) {
-        const part = chunks[next++];
-        const tq = `select ${[e.tagId, e.date, e.vrn, e.cls, e.agentName, e.agentId, e.tlName, e.status, e.type, e.masterId, e.gvName].join(', ')} where ${part.map((t) => `${e.tagId} = '${t}'`).join(' or ')}`;
-        const t = await D.query(e.sheet, tq, {});
-        (t.rows || []).forEach((r) => {
-          const tag = D.cellText(r[0]).toUpperCase();
-          const d = D.cellDate(r[1]);
-          const ch = FF.model.channelOf(D.cellText(r[9]), D.cellText(r[6]));
-          out.set(tag, { date: d ? U.dateKey(d) : D.cellText(r[1]), vrn: D.cellText(r[2]), cls: D.cellText(r[3]), agent: (ch === 'GV Partner' ? D.cellText(r[10]) : '') || D.cellText(r[4]), agentId: D.cellText(r[5]), tl: D.cellText(r[6]), status: D.cellText(r[7]), type: D.cellText(r[8]), ch });
-        });
-      }
-    };
-    await Promise.all([worker(), worker(), worker()]);
-    return out;
-  }
-  const BCR = { rows: null, title: '' };
-  const BCR_HEAD = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Allocated / Issue date', 'VRN', 'Note'];
-  async function runBcr(form) {
-    const outEl = form.parentNode.querySelector('[data-msp-bcr-out]');
-    const f = new FormData(form);
-    const first = String(f.get('first') || '').trim(), last = String(f.get('last') || '').trim(), tag = String(f.get('tag') || '').trim().toUpperCase();
-    let list;
-    try { list = expandRange(first, last); } catch (err) { outEl.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; return; }
-    outEl.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain (stock + issuance)…`);
-    try {
-      const res = await FF.auth.api('/api/barcode-range', 'POST', { first, last });
-      const byKey = new Map();
-      (res.rows || []).forEach((r) => { const k = strip0(bcDigits(r.barcode)); if (k && !byKey.has(k)) byKey.set(k, r); });
-      const found = [];
-      list.forEach((b) => { const r = byKey.get(b.key); if (r) found.push({ n: b.n, tagId: String(r.tagId || '').toUpperCase() }); });
-      const infer = tagInfer(found, tag, list[0].n);
-      const tagOf = new Map();
-      list.forEach((b) => { const r = byKey.get(b.key); const t = r && r.tagId ? String(r.tagId).toUpperCase() : (infer ? infer(b.n) : ''); if (t) tagOf.set(b.key, t); });
-      const eir = tagOf.size ? await eirByTags([...new Set(tagOf.values())]) : new Map();
-      const rows = list.map((b) => {
-        const st = byKey.get(b.key), t = tagOf.get(b.key) || '', is = t ? eir.get(t) : null;
-        if (is) return [b.label, '✅ Issued', t, is.cls, is.agent, is.agentId, is.tl, is.date, is.vrn, `${is.ch === 'GV Partner' ? 'GV' : 'FF'}${st ? ' · StockDataa me bhi hai' : ' · tag ID barcode se anumaanit'}${is.type ? ' · ' + is.type : ''}`];
-        if (st) return [b.label, st.agent ? '📦 In stock (agent)' : '🏢 Master / BC stock', t, st.cls, st.agent || st.inventory || '', st.agentId || '', st.tl || '', st.agentAt || st.bcAt || '', '', st.agent ? '' : 'Agent ko allocate nahi'];
-        return [b.label, '❓ Not found', t, '', '', '', '', '', '', t ? 'Na stock me, na EIR me (tag ID anumaanit)' : 'Tag ID nahi mila — first barcode ka Tag ID daal ke dobara check karo'];
-      });
-      BCR.rows = rows; BCR.title = `${first}_${last}`;
-      const cnt = (s) => rows.filter((r) => r[1] === s).length;
-      const byAgent = new Map();
-      rows.forEach((r) => { if (!r[4]) return; const k = r[4]; const o = byAgent.get(k) || { stock: 0, issued: 0, tl: r[6] }; if (r[1] === '✅ Issued') o.issued++; else o.stock++; byAgent.set(k, o); });
-      const agentRows = [...byAgent.entries()].sort((a, b) => (b[1].stock + b[1].issued) - (a[1].stock + a[1].issued));
-      const show = rows.slice(0, 1000);
-      outEl.innerHTML = `<div class="msp-bcr-sumrow">
-          <span class="badge blue">🔢 ${U.fmt(rows.length)} barcodes</span><span class="badge green">✅ Issued ${U.fmt(cnt('✅ Issued'))}</span>
-          <span class="badge purple">📦 Agent stock ${U.fmt(cnt('📦 In stock (agent)'))}</span><span class="badge gray">🏢 Master/BC ${U.fmt(cnt('🏢 Master / BC stock'))}</span>
-          <span class="badge red">❓ Not found ${U.fmt(cnt('❓ Not found'))}</span>
-          ${FF.auth.can('export') ? '<button type="button" class="btn small" data-msp-bcr-xlsx>⬇ Excel</button>' : ''}</div>
-        ${agentRows.length ? `<h4 style="margin:12px 0 4px">🧑‍💼 Agent-wise</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th><th class="num">📦 Stock</th><th class="num">✅ Issued</th><th class="num">Total</th></tr></thead><tbody>${agentRows.map(([k, o]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(o.tl || '')}</td><td class="num">${U.fmt(o.stock)}</td><td class="num">${U.fmt(o.issued)}</td><td class="num"><b>${U.fmt(o.stock + o.issued)}</b></td></tr>`).join('')}</tbody></table></div>` : ''}
-        <h4 style="margin:12px 0 4px">🏷️ Har barcode${rows.length > show.length ? ` <small class="dim">(pehle 1,000 — sab Excel me)</small>` : ''}</h4>
-        <div class="table-wrap"><table class="tbl compact msp-bcr-tbl"><thead><tr>${BCR_HEAD.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${show.map((r) => `<tr class="bcr-${r[1] === '✅ Issued' ? 'iss' : r[1] === '❓ Not found' ? 'nf' : 'st'}">${r.map((v, i) => `<td${i === 0 || i === 2 ? ' class="mono"' : ''}>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-    } catch (err) {
-      outEl.innerHTML = U.errorBox(err);
-    }
-  }
-
-  document.addEventListener('submit', (e) => {
-    const form = e.target && e.target.closest && e.target.closest('[data-msp-bcr-form]');
-    if (!form) return;
-    e.preventDefault();
-    runBcr(form);
-  });
   document.addEventListener('click', (e) => {
     const t = e.target; if (!t || !t.closest) return;
     const srt = t.closest('[data-msp-rank-sort]');
@@ -2188,7 +2072,6 @@ FF.pages = FF.pages || {};
       FF.xlsx.download(`${U.slug(d.pr.name)}-agent-ranking-${U.stamp()}.xlsx`, [{ name: 'Ranking', header: ['Rank', 'Agent', 'Agent ID', 'Score', 'MTD', 'Last month', 'Growth %', 'Stock', 'Stock use %', 'Cover (din)', 'Priority'], rows: rankSorted(d.rows, RANK.sort).map((x, i) => [i + 1, x.name, x.id, x.score, x.cur, x.last, Math.round(x.growth), x.stock, Math.round(x.sell), x.cover == null ? '' : Math.round(x.cover), x.priority]) }]);
       return;
     }
-    if (t.closest('[data-msp-bcr-xlsx]') && BCR.rows) FF.xlsx.download(`barcode-range-${U.slug(BCR.title)}-${U.stamp()}.xlsx`, [{ name: 'Barcode range', header: BCR_HEAD, rows: BCR.rows }]);
   });
 
   FF.pages.masterSearch = { title: 'Master Search', render: pageRender };

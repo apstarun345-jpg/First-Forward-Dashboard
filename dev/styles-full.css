@@ -238,15 +238,23 @@ html[data-theme="dark"] .pct.neg { color: #f87171; }
 .msp-rank-tbl tr.msp-rank-bottom td { background: rgba(239,68,68,.07); }
 .msp-rank-bar { display: block; height: 4px; margin-top: 3px; border-radius: 4px; background: rgba(148,163,184,.25); position: relative; overflow: hidden; }
 .msp-rank-bar::after { content: ''; position: absolute; inset: 0 auto 0 0; width: var(--w); background: linear-gradient(90deg,#6366f1,#22c55e); border-radius: 4px; }
-.msp-bcr { margin-bottom: 12px; }
-.msp-bcr-sum { cursor: pointer; padding: 14px 18px; list-style: none; }
-.msp-bcr-sum::-webkit-details-marker { display: none; }
-.msp-bcr-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
-@media (max-width: 760px) { .msp-bcr-form { grid-template-columns: 1fr; } }
-.msp-bcr-sumrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
-.msp-bcr-tbl tr.bcr-iss td:nth-child(2) { color: #15803d; font-weight: 700; }
-.msp-bcr-tbl tr.bcr-nf td:nth-child(2) { color: #b91c1c; font-weight: 700; }
-.msp-bcr-tbl tr.bcr-st td:nth-child(2) { color: #6d28d9; font-weight: 700; }
+.msp-bcr-link { margin: 0 0 12px; }
+/* 🔢 v216 — Barcode Checker page */
+.bcc-tabs { display: inline-flex; gap: 4px; margin-bottom: 12px; }
+.bcc-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
+.bcc-form[hidden] { display: none; }
+.bcc-form.bcc-multi { grid-template-columns: 1fr; }
+.bcc-form textarea { min-height: 120px; resize: vertical; }
+@media (max-width: 760px) { .bcc-form { grid-template-columns: 1fr; } }
+.bcc-note { margin: 8px 0 0; }
+.bcc-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.bcc-chip b { margin-left: 4px; }
+.bcc-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.bcc-tools .input { flex: 1 1 260px; max-width: 420px; }
+.bcc-agents { margin: 4px 0 10px; }
+.bcc-agents summary { cursor: pointer; padding: 4px 0; }
+.bcc-agents tr.on td { background: rgba(99,102,241,.1); }
+.bcc-tbl tr.bcc-nf td { background: rgba(239,68,68,.05); }
 html[data-theme="dark"] .sug-result.gross > small { color: #5eead4; }
 .g1 { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
 .g2 { background: linear-gradient(135deg, #ec4899, #f43f5e); }
