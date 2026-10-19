@@ -278,7 +278,7 @@ html[data-theme="dark"] .tr-cols-order .tr-col-order .tr-col-move .btn.tiny{back
 .tr-req-wrap.tr-cards .tr-req-tbl, .tr-req-wrap.tr-cards .tr-req-tbl td { white-space: normal !important; }
 .tr-req-wrap.tr-cards td .tr-class-grid { grid-template-columns: repeat(auto-fit, minmax(54px, 1fr)); }
 body.public-form .tr-hero { display: block; margin: 0 0 14px; padding: 22px 20px 18px; border-radius: 28px; color: #fff; position: relative; overflow: hidden;
-  background: linear-gradient(145deg, #2458e6 0%, #1741b8 55%, #0f2f8c 100%); box-shadow: 0 18px 40px rgba(23, 65, 184, .28); }
+  background: linear-gradient(145deg, #1a3fae 0%, #11308c 55%, #0a1d5c 100%); box-shadow: 0 18px 40px rgba(23, 65, 184, .28); }
 body.public-form .tr-hero::after { content: ""; position: absolute; right: -70px; bottom: -90px; width: 260px; height: 260px; border-radius: 50%; border: 36px solid rgba(255, 255, 255, .07); pointer-events: none; }
 body.public-form .tr-hero-main { position: relative; z-index: 1; }
 body.public-form .tr-hero .tr-public-brand { margin-bottom: 14px; }

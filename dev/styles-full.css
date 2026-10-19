@@ -7561,7 +7561,7 @@ body.public-form .main { max-width: 880px; margin: 0 auto; padding: 14px 14px 90
 body.public-form .tr-public-page { max-width: 880px; }
 /* hero */
 body.public-form .tr-hero { display: block; margin: 0 0 14px; padding: 22px 20px 18px; border-radius: 28px; color: #fff; position: relative; overflow: hidden;
-  background: linear-gradient(145deg, #2458e6 0%, #1741b8 55%, #0f2f8c 100%); box-shadow: 0 18px 40px rgba(23, 65, 184, .28); }
+  background: linear-gradient(145deg, #1a3fae 0%, #11308c 55%, #0a1d5c 100%); box-shadow: 0 18px 40px rgba(23, 65, 184, .28); }
 body.public-form .tr-hero::after { content: ""; position: absolute; right: -70px; bottom: -90px; width: 260px; height: 260px; border-radius: 50%; border: 36px solid rgba(255, 255, 255, .07); pointer-events: none; }
 body.public-form .tr-hero-main { position: relative; z-index: 1; }
 body.public-form .tr-hero .tr-public-brand { margin-bottom: 14px; }
@@ -7594,7 +7594,7 @@ body.public-form .tr-employee-todo { border-color: #f5b4b4; }
 body.public-form .input, body.public-form select.input, body.public-form textarea.input { border-radius: 14px; border: 1px solid #dbe5f7; background: #f8faff; padding: 11px 13px; font-size: 14px; }
 body.public-form .input:focus { background: #fff; border-color: #6f9cff; box-shadow: 0 0 0 4px rgba(29, 78, 216, .1); outline: 0; }
 body.public-form .btn { border-radius: 999px; border-color: #dbe5f7; background: #fff; padding: 9px 16px; }
-body.public-form .btn.primary { background: linear-gradient(135deg, #2a5bea, #1741b8); box-shadow: 0 10px 22px rgba(29, 78, 216, .3); }
+body.public-form .btn.primary { background: linear-gradient(135deg, #1d47c4, #11308c); box-shadow: 0 10px 22px rgba(29, 78, 216, .3); }
 body.public-form .badge { border-radius: 999px; }
 /* agent blocks */
 body.public-form .tr-agent-card { border: 1px solid #e3ebfa; border-left: 1px solid #e3ebfa; border-radius: 20px; padding: 14px 16px; background: #fbfcff; }

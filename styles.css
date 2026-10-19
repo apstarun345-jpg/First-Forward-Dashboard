@@ -6577,7 +6577,7 @@ body.public-form .card-right { font-size: 12.5px; }
 body.public-form .input, body.public-form select.input, body.public-form textarea.input { border-radius: 14px; border: 1px solid #dbe5f7; background: #f8faff; padding: 11px 13px; font-size: 14px; }
 body.public-form .input:focus { background: #fff; border-color: #6f9cff; box-shadow: 0 0 0 4px rgba(29, 78, 216, .1); outline: 0; }
 body.public-form .btn { border-radius: 999px; border-color: #dbe5f7; background: #fff; padding: 9px 16px; }
-body.public-form .btn.primary { background: linear-gradient(135deg, #2a5bea, #1741b8); box-shadow: 0 10px 22px rgba(29, 78, 216, .3); }
+body.public-form .btn.primary { background: linear-gradient(135deg, #1d47c4, #11308c); box-shadow: 0 10px 22px rgba(29, 78, 216, .3); }
 body.public-form .badge { border-radius: 999px; }
 /* agent blocks */
 body.public-form .tr-qty-list { border-radius: 18px; border-color: #dfe8fa; background: #fff; }
