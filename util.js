@@ -548,7 +548,8 @@ window.FF = window.FF || {};
   function spinner(text, opts) {
     const o = opts || {};
     const t = String(text || 'Loading data from Google Sheet…').replace(/(\.\.\.|…)\s*$/, '');
-    return `<div class="loading" role="status" aria-live="polite">${loader(o.style, { size: o.size || 'lg' })}<div class="loading-text">${esc(t)}${ellipsis()}</div>${o.hint ? `<div class="loading-hint">${esc(o.hint)}</div>` : ''}</div>`;
+    const sk = (o.size && o.size !== 'lg') || o.skeleton === false ? '' : '<div class="ux-sk" aria-hidden="true"><i></i><i></i><i></i></div>';   // ✨ v213 shimmer skeleton
+    return `<div class="loading" role="status" aria-live="polite">${loader(o.style, { size: o.size || 'lg' })}<div class="loading-text">${esc(t)}${ellipsis()}</div>${o.hint ? `<div class="loading-hint">${esc(o.hint)}</div>` : ''}${sk}</div>`;
   }
   function errorBox(err, retryAttr) {
     const msg = err && err.message ? err.message : String(err);
