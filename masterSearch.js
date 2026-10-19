@@ -1269,6 +1269,7 @@ FF.pages = FF.pages || {};
         </div>
         <div class="msp-chips" id="msp-quick"></div>
       </div></div>
+      ${bcrCardHtml()}
       <div id="msp-out"><div class="card"><div class="card-body empty">👆 <b>Naam ya ID type karo</b> — yahan us insaan ka poora FF + GV data aa jayega.</div></div></div>
       <div id="msp-trend"></div>
     </div>`;
@@ -1586,6 +1587,7 @@ FF.pages = FF.pages || {};
           const pr = await MP()._buildSoon(g[c], (late) => { REPORT_CTX.prs[c] = late; html[c] = kpiStripHtml(late); paint(); });
           REPORT_CTX.prs[c] = pr;
           html[c] = kpiStripHtml(pr);
+          paintRank(c, pr);
           prefetchReport(c, pr);
         } catch (err) {
           html[c] = `<section class="card msp-kpi-card" data-msp-kpi-ch="${c}"><div class="card-body dim small">⚠️ ${c === 'gv' ? 'GV' : 'FF'} profile nahi bana: ${esc((err && err.message) || err)}</div></section>`;
@@ -1641,6 +1643,7 @@ FF.pages = FF.pages || {};
           ${person ? `<div class="msp-hero-act">${FF.auth && FF.auth.can && FF.auth.can('export') ? '<button class="btn small primary" data-msp-report title="Stock pivot + Issuance pivot + Ageing + tag rows — ek Excel me">⬇ Full report</button>' : ''}<button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
         <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => viewGroup[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
+        <div id="msp-rank"></div>
         ${gvStripHtml(viewGroup.gv)}${ffStripHtml(viewGroup.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
       paintKpis(viewGroup, U.$('#msp-kpis', out)).catch(() => {});
@@ -2004,6 +2007,189 @@ FF.pages = FF.pages || {};
     const row = t.closest('[data-msp-age-b]');
     if (row) { e.preventDefault(); e.stopPropagation(); const box = row.closest('[data-msp-age]'); if (box) openAgeBucket(box, Number(row.dataset.mspAgeB)); }
   }, true);
+
+  // ===== 🏆 v215 — Agent ranking in TL (score = issuance 50% + sell-through 30% + growth 20%) =====
+  const RANK = { sort: 'score', data: {} };
+  function rankRows(pr) {
+    const c = (pr.calc && pr.calc.total) || {};
+    const el = Math.max(1, Number(c.elapsed) || new Date().getDate());
+    const m = pr.months || {};
+    const lastDays = m.last ? U.daysInMonth(m.last) : 30;
+    const list = (pr.agents || []).filter((a) => a && a.name && (a.cur || a.last || a.stockTotal));
+    const maxCur = Math.max(1, ...list.map((a) => a.cur || 0));
+    const rows = list.map((a) => {
+      const rate = (a.cur || 0) / el, lastRate = (a.last || 0) / lastDays;
+      const growth = lastRate ? ((rate - lastRate) / lastRate) * 100 : (rate ? 100 : 0);
+      const sell = (a.cur || 0) + (a.stockTotal || 0) ? (a.cur || 0) / ((a.cur || 0) + (a.stockTotal || 0)) * 100 : 0;
+      const cover = rate ? (a.stockTotal || 0) / rate : null;
+      const score = Math.round(((a.cur || 0) / maxCur) * 50 + (sell / 100) * 30 + (Math.max(-100, Math.min(100, growth)) + 100) / 200 * 20);
+      return { name: a.name, id: a.id || '', cur: a.cur || 0, last: a.last || 0, stock: a.stockTotal || 0, rate, growth, sell, cover, score, priority: a.priority || '' };
+    });
+    return rows;
+  }
+  function rankSorted(rows, by) {
+    const k = { score: (x) => -x.score, cur: (x) => -x.cur, growth: (x) => -x.growth, sell: (x) => -x.sell, cover: (x) => (x.cover == null ? 1e9 : x.cover) }[by] || ((x) => -x.score);
+    return rows.slice().sort((a, b) => k(a) - k(b) || b.cur - a.cur);
+  }
+  function rankHtml(ch, pr) {
+    const rows = RANK.data[ch] && RANK.data[ch].rows;
+    if (!rows || rows.length < 2) return '';
+    const by = RANK.sort, list = rankSorted(rows, by), n = list.length;
+    const medal = (i) => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`);
+    const chip = (k, label) => `<button type="button" class="chip${by === k ? ' on' : ''}" data-msp-rank-sort="${k}">${label}</button>`;
+    const coverTxt = (x) => (x.cover == null ? (x.stock ? '<span class="badge red">∞ (0 issuance)</span>' : '—') : `${U.fmt(Math.round(x.cover))} din`);
+    const body = list.map((x, i) => `<tr class="${i < 3 ? 'msp-rank-top' : i >= n - 3 && n > 6 ? 'msp-rank-bottom' : ''}">
+        <td class="num"><b>${medal(i)}</b></td>
+        <td><a href="#/masterSearch?q=${encodeURIComponent(x.name)}${x.id ? `&id=${encodeURIComponent(x.id)}` : ''}&ch=${ch}"><b>${esc(x.name)}</b></a>${x.priority ? ` <small class="dim">${esc(x.priority)}</small>` : ''}</td>
+        <td class="num"><b>${U.fmt(x.score)}</b><i class="msp-rank-bar" style="--w:${x.score}%"></i></td>
+        <td class="num">${U.fmt(x.cur)}</td><td class="num">${U.fmt(x.last)}</td>
+        <td class="num">${U.pctHtml ? U.pctHtml(x.growth, { decimals: 0 }) : `${Math.round(x.growth)}%`}</td>
+        <td class="num">${U.fmt(x.stock)}</td><td class="num">${U.fmt(Math.round(x.sell))}%</td><td class="num">${coverTxt(x)}</td></tr>`).join('');
+    return `<section class="card msp-rank-card" data-msp-rank-ch="${ch}"><div class="card-head"><div>
+        <h3>🏆 Agent ranking · ${esc(pr.name)} ki team ${ch === 'gv' ? '🟩 GV' : '🟦 FF'}</h3>
+        <p class="dim small">Score (0–100) = Issuance 50% + Stock use (sell-through) 30% + Growth (run-rate vs last month) 20% · 🟩 top 3 · 🟥 bottom 3</p></div>
+        <div class="card-right">${FF.auth && FF.auth.can && FF.auth.can('export') ? `<button class="btn small" data-msp-rank-xlsx="${ch}">⬇ Excel</button>` : ''}</div></div>
+      <div class="card-body"><div class="chip-row msp-rank-sorts"><span class="dim small">Sort:</span>${chip('score', '🏆 Score')}${chip('cur', '🏷️ Issuance')}${chip('growth', '📈 Growth')}${chip('sell', '🔄 Stock use')}${chip('cover', '⏳ Cover (kam pehle)')}</div>
+      <div class="table-wrap"><table class="tbl compact msp-rank-tbl"><thead><tr><th>Rank</th><th>Agent</th><th class="num">Score</th><th class="num">MTD</th><th class="num">Last month</th><th class="num">Growth</th><th class="num">Stock</th><th class="num">Stock use</th><th class="num">Cover</th></tr></thead><tbody>${body}</tbody></table></div></div></section>`;
+  }
+  function paintRank(ch, pr) {
+    if (!pr || pr.partial || !/tl$/.test(String(pr.kind || ''))) return;
+    RANK.data[ch] = { pr, rows: rankRows(pr) };
+    const host = document.getElementById('msp-rank');
+    if (!host) return;
+    const old = host.querySelector(`[data-msp-rank-ch="${ch}"]`);
+    const html = rankHtml(ch, pr);
+    if (old) old.outerHTML = html; else host.insertAdjacentHTML(ch === 'ff' ? 'afterbegin' : 'beforeend', html);
+  }
+
+  // ===== 🔢 v215 — Barcode range checker =====
+  function bcrCardHtml() {
+    return `<details class="card msp-bcr" id="msp-bcr"><summary class="msp-bcr-sum">🔢 <b>Barcode range checker</b> <span class="dim small">— range daalo: kaunsa tag kis agent ke stock me, kaunsa issue hua, kaunsa gayab</span></summary>
+      <div class="card-body"><form class="msp-bcr-form" data-msp-bcr-form>
+        <label class="field"><span class="dim small">First barcode</span><input class="input" name="first" placeholder="608116-011-0558283" required></label>
+        <label class="field"><span class="dim small">Last barcode</span><input class="input" name="last" placeholder="608116-011-0558331" required></label>
+        <label class="field"><span class="dim small">First barcode ka Tag ID <em>(optional)</em></span><input class="input" name="tag" placeholder="34161FA820328EE817109960"></label>
+        <button class="btn primary" type="submit">🔎 Check</button>
+      </form><p class="dim small" style="margin:6px 0 0">Max 5,000 barcodes ek baar me. Stock = StockDataa · Issued = EIR (tag ID se). Range ka koi bhi tag stock me na ho tabhi Tag ID chahiye.</p>
+      <div data-msp-bcr-out></div></div></details>`;
+  }
+  const bcDigits = (v) => String(v || '').replace(/\D/g, '');
+  const strip0 = (d) => d.replace(/^0+(?=\d)/, '');
+  function expandRange(a, b) {
+    const da = bcDigits(a), db = bcDigits(b);
+    if (!da || !db) throw new Error('Barcode me digits chahiye');
+    const A = BigInt(da), B = BigInt(db);
+    if (B < A) throw new Error('First barcode last se bada hai');
+    if (B - A >= 5000n) throw new Error(`Range me ${(B - A + 1n).toString()} barcodes hain — max 5,000. Chhota karo.`);
+    const width = Math.max(da.length, db.length);
+    const fmt = (n) => { const d = n.toString().padStart(width, '0'); let k = 0; const tpl = da.length === width ? String(a).trim() : d; return /\D/.test(tpl) ? tpl.replace(/\d/g, () => d[k++] || '') : d; };
+    const out = [];
+    for (let n = A; n <= B; n++) out.push({ n, label: fmt(n), key: strip0(n.toString()) });
+    return out;
+  }
+  const isHex = (t) => /^[0-9A-F]{6,}$/i.test(String(t || ''));
+  /** Stock me mile tags se barcode → Tag ID ka step nikaalo (real data: har barcode par +0x20). */
+  function tagInfer(found, firstTag, firstN) {
+    const pts = found.filter((x) => isHex(x.tagId)).map((x) => ({ n: x.n, t: BigInt('0x' + x.tagId), len: x.tagId.length }));
+    if (firstTag && isHex(firstTag)) pts.push({ n: firstN, t: BigInt('0x' + firstTag), len: firstTag.length });
+    if (!pts.length) return null;
+    pts.sort((p, q) => (p.n < q.n ? -1 : 1));
+    let step = 32n;
+    if (pts.length >= 2) {
+      const a = pts[0], b = pts[pts.length - 1];
+      const dn = b.n - a.n;
+      if (dn > 0n && (b.t - a.t) % dn === 0n && (b.t - a.t) / dn > 0n) step = (b.t - a.t) / dn;
+    }
+    return (n) => {
+      let best = pts[0];
+      for (const p of pts) if ((p.n > n ? p.n - n : n - p.n) < (best.n > n ? best.n - n : n - best.n)) best = p;
+      const t = best.t + (n - best.n) * step;
+      return t > 0n ? t.toString(16).toUpperCase().padStart(best.len, '0') : '';
+    };
+  }
+  async function eirByTags(tags) {
+    const e = FF.config.eir, D = FF.data;
+    const out = new Map();
+    const chunks = []; for (let i = 0; i < tags.length; i += 120) chunks.push(tags.slice(i, i + 120));
+    let next = 0;
+    const worker = async () => {
+      while (next < chunks.length) {
+        const part = chunks[next++];
+        const tq = `select ${[e.tagId, e.date, e.vrn, e.cls, e.agentName, e.agentId, e.tlName, e.status, e.type, e.masterId, e.gvName].join(', ')} where ${part.map((t) => `${e.tagId} = '${t}'`).join(' or ')}`;
+        const t = await D.query(e.sheet, tq, {});
+        (t.rows || []).forEach((r) => {
+          const tag = D.cellText(r[0]).toUpperCase();
+          const d = D.cellDate(r[1]);
+          const ch = FF.model.channelOf(D.cellText(r[9]), D.cellText(r[6]));
+          out.set(tag, { date: d ? U.dateKey(d) : D.cellText(r[1]), vrn: D.cellText(r[2]), cls: D.cellText(r[3]), agent: (ch === 'GV Partner' ? D.cellText(r[10]) : '') || D.cellText(r[4]), agentId: D.cellText(r[5]), tl: D.cellText(r[6]), status: D.cellText(r[7]), type: D.cellText(r[8]), ch });
+        });
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    return out;
+  }
+  const BCR = { rows: null, title: '' };
+  const BCR_HEAD = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Allocated / Issue date', 'VRN', 'Note'];
+  async function runBcr(form) {
+    const outEl = form.parentNode.querySelector('[data-msp-bcr-out]');
+    const f = new FormData(form);
+    const first = String(f.get('first') || '').trim(), last = String(f.get('last') || '').trim(), tag = String(f.get('tag') || '').trim().toUpperCase();
+    let list;
+    try { list = expandRange(first, last); } catch (err) { outEl.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; return; }
+    outEl.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain (stock + issuance)…`);
+    try {
+      const res = await FF.auth.api('/api/barcode-range', 'POST', { first, last });
+      const byKey = new Map();
+      (res.rows || []).forEach((r) => { const k = strip0(bcDigits(r.barcode)); if (k && !byKey.has(k)) byKey.set(k, r); });
+      const found = [];
+      list.forEach((b) => { const r = byKey.get(b.key); if (r) found.push({ n: b.n, tagId: String(r.tagId || '').toUpperCase() }); });
+      const infer = tagInfer(found, tag, list[0].n);
+      const tagOf = new Map();
+      list.forEach((b) => { const r = byKey.get(b.key); const t = r && r.tagId ? String(r.tagId).toUpperCase() : (infer ? infer(b.n) : ''); if (t) tagOf.set(b.key, t); });
+      const eir = tagOf.size ? await eirByTags([...new Set(tagOf.values())]) : new Map();
+      const rows = list.map((b) => {
+        const st = byKey.get(b.key), t = tagOf.get(b.key) || '', is = t ? eir.get(t) : null;
+        if (is) return [b.label, '✅ Issued', t, is.cls, is.agent, is.agentId, is.tl, is.date, is.vrn, `${is.ch === 'GV Partner' ? 'GV' : 'FF'}${st ? ' · StockDataa me bhi hai' : ' · tag ID barcode se anumaanit'}${is.type ? ' · ' + is.type : ''}`];
+        if (st) return [b.label, st.agent ? '📦 In stock (agent)' : '🏢 Master / BC stock', t, st.cls, st.agent || st.inventory || '', st.agentId || '', st.tl || '', st.agentAt || st.bcAt || '', '', st.agent ? '' : 'Agent ko allocate nahi'];
+        return [b.label, '❓ Not found', t, '', '', '', '', '', '', t ? 'Na stock me, na EIR me (tag ID anumaanit)' : 'Tag ID nahi mila — first barcode ka Tag ID daal ke dobara check karo'];
+      });
+      BCR.rows = rows; BCR.title = `${first}_${last}`;
+      const cnt = (s) => rows.filter((r) => r[1] === s).length;
+      const byAgent = new Map();
+      rows.forEach((r) => { if (!r[4]) return; const k = r[4]; const o = byAgent.get(k) || { stock: 0, issued: 0, tl: r[6] }; if (r[1] === '✅ Issued') o.issued++; else o.stock++; byAgent.set(k, o); });
+      const agentRows = [...byAgent.entries()].sort((a, b) => (b[1].stock + b[1].issued) - (a[1].stock + a[1].issued));
+      const show = rows.slice(0, 1000);
+      outEl.innerHTML = `<div class="msp-bcr-sumrow">
+          <span class="badge blue">🔢 ${U.fmt(rows.length)} barcodes</span><span class="badge green">✅ Issued ${U.fmt(cnt('✅ Issued'))}</span>
+          <span class="badge purple">📦 Agent stock ${U.fmt(cnt('📦 In stock (agent)'))}</span><span class="badge gray">🏢 Master/BC ${U.fmt(cnt('🏢 Master / BC stock'))}</span>
+          <span class="badge red">❓ Not found ${U.fmt(cnt('❓ Not found'))}</span>
+          ${FF.auth.can('export') ? '<button type="button" class="btn small" data-msp-bcr-xlsx>⬇ Excel</button>' : ''}</div>
+        ${agentRows.length ? `<h4 style="margin:12px 0 4px">🧑‍💼 Agent-wise</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th><th class="num">📦 Stock</th><th class="num">✅ Issued</th><th class="num">Total</th></tr></thead><tbody>${agentRows.map(([k, o]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(o.tl || '')}</td><td class="num">${U.fmt(o.stock)}</td><td class="num">${U.fmt(o.issued)}</td><td class="num"><b>${U.fmt(o.stock + o.issued)}</b></td></tr>`).join('')}</tbody></table></div>` : ''}
+        <h4 style="margin:12px 0 4px">🏷️ Har barcode${rows.length > show.length ? ` <small class="dim">(pehle 1,000 — sab Excel me)</small>` : ''}</h4>
+        <div class="table-wrap"><table class="tbl compact msp-bcr-tbl"><thead><tr>${BCR_HEAD.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${show.map((r) => `<tr class="bcr-${r[1] === '✅ Issued' ? 'iss' : r[1] === '❓ Not found' ? 'nf' : 'st'}">${r.map((v, i) => `<td${i === 0 || i === 2 ? ' class="mono"' : ''}>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    } catch (err) {
+      outEl.innerHTML = U.errorBox(err);
+    }
+  }
+
+  document.addEventListener('submit', (e) => {
+    const form = e.target && e.target.closest && e.target.closest('[data-msp-bcr-form]');
+    if (!form) return;
+    e.preventDefault();
+    runBcr(form);
+  });
+  document.addEventListener('click', (e) => {
+    const t = e.target; if (!t || !t.closest) return;
+    const srt = t.closest('[data-msp-rank-sort]');
+    if (srt) { RANK.sort = srt.dataset.mspRankSort; Object.keys(RANK.data).forEach((ch) => { const host = document.getElementById('msp-rank'); const old = host && host.querySelector(`[data-msp-rank-ch="${ch}"]`); if (old) old.outerHTML = rankHtml(ch, RANK.data[ch].pr); }); return; }
+    const rx = t.closest('[data-msp-rank-xlsx]');
+    if (rx) {
+      const d = RANK.data[rx.dataset.mspRankXlsx]; if (!d) return;
+      FF.xlsx.download(`${U.slug(d.pr.name)}-agent-ranking-${U.stamp()}.xlsx`, [{ name: 'Ranking', header: ['Rank', 'Agent', 'Agent ID', 'Score', 'MTD', 'Last month', 'Growth %', 'Stock', 'Stock use %', 'Cover (din)', 'Priority'], rows: rankSorted(d.rows, RANK.sort).map((x, i) => [i + 1, x.name, x.id, x.score, x.cur, x.last, Math.round(x.growth), x.stock, Math.round(x.sell), x.cover == null ? '' : Math.round(x.cover), x.priority]) }]);
+      return;
+    }
+    if (t.closest('[data-msp-bcr-xlsx]') && BCR.rows) FF.xlsx.download(`barcode-range-${U.slug(BCR.title)}-${U.stamp()}.xlsx`, [{ name: 'Barcode range', header: BCR_HEAD, rows: BCR.rows }]);
+  });
 
   FF.pages.masterSearch = { title: 'Master Search', render: pageRender };
 

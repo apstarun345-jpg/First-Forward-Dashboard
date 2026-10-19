@@ -231,6 +231,22 @@ html[data-theme="dark"] .pct.neg { color: #f87171; }
 .msp-cover { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; font-size: 12px; font-weight: 800; vertical-align: middle; background: rgba(34,197,94,.14); color: #15803d; }
 .msp-cover.warn { background: rgba(245,158,11,.16); color: #b45309; } .msp-cover.bad { background: rgba(239,68,68,.14); color: #b91c1c; }
 @media (max-width: 640px) { .msp-kpi.msp-age-box { grid-column: 1 / -1; } }
+/* 🏆 v215 — Agent ranking + 🔢 Barcode range checker */
+.msp-rank-card { margin-bottom: 12px; }
+.msp-rank-sorts { margin-bottom: 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.msp-rank-tbl tr.msp-rank-top td { background: rgba(34,197,94,.08); }
+.msp-rank-tbl tr.msp-rank-bottom td { background: rgba(239,68,68,.07); }
+.msp-rank-bar { display: block; height: 4px; margin-top: 3px; border-radius: 4px; background: rgba(148,163,184,.25); position: relative; overflow: hidden; }
+.msp-rank-bar::after { content: ''; position: absolute; inset: 0 auto 0 0; width: var(--w); background: linear-gradient(90deg,#6366f1,#22c55e); border-radius: 4px; }
+.msp-bcr { margin-bottom: 12px; }
+.msp-bcr-sum { cursor: pointer; padding: 14px 18px; list-style: none; }
+.msp-bcr-sum::-webkit-details-marker { display: none; }
+.msp-bcr-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
+@media (max-width: 760px) { .msp-bcr-form { grid-template-columns: 1fr; } }
+.msp-bcr-sumrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.msp-bcr-tbl tr.bcr-iss td:nth-child(2) { color: #15803d; font-weight: 700; }
+.msp-bcr-tbl tr.bcr-nf td:nth-child(2) { color: #b91c1c; font-weight: 700; }
+.msp-bcr-tbl tr.bcr-st td:nth-child(2) { color: #6d28d9; font-weight: 700; }
 html[data-theme="dark"] .sug-result.gross > small { color: #5eead4; }
 .g1 { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
 .g2 { background: linear-gradient(135deg, #ec4899, #f43f5e); }

@@ -7599,6 +7599,23 @@ async function handleApi(req, res, url) {
       throw new HttpError(502, 'StockDataa index nahi ban paya: ' + String((err && err.message) || err).slice(0, 240));
     }
   }
+  // 🔢 v215 — Barcode range checker (Master Search): range ke StockDataa rows (login wale sab users, read-only).
+  if (p === '/api/barcode-range' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const first = String((body && body.first) || '').slice(0, 60), last = String((body && body.last) || '').slice(0, 60);
+    if (!first || !last) throw new HttpError(400, 'First aur last barcode dono chahiye.');
+    try {
+      const out = await mappingStock.lookup([{ type: 'range', first, last }], { fresh: !!(body && body.fresh) });
+      const r = (out.results && out.results[0]) || {};
+      if (r.error) throw new HttpError(400, r.error);
+      const rows = (r.rows || []).map((x) => ({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, tagType: x.tagType, inventory: x.inventoryName, bcAt: x.barcodeAllocatedAt, agentId: x.stockAgentId, agent: x.stockAgentName, agentAt: x.agentAllocatedAt, tl: x.tlName }));
+      return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, rows, meta: out.meta }), { 'Cache-Control': 'no-store' });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(502, 'StockDataa index nahi ban paya: ' + String((err && err.message) || err).slice(0, 240));
+    }
+  }
   if (p === '/api/fastag-mapping/index-status' && method === 'GET') {
     requireAdmin(user);
     // ?fresh=1 → index peeche se dobara ban jaata hai (jawab turant milta hai, page poll karta rehta hai).
