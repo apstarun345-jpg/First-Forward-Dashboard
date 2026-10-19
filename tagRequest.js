@@ -2106,6 +2106,8 @@ body.colorful .from-hdr { color: #166534; }
       <div class="btn-row" style="margin-top:12px;justify-content:center">
         <button class="btn primary" data-tr-act="again">➕ Naya request banao</button>
         <button class="btn" data-tr-act="check-status">🔎 Status dekho</button>
+        <button class="btn" data-tr-act="copy-summary" title="Copy a short summary to share">📋 Copy summary</button>
+        <button class="btn" data-tr-act="wa-summary">💬 WhatsApp</button>
       </div>
       ${dup ? `<div class="notice amber" style="margin-top:10px">🔁 Note: ${fmt(dup.count || 0)} agent ki request pehle se active thi — admin ko 🔁 mark ke saath dikhegi, taaki duplicate dispatch na ho.</div>` : ''}
       <p class="dim small" style="margin-top:10px">Status ke stage: ⏳ Pending → ✅ Approved → 🚚 Dispatched (ya ⛔ Rejected). Admin status badalte hi Status tab me dikh jaata hai.</p>
@@ -2113,6 +2115,9 @@ body.colorful .from-hdr { color: #166534; }
     body.querySelectorAll('[data-tr-copy-id]').forEach((b) => b.addEventListener('click', () => U.copyText(b.dataset.trCopyId).then((ok) => U.toast(ok ? '📋 Request ID copy ho gayi' : 'Copy nahi hua', ok ? 'ok' : 'warn'))));
     const act = (name, fn) => { const b = body.querySelector(`[data-tr-act="${name}"]`); if (b) b.addEventListener('click', fn); };
     act('again', () => { state.done = null; state.view = 'form'; renderRoot(); });
+    const summaryText = () => [`Tag request sent${d.employee ? ' by ' + d.employee : ''}`, ...reqs.map((r) => `• ${r.agentName || 'Agent'} — ${(r.classes || []).map((c) => `${c.cls}×${c.qty}`).join(', ')} (${fmt(r.total)} tags) · ID ${r.id}`), `Total: ${fmt(batch.total || reqs.reduce((s, r) => s + num(r.total), 0))} tags`].join('\n');
+    act('copy-summary', () => U.copyText(summaryText()).then((ok) => U.toast(ok ? '📋 Summary copied' : 'Copy failed', ok ? 'ok' : 'warn')));
+    act('wa-summary', () => { const t = summaryText(); if (FF.app && FF.app.shareWhatsApp) FF.app.shareWhatsApp(t); else window.open(`https://wa.me/?text=${encodeURIComponent(t)}`, '_blank', 'noopener'); });
     act('check-status', () => {
       const first = reqs.find((r) => digits(r.mobile).length >= 10);
       state.status = { q: first ? digits(first.mobile).slice(-10) : String((reqs[0] || {}).id || ''), list: null, busy: false, err: '', searched: '' };
@@ -2138,7 +2143,40 @@ body.colorful .from-hdr { color: #166534; }
       <div class="dim small">📅 ${esc(longDate(s.at))}      <div class="dim small">📦 Item Name: <b>${esc(normalizeItemName(s.itemName))}</b></div>
  · ${esc(ago(s.at))}${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : (s.byName ? ` · 👤 entry: ${esc(s.byName)}` : '')} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
       ${s.adminNote ? `<div class="notice green" style="margin-top:8px">💬 Admin note: ${esc(s.adminNote)}</div>` : ''}
+      ${isPublic() && (s.classes || []).length ? `<div style="margin-top:8px"><button type="button" class="btn small" data-tr-again="${esc(s.id)}" title="Fill the form again with this request's agent and quantities">🔁 Request again</button></div>` : ''}
     </div>`;
+  }
+  /** 🔁 v221 — purani request ke agent + qty se form bharo (mobile / address address-book se auto-fill). */
+  async function repeatRequest(s) {
+    const groups = new Map();
+    (s.classes || []).forEach((c) => {
+      const name = clean(c.agent || s.agentName);
+      const cls = String(c.cls || '').toUpperCase();
+      const q = Math.max(0, Math.round(num(c.approved) || num(c.requested)));
+      if (!name || !CLASS_LIST.includes(cls) || !q) return;
+      const g = groups.get(name) || {}; g[cls] = String(q); groups.set(name, g);
+    });
+    if (!groups.size) { U.toast('No class-wise quantities found in this request', 'warn'); return; }
+    try { await withTimeout(buildIndex(), 4000); } catch { /* index optional */ }
+    const rows = [];
+    groups.forEach((q, name) => {
+      const row = newRow({ name });
+      Object.assign(row.q, q);
+      const rec = exactAgent(row);
+      if (rec) {
+        row.agentId = rec.agentId || ''; row.name = rec.name; row.tl = rec.tlName; row.channel = rec.channel; row.isTl = !!rec.isTl;
+        const saved = agentBook()[`${rec.channel}|${norm(rec.name)}`];
+        if (saved) { row.mobile = saved.mobile || ''; row.address = saved.address || ''; row.pincode = saved.pincode || ''; row.fromBook = !!(saved.mobile || saved.address); }
+      }
+      rows.push(row);
+    });
+    state.rows = rows.slice(0, 20);
+    state.errs = {}; state.dupAcked = {}; state.dup = { list: [], force: false, busy: false };
+    state.view = 'form'; state.done = null;
+    renderRoot();
+    state.rows.forEach((r) => suggestHistoricalContact(r));
+    U.toast(`🔁 Form filled from ${s.id} — please check quantities and address`, 'ok');
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* ignore */ }
   }
   function employeeStatusPage(summary, filter, requestedPage) {
     const requests = Array.isArray(summary && summary.requests) ? summary.requests : [];
@@ -2238,6 +2276,12 @@ body.colorful .from-hdr { color: #166534; }
       repaint();
       loadEmployeeSummary(true).then(() => { if (rootEl && rootEl.isConnected) repaint(); });
     });
+    scope.querySelectorAll('[data-tr-again]').forEach((button) => button.addEventListener('click', () => {
+      const id = button.dataset.trAgain;
+      const pool = [].concat((state.employeeSummary && state.employeeSummary.requests) || [], (state.status && state.status.list) || []);
+      const s = pool.find((x) => x && x.id === id);
+      if (s) repeatRequest(s);
+    }));
     scope.querySelectorAll('[data-tr-emp-filter]').forEach((button) => button.addEventListener('click', () => {
       state.employeeHistoryFilter = button.dataset.trEmpFilter || 'all';
       state.employeeHistoryPage = 1;
@@ -2507,7 +2551,10 @@ body.colorful .from-hdr { color: #166534; }
     const v = statusOf(r);
     const dup = r.dupCount || (r.dupOf || []).length;
     const sheet = r.sheetSync && r.sheetSync.error ? ` <span class="badge red" title="Sheet sync fail: ${esc(r.sheetSync.error || '')}">📗!</span>` : r.sheetSync ? ' <span class="badge green" title="Sheet me entry ho chuki hai">📗</span>' : '';
-    const top = `<span class="badge ${v.tone}">${v.label}</span>${sheet}${dup ? ` <span class="badge amber" title="Pehle se active request: ${esc((r.dupOf || []).join(', '))}">🔁 dup</span>` : ''}`;
+    // ⏱ v221 — admin ko dikhe ki pending request kitne time se ruki hai (4h+ amber, 24h+ red)
+    const waitH = isAdmin() && (r.status || 'pending') === 'pending' && r.at ? (Date.now() - new Date(r.at).getTime()) / 3600000 : 0;
+    const wait = waitH >= 1 ? ` <span class="badge ${waitH >= 24 ? 'red' : waitH >= 4 ? 'amber' : 'gray'}" title="Waiting for approval since ${esc(ago(r.at))}">⏱ ${waitH >= 48 ? Math.floor(waitH / 24) + 'd' : waitH >= 24 ? '1d' : Math.floor(waitH) + 'h'}</span>` : '';
+    const top = `<span class="badge ${v.tone}">${v.label}</span>${wait}${sheet}${dup ? ` <span class="badge amber" title="Pehle se active request: ${esc((r.dupOf || []).join(', '))}">🔁 dup</span>` : ''}`;
     if (!isAdmin()) return `<div class="tr-st-cell">${top}${r.adminNote ? `<small class="dim tr-note" title="${esc(r.adminNote)}">💬 ${esc(String(r.adminNote).slice(0, 60))}</small>` : ''}</div>`;
     const status = r.status || 'pending';
     return `<div class="tr-st-cell">${top}
