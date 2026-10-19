@@ -905,9 +905,11 @@ FF.pages = FF.pages || {};
       return `<section class="card fresh-card"><div class="card-head"><div><h3>🕒 Sheets — last data update</h3><p class="dim small">Har sheet ki <b>last filled row</b> ka date + time, aur Google Sheet ki edit history. Site ne ye data abhi load kiya: <b>${esc(U.timeLabel(S.loadedAt || G.loadedAt || Date.now()))}</b></p></div><div class="head-actions"><button class="btn small" data-fresh-refresh="1">↻ Dobara check</button></div></div><div class="card-body fresh-grid">${rows}</div></section>`;
     }
     const DISMISS_KEY = 'ff_fresh_alert_dismiss';
-    const staleSig = (list) => list.filter((r) => isStaleVal(r.value)).map((r) => `${r.key}:${r.value.d.getTime()}`).join('|');
+    // 🛡️ v217 — alert sirf pakke (server / import-log) data par; gviz column-max (text dates ka max galat ho sakta hai) par nahi
+    const isAlertStale = (r) => !r.approx && isStaleVal(r.value);
+    const staleSig = (list) => list.filter(isAlertStale).map((r) => `${r.key}:${r.value.d.getTime()}`).join('|');
     function alertHtml(list) {
-      const stale = list.filter((r) => isStaleVal(r.value));
+      const stale = list.filter(isAlertStale);
       if (!stale.length) return '';
       const sig = staleSig(list);
       try { const d = JSON.parse(localStorage.getItem(DISMISS_KEY) || 'null'); if (d && d.sig === sig && Date.now() - d.at < 3 * 3600e3) return ''; } catch { /* ignore */ }
@@ -932,7 +934,7 @@ FF.pages = FF.pages || {};
     async function mount(root, force) {
       const host = U.$('#home-freshness', root);   // section hide ho tab bhi alert ke liye check chalta hai
       const skeleton = [['ff-eir', '🟦', 'First Forward', 'EIR', 'Sabse naya issue date (EIR)'], ['ff-stock', '🟦', 'First Forward', 'StockDataa', 'Sabse nayi tag / agent allocation'], ['gv-master', '🟩', 'GV Partner', 'GV Master', 'Sabse naya issuance (date + time column)'], ['gv-assign', '🟩', 'GV Partner', 'Tag Assignment', 'Sabse nayi allocation / date column']].map(([key, icon, title, tab, note]) => ({ key, icon, title, tab, note, value: null }));
-      const paint = (list, loading, final) => { if (host && host.isConnected) host.innerHTML = html(list, loading); paintAlert(root, list, final); };
+      const paint = (list, loading, final) => { if (host && host.isConnected) host.innerHTML = html(list, loading); if (final) paintAlert(root, list, final); };
       if (!force && memo && Date.now() - memoAt < 90000) { paint(memo, false, true); return; }
       paint(memo || skeleton, true, false);
       if (!inflight) inflight = compute((partial) => { if (!memo || force) paint(partial, true, false); }).finally(() => { inflight = null; });
