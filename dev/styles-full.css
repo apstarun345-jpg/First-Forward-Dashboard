@@ -7547,3 +7547,96 @@ html[data-theme="dark"] .fresh-alert{background:linear-gradient(135deg,#3b1212,#
 .tix-recon { padding: 10px 14px; border-radius: 12px; margin-bottom: 12px; font-size: 13px; border: 1px solid; }
 .tix-recon.ok { background: color-mix(in srgb, #10b981 12%, transparent); border-color: color-mix(in srgb, #10b981 40%, transparent); }
 .tix-recon.warn { background: color-mix(in srgb, #f59e0b 14%, transparent); border-color: color-mix(in srgb, #f59e0b 45%, transparent); }
+
+/* =============================================================================
+   🎨 v222 — Employee Tag Request link skin ("wallet desk" look): neela gradient hero, bade white
+   cards, pill tabs, tinted stat tiles. Sirf body.public-form (employee link) par — admin UI same.
+   ============================================================================= */
+html:not([data-theme="dark"]) body.public-form {
+  --brand: #1d4ed8; --brand-2: #0f379f; --bg: #f1f5fd; --line: #e3eaf8; --muted: #667797; --ink: #0e1a3a;
+  --radius: 22px; --shadow: 0 12px 32px rgba(29, 78, 216, .07), 0 1px 2px rgba(29, 78, 216, .05);
+  background: radial-gradient(900px 340px at 50% -80px, #dce8ff 0%, rgba(220, 232, 255, 0) 70%), #f1f5fd;
+}
+body.public-form .main { max-width: 880px; margin: 0 auto; padding: 14px 14px 90px; }
+body.public-form .tr-public-page { max-width: 880px; }
+/* hero */
+body.public-form .tr-hero { display: block; margin: 0 0 14px; padding: 22px 20px 18px; border-radius: 28px; color: #fff; position: relative; overflow: hidden;
+  background: linear-gradient(145deg, #2458e6 0%, #1741b8 55%, #0f2f8c 100%); box-shadow: 0 18px 40px rgba(23, 65, 184, .28); }
+body.public-form .tr-hero::after { content: ""; position: absolute; right: -70px; bottom: -90px; width: 260px; height: 260px; border-radius: 50%; border: 36px solid rgba(255, 255, 255, .07); pointer-events: none; }
+body.public-form .tr-hero-main { position: relative; z-index: 1; }
+body.public-form .tr-hero .tr-public-brand { margin-bottom: 14px; }
+body.public-form .tr-hero .tr-public-brand b { color: #fff; font-size: 14px; }
+body.public-form .tr-hero .tr-public-brand small { color: rgba(255, 255, 255, .72); }
+body.public-form .tr-hero .tr-public-logo { background: rgba(255, 255, 255, .16); color: #fff; border: 1px solid rgba(255, 255, 255, .25); }
+body.public-form .tr-hero-kicker { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .7); }
+body.public-form .tr-hero h1 { margin: 0 0 8px; font-size: 34px; line-height: 1.08; letter-spacing: -.03em; font-weight: 800; color: #fff !important; }
+body.public-form .tr-hero .sub { margin: 0; max-width: 520px; font-size: 14px; line-height: 1.5; color: rgba(255, 255, 255, .82) !important; }
+body.public-form .tr-hero-stats:empty { display: none; }
+body.public-form .tr-hero-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; }
+body.public-form .tr-hero-stat { padding: 11px 12px; border-radius: 16px; background: rgba(255, 255, 255, .12); border: 1px solid rgba(255, 255, 255, .18); backdrop-filter: blur(4px); }
+body.public-form .tr-hero-stat small { display: block; font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, .75); }
+body.public-form .tr-hero-stat b { display: block; margin-top: 2px; font-size: 26px; line-height: 1.1; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+/* pill tabs */
+body.public-form .tr-pill-tabs { margin: 0 0 14px; }
+body.public-form .tr-pill-tabs .seg { background: none; padding: 0; gap: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+body.public-form .tr-pill-tabs .seg::-webkit-scrollbar { display: none; }
+body.public-form .tr-pill-tabs .seg-btn { flex: none; padding: 9px 16px; border-radius: 999px; background: #fff; border: 1px solid #dfe7f7; color: #4a5b7e; font-weight: 600; box-shadow: 0 2px 6px rgba(29, 78, 216, .04); }
+body.public-form .tr-pill-tabs .seg-btn.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29, 78, 216, .08); }
+/* cards */
+body.public-form .card { border: 1px solid #e8eefb; border-radius: 24px; box-shadow: 0 12px 30px rgba(29, 78, 216, .06); }
+body.public-form .card-head { padding: 18px 20px 0; }
+body.public-form .card-head h3 { font-size: 18px; font-weight: 800; letter-spacing: -.02em; }
+body.public-form .card-body { padding: 14px 20px 20px; }
+body.public-form .card-right { font-size: 12.5px; }
+body.public-form .tr-employee, body.public-form .tr-stock-card { border-left: 1px solid #e8eefb; }
+body.public-form .tr-employee-todo { border-color: #f5b4b4; }
+/* inputs + buttons */
+body.public-form .input, body.public-form select.input, body.public-form textarea.input { border-radius: 14px; border: 1px solid #dbe5f7; background: #f8faff; padding: 11px 13px; font-size: 14px; }
+body.public-form .input:focus { background: #fff; border-color: #6f9cff; box-shadow: 0 0 0 4px rgba(29, 78, 216, .1); outline: 0; }
+body.public-form .btn { border-radius: 999px; border-color: #dbe5f7; background: #fff; padding: 9px 16px; }
+body.public-form .btn.primary { background: linear-gradient(135deg, #2a5bea, #1741b8); box-shadow: 0 10px 22px rgba(29, 78, 216, .3); }
+body.public-form .badge { border-radius: 999px; }
+/* agent blocks */
+body.public-form .tr-agent-card { border: 1px solid #e3ebfa; border-left: 1px solid #e3ebfa; border-radius: 20px; padding: 14px 16px; background: #fbfcff; }
+body.public-form .tr-agent-card.tr-has-err { border-color: #f3a9a9; }
+body.public-form .tr-agent-num { font-weight: 800; }
+body.public-form .tr-agent-total { padding: 3px 10px; border-radius: 999px; background: #eaf1ff; color: #1d4ed8; font-size: 12px; }
+body.public-form .tr-qty-list { border-radius: 18px; border-color: #dfe8fa; background: #fff; }
+body.public-form .tr-qty-row .input.tr-qty { border-radius: 12px; background: #eef4ff; border-color: #cfe0ff; color: #1d4ed8; }
+body.public-form .tr-add-btn { width: 100%; justify-content: center; border-style: dashed; border-color: #a9c3f5; color: #1d4ed8; background: #f3f7ff; padding: 12px; }
+/* sticky submit bar */
+body.public-form .tr-submit-bar { bottom: 10px; padding: 10px 12px 10px 18px; border-radius: 999px; background: rgba(255, 255, 255, .94); border: 1px solid #dde7fb; box-shadow: 0 14px 34px rgba(29, 78, 216, .18); backdrop-filter: blur(8px); }
+body.public-form .tr-submit-sum { margin-right: auto; font-size: 13px; color: #4a5b7e; }
+body.public-form .tr-submit-sum b { color: #1d4ed8; font-size: 16px; }
+body.public-form .tr-send-btn { padding: 12px 22px; font-size: 14px; }
+/* Meri requests: stat tiles + ledger-style cards */
+body.public-form .tr-es-tags { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+body.public-form .tr-es-tags span { display: block; padding: 12px 14px; border-radius: 18px; font-size: 11.5px; font-weight: 700; color: #4a6aa8; background: #eaf1ff; border: 1px solid #cfe0ff; }
+body.public-form .tr-es-tags span:last-child { color: #1f8a5b; background: #ecfaf3; border-color: #c6efd9; }
+body.public-form .tr-es-tags b { display: block; margin-top: 3px; font-size: 24px; line-height: 1.1; letter-spacing: -.02em; color: #1d4ed8; }
+body.public-form .tr-es-tags span:last-child b { color: #12905a; }
+body.public-form .tr-emp-filters { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+body.public-form .tr-emp-filter { flex: none; display: inline-flex; gap: 6px; align-items: center; padding: 8px 14px; border-radius: 999px; background: #fff; border: 1px solid #dfe7f7; color: #4a5b7e; font-weight: 600; font-size: 13px; cursor: pointer; }
+body.public-form .tr-emp-filter.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; }
+body.public-form .tr-emp-filter b { font-variant-numeric: tabular-nums; }
+body.public-form .tr-st-list { display: grid; gap: 10px; }
+body.public-form .tr-st-card { border: 1px solid #e6edfb; border-left: 1px solid #e6edfb; border-radius: 20px; padding: 14px 16px; background: #fff; box-shadow: 0 4px 14px rgba(29, 78, 216, .04); }
+body.public-form .tr-st-card.st-approved { background: linear-gradient(0deg, #fff, #f6fdf9); }
+body.public-form .tr-st-card.st-rejected { background: linear-gradient(0deg, #fff, #fff7f7); }
+body.public-form .tr-st-total b { font-size: 18px; color: #1d4ed8; }
+body.public-form .tr-step { background: #eef2fa; }
+body.public-form .tr-emp-chip { background: #fff; border-radius: 999px; }
+body.public-form .tr-emp-details > summary { padding: 16px 20px; }
+/* done screen */
+body.public-form .tr-done { border-radius: 28px; }
+body.public-form .tr-done-icon { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto; border-radius: 50%; background: #ecfaf3; font-size: 30px; }
+body.public-form .tr-dup-warn { border-radius: 24px; }
+@media (max-width: 720px) {
+  body.public-form .main { padding: 8px 10px 96px; }
+  body.public-form .tr-hero { border-radius: 24px; padding: 18px 16px 14px; }
+  body.public-form .tr-hero h1 { font-size: 28px; }
+  body.public-form .tr-hero-stat b { font-size: 22px; }
+  body.public-form .card-head { padding: 16px 16px 0; }
+  body.public-form .card-body { padding: 12px 14px 16px; }
+  body.public-form .tr-submit-bar { border-radius: 24px; justify-content: space-between; }
+}

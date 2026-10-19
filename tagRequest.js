@@ -174,7 +174,7 @@ FF.pages = FF.pages || {};
     if (!isPublic()) return Promise.resolve(null);
     if (!force && state.employeeSummary) return Promise.resolve(state.employeeSummary);
     if (state.employeeSummaryPromise) return state.employeeSummaryPromise;
-    state.employeeSummaryPromise = publicApi('/api/public/tag-request/employee-status').then((out) => { state.employeeSummary = out || null; return state.employeeSummary; }).catch(() => null).finally(() => { state.employeeSummaryPromise = null; });
+    state.employeeSummaryPromise = publicApi('/api/public/tag-request/employee-status').then((out) => { state.employeeSummary = out || null; try { refreshHero(); } catch { /* optional */ } return state.employeeSummary; }).catch(() => null).finally(() => { state.employeeSummaryPromise = null; });
     return state.employeeSummaryPromise;
   }
   /** 📇 Agent ka pichla mobile/address/pincode (isi device par) — wahi agent dobara chuno to auto-fill. */
@@ -1091,17 +1091,36 @@ body.colorful .from-hdr { color: #166534; }
     if (isPublic()) return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('requests', '👤 Meri requests')}${tab('status', '🔎 Status')}</div>`;
     return `<div class="seg" id="tr-tabs">${tab('form', '📝 Form')}${tab('requests', isAdmin() ? '📥 Tag Requests' : '📥 Meri requests')}${isAdmin() ? tab('settings', '⚙️ Link & Sheet') : ''}</div>`;
   };
+  /** 🎨 v222 — public hero: "Hello, <name>" + Pending / Approved / Dispatched tiles (summary aane par bharte hain). */
+  function heroTitle() {
+    const first = clean((state.employee || {}).name).split(' ')[0];
+    return first && first.length >= 2 ? `Hello, ${first}` : ((state.publicCfg || {}).title || 'IDFC Agents Tag Request');
+  }
+  function heroStatsHtml() {
+    const sm = state.employeeSummary;
+    if (!sm) return '';
+    const tile = (key, label, tone) => `<div class="tr-hero-stat ${tone}"><small>${label}</small><b>${sm ? fmt(employeeStatusCount(sm, key)) : '–'}</b></div>`;
+    return tile('pending', 'Pending', 'p') + tile('approved', 'Approved', 'a') + tile('dispatched', 'Dispatched', 'd');
+  }
+  function refreshHero() {
+    if (!rootEl || !rootEl.querySelector || !isPublic()) return;
+    const h = rootEl.querySelector('[data-tr-hero-h1]'); if (h) h.textContent = heroTitle();
+    const st = rootEl.querySelector('[data-tr-hero-stats]'); if (st) st.innerHTML = heroStatsHtml();
+  }
   function headHtml() {
     if (isPublic()) {
       const cfg = state.publicCfg || {};
       const brand = cfg.brand || 'First Forward';
       const logo = cfg.logo ? `<img class="tr-public-logo" src="${esc(cfg.logo)}" alt="${esc(brand)}">` : `<span class="tr-public-logo mono">${esc(String(brand).split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</span>`;
-      return `<div class="page-head tr-public-head"><div>
-          <div class="tr-public-brand">${logo}<div><b>${esc(brand)}</b><small class="dim">${esc(cfg.tagline || 'Dashboard')}</small></div></div>
-          <h1>🏷️ ${esc(cfg.title || 'IDFC Agents Tag Request')}</h1>
-          <p class="sub">${esc(cfg.intro || 'Employee form — login ki zaroorat nahi. Upar apna naam likho, phir har agent ka naam, mobile, address, pincode aur class-wise qty bharo. Admin ko request turant mil jaayegi.')}</p>
-        </div>
-        <div class="head-actions">${tabsHtml()}</div></div>`;
+      const intro = cfg.intro || 'Employee form — login ki zaroorat nahi. Upar apna naam likho, phir har agent ka naam, mobile, address, pincode aur class-wise qty bharo. Admin ko request turant mil jaayegi.';
+      return `<div class="page-head tr-public-head tr-hero"><div class="tr-hero-main">
+          <div class="tr-public-brand">${logo}<div><b>${esc(brand)}</b><small>${esc(cfg.tagline || 'Dashboard')}</small></div></div>
+          <p class="tr-hero-kicker">${esc(cfg.title || 'IDFC Agents Tag Request')}</p>
+          <h1 data-tr-hero-h1>${esc(heroTitle())}</h1>
+          <p class="sub">${esc(intro)}</p>
+          <div class="tr-hero-stats" data-tr-hero-stats>${heroStatsHtml()}</div>
+        </div></div>
+        <div class="head-actions tr-pill-tabs">${tabsHtml()}</div>`;
     }
     return `<div class="page-head"><div><h1>🏷️ Tag Request</h1><p class="sub">IDFC Agents Tag Request — upar employee ka naam, neeche har agent ka block (naam · mobile · address · pincode · class-wise qty). Admin: 📥 Tag Requests me har request ek row me — select karke 🖨️ print / ✅ approve.</p></div>
       <div class="head-actions">${tabsHtml()}<button class="btn" data-tr-act="share" title="Employees ko bhejne wala form link copy karo (bina login khulta hai)">🔗 Employee link</button><button class="btn" data-tr-act="reload" title="Sheet ka taaza data dobara padho">↻ Data refresh</button></div></div>`;
@@ -1849,6 +1868,7 @@ body.colorful .from-hdr { color: #166534; }
       const key = inp.dataset.trEmp;
       state.employee[key] = inp.value;
       if (key === 'name') {
+        refreshHero();
         try { if (clean(inp.value).length >= 2) window.dispatchEvent(new CustomEvent('ff-employee-name', { detail: { name: clean(inp.value) } })); } catch { /* optional */ }
         const card = root.querySelector('#tr-employee-card');
         if (card && card.classList) card.classList.toggle('tr-employee-todo', clean(inp.value).length < 2);
