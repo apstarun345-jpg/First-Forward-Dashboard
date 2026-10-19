@@ -75,5 +75,5 @@ test('wiring: Home template me alert slot, server freshness parallel', () => {
   assert.match(home, /<div id="home-fresh-alert"><\/div><div class="home-hero v2">/);
   assert.match(home, /data-fresh-dismiss/);
   const server = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
-  assert.match(server, /await Promise\.all\(\['ff', 'gv'\]\.map\(async \(src\)/);
+  assert.match(server, /const metaP = Promise\.all\(\['ff', 'gv'\]\.map\(async \(src\)/);
 });

@@ -784,7 +784,8 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
   }
   const store = new AppsScriptStore({ url: url0, secret: secret0 });
   store.timeoutMs = 40000; store.attempts = 2; store.label = 'Sheet freshness';
-  await Promise.all(['ff', 'gv'].map(async (src) => {   // dono spreadsheets parallel
+  // ⏱️ v220 — Apps Script dheema ho to 15s se zyada nahi rukte: gviz + import-log wala jawab turant, baaki peeche se cache me aa jata hai
+  const metaP = Promise.all(['ff', 'gv'].map(async (src) => {   // dono spreadsheets parallel
     const mine = items.filter((i) => i.source === src);
     const id = idOf(src);
     if (!mine.length || !id) return;
@@ -797,6 +798,7 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
       out.files[src] = { error: /unknown action/i.test(m) ? 'Apps Script purana hai — google-apps-script/Code.gs (v3.73) dobara paste karke New version deploy karein.' : m.slice(0, 220) };
     }
   }));
+  await Promise.race([metaP, new Promise((r) => setTimeout(() => { out.slowAS = true; r(); }, 15000))]);
   await counts;
   items.forEach((it) => {
     const t = out.tabs[it.key] || (out.tabs[it.key] = { tab: it.tab, gvizOnly: true });

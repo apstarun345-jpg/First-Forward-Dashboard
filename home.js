@@ -749,7 +749,21 @@ FF.pages = FF.pages || {};
       let best = null;
       const t = await D().query(sheet, `select ${letters.map((l) => `max(${l})`).join(', ')}`, { fresh: true });
       const row = (t.rows || [])[0] || [];
-      row.forEach((c) => { best = later(cellDT(c), best); });
+      let textCol = false;
+      row.forEach((c) => { best = later(cellDT(c), best); if (c && c.v != null && !/^Date\(/.test(String(c.v))) textCol = true; });
+      // 🛡️ v220 — text dates ("31/12/2025 …") ka max() alphabet ke hisab se hota hai = galat. Aisa column ho to aakhri 400 rows se asli max nikalo.
+      if (textCol) {
+        try {
+          const k = await D().query(sheet, `select count(${letters[0]})`, { fresh: true });
+          const n = Number((((k.rows || [])[0] || [])[0] || {}).v) || 0;
+          if (n) {
+            const tail = await D().query(sheet, `select ${letters.join(', ')} offset ${Math.max(0, n - 400)}`, { fresh: true });
+            let tb = null;
+            (tail.rows || []).forEach((r) => (r || []).forEach((c) => { const x = cellDT(c); if (x && x.d.getFullYear() >= 2015 && x.d.getTime() <= Date.now() + 36 * 3600e3) tb = later(x, tb); }));
+            if (tb) return tb;
+          }
+        } catch { /* max() par hi rehne do */ }
+      }
       return best;
     }
     const D = () => FF.data;
@@ -863,7 +877,7 @@ FF.pages = FF.pages || {};
       const gP = gvizCompute().catch(() => []);
       const sP = serverCompute().then((list) => ({ list }), (e) => ({ err: String((e && e.message) || e) }));
       const g = await gP;
-      if (onPartial) { try { onPartial(mergeList(null, g, '')); } catch { /* optional */ } }   // gviz pehle aa jaye to turant dikhao
+      // v220 — gviz ka andaza pehle nahi dikhate (galat ho sakta hai); pakka server data aate hi dikhate hain
       const s = await sP;
       return mergeList(s.list || null, g, s.err || '');
     }
