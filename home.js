@@ -1052,7 +1052,7 @@ FF.pages = FF.pages || {};
           <div class="home-stat"><span class="dim">Sync</span><b id="home-sync">${FF.preloader && FF.preloader.done ? 'All sheets ready ✓' : 'Background sync…'}</b></div>
           <button class="btn primary" data-action="refresh">↻ Refresh</button>
           ${FF.auth.can('aiAnalyst') ? '<a class="btn aa-home-btn" href="#/aiAnalyst" title="GV + FF poora review — growth, down, kya karein">🧠 AI Business Analyst</a>' : ''}
-          <button class="btn" id="home-morning-card" title="Boss ke liye WhatsApp Good-Morning card (PNG)">📲 Morning Card</button>
+          <button class="btn" id="home-story" title="Aaj ka summary — story jaisa (swipe)">📖 Story</button><button class="btn" id="home-morning-card" title="Boss ke liye WhatsApp Good-Morning card (PNG)">📲 Morning Card</button>
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>
           <button class="btn" id="home-customize" title="Reorder or hide Home sections" aria-expanded="false">⚙ Customize</button>
         </div>
@@ -1437,6 +1437,11 @@ FF.pages = FF.pages || {};
       if (host && top.length) host.innerHTML = top.map((r, i) => `<div class="hm-toprow"><span class="rank">${i + 1}</span><b>${esc(r.name)}</b><span class="tag gv">GV</span><strong>${U.fmt(r.n)}</strong></div>`).join('');
     }).catch(() => {});
 
+    // 📖 v218 — Story mode: button + mobile par din me ek baar khud.
+    const needStory = () => (FF.story ? Promise.resolve() : (FF.lazy && FF.lazy.shellNeed ? FF.lazy.shellNeed(['story']) : Promise.reject(new Error('loader nahi'))));
+    const storyBtn = U.$('#home-story', root);
+    if (storyBtn) storyBtn.addEventListener('click', () => { needStory().then(() => FF.story && FF.story.show()).catch(() => U.toast('Story load nahi hui — refresh karo', 'err')); });
+    setTimeout(() => { needStory().then(() => FF.story && FF.story.maybeAuto()).catch(() => {}); }, 2500);
     const morningBtn = U.$('#home-morning-card', root);
     // 📲 Morning card module first paint ke baad load hota hai — click par load karke bana do.
     if (morningBtn) morningBtn.addEventListener('click', () => {
