@@ -1508,7 +1508,7 @@ FF.pages = FF.pages || {};
       const ffGhost = isGvMasterFfHolder(b.ffAgent, b.ffId) || isGvChannelTl(ffTl);
       const gvGhost = isUnassignedGvHolder(b.gvAgent, b.gvId);
       if (ffGhost || gvGhost) {
-        const reasons = [ffGhost ? 'FF side GV master / TL ApnaPayment — GV channel stock, double count nahi' : '', gvGhost ? 'GV side not-assigned/blank — abhi kisi agent ke paas nahi' : ''].filter(Boolean);
+        const reasons = [ffGhost ? 'FF side GV master / TL ApnaPayment — GV channel stock, not double counted' : '', gvGhost ? 'GV side not-assigned/blank — not with any agent right now' : ''].filter(Boolean);
         return { ...b, ffDup, gvDup, crossOwner, ffGhost, gvGhost, ghost: true, doubleMapped: false, reasons };
       }
       const reasons = [ffDup ? 'FF me ek se zyada rows/owners' : '', gvDup ? 'GV me ek se zyada rows/owners' : '', crossOwner ? 'FF aur GV me alag agent' : ''].filter(Boolean);

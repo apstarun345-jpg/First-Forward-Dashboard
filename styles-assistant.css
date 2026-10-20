@@ -54,7 +54,6 @@
 .ask-head .ask-ico { flex: none; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; font-size: 13px; }
 .ask-hero { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, #6366f1 14%, var(--card)), color-mix(in srgb, #ec4899 12%, var(--card))); border: 1px solid color-mix(in srgb, #6366f1 25%, var(--line)); }
 .ask-msg { overflow-wrap: anywhere; }
-.ask-chips button { white-space: nowrap; }
 .ask-form { align-items: center; }
 .ask-input { min-width: 0; }
 @media (max-width: 760px) {

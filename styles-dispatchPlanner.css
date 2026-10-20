@@ -27,7 +27,6 @@
 .dp2-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
 .dp2-table thead th.num { text-align: right; }
 .dp2-table thead th.dp2-sort { cursor: pointer; user-select: none; }
-.dp2-table thead th.dp2-sort:hover { background: #dbe4ff; }
 .dp2-ch { padding: 1px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 800; }
 .dp2-gr { display: block; font-size: 10.5px; font-weight: 800; }
 .dp2-hot1 { background: color-mix(in srgb, #22c55e 9%, transparent); }

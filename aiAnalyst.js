@@ -170,32 +170,32 @@ FF.pages = FF.pages || {};
     if (ff && gv) {
       const dFf = ff.proj - ff.last.total, dGv = gv.proj - gv.last.total;
       const lead = Math.abs(dFf) >= Math.abs(dGv) ? ['First Forward', dFf] : ['GV Partner', dGv];
-      lines.push({ k: tone(dFf + dGv), drill: 'cmp', t: `<b>Channel-wise asar</b> (alag-alag, mix nahi): FF <b class="aa-d ${tone(dFf)}">${sgn(dFf)}</b> · GV <b class="aa-d ${tone(dGv)}">${sgn(dGv)}</b> tags vs ${lastLbl}. Sabse bada asar <b>${lead[0]}</b> ka (${sgn(lead[1])}).` });
+      lines.push({ k: tone(dFf + dGv), drill: 'cmp', t: `<b>Channel-wise impact</b> (separately, not mixed): FF <b class="aa-d ${tone(dFf)}">${sgn(dFf)}</b> · GV <b class="aa-d ${tone(dGv)}">${sgn(dGv)}</b> tags vs ${lastLbl}. Biggest impact from <b>${lead[0]}</b> (${sgn(lead[1])}).` });
     }
     all.forEach((c) => {
       const L = CH[c.ch].label, [h] = healthOf(c.projGrowth);
       const topUp = c.d.up[0], topDown = c.d.down[0];
-      lines.push({ k: tone(c.projGrowth || 0), drill: `${c.ch}:proj`, t: `<b>${CH[c.ch].icon} ${L} — ${h}:</b> ${curLbl} ab tak ${fmt(c.cur.total)} · ${a.isCurrent ? 'projected' : 'poora mahina'} <b>${fmt(c.proj)}</b> vs ${lastLbl} ${fmt(c.last.total)} (<b class="aa-d ${tone(c.projGrowth || 0)}">${pctTxt(c.projGrowth)}</b>).` });
-      if (topUp) lines.push({ k: 'up', drill: `${c.ch}:up`, t: `<b>${L} growth driver:</b> <b>${esc(topUp.name)}</b> (${sgn(topUp.delta)})${c.d.up[1] ? `, ${esc(c.d.up[1].name)} (${sgn(c.d.up[1].delta)})` : ''}${c.d.up[2] ? `, ${esc(c.d.up[2].name)} (${sgn(c.d.up[2].delta)})` : ''} — total ${fmt(c.d.up.length)} agents badhe.` });
-      if (topDown) lines.push({ k: 'down', drill: `${c.ch}:down`, t: `<b>${L} girawat:</b> <b>${esc(topDown.name)}</b> (${sgn(topDown.delta)})${c.d.down[1] ? `, ${esc(c.d.down[1].name)} (${sgn(c.d.down[1].delta)})` : ''}${c.d.down[2] ? `, ${esc(c.d.down[2].name)} (${sgn(c.d.down[2].delta)})` : ''} — total ${fmt(c.d.down.length)} agents ghate.` });
+      lines.push({ k: tone(c.projGrowth || 0), drill: `${c.ch}:proj`, t: `<b>${CH[c.ch].icon} ${L} — ${h}:</b> ${curLbl} so far ${fmt(c.cur.total)} · ${a.isCurrent ? 'projected' : 'full month'} <b>${fmt(c.proj)}</b> vs ${lastLbl} ${fmt(c.last.total)} (<b class="aa-d ${tone(c.projGrowth || 0)}">${pctTxt(c.projGrowth)}</b>).` });
+      if (topUp) lines.push({ k: 'up', drill: `${c.ch}:up`, t: `<b>${L} growth driver:</b> <b>${esc(topUp.name)}</b> (${sgn(topUp.delta)})${c.d.up[1] ? `, ${esc(c.d.up[1].name)} (${sgn(c.d.up[1].delta)})` : ''}${c.d.up[2] ? `, ${esc(c.d.up[2].name)} (${sgn(c.d.up[2].delta)})` : ''} — ${fmt(c.d.up.length)} agents grew in total.` });
+      if (topDown) lines.push({ k: 'down', drill: `${c.ch}:down`, t: `<b>${L} decline:</b> <b>${esc(topDown.name)}</b> (${sgn(topDown.delta)})${c.d.down[1] ? `, ${esc(c.d.down[1].name)} (${sgn(c.d.down[1].delta)})` : ''}${c.d.down[2] ? `, ${esc(c.d.down[2].name)} (${sgn(c.d.down[2].delta)})` : ''} — ${fmt(c.d.down.length)} agents dropped in total.` });
       if (c.d.lost.length) {
         const lostTags = c.d.lost.reduce((s, r) => s + r.last, 0);
-        lines.push({ k: 'down', drill: `${c.ch}:lost`, t: `<b>${L}:</b> ${fmt(c.d.lost.length)} agents jo ${lastLbl} me chal rahe the abhi <b>zero</b> hain (pichhle mahine ${fmt(lostTags)} tags).` });
-        actions.push({ drill: `${c.ch}:lost`, t: `${L}: ${fmt(c.d.lost.length)} zero-activity agents ko call karo — pehle top 5: ${c.d.lost.slice(0, 5).map((r) => esc(r.name)).join(', ')}.` });
+        lines.push({ k: 'down', drill: `${c.ch}:lost`, t: `<b>${L}:</b> ${fmt(c.d.lost.length)} agents who were active in ${lastLbl} are now at <b>zero</b> (${fmt(lostTags)} tags last month).` });
+        actions.push({ drill: `${c.ch}:lost`, t: `${L}: call the ${fmt(c.d.lost.length)} zero-activity agents — top 5 first: ${c.d.lost.slice(0, 5).map((r) => esc(r.name)).join(', ')}.` });
       }
       const tlDown = c.tls.filter((t) => t.delta < 0).sort((x, y) => x.delta - y.delta)[0];
-      if (tlDown && tlDown.delta <= -20) actions.push({ drill: `${c.ch}:tl:${tlDown.name}`, t: `${L}: TL <b>${esc(tlDown.name)}</b> ki team ${sgn(tlDown.delta)} tags gir rahi hai (${tlDown.active}/${tlDown.agents} active) — review meeting karo.` });
+      if (tlDown && tlDown.delta <= -20) actions.push({ drill: `${c.ch}:tl:${tlDown.name}`, t: `${L}: TL <b>${esc(tlDown.name)}</b>'s team is down ${sgn(tlDown.delta)} tags (${tlDown.active}/${tlDown.agents} active) — hold a review meeting.` });
       if (c.mo.hasPrev && c.mo.growth !== null && Math.abs(c.mo.growth) >= 10) {
-        lines.push({ k: tone(c.mo.growth), drill: `${c.ch}:daily`, t: `<b>${L} momentum:</b> pichhle 7 din ${fmt(c.mo.week)} vs usse pehle 7 din ${fmt(c.mo.prev)} (${pctTxt(c.mo.growth)}).` });
-        if (c.mo.growth <= -10) actions.push({ drill: `${c.ch}:down`, t: `${L}: haftawar raftaar ${pctTxt(c.mo.growth)} gir rahi hai — top decliners se isi hafte baat karo.` });
+        lines.push({ k: tone(c.mo.growth), drill: `${c.ch}:daily`, t: `<b>${L} momentum:</b> last 7 days ${fmt(c.mo.week)} vs the 7 days before ${fmt(c.mo.prev)} (${pctTxt(c.mo.growth)}).` });
+        if (c.mo.growth <= -10) actions.push({ drill: `${c.ch}:down`, t: `${L}: weekly pace is falling ${pctTxt(c.mo.growth)} — talk to the top decliners this week.` });
       }
-      if (c.conc.top5Share >= 50) actions.push({ drill: `${c.ch}:top5`, t: `${L}: top 5 agents hi ${c.conc.top5Share.toFixed(0)}% issuance de rahe hain — dependency risk, mid-level agents ko push karo.` });
-      if (c.cover && c.cover < 7) actions.push({ drill: `${c.ch}:stock`, t: `${L}: stock cover sirf ${c.cover.toFixed(0)} din — dispatch jaldi plan karo (Dispatch Planner).` });
-      else if (c.cover && c.cover > 60) actions.push({ drill: `${c.ch}:stock`, t: `${L}: stock cover ${c.cover.toFixed(0)} din (bahut zyada) — idle stock wale agents/TLs se redistribute karo.` });
-      if (c.vc4Share < c.vc4ShareLast - 3) actions.push({ drill: `${c.ch}:class`, t: `${L}: VC4 mix ${c.vc4ShareLast.toFixed(0)}% → ${c.vc4Share.toFixed(0)}% gira — payable class par focus badhao.` });
-      if (c.wrongShare >= 3) actions.push({ drill: '', t: `${L}: Wrong-VRN ${c.wrongShare.toFixed(1)}% hai — Unusual Activity page me flagged agents dekho.` });
+      if (c.conc.top5Share >= 50) actions.push({ drill: `${c.ch}:top5`, t: `${L}: the top 5 agents alone give ${c.conc.top5Share.toFixed(0)}% of issuance — dependency risk, push the mid-level agents.` });
+      if (c.cover && c.cover < 7) actions.push({ drill: `${c.ch}:stock`, t: `${L}: stock cover only ${c.cover.toFixed(0)} days — plan dispatch soon (Dispatch Planner).` });
+      else if (c.cover && c.cover > 60) actions.push({ drill: `${c.ch}:stock`, t: `${L}: stock cover ${c.cover.toFixed(0)} days (too high) — redistribute from agents/TLs with idle stock.` });
+      if (c.vc4Share < c.vc4ShareLast - 3) actions.push({ drill: `${c.ch}:class`, t: `${L}: VC4 mix ${c.vc4ShareLast.toFixed(0)}% → ${c.vc4Share.toFixed(0)}% dropped — increase focus on the payable class.` });
+      if (c.wrongShare >= 3) actions.push({ drill: '', t: `${L}: Wrong-VRN is ${c.wrongShare.toFixed(1)}% — check the flagged agents on the Unusual Activity page.` });
     });
-    if (!actions.length) actions.push({ drill: '', t: 'Koi bada risk nahi dikha — current raftaar banaye rakho.' });
+    if (!actions.length) actions.push({ drill: '', t: 'No big risk found — keep up the current pace.' });
     return { lines, actions };
   }
 
@@ -220,17 +220,17 @@ FF.pages = FF.pages || {};
     switch (what) {
       case 'cur': return mk(`${L} · ${curLbl} ab tak — sab agents`, [...c.d.rows].filter((r) => r.cur > 0).sort((x, y) => y.cur - x.cur), [`${fmt(c.cur.total)} tags`, `${fmt(c.conc.active)} active agents`]);
       case 'proj': return mk(`${L} · projected — sab agents`, [...c.d.rows].filter((r) => r.proj > 0 || r.last > 0).sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta)), [`projected ${fmt(c.proj)}`, `${lastLbl} ${fmt(c.last.total)}`]);
-      case 'up': return mk(`${L} · growth kiski wajah se`, c.d.up, [`net ${sgn(c.d.net)}`, `${fmt(c.d.up.length)} agents badhe`]);
-      case 'down': return mk(`${L} · kaun down hai`, c.d.down, [`${fmt(c.d.down.length)} agents ghate`]);
-      case 'lost': return mk(`${L} · gaye / zero-activity`, c.d.lost, [`${fmt(c.d.lost.reduce((s, r) => s + r.last, 0))} tags pichhle mahine`]);
+      case 'up': return mk(`${L} · what drove growth`, c.d.up, [`net ${sgn(c.d.net)}`, `${fmt(c.d.up.length)} agents grew`]);
+      case 'down': return mk(`${L} · who is down`, c.d.down, [`${fmt(c.d.down.length)} agents dropped`]);
+      case 'lost': return mk(`${L} · gone / zero-activity`, c.d.lost, [`${fmt(c.d.lost.reduce((s, r) => s + r.last, 0))} tags last month`]);
       case 'fresh': return mk(`${L} · naye / pehli baar active`, c.d.fresh, [`${fmt(c.d.fresh.reduce((s, r) => s + r.cur, 0))} tags ab tak`]);
       case 'tlup': return { title: `${L} · TL growth`, headers: ['TL', 'Active', 'Agents', lastLbl, 'Projected', 'Change', '%'], rows: c.tls.filter((t) => t.delta > 0).sort((x, y) => y.delta - x.delta).map((t) => [t.name, t.active, t.agents, fmt(t.last), fmt(t.proj), sgn(t.delta), pctTxt(t.growth)]), tlKeys: c.tls.filter((t) => t.delta > 0).sort((x, y) => y.delta - x.delta).map((t) => t.name), ch };
       case 'tldown': return { title: `${L} · TL down`, headers: ['TL', 'Active', 'Agents', lastLbl, 'Projected', 'Change', '%'], rows: c.tls.filter((t) => t.delta < 0).sort((x, y) => x.delta - y.delta).map((t) => [t.name, t.active, t.agents, fmt(t.last), fmt(t.proj), sgn(t.delta), pctTxt(t.growth)]), tlKeys: c.tls.filter((t) => t.delta < 0).sort((x, y) => x.delta - y.delta).map((t) => t.name), ch };
-      case 'tl': { const name = key.split(':').slice(2).join(':'); const t = c.tls.find((x) => x.name === name); return t ? mk(`${L} · TL ${t.name} ki team`, [...t.members].sort((x, y) => y.cur - x.cur), [`${t.active}/${t.agents} active`, `change ${sgn(t.delta)}`]) : null; }
+      case 'tl': { const name = key.split(':').slice(2).join(':'); const t = c.tls.find((x) => x.name === name); return t ? mk(`${L} · TL ${t.name}'s team`, [...t.members].sort((x, y) => y.cur - x.cur), [`${t.active}/${t.agents} active`, `change ${sgn(t.delta)}`]) : null; }
       case 'class': return { title: `${L} · class mix (last 6 mahine)`, headers: ['Month', 'Total', 'VC4', 'VC20', 'VC5+', 'Commercial', 'VC4 %', 'Replacement', 'Wrong VRN'], rows: [...c.mon].reverse().map((m) => [U.labelYM(m.ym), fmt(m.total), fmt(m.vc4), fmt(m.vc20), fmt(m.vc5p), fmt(m.comm), m.total ? (m.vc4 / m.total * 100).toFixed(0) + '%' : '—', fmt(m.repl), fmt(m.wrong)]) };
       case 'daily': { const n = Math.max(c.curSeries.length, c.lastSeries.length); const rows = []; for (let i = 0; i < n; i++) rows.push([`Day ${i + 1}`, i < c.curSeries.length ? fmt(c.curSeries[i]) : '—', i < c.lastSeries.length ? fmt(c.lastSeries[i]) : '—']); return { title: `${L} · daily issuance`, headers: ['Din', curLbl, lastLbl], rows: rows.reverse(), stats: [`7 din: ${fmt(c.mo.week)} vs pehle ${fmt(c.mo.prev)}`] }; }
       case 'stock': { const g = U.groupSum(c.stockRows, (r) => r.cls || 'NA', (r) => r.n); const ents = Object.entries(g instanceof Map ? Object.fromEntries(g) : g).sort((x, y) => y[1] - x[1]); return { title: `${L} · class-wise stock`, headers: ['Class', 'Stock tags', 'Share'], rows: ents.map(([k, v]) => [k, fmt(v), c.stock ? (v / c.stock * 100).toFixed(0) + '%' : '—']), stats: [`${fmt(c.stock)} tags`, `cover ${c.cover.toFixed(0)} din`] }; }
-      case 'top5': return { title: `${L} · top agents ka share`, headers: ['Agent', 'Agent ID', 'TL', curLbl, 'Share', 'Cumulative'], rows: (() => { let run = 0; return c.conc.sorted.slice(0, 50).map((r) => { run += r.cur; return [r.name, r.id, r.direct ? 'Direct' : (clean(r.tl) || '—'), fmt(r.cur), (r.cur / c.cur.total * 100).toFixed(1) + '%', (run / c.cur.total * 100).toFixed(0) + '%']; }); })(), persons: c.conc.sorted.slice(0, 50).map((r) => ({ ch, name: r.name, id: r.id })), stats: [`top 5 = ${c.conc.top5Share.toFixed(0)}%`, `80% ke liye ${c.conc.n80} agents`], ch };
+      case 'top5': return { title: `${L} · top agents' share`, headers: ['Agent', 'Agent ID', 'TL', curLbl, 'Share', 'Cumulative'], rows: (() => { let run = 0; return c.conc.sorted.slice(0, 50).map((r) => { run += r.cur; return [r.name, r.id, r.direct ? 'Direct' : (clean(r.tl) || '—'), fmt(r.cur), (r.cur / c.cur.total * 100).toFixed(1) + '%', (run / c.cur.total * 100).toFixed(0) + '%']; }); })(), persons: c.conc.sorted.slice(0, 50).map((r) => ({ ch, name: r.name, id: r.id })), stats: [`top 5 = ${c.conc.top5Share.toFixed(0)}%`, `80% ke liye ${c.conc.n80} agents`], ch };
       case 'active': return mk(`${L} · active agents`, c.conc.sorted, [`${fmt(c.conc.active)} agents`]);
       default: return null;
     }

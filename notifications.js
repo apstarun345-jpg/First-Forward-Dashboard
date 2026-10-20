@@ -536,6 +536,16 @@ window.FF = window.FF || {};
       if (item && item.meta && item.meta.source === 'recovery-hint') return false;
       return (state.filterType === 'all' || item.type === state.filterType) && (!state.filterUnread || itemUnread(item));
     });
+    // 🗂️ v228 — alerts type-wise group: "🏷️ Tag requests 3 · 🚨 Alerts 2…" chips (tap = sirf wahi type)
+    const typeCount = new Map();
+    state.items.forEach((item) => {
+      if (!item || (item.meta && item.meta.source === 'recovery-hint')) return;
+      if (state.filterUnread && !itemUnread(item)) return;
+      const k = item.type || 'info'; const c = typeCount.get(k) || { n: 0, unread: 0 };
+      c.n++; if (itemUnread(item)) c.unread++; typeCount.set(k, c);
+    });
+    const typeLabel = (k) => { const t = NOTIFY_TYPES.find((x) => x.key === k); return t ? t.label : k; };
+    const groupChips = typeCount.size > 1 ? `<div class="notify-groups" role="group" aria-label="Notification groups"><button type="button" class="notify-group ${state.filterType === 'all' ? 'on' : ''}" data-notify-type="all">All <b>${[...typeCount.values()].reduce((a, c) => a + c.n, 0)}</b></button>${[...typeCount.entries()].sort((a, b) => b[1].unread - a[1].unread || b[1].n - a[1].n).map(([k, c]) => `<button type="button" class="notify-group ${state.filterType === k ? 'on' : ''} ${c.unread ? 'has-new' : ''}" data-notify-type="${U.esc(k)}">${U.esc(typeLabel(k))} <b>${c.n}</b>${c.unread ? `<i>${c.unread} new</i>` : ''}</button>`).join('')}</div>` : '';
     const rows = filtered.slice(0, 60).map((item) => {
       const open = state.expanded === item.id;
       const unread = itemUnread(item);
@@ -548,6 +558,7 @@ window.FF = window.FF || {};
       ${presence}
       ${switches}
       ${hintLine()}
+      ${groupChips}
       <div class="notification-list">${rows || `<div class="notification-empty">${state.filterUnread ? 'No unread notifications in this view.' : 'Abhi koi notification nahi. User login/page open, report update aur shared location yahan dikhegi.'}</div>`}</div>`;
   }
 
@@ -1106,6 +1117,8 @@ window.FF = window.FF || {};
       }
       const center = e.target.closest('[data-notify-center]');
       if (center) { e.preventDefault(); e.stopPropagation(); toggle(false); openCenter(); return; }
+      const grp = e.target.closest('[data-notify-type]');
+      if (grp) { e.preventDefault(); e.stopPropagation(); state.filterType = grp.dataset.notifyType || 'all'; render(true); return; }
       const filter = e.target.closest('[data-notify-filter]');
       if (filter && filter.dataset.notifyFilter === 'unread') {
         e.preventDefault(); e.stopPropagation(); state.filterUnread = !state.filterUnread; render(); return;

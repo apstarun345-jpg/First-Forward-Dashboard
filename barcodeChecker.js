@@ -159,7 +159,7 @@ FF.pages = FF.pages || {};
     if (p.tab === 'multi') state.tab = 'multi';
     root.innerHTML = `<div class="page bcc-page">
       <div class="page-head"><div><h1>🔢 Barcode Checker</h1>
-        <p class="sub">Barcode range ya kai barcodes → har tag ka status: <b>✅ issued</b> (kab, kis VRN par) · <b>📦 kis agent ke stock me</b> · <b>🏢 master/BC</b> · <b>❓ gayab</b>. Stock = StockDataa · Issued = EIR.</p></div></div>
+        <p class="sub">Barcode range or many barcodes → status of every tag: <b>✅ issued</b> (when, on which VRN) · <b>📦 in which agent's stock</b> · <b>🏢 master/BC</b> · <b>❓ missing</b>. Stock = StockDataa · Issued = EIR.</p></div></div>
       <div class="card"><div class="card-body">
         <div class="seg bcc-tabs"><button type="button" class="seg-btn${state.tab === 'range' ? ' on' : ''}" data-bcc-tab="range">↔️ Range (first → last)</button><button type="button" class="seg-btn${state.tab === 'multi' ? ' on' : ''}" data-bcc-tab="multi">📋 Multiple barcodes</button></div>
         <form class="bcc-form" data-bcc-form="range" ${state.tab === 'range' ? '' : 'hidden'}>

@@ -372,7 +372,7 @@ FF.pages = FF.pages || {};
     const ok = !diffs.length && mas.total === eir.total;
     const banner = ok
       ? `<div class="tix-recon ok">✅ ${esc(rangeLabel(m.from, to, true))} — GV ka EIR total aur GV Master total <b>barabar</b> hai (${U.fmt(eir.total)}).</div>`
-      : `<div class="tix-recon warn">⚠️ GV Master EIR se <b>${U.fmt(Math.abs(mas.total - eir.total))} ${mas.total > eir.total ? 'zyada' : 'kam'}</b> hai (${diffs.length} din me fark). Dashboard ke totals EIR se hain — Master me late / duplicate / alag entries check karo.</div>`;
+      : `<div class="tix-recon warn">⚠️ GV Master EIR se <b>${U.fmt(Math.abs(mas.total - eir.total))} ${mas.total > eir.total ? 'more' : 'less'}</b> than EIR (${diffs.length} days differ). Dashboard totals come from EIR — check Master for late / duplicate / different entries.</div>`;
     return `${banner}<div class="grid g-2"><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Metric</th><th class="num">GV · EIR</th><th class="num">GV · Master</th><th>Fark</th></tr></thead><tbody>${tbl}</tbody></table></div>
       ${diffs.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Din (sabse bada fark)</th><th class="num">EIR</th><th class="num">Master</th><th>Fark</th></tr></thead><tbody>${dayRows}</tbody></table></div>` : '<p class="dim">Kisi din me fark nahi.</p>'}</div>
       <p class="dim small">Compare sirf ${esc(lbl(to, true))} tak (EIR ki latest date). Master ke aaj ke live tags EIR me kal aate hain.</p>`;
@@ -421,7 +421,7 @@ FF.pages = FF.pages || {};
     }
     if (from > to) { const t = from; from = to; to = t; }
 
-    root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">GV Partner (EIR master ID 5845036) vs First Forward — VC4 · VC20 · VC5+ · Commercial, share %, up/down aur graphs</p></div>
+    root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">GV Partner (EIR master ID 5845036) vs First Forward — VC4 · VC20 · VC5+ · Commercial, share %, up/down and graphs</p></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div class="card tix-toolbar">
         <div class="tix-presets" id="ti-presets" role="group" aria-label="Date shortcuts">${PRESETS.map(([id, label]) => `<button type="button" class="tix-chipbtn" data-preset="${id}">${label}</button>`).join('')}<button type="button" class="tix-chipbtn" data-preset="custom">Custom</button></div>
@@ -455,7 +455,7 @@ FF.pages = FF.pages || {};
       rows.gvMap = scanDays(rows.gvRows);
       const m = buildModel(rows, from, to);
       const prevTxt = m.prevGvRange ? `vs ${esc(rangeLabel(m.prevGvRange[0], m.prevGvRange[1], true))}` : '';
-      info.innerHTML = `<span class="badge indigo">${esc(rangeLabel(from, to, true))}</span> <span class="dim">${m.days} din ${prevTxt ? `· ${prevTxt}` : ''}</span> ${m.ffPending || m.gvPending ? `<span class="badge amber" title="EIR sheet T+1 aata hai — ${esc(lbl(m.ffThrough, true))} ke baad ka data kal aayega. Is wajah se growth like-for-like (utne hi din) dikhaya gaya hai.">🧾 EIR T+1 · ${m.ffComparable || m.gvComparable ? 'latest data tak' : 'kal aayega'}</span>` : ''}`;
+      info.innerHTML = `<span class="badge indigo">${esc(rangeLabel(from, to, true))}</span> <span class="dim">${m.days} din ${prevTxt ? `· ${prevTxt}` : ''}</span> ${m.ffPending || m.gvPending ? `<span class="badge amber" title="The EIR sheet is T+1 — data after ${esc(lbl(m.ffThrough, true))} arrives tomorrow. So growth is shown like-for-like (same number of days).">🧾 EIR T+1 · ${m.ffComparable || m.gvComparable ? 'latest data tak' : 'kal aayega'}</span>` : ''}`;
       const total = m.ff.total + m.gv.total;
       const totalP = m.ffPrev.total + m.gvPrev.total;
 

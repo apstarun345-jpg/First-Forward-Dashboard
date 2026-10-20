@@ -1563,7 +1563,7 @@ body.colorful .from-hdr { color: #166534; }
         <button type="button" class="btn" data-tr-act="clear">🧹 Clear</button>
         <button type="button" class="btn primary tr-send-btn" data-tr-act="send" ${busy ? 'disabled' : ''}>${busy ? '⏳ Bhej rahe hain…' : '📤 Request submit karo'}</button>
       </div>
-      <p class="dim small">🔎 Submit par system khud sheet se agent ka <b>stock</b>, <b>last month</b> aur <b>current month</b> issuance (🚗 VC4+VC20 · 🚚 VC5+ alag) check karke admin ko saath bhejta hai. Har agent ki request alag banti hai — status <b>🔎 Status</b> tab me agent ke mobile number se dikhta hai.</p>`;
+      <p class="dim small">🔎 On submit, the system checks the agent's <b>stock</b>, <b>last month</b> and <b>current month</b> issuance (🚗 VC4+VC20 · 🚚 VC5+ separately) from the sheet and sends it to the admin. Each agent's request is created separately — check the status in the <b>🔎 Status</b> tab with the agent's mobile number.</p>`;
     rootEl.querySelectorAll('.tr-agent-card').forEach(bindAgentCard);
     bindStockBoard(rootEl);
     bindFormGlobal();

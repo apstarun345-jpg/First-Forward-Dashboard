@@ -2997,6 +2997,7 @@ html[data-theme="dark"] .dp2-class-chip b { color: #5eead4; }
 .dp2-wrap { max-height: 72vh; overflow: auto; border-radius: 12px; }
 .dp2-table thead th { position: sticky; top: 0; z-index: 2; background: linear-gradient(180deg, #eef2ff, #e0e7ff); color: #3730a3; padding: 9px 10px; text-align: left; font-size: 11.5px; white-space: nowrap; border-bottom: 2px solid #c7d2fe; vertical-align: bottom; }
 .dp2-table thead th small { display: block; font-weight: 600; font-size: 10px; color: #6366f1; opacity: .85; }
+.dp2-table thead th.dp2-sort:hover { background: #dbe4ff; }
 .dp2-table thead th i { font-style: normal; margin-left: 4px; font-size: 10px; opacity: .45; }
 .dp2-table thead th.on i { opacity: 1; color: #4f46e5; }
 .dp2-table thead th.hot1 { background: linear-gradient(180deg, #dcfce7, #bbf7d0); color: #166534; border-bottom-color: #86efac; }
@@ -6509,6 +6510,7 @@ body[data-cc] .kpi:not(.ua-kpi-card) .kpi-value, body[data-cc] .kpi:not(.ua-kpi-
 .ask-hero .ff-robot { flex: none; width: 54px; height: 54px; padding: 6px; border-radius: 16px; background: linear-gradient(145deg, #6366f1, #ec4899); animation: rbFloat 3.6s ease-in-out infinite; }
 .ask-hero b { display: block; font-size: 13.5px; }
 .ask-hero small { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+.ask-chips button { white-space: nowrap; }
 /* sound-nudge panel ke upar na aaye */
 body:has(#ask-panel:not([hidden])) .bell-unlock { display: none; }
 /* mobile — bottom nav ke upar, poori width panel (pehle FAB nav ke peeche chhup jata tha) */
@@ -6552,7 +6554,15 @@ html[data-theme="dark"] .fresh-alert{background:linear-gradient(135deg,#3b1212,#
 .fresh-extra { flex: 1 1 100%; border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 2px; font-size: 12px; line-height: 1.55; display: grid; gap: 1px; }
 .fresh-extra b { display: inline; }
 /* ---------- v198 · GV & FF Tag Issued redesign ---------- */
+.tix-dates label { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.tix-title small { color: var(--muted); font-weight: 600; font-size: 11px; }
+.tix-split i { display: block; height: 100%; transition: width .4s ease; }
+.tix-donuts h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.tix-strong td { font-weight: 800; background: color-mix(in srgb, var(--brand) 6%, transparent); }
+.tix-people > summary { cursor: pointer; font-weight: 800; font-size: 15px; padding: 10px 2px; }
 /* v200 · Tag Issued data health + EIR vs GV Master check */
+.tix-recon.ok { background: color-mix(in srgb, #10b981 12%, transparent); border-color: color-mix(in srgb, #10b981 40%, transparent); }
+.tix-recon.warn { background: color-mix(in srgb, #f59e0b 14%, transparent); border-color: color-mix(in srgb, #f59e0b 45%, transparent); }
 /* =============================================================================
    🎨 v222 — Employee Tag Request link skin ("wallet desk" look): neela gradient hero, bade white
    cards, pill tabs, tinted stat tiles. Sirf body.public-form (employee link) par — admin UI same.
@@ -6565,7 +6575,13 @@ html:not([data-theme="dark"]) body.public-form {
 body.public-form .main { max-width: 880px; margin: 0 auto; padding: 14px 14px 90px; }
 body.public-form .tr-public-page { max-width: 880px; }
 /* hero */
+body.public-form .tr-hero { display: block; margin: 0 0 14px; padding: 22px 20px 18px; border-radius: 28px; color: #fff; position: relative; overflow: hidden;
+  background: linear-gradient(145deg, #1a3fae 0%, #11308c 55%, #0a1d5c 100%); box-shadow: 0 18px 40px rgba(23, 65, 184, .28); }
+body.public-form .tr-hero .tr-public-brand b { color: #fff; font-size: 14px; }
+body.public-form .tr-hero .tr-public-brand small { color: rgba(255, 255, 255, .72); }
+body.public-form .tr-hero-kicker { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .7); }
 body.public-form .tr-hero h1 { margin: 0 0 8px; font-size: 34px; line-height: 1.08; letter-spacing: -.03em; font-weight: 800; color: #fff !important; }
+body.public-form .tr-hero-stat { padding: 11px 12px; border-radius: 16px; background: rgba(255, 255, 255, .12); border: 1px solid rgba(255, 255, 255, .18); backdrop-filter: blur(4px); }
 body.public-form .tr-hero-stat small { display: block; font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, .75); }
 body.public-form .tr-hero-stat b { display: block; margin-top: 2px; font-size: 26px; line-height: 1.1; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 /* pill tabs */
@@ -6582,11 +6598,22 @@ body.public-form .btn { border-radius: 999px; border-color: #dbe5f7; background:
 body.public-form .btn.primary { background: linear-gradient(135deg, #1d47c4, #11308c); box-shadow: 0 10px 22px rgba(29, 78, 216, .3); }
 body.public-form .badge { border-radius: 999px; }
 /* agent blocks */
+body.public-form .tr-agent-card { border: 1px solid #e3ebfa; border-left: 1px solid #e3ebfa; border-radius: 20px; padding: 14px 16px; background: #fbfcff; }
+body.public-form .tr-agent-total { padding: 3px 10px; border-radius: 999px; background: #eaf1ff; color: #1d4ed8; font-size: 12px; }
 body.public-form .tr-qty-list { border-radius: 18px; border-color: #dfe8fa; background: #fff; }
+body.public-form .tr-add-btn { width: 100%; justify-content: center; border-style: dashed; border-color: #a9c3f5; color: #1d4ed8; background: #f3f7ff; padding: 12px; }
 /* sticky submit bar */
+body.public-form .tr-submit-bar { bottom: 10px; padding: 10px 12px 10px 18px; border-radius: 999px; background: rgba(255, 255, 255, .94); border: 1px solid #dde7fb; box-shadow: 0 14px 34px rgba(29, 78, 216, .18); backdrop-filter: blur(8px); }
 /* Meri requests: stat tiles + ledger-style cards */
+body.public-form .tr-es-tags span:last-child { color: #1f8a5b; background: #ecfaf3; border-color: #c6efd9; }
 body.public-form .tr-emp-filters { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+body.public-form .tr-emp-filter { flex: none; display: inline-flex; gap: 6px; align-items: center; padding: 8px 14px; border-radius: 999px; background: #fff; border: 1px solid #dfe7f7; color: #4a5b7e; font-weight: 600; font-size: 13px; cursor: pointer; }
+body.public-form .tr-emp-filter.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; }
+body.public-form .tr-st-card { border: 1px solid #e6edfb; border-left: 1px solid #e6edfb; border-radius: 20px; padding: 14px 16px; background: #fff; box-shadow: 0 4px 14px rgba(29, 78, 216, .04); }
+body.public-form .tr-step { background: #eef2fa; }
+body.public-form .tr-emp-chip { background: #fff; border-radius: 999px; }
 /* done screen */
+body.public-form .tr-done-icon { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto; border-radius: 50%; background: #ecfaf3; font-size: 30px; }
 @media (max-width: 720px) {
 body.public-form .main { padding: 8px 10px 96px; }
 body.public-form .card-head { padding: 16px 16px 0; }
@@ -6602,3 +6629,23 @@ html.mobile-ui .ask-fab { scale: .8; transform-origin: 100% 100%; transition: tr
 html[data-theme="dark"] .cp-btn { background: #172f6b; color: #dbe7ff; border-color: #2a4a9a; }
 .pw-banner { background: #fff7ed !important; border-color: #fdba74 !important; color: #7c2d12 !important; }
 html[data-theme="dark"] .pw-banner { background: #3a1d0a !important; color: #fed7aa !important; }
+/* 🔀 v228 — FF ↔ GV channel switch (merged pages) */
+.ch-switch { display: inline-flex; gap: 4px; padding: 4px; margin: 0 0 12px; border-radius: 999px; background: var(--card, #fff); border: 1px solid var(--line, #e3eaf8); box-shadow: 0 4px 14px rgba(29, 78, 216, .08); }
+.ch-switch a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 999px; font-weight: 700; font-size: 13px; color: var(--muted, #4b5b78); text-decoration: none; white-space: nowrap; }
+.ch-switch a:hover { background: color-mix(in srgb, var(--brand, #1d4ed8) 8%, transparent); text-decoration: none; }
+.ch-switch a.ch-ff.on { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff; box-shadow: 0 6px 14px rgba(37, 99, 235, .3); }
+.ch-switch a.ch-gv.on { background: linear-gradient(135deg, #10b981, #0d9488); color: #fff; box-shadow: 0 6px 14px rgba(16, 185, 129, .3); }
+/* 🗂️ v228 — notification groups */
+/* 🟢 v228 — freshness status line */
+.fresh-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700; }
+.fresh-status.ok { background: #dcfce7; color: #166534; }
+.fresh-status.warn { background: #fef3c7; color: #92400e; }
+.fresh-status.bad { background: #fee2e2; color: #991b1b; }
+html[data-theme="dark"] .fresh-status.ok { background: #0f3a24; color: #86efac; }
+html[data-theme="dark"] .fresh-status.warn { background: #3a2a0a; color: #fcd34d; }
+html[data-theme="dark"] .fresh-status.bad { background: #3a1010; color: #fca5a5; }
+/* 📱 v228 — phone tables: header stays on top, first column (name) stays on the left */
+html.mobile-ui .table-wrap { max-height: 72vh; overflow: auto; -webkit-overflow-scrolling: touch; }
+html.mobile-ui .tbl thead th { position: sticky; top: 0; z-index: 3; }
+html.mobile-ui .tbl th:first-child, html.mobile-ui .tbl td:first-child { position: sticky; left: 0; z-index: 2; background: var(--card, #fff); box-shadow: 1px 0 0 var(--line, #e3eaf8); }
+html.mobile-ui .tbl thead th:first-child { z-index: 4; background: var(--pk-head, #eef3fe); }

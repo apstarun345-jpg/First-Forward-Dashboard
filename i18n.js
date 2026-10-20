@@ -783,7 +783,16 @@ window.FF = window.FF || {};
     if (!idx.size) return str;
     let out;
     if (dict[s] !== undefined) out = dict[s];                 // poora text exact match
-    else out = scanText(s, dict, idx);
+    else {
+      // v228 — source HTML me text kai lines me tuta ho (newline + indent) to bhi match ho: whitespace normalise karke dekho
+      const core = s.trim().replace(/\s+/g, ' ');
+      if (core !== s.trim()) {
+        const lead = s.match(/^\s*/)[0], trail = s.match(/\s*$/)[0];
+        out = lead + (dict[core] !== undefined ? dict[core] : scanText(core, dict, idx)) + trail;
+      } else if (core !== s && dict[core] !== undefined) {
+        out = s.match(/^\s*/)[0] + dict[core] + s.match(/\s*$/)[0];
+      } else out = scanText(s, dict, idx);
+    }
     if (s.length < 400) { if (memoT.size > 6000) memoT.clear(); memoT.set(mk, out); }
     return out;
   }

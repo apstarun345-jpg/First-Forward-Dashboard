@@ -885,13 +885,13 @@ FF.pages = FF.pages || {};
     const isStaleVal = (x) => !!(x && x.d && (x.hasTime ? (Date.now() - x.d.getTime()) / 3600000 > 24 : dayDiff(x.d) >= 2));
     const dayDiff = (dt) => { const a = new Date(); a.setHours(0, 0, 0, 0); const b = new Date(dt); b.setHours(0, 0, 0, 0); return Math.round((a - b) / 86400000); };
     function ago(x) {
-      if (!x.hasTime) { const n = dayDiff(x.d); return n <= 0 ? 'aaj' : n === 1 ? 'kal' : `${n} din pehle`; }
+      if (!x.hasTime) { const n = dayDiff(x.d); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago`; }
       const mins = Math.max(0, Math.round((Date.now() - x.d.getTime()) / 60000));
-      if (mins < 1) return 'abhi abhi';
-      if (mins < 60) return `${mins} min pehle`;
+      if (mins < 1) return 'just now';
+      if (mins < 60) return `${mins} min ago`;
       const h = Math.floor(mins / 60);
-      if (h < 48) return `${h} ghante${mins % 60 ? ` ${mins % 60} min` : ''} pehle`;
-      return `${Math.floor(h / 24)} din pehle`;
+      if (h < 48) return `${h} h${mins % 60 ? ` ${mins % 60} min` : ''} ago`;
+      return `${Math.floor(h / 24)} days ago`;
     }
     function tone(x) {
       if (!x.hasTime) { const n = dayDiff(x.d); return n <= 1 ? 'ok' : n <= 3 ? 'warn' : 'bad'; }
@@ -901,22 +901,25 @@ FF.pages = FF.pages || {};
     function html(list, loading) {
       const rows = list.map((r) => {
         let val;
-        if (!r.value) val = r.noCol ? '<span class="dim">Is sheet me date/time column nahi mila</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'check ho raha hai…' : (r.err ? 'padh nahi paya' : '—')}</span>`;
-        else val = `<b>${esc(fmtDT(r.value))}</b>${r.value.hasTime ? '' : ' <small class="dim">(sirf date)</small>'}`;
+        if (!r.value) val = r.noCol ? '<span class="dim">No date/time column in this sheet</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'checking…' : (r.err ? 'could not read' : '—')}</span>`;
+        else val = `<b>${esc(fmtDT(r.value))}</b>${r.value.hasTime ? '' : ' <small class="dim">(date only)</small>'}`;
         const pill = r.value ? `<span class="fresh-pill ${tone(r.value)}">${esc(ago(r.value))}</span>` : '';
-        const lines = [];
-        if (r.exact) {
-          if (r.lastRow) lines.push(`Last filled row <b>#${esc(U.fmt(r.lastRow))}</b>${r.totalRows && r.totalRows !== r.lastRow ? ` <span class="dim">(tab me ${esc(U.fmt(r.totalRows))} rows)</span>` : ''}`);
-          if (r.rowTime) lines.push(`Row ka time: ${esc(fmtDT(r.rowTime))}${r.rowTime.col ? ` <span class="dim">· ${esc(r.rowTime.col)}</span>` : ''}`);
-          else if (r.lastRow) lines.push('<span class="dim">Is row me date/time cell nahi mila</span>');
-          if (r.file && r.file.updated) lines.push(`Sheet file last edit: ${esc(fmtDT(r.file.updated))}${r.file.by ? ` · ${esc(r.file.by)}` : ''} <span class="dim">(poori file)</span>`);
-          else if (r.file && r.file.error) lines.push(`<span class="dim" title="${esc(r.file.error)}">Edit history: ${esc(r.file.error.slice(0, 90))}</span>`);
-        } else if (r.approx) lines.push('<span class="dim">Sheet ke poore date column ka sabse naya record (exact last-row / edit history ke liye Apps Script Code.gs v3.73 deploy karein)</span>');
-        if (r.exact && r.colMax) lines.push('<span class="dim">✔ Poore column ka sabse naya date (last row se bhi naya mila)</span>');
-        const extra = lines.length ? `<div class="fresh-extra">${lines.map((l) => `<div>${l}</div>`).join('')}</div>` : '';
-        return `<div class="fresh-row"><div class="fresh-src"><span class="fresh-ic">${r.icon}</span><div><b>${esc(r.tab)}</b><small class="dim">${esc(r.title)}${r.note ? ' · ' + esc(r.note) : ''}</small></div></div><div class="fresh-val">${val}${pill}</div>${extra}</div>`;
+        // 🟢 v228 — tech notes ki jagah ek saaf status line; poori detail row ke tooltip me
+        const tips = [];
+        if (r.lastRow) tips.push(`Last filled row #${U.fmt(r.lastRow)}`);
+        if (r.rowTime) tips.push(`Row time: ${fmtDT(r.rowTime)}`);
+        if (r.file && r.file.updated) tips.push(`Sheet file last edit: ${fmtDT(r.file.updated)}${r.file.by ? ` · ${r.file.by}` : ''}`);
+        if (r.value && r.value.imported) tips.push('Source: import log');
+        const tn = r.value ? tone(r.value) : '';
+        const status = !r.value ? (loading ? '' : (r.noCol ? '' : '<span class="fresh-status bad">✕ Could not read this sheet</span>'))
+          : tn === 'ok' ? `<span class="fresh-status ok">✓ Up to date — ${esc(ago(r.value))}</span>`
+            : tn === 'warn' ? `<span class="fresh-status warn">⚠ A bit old — ${esc(ago(r.value))}</span>`
+              : `<span class="fresh-status bad">⚠ Old data — ${esc(ago(r.value))}. Check the import.</span>`;
+        const extra = status ? `<div class="fresh-extra">${status}</div>` : '';
+        const titleAttr = tips.length ? ` title="${esc(tips.join('\n'))}"` : '';
+        return `<div class="fresh-row"${titleAttr}><div class="fresh-src"><span class="fresh-ic">${r.icon}</span><div><b>${esc(r.tab)}</b><small class="dim">${esc(r.title)}${r.note ? ' · ' + esc(r.note) : ''}</small></div></div><div class="fresh-val">${val}${pill}</div>${extra}</div>`;
       }).join('');
-      return `<section class="card fresh-card"><div class="card-head"><div><h3>🕒 Sheets — last data update</h3><p class="dim small">Har sheet ki <b>last filled row</b> ka date + time, aur Google Sheet ki edit history. Site ne ye data abhi load kiya: <b>${esc(U.timeLabel(S.loadedAt || G.loadedAt || Date.now()))}</b></p></div><div class="head-actions"><button class="btn small" data-fresh-refresh="1">↻ Dobara check</button></div></div><div class="card-body fresh-grid">${rows}</div></section>`;
+      return `<section class="card fresh-card"><div class="card-head"><div><h3>🕒 Sheets — last data update</h3><p class="dim small">When each sheet last received data. Site loaded this data at <b>${esc(U.timeLabel(S.loadedAt || G.loadedAt || Date.now()))}</b></p></div><div class="head-actions"><button class="btn small" data-fresh-refresh="1">↻ Check again</button></div></div><div class="card-body fresh-grid">${rows}</div></section>`;
     }
     const DISMISS_KEY = 'ff_fresh_alert_dismiss';
     // 🛡️ v217 — alert sirf pakke (server / import-log) data par; gviz column-max (text dates ka max galat ho sakta hai) par nahi

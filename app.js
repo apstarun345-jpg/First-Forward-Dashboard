@@ -99,18 +99,18 @@ window.FF = window.FF || {};
     { id: 'targets', icon: '🎯', label: 'Agent Targets', desc: 'Shortlist · target · progress · Excel', perm: 'targets', group: 'Management' },
     { id: 'tagRequest', icon: '🏷️', label: 'Tag Request', desc: 'IDFC agents · employee + har agent ka mobile/address/pincode + class-wise qty → admin table (select · print · approve)', perm: 'tagRequest', group: 'Management' },
     { id: 'masterSearch', icon: '🔎', label: 'Master Search', desc: 'GV + FF · naam / ID / mobile → seedha poora profile (koi list nahi)', perm: 'masterSearch', group: 'Management' },
-    { id: 'barcodeChecker', icon: '🔢', label: 'Barcode Checker', desc: 'Barcode range / multiple barcodes → issued · kis agent ke stock me · gayab', perm: 'masterSearch', group: 'Management' },
+    { id: 'barcodeChecker', icon: '🔢', label: 'Barcode Checker', desc: 'Barcode range / multiple barcodes → issued · in which agent\'s stock · missing', perm: 'masterSearch', group: 'Management' },
     { id: 'bulkTagStatus', icon: '🔍', label: 'Bulk Tag Status', desc: 'Bulk VRN / Tag ID / Barcode → GV issued, FF issued ya stock status', perm: 'bulkTagStatus', group: 'Management' },
     { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'rangeReport', group: 'Management' },
     { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'teamMap', group: 'Management', feat: 'teamMap', adminOnly: true },
-    { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'KPIs & charts (EIR)', perm: 'dashboard', group: 'First Forward' },
-    { id: 'trend', icon: '📈', label: 'Trend', desc: 'Daily · Monthly · Last vs Current', perm: 'trend', group: 'First Forward' },
-    { id: 'performance', icon: '🏆', label: 'Performance', desc: 'Agents & TLs (REPORT)', perm: 'performance', group: 'First Forward' },
-    { id: 'stock', icon: '📦', label: 'Stock', desc: 'Search · pivot · Excel (StockDataa)', perm: 'stock', group: 'First Forward' },
-    { id: 'gvDashboard', icon: '🚀', label: 'GV Partner Dashboard', desc: 'GV issuance · stock · performance', perm: 'gvDashboard', group: 'GV Partner' },
-    { id: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly', perm: 'gvTrend', group: 'GV Partner' },
-    { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'GV Partner' },
-    { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'GV Partner' },
+    { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'FF + GV · KPIs & charts', perm: 'dashboard', group: 'Reports', twin: 'gvDashboard' },
+    { id: 'trend', icon: '📈', label: 'Trend', desc: 'FF + GV · daily · monthly · last vs current', perm: 'trend', group: 'Reports', twin: 'gvTrend' },
+    { id: 'performance', icon: '🏆', label: 'Performance', desc: 'FF + GV · agents & TLs', perm: 'performance', group: 'Reports', twin: 'gvPerformance' },
+    { id: 'stock', icon: '📦', label: 'Stock', desc: 'FF + GV · search · pivot · Excel', perm: 'stock', group: 'Reports', twin: 'gvStock' },
+    { id: 'gvDashboard', icon: '🚀', label: 'GV Partner Dashboard', desc: 'GV issuance · stock · performance', perm: 'gvDashboard', group: 'Reports', twinOf: 'dashboard' },
+    { id: 'gvTrend', icon: '📈', label: 'GV Trend', desc: 'GV Master daily / monthly', perm: 'gvTrend', group: 'Reports', twinOf: 'trend' },
+    { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'Reports', twinOf: 'performance' },
+    { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'Reports', twinOf: 'stock' },
     { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStockReport', group: 'GV Partner' },
     { id: 'fastagMapping', icon: '🔗', label: 'FASTag Mapping', desc: 'StockDataa lookup · barcode range / tag ID / agent mapping · CSV', perm: 'fastagMapping', group: 'GV Partner', adminOnly: true },
     { id: 'dualChannel', icon: '🔗', label: 'Dual-channel Agents', desc: 'Verified GV + FF overlap · separate & combined', perm: 'dualChannel', group: 'Cross Channel' },
@@ -121,11 +121,11 @@ window.FF = window.FF || {};
     { id: 'directAgents', icon: '🧍', label: 'Direct Agents & TLs', desc: 'FF: TL Name APS · GV: TL ID + Name blank — ek hi rule poore site par', perm: 'directAgents', group: 'Cross Channel' },
     { id: 'newAgents', icon: '🆕', label: 'New Agents & TL Changes', desc: 'Naye agents · TL badla / hata — FF + GV alag table, click → poori profile', perm: 'newAgents', group: 'Cross Channel' },
     { id: 'unusual', icon: '🚨', label: 'Unusual Activity', desc: 'High Wrong VRN · Replacement · Chassis · single-day spike — agent-wise flags (FF + GV)', perm: 'unusual', group: 'Cross Channel' },
-    { id: 'ffAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'FF agent ya TL → stock · issuance · ageing · Share / PDF', perm: 'ffAgentSummary', group: 'First Forward' },
-    { id: 'gvAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'GV agent ya TL → stock · issuance · ageing · Share / PDF', perm: 'gvAgentSummary', group: 'GV Partner' },
+    { id: 'ffAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'FF + GV · agent or TL → stock · issuance · ageing · PDF', perm: 'ffAgentSummary', group: 'Reports', twin: 'gvAgentSummary' },
+    { id: 'gvAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'GV agent or TL → stock · issuance · ageing · PDF', perm: 'gvAgentSummary', group: 'Reports', twinOf: 'ffAgentSummary' },
     { id: 'fastagChampions', icon: '🏆', label: 'FASTag Champions', desc: 'Top agents/TLs by VC4, Commercial, Chassis, Replacement, Wrong VRN — FF & GV', perm: 'fastagChampions', group: 'Cross Channel' },
   ];
-  const GROUP_ICON = { 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤', 'Wow Zone': '🎉' };
+  const GROUP_ICON = { 'Reports': '📊', 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤', 'Wow Zone': '🎉' };
   // ── 🧹 v3.62 · RETIRED PAGES ────────────────────────────────────────────────────────────────────
   // Ye pages app se hata di gayi hain (client request: sirf kaam ki cheezein — site halki aur phone
   // par smooth). Modules disk par hain (koi purana code crash na ho), par:
@@ -303,11 +303,16 @@ window.FF = window.FF || {};
     home: { desc: 'Highlights · GV & FF charts' },
     tagIssued: { desc: 'Date-wise detailed issuance · VC4 vs Commercial' },
     targets: { desc: 'Shortlist agents · set targets · track progress · Excel' },
-    tagRequest: { desc: 'IDFC agents · employee + each agent’s mobile/address/pincode + class-wise qty → admin table (select · print · approve)' },
     rangeReport: { desc: 'Pick any from→to dates · FF + GV combined · Excel' },
     tv: { desc: 'Big-screen rotation · auto slides · fullscreen' },
     compare: { desc: 'Side-by-side comparison of both channels' },
-    stock: { desc: 'Search · pivot · Excel (StockDataa)' }
+    stock: { desc: 'FF + GV · search · pivot · Excel' },
+    tagRequest: { desc: 'Agents\' tag requests · approve · print · dispatch' },
+    aiAnalyst: { desc: 'GV + FF review · what grew · who is down · what to do' },
+    masterSearch: { desc: 'GV + FF · name / ID / mobile → full profile' },
+    bulkTagStatus: { desc: 'Bulk VRN / Tag ID / Barcode → GV issued, FF issued or stock' },
+    directAgents: { desc: 'Agents without a TL · FF + GV' },
+    newAgents: { desc: 'New agents · TL changes · FF + GV' }
   };
   // Exact textContent translations for page heads + common buttons (applied after every render).
   const TEXT = {
@@ -614,10 +619,12 @@ window.FF = window.FF || {};
     if (!nav) return;
     const u = FF.auth.user;
     const sheets = enabledTabs().filter((s) => FF.auth.can(`sheet:${s.id}`));
-    const groups = [...new Set(PAGES.map((p) => p.group))];
+    const ORDER = ['Management', 'Reports', 'First Forward', 'GV Partner', 'Cross Channel'];
+    const groups = [...new Set([...ORDER, ...PAGES.map((p) => p.group)])];
     let html = '';
     for (const group of groups) {
-      const items = PAGES.filter((p) => p.group === group && FF.auth.can(p.perm) && featOk(p));
+      // 🔀 v228 — FF/GV jodi wale pages sidebar me EK entry (page ke upar FF ↔ GV switch)
+      const items = PAGES.filter((p) => p.group === group && featOk(p) && !p.twinOf && (FF.auth.can(p.perm) || (p.twin && FF.auth.can((pageDef(p.twin) || {}).perm))));
       const groupSheets = group === 'Management' || group === 'Cross Channel' || group === 'Workspace' ? [] : sheets.filter((s) => (s.group || 'First Forward') === group);
       if (!items.length && !groupSheets.length) continue;
       const expanded = openNavGroup === group;
@@ -625,7 +632,11 @@ window.FF = window.FF || {};
       const channelClass = group === 'GV Partner' ? 'gv' : group === 'First Forward' ? 'ff' : group === 'Cross Channel' ? 'cross' : '';
       html += `<button type="button" class="nav-sec nav-sec-toggle ${channelClass} ${expanded ? 'open' : ''}" data-nav-group="${esc(group)}" aria-expanded="${expanded}" aria-controls="${bodyId}"><span>${GROUP_ICON[group] || '▦'} ${groupLabel(group)}</span><span class="nav-count">${items.length + groupSheets.length}</span><span class="nav-chevron" aria-hidden="true">›</span></button>`;
       html += `<div class="nav-group-body" id="${bodyId}" ${expanded ? '' : 'hidden'}>`;
-      html += items.map((p) => { const L = pageLabel(p); return navItem(p.id, p.icon, L.label, L.desc, current.page === p.id, `#/${p.id}`); }).join('');
+      html += items.map((p) => {
+        const L = pageLabel(p);
+        const target = FF.auth.can(p.perm) ? p.id : p.twin;
+        return navItem(target, p.icon, L.label, L.desc, current.page === p.id || (p.twin && current.page === p.twin), `#/${target}`).replace(`data-page="${target}"`, `data-page="${target}"${p.twin ? ` data-twin="${p.id === target ? p.twin : p.id}"` : ''}`);
+      }).join('');
       if (groupSheets.length) {
         html += `<div class="nav-sub">${groupLabel('Sheets')}</div>`;
         html += groupSheets.map((s) => `<a class="nav-item sheet ${current.page === 'sheet' && current.params.name === s.id ? 'active' : ''}" data-page="sheet" data-name="${esc(s.id)}" href="#/sheet/${encodeURIComponent(s.id)}"><span class="nav-ico">${s.icon || '📄'}</span><span class="nav-text"><b>${esc(s.id)}</b><small>${esc(s.desc || '')}</small></span></a>`).join('');
@@ -958,7 +969,7 @@ window.FF = window.FF || {};
 
   function markActive() {
     U.$$('#nav .nav-item').forEach((a) => {
-      const on = a.dataset.page === current.page && (current.page !== 'sheet' || a.dataset.name === current.params.name);
+      const on = (a.dataset.page === current.page || a.dataset.twin === current.page) && (current.page !== 'sheet' || a.dataset.name === current.params.name);
       a.classList.toggle('active', on);
     });
     // Lazy loading: page module abhi load nahi hua ho to bhi title sidebar registry se aa jaye.
@@ -1091,6 +1102,7 @@ window.FF = window.FF || {};
       if (typeof mod.render === 'function') await mod.render(root, params, ctx || {});
       else if (typeof mod === 'function') await mod(root, params, ctx || {});
       else throw new Error(`Page render nahi ho paya (${page}).`);
+      if (token === current.token) { channelSwitch(root, page); shortSubtitle(root, page); }
     } catch (err) {
       console.error(err);
       if (token === current.token) root.innerHTML = U.errorBox(err, 'data-action="refresh"');
@@ -1108,6 +1120,61 @@ window.FF = window.FF || {};
       if (typeof requestIdleCallback === 'function') requestIdleCallback(polish, { timeout: 250 });
       else setTimeout(polish, 0);
     }
+  }
+
+  /** ✍️ v228 — header ke neeche ek chhoti, seedhi line (lambe technical subtitle ki jagah). */
+  const SUBTITLES = {
+    dashboard: 'First Forward issuance and stock at a glance',
+    gvDashboard: 'GV Partner issuance, stock and performance at a glance',
+    trend: 'Daily and monthly issuance — this month vs last month',
+    gvTrend: 'GV daily and monthly issuance — this month vs last month',
+    stock: 'Who holds how many tags — search, pivot and Excel',
+    gvStock: 'GV stock with each agent — search and Excel',
+    gvStockReport: 'GV agent and TL stock with dispatch suggestions',
+    tagIssued: 'Tags issued by date — GV and First Forward, class-wise',
+    targets: 'Set agent targets and track progress',
+    tagRequest: 'Tag requests from agents — review, approve, print and dispatch',
+    masterSearch: 'Find any agent, TL, tag or mobile and open the full profile',
+    barcodeChecker: 'Check a barcode range or list — issued, in stock or missing',
+    bulkTagStatus: 'Check many VRNs, Tag IDs or barcodes at once',
+    rangeReport: 'FF + GV report for any date range',
+    teamMap: 'Where the team is and how far from the office',
+    fastagMapping: 'Map barcodes and tag IDs to agents',
+    dualChannel: 'Agents working in both GV and First Forward',
+    masterStock: 'StockDataa and Tag Assignment stock in one place',
+    compare: 'GV and First Forward side by side',
+    dataQuality: 'Drops, zero-activity agents, duplicates and data mismatches',
+    dispatchPlan: 'Who needs stock next — box plan and pick list',
+    directAgents: 'Agents without a TL, for FF and GV',
+    newAgents: 'New agents and TL changes',
+    unusual: 'Agents with unusual wrong-VRN, replacement, chassis or spikes',
+    ffAgentSummary: 'One agent or TL — stock, issuance and ageing, share as PDF',
+    gvAgentSummary: 'One GV agent or TL — stock, issuance and ageing, share as PDF',
+    fastagChampions: 'Top agents and TLs by class',
+    settings: 'Branding, data sources, users and access',
+    performance: 'How every agent and TL is doing this month',
+    gvPerformance: 'How every GV agent and TL is doing this month'
+  };
+  function shortSubtitle(root, page) {
+    try {
+      const txt = SUBTITLES[page]; if (!txt || lang() === 'hi') return;
+      const sub = root.querySelector('.page-head .sub'); if (!sub) return;
+      sub.textContent = txt; sub.classList.add('sub-short');
+    } catch { /* optional */ }
+  }
+
+  /** 🔀 v228 — jodi wale pages (Dashboard · Trend · Performance · Stock · Agent/TL Summary) ke upar FF ↔ GV switch. */
+  function channelSwitch(root, page) {
+    try {
+      const def = pageDef(page); if (!def) return;
+      const ffId = def.twin ? def.id : def.twinOf, gvId = def.twin || (def.twinOf ? def.id : '');
+      if (!ffId || !gvId) return;
+      const can = (id) => { const d = pageDef(id); return !!(d && FF.auth.can(d.perm)); };
+      if (!can(ffId) || !can(gvId)) return;
+      const old = root.querySelector(':scope > .ch-switch'); if (old) old.remove();
+      const el = U.h(`<div class="ch-switch" role="tablist" aria-label="Channel"><a role="tab" href="#/${ffId}" class="ch-ff ${page === ffId ? 'on' : ''}" aria-selected="${page === ffId}">🟦 First Forward</a><a role="tab" href="#/${gvId}" class="ch-gv ${page === gvId ? 'on' : ''}" aria-selected="${page === gvId}">🟩 GV Partner</a></div>`);
+      root.prepend(el);
+    } catch { /* optional */ }
   }
 
   /** 🩺 v3.37 — Settings → Diagnostics ke SAVED fixes boot/par har page render par eagerly laga do.

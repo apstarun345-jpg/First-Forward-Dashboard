@@ -747,7 +747,7 @@ FF.pages = FF.pages || {};
     const allTls = collectTls(agents);
     const days = U.suggestDays();
     const ffB = chBasis('ff'), gvB = chBasis('gv');
-    const chLine = (c, b) => `<span class="dp2-basis ${c}" title="${esc(c === 'ff' ? `First Forward ka data kal aata hai — ${b.shortLabel || ''} tak ka data, isliye ${monthText(c)} ke ${b.days} din` : `GV live hai — sheet jaisa (aaj − 1) = ${b.days} din`)}">${CH[c].icon} <b>${CH[c].short}</b> ${esc(monthText(c))} ÷ <em>${fmt(b.days)} din</em></span>`;
+    const chLine = (c, b) => `<span class="dp2-basis ${c}" title="${esc(c === 'ff' ? `First Forward data arrives a day late — data until ${b.shortLabel || ''}, so ${b.days} days of ${monthText(c)}` : `GV is live — as in the sheet (today − 1) = ${b.days} days`)}">${CH[c].icon} <b>${CH[c].short}</b> ${esc(monthText(c))} ÷ <em>${fmt(b.days)} days</em></span>`;
     U.$('#dp2-formula', root).innerHTML = `<span><b>Run-rate</b> = data month ka issue ÷ (aaj − 1)</span>${chLine('ff', ffB)}${gvOn() ? chLine('gv', gvB) : ''}<span><b>Required</b> = run-rate × <em>${fmt(days)} din</em></span><span><b>WITH stock</b> = Required − stock</span><span><b>W/O stock</b> = Required</span><a href="#/settings" title="Kitne din — Settings → Alert modify">⚙️ ${fmt(days)} din</a>`;
 
     const tlNames = () => {
