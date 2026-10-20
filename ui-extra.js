@@ -15,8 +15,8 @@ window.FF = window.FF || {};
   const css = `
 .ux-av{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;margin-right:7px;vertical-align:middle;flex:none;letter-spacing:.02em;box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .ux-av.lg{width:40px;height:40px;font-size:15px}
-.ux-sticky{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 62px);transform:translate(-50%,-140%);z-index:900;display:flex;gap:6px;padding:6px 8px;border-radius:14px;background:var(--card,#fff);box-shadow:0 8px 24px rgba(15,23,42,.18);transition:transform .28s cubic-bezier(.2,.8,.2,1);max-width:calc(100vw - 24px);overflow-x:auto;scrollbar-width:none}
-.ux-sticky.on{transform:translate(-50%,0)}
+.ux-sticky{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 62px);transform:translate(-50%,-140%);opacity:0;pointer-events:none;transition:transform .25s ease,opacity .2s ease;z-index:900;display:flex;gap:6px;padding:6px 8px;border-radius:14px;background:var(--card,#fff);box-shadow:0 8px 24px rgba(15,23,42,.18);transition:transform .28s cubic-bezier(.2,.8,.2,1);max-width:calc(100vw - 24px);overflow-x:auto;scrollbar-width:none}
+.ux-sticky.on{transform:translate(-50%,0);opacity:1;pointer-events:auto}
 .ux-sticky a{display:flex;flex-direction:column;min-width:78px;padding:3px 9px;border-radius:10px;text-decoration:none;color:inherit;white-space:nowrap}
 .ux-sticky a:hover{background:rgba(99,102,241,.08)}
 .ux-sticky small{font-size:10.5px;opacity:.7;font-weight:600;max-width:110px;overflow:hidden;text-overflow:ellipsis}.ux-sticky b{font-size:15px}
@@ -92,6 +92,13 @@ html.mobile-ui .ux-fsheet.open>*{flex:1 1 100%;max-width:100%}
     if (show && !sShown) {
       const k = [...grid.querySelectorAll('.kpi')].slice(0, 5);
       stickyBar.innerHTML = k.map((x) => { const t = x.querySelector('.kpi-title'), v = x.querySelector('.kpi-value'); return `<a href="#" data-ux-go><small>${esc(t ? t.textContent.trim() : '')}</small><b>${esc(v ? v.textContent.trim() : '')}</b></a>`; }).join('');
+    }
+    // v232 — topbar ki asli height ke neeche dikhao (lamba topbar / banner ho to bhi kata na ho)
+    if (stickyBar && show) {
+      const tb = document.querySelector('.topbar');
+      const r = tb ? tb.getBoundingClientRect() : null;
+      const top = r && r.bottom > 0 ? Math.round(r.bottom + 8) : 12;
+      stickyBar.style.top = `${top}px`;
     }
     if (stickyBar && show !== sShown) stickyBar.classList.toggle('on', show);
     sShown = show;

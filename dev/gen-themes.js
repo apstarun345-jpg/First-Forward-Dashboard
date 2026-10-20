@@ -249,10 +249,7 @@ html[data-theme-pack="desk"] #mobile-nav .mobile-nav-item.active > span { backgr
 html[data-theme-pack="desk"] #mobile-nav .mobile-nav-item.active small { font-weight: 800; color: #11308c !important; }
 html[data-theme-pack="desk"] #mobile-nav .mobile-nav-item:not(.active) { color: #4b5b78 !important; }
 /* v226 — sidebar polish: glow, glass icons, section bars, active accent */
-html[data-theme-pack="desk"] .sidebar { background:
-  radial-gradient(420px 260px at 0% 0%, rgba(96, 141, 255, .35), transparent 70%),
-  radial-gradient(360px 300px at 100% 100%, rgba(14, 165, 233, .18), transparent 70%),
-  linear-gradient(170deg, #1a3fae 0%, #11308c 45%, #081a52 100%) !important; }
+html[data-theme-pack="desk"] .sidebar { background: linear-gradient(180deg, #13328f 0%, #0e2878 45%, #0a1d5c 100%) !important; }
 html[data-theme-pack="desk"] .sidebar .brand { margin: 0 10px 6px; padding: 16px 8px 14px; border-bottom: 1px solid rgba(255, 255, 255, .14); }
 html[data-theme-pack="desk"] .sidebar .brand-logo { box-shadow: 0 0 0 3px rgba(255, 255, 255, .18), 0 6px 16px rgba(0, 0, 0, .25) !important; }
 html[data-theme-pack="desk"] .sidebar .nav-ico { background: rgba(255, 255, 255, .13); border: 1px solid rgba(255, 255, 255, .16); border-radius: 11px; }
