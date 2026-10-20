@@ -318,7 +318,7 @@ test('🔎 dropdown suggestions — partial names use direct fallback and both i
 test('🎨 theme — normal light UI by default; dark splash styling is scoped only to the splash', async () => {
   const index = await read('index.html');
   const boot = await read('ui-boot.js');
-  assert.match(index, /#app-boot\{background:#0b1020 !important;color:#fff !important\}/);
+  assert.match(index, /#app-boot\{background:[^}]*#11308c[^}]*!important;color:#fff !important\}/);
   assert.doesNotMatch(index, /html,body\{background:#0b1020 !important;color:#fff !important\}/);
   assert.match(index, /styles\.css\?v=\d+/);
   assert.match(index, /ui-boot\.js\?v=\d+/);

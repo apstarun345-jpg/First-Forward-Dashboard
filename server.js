@@ -4874,8 +4874,8 @@ async function handleApi(req, res, url) {
       display_override: ['standalone', 'minimal-ui'],
       launch_handler: { client_mode: 'navigate-existing' },
       prefer_related_applications: false,
-      background_color: (s.theme && s.theme.sidebarBg) || '#111214',
-      theme_color: (s.theme && s.theme.accent) || '#111214',
+      background_color: '#0a1d5c',
+      theme_color: '#0a1d5c',
       categories: ['business', 'productivity', 'finance'],
       icons: [
         { src: '/api/pwa/icon/192', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },

@@ -1750,9 +1750,21 @@ window.FF = window.FF || {};
           pop.appendChild(el.closest('.theme-wrap') || el);
         });
         moreBtn.after(pop);
+        // 🧹 v229 — topbar me sirf roz ke buttons (↻ · 🔔 · user); baaki saare (jo modules baad me jodte hain — 📅 🔊 ▦ 🎯 ☆ …) bhi ⋯ me
+        const KEEP = (el) => el === moreBtn || el === pop || el.id === 'pwa-install' || el.id === 'top-refresh' || (el.classList && (el.classList.contains('notification-wrap') || el.classList.contains('user-wrap') || el.classList.contains('master-search') || el.classList.contains('global-search')));
+        const tidy = () => {
+          [...topActions.children].forEach((el) => {
+            if (KEEP(el) || el.tagName === 'SCRIPT') return;
+            const btn = el.matches('button, a') ? el : el.querySelector('button, a');
+            if (btn && !btn.dataset.label) btn.dataset.label = String(btn.getAttribute('title') || btn.getAttribute('aria-label') || '').split(/[(·—]/)[0].trim();
+            pop.appendChild(el);
+          });
+        };
+        tidy();
+        new MutationObserver(() => tidy()).observe(topActions, { childList: true });
         const sync = () => { pop.hidden = !topActions.classList.contains('more-open'); };
         new MutationObserver(sync).observe(topActions, { attributes: true, attributeFilter: ['class'] });
-        pop.addEventListener('click', (e) => { if (e.target.closest('#lang-toggle, #theme-toggle, #a11y-btn')) topActions.classList.remove('more-open'), moreBtn.setAttribute('aria-expanded', 'false'), (moreBtn.textContent = '⋯'); });
+        pop.addEventListener('click', (e) => { if (e.target.closest('button:not(#theme-pack-btn)')) topActions.classList.remove('more-open'), moreBtn.setAttribute('aria-expanded', 'false'), (moreBtn.textContent = '⋯'); });
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && topActions.classList.contains('more-open')) { topActions.classList.remove('more-open'); moreBtn.textContent = '⋯'; } });
       }
       moreBtn.addEventListener('click', (e) => {

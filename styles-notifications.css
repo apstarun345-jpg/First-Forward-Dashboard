@@ -41,6 +41,4 @@ button.notification-item:hover { filter: brightness(.97); }
 }
 .notify-groups { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 12px 8px; }
 .notify-group { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line, #e3eaf8); background: var(--card, #fff); color: var(--ink); font-size: 12px; font-weight: 600; cursor: pointer; }
-.notify-group b { font-variant-numeric: tabular-nums; }
-.notify-group i { font-style: normal; font-size: 10.5px; font-weight: 800; color: #fff; background: #dc2626; border-radius: 999px; padding: 1px 6px; }
 .notify-group.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; }

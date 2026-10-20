@@ -41,9 +41,36 @@ window.FF = window.FF || {};
       });
     } catch { /* optional */ }
   }
+  // 🎨 v229 — heading ke shuru ka emoji ek chhote rounded icon tile me (sab jagah ek jaisa icon style)
+  const EMO = /^\s*((?:\p{Extended_Pictographic}|\p{Regional_Indicator}{2})(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*)\s*/u;
+  function iconHeads(root) {
+    try {
+      (root || document).querySelectorAll('.card-head h3:not([data-hd]), .page-head h1:not([data-hd])').forEach((h) => {
+        h.setAttribute('data-hd', '1');
+        const t = h.firstChild;
+        if (!t || t.nodeType !== 3) return;
+        const m = EMO.exec(t.nodeValue);
+        if (!m) return;
+        const ico = document.createElement('span');
+        ico.className = 'hd-ico'; ico.setAttribute('aria-hidden', 'true'); ico.textContent = m[1];
+        t.nodeValue = t.nodeValue.slice(m[0].length);
+        h.insertBefore(ico, t);
+        h.classList.add('has-hd-ico');
+      });
+    } catch { /* optional */ }
+  }
+  // 0 wale KPI cards halke (grey) — asli numbers par dhyan jaye
+  function zeroKpis(root) {
+    try {
+      (root || document).querySelectorAll('.kpi .kpi-value').forEach((v) => {
+        const k = v.closest('.kpi'); const txt = (v.firstChild && v.firstChild.nodeType === 3 ? v.firstChild.nodeValue : v.textContent || '').trim();
+        k.classList.toggle('kpi-zero', /^[₹]?0(\.0+)?%?$/.test(txt));
+      });
+    } catch { /* optional */ }
+  }
   if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
     let queued = false;
-    const run = () => { queued = false; tintKpis(document); };
+    const run = () => { queued = false; tintKpis(document); iconHeads(document); zeroKpis(document); };
     const start = () => { try { new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(run); } }).observe(document.body, { childList: true, subtree: true }); run(); } catch { /* optional */ } };
     if (document.body) start(); else document.addEventListener('DOMContentLoaded', start, { once: true });
   }

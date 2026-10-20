@@ -6280,6 +6280,9 @@ tr.clickable[data-pick-agent], tr.clickable[data-pick-tl] { cursor: pointer; }
 /* ===== 📱 Tag Request card view (phone) + swipe ===== */
 .tr-card-toggle.on, .tr-detail-toggle.on { background: color-mix(in srgb, var(--brand) 14%, var(--card)); border-color: var(--brand); }
 .table-wrap.tall.tr-req-wrap.tr-cards, .tr-req-wrap.tr-cards { max-height: none !important; overflow: visible !important; }
+.tr-req-wrap.tr-cards .tr-req-tbl colgroup,
+.tr-req-wrap.tr-cards .tr-req-tbl thead { display: none; }
+.tr-req-wrap.tr-cards .tr-req-tbl tbody { display: block; }
 .tr-req-wrap.tr-cards td input:not([type=checkbox]), .tr-req-wrap.tr-cards td select, .tr-req-wrap.tr-cards td textarea { max-width: 100%; width: 100%; box-sizing: border-box; }
 .tr-req-wrap.tr-cards td * { max-width: 100%; }
 .tr-req-wrap.tr-cards td { display: block; padding: 0 !important; border: 0 !important; width: auto !important; min-width: 0; text-align: left; background: transparent; }
@@ -6577,6 +6580,7 @@ body.public-form .tr-public-page { max-width: 880px; }
 /* hero */
 body.public-form .tr-hero { display: block; margin: 0 0 14px; padding: 22px 20px 18px; border-radius: 28px; color: #fff; position: relative; overflow: hidden;
   background: linear-gradient(145deg, #1a3fae 0%, #11308c 55%, #0a1d5c 100%); box-shadow: 0 18px 40px rgba(23, 65, 184, .28); }
+body.public-form .tr-hero::after { content: ""; position: absolute; right: -70px; bottom: -90px; width: 260px; height: 260px; border-radius: 50%; border: 36px solid rgba(255, 255, 255, .07); pointer-events: none; }
 body.public-form .tr-hero .tr-public-brand b { color: #fff; font-size: 14px; }
 body.public-form .tr-hero .tr-public-brand small { color: rgba(255, 255, 255, .72); }
 body.public-form .tr-hero-kicker { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .7); }
@@ -6604,18 +6608,27 @@ body.public-form .tr-qty-list { border-radius: 18px; border-color: #dfe8fa; back
 body.public-form .tr-add-btn { width: 100%; justify-content: center; border-style: dashed; border-color: #a9c3f5; color: #1d4ed8; background: #f3f7ff; padding: 12px; }
 /* sticky submit bar */
 body.public-form .tr-submit-bar { bottom: 10px; padding: 10px 12px 10px 18px; border-radius: 999px; background: rgba(255, 255, 255, .94); border: 1px solid #dde7fb; box-shadow: 0 14px 34px rgba(29, 78, 216, .18); backdrop-filter: blur(8px); }
+body.public-form .tr-submit-sum b { color: #1d4ed8; font-size: 16px; }
 /* Meri requests: stat tiles + ledger-style cards */
+body.public-form .tr-es-tags span { display: block; padding: 12px 14px; border-radius: 18px; font-size: 11.5px; font-weight: 700; color: #4a6aa8; background: #eaf1ff; border: 1px solid #cfe0ff; }
 body.public-form .tr-es-tags span:last-child { color: #1f8a5b; background: #ecfaf3; border-color: #c6efd9; }
+body.public-form .tr-es-tags b { display: block; margin-top: 3px; font-size: 24px; line-height: 1.1; letter-spacing: -.02em; color: #1d4ed8; }
+body.public-form .tr-es-tags span:last-child b { color: #12905a; }
 body.public-form .tr-emp-filters { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
 body.public-form .tr-emp-filter { flex: none; display: inline-flex; gap: 6px; align-items: center; padding: 8px 14px; border-radius: 999px; background: #fff; border: 1px solid #dfe7f7; color: #4a5b7e; font-weight: 600; font-size: 13px; cursor: pointer; }
 body.public-form .tr-emp-filter.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; }
+body.public-form .tr-emp-filter b { font-variant-numeric: tabular-nums; }
 body.public-form .tr-st-card { border: 1px solid #e6edfb; border-left: 1px solid #e6edfb; border-radius: 20px; padding: 14px 16px; background: #fff; box-shadow: 0 4px 14px rgba(29, 78, 216, .04); }
+body.public-form .tr-st-total b { font-size: 18px; color: #1d4ed8; }
 body.public-form .tr-step { background: #eef2fa; }
 body.public-form .tr-emp-chip { background: #fff; border-radius: 999px; }
+body.public-form .tr-emp-details > summary { padding: 16px 20px; }
 /* done screen */
 body.public-form .tr-done-icon { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto; border-radius: 50%; background: #ecfaf3; font-size: 30px; }
 @media (max-width: 720px) {
 body.public-form .main { padding: 8px 10px 96px; }
+body.public-form .tr-hero h1 { font-size: 28px; }
+body.public-form .tr-hero-stat b { font-size: 22px; }
 body.public-form .card-head { padding: 16px 16px 0; }
 body.public-form .card-body { padding: 12px 14px 16px; }
 }
@@ -6636,6 +6649,8 @@ html[data-theme="dark"] .pw-banner { background: #3a1d0a !important; color: #fed
 .ch-switch a.ch-ff.on { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff; box-shadow: 0 6px 14px rgba(37, 99, 235, .3); }
 .ch-switch a.ch-gv.on { background: linear-gradient(135deg, #10b981, #0d9488); color: #fff; box-shadow: 0 6px 14px rgba(16, 185, 129, .3); }
 /* 🗂️ v228 — notification groups */
+.notify-group b { font-variant-numeric: tabular-nums; }
+.notify-group i { font-style: normal; font-size: 10.5px; font-weight: 800; color: #fff; background: #dc2626; border-radius: 999px; padding: 1px 6px; }
 /* 🟢 v228 — freshness status line */
 .fresh-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700; }
 .fresh-status.ok { background: #dcfce7; color: #166534; }
@@ -6649,3 +6664,27 @@ html.mobile-ui .table-wrap { max-height: 72vh; overflow: auto; -webkit-overflow-
 html.mobile-ui .tbl thead th { position: sticky; top: 0; z-index: 3; }
 html.mobile-ui .tbl th:first-child, html.mobile-ui .tbl td:first-child { position: sticky; left: 0; z-index: 2; background: var(--card, #fff); box-shadow: 1px 0 0 var(--line, #e3eaf8); }
 html.mobile-ui .tbl thead th:first-child { z-index: 4; background: var(--pk-head, #eef3fe); }
+/* 🧹 v229 — topbar ⋯ menu: har tool ek label wali row (modules ke jode buttons bhi) */
+html:not(.mobile-ui) .top-more-pop > button, html:not(.mobile-ui) .top-more-pop > a, html:not(.mobile-ui) .top-more-pop > * > button {
+  display: flex; align-items: center; gap: 8px; justify-content: flex-start; width: auto; height: auto; min-width: 0;
+  padding: 8px 10px; border-radius: 10px; font-size: 13px; font-weight: 650; border: 1px solid var(--line, #e6e8f2); background: var(--card, #fff); color: var(--ink); cursor: pointer;
+}
+html:not(.mobile-ui) .top-more-pop > button:not(.icon-btn)::after, html:not(.mobile-ui) .top-more-pop > * > button:not(.icon-btn)::after { content: attr(data-label); font-size: 12.5px; color: var(--ink, #0f172a); }
+html:not(.mobile-ui) .top-more-pop button:hover { background: var(--pk-soft, #eaf1ff); }
+/* 🎨 v229 — heading icon tiles (charts.js iconHeads) */
+.hd-ico { display: inline-grid; place-items: center; width: 30px; height: 30px; margin-right: 8px; border-radius: 10px; font-size: 16px; line-height: 1; vertical-align: -6px; background: color-mix(in srgb, var(--brand, #1d4ed8) 10%, var(--card, #fff)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand, #1d4ed8) 16%, transparent); flex: none; }
+.card-head h3.has-hd-ico { display: flex; align-items: center; flex-wrap: wrap; gap: 0 2px; }
+.page-head h1 .hd-ico { width: 38px; height: 38px; font-size: 20px; border-radius: 12px; vertical-align: -7px; background: rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .28); -webkit-text-fill-color: initial; }
+html:not([data-theme-pack="desk"]) .page-head h1 .hd-ico { background: color-mix(in srgb, var(--brand, #4f46e5) 10%, var(--card, #fff)); }
+/* 🔡 v229 — KPI titles in normal case (easier to read) */
+html body .kpi .kpi-title, html body .gs-kpi .kpi-title { text-transform: none; letter-spacing: .01em; font-size: 12.5px; font-weight: 700; }
+/* ⚪ v229 — zero-value KPI cards muted */
+html body .kpi.kpi-zero { --k1: #64748b; --k2: #94a3b8; --k3: #b6c2d3; --kglow: rgba(100, 116, 139, .3); }
+html body .kpi.kpi-zero .kpi-value { opacity: .85; }
+/* 📱 v229 — compact phone login: form first, capabilities box hidden */
+html.mobile-ui .login-only-shell .pro-info-box { display: none !important; }
+html.mobile-ui .login-only-shell .pro-card { padding-top: 18px !important; padding-bottom: 18px !important; }
+html.mobile-ui .login-only-shell .login-app-brand { padding: 10px 12px !important; margin-bottom: 10px !important; }
+html.mobile-ui .login-only-shell .pro-login-header { margin-bottom: 10px !important; }
+html.mobile-ui .login-only-shell .pro-hint { display: none !important; }
+/* 🗂️ v229 — settings tab groups */

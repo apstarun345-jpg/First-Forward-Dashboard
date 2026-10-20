@@ -7,6 +7,8 @@ FF.pages = FF.pages || {};
   const U = FF.util, A = FF.auth;
   const esc = U.esc;
   const TABS = [['account', '👤 My account'], ['diagnostics', '🩺 Site diagnostics'], ['sound', '🔊 Sound & voice'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['direct', '🧍 Direct agents'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
+  // 🗂️ v229 — 15 tabs → 5 saaf groups
+  const TAB_GROUPS = [['My account', ['account', 'sound']], ['Data & Sheets', ['sources', 'data', 'direct', 'rules']], ['Users & Access', ['users', 'access', 'links', 'audit']], ['Alerts & Look', ['features', 'contacts', 'brand']], ['System', ['diagnostics', 'backup']]];
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
@@ -2424,7 +2426,7 @@ FF.pages = FF.pages || {};
     if (!admin && !['account', 'diagnostics'].includes(tab)) tab = 'account';
     const visibleTabs = admin ? TABS : TABS.filter(([k]) => ['account', 'diagnostics'].includes(k));
     root.innerHTML = `<div class="page-head"><div><h1>⚙️ Settings</h1><p class="sub">${admin ? 'Har cheez yahin se modify karo — branding, images, colours, sheet mapping, thresholds, contacts, users & access' : 'Profile, site diagnostics, password aur aapka access'}</p></div></div>
-      <div class="card controls"><div class="seg" id="set-tabs">${visibleTabs.map(([k, l]) => `<button class="seg-btn ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div></div>
+      <div class="card controls"><div class="set-groups" id="set-tabs">${TAB_GROUPS.map(([label, keys]) => { const list = visibleTabs.filter(([k]) => keys.includes(k)); return list.length ? `<div class="set-group"><small>${label}</small><div class="seg">${list.map(([k, l]) => `<button class="seg-btn ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div></div>` : ''; }).join('')}</div></div>
       <div id="set-body">${U.spinner('Settings load ho rahi hain…')}</div>`;
     const body = U.$('#set-body', root);
     try { if (admin) await loadSettings(); } catch (err) { body.innerHTML = U.errorBox(err); return; }
