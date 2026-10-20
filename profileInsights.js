@@ -14,7 +14,7 @@ window.FF = window.FF || {};
   const esc = U.esc;
   const fmt = (n, d) => U.fmt(n, d);
   const GROUPS = ['VC4', 'VC20', 'VC5+'];
-  const COLORS = { VC4: '#6366f1', VC20: '#ec4899', 'VC5+': '#f59e0b' };
+  const COLORS = { VC4: '#2563eb', VC20: '#f59e0b', 'VC5+': '#ea580c' };   // v226 — site-wide class colours
   const HIGH_GROWTH = 20;            // % — run-rate growth vs last month
   const norm = (s) => String(s === null || s === undefined ? '' : s).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   const normId = (v) => String(v === null || v === undefined ? '' : v).trim().replace(/\.0+$/, '').toUpperCase();

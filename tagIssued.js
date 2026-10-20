@@ -18,10 +18,10 @@ FF.pages = FF.pages || {};
   ];
   const KPIS = [
     { key: 'total', label: 'Total Issued', short: 'Total', icon: '🏷️', accent: '#6366f1', f: '' },
-    { key: 'vc4', label: 'VC4', short: 'VC4', icon: '🚗', accent: '#10b981', f: 'vc4' },
+    { key: 'vc4', label: 'VC4', short: 'VC4', icon: '🚗', accent: '#2563eb', f: 'vc4' },
     { key: 'vc20', label: 'VC20', short: 'VC20', icon: '🚚', accent: '#f59e0b', f: 'vc20' },
-    { key: 'vc5p', label: 'VC5+', short: 'VC5+', icon: '🚛', accent: '#ec4899', f: 'vc5p' },
-    { key: 'comm', label: 'VC20 + VC5+', short: 'Commercial', icon: '🏭', accent: '#0ea5e9', f: 'comm', sub: 'Commercial (NVC4)' }
+    { key: 'vc5p', label: 'VC5+', short: 'VC5+', icon: '🚛', accent: '#ea580c', f: 'vc5p' },
+    { key: 'comm', label: 'VC20 + VC5+', short: 'Commercial', icon: '🏭', accent: '#f97316', f: 'comm', sub: 'Commercial (NVC4)' }
   ];
 
   const card = (title, body, right, cls) => `<section class="card ${cls || ''}"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;

@@ -6,7 +6,7 @@ window.FF = window.FF || {};
   const esc = U.esc;
   const PALETTE = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#0ea5e9', '#8b5cf6', '#f97316', '#14b8a6', '#ef4444', '#84cc16', '#06b6d4', '#d946ef', '#64748b'];
   const COLORS = {
-    VC4: '#6366f1', VC20: '#ec4899', 'VC5+': '#f59e0b', NVC4: '#f59e0b', Commercial: '#f59e0b',
+    VC4: '#2563eb', VC20: '#f59e0b', 'VC5+': '#ea580c', NVC4: '#f97316', Commercial: '#f97316',
     ISSUANCE: '#10b981', REPLACEMENT: '#f97316',
     'First Forward': '#8b5cf6', 'GV Partner': '#0ea5e9',
     current: '#6366f1', last: '#ec4899',
@@ -29,10 +29,32 @@ window.FF = window.FF || {};
   const PACK_ON = () => PALETTE[0] !== BASE_PALETTE[0] || PALETTE[1] !== BASE_PALETTE[1];
   const tc = (c) => { if (!c || !PACK_ON()) return c; const i = BASE_PALETTE.indexOf(String(c).toLowerCase()); return i >= 0 ? PALETTE[i] : c; };
   syncPackPalette();
+  // 🚗🚚 v226 — KPI cards bhi class ke rang me: title me VC4 = neela, Commercial / VC20 / VC5+ = orange (har page par, ek jagah se).
+  function tintKpis(root) {
+    try {
+      (root || document).querySelectorAll('.kpi:not([data-cls-tint]), .gs-kpi:not([data-cls-tint])').forEach((k) => {
+        k.setAttribute('data-cls-tint', '1');
+        const t = ((k.querySelector('.kpi-title, .gs-kpi-title, h4, small') || {}).textContent || '').trim();
+        if (!t || /^vs\b/i.test(t)) return;
+        if (/commercial|nvc4|vc20|vc5\+|\bcomm\b/i.test(t)) k.classList.add('kpi-cls-comm');
+        else if (/\bvc4\b/i.test(t)) k.classList.add('kpi-cls-vc4');
+      });
+    } catch { /* optional */ }
+  }
+  if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+    let queued = false;
+    const run = () => { queued = false; tintKpis(document); };
+    const start = () => { try { new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(run); } }).observe(document.body, { childList: true, subtree: true }); run(); } catch { /* optional */ } };
+    if (document.body) start(); else document.addEventListener('DOMContentLoaded', start, { once: true });
+  }
   let seq = 0;
   const specs = new Map();
 
-  function color(name, i) { return COLORS[name] || PALETTE[i % PALETTE.length]; }
+  // 🚗🚚 v226 — har class ka ek pakka rang, poori site par: VC4 = neela, VC20 / VC5+ / commercial = orange.
+  const CLS = { VC4: '#2563eb', VC20: '#f59e0b', 'VC5+': '#ea580c', NVC4: '#f97316', COMMERCIAL: '#f97316', 'ALL COMM': '#f97316', COMM: '#f97316',
+    VC5: '#fb923c', VC6: '#f97316', VC7: '#ea580c', VC12: '#d9480f', VC16: '#c2410c' };
+  const cc = (n) => CLS[String(n == null ? '' : n).trim().toUpperCase().replace(/\s+/g, ' ')] || null;
+  function color(name, i) { return cc(name) || COLORS[name] || PALETTE[i % PALETTE.length]; }
   function fmtVal(v, f) { return f ? f(v) : U.fmt(v); }
   function niceMax(max) {
     if (!max || max <= 0) return 1;
@@ -42,13 +64,13 @@ window.FF = window.FF || {};
     return step * exp;
   }
   function legend(series) {
-    return `<div class="legend">${series.map((s, i) => `<span class="legend-item"><i style="background:${tc(s.color) || color(s.name, i)}"></i>${esc(s.name)}</span>`).join('')}</div>`;
+    return `<div class="legend">${series.map((s, i) => `<span class="legend-item"><i style="background:${cc(s.name) || tc(s.color) || color(s.name, i)}"></i>${esc(s.name)}</span>`).join('')}</div>`;
   }
 
   /** Vertical (stacked) bars. opts: { labels, series:[{name, values, color}], height, format, showValues, labelEvery, tips } */
   function bars(opts) {
     const { labels } = opts;
-    const series = opts.series.map((s, i) => ({ ...s, color: tc(s.color) || color(s.name, i) }));
+    const series = opts.series.map((s, i) => ({ ...s, color: cc(s.name) || tc(s.color) || color(s.name, i) }));
     const totals = labels.map((_, i) => U.sum(series, (s) => s.values[i] || 0));
     const max = niceMax(Math.max(...totals, 0));
     const height = opts.height || 220;
@@ -62,7 +84,7 @@ window.FF = window.FF || {};
       const segs = series.map((s) => {
         const v = s.values[i] || 0;
         if (v <= 0) return '';
-        const c = classy ? PALETTE[i % PALETTE.length] : s.color;
+        const c = classy ? (cc(label) || PALETTE[i % PALETTE.length]) : s.color;
         return `<div class="vseg" style="flex:0 0 ${(v / total) * 100}%;background:linear-gradient(180deg, color-mix(in srgb, ${c} 72%, #fff), ${c})"></div>`;
       }).join('');
       const tip = opts.tips && opts.tips[i] ? opts.tips[i] : `<b>${esc(opts.tipLabels ? opts.tipLabels[i] : label)}</b><br>${series.length > 1 ? series.map((s) => `<i style="background:${s.color}"></i>${esc(s.name)}: <b>${fmtVal(s.values[i] || 0, opts.format)}</b>`).join('<br>') + '<br>' : ''}Total: <b>${fmtVal(total, opts.format)}</b>`;
@@ -84,7 +106,7 @@ window.FF = window.FF || {};
     const items = opts.items || [];
     const max = opts.max || Math.max(1, ...items.map((it) => Math.max(it.value || 0, it.compare || 0)));
     const html = `<div class="hbars">${items.map((it, i) => {
-      const c = tc(it.color) || PALETTE[i % PALETTE.length];
+      const c = cc(it.label) || tc(it.color) || PALETTE[i % PALETTE.length];
       const w = Math.max(0, ((it.value || 0) / max) * 100);
       const cw = it.compare !== undefined && it.compare !== null ? Math.max(0, (it.compare / max) * 100) : null;
       const g = cw !== null ? U.growth(it.value || 0, it.compare) : null;
@@ -109,11 +131,11 @@ window.FF = window.FF || {};
     const segs = items.map((it, i) => {
       const frac = total ? it.value / total : 0;
       const len = frac * circ;
-      const seg = `<circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="${tc(it.color) || color(it.label, i)}" stroke-width="14" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" data-tip="${esc(`<b>${it.label}</b><br>${fmtVal(it.value, opts.format)} · ${U.fmtPct(frac * 100)}`)}" ${it.attr || ''}></circle>`;
+      const seg = `<circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="${cc(it.label) || tc(it.color) || color(it.label, i)}" stroke-width="14" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" data-tip="${esc(`<b>${it.label}</b><br>${fmtVal(it.value, opts.format)} · ${U.fmtPct(frac * 100)}`)}" ${it.attr || ''}></circle>`;
       offset += len;
       return seg;
     }).join('');
-    const legendHtml = items.map((it, i) => `<div class="donut-leg" ${it.attr || ''}><i style="background:${tc(it.color) || color(it.label, i)}"></i><span class="donut-leg-label">${esc(it.label)}</span><b>${fmtVal(it.value, opts.format)}</b><span class="donut-leg-pct">${U.fmtPct(total ? (it.value / total) * 100 : 0)}</span></div>`).join('');
+    const legendHtml = items.map((it, i) => `<div class="donut-leg" ${it.attr || ''}><i style="background:${cc(it.label) || tc(it.color) || color(it.label, i)}"></i><span class="donut-leg-label">${esc(it.label)}</span><b>${fmtVal(it.value, opts.format)}</b><span class="donut-leg-pct">${U.fmtPct(total ? (it.value / total) * 100 : 0)}</span></div>`).join('');
     const cid = `ch${++seq}`;
     specs.set(cid, { kind: 'donut', opts: { ...opts, items, total } });
     return `<div class="chart-shot" data-cid="${cid}"><div class="donut"><div class="donut-ring" style="width:${size}px;height:${size}px"><svg viewBox="0 0 100 100" width="${size}" height="${size}" style="transform:rotate(-90deg)"><circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="#eef0f6" stroke-width="14"></circle>${segs}</svg>
@@ -131,7 +153,7 @@ window.FF = window.FF || {};
     const W = Math.max(280, el.clientWidth || 640);
     const H = opts.height || 240;
     const L = 46, R = 14, T = 14, B = 26;
-    const series = opts.series.map((s, i) => ({ ...s, color: tc(s.color) || color(s.name, i) }));
+    const series = opts.series.map((s, i) => ({ ...s, color: cc(s.name) || tc(s.color) || color(s.name, i) }));
     const n = opts.labels.length;
     const allVals = series.flatMap((s) => s.values.filter((v) => v !== null && v !== undefined));
     const max = niceMax(Math.max(...allVals, 0));
@@ -268,7 +290,7 @@ window.FF = window.FF || {};
     items.forEach((it, i) => {
       const frac = total ? it.value / total : 0;
       if (frac <= 0) return;
-      ctx.strokeStyle = tc(it.color) || color(it.label, i);
+      ctx.strokeStyle = cc(it.label) || tc(it.color) || color(it.label, i);
       ctx.beginPath(); ctx.arc(cx, cy, r, angle, angle + frac * Math.PI * 2); ctx.stroke();
       angle += frac * Math.PI * 2;
     });
@@ -279,7 +301,7 @@ window.FF = window.FF || {};
     let ly = Math.max(24, cy - items.length * 11);
     ctx.textAlign = 'left';
     items.forEach((it, i) => {
-      ctx.fillStyle = tc(it.color) || color(it.label, i); ctx.fillRect(230, ly - 9, 10, 10);
+      ctx.fillStyle = cc(it.label) || tc(it.color) || color(it.label, i); ctx.fillRect(230, ly - 9, 10, 10);
       ctx.fillStyle = PNG_INK; ctx.font = '12px Inter, sans-serif';
       ctx.fillText(truncText(ctx, it.label, W - 380), 246, ly);
       ctx.font = '700 12px Inter, sans-serif';
@@ -307,7 +329,7 @@ window.FF = window.FF || {};
         ctx.fillStyle = '#cbd5e1';
         ctx.fillRect(trackX, y + rowH / 2 - 5, trackW * Math.max(0, it.compare / max), 10);
       }
-      ctx.fillStyle = tc(it.color) || PALETTE[i % PALETTE.length];
+      ctx.fillStyle = cc(it.label) || tc(it.color) || PALETTE[i % PALETTE.length];
       ctx.fillRect(trackX, y + rowH / 2 - 5, trackW * Math.max(0, (it.value || 0) / max), 10);
       ctx.font = '700 12px Inter, sans-serif'; ctx.textAlign = 'right'; ctx.fillStyle = PNG_INK;
       ctx.fillText(fmtVal(it.value || 0, opts.format), W - 12, y + rowH / 2 + 4);
@@ -337,5 +359,5 @@ window.FF = window.FF || {};
     else U.downloadBlob(name, new Blob([c.toDataURL('image/png')], { type: 'image/png' }));
   }
 
-  FF.charts = { PALETTE, COLORS, syncPackPalette, color, bars, hbars, donut, lines, mount, legend, spark, download };
+  FF.charts = { PALETTE, COLORS, CLASS_COLORS: CLS, classColor: cc, syncPackPalette, color, bars, hbars, donut, lines, mount, legend, spark, download };
 })(window.FF);

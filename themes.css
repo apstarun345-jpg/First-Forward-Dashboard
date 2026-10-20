@@ -2,7 +2,7 @@
 /* ---------- Royal Blue Desk (light) ---------- */
 html[data-theme-pack="desk"] {
   color-scheme: light;
-  --bg: #f1f5fd; --card: #ffffff; --ink: #0e1a3a; --muted: #62728f; --line: #e3eaf8;
+  --bg: #f1f5fd; --card: #ffffff; --ink: #0b1630; --muted: #4b5b78; --line: #e3eaf8;
   --brand: #1d4ed8; --brand-2: #0ea5e9; --brand2: #0ea5e9;
   --side-bg: #081a52; --side-bg2: #1a3fae; --side-ink: #e3ecff;
   --pk-surface2: #ffffff; --pk-head: #eef3fe; --pk-topbar: rgba(241,245,253,.86); --pk-soft: #eaf1ff;
@@ -406,6 +406,40 @@ html[data-theme-pack="desk"] .sidebar .nav-item.active, html[data-theme-pack="de
 html[data-theme-pack="desk"] .sidebar .nav-item.active small { color: #3b5bb5 !important; -webkit-text-fill-color: #3b5bb5 !important; }
 html[data-theme-pack="desk"] .page-head .sub, html[data-theme-pack="desk"] .page-head .dim, html[data-theme-pack="desk"] .page-head small { color: #fff !important; font-weight: 600; }
 html[data-theme-pack="desk"]:not([data-theme-pack=""]) .home-hero.v2 .sub { color: #fff !important; font-weight: 600; }
+/* v226 — readability: KPI text, small grey text */
+html[data-theme-pack="desk"] .kpi .kpi-title, html[data-theme-pack="desk"] .kpi .kpi-value, html[data-theme-pack="desk"] .kpi .kpi-foot { text-shadow: 0 1px 2px rgba(0, 0, 0, .22); }
+html[data-theme-pack="desk"] .kpi .kpi-foot { font-weight: 600; }
+html[data-theme-pack="desk"] .card .dim, html[data-theme-pack="desk"] .card small.dim { color: #4b5b78; }
+/* v226 — phone: header compact, buttons one swipeable row (nothing cut off) */
+html.mobile-ui[data-theme-pack="desk"] .page-head { padding: 16px 16px 14px; border-radius: 22px; }
+html.mobile-ui[data-theme-pack="desk"] .page-head h1 { font-size: 24px; }
+html.mobile-ui[data-theme-pack="desk"] .page-head .sub { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; }
+html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 8px; width: 100%; max-width: 100%; padding-bottom: 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
+html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions::-webkit-scrollbar { display: none; }
+html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions > * { flex: none; white-space: nowrap; }
+html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions .btn { padding: 8px 14px; font-size: 13px; }
+/* v226 — phone bottom bar: open page in a blue pill */
+html[data-theme-pack="desk"] #mobile-nav .mobile-nav-item.active { color: #1d4ed8 !important; }
+html[data-theme-pack="desk"] #mobile-nav .mobile-nav-item.active > span { background: #e3ecff !important; border-radius: 999px; padding: 4px 16px; box-shadow: inset 0 0 0 1px #bcd0fb; }
+html[data-theme-pack="desk"] #mobile-nav .mobile-nav-item.active small { font-weight: 800; color: #11308c !important; }
+html[data-theme-pack="desk"] #mobile-nav .mobile-nav-item:not(.active) { color: #4b5b78 !important; }
+/* v226 — sidebar polish: glow, glass icons, section bars, active accent */
+html[data-theme-pack="desk"] .sidebar { background:
+  radial-gradient(420px 260px at 0% 0%, rgba(96, 141, 255, .35), transparent 70%),
+  radial-gradient(360px 300px at 100% 100%, rgba(14, 165, 233, .18), transparent 70%),
+  linear-gradient(170deg, #1a3fae 0%, #11308c 45%, #081a52 100%) !important; }
+html[data-theme-pack="desk"] .sidebar .brand { margin: 0 10px 6px; padding: 16px 8px 14px; border-bottom: 1px solid rgba(255, 255, 255, .14); }
+html[data-theme-pack="desk"] .sidebar .brand-logo { box-shadow: 0 0 0 3px rgba(255, 255, 255, .18), 0 6px 16px rgba(0, 0, 0, .25) !important; }
+html[data-theme-pack="desk"] .sidebar .nav-ico { background: rgba(255, 255, 255, .13); border: 1px solid rgba(255, 255, 255, .16); border-radius: 11px; }
+html[data-theme-pack="desk"] .sidebar .nav-item { position: relative; }
+html[data-theme-pack="desk"] .sidebar .nav-item:hover { background: rgba(255, 255, 255, .12); transform: translateX(3px); }
+html[data-theme-pack="desk"] .sidebar .nav-item.active::before { content: ""; position: absolute; left: -10px; top: 12px; bottom: 12px; width: 4px; border-radius: 0 4px 4px 0; background: #fbbf24; box-shadow: 0 0 10px rgba(251, 191, 36, .7); }
+html[data-theme-pack="desk"] .sidebar .nav-item.active .nav-ico { background: #e3ecff; border-color: #bcd0fb; }
+html[data-theme-pack="desk"] .sidebar .nav-sec-toggle { background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .1); border-radius: 14px; margin: 6px 0 4px; letter-spacing: .1em; }
+html[data-theme-pack="desk"] .sidebar .nav-sec-toggle.open { background: rgba(255, 255, 255, .14); border-color: rgba(255, 255, 255, .22); }
+html[data-theme-pack="desk"] .sidebar .nav-sec-toggle:hover { background: rgba(255, 255, 255, .16); }
+html[data-theme-pack="desk"] .sidebar .side-foot #user-box > * { background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .16); border-radius: 16px; }
+html[data-theme-pack="desk"] .sidebar .nav { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .3) transparent; }
 /* tables */
 html[data-theme-pack="desk"] .tbl th { background: #eef3fe; color: #50628a; font-weight: 700; }
 html[data-theme-pack="desk"] .tbl thead tr:first-child th:first-child { border-top-left-radius: 12px; }

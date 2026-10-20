@@ -71,7 +71,7 @@ FF.pages = FF.pages || {};
   const compareBar = (a, b, la, lb, ca, cb) => {
     const t = (a || 0) + (b || 0);
     const pa = t ? (a / t) * 100 : 0;
-    return `<div class="cmp"><div class="cmp-head"><span><i style="background:${ca || '#6366f1'}"></i>${esc(la)} <b>${U.fmt(a)}</b> <small class="dim">${U.fmtPct(pa, 0)}</small></span><span><small class="dim">${U.fmtPct(100 - pa, 0)}</small> <b>${U.fmt(b)}</b> ${esc(lb)}<i style="background:${cb || '#f59e0b'}"></i></span></div><div class="cmp-track"><div style="width:${pa}%;background:${ca || '#6366f1'}"></div><div style="width:${100 - pa}%;background:${cb || '#f59e0b'}"></div></div></div>`;
+    return `<div class="cmp"><div class="cmp-head"><span><i style="background:${ca || '#2563eb'}"></i>${esc(la)} <b>${U.fmt(a)}</b> <small class="dim">${U.fmtPct(pa, 0)}</small></span><span><small class="dim">${U.fmtPct(100 - pa, 0)}</small> <b>${U.fmt(b)}</b> ${esc(lb)}<i style="background:${cb || '#f97316'}"></i></span></div><div class="cmp-track"><div style="width:${pa}%;background:${ca || '#2563eb'}"></div><div style="width:${100 - pa}%;background:${cb || '#f97316'}"></div></div></div>`;
   };
   const kpi = (cls, title, icon, value, foot) => `<div class="kpi ${cls}"><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
   const card = (title, body, right, cls) => `<section class="card ${cls || ''}"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
