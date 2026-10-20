@@ -32,5 +32,4 @@
 @media (max-width: 860px) {
 .fm-rep-grid { grid-template-columns: minmax(0, 1fr); }
 }
-.fm-report .tbl thead th { position: sticky; top: 0; z-index: 2; background: var(--card); box-shadow: 0 1px 0 var(--line); }
 .fm-rep-tbl thead th:first-child { z-index: 3; }

@@ -290,7 +290,6 @@ body.public-form .tr-employee-todo { border-color: #f5b4b4; }
 body.public-form .tr-agent-card.tr-has-err { border-color: #f3a9a9; }
 body.public-form .tr-agent-num { font-weight: 800; }
 body.public-form .tr-qty-row .input.tr-qty { border-radius: 12px; background: #eef4ff; border-color: #cfe0ff; color: #1d4ed8; }
-body.public-form .tr-submit-sum { margin-right: auto; font-size: 13px; color: #4a5b7e; }
 body.public-form .tr-send-btn { padding: 12px 22px; font-size: 14px; }
 body.public-form .tr-es-tags { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
 body.public-form .tr-st-list { display: grid; gap: 10px; }

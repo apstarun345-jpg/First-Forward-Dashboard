@@ -20,6 +20,93 @@ FF.pages = FF.pages || {};
   const can = (perm) => { try { return !FF.auth || FF.auth.can(perm); } catch { return true; } };
   const canContacts = () => can('contacts');
 
+
+  // 📊 v235 — "All agents issuance" board: har agent ka month total — VC4 · VC20 · VC5+ · Total · Replacement · Chassis
+  // (FF = EIR agent-class rows · GV = GV issuance rows). Month filter, kisi bhi column par sort (default Total ↓), search, Excel.
+  const ISSUE_COLS = [['vc4', 'VC4'], ['vc20', 'VC20'], ['vc5p', 'VC5+'], ['total', 'Total'], ['replacement', 'Replacement'], ['chassis', 'Chassis'], ['wrongVrn', 'Wrong VRN']];
+  const issueBoardState = { ff: { month: '', sort: 'total', dir: -1, q: '', limit: 100 }, gv: { month: '', sort: 'total', dir: -1, q: '', limit: 100 } };
+  async function issueBoardRows(channel) {
+    const isGv = channel === 'gv';
+    const grp = (r) => { const g = r.group || (FF.model && FF.model.classGroup ? FF.model.classGroup(r.cls) : ''); return g === 'VC4' ? 'vc4' : g === 'VC20' ? 'vc20' : 'vc5p'; };
+    let rows = [];
+    if (isGv) {
+      try { await FF.store.need('daily'); } catch { /* optional */ }
+      try { if (FF.gv && FF.gv.need) await FF.gv.need('master'); } catch { /* optional */ }
+      rows = (FF.gv && FF.gv.issuanceRows ? FF.gv.issuanceRows() : []) || [];
+    } else {
+      rows = ((await FF.store.need('agentClass')) || []).filter((r) => r && r.channel === 'First Forward');
+    }
+    const months = [...new Set(rows.map((r) => r.ym).filter(Boolean))].sort();
+    return { rows, months, grp };
+  }
+  async function mountIssueBoard(host, channel, onPick) {
+    if (!host) return;
+    const st = issueBoardState[channel];
+    host.innerHTML = `<div class="card-body">${U.spinner('Building agent-wise issuance…')}</div>`;
+    let data;
+    try { data = await issueBoardRows(channel); } catch (err) { host.innerHTML = `<div class="card-body">${U.errorBox(err)}</div>`; return; }
+    const isGv = channel === 'gv';
+    const isChassis = (r) => /chassis/i.test(r.vrnType || r.tagType || '');
+    const isRepl = (r) => /replacement/i.test(r.type || r.status || '');
+    const isWrong = (r) => /wrong/i.test(r.vrnType || '');
+    if (!st.month || !data.months.includes(st.month)) st.month = data.months[data.months.length - 1] || U.ymKey(new Date());
+    const build = () => {
+      const map = new Map();
+      for (const r of data.rows) {
+        if (r.ym !== st.month) continue;
+        const name = clean(isGv ? (r.agentName || r.agentId) : r.name);
+        if (!name) continue;
+        const id = clean(r.agentId || '');
+        const key = isGv ? `${idKey(id)}|${norm(name)}` : norm(name);
+        let o = map.get(key);
+        if (!o) { o = { name, id, tl: clean(r.tlName) || '', vc4: 0, vc20: 0, vc5p: 0, total: 0, replacement: 0, chassis: 0, wrongVrn: 0 }; map.set(key, o); }
+        const n = Number(r.n) || 1;
+        o.total += n; o[data.grp(r)] += n;
+        if (isChassis(r)) o.chassis += n;
+        if (isRepl(r)) o.replacement += n;
+        if (isWrong(r)) o.wrongVrn += n;
+      }
+      return [...map.values()];
+    };
+    const paint = () => {
+      let list = build();
+      const tot = list.reduce((a, r) => { ISSUE_COLS.forEach(([k]) => { a[k] = (a[k] || 0) + r[k]; }); return a; }, {});
+      const q = norm(st.q);
+      if (q) list = list.filter((r) => norm(`${r.name} ${r.id} ${r.tl}`).includes(q));
+      list.sort((a, b) => (st.sort === 'name' ? a.name.localeCompare(b.name) * -st.dir : (b[st.sort] - a[st.sort]) * -st.dir) || b.total - a.total || a.name.localeCompare(b.name));
+      const cols = ISSUE_COLS.filter(([k]) => !(isGv && k === 'wrongVrn'));
+      const th = (k, l) => `<th class="num ib-sort ${st.sort === k ? 'on' : ''}" data-ib-sort="${k}" title="Sort by ${l}">${l}${st.sort === k ? (st.dir < 0 ? ' ▼' : ' ▲') : ''}</th>`;
+      const shown = list.slice(0, st.limit);
+      host.innerHTML = `<div class="card-head"><h3>📊 All agents — issuance <span class="dim">${isGv ? 'GV Partner' : 'First Forward'}</span></h3>
+        <div class="card-right ib-tools">
+          <select class="input" data-ib-month aria-label="Month">${data.months.slice().reverse().map((m) => `<option value="${esc(m)}" ${m === st.month ? 'selected' : ''}>${esc(U.labelYM(m))}</option>`).join('')}</select>
+          <input class="input" data-ib-q type="search" placeholder="Filter agent / TL / ID…" value="${esc(st.q)}" autocomplete="off">
+          <button class="btn small" data-ib-xlsx>⬇ Excel</button>
+        </div></div>
+        <div class="card-body">
+          <div class="ib-totals">${cols.map(([k, l]) => `<span class="ib-tot ${k === 'total' ? 'main' : ''}"><small>${l}</small><b>${fmt(tot[k] || 0)}</b></span>`).join('')}<span class="ib-tot"><small>Agents</small><b>${fmt(list.length)}</b></span></div>
+          <div class="table-wrap"><table class="tbl compact ib-tbl"><thead><tr><th>#</th><th class="ib-sort ${st.sort === 'name' ? 'on' : ''}" data-ib-sort="name">Agent</th><th>TL</th>${cols.map(([k, l]) => th(k, l)).join('')}</tr></thead>
+          <tbody>${shown.map((r, i) => `<tr class="clickable" data-ib-pick="${esc(r.name)}" data-ib-id="${esc(r.id)}" title="Open ${esc(r.name)}'s full summary"><td>${i + 1}</td><td><b>${esc(r.name)}</b>${r.id ? ` <small class="dim">${esc(r.id)}</small>` : ''}</td><td class="dim">${esc(r.tl || '—')}</td>${cols.map(([k]) => `<td class="num ${k === 'total' ? 'ib-total' : ''}">${r[k] ? fmt(r[k]) : '<span class="dim">0</span>'}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length + 3}" class="empty">No issuance in ${esc(U.labelYM(st.month))}.</td></tr>`}</tbody></table></div>
+          ${list.length > shown.length ? `<div style="text-align:center;margin-top:8px"><button class="btn small" data-ib-more>⬇ Show all ${fmt(list.length)} agents</button></div>` : ''}
+        </div>`;
+      const mo = host.querySelector('[data-ib-month]'); if (mo) mo.addEventListener('change', () => { st.month = mo.value; st.limit = 100; paint(); });
+      const qi = host.querySelector('[data-ib-q]'); if (qi) { let t = 0; qi.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { st.q = qi.value; const pos = qi.selectionStart; paint(); const n = host.querySelector('[data-ib-q]'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch { /* ignore */ } } }, 200); }); }
+      const more = host.querySelector('[data-ib-more]'); if (more) more.addEventListener('click', () => { st.limit = 100000; paint(); });
+      host.querySelectorAll('[data-ib-sort]').forEach((h) => h.addEventListener('click', () => { const k = h.dataset.ibSort; if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = k === 'name' ? 1 : -1; } paint(); }));
+      host.querySelectorAll('[data-ib-pick]').forEach((tr) => tr.addEventListener('click', () => onPick && onPick(tr.dataset.ibPick, tr.dataset.ibId)));
+      const xb = host.querySelector('[data-ib-xlsx]');
+      if (xb) xb.addEventListener('click', () => {
+        const head = ['#', 'Agent', 'Agent ID', 'TL', ...cols.map(([, l]) => l)];
+        const body = list.map((r, i) => [i + 1, r.name, r.id, r.tl, ...cols.map(([k]) => r[k])]);
+        const fname = `${isGv ? 'GV' : 'FF'}_agent_issuance_${st.month}.xlsx`;
+        if (FF.xlsx && FF.xlsx.download) FF.xlsx.download(fname, [{ name: 'Agents', header: head, rows: body }]);
+        else U.toast('Excel not available', 'warn');
+      });
+    };
+    paint();
+  }
+
+  FF.issueBoard = { mount: mountIssueBoard };
   async function loadPeople(channel) {
     const isGv = channel === 'gv';
     const kind = isGv ? 'gv-agent' : 'ff-agent';

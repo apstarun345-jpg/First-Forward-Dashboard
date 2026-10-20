@@ -55,3 +55,5 @@
 .gs-hero { padding: 14px; }
 .gs-hero-act { width: 100%; }
 }
+.ib-card .table-wrap { max-height: 520px; overflow: auto; }
+html body .gs-hero h1, html body .gs-hero h2, html body .gs-hero .gs-name, html body .gs-hero-who h1, html body .gs-hero-who h2 { color: #fff !important; -webkit-text-fill-color: #fff !important; }

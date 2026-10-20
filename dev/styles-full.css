@@ -7729,3 +7729,19 @@ html.mobile-ui .login-only-shell .pro-hint { display: none !important; }
 .tr-item-chips.sm .tr-item-chip { padding: 3px 8px; font-size: 11.5px; }
 .tr-item-chips.sm .tr-item-chip input { width: 13px; height: 13px; }
 html[data-theme="dark"] .tr-item-chip.on { background: #172f6b; color: #dbe7ff; border-color: #2a4a9a; }
+
+/* 📊 v235 — Agent / TL Summary: all agents issuance board */
+.ib-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ib-tools .input { width: auto; min-width: 150px; }
+.ib-totals { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.ib-tot { display: flex; flex-direction: column; padding: 8px 12px; border-radius: 14px; background: var(--pk-soft, #eef3fe); border: 1px solid var(--line, #e3eaf8); min-width: 90px; }
+.ib-tot small { font-size: 11px; font-weight: 700; color: var(--muted); }
+.ib-tot b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.ib-tot.main { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff; border-color: transparent; }
+.ib-tot.main small { color: rgba(255, 255, 255, .85); }
+.ib-tbl .ib-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.ib-tbl .ib-sort.on { color: var(--brand, #1d4ed8); }
+.ib-tbl .ib-total { font-weight: 800; color: var(--brand, #1d4ed8); }
+.ib-card .table-wrap { max-height: 520px; overflow: auto; }
+/* summary hero: name always white */
+html body .gs-hero h1, html body .gs-hero h2, html body .gs-hero .gs-name, html body .gs-hero-who h1, html body .gs-hero-who h2 { color: #fff !important; -webkit-text-fill-color: #fff !important; }

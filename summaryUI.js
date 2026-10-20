@@ -672,6 +672,7 @@ window.FF = window.FF || {};
           </div>
           <div class="gs-quick"><span class="dim small">⚡ Turant kholo:</span><div id="gs-sug" class="gs-sug"></div></div>
         </div></div>
+        <section class="card ib-card" id="gs-issue-board"></section>
         <div id="gs-body">${U.spinner(`${label} ka data load ho raha hai…`)}</div>
       </div>`;
       const body = U.$('#gs-body', root), qEl = U.$('#gs-q', root), drop = U.$('#gs-drop', root), sug = U.$('#gs-sug', root);
@@ -688,6 +689,14 @@ window.FF = window.FF || {};
             <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''} <small class="dim">· ${fmt(p.cur)} mtd · ${fmt(p.stock)} stock${(p.today !== undefined) ? ` · ${fmt(p.today)} aaj` : ''}</small></button>`;
         }).join('') : '<span class="dim small">Koi matching naam/ID/mobile nahi mila</span>';
       };
+      // 📊 v235 — all agents issuance board (month · sort · Excel); row click → usi agent ka poora summary
+      if (FF.issueBoard && FF.issueBoard.mount) void FF.issueBoard.mount(U.$('#gs-issue-board', root), ch, (name, id) => {
+        const norm2 = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        const hit = S.list.find((p) => !/tl$/.test(String(p.kind || '')) && ((id && String(p.id || '').toUpperCase() === String(id).toUpperCase()) || norm2(p.name) === norm2(name))) || matchList(S.list, name)[0];
+        if (hit) { pick(hit); setTimeout(() => { if (body && body.scrollIntoView) body.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 150); }
+        else U.toast('This agent is not in the agent list', 'warn');
+      });
+      else { const h = U.$('#gs-issue-board', root); if (h) h.remove(); }
       lateList = (list) => {
         paintSug(qEl ? qEl.value : '');
         if (asked && !S.person) { const h = matchList(list, asked)[0]; if (h) pick(h); }
