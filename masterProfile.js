@@ -277,6 +277,7 @@ window.FF = window.FF || {};
    * usi calendar day tak compare karta hai. Whole previous-month total kabhi compare nahi hota.
    * Example: 7 Oct ko → 1–6 Oct vs 1–6 Sep.
    */
+  const cmgCache = new WeakMap();
   function comparableMtdGrowth(pr, ch) {
     const channel = /^gv/i.test(String(ch || pr.ch || pr.channel || '')) ? 'gv' : 'ff';
     const now = new Date();
@@ -314,33 +315,39 @@ window.FF = window.FF || {};
     const tl = /-tl$/i.test(String(pr && pr.kind || ''));
     const wantName = norm(pr && pr.name);
     const wantId = clean(pr && pr.id).replace(/\.0+$/, '').toUpperCase();
-    const belongs = (r) => {
-      if (!r) return false;
-      if (channel === 'gv') {
-        if (tl) {
-          const rid = clean(r.tlId || r.gvTlId || r.supervisorId).replace(/\.0+$/, '').toUpperCase();
-          return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.tlName) === wantName);
+    // ⚡ v234 — ek hi baar poore rows ka id-wise / naam-wise jod (date window ke hisaab se), phir har person O(1).
+    // Pehle har agent ke liye poora EIR scan hota tha → 700 agents par Agent / TL Summary ~6 s atakta tha.
+    const aggKey = `${channel}|${tl ? 1 : 0}|${curStart}|${curEnd}|${prevStart}|${prevEnd}|${rows.length}`;
+    let byRows = cmgCache.get(rows);
+    if (!byRows) { byRows = new Map(); cmgCache.set(rows, byRows); }
+    let agg = byRows.get(aggKey);
+    if (!agg) {
+      agg = { byId: new Map(), byName: new Map() };
+      const bump = (map, k, isCur, n) => { if (!k) return; let o = map.get(k); if (!o) { o = { cur: 0, last: 0, curRows: 0, lastRows: 0 }; map.set(k, o); } if (isCur) { o.cur += n; o.curRows++; } else { o.last += n; o.lastRows++; } };
+      for (const r of rows) {
+        if (!r) continue;
+        if (channel !== 'gv' && String(r.channel || '').toLowerCase().includes('gv')) continue;
+        const k = rowDateKey(r);
+        if (!k) continue;
+        const isCur = k >= curStart && k <= curEnd;
+        if (!isCur && !(k >= prevStart && k <= prevEnd)) continue;
+        const n = num(r.n !== undefined ? r.n : (r.count !== undefined ? r.count : 1));
+        let rid, rname;
+        if (channel === 'gv') {
+          rid = tl ? clean(r.tlId || r.gvTlId || r.supervisorId) : clean(r.agentId);
+          rname = tl ? r.tlName : r.agentName;
+        } else {
+          rid = tl ? clean(r.tlId) : clean(r.agentId || r.id);
+          rname = tl ? r.tlName : (r.agentName || r.name);
         }
-        const rid = clean(r.agentId).replace(/\.0+$/, '').toUpperCase();
-        return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.agentName) === wantName);
+        bump(agg.byId, rid.replace(/\.0+$/, '').toUpperCase(), isCur, n);
+        bump(agg.byName, norm(rname), isCur, n);
       }
-      if (String(r.channel || '').toLowerCase().includes('gv')) return false;
-      if (tl) {
-        const rid = clean(r.tlId).replace(/\.0+$/, '').toUpperCase();
-        return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.tlName) === wantName);
-      }
-      const rid = clean(r.agentId || r.id).replace(/\.0+$/, '').toUpperCase();
-      return (wantId && rid && rid === wantId) || (!wantId && wantName && norm(r.agentName || r.name) === wantName);
-    };
-    let cur = 0, last = 0, curRows = 0, lastRows = 0;
-    rows.forEach((r) => {
-      if (!belongs(r)) return;
-      const k = rowDateKey(r);
-      if (!k) return;
-      const n = num(r.n !== undefined ? r.n : (r.count !== undefined ? r.count : 1));
-      if (k >= curStart && k <= curEnd) { cur += n; curRows++; }
-      else if (k >= prevStart && k <= prevEnd) { last += n; lastRows++; }
-    });
+      if (byRows.size > 8) byRows.clear();
+      byRows.set(aggKey, agg);
+    }
+    const hit = (wantId ? agg.byId.get(wantId) : (wantName ? agg.byName.get(wantName) : null)) || { cur: 0, last: 0, curRows: 0, lastRows: 0 };
+    const cur = hit.cur, last = hit.last, curRows = hit.curRows, lastRows = hit.lastRows;
     // No comparable previous-period data = don't invent 0%/100% growth.
     const growth = last > 0 ? ((cur - last) / last) * 100 : (last === 0 && cur === 0 ? 0 : null);
     return { growth, current: cur, last, curRows, lastRows, day, currentEnd: curEnd, previousEnd: prevEnd, label: U.labelDateKey(curEnd), currentYm: curYm, previousYm: prevYm };
@@ -700,18 +707,56 @@ window.FF = window.FF || {};
     return gvMobileFor(name, id) || '';
   }
   /** FF agent issuance rows: EIR daily is authoritative and can bridge ID aliases from performance/stock sources. */
+  // ⚡ v234 — EIR daily ka index ek baar (data badle to dobara): id → rows, naam → rows. Pehle har agent ke liye
+  // poora EIR scan hota tha (TL ki team = har agent par poora sheet) → Agent / TL Summary kholte hi atakta tha.
+  const ffIssueIdxCache = new WeakMap();
+  function ffIssueIndex(daily) {
+    let idx = ffIssueIdxCache.get(daily);
+    if (idx && idx.n === daily.length) return idx;
+    const byId = new Map(), byName = new Map(), meta = new Array(daily.length);
+    for (let i = 0; i < daily.length; i++) {
+      const row = daily[i];
+      if (!row || /gv|green/i.test(String(row.channel || ''))) continue;
+      const m = { rid: clean(row.agentId || row.id).replace(/\.0+$/, '').toUpperCase(), rn: norm(row.agentName || row.name), rtl: norm(row.tlName || row.tl), rtlId: clean(row.tlId).replace(/\.0+$/, '').toUpperCase() };
+      meta[i] = m;
+      if (m.rid) { const l = byId.get(m.rid); if (l) l.push(i); else byId.set(m.rid, [i]); }
+      if (m.rn) { const l = byName.get(m.rn); if (l) l.push(i); else byName.set(m.rn, [i]); }
+    }
+    idx = { n: daily.length, byId, byName, meta };
+    ffIssueIdxCache.set(daily, idx);
+    return idx;
+  }
+  const acIdxCache = new WeakMap();
+  function acIndex(ac) {
+    let ix = acIdxCache.get(ac);
+    if (ix && ix.n === ac.length) return ix;
+    const byId = new Map(), byName = new Map();
+    for (let i = 0; i < ac.length; i++) {
+      const r = ac[i]; if (!r) continue;
+      const rid = clean(r.agentId || r.id).replace(/\.0+$/, '').toUpperCase();
+      const rn = norm(r.name || r.agentName);
+      if (rid) { const l = byId.get(rid); if (l) l.push(i); else byId.set(rid, [i]); }
+      if (rn) { const l = byName.get(rn); if (l) l.push(i); else byName.set(rn, [i]); }
+    }
+    ix = { n: ac.length, byId, byName };
+    acIdxCache.set(ac, ix);
+    return ix;
+  }
   function ffAgentIssueRows(name, ids, tlName, tlId) {
     const wantName = norm(name);
     const idSet = new Set((ids || []).map((v) => clean(v).replace(/\.0+$/, '').toUpperCase()).filter(Boolean));
     const wantTl = norm(tlName);
     const wantTlId = clean(tlId).replace(/\.0+$/, '').toUpperCase();
     const out = [];
-    for (const row of (rowsOf('daily') || [])) {
-      if (!row || /gv|green/i.test(String(row.channel || ''))) continue;
-      const rid = clean(row.agentId || row.id).replace(/\.0+$/, '').toUpperCase();
-      const rn = norm(row.agentName || row.name);
-      const rtl = norm(row.tlName || row.tl);
-      const rtlId = clean(row.tlId).replace(/\.0+$/, '').toUpperCase();
+    const daily = rowsOf('daily') || [];
+    const ix = ffIssueIndex(daily);
+    const cand = new Set();
+    idSet.forEach((id) => (ix.byId.get(id) || []).forEach((i) => cand.add(i)));
+    if (wantName) (ix.byName.get(wantName) || []).forEach((i) => cand.add(i));
+    const order = [...cand].sort((x, y) => x - y);   // sheet ka wahi order
+    for (const i of order) {
+      const row = daily[i];
+      const { rid, rn, rtl, rtlId } = ix.meta[i];
       const idMatch = rid && idSet.has(rid);
       const nameMatch = wantName && rn === wantName && (!wantTlId || !rtlId || rtlId === wantTlId) && (!wantTl || !rtl || rtl === wantTl);
       if (!idMatch && !nameMatch) continue;
@@ -1266,6 +1311,17 @@ window.FF = window.FF || {};
       const atlId = clean(a && a.tlId).replace(/\.0+$/, '').toUpperCase();
       return !atlId || !rtlId || rtlId === atlId || !atl || !rtl || rtl === atl;
     };
+    // ⚡ v234 — agentClass rows ka index (id / naam) — poora array har baar filter nahi
+    let acMineMemo = null;
+    const acMine = () => {
+      if (acMineMemo) return acMineMemo;
+      const ix = acIndex(ac);
+      const cand = new Set();
+      identityIds.forEach((id) => (ix.byId.get(id) || []).forEach((i) => cand.add(i)));
+      (ix.byName.get(n) || []).forEach((i) => cand.add(i));
+      acMineMemo = [...cand].sort((x, y) => x - y).map((i) => ac[i]).filter(isMine);
+      return acMineMemo;
+    };
     const eirRows = ffAgentIssueRows(p.name, [...identityIds], a && a.tlName, a && a.tlId);
     const eirBins = classBinsFromRows(eirRows, curYm, lastYm);
     if (a) {
@@ -1285,7 +1341,7 @@ window.FF = window.FF || {};
     }
     out.tagRequired = out.direct && isHM(out.priority);
     out.months = { cur: curYm, last: lastYm };
-    out.classBins = classBinsFromRows(ac.filter(isMine), curYm, lastYm);
+    out.classBins = classBinsFromRows(acMine(), curYm, lastYm);
     out.issuanceSources = { cur: 'First Forward EIR', last: 'First Forward EIR', classes: 'First Forward EIR' };    // Prefer exact EIR agent rows for month totals; performance snapshot can be stale/empty for this identity.    if (eirBins.available.cur || eirBins.available.last) {      out.totals.curVc4 = num(eirBins.cur.VC4); out.totals.curComm = num(eirBins.cur.VC20) + num(eirBins.cur['VC5+']); out.totals.curTotal = num(eirBins.cur.total);      out.totals.lastVc4 = num(eirBins.last.VC4); out.totals.lastComm = num(eirBins.last.VC20) + num(eirBins.last['VC5+']); out.totals.lastTotal = num(eirBins.last.total);      out.classBins = eirBins;    }
     attachGrowth(out, a || {}, curYm);
     attachLinkedTl(out, light);
@@ -1294,12 +1350,12 @@ window.FF = window.FF || {};
       out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
     }
     if (light) return out;
-    out.classes = classTable((eirRows.length ? eirRows : ac.filter(isMine)), stk.filter((r) => {
+    out.classes = classTable((eirRows.length ? eirRows : acMine()), stk.filter((r) => {
       const rid = rowAgentId(r);
       if (identityIds.size && rid) return identityIds.has(rid);
       return norm(r.agentName) === n;
     }), curYm, lastYm);
-    out.classBins = classBinsFromRows(ac.filter(isMine), curYm, lastYm);
+    out.classBins = classBinsFromRows(acMine(), curYm, lastYm);
     if (!out.classes.length && a) out.classes = [{ cls: 'VC4', cur: num(a.curVc4), last: num(a.lastVc4), stock: num(a.stockVc4) }, { cls: 'Commercial', cur: num(a.curNvc4), last: num(a.lastNvc4), stock: num(a.stockNvc4) }];
     else if (out.classes.length && rowsOf('daily').length) {
       // Only replace the REPORT snapshot once the canonical EIR daily view is loaded. Some

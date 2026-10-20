@@ -2423,13 +2423,17 @@ FF.pages = FF.pages || {};
   async function render(root, params) {
     const admin = A.isAdmin();
     if (params.tab && TABS.some((t) => t[0] === params.tab)) tab = params.tab;
-    if (!admin && !['account', 'diagnostics'].includes(tab)) tab = 'account';
-    const visibleTabs = admin ? TABS : TABS.filter(([k]) => ['account', 'diagnostics'].includes(k));
+    // ⚙️ v234 — admin jo Settings sections Access matrix me de, wo non-admin ko bhi dikhte hain
+    const GRANTABLE = ['brand', 'sound', 'sources', 'data', 'direct', 'rules', 'features', 'contacts'];
+    const canTab = (k) => admin || ['account', 'diagnostics'].includes(k) || (GRANTABLE.includes(k) && A.can(`settings:${k}`));
+    const visibleTabs = TABS.filter(([k]) => canTab(k));
+    if (!canTab(tab)) tab = 'account';
+    const settingsAccess = admin || visibleTabs.some(([k]) => GRANTABLE.includes(k));
     root.innerHTML = `<div class="page-head"><div><h1>⚙️ Settings</h1><p class="sub">${admin ? 'Har cheez yahin se modify karo — branding, images, colours, sheet mapping, thresholds, contacts, users & access' : 'Profile, site diagnostics, password aur aapka access'}</p></div></div>
       <div class="card controls"><div class="set-groups" id="set-tabs">${TAB_GROUPS.map(([label, keys]) => { const list = visibleTabs.filter(([k]) => keys.includes(k)); return list.length ? `<div class="set-group"><small>${label}</small><div class="seg">${list.map(([k, l]) => `<button class="seg-btn ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div></div>` : ''; }).join('')}</div></div>
       <div id="set-body">${U.spinner('Settings load ho rahi hain…')}</div>`;
     const body = U.$('#set-body', root);
-    try { if (admin) await loadSettings(); } catch (err) { body.innerHTML = U.errorBox(err); return; }
+    try { if (settingsAccess) await loadSettings(); } catch (err) { body.innerHTML = U.errorBox(err); return; }
     const draw = async () => {
       U.$$('#set-tabs .seg-btn', root).forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
       history.replaceState(null, '', `#/settings?tab=${tab}`);

@@ -128,6 +128,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
   { key: 'tagRequest', label: 'Management · Tag Request (IDFC agents · class-wise stock/tag request form)', group: 'Management' },
   { key: 'masterSearch', label: 'Management · Master Search (GV + FF naam/ID → seedha poora profile)', group: 'Management' },
+  { key: 'barcodeChecker', label: 'Management · Barcode Checker (range / multiple barcodes)', group: 'Management' },
   { key: 'bulkTagStatus', label: 'Management · Bulk Tag Status (VRN / Tag ID / Barcode → GV / FF / stock lookup)', group: 'Management' },
   { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
   { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
@@ -159,7 +160,18 @@ export const PAGE_PERMISSIONS = [
   { key: 'refresh', label: 'Force refresh from Google', group: 'Actions' },
   { key: 'contacts', label: 'See mobile numbers', group: 'Actions' },
   { key: 'voiceAssistant', label: 'Voice assistant (🎙️ panel + 👂 wake word)', group: 'Actions' },
+  // ⚙️ v234 — Settings ke sections bhi admin kisi bhi user ko de sakta hai (Users / Access / Links / Audit / Backup sirf admin)
+  { key: 'settings:brand', label: 'Settings · Branding & images', group: 'Settings' },
+  { key: 'settings:sound', label: 'Settings · Sound & voice (office bell)', group: 'Settings' },
+  { key: 'settings:sources', label: 'Settings · Sheets & tabs', group: 'Settings' },
+  { key: 'settings:data', label: 'Settings · Data source', group: 'Settings' },
+  { key: 'settings:direct', label: 'Settings · Direct agents rule', group: 'Settings' },
+  { key: 'settings:rules', label: 'Settings · Thresholds', group: 'Settings' },
+  { key: 'settings:features', label: 'Settings · Features & alerts', group: 'Settings' },
+  { key: 'settings:contacts', label: 'Settings · Contacts & sharing', group: 'Settings' },
 ];
+const SETTINGS_ADMIN_ONLY_KEYS = ['email', 'personalLinks', 'schedules', 'dispatchEmail', 'storage', 'users', 'sessions'];
+const hasSettingsPerm = (u) => !!(u && Array.isArray(u.permissions) && u.permissions.some((k) => String(k).startsWith('settings:')));
 
 // Sheet-tab registry defaults (also mirrored in config.js). `enabled:false` hides a tab everywhere.
 export const DEFAULT_TABS = [
@@ -4649,11 +4661,17 @@ async function migrateUserPermissions() {
     ['tagIssued', 'rangeReport'], ['home', 'tv'], ['home', 'teamMap'], ['home', 'masterSearch'],
     ['performance', 'stockReport'], ['gvStock', 'gvStockReport'],
     ['savedViews', 'reportStudio'], ['compare', 'charts'],
-    ['dualChannel', 'masterStock'], ['fastagChampions', 'arena'], ['fastagChampions', 'fame'], ['tv', 'warRoom']
+    ['dualChannel', 'masterStock'], ['fastagChampions', 'arena'], ['fastagChampions', 'fame'], ['tv', 'warRoom'],
+    ['masterSearch', 'barcodeChecker']
   ];
+  // 🔐 v234 — ek user par sirf EK baar (permVer). Pehle har restart par chalta tha → admin ne jo access hataya
+  // (jaise Master Search / Voice) wo restart ke baad wapas aa jaata tha.
+  const PERM_VER = 3;
   let migrated = false;
   for (const u of db.users) {
     if (!u || u.role === 'admin' || !Array.isArray(u.permissions)) continue;
+    if (Number(u.permVer) >= PERM_VER) continue;
+    u.permVer = PERM_VER; migrated = true;
     const has = new Set(u.permissions), add = [];
     for (const [parent, child] of PERM_CHILDREN) if (has.has(parent) && !has.has(child)) add.push(child);
     if (!has.has('voiceAssistant')) add.push('voiceAssistant');
@@ -8047,9 +8065,10 @@ async function handleApi(req, res, url) {
   // ---- settings ----
   if (p === '/api/settings' && method === 'GET') return sendJson(res, 200, { settings: settingsFor(user), defaults: DEFAULT_SETTINGS });
   if (p === '/api/settings' && method === 'PUT') {
-    requireAdmin(user);
+    if (!user || (user.role !== 'admin' && !hasSettingsPerm(user))) throw new HttpError(403, 'Admin access required');
     const body = await readBody(req);
     const patch = body && typeof body === 'object' ? (body.settings || body) : {};
+    if (user.role !== 'admin') SETTINGS_ADMIN_ONLY_KEYS.forEach((k) => { delete patch[k]; });   // 🔐 secrets / users sirf admin
     delete patch.updatedAt; delete patch.updatedBy;
     for (const key of ['logo', 'pwaIcon192', 'pwaIcon512', 'pwaIcon64', 'loginImage']) {
       if (patch[key] && !/^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/.test(patch[key])) throw new HttpError(400, `${key}: sirf PNG/JPG/WEBP/SVG image (data URL) allowed.`);
