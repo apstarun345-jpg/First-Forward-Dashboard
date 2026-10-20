@@ -2525,7 +2525,7 @@ body.colorful .from-hdr { color: #166534; }
   const growthHtml = (g) => (g === null ? '<span class="delta up">🆕 new</span>' : `<span class="delta ${g > 0.05 ? 'up' : g < -0.05 ? 'down' : 'flat'}">${g > 0.05 ? '▲ +' : g < -0.05 ? '▼ ' : ''}${fmt(g, 1)}%</span>`);
   const growthSmall = (g) => (g === null ? 'new' : `${g > 0 ? '+' : ''}${fmt(g, 0)}%`);
   /** Metric cells — admin rows also show both stock-adjusted and no-stock-deduction suggestions. */
-  const CLASS_DETAIL_LIST = ['VC4', 'VC5', 'VC7', 'VC12', 'VC16'];
+  const CLASS_DETAIL_LIST = ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16'];   // v233 — VC6 chhoot raha tha (jod total se kam aata tha)
   function metricCellsHtml(dr) {
     const m = metricsFor(dr);
     const n = metricNumbers(m);
@@ -2538,7 +2538,13 @@ body.colorful .from-hdr { color: #166534; }
       const x = dr.rows.find((r) => String(r.cls || '').toUpperCase() === c);
       return [c, x ? num(x[field]) : 0];
     });
-    const classLineHtml = (field) => classMetrics(field).map(([cls, val]) => `<span><b>${esc(cls)}</b> <strong>${fmt(val)}</strong></span>`).join('');
+    const classLineHtml = (field) => {
+      const list = classMetrics(field);
+      const tot = field === 'stock' ? num(n.total.stock) : field === 'last' ? num(n.total.last) : field === 'cur' ? num(n.total.cur) : 0;
+      const sum = list.reduce((a, [, v]) => a + v, 0);
+      if (tot > sum) list.push(['Other', tot - sum]);   // jod hamesha total ke barabar dikhe
+      return list.map(([cls, val]) => `<span><b>${esc(cls)}</b> <strong>${fmt(val)}</strong></span>`).join('');
+    };
     const keys = ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth'];
     if (isAdmin()) keys.push('suggest');
     // Agent sheet me nahi mila + koi snapshot nahi → "0" galat lagta (stock 0?) — "—" dikhao
