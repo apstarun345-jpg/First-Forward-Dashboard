@@ -17,7 +17,7 @@ window.FF = window.FF || {};
     // Admin-only activity types (sab users ki activity admin ko hi milti hai):
     { key: 'signup',   label: '🆕 New account signup',     user: false, admin: true },
     { key: 'report',   label: '📊 Report data update',     user: true,  admin: true },
-    { key: 'digest',   label: '🌅 Daily digest (subah · issuance + stock + cover)', user: false, admin: true },
+    { key: 'digest',   label: '🌅 Daily digest (morning · issuance + stock + cover)', user: false, admin: true },
     { key: 'alert',    label: '🔴 Critical alerts (low cover · mid-month target miss)', user: false, admin: true },
     { key: 'activity', label: '👀 User page opens',        user: false, admin: true },
     { key: 'click',    label: '👆 Button / option use',    user: false, admin: true },
@@ -25,7 +25,7 @@ window.FF = window.FF || {};
     { key: 'settings', label: '⚙️ Settings changes',     user: false, admin: true },
     { key: 'location', label: '📍 Location shares',        user: false, admin: true },
     // 🏷️ IDFC Agents Tag Request — requester ko confirmation + admin ko nayi request (v3.24)
-    { key: 'request',  label: '🏷️ Tag Request (nayi request + status)', user: true, admin: true },
+    { key: 'request',  label: '🏷️ Tag Request (new request + status)', user: true, admin: true },
     // 🎙️ Live Assist — consent-based voice/video session (v3.26)
     { key: 'assist',   label: '🎙️ Live Assist (voice/video session)', user: true, admin: true }
   ];
@@ -43,7 +43,7 @@ window.FF = window.FF || {};
   const VALID_TONES = new Set(TONE_OPTIONS.map((x) => x.id));
   // `voice` = app/web band hone par bhi alerts bol kar sunao (pushVoice.js + sw.js voice queue).
   const DEFAULT_PREFS = { enabled: true, login: true, signup: true, report: true, monthly: true, digest: true, alert: true, activity: true, click: true, search: true, settings: true, user: true, location: true, info: true, request: true, assist: true, sound: true, tone: 'classic', push: true, voice: true };
-  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], publicPeople: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, filterSearch: '', centerPriority: 'all', centerDate: 'all', seenAt: '', voiceAt: {} };
+  const state = { started: false, bound: false, timer: null, presenceTimer: null, fastTimer: null, lastAt: '', items: [], unread: 0, serverUnread: 0, firstPoll: true, page: 'home', pointer: null, people: [], publicPeople: [], lastInteraction: Date.now(), pointerBound: false, events: [], dirty: false, lastSent: 0, lastScroll: -1, pushOn: false, pushDevices: 0, pushStatus: null, pushTriedAt: 0, pushError: '', prefs: { ...DEFAULT_PREFS }, audioCtx: null, expanded: null, filterType: 'all', filterUnread: false, filterSearch: '', centerPriority: 'all', centerDate: 'all', seenAt: '', voiceAt: {}, moreOpen: false };
   const normalizePrefs = (p) => {
     const out = { ...DEFAULT_PREFS, ...(p && typeof p === 'object' ? p : {}) };
     if (!VALID_TONES.has(String(out.tone))) out.tone = DEFAULT_PREFS.tone;
@@ -555,11 +555,10 @@ window.FF = window.FF || {};
     const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${U.esc(p.page)}` : `Last active ${U.esc(U.timeLabel(p.lastSeen))} · last page: ${U.esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span><button class="btn small" data-live-watch="${U.esc(p.username)}">👁 Live view</button> <button class="btn small" data-la-request="${U.esc(p.username)}" title="User ki marzi se live awaaz/video session shuru karo">🎙 Assist</button></span></div>`).join('') : '<div class="notification-empty">Logged-in users will appear after they open the dashboard.</div>'}<div class="presence-title" style="margin-top:14px">🏷️ Employee link activity <small>Link-open alerts and page preview · detailed interaction sharing only after opt-in</small></div>${state.publicPeople.length ? state.publicPeople.map((p) => `<div class="presence-row public-live-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || 'Employee link visitor')}</b><small>${p.sharing ? (p.active ? 'Live sharing ON' : `Last seen ${U.esc(U.timeLabel(p.lastSeen))}`) : (p.active ? 'Link open · preview only' : `Last seen ${U.esc(U.timeLabel(p.lastSeen))}`)} · Tag Request page</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}${p.requestIds && p.requestIds.length ? `<small>Request IDs: ${U.esc(p.requestIds.slice(0, 3).join(', '))}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? (p.sharing ? 'LIVE SHARE' : 'LINK OPEN') : p.online ? 'IDLE' : 'AWAY'}</span><button class="btn small primary" data-live-public-watch="${U.esc(p.sessionId)}">${p.sharing ? '👁 Live View' : '👁 Page Preview'}</button></span></div>`).join('') : '<div class="notification-empty">No employee-link visits yet. Link-open notification and page preview appear automatically.</div>'}</section>` : '';
     pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'} · ${filtered.length} shown</small></div><div style="display:flex;gap:6px"><button class="btn small primary" data-notify-center>📬 Full Center</button><button class="btn small" data-notify-read ${state.unread ? '' : 'disabled'}>✓ Mark all read</button></div></div>
       <div class="notify-filter-bar"><label>Type <select data-notify-filter="type">${typeOptions.map((t) => `<option value="${U.esc(t.key)}" ${state.filterType === t.key ? 'selected' : ''}>${U.esc(t.label)}</option>`).join('')}</select></label><button type="button" class="btn small ${state.filterUnread ? 'primary' : ''}" data-notify-filter="unread">${state.filterUnread ? '✓ Unread only' : 'Unread only'}</button></div>
-      ${presence}
-      ${switches}
-      ${hintLine()}
       ${groupChips}
-      <div class="notification-list">${rows || `<div class="notification-empty">${state.filterUnread ? 'No unread notifications in this view.' : 'Abhi koi notification nahi. User login/page open, report update aur shared location yahan dikhegi.'}</div>`}</div>`;
+      <div class="notification-list">${rows || `<div class="notification-empty">${state.filterUnread ? 'No unread notifications in this view.' : 'No notifications yet. Logins, page opens, report updates and shared locations will appear here.'}</div>`}</div>
+      ${hintLine()}
+      <details class="notify-more"${state.moreOpen ? ' open' : ''}><summary>⚙️ Alert settings${isAdmin ? ' · 🟢 user activity' : ''}</summary>${presence}${switches}</details>`;
   }
 
   // ---- 📬 Notification Center 2.0 ----------------------------------------------------------------
@@ -1126,6 +1125,7 @@ window.FF = window.FF || {};
       const read = e.target.closest('[data-notify-read]');
       if (read) { e.preventDefault(); markAllRead(); }
     });
+    document.addEventListener('toggle', (e) => { if (e.target && e.target.classList && e.target.classList.contains('notify-more')) state.moreOpen = e.target.open; }, true);
     document.addEventListener('change', (e) => {
       const filter = e.target.closest && e.target.closest('[data-notify-filter="type"]');
       if (filter) { state.filterType = filter.value || 'all'; render(); }
