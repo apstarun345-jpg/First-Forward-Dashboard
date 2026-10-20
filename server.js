@@ -719,6 +719,15 @@ const livePresence = new Map();
 // Optional, explicitly consented sessions for the public employee Tag Request link.
 // Tokens stay server-side; public GET responses never include them. Sessions are ephemeral by design.
 const publicLiveSessions = new Map();
+// 🧺 v231 — Tag Request me ek saath kai items (FASTag + Biomatric Device + Matarial). String " + " se judi rehti hai
+// (purani single values bhi waise hi valid); order hamesha same.
+const TAG_ITEM_NAMES = ['FASTag', 'Biomatric Device', 'Matarial'];
+function normItemName(v) {
+  const ALIAS = { material: 'Matarial', 'biometric device': 'Biomatric Device', biometric: 'Biomatric Device' };
+  const parts = (Array.isArray(v) ? v : String(v == null ? '' : v).split(/\s*\+\s*/)).map((x) => String(x || '').trim()).map((x) => ALIAS[x.toLowerCase()] || x);
+  const out = TAG_ITEM_NAMES.filter((n) => parts.some((x) => x.toLowerCase() === n.toLowerCase()));
+  return out.length ? out.join(' + ') : 'FASTag';
+}
 const sheetFreshCache = new Map();   // v178 — /api/sheet-freshness 60s cache
 // 🕒 v209 — row-count tracker: sheet me nayi rows aayi (chahe purani date ki ho) to "changedMs" = tab badalne ka time.
 let sheetFreshLastItems = null;
@@ -5812,7 +5821,7 @@ async function handleApi(req, res, url) {
       const label = agent.name || agent.agentId || `Agent ${i + 1}`;
       const rowsIn = (Array.isArray(a.rows) ? a.rows : []).slice(0, 20);
       const hasQty = rowsIn.some((x) => Math.round(Number(x && x.approved) || 0) > 0);
-      const itemName = ['FASTag', 'Biomatric Device', 'Matarial'].includes(rl.itemName) ? rl.itemName : 'FASTag';
+      const itemName = normItemName(rl.itemName);
       if (!agent.name && !agent.agentId && !agent.mobile && !hasQty) return; // poora khaali block — chhod do
       if (agent.name.length < 2 && !agent.agentId) throw new HttpError(400, `Agent ${i + 1}: agent ka naam / ID zaroori hai.`);
       const mob = tagDigits(agent.mobile);
@@ -5907,7 +5916,7 @@ async function handleApi(req, res, url) {
     const rows = r.rows || [];
     const names = [...new Set(rows.map((x) => x.agentName).filter(Boolean))];
     return {
-      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '', itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(r.itemName) ? r.itemName : 'FASTag', serialNumber: r.serialNumber || '', deviceName: r.deviceName || '', materialDescription: r.materialDescription || '',
+      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '', itemName: normItemName(r.itemName), serialNumber: r.serialNumber || '', deviceName: r.deviceName || '', materialDescription: r.materialDescription || '',
       agentName: (r.agent && r.agent.name) || names[0] || '', agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
       rows: rows.length, agents: Math.max(1, names.length),
       classes: rows.map((x) => ({ cls: x.cls, requested: x.requested === undefined ? Number(x.approved) || 0 : Number(x.requested) || 0, approved: Number(x.approved) || 0, ...(names.length > 1 ? { agent: x.agentName || '' } : {}) })),
@@ -5961,7 +5970,7 @@ async function handleApi(req, res, url) {
       employee: ctx.employee, employeeToken: ctx.employeeToken || '', agent: d.agent,
       ...(submissionId ? { submissionId, submissionFingerprint } : {}),
       ...(ctx.courier ? { courier: ctx.courier } : {}),
-      itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(ctx.itemName) ? ctx.itemName : 'FASTag',
+      itemName: normItemName(ctx.itemName),
       ...(ctx.serialNumber ? { serialNumber: ctx.serialNumber } : {}), ...(ctx.deviceName ? { deviceName: ctx.deviceName } : {}), ...(ctx.materialDescription ? { materialDescription: ctx.materialDescription } : {}),
       ...(ctx.source ? { source: ctx.source, ip: ctx.ip } : {}),
       status: 'pending', note: ctx.note || '', adminNote: '',
@@ -6236,7 +6245,7 @@ async function handleApi(req, res, url) {
       case 'agentPincode': return (req.agent && req.agent.pincode) || '';
       case 'requested': return x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0;
       case 'courier': return req.courier || '';
-      case 'itemName': return ['FASTag', 'Biomatric Device', 'Matarial'].includes(req.itemName) ? req.itemName : 'FASTag';
+      case 'itemName': return normItemName(req.itemName);
       case 'serialNumber': return req.serialNumber || '';
       case 'deviceName': return req.deviceName || '';
       case 'materialDescription': return req.materialDescription || '';
@@ -6433,7 +6442,7 @@ async function handleApi(req, res, url) {
       const emp = body.employee && typeof body.employee === 'object' ? body.employee : {};
       const employee = { name: shortText(emp.name, 80) || user.name || user.username, ...(shortText(emp.office || emp.branch, 80) ? { office: shortText(emp.office || emp.branch, 80) } : {}) };
       drafts.forEach((d) => { d.dupes = tagAgentDupes([{ ...d.agent, rows: d.rows }]); });
-      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag', serialNumber: shortText(body.serialNumber, 100), deviceName: shortText(body.deviceName, 120), materialDescription: shortText(body.materialDescription, 200), updatedBy: user.username, submissionId: body.submissionId });
+      const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), itemName: normItemName(body.itemName), serialNumber: shortText(body.serialNumber, 100), deviceName: shortText(body.deviceName, 120), materialDescription: shortText(body.materialDescription, 200), updatedBy: user.username, submissionId: body.submissionId });
       const n = out.created.length;
       if (!out.idempotentReplay) try {
         recordNotification({
@@ -6460,7 +6469,7 @@ async function handleApi(req, res, url) {
       id: nextTagReqId(), at: now, by: user.username, byName: user.name || user.username,
       status: 'pending', note: shortText(body.note, 300), adminNote: '',
       ...(shortText(body.courier, 40) ? { courier: shortText(body.courier, 40) } : {}),
-      itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag',
+      itemName: normItemName(body.itemName),
       rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: user.username
     };
     storeTagRequests([row]);
@@ -6603,7 +6612,7 @@ async function handleApi(req, res, url) {
       const c = shortText(body.courier, 40);
       if (c) row.courier = c; else delete row.courier;
     }
-    if (body.itemName !== undefined) row.itemName = ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag';
+    if (body.itemName !== undefined) row.itemName = normItemName(body.itemName);
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
     if (Object.keys(body).every((k) => k === 'status')) persistBackground('notify'); // status-only → instant reply
     else await persist('notify');
@@ -6970,7 +6979,7 @@ async function handleApi(req, res, url) {
         by: `public:${normUser(employeeName) || 'employee'}`, byName: employeeName,
         employee: { name: employeeName, ...(office ? { office } : {}) }, employeeToken,
         courier: shortText(body.courier, 40),
-        itemName: ['FASTag', 'Biomatric Device', 'Matarial'].includes(body.itemName) ? body.itemName : 'FASTag',
+        itemName: normItemName(body.itemName),
         serialNumber: shortText(body.serialNumber, 100), deviceName: shortText(body.deviceName, 120), materialDescription: shortText(body.materialDescription, 200),
         source: 'public-link', ip: String(ip || '').slice(0, 45), note, updatedBy: 'public-link', submissionId: body.submissionId
       });

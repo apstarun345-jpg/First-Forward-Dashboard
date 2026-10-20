@@ -76,7 +76,7 @@ test('🖨️ print selected — har request ka label sirf EK baar, TO = agent k
   assert.equal(count(one, /class="lbl"/g), 1, 'single request = 1 label (pehle 10 copies repeat hoti thi)');
   const none = TR.labelsHtml([], {});
   assert.equal(count(none, /class="lbl"/g), 0);
-  assert.match(none, /Koi request select nahi hui/);
+  assert.match(none, /No request selected/);
 });
 
 test('📋 labelText — agent ka mobile/address/PIN; purani request me employee + agent line', () => {
@@ -166,7 +166,7 @@ test('📥 request row — ek hi row me sab (koi Kholo nahi): stock 🚗/🚚, i
   const [dr] = TR._test.displayRows([rahul]);
   const html = TR._test.reqRowHtml(dr);
   assert.ok(!/Kholo|data-tr-open/.test(html), 'drawer / Kholo button nahi');
-  for (const s of ['data-tr-sel="tagreq_aaa111::agent"', 'Ramesh Yadav', 'Jaipur office', 'Rahul Sharma', '#1001', 'TL TL One', '☏ 9876500001', 'Gandhi Nagar', '📮 302015', 'Item Name']) assert.ok(html.includes(s), `row me "${s}"`);
+  for (const s of ['data-tr-sel="tagreq_aaa111::agent"', 'Ramesh Yadav', 'Jaipur office', 'Rahul Sharma', '#1001', 'TL TL One', '☏ 9876500001', 'Gandhi Nagar', '📮 302015', 'data-tr-item-name']) assert.ok(html.includes(s), `row me "${s}"`);
   for (const m of ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth', 'suggest']) assert.ok(html.includes(`data-tr-m="${m}"`), `metric cell ${m}`);
   assert.match(html, /data-tr-m="stock">[\s\S]{0,260}<b class="tr-big-num">17<\/b>/, 'stock total (snapshot)');
   assert.match(html, /data-tr-m="core"><b class="tr-big-num">14<\/b>/);
@@ -391,7 +391,11 @@ test('📦 Item Name — options, FASTag default, payload and print label', () =
   const result = TR._test.payload([{ agentName: 'Agent X', agentId: 'A-1', q: { VC4: 1 } }], { name: 'Employee X' }).payload;
   assert.equal(result.itemName, 'FASTag');
   const req = { id: 'tagreq_item', at: Date.now(), status: 'pending', itemName: 'Matarial', rows: [{ cls: 'VC4', approved: 1, agentName: 'Agent X' }] };
-  assert.ok(TR.labelText(TR._test.labelItem(req)).includes('Item Name: Matarial'));
+  assert.ok(TR.labelText(TR._test.labelItem(req)).includes('Item Name: Material'));
+  // 🧺 v231 — multiple items together
+  assert.equal(TR._test.normalizeItemName('Matarial + FASTag'), 'FASTag + Matarial');
+  assert.equal(TR._test.normalizeItemName(['Biomatric Device', 'FASTag', 'Matarial']), 'FASTag + Biomatric Device + Matarial');
+  assert.ok(TR.labelText(TR._test.labelItem({ ...req, itemName: 'FASTag + Biomatric Device' })).includes('Item Name: FASTag + Biometric Device'));
 });
 
 test('v203 repeat request: confirm checkbox + wajah zaroori, force button tab tak disabled, review panel', () => {

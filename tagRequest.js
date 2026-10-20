@@ -141,8 +141,16 @@ FF.pages = FF.pages || {};
   const EMPLOYEE_TOKEN_KEY = 'ff_tr_employee_token';
   const COURIER_KEY = 'ff_tr_courier';   // 🚚 pichhla chuna hua courier — dobara type na karna pade
   const ITEM_NAME_OPTIONS = ['FASTag', 'Biomatric Device', 'Matarial'];
-  const isFastag = () => normalizeItemName(state.itemName) === 'FASTag';
-  const normalizeItemName = (value) => ITEM_NAME_OPTIONS.find((x) => x.toLowerCase() === clean(value).toLowerCase()) || 'FASTag';
+  // 🧺 v231 — ek request me kai items saath (FASTag + Biomatric Device + Matarial), " + " se jude
+  const ITEM_ALIAS = { material: 'matarial', 'biometric device': 'biomatric device', biometric: 'biomatric device' };
+  const itemList = (value) => { const parts = (Array.isArray(value) ? value : String(value == null ? '' : value).split(/\s*\+\s*/)).map((x) => clean(x).toLowerCase()).map((x) => ITEM_ALIAS[x] || x); const out = ITEM_NAME_OPTIONS.filter((n) => parts.includes(n.toLowerCase())); return out.length ? out : ['FASTag']; };
+  const normalizeItemName = (value) => itemList(value).join(' + ');
+  const hasItem = (name, value) => itemList(value === undefined ? state.itemName : value).includes(name);
+  const ITEM_LABEL = { FASTag: 'FASTag', 'Biomatric Device': 'Biometric Device', Matarial: 'Material' };
+  const ITEM_ICON = { FASTag: '🏷️', 'Biomatric Device': '🖐️', Matarial: '📦' };
+  const itemLabel = (value) => itemList(value).map((n) => ITEM_LABEL[n] || n).join(' + ');
+  const isFastag = () => hasItem('FASTag');
+  const onlyFastag = () => normalizeItemName(state.itemName) === 'FASTag';
   /** 🚚 Courier list — Settings → 🏷️ Tag Request → courier names se aati hai (default Delhivery / DTDC). */
   function courierOptions() {
     const cfg = formCfg() || {};
@@ -697,7 +705,7 @@ FF.pages = FF.pages || {};
       agentName, agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
       agents: agents.length, forTl: !!(r.agent && r.agent.kind === 'tl'), tl: (r.agent && r.agent.tl) || (rows[0] && rows[0].tl !== '—' ? rows[0].tl : '') || '',
       courier: clean(r.courier || ''),         // 🚚 label par courier ka naam
-      itemName: normalizeItemName(r.itemName)  // 📦 printed item
+      itemName: itemLabel(r.itemName)  // 📦 printed item(s)
     };
   }
   /** Label par agent / TL ka reference line (dispatch name alag ho ya purani employee request ho tab). */
@@ -745,8 +753,9 @@ FF.pages = FF.pages || {};
       const cls = it.classes.length ? it.classes.map((c) => `${esc(c.cls)} × ${fmt(c.qty)}`).join(' · ') : '—';
       const agentLine = agentRef(it) ? `<div class="to-agent">${esc(agentRef(it))}</div>` : '';
       const courierChip = it.courier ? `<div class="to-courier">🚚 Courier: <b>${esc(it.courier)}</b></div>` : '';
-      const itemNameChip = `<div class="to-item-name">📦 Item Name: <b>${esc(it.itemName || 'FASTag')}</b></div>`;
-      return `<div class="lbl"><div class="lbl-top-bar"><span class="to-hdr-title">DELIVER TO</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${itemNameChip}${courierChip}${agentLine}</div><div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>${fromLine}</div>`;
+      const itemNameChip = `<div class="to-item-name">📦 Items: <b>${esc(it.itemName || 'FASTag')}</b></div>`;
+      const showCls = it.classes.length || !it.itemName || /FASTag/.test(it.itemName);
+      return `<div class="lbl"><div class="lbl-top-bar"><span class="to-hdr-title">DELIVER TO</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${itemNameChip}${courierChip}${agentLine}</div>${showCls ? `<div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>` : ''}${fromLine}</div>`;
     }).join('');
     const totalTags = list.reduce((s, it) => s + num(it.total), 0);
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -775,7 +784,9 @@ body { font-family: "Inter", Arial, "Segoe UI", sans-serif; color: #0f172a; marg
 .to-name { font-size: 115%; font-weight: 900; color: #0f172a; }
 .to-mob { font-weight: 800; margin-top: 0.5mm; color: #0f172a; font-size: 98%; }
 .to-mob::before { content: "Mobile Number - "; font-weight: 700; color: #475569; font-size: 86%; }
-.to-addr { margin-top: 0.5mm; font-size: 90%; color: #1e293b; line-height: 1.22; }
+.to-addr { margin-top: 0.5mm; font-size: 90%; color: #1e293b; line-height: 1.22; overflow-wrap: anywhere; word-break: break-word; }
+.to-item-name { font-size: 84%; font-weight: 700; margin-top: 0.5mm; color: #4c1d95; }
+.to-name, .to-mob, .to-pin { overflow-wrap: anywhere; }
 .to-pin { font-size: 118%; font-weight: 900; letter-spacing: 0.4px; margin-top: 0.6mm; color: #0f172a; }
 .to-agent { font-size: 78%; font-weight: 700; margin-top: 0.4mm; color: #334155; }
 .to-courier { font-size: 84%; font-weight: 800; margin-top: 0.5mm; color: #7c2d12; }
@@ -801,14 +812,14 @@ body.colorful .from-hdr { color: #166534; }
 .empty { padding: 30px; text-align: center; color: #666; }
 @media print { .bar { display: none; } body { margin: 0; background: #fff; } .grid { padding: 0; } }
 </style></head><body class="${colorful ? 'colorful' : ''}">
-<div class="bar"><b>🖨️ Dispatch labels — ${list.length} request${list.length === 1 ? '' : 's'} · ${fmt(totalTags)} tags (har label ek hi baar)</b>
+<div class="bar"><b>🖨️ Dispatch labels — ${list.length} request${list.length === 1 ? '' : 's'} · ${fmt(totalTags)} tags (each label once)</b>
   <button id="pbtn" style="font-weight:700">🖨️ Print</button>
   <button id="pdfbtn" style="font-weight:700;background:#16a34a;color:#fff;border-color:#16a34a">📄 Download PDF</button>
   <span>Style: <span class="grp"><button class="th ${colorful ? 'on' : ''}" data-colorful="1">🎨 Colorful Label</button><button class="th ${!colorful ? 'on' : ''}" data-colorful="0">🖨️ Standard B&W</button></span></span>
   <span>Text size: <span class="grp"><button class="sz" data-sz="9">A−</button><button class="sz" data-sz="10.5">A</button><button class="sz" data-sz="12">A+</button><button class="sz" data-sz="14">A++</button></span></span>
   <span>Per page: <span class="grp"><button class="rp" data-rows="4">8</button><button class="rp" data-rows="5">10</button><button class="rp" data-rows="6">12</button></span></span>
-  <span style="color:#666;font-size:12px">📬 TO (Receiver) upar · 📤 FROM (Sender) neeche · 📄 Download PDF = seedha PDF file.</span></div>
-<div class="grid">${cells || '<div class="empty">Koi request select nahi hui.</div>'}</div>
+  <span style="color:#666;font-size:12px">📬 TO (Receiver) on top · 📤 FROM (Sender) below · long addresses shrink automatically so nothing is cut · 📄 Download PDF = PDF file.</span></div>
+<div class="grid">${cells || '<div class="empty">No request selected.</div>'}</div>
 </body></html>`;
   }
   /** 📄 Labels → PDF (direct download) — TO (Receiver) UPAR · Class qty · FROM (Sender) NEECHE + Colorful option. */
@@ -833,8 +844,13 @@ body.colorful .from-hdr { color: #166534; }
         const col = n % 2, rowI = Math.floor(n / 2);
         const x0 = MG + col * (lw + GAP), y0 = MG + rowI * (lh + GAP);
         const t = it.to || {};
-        const fnt = (pct, w) => { ctx.font = `${w || 400} ${px(pt * MMPT * pct)}px ${FONT}`; };
-        const line = (xa, ya, xb, dash, colStr) => { ctx.save(); ctx.strokeStyle = colStr || (dash ? '#64748b' : '#111'); ctx.lineWidth = px(0.28); ctx.setLineDash(dash ? [px(0.8), px(0.8)] : []); ctx.beginPath(); ctx.moveTo(px(xa), px(ya)); ctx.lineTo(px(xb), px(ya)); ctx.stroke(); ctx.restore(); };
+        // 📐 v231 — auto-fit: lamba address ho to poora label (text) chhota hota hai jab tak sab andar na aa jaye; kuch kat-ta nahi
+        const drawLabel = (scale, dry) => {
+        const ps = pt * scale;
+        const fnt = (pct, w) => { ctx.font = `${w || 400} ${px(ps * MMPT * pct)}px ${FONT}`; };
+        const line = (xa, ya, xb, dash, colStr) => { if (dry) return; ctx.save(); ctx.strokeStyle = colStr || (dash ? '#64748b' : '#111'); ctx.lineWidth = px(0.28); ctx.setLineDash(dash ? [px(0.8), px(0.8)] : []); ctx.beginPath(); ctx.moveTo(px(xa), px(ya)); ctx.lineTo(px(xb), px(ya)); ctx.stroke(); ctx.restore(); };
+        const fillText = (str, xx, yy) => { if (!dry) ctx.fillText(str, xx, yy); };
+        if (!dry) {
         // Outer card border & background
         ctx.save();
         if (colorful) {
@@ -850,20 +866,21 @@ body.colorful .from-hdr { color: #166534; }
           ctx.setLineDash([px(1.6), px(1.1)]);
         }
         ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(px(x0), px(y0), px(lw), px(lh), px(1.8)); else ctx.rect(px(x0), px(y0), px(lw), px(lh)); ctx.stroke(); ctx.restore();
+        }
 
         const ix = x0 + 2.8, iw = lw - 5.6;
         // Top header bar: DELIVER TO
-        fnt(0.68, 800);
+        ctx.font = `800 ${px(pt * MMPT * 0.68)}px ${FONT}`;
         ctx.fillStyle = colorful ? '#ffffff' : '#111111';
-        ctx.fillText('DELIVER TO', px(ix), px(y0 + 3.8));
+        fillText('DELIVER TO', px(ix), px(y0 + 3.8));
         if (!colorful) line(ix, y0 + 5.2, ix + iw, false);
 
         let y = y0 + 6.2;
         const text = (str, pct, w, color, gapAfter) => {
           fnt(pct, w); ctx.fillStyle = color || '#0f172a';
           const lines = FF.pdf.wrap(ctx, str, px(iw));
-          const step = pt * MMPT * pct * 1.24;
-          lines.forEach((l) => { y += step; ctx.fillText(l, px(ix), px(y - step * 0.2)); });
+          const step = ps * MMPT * pct * 1.24;
+          lines.forEach((l) => { y += step; fillText(l, px(ix), px(y - step * 0.2)); });
           y += gapAfter || 0;
         };
 
@@ -872,6 +889,7 @@ body.colorful .from-hdr { color: #166534; }
         if (t.mobile) text(`Mobile Number - ${t.mobile}`, 0.92, 700, colorful ? '#15803d' : '#111', 0.2);
         if (t.address) text(`Address - ${t.address}`, 0.84, 500, '#1e293b', 0.2);
         if (t.pincode) text(`PIN Code - ${t.pincode}`, 1.15, 900, colorful ? '#b91c1c' : '#111', 0.3);
+        if (it.itemName) text(`Items - ${it.itemName}`, 0.84, 700, colorful ? '#6d28d9' : '#111', 0.2);
         if (it.courier) text(`Courier - ${it.courier}`, 0.95, 800, colorful ? '#c2410c' : '#111', 0.25);
         const aref = agentRef(it);
         if (aref) text(aref, 0.74, 600, '#334155', 0.2);
@@ -879,45 +897,36 @@ body.colorful .from-hdr { color: #166534; }
         // 2. BOTTOM ANCHOR: Class summary + FROM neeche
         const cls = it.classes.length ? it.classes.map((c) => `${c.cls} × ${fmt(c.qty)}`).join(' · ') : '—';
         const fromStr1 = `FROM: Name - ${f.name}`; // sirf naam — mobile/address label par nahi
-        const fromStr2 = '';
-        const meta = ''; // Req / Emp / TL line label par nahi
 
         fnt(0.76, 700);
-        const clsLines = FF.pdf.wrap(ctx, `FASTags: ${cls} = ${fmt(it.total)} tags`, px(iw)).slice(0, 2);
+        const clsLines = it.classes.length || !it.itemName || /FASTag/.test(it.itemName) ? FF.pdf.wrap(ctx, `FASTags: ${cls} = ${fmt(it.total)} tags`, px(iw)).slice(0, 2) : [];
         fnt(0.64, 700);
         const fromLines1 = FF.pdf.wrap(ctx, fromStr1, px(iw)).slice(0, 2);
-        fnt(0.60, 500);
-        const fromLines2 = fromStr2 ? FF.pdf.wrap(ctx, fromStr2, px(iw)).slice(0, 2) : [];
-        fnt(0.54, 400);
-        const metaLines = meta ? FF.pdf.wrap(ctx, meta, px(iw)).slice(0, 1) : [];
 
-        const sCls = pt * MMPT * 0.76 * 1.22;
-        const sFr1 = pt * MMPT * 0.64 * 1.22;
-        const sFr2 = pt * MMPT * 0.60 * 1.20;
-        const sMet = pt * MMPT * 0.54 * 1.18;
-        const bottomH = clsLines.length * sCls + fromLines1.length * sFr1 + fromLines2.length * sFr2 + metaLines.length * sMet + 3.2;
+        const sCls = ps * MMPT * 0.76 * 1.22;
+        const sFr1 = ps * MMPT * 0.64 * 1.22;
+        const bottomH = clsLines.length * sCls + fromLines1.length * sFr1 + 3.2;
+        const topEnd = y;
 
         let yb = Math.max(y + 0.8, y0 + lh - bottomH - 1.4);
-        if (colorful) {
-          ctx.save();
-          ctx.fillStyle = '#fef3c7';
-          ctx.fillRect(px(ix), px(yb), px(iw), px(clsLines.length * sCls + 1.0));
-          ctx.restore();
-        } else {
-          line(ix, yb, ix + iw, true);
+        if (clsLines.length) {
+          if (colorful) {
+            if (!dry) { ctx.save(); ctx.fillStyle = '#fef3c7'; ctx.fillRect(px(ix), px(yb), px(iw), px(clsLines.length * sCls + 1.0)); ctx.restore(); }
+          } else line(ix, yb, ix + iw, true);
+          yb += 0.4;
+          fnt(0.76, 700); ctx.fillStyle = colorful ? '#78350f' : '#111';
+          clsLines.forEach((l) => { yb += sCls; fillText(l, px(ix + 0.8), px(yb - 0.4)); });
+          yb += 0.8;
         }
-        yb += 0.4;
-        fnt(0.76, 700); ctx.fillStyle = colorful ? '#78350f' : '#111';
-        clsLines.forEach((l) => { yb += sCls; ctx.fillText(l, px(ix + 0.8), px(yb - 0.4)); });
-        yb += 0.8;
         line(ix, yb, ix + iw, true, colorful ? '#16a34a' : '#64748b');
         yb += 0.5;
         fnt(0.64, 700); ctx.fillStyle = colorful ? '#166534' : '#1e293b';
-        fromLines1.forEach((l) => { yb += sFr1; ctx.fillText(l, px(ix), px(yb - 0.3)); });
-        fnt(0.60, 500); ctx.fillStyle = '#334155';
-        fromLines2.forEach((l) => { yb += sFr2; ctx.fillText(l, px(ix), px(yb - 0.3)); });
-        fnt(0.54, 400); ctx.fillStyle = '#64748b';
-        metaLines.forEach((l) => { yb += sMet; ctx.fillText(l, px(ix), px(yb - 0.2)); });
+        fromLines1.forEach((l) => { yb += sFr1; fillText(l, px(ix), px(yb - 0.3)); });
+        return { fits: topEnd + 0.8 + bottomH <= lh + y0 - 0.6 && yb <= y0 + lh - 0.6 };
+        };
+        let scale = 1;
+        while (scale > 0.55 && !drawLabel(scale, true).fits) scale -= 0.05;
+        drawLabel(scale, false);
       });
       canvases.push(pg.canvas);
     }
@@ -953,15 +962,28 @@ body.colorful .from-hdr { color: #166534; }
     const H = {}; [3, 4, 5, 6].forEach((n) => { H[n] = `${((283 - (n - 1) * 2.5) / n).toFixed(1)}mm`; });
     const st = { size: (initOpts && initOpts.size) || 10.5, rows: (initOpts && initOpts.rows) || 5, colorful: !initOpts || initOpts.colorful !== false };
     const each = (sel, fn) => Array.prototype.forEach.call(doc.querySelectorAll(sel), fn);
+    // 📐 v231 — auto-fit: jis label ka content (lamba address) box se bahar jaye, sirf usi ka text chhota (min 6pt)
+    const over = (el) => el && el.scrollHeight > el.clientHeight + 1;
+    const fit = () => each('.lbl', (l) => {
+      let size = st.size; l.style.fontSize = `${size}pt`;
+      const to = l.querySelector('.to');
+      let guard = 0;
+      while ((over(l) || over(to)) && size > 6 && guard++ < 40) { size = Math.round((size - 0.25) * 100) / 100; l.style.fontSize = `${size}pt`; }
+      l.classList.toggle('fitted', size < st.size);
+    });
+    const fitSoon = () => { fit(); try { w.setTimeout(fit, 250); w.setTimeout(fit, 900); } catch { /* ignore */ } };
     const mark = (sel, attr, v) => each(sel, (b) => b.classList.toggle('on', b.getAttribute(attr) === String(v)));
     mark('.sz', 'data-sz', st.size); mark('.rp', 'data-rows', st.rows); mark('.th', 'data-colorful', st.colorful ? '1' : '0');
-    each('.sz', (b) => b.addEventListener('click', () => { st.size = Number(b.getAttribute('data-sz')); each('.lbl', (l) => { l.style.fontSize = `${st.size}pt`; }); mark('.sz', 'data-sz', st.size); }));
-    each('.rp', (b) => b.addEventListener('click', () => { st.rows = Number(b.getAttribute('data-rows')); each('.lbl', (l) => { l.style.height = H[st.rows]; }); mark('.rp', 'data-rows', st.rows); }));
+    each('.sz', (b) => b.addEventListener('click', () => { st.size = Number(b.getAttribute('data-sz')); mark('.sz', 'data-sz', st.size); fitSoon(); }));
+    each('.rp', (b) => b.addEventListener('click', () => { st.rows = Number(b.getAttribute('data-rows')); each('.lbl', (l) => { l.style.height = H[st.rows]; }); mark('.rp', 'data-rows', st.rows); fitSoon(); }));
     each('.th', (b) => b.addEventListener('click', () => {
       st.colorful = b.getAttribute('data-colorful') === '1';
       if (doc.body && doc.body.classList) doc.body.classList.toggle('colorful', st.colorful);
       mark('.th', 'data-colorful', st.colorful ? '1' : '0');
+      fitSoon();
     }));
+    fitSoon();
+    try { w.addEventListener('load', fit); w.addEventListener('beforeprint', fit); } catch { /* ignore */ }
     const pb = doc.getElementById('pbtn');
     if (pb) pb.addEventListener('click', () => { try { w.focus(); w.print(); } catch { /* ignore */ } });
     const pdfb = doc.getElementById('pdfbtn');
@@ -1548,11 +1570,11 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-form-extra">
             ${cfg.askCourier === false ? '' : `<label class="field"><span class="dim small">🚚 Courier (optional — label par chhapta hai)</span>
               <select class="input" data-tr-field="courier"><option value="" ${state.courier ? '' : 'selected'}>🚚 courier chuno…</option>${courierOptions().map((c) => `<option value="${esc(c)}" ${c.toLowerCase() === String(state.courier || '').toLowerCase() ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>`}
-            <label class="field"><span class="dim small">📦 Item Name</span>
-              <select class="input" data-tr-field="itemName" aria-label="Item Name">${ITEM_NAME_OPTIONS.map((name) => `<option value="${esc(name)}" ${normalizeItemName(state.itemName) === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
-            ${normalizeItemName(state.itemName) === 'FASTag' ? '<p class="dim small tr-item-help">🏷️ FASTag select hai — neeche har agent ke liye class-wise quantity bharein.</p>' : ''}
-            ${normalizeItemName(state.itemName) === 'Biomatric Device' ? `<label class="field"><span class="dim small">🔢 Serial Number *</span><input class="input${errOf('item', 'serialNumber') ? ' tr-bad' : ''}" data-tr-field="serialNumber" value="${esc(state.serialNumber || '')}" placeholder="Device ka serial number" maxlength="100"></label><label class="field"><span class="dim small">🖥️ Device Name *</span><input class="input${errOf('item', 'deviceName') ? ' tr-bad' : ''}" data-tr-field="deviceName" value="${esc(state.deviceName || '')}" placeholder="Biometric device ka naam" maxlength="120"></label>` : ''}
-            ${normalizeItemName(state.itemName) === 'Matarial' ? `<label class="field tr-span-all"><span class="dim small">📦 Material details *</span><input class="input${errOf('item', 'materialDescription') ? ' tr-bad' : ''}" data-tr-field="materialDescription" value="${esc(state.materialDescription || '')}" placeholder="Kya material hai? Jaise printer, cable, scanner..." maxlength="200"></label>` : ''}
+            <div class="field tr-items-field"><span class="dim small">📦 Items <small>(select one or more)</small></span>
+              <div class="tr-item-chips" role="group" aria-label="Items">${ITEM_NAME_OPTIONS.map((name) => `<label class="tr-item-chip ${hasItem(name) ? 'on' : ''}"><input type="checkbox" data-tr-item="${esc(name)}" ${hasItem(name) ? 'checked' : ''}> ${ITEM_ICON[name]} ${esc(ITEM_LABEL[name])}</label>`).join('')}</div></div>
+            ${isFastag() ? `<p class="dim small tr-item-help">🏷️ FASTag is selected — fill in the class-wise quantity for each agent below${onlyFastag() ? '' : ' (agents who only need the other items can leave it at 0)'}.</p>` : ''}
+            ${hasItem('Biomatric Device') ? `<label class="field"><span class="dim small">🔢 Serial Number *</span><input class="input${errOf('item', 'serialNumber') ? ' tr-bad' : ''}" data-tr-field="serialNumber" value="${esc(state.serialNumber || '')}" placeholder="Device ka serial number" maxlength="100"></label><label class="field"><span class="dim small">🖥️ Device Name *</span><input class="input${errOf('item', 'deviceName') ? ' tr-bad' : ''}" data-tr-field="deviceName" value="${esc(state.deviceName || '')}" placeholder="Biometric device ka naam" maxlength="120"></label>` : ''}
+            ${hasItem('Matarial') ? `<label class="field tr-span-all"><span class="dim small">📦 Material details *</span><input class="input${errOf('item', 'materialDescription') ? ' tr-bad' : ''}" data-tr-field="materialDescription" value="${esc(state.materialDescription || '')}" placeholder="Kya material hai? Jaise printer, cable, scanner..." maxlength="200"></label>` : ''}
             ${cfg.askNote === false ? '' : `<label class="field tr-note-field"><span class="dim small">Note (optional — admin ke liye)</span>
               <input class="input" data-tr-field="note" value="${esc(state.note)}" placeholder="e.g. urgent — kal dispatch chahiye" maxlength="300"></label>`}
           </div>
@@ -1856,8 +1878,11 @@ body.colorful .from-hdr { color: #166534; }
     if (courier) {
       courier.addEventListener('change', () => { state.courier = clean(courier.value); saveCourier(); });
     }
-    const itemName = root.querySelector('[data-tr-field="itemName"]');
-    if (itemName) itemName.addEventListener('change', () => { state.itemName = normalizeItemName(itemName.value); renderForm(); });
+    root.querySelectorAll('[data-tr-item]').forEach((cb) => cb.addEventListener('change', () => {
+      const picked = [...root.querySelectorAll('[data-tr-item]')].filter((x) => x.checked).map((x) => x.dataset.trItem);
+      if (!picked.length) { cb.checked = true; U.toast('Select at least one item', 'warn'); return; }
+      state.itemName = normalizeItemName(picked); saveDraftSoon(); renderForm();
+    }));
     ['serialNumber', 'deviceName', 'materialDescription'].forEach((key) => {
       const input = root.querySelector(`[data-tr-field="${key}"]`);
       if (input) input.addEventListener('input', () => { state[key] = input.value; if (clean(input.value).length >= 2 && state.errs.item && state.errs.item[key]) { delete state.errs.item[key]; input.classList.remove('tr-bad'); } });
@@ -1954,11 +1979,11 @@ body.colorful .from-hdr { color: #166534; }
     let first = null;
     const mark = (rowId, field, msg) => { (errs[rowId] = errs[rowId] || {})[field] = msg; if (!first) first = { rowId, field }; };
     if (clean(state.employee.name).length < 2) mark('employee', 'name', 'Employee name zaroori hai (kam se kam 2 akshar)');
-    if (normalizeItemName(state.itemName) === 'Biomatric Device') {
+    if (hasItem('Biomatric Device')) {
       if (clean(state.serialNumber).length < 2) mark('item', 'serialNumber', 'Biometric device ka serial number likho');
       if (clean(state.deviceName).length < 2) mark('item', 'deviceName', 'Device name likho');
     }
-    if (normalizeItemName(state.itemName) === 'Matarial' && clean(state.materialDescription).length < 2) mark('item', 'materialDescription', 'Material ka naam / details likho');
+    if (hasItem('Matarial') && clean(state.materialDescription).length < 2) mark('item', 'materialDescription', 'Material ka naam / details likho');
     if (!isFastag() && !state.rows.some((r) => String(r.name || r.agentId || '').trim() || digits(r.mobile) || clean(r.address))) mark(state.rows[0].id, 'agent', 'Device / material request ke liye agent ya delivery details bharein');
     const filled = state.rows.filter(rowHasContent);
     if (!filled.length) mark(state.rows[0].id, 'agent', isFastag() ? 'Kam se kam ek agent ka naam + qty bharo' : 'Device / material request ke liye agent ya delivery details bharein');
@@ -1973,7 +1998,7 @@ body.colorful .from-hdr { color: #166534; }
         if (clean(row.address).length < 8) mark(row.id, 'address', 'Agent ka full address likho (house / street / area / city)');
         if (!/^\d{6}$/.test(digits(row.pincode))) mark(row.id, 'pincode', '6 digit pincode daalo');
       } else if (row.pincode && !/^\d{6}$/.test(digits(row.pincode))) mark(row.id, 'pincode', 'Pincode 6 digit ka hona chahiye');
-      if (isFastag() && !rowTotal(row)) mark(row.id, 'qty', 'Kam se kam ek class me qty daalo');
+      if (onlyFastag() && !rowTotal(row)) mark(row.id, 'qty', 'Kam se kam ek class me qty daalo');
       const rec = exactAgent(row);
       const key = rec ? `${rec.channel}|${norm(rec.name)}` : `?|${norm(row.name || row.agentId)}`;
       if (isFastag() && String(row.name || row.agentId || '').trim()) {
@@ -2013,7 +2038,7 @@ body.colorful .from-hdr { color: #166534; }
     const office = clean(state.employee.office);
     const liveShare = isPublic() && FF.publicForm && typeof FF.publicForm.liveShareCredentials === 'function' ? FF.publicForm.liveShareCredentials() : null;
     const publicVisitId = isPublic() && FF.publicForm && typeof FF.publicForm.publicVisitId === 'function' ? FF.publicForm.publicVisitId() : '';
-    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), itemName: normalizeItemName(state.itemName), serialNumber: normalizeItemName(state.itemName) === 'Biomatric Device' ? clean(state.serialNumber || '') : '', deviceName: normalizeItemName(state.itemName) === 'Biomatric Device' ? clean(state.deviceName || '') : '', materialDescription: normalizeItemName(state.itemName) === 'Matarial' ? clean(state.materialDescription || '') : '', agents };
+    return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), itemName: normalizeItemName(state.itemName), serialNumber: hasItem('Biomatric Device') ? clean(state.serialNumber || '') : '', deviceName: hasItem('Biomatric Device') ? clean(state.deviceName || '') : '', materialDescription: hasItem('Matarial') ? clean(state.materialDescription || '') : '', agents };
   }
   const withTimeout = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
   async function submit() {
@@ -2160,7 +2185,7 @@ body.colorful .from-hdr { color: #166534; }
       <div class="tr-st-top"><span class="badge ${v.tone}">${v.label}</span><b class="tr-st-agent">${esc(s.agentName || '—')}</b>${s.agents > 1 ? `<small class="dim"> +${s.agents - 1} agents</small>` : ''}<span class="tr-st-total"><b>${fmt(s.total)}</b> tags</span></div>
       ${steps}
       ${cls ? `<div class="tr-st-classes">${cls}</div>` : ''}
-      <div class="dim small">📅 ${esc(longDate(s.at))}      <div class="dim small">📦 Item Name: <b>${esc(normalizeItemName(s.itemName))}</b></div>
+      <div class="dim small">📅 ${esc(longDate(s.at))}      <div class="dim small">📦 Items: <b>${esc(itemLabel(s.itemName))}</b></div>
  · ${esc(ago(s.at))}${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : (s.byName ? ` · 👤 entry: ${esc(s.byName)}` : '')} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
       ${s.adminNote ? `<div class="notice green" style="margin-top:8px">💬 Admin note: ${esc(s.adminNote)}</div>` : ''}
       ${isPublic() && (s.classes || []).length ? `<div style="margin-top:8px"><button type="button" class="btn small" data-tr-again="${esc(s.id)}" title="Fill the form again with this request's agent and quantities">🔁 Request again</button></div>` : ''}
@@ -2614,7 +2639,7 @@ body.colorful .from-hdr { color: #166534; }
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
       <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)} <button type="button" class="cp-btn" data-copy="${esc(dr.agent.agentId)}" title="Copy agent ID" aria-label="Copy agent ID">📋</button>` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
         <span class="tr-tags"><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
-      ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td><td class="tr-c-item-name"><select class="input tr-item-name-sel" data-tr-item-name data-key="${esc(dr.key)}" aria-label="Item Name" title="📦 Item Name">${ITEM_NAME_OPTIONS.map((name) => `<option value="${esc(name)}" ${normalizeItemName(r.itemName) === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>${r.serialNumber ? `<small class="dim">Serial: ${esc(r.serialNumber)}</small>` : ''}${r.deviceName ? `<small class="dim">Device: ${esc(r.deviceName)}</small>` : ''}${r.materialDescription ? `<small class="dim">Material: ${esc(r.materialDescription)}</small>` : ''} </td>` : ''}
+      ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td><td class="tr-c-item-name"><div class="tr-item-chips sm" data-tr-item-name data-key="${esc(dr.key)}" role="group" aria-label="Items">${ITEM_NAME_OPTIONS.map((name) => `<label class="tr-item-chip ${hasItem(name, r.itemName) ? 'on' : ''}" title="${esc(ITEM_LABEL[name])}"><input type="checkbox" data-tr-item-cell="${esc(name)}" data-key="${esc(dr.key)}" ${hasItem(name, r.itemName) ? 'checked' : ''}> ${ITEM_ICON[name]} ${esc(ITEM_LABEL[name])}</label>`).join('')}</div>${r.serialNumber ? `<small class="dim">Serial: ${esc(r.serialNumber)}</small>` : ''}${r.deviceName ? `<small class="dim">Device: ${esc(r.deviceName)}</small>` : ''}${r.materialDescription ? `<small class="dim">Material: ${esc(r.materialDescription)}</small>` : ''} </td>` : ''}
       <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a> <button type="button" class="cp-btn" data-copy="${esc(c.mobile)}" title="Copy mobile" aria-label="Copy mobile">📋</button><a class="cp-btn" target="_blank" rel="noopener" href="${esc(U.waLink('', c.mobile))}" title="WhatsApp" aria-label="WhatsApp">💬</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)} <button type="button" class="cp-btn" data-copy="${esc([c.address, c.pincode].filter(Boolean).join(', '))}" title="Copy address" aria-label="Copy address">📋</button></div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
       ${metricCellsHtml(dr)}
       <td class="tr-c-cls">${classCellHtml(dr)}</td>
@@ -3337,14 +3362,17 @@ body.colorful .from-hdr { color: #166534; }
         return;
       }
       if (t.matches && t.matches('[data-tr-courier]')) {
-      if (t.matches && t.matches('[data-tr-item-name]')) {
+      if (t.matches && t.matches('[data-tr-item-cell]')) {
         const dr = findDr(t.dataset.key);
         if (!dr) return;
-        const val = normalizeItemName(t.value);
+        const box = t.closest('[data-tr-item-name]');
+        const picked = box ? [...box.querySelectorAll('[data-tr-item-cell]')].filter((x) => x.checked).map((x) => x.dataset.trItemCell) : [];
+        if (!picked.length) { t.checked = true; U.toast('Select at least one item', 'warn'); return; }
+        const val = normalizeItemName(picked);
         if (val === normalizeItemName(dr.req.itemName)) return;
         t.disabled = true;
         putRequest(dr.req, { itemName: val }).then(() => {
-          U.toast('Item Name: ' + val, 'ok');
+          U.toast('Items: ' + itemLabel(val), 'ok');
           renderReqTable();
         }).catch((err) => {
           U.toast('Item Name save nahi hua: ' + ((err && err.message) || ''), 'err');
@@ -3793,12 +3821,12 @@ body.colorful .from-hdr { color: #166534; }
       return html;
     },
     // 🧪 Tests: requests → table rows (har agent ek row) + row HTML + submit payload.
-    _test: {
+    _test: { openPrint, labelsPdf,
       displayRows, reqRowHtml: (dr) => reqRowHtml(dr), metricCellsHtml, metricNumbers, hintText, agentGroupSummaryHtml, channelFilterHtml, requestsShellHtml, agentKeyOf, labelItem, contactOf,
       employeeStatusPage, employeeStatusFiltersHtml, employeeStatusHistoryHtml,
       employeeHistoryInnerHtml, employeeHistoryChipsHtml, employeeHistoryPanelHtml, contactSuggestHtml,
       recTotals, suggestItems, suggestHtml, stockBoardHtml, stockBoardTableHtml, stockBoardRows, stockBoardChipsHtml,
-      classBreakdownRows, classBreakdownHtml, tlPanelHtml, findTlRecord, courierOptions, ITEM_NAME_OPTIONS, normalizeItemName, requestColumnCount,
+      classBreakdownRows, classBreakdownHtml, tlPanelHtml, findTlRecord, courierOptions, ITEM_NAME_OPTIONS, normalizeItemName, itemList, itemLabel, requestColumnCount,
       setIndex: (idx) => { state.index = idx || null; },
       setStockBoard: (patch) => { state.stockBoard = { ...state.stockBoard, ...(patch || {}) }; },
       // 🧪 Public (employee link) mode + employee identity/history — panel generators inhi par chalte hain.
