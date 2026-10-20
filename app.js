@@ -1074,7 +1074,9 @@ window.FF = window.FF || {};
     root.className = `page page-${page}`;
     main.setAttribute('aria-busy', 'true');
     routeProgress(true, token);
-    main.replaceChildren(root);
+    // ⚡ v236 — FF ↔ GV switch turant (page render se pehle, root ke bahar) → click par koi jump/lag nahi
+    const chSw = channelSwitchEl(page);
+    if (chSw) main.replaceChildren(chSw, root); else main.replaceChildren(root);
     main.scrollTop = 0; window.scrollTo(0, 0);
     // Slow page render ho to blank screen ("hang") ki jagah animated skeleton — page ka apna content
     // aate hi wo skeleton overwrite kar deta hai (root me content aa chuka ho to loader lagta hi nahi).
@@ -1102,7 +1104,7 @@ window.FF = window.FF || {};
       if (typeof mod.render === 'function') await mod.render(root, params, ctx || {});
       else if (typeof mod === 'function') await mod(root, params, ctx || {});
       else throw new Error(`Page render nahi ho paya (${page}).`);
-      if (token === current.token) { channelSwitch(root, page); shortSubtitle(root, page); }
+      if (token === current.token) { shortSubtitle(root, page); if (chSw) prefetchTwin(page); }
     } catch (err) {
       console.error(err);
       if (token === current.token) root.innerHTML = U.errorBox(err, 'data-action="refresh"');
@@ -1164,17 +1166,41 @@ window.FF = window.FF || {};
   }
 
   /** 🔀 v228 — jodi wale pages (Dashboard · Trend · Performance · Stock · Agent/TL Summary) ke upar FF ↔ GV switch. */
-  function channelSwitch(root, page) {
+  function twinPair(page) {
+    const def = pageDef(page); if (!def) return null;
+    const ffId = def.twin ? def.id : def.twinOf, gvId = def.twin || (def.twinOf ? def.id : '');
+    if (!ffId || !gvId) return null;
+    const can = (id) => { const d = pageDef(id); return !!(d && FF.auth.can(d.perm)); };
+    return can(ffId) && can(gvId) ? { ffId, gvId } : null;
+  }
+  function channelSwitchEl(page) {
     try {
-      const def = pageDef(page); if (!def) return;
-      const ffId = def.twin ? def.id : def.twinOf, gvId = def.twin || (def.twinOf ? def.id : '');
-      if (!ffId || !gvId) return;
-      const can = (id) => { const d = pageDef(id); return !!(d && FF.auth.can(d.perm)); };
-      if (!can(ffId) || !can(gvId)) return;
-      const old = root.querySelector(':scope > .ch-switch'); if (old) old.remove();
+      const p = twinPair(page); if (!p) return null;
+      const { ffId, gvId } = p;
       const el = U.h(`<div class="ch-switch" role="tablist" aria-label="Channel"><a role="tab" href="#/${ffId}" class="ch-ff ${page === ffId ? 'on' : ''}" aria-selected="${page === ffId}">🟦 First Forward</a><a role="tab" href="#/${gvId}" class="ch-gv ${page === gvId ? 'on' : ''}" aria-selected="${page === gvId}">🟩 GV Partner</a></div>`);
-      root.prepend(el);
-    } catch { /* optional */ }
+      // Click par highlight turant badlo (page data baad me aata rahe), hover/touch par module pehle se laa lo
+      el.addEventListener('click', (e) => {
+        const a = e.target.closest('a'); if (!a || a.classList.contains('on')) { if (a) e.preventDefault(); return; }
+        el.querySelectorAll('a').forEach((x) => { const on = x === a; x.classList.toggle('on', on); x.setAttribute('aria-selected', String(on)); });
+      });
+      const warm = (e) => { const a = e.target.closest('a'); if (a) prefetchPage(a.getAttribute('href').slice(2)); };
+      el.addEventListener('pointerenter', warm, true);
+      el.addEventListener('touchstart', warm, { passive: true, capture: true });
+      return el;
+    } catch { return null; }
+  }
+  function prefetchPage(id) {
+    try { if (id && FF.lazy && FF.lazy.ensure && !FF.pages[id]) FF.lazy.ensure(id).catch(() => {}); } catch { /* optional */ }
+  }
+  function prefetchTwin(page) {
+    const p = twinPair(page); if (!p) return;
+    const other = page === p.ffId ? p.gvId : p.ffId;
+    const run = () => {
+      prefetchPage(other);
+      // GV pages ka base data bhi idle me garam kar do
+      try { if (other.startsWith('gv') && FF.gv && FF.gv.need) Promise.resolve(FF.gv.need('master', { only: true })).catch(() => {}); } catch { /* optional */ }
+    };
+    if (window.requestIdleCallback) requestIdleCallback(run, { timeout: 2500 }); else setTimeout(run, 800);
   }
 
   /** 🩺 v3.37 — Settings → Diagnostics ke SAVED fixes boot/par har page render par eagerly laga do.

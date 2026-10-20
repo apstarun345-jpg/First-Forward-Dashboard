@@ -3716,6 +3716,7 @@ body.public-form .main { padding: 10px 8px 48px; }
 .tr-src.snap { background: #94a3b8; }
 .tr-src.rows { background: #f59e0b; }
 .tr-c-cls { min-width: 128px; }
+.tr-cq-row.zero { opacity: .55; }
 .tr-cq-row s { font-size: 11px; }
 .tr-cq-edit .tr-cq-row b { width: 40px; }
 .tr-cq-edit .input { width: 64px; padding: 4px 6px; text-align: center; font-weight: 800; }
@@ -6700,5 +6701,6 @@ html.mobile-ui .login-only-shell .pro-hint { display: none !important; }
 /* 🔔 v230 — bell: list pehle, settings/activity neeche band box me */
 .notify-more > summary { cursor: pointer; list-style: none; padding: 10px 14px; font-size: 12.5px; font-weight: 700; color: var(--muted); }
 /* 🧺 v231 — Tag Request: multi-select items */
+.tr-item-chip.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; }
 /* 📊 v235 — Agent / TL Summary: all agents issuance board */
 /* summary hero: name always white */

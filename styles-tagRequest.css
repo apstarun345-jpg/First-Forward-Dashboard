@@ -112,7 +112,6 @@
 .tr-cq { display: flex; flex-direction: column; gap: 2px; }
 .tr-cq-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 8px; border-radius: 7px; background: color-mix(in srgb, var(--brand) 6%, transparent); white-space: nowrap; }
 .tr-cq-row.changed { background: #fef3c7; }
-.tr-cq-row.zero { opacity: .55; }
 .tr-cq-edit .tr-cq-row { background: transparent; padding: 1px 0; justify-content: flex-start; }
 .tr-req-foot { padding: 8px 16px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tr-legend { padding: 4px 16px 14px; margin: 0; }
@@ -305,7 +304,6 @@ body.public-form .tr-submit-bar { border-radius: 24px; justify-content: space-be
 .tr-item-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .tr-item-chip { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line, #dbe5f7); background: var(--card, #fff); font-weight: 650; font-size: 13.5px; cursor: pointer; user-select: none; }
 .tr-item-chip input { width: 16px; height: 16px; accent-color: #2563eb; margin: 0; }
-.tr-item-chip.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; }
 .tr-item-chips.sm { gap: 4px; }
 .tr-item-chips.sm .tr-item-chip { padding: 3px 8px; font-size: 11.5px; }
 .tr-item-chips.sm .tr-item-chip input { width: 13px; height: 13px; }
