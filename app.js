@@ -174,7 +174,8 @@ window.FF = window.FF || {};
     tag: '<path d="M20.4 13.4 13.4 20.4a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 3 12V4.5A1.5 1.5 0 0 1 4.5 3H12a2 2 0 0 1 1.4.6l7 7a2 2 0 0 1 0 2.8Z"/><circle cx="7.9" cy="7.9" r="1.4"/>',
     bell: '<path d="M6.4 9.7a5.6 5.6 0 0 1 11.2 0c0 3.3.8 4.8 1.6 5.7.4.5 0 1.3-.7 1.3H5.5c-.7 0-1.1-.8-.7-1.3.8-.9 1.6-2.4 1.6-5.7Z"/><path d="M9.9 19.6a2.2 2.2 0 0 0 4.2 0"/>',
     team: '<path d="M8.2 20.4h7.6"/><path d="M12 16.7v3.7"/><path d="M6.6 4.6h10.8v4.5a5.4 5.4 0 0 1-10.8 0V4.6Z"/><path d="M6.6 6.6H4.9a2 2 0 0 0 2 3.6"/><path d="M17.4 6.6h1.7a2 2 0 0 1-2 3.6"/>',
-    more: '<path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/>'
+    more: '<path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/>',
+    clipboard: '<rect x="5.5" y="4.5" width="13" height="16" rx="2"/><path d="M9.2 4.5V3.6a1 1 0 0 1 1-1h3.6a1 1 0 0 1 1 1v.9"/><path d="M8.7 10h6.6"/><path d="M8.7 13.5h6.6"/><path d="M8.7 17h3.8"/>'
   };
   const navIcon = (key) => `<svg class="mnav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">${NAV_ICONS[key] || NAV_ICONS.more}</svg>`;
 
@@ -195,7 +196,7 @@ window.FF = window.FF || {};
       { kind: 'route', id: 'tagIssued', icon: 'tag', label: 'Tags' },
       { kind: 'action', id: 'notifications', icon: 'bell', label: 'Alerts' },
       (FF.auth && FF.auth.can && FF.auth.can('tagRequest') && FF.auth.can('tagRequest') !== false
-        ? { kind: 'route', id: 'tagRequest', icon: 'tag', label: 'Requests' }
+        ? { kind: 'route', id: 'tagRequest', icon: 'clipboard', label: 'Requests' }
         : { kind: 'route', id: 'performance', icon: 'team', label: 'Team' }),
       { kind: 'action', id: 'more', icon: 'more', label: 'More' }
     ];
@@ -2261,7 +2262,17 @@ window.FF = window.FF || {};
     startVersionWatch(); // 🔄 update-available toast (features.updateToast)
     const u = FF.auth.user;
     if (FF.auth.isAdmin()) FF.auth.api('/api/health').then(h => { storageBanner(h.storage); pushBanner(h.push); setPendingSignups(h.pendingSignups); renderSidebar(); }).catch(() => {});
-    if (u && u.mustChangePassword) setTimeout(() => U.toast('⚠️ Default password chal raha hai — Settings → My account se badlo', 'err'), 900);
+    // 🔐 v227 — default password: content ke upar laal toast ki jagah upar ek patli banner (Change now · ✕ is session ke liye)
+    if (u && u.mustChangePassword) {
+      let hidden = false; try { hidden = sessionStorage.getItem('ff_pw_banner_hide') === '1'; } catch { /* ignore */ }
+      const old = U.$('#pw-banner'); if (old) old.remove();
+      if (!hidden) {
+        const el = U.h('<div class="storage-banner pw-banner" id="pw-banner" role="alert"><span>🔐 <b>Default password is still in use</b> — change it for safety.</span><a class="btn small primary" href="#/settings">Change now</a><button class="btn small" data-hide-pw-banner title="Hide for this session">✕</button></div>');
+        el.querySelector('[data-hide-pw-banner]').addEventListener('click', () => { el.remove(); try { sessionStorage.setItem('ff_pw_banner_hide', '1'); } catch { /* ignore */ } });
+        const main = U.$('#main');
+        if (main && main.parentNode) main.parentNode.insertBefore(el, main); else document.body.prepend(el);
+      }
+    }
     // Location prompt + PWA
     setTimeout(requestLocationOnOpen, 2000);
     updateInstallBtn();

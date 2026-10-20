@@ -90,13 +90,14 @@ test('GV TL profile: awkward id / naam wale EIR rows par team + agent totals EXA
   assert.equal(byName['Chetan Rao'].last, 7, 'Chetan — Asha ki row (G001) nahi jodi');
   const beta = MP.quick(person('gv-tl', 'GV TL Beta', 'GT2'));
   assert.equal(beta.totals.lastTotal, 7, 'Stranger ke 7, Alpha ke rows nahi');
-  // Agent profile ka rule alag hai: naam YA exact id (case-sensitive). Asha ki report id 'g001' (chhota) hai, EIR row 'G001' —
-  // isliye id se row 8 nahi judti, sirf naam wale rows: 2 + 6.
+  // 🧮 v227 — agent profile ab TL list wala hi rule (sameGvAgent) use karta hai, isliye dono jagah same number:
+  // Asha = 2 (G001) + 6 (bina id, naam) + 11 (G001) = 19 · Chetan = 3 + 4 (G003) = 7 (row 8 ki id G001 hai → Asha).
   const asha = MP.quick(person('gv-agent', 'Asha Verma', 'G001'));
-  assert.equal(asha.totals.lastTotal, 8, 'agent profile: naam wale rows (2 + 6); id case alag → row 8 nahi');
-  // Chetan: naam (rows 3 + 8 = 3 + 11) YA id G003 (rows 3 + 7 = 3 + 4) → 3 + 4 + 11
+  assert.equal(asha.totals.lastTotal, byName['Asha Verma'].last, 'agent profile == TL list (Asha)');
+  assert.equal(asha.totals.lastTotal, 19);
   const chetan = MP.quick(person('gv-agent', 'Chetan Rao', 'G003'));
-  assert.equal(chetan.totals.lastTotal, 18, 'agent profile: naam ya exact id');
+  assert.equal(chetan.totals.lastTotal, byName['Chetan Rao'].last, 'agent profile == TL list (Chetan)');
+  assert.equal(chetan.totals.lastTotal, 7);
   const nobody = MP.quick(person('gv-agent', 'Nobody Here', 'G404'));
   assert.ok(!nobody || !nobody.totals || !nobody.totals.lastTotal, 'anjaan agent ke 0');
 });

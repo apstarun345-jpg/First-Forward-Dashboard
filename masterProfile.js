@@ -1568,12 +1568,10 @@ window.FF = window.FF || {};
     };
     // GV Master is authoritative for GV agent issuance; Tag Assignment is authoritative for stock.
     const curYmTruth = U.ymKey(new Date()), lastYmTruth = U.prevMonthKey(curYmTruth);
-    // Agent ka rule: naam (normalised) YA exact id — id case-sensitive rehta hai (gvAgentRows jaisa hi),
-    // warna sheet me 'g001' vs 'G001' jaise farq par doosre agent ki rows jud jaati hain.
-    const myMasterRows = gvCanonicalIssuanceRows().filter((row) => {
-      if (out.id) return clean(row.agentId).replace(/\.0+$/, '').toUpperCase() === clean(out.id).replace(/\.0+$/, '').toUpperCase();
-      return norm(row.agentName) === norm(out.name);
-    });
+    // 🧮 v227 — TL view jaisa hi rule (sameGvAgent): row aur agent dono ki id ho to id decide karti hai,
+    // warna naam. Pehle id wale agent ki bina-id (sirf naam) rows chhoot jaati thi → agent ka total TL list se kam dikhta tha.
+    const myId = clean(out.id).replace(/\.0+$/, '');
+    const myMasterRows = gvCanonicalIssuanceRows().filter((row) => sameGvAgent({ agentId: clean(row.agentId).replace(/\.0+$/, ''), agentName: row.agentName }, { agentId: myId, agentName: out.name }));
     const curExact = exactGvMonth(myMasterRows, curYmTruth);
     const lastExact = exactGvMonth(myMasterRows, lastYmTruth);
     if (truthCur || curExact) {

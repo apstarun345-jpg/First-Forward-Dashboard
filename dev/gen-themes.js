@@ -240,6 +240,8 @@ html.mobile-ui[data-theme-pack="desk"] .page-head .sub { display: -webkit-box; -
 html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 8px; width: 100%; max-width: 100%; padding-bottom: 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
 html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions::-webkit-scrollbar { display: none; }
 html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions > * { flex: none; white-space: nowrap; }
+html[data-theme-pack="desk"] .page-head .seg { flex-wrap: nowrap !important; }
+html[data-theme-pack="desk"] .page-head .seg-btn { white-space: nowrap; }
 html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions .btn { padding: 8px 14px; font-size: 13px; }
 /* v226 — phone bottom bar: open page in a blue pill */
 html[data-theme-pack="desk"] #mobile-nav .mobile-nav-item.active { color: #1d4ed8 !important; }

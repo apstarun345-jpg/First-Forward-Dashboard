@@ -1230,6 +1230,22 @@ window.FF = window.FF || {};
     fab.dataset.state = 'idle';
     fab.innerHTML = '<span class="ask-ring"></span><span class="ask-ring r2"></span>' + robotSvg('fab-robot') + '<span class="ask-fab-mic" aria-hidden="true">🎙</span>';
     document.body.appendChild(fab);
+    // 📱 v227 — phone par neeche scroll karte waqt robot chhup jaata hai (KPI ke number na dhake), upar scroll / ruke to wapas.
+    try {
+      let lastY = window.scrollY || 0, ticking = false, idleT = null;
+      const onScroll = () => {
+        if (ticking) return; ticking = true;
+        requestAnimationFrame(() => {
+          ticking = false;
+          if (!document.documentElement.classList.contains('mobile-ui')) return;
+          const y = window.scrollY || 0;
+          if (y > lastY + 6 && y > 120) fab.classList.add('fab-hide'); else if (y < lastY - 6) fab.classList.remove('fab-hide');
+          lastY = y;
+          clearTimeout(idleT); idleT = setTimeout(() => fab.classList.remove('fab-hide'), 1600);
+        });
+      };
+      window.addEventListener('scroll', onScroll, { passive: true });
+    } catch { /* optional */ }
 
     const wrap = document.createElement('div');
     wrap.id = 'ask-panel';

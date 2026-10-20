@@ -38,7 +38,6 @@
 .ff-robot .rb-ear { fill: rgba(255,255,255,.85); }
 .ff-robot .rb-mouth { stroke: #67e8f9; }
 .ff-robot .rb-wave { fill: #67e8f9; opacity: 0; }
-.ff-robot .rb-wave rect { transform-box: fill-box; transform-origin: center bottom; }
 .ff-robot .rb-ant-stem { color: #fff; }
 [data-state="speaking"] .ff-robot .rb-mouth, [data-state="listening"] .ff-robot .rb-mouth { opacity: 0; }
 [data-state="speaking"] .ff-robot .rb-wave, [data-state="listening"] .ff-robot .rb-wave { opacity: 1; }
@@ -63,3 +62,4 @@
 #ask-panel { left: 8px; right: 8px; width: auto; bottom: calc(138px + env(safe-area-inset-bottom, 0px)); max-height: calc(100vh - 210px); z-index: 130; }
 .ask-head .ask-ico { width: 26px; height: 26px; }
 }
+html.mobile-ui .ask-fab.fab-hide { translate: 0 160%; opacity: 0; pointer-events: none; }

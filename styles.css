@@ -6497,6 +6497,7 @@ body[data-cc] .kpi:not(.ua-kpi-card) .kpi-value, body[data-cc] .kpi:not(.ua-kpi-
 /* robot parts */
 .ff-robot .rb-eye { fill: #67e8f9; transform-box: fill-box; transform-origin: center; animation: rbBlink 4.2s infinite; }
 .ff-robot .rb-ant { fill: #fde047; transform-box: fill-box; transform-origin: center; animation: rbAnt 1.8s ease-in-out infinite; }
+.ff-robot .rb-wave rect { transform-box: fill-box; transform-origin: center bottom; }
 @keyframes rbBlink { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(.08); } }
 @keyframes rbAnt { 0%,100% { transform: scale(1); filter: drop-shadow(0 0 0 #fde047); } 50% { transform: scale(1.35); filter: drop-shadow(0 0 5px #fde047); } }
 @keyframes rbWave { 0%,100% { transform: scaleY(.35); } 50% { transform: scaleY(1.25); } }
@@ -6594,3 +6595,10 @@ body.public-form .card-body { padding: 12px 14px 16px; }
 /* 🚗🚚 v226 — class colours on KPI cards (charts.js tintKpis): VC4 = blue, Commercial / VC20 / VC5+ = orange */
 html body .kpi.kpi-cls-vc4, html body .gs-kpi.kpi-cls-vc4 { --k1: #1e3a8a; --k2: #2563eb; --k3: #38bdf8; --kglow: rgba(37, 99, 235, .55); }
 html body .kpi.kpi-cls-comm, html body .gs-kpi.kpi-cls-comm { --k1: #c2410c; --k2: #f97316; --k3: #fbbf24; --kglow: rgba(249, 115, 22, .55); }
+/* 📱 v227 — phone: AI robot chhota + scroll par chhupta hai; copy buttons saaf; password banner */
+html.mobile-ui .ask-fab { scale: .8; transform-origin: 100% 100%; transition: translate .25s ease, opacity .25s ease, scale .2s ease; }
+.cp-btn { background: #fff; color: #1d4ed8; border-color: #c9d8f7; box-shadow: 0 1px 2px rgba(15, 23, 42, .08); }
+.cp-btn:hover { background: #eaf1ff; }
+html[data-theme="dark"] .cp-btn { background: #172f6b; color: #dbe7ff; border-color: #2a4a9a; }
+.pw-banner { background: #fff7ed !important; border-color: #fdba74 !important; color: #7c2d12 !important; }
+html[data-theme="dark"] .pw-banner { background: #3a1d0a !important; color: #fed7aa !important; }

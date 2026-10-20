@@ -22,7 +22,7 @@ test('Theme: light → dark → auto (system) cycle; boot honours auto', () => {
   assert.match(boot, /explicitTheme === 'auto'/);
 });
 test('Bottom nav shows Requests for users with Tag Request access', () => {
-  assert.match(app, /id: 'tagRequest', icon: 'tag', label: 'Requests'/);
+  assert.match(app, /id: 'tagRequest', icon: 'clipboard', label: 'Requests'/);
 });
 test('Search: recent + pinned list on focus', () => {
   assert.match(ms, /const RKEY = 'ff_ms_recent'/);
