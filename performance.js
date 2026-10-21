@@ -125,7 +125,46 @@ FF.pages = FF.pages || {};
         if (byLeader) addBin(byLeader[ymSlot], r);
       }
     });
-    return { cur, last, byName, byTl, daily: daily.filter(isFfEirRow), latest, ready };
+    // Per-agent daily map (dateKey → tags) → real Active / Inactive / 7-day / active-days / growth.
+    const agentDays = new Map();
+    const latestKey = latest ? U.dateKey(latest) : '';
+    if (latest) daily.forEach((r) => {
+      if (!isFfEirRow(r) || !r.key || r.key > latestKey || !(Number(r.n) > 0)) return;
+      const k = norm(r.agentName);
+      if (!k) return;
+      let m = agentDays.get(k); if (!m) { m = new Map(); agentDays.set(k, m); }
+      m.set(r.key, (m.get(r.key) || 0) + Number(r.n));
+    });
+    return { cur, last, byName, byTl, daily: daily.filter(isFfEirRow), latest, ready, agentDays, latestKey };
+  }
+  const GROWTH_HIGH = 25;
+  /** EIR daily se activity + growth + status (sheet ke khali/stale REPORT columns ki jagah). */
+  function applyActivity(a, idx) {
+    if (!idx || !idx.latest) return;
+    const days = idx.agentDays.get(norm(a.name));
+    const curPrefix = idx.cur + '-';
+    const week = [];
+    for (let i = 6; i >= 0; i--) { const d = new Date(idx.latest.getTime()); d.setDate(d.getDate() - i); week.push((days && days.get(U.dateKey(d))) || 0); }
+    a.week = week; a.weekTotal = week.reduce((x, y) => x + y, 0);
+    let last = '', actD = 0;
+    if (days) days.forEach((n, k) => { if (k > last) last = k; if (k.startsWith(curPrefix)) actD++; });
+    a.activeDays = actD;
+    a.lastIssueKey = last;
+    const issuedThisMonth = a.curTotal > 0;
+    if (!last) { a.inactiveDays = 99; a.activeCat = 'inactive-month'; a.lastActive = a.lastTotal > 0 ? 'Inactive in month' : 'No issuance'; }
+    else {
+      const dd = Math.round((idx.latest - U.parseDate(last)) / 86400000);
+      a.inactiveDays = issuedThisMonth ? dd : 99;
+      a.activeCat = !issuedThisMonth ? 'inactive-month' : dd <= 0 ? 'active' : dd <= 3 ? 'inactive-3' : dd <= 7 ? 'inactive-7' : 'inactive-8';
+      a.lastActive = !issuedThisMonth ? 'Inactive in month' : dd <= 0 ? 'Active' : `${dd} day${dd > 1 ? 's' : ''} inactive`;
+    }
+    const proj = a.curProjected || 0, lt = a.lastTotal || 0;
+    const g = lt > 0 ? Math.round((proj / lt - 1) * 100) : null;
+    a.growthNum = g;
+    a.growth = g === null ? '' : `${g > 0 ? '▲ +' : g < 0 ? '▼ ' : ''}${g}%`;
+    a.growthAbs = Math.round(proj - lt);
+    a.perfStatus = a.curTotal <= 0 ? (lt > 0 ? 'Inactive' : 'No issuance') : lt <= 0 ? 'New' : g >= GROWTH_HIGH ? 'High Growth' : g >= 0 ? 'Growth' : 'De-Growth';
+    a.agentStatus = ({ 'High Growth': '🚀 High Growth', Growth: '🟢 Growth', 'De-Growth': '🔻 De-Growth', New: '🆕 New', Inactive: '🔴 Inactive', 'No issuance': '⚪ No issuance' })[a.perfStatus];
   }
   function eirDays(index) {
     if (!index || !index.latest) return null;
@@ -171,12 +210,14 @@ FF.pages = FF.pages || {};
     } else {
       a.curProjected = 0; a.avgTotal = 0; a.avgVc4 = 0; a.avgNvc4 = 0;
     }
+    applyActivity(a, idx);
   }
   function reconcileAuthoritative() {
     const idx = authoritativeIndex();
     if (!idx || !idx.ready) return null;
     state.authoritative = idx;
     state.agents.forEach((a) => applyAuthoritativeAgent(a, idx));
+    try { const ed = eirDays(idx); if (ed && ed.labels.length === 7) { state.dayLabels = ed.labels; } } catch { /* sheet labels rahenge */ }
     // Rebuild TL rollups from the corrected agents; buildTlGroups also applies the exact TL
     // class aggregate below. This keeps tables, charts, drawers and exports on one path.
     state.allTlGroups = buildTlGroups(state.agents, false);
@@ -318,6 +359,17 @@ FF.pages = FF.pages || {};
       g.tlAvgVc4 = g.tlCurVc4 / fd; g.tlAvgNvc4 = g.tlCurNvc4 / fd; g.tlAvgTotal = g.tlCurTotal / fd;
       g.tlProjected = U.projectMonthEnd(g.tlCurTotal, fd, curYmKey());
       g.tlLastVc4 = lastExact.VC4 || 0; g.tlLastNvc4 = (lastExact.VC20 || 0) + (lastExact['VC5+'] || 0); g.tlLastTotal = lastExact.total || 0;
+      if (state.authoritative && state.authoritative.latest) {
+        const lt = g.tlLastTotal || 0;
+        g.tlGrowthNum = lt > 0 ? Math.round((g.tlProjected / lt - 1) * 100) : null;
+        g.tlGrowth = g.tlGrowthNum === null ? '' : `${g.tlGrowthNum > 0 ? '▲ +' : g.tlGrowthNum < 0 ? '▼ ' : ''}${g.tlGrowthNum}%`;
+        g.tlStatus = g.tlCurTotal <= 0 ? (lt > 0 ? '🔴 Inactive' : '⚪ No issuance') : lt <= 0 ? '🆕 New' : g.tlGrowthNum >= GROWTH_HIGH ? '🚀 High Growth' : g.tlGrowthNum >= 0 ? '🟢 Growth' : '🔻 De-Growth';
+      }
+      g.todayActive = g.agents.filter((a) => a.activeCat === 'active').length;
+      g.recentActive = g.agents.filter((a) => a.activeCat === 'active' || a.activeCat === 'inactive-3').length;
+      g.highGrowthCount = g.agents.filter((a) => a.perfStatus === 'High Growth').length;
+      g.deGrowthCount = g.agents.filter((a) => a.perfStatus === 'De-Growth').length;
+      g.inactiveCount = g.agents.filter((a) => a.activeCat === 'inactive-month').length;
       g.priority = prio(g.tlPriority); g.commPriority = prio(g.tlCommPriority);
       g.searchText = [g.tlName, g.tlId, g.tlMobile].join(' ').toLowerCase();
       return g;
@@ -414,10 +466,13 @@ FF.pages = FF.pages || {};
     const lowStock = groups.filter((g) => (g.tlCurTotal || 0) > 0 && (isLow(g.tlStockAlert) || (isLow(g.tlCommAlert) && (g.tlCurNvc4 || 0) > 0))).sort((a, b) => (a.tlVc4Days ?? 9999) - (b.tlVc4Days ?? 9999));
     const overStock = groups.filter((g) => isOver(g.tlStockAlert)).sort((a, b) => (b.tlVc4Days ?? 0) - (a.tlVc4Days ?? 0));
     const dropped = state.filtered.filter((a) => a.lastTotal > 0 && a.inactiveDays >= (FF.config.thresholds.inactiveDays || 3)).sort((a, b) => b.lastTotal - a.lastTotal);
+    const highGrowth = state.filtered.filter((a) => a.perfStatus === 'High Growth').sort((a, b) => (b.growthAbs || 0) - (a.growthAbs || 0));
+    const tlHigh = groups.filter((g) => /high growth/i.test(g.tlStatus || '')).sort((a, b) => (b.tlGrowthNum || 0) - (a.tlGrowthNum || 0));
+    const tlDe = groups.filter((g) => /de-?growth/i.test(g.tlStatus || '')).sort((a, b) => (a.tlGrowthNum || 0) - (b.tlGrowthNum || 0));
     const deGrowth = state.filtered.filter((a) => /de-?growth/i.test(a.agentStatus || '')).sort((a, b) => (b.lastTotal - (b.curProjected || 0)) - (a.lastTotal - (a.curProjected || 0)));
     const wrongVrn = state.filtered.filter((a) => (a.wrongVrn || 0) > 0).sort((a, b) => b.wrongVrn - a.wrongVrn);
     const highPriority = state.filtered.filter((a) => a.priority === 'High').sort((a, b) => (a.agentStockDays ?? 9999) - (b.agentStockDays ?? 9999));
-    return { lowStock, overStock, dropped, deGrowth, wrongVrn, highPriority, total: lowStock.length + overStock.length + deGrowth.length + wrongVrn.length };
+    return { highGrowth, tlHigh, tlDe, lowStock, overStock, dropped, deGrowth, wrongVrn, highPriority, total: lowStock.length + overStock.length + deGrowth.length + wrongVrn.length };
   }
 
   // ---- EIR class split (VC4 / VC20 / VC5+) for a name -------------------------------------------
@@ -499,6 +554,8 @@ FF.pages = FF.pages || {};
   const TL_COLUMNS = () => [
     { key: 'tlName', label: 'Team Leader', sticky: true, sortValue: (g) => g.tlName || g.tlKey, render: (g) => cellMain(g.tlName || g.tlKey, `${g.tlId || ''}${g.tlMobile && !/^na$/i.test(g.tlMobile) && canContacts() ? ` · ${g.tlMobile}` : ''}`) },
     { key: 'agentCount', label: 'Agents (active)', num: true, sortValue: (g) => g.agentCount, render: (g) => `<b>${g.agentCount}</b> <small class="dim">(${g.activeCount})</small>` },
+    { key: 'todayActive', label: 'Active today / 3d / inactive', num: true, sortValue: (g) => g.todayActive, render: (g) => `<b>${g.todayActive}</b> <small class="dim">/ ${g.recentActive} / ${g.inactiveCount}</small>` },
+    { key: 'growthSplit', label: '🚀 High / 🔻 De-growth', num: true, sortValue: (g) => g.highGrowthCount - g.deGrowthCount, render: (g) => `<span class="delta up">${g.highGrowthCount}</span> <span class="dim">/</span> <span class="delta down">${g.deGrowthCount}</span>` },
     { key: 'tlLastTotal', label: `${state.months.last.slice(0, 3)} total`, num: true, sortValue: (g) => g.tlLastTotal, render: (g) => `${fmt(g.tlLastTotal)} <small class="dim">${fmt(g.tlLastVc4)}/${fmt(g.tlLastNvc4)}</small>` },
     { key: 'tlCurVc4', label: 'VC4', num: true, sortValue: (g) => g.tlCurVc4, render: (g) => fmt(g.tlCurVc4) },
     { key: 'tlCurNvc4', label: 'Commercial', num: true, sortValue: (g) => g.tlCurNvc4, render: (g) => fmt(g.tlCurNvc4) },
@@ -833,7 +890,7 @@ FF.pages = FF.pages || {};
       <div class="chip-group"><span class="chip-label">TL priority · VC4</span>${P.map((p) => chip('tlPriority', p, `${p === 'High' ? '🔴' : p === 'Medium' ? '🟡' : '🟢'} ${p}`, tlCnt((g) => g.priority === p), p.toLowerCase())).join('')}</div>
       <div class="chip-group"><span class="chip-label">TL priority · Commercial</span>${P.map((p) => chip('commPriority', p, `${p === 'High' ? '🔴' : p === 'Medium' ? '🟡' : '🟢'} ${p}`, tlCnt((g) => g.commPriority === p), p.toLowerCase())).join('')}</div>
       <div class="chip-group"><span class="chip-label">Status</span>${statuses.map(([v, c]) => chip('status', v, `<span class="badge ${tone(v)}">${esc(stripEmoji(v))}</span>`, c)).join('')}</div>
-      <div class="chip-group"><span class="chip-label">Activity</span>${[['active', '🟢 Active'], ['inactive-7', '🟡 Inactive 1–7d'], ['inactive-8', '🔴 Inactive 8+d'], ['inactive-month', '⚫ Inactive in month']].map(([v, l]) => chip('active', v, l, cnt((a) => a.activeCat === v))).join('')}</div>
+      <div class="chip-group"><span class="chip-label">Activity</span>${[['active', '🟢 Active'], ['inactive-3', '🟡 Inactive 1–3d'], ['inactive-7', '🟠 Inactive 4–7d'], ['inactive-8', '🔴 Inactive 8+d'], ['inactive-month', '⚫ Inactive in month']].map(([v, l]) => chip('active', v, l, cnt((a) => a.activeCat === v))).join('')}</div>
     </div>`;
   }
   function distList(entries, total, filterKey) {
@@ -957,7 +1014,7 @@ FF.pages = FF.pages || {};
     const topN = FF.config.thresholds.topN || 10;
     const topAgents = [...state.filtered].sort((a, b) => b.curTotal - a.curTotal).slice(0, topN);
     const topTls = [...state.tlGroups].sort((a, b) => (b.tlCurTotal || 0) - (a.tlCurTotal || 0)).slice(0, topN);
-    const activity = [['active', 'Active'], ['inactive-7', 'Inactive 1–7 days'], ['inactive-8', 'Inactive 8+ days'], ['inactive-month', 'Inactive in month'], ['notfound', 'Not found'], ['other', 'Other']].map(([key, label]) => [label, state.filtered.filter((a) => a.activeCat === key).length, key]).filter((r) => r[1] > 0);
+    const activity = [['active', 'Active'], ['inactive-3', 'Inactive 1–3 days'], ['inactive-7', 'Inactive 4–7 days'], ['inactive-8', 'Inactive 8+ days'], ['inactive-month', 'Inactive in month'], ['notfound', 'Not found'], ['other', 'Other']].map(([key, label]) => [label, state.filtered.filter((a) => a.activeCat === key).length, key]).filter((r) => r[1] > 0);
     const shareCur = k.curTotal ? (k.curVc4 / k.curTotal) * 100 : 0, shareLast = k.lastTotal ? (k.lastVc4 / k.lastTotal) * 100 : 0;
     const agg = classAggFiltered(); // 🚗 EIR 4-way (VC4 / VC20 / VC5+ / All Comm)
     const aggTitle = agg ? `⚖️ Class split · ${esc(agg.lastLabel)} → ${esc(agg.curLabel)}` : `⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`;
@@ -1146,6 +1203,8 @@ FF.pages = FF.pages || {};
     el.innerHTML = `${dispatchCard}${card('🔴 High priority agents · dispatch', b.highPriority.length, 'red', `<table class="tbl">${agentHead('Stock days')}<tbody>${agentRows(b.highPriority, (a) => fmt(a.agentStockDays))}</tbody></table>`, 'Agent priority "High" · sorted by lowest stock days', 'high-priority-agents')}
       ${card('🚨 Dispatch needed · TL stock risk', b.lowStock.length, 'red', `<table class="tbl">${tlHead('Priority')}<tbody>${tlRows(b.lowStock, (g) => g.tlPriority)}</tbody></table>`, 'Active TLs jinka VC4 (ya Commercial) stock alert risk dikha raha hai', 'tl-stock-risk')}
       ${card('🧊 Over-stocked TLs', b.overStock.length, 'amber', `<table class="tbl">${tlHead('TL status')}<tbody>${tlRows(b.overStock, (g) => g.tlStatus)}</tbody></table>`, 'Stock zaroorat se zyada — dispatch hold', 'tl-over-stock')}
+      ${card('🚀 High growth agents', b.highGrowth.length, 'green', `<table class="tbl">${agentHead('Projected')}<tbody>${agentRows(b.highGrowth, (a) => `${fmt(a.curProjected)} <small class="dim">${a.growth}</small>`)}</tbody></table>`, `Projected ${GROWTH_HIGH}%+ upar vs ${esc(state.months.last)} · biggest gain first`, 'high-growth-agents')}
+      ${card('🚀 High growth TLs', b.tlHigh.length, 'green', `<table class="tbl"><thead><tr><th>TL</th><th class="num">${esc(state.months.last.slice(0, 3))}</th><th class="num">${esc(state.months.cur.slice(0, 3))}</th><th class="num">Projected</th><th class="num">Growth</th></tr></thead><tbody>${b.tlHigh.slice(0, cap).map((g) => `<tr data-tl="${esc(g.tlKey)}" class="clickable"><td>${cellMain(g.tlName || g.tlKey, g.tlId)}</td><td class="num">${fmt(g.tlLastTotal)}</td><td class="num">${fmt(g.tlCurTotal)}</td><td class="num">${fmt(g.tlProjected)}</td><td class="num"><b>${esc(g.tlGrowth)}</b></td></tr>`).join('')}</tbody></table>`, `TL projected ${GROWTH_HIGH}%+ growth`, 'high-growth-tls')}
       ${card('📉 De-growth agents', b.deGrowth.length, 'red', `<table class="tbl">${agentHead('Projected')}<tbody>${agentRows(b.deGrowth, (a) => fmt(a.curProjected))}</tbody></table>`, `Status "De-Growth" · sorted by biggest drop vs ${esc(state.months.last)}`, 'de-growth-agents')}
       ${card(`😶 Went quiet · ${esc(state.months.last)} me issue kiya, ab ${FF.config.thresholds.inactiveDays || 3}+ din inactive`, b.dropped.length, 'amber', `<table class="tbl">${agentHead('Inactive days')}<tbody>${agentRows(b.dropped, (a) => (a.inactiveDays >= 99 ? 'Month' : String(a.inactiveDays)))}</tbody></table>`, 'TL follow-up list', 'went-quiet-agents')}
       ${card('🔖 Wrong VRN entries', b.wrongVrn.length, 'amber', `<table class="tbl">${agentHead('Wrong VRN')}<tbody>${agentRows(b.wrongVrn, (a) => fmt(a.wrongVrn))}</tbody></table>`, 'Is month wrong vehicle numbers wale agents', 'wrong-vrn-agents')}

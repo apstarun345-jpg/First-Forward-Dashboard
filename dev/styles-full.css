@@ -7858,3 +7858,10 @@ html[data-theme="dark"] .kpi .delta.down, html[data-theme="dark"] .kd-hero .delt
 html[data-theme="dark"] .tix-down { color: #fca5a5; }
 /* v242 — Range Report hata diya: Master Search ka 📅 date-range button bhi band */
 .ms-range-btn, .ms-range-pop { display: none !important; }
+
+/* v243 Performance filter chips — aligned rows: label column + wrapped chips */
+.chip-groups { display: grid; grid-template-columns: 1fr; gap: 6px; align-items: start; }
+.chip-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chip-group .chip-label { flex: 0 0 170px; font-weight: 600; }
+.chip-group .chip { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
+@media (max-width: 640px) { .chip-groups { grid-template-columns: 1fr; } .chip-group .chip-label { flex: 0 0 100%; } }

@@ -12,3 +12,11 @@
 .pf-dispatch-row-total { background: color-mix(in srgb, #0f766e 7%, transparent); font-weight: 800; }
 .ab-wrap.ab-ff { --ab-a: #4f46e5; --ab-b: #ec4899; }
 .badge-name { flex: 1 1 130px !important; }
+.chip-groups { display: grid; grid-template-columns: 1fr; gap: 6px; align-items: start; }
+.chip-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chip-group .chip-label { flex: 0 0 170px; font-weight: 600; }
+.chip-group .chip { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
+@media (max-width: 640px) {
+.chip-groups { grid-template-columns: 1fr; }
+.chip-group .chip-label { flex: 0 0 100%; }
+}
