@@ -1847,13 +1847,16 @@ body.colorful .from-hdr { color: #166534; }
     if (mapInp && mapBox) {
       const mapClose = () => { mapBox.hidden = true; };
       const mapShow = () => {
-        const q = norm(mapInp.value), dq = digits(mapInp.value), list = (state.index && state.index.list) || [];
-        const hits = list.filter((a) => q && (norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)))).slice(0, 12);
-        mapBox.innerHTML = hits.length ? hits.map((a) => `<button type="button" class="tr-suggest-item" data-tr-mappick="${esc(a.channel)}|${esc(norm(a.name))}"><span class="tr-suggest-name">${esc(a.name)}${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}</span><small class="dim">${a.tlName ? `TL ${esc(a.tlName)} · ` : ''}${a.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</small></button>`).join('') : `<div class="tr-suggest-empty">${q ? 'Koi match nahi — jo likha hai wahi sheet me jayega' : 'Naam ya ID likho…'}</div>`;
+        // sirf isi TL ke agents (TL ki apni row bhi) — khaali box par click karte hi poori list
+        const trec = exactAgent(row);
+        const all = trec && trec.isTl ? tlAgents(trec) : [];
+        const q = norm(mapInp.value), dq = digits(mapInp.value);
+        const hits = all.filter((a) => !q || norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq))).slice(0, 80);
+        mapBox.innerHTML = hits.length ? hits.map((a, k) => `<button type="button" class="tr-suggest-item" data-tr-mappick="${k}"><span class="tr-suggest-name">${a.isSelf ? '👤 ' : ''}${esc(a.name)}${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}</span><small class="dim">${a.isSelf ? 'TL ki apni ID · ' : ''}TL ${esc(a.tlName || trec.name)} · ${a.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</small></button>`).join('') : `<div class="tr-suggest-empty">${all.length ? 'Is TL ke agents me match nahi — jo likha hai wahi sheet me jayega' : 'Is TL ke agents nahi mile — naam / ID khud likh sakte ho'}</div>`;
         mapBox.hidden = false;
         mapBox.querySelectorAll('[data-tr-mappick]').forEach((b) => b.addEventListener('mousedown', (e) => {
           e.preventDefault();
-          const rec = state.index && state.index.byKey.get(b.dataset.trMappick);
+          const rec = hits[Number(b.dataset.trMappick)];
           if (!rec) return;
           row.mapName = rec.name; row.mapId = rec.agentId || ''; row.mapText = `${rec.name}${rec.agentId ? ` · #${rec.agentId}` : ''}`;
           mapInp.value = row.mapText; mapClose();
@@ -1865,7 +1868,8 @@ body.colorful .from-hdr { color: #166534; }
         if (d.length >= 3 && !/[a-z]/i.test(v)) { row.mapId = d; row.mapName = ''; } else { row.mapName = v; row.mapId = ''; }
         mapShow();
       });
-      mapInp.addEventListener('focus', () => { if (mapInp.value.trim()) mapShow(); });
+      mapInp.addEventListener('focus', () => { mapInp.select && mapInp.select(); mapShow(); });
+      mapInp.addEventListener('click', () => { if (mapBox.hidden) mapShow(); });
       mapInp.addEventListener('blur', () => setTimeout(mapClose, 150));
     }
     // ---- agent contact (mobile · address · pincode) — typing par re-render nahi -------------------
