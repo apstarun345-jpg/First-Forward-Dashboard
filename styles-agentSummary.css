@@ -45,3 +45,9 @@
 .ib-new-btn.on { background: linear-gradient(135deg, #10b981, #059669) !important; color: #fff !important; border-color: transparent !important; }
 .ib-tbl .ib-sort.on { color: var(--brand, #1d4ed8); }
 .ib-tbl .ib-total { font-weight: 800; color: var(--brand, #1d4ed8); }
+html[data-theme="dark"] .ib-tot { background: #15213d; border-color: #2b3a5e; }
+html[data-theme="dark"] .ib-tot.main { background: linear-gradient(135deg, #2563eb, #1d4ed8); }
+html[data-theme="dark"] .ib-tot.main small { color: rgba(255, 255, 255, .85); }
+html[data-theme="dark"] .ib-tot.main b { color: #fff; }
+html[data-theme="dark"] .ib-tot-new { background: #0b2a22; border-color: #14583f; }
+html[data-theme="dark"] .ib-tbl .ib-total { color: #93b4ff; }

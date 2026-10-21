@@ -15,9 +15,6 @@
 .aa-d.down { color: #dc2626; }
 .aa-d.flat { color: var(--muted); }
 .aa-mini { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
-html[data-theme="dark"] .aa-chip.up { background: #064e3b; color: #6ee7b7; }
-html[data-theme="dark"] .aa-chip.down { background: #7f1d1d; color: #fca5a5; }
-html[data-theme="dark"] .aa-chip.flat { background: #334155; color: #cbd5e1; }
 @media (max-width: 1700px) {
 .aa-chan .grid.g-2 { grid-template-columns: minmax(0, 1fr); }
 }

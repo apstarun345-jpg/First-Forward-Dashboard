@@ -6496,6 +6496,9 @@ body[data-cc] .kpi:not(.ua-kpi-card) .kpi-value, body[data-cc] .kpi:not(.ua-kpi-
 .aa-mini b { display: block; font-size: 22px; margin: 2px 0; }
 .aa-mini span { color: var(--muted); font-size: 11.5px; }
 .aa-chan .table-wrap { max-height: 380px; overflow: auto; }
+html[data-theme="dark"] .aa-chip.up { background: #064e3b; color: #6ee7b7; }
+html[data-theme="dark"] .aa-chip.down { background: #7f1d1d; color: #fca5a5; }
+html[data-theme="dark"] .aa-chip.flat { background: #334155; color: #cbd5e1; }
 /* ===== v171 · AI Business Analyst redesign ===== */
 .aa-hero h1 { margin: 0 0 4px; font-size: 24px; color: #fff; background: none; -webkit-text-fill-color: #fff; }
 .aa-hero p { margin: 0; font-size: 13px; line-height: 1.5; opacity: .93; max-width: 760px; }
@@ -6731,6 +6734,7 @@ html.mobile-ui .login-only-shell .pro-hint { display: none !important; }
 .notify-more > summary { cursor: pointer; list-style: none; padding: 10px 14px; font-size: 12.5px; font-weight: 700; color: var(--muted); }
 /* 🧺 v231 — Tag Request: multi-select items */
 .tr-item-chip.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; }
+html[data-theme="dark"] .tr-item-chip.on { background: #172f6b; color: #dbe7ff; border-color: #2a4a9a; }
 /* 📊 v235 — Agent / TL Summary: all agents issuance board */
 .ib-tools .input { width: auto; min-width: 150px; }
 .ib-tot small { font-size: 11px; font-weight: 700; color: var(--muted); }
@@ -6738,6 +6742,7 @@ html.mobile-ui .login-only-shell .pro-hint { display: none !important; }
 .ib-tot.main small { color: rgba(255, 255, 255, .85); }
 .ib-tbl .ib-sort { cursor: pointer; user-select: none; white-space: nowrap; }
 /* summary hero: name always white */
+html body .gs-hero h1, html body .gs-hero h2, html body .gs-hero .gs-name, html body .gs-hero-who h1, html body .gs-hero-who h2 { color: #fff !important; -webkit-text-fill-color: #fff !important; }
 /* v237 — Tag Requests: status tabs hamesha dikhen (phone par Filters sheet ke andar nahi) + table me agent ke neeche status */
 .tr-status-bar .tr-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 @media (max-width: 720px) {
@@ -6784,3 +6789,17 @@ html[data-theme-pack] .page-tagRequest .page-head .seg .seg-btn { padding: 6px 8
 /* v239 — contrast: amber / orange / pink text on light backgrounds was under 3:1 */
 .kpi-icon { filter: none; }
 body[data-cc] .kpi.g9 .kpi-value, body[data-cc] .kpi.g9 .kpi-value b, body[data-cc] .kpi.g9 .kpi-icon { color: #a16207; }
+/* v240 — dark mode: issuance board tiles, count badges, item chips were light-on-light */
+html[data-theme="dark"] .ib-tot small { color: #9fb0d4; }
+html[data-theme="dark"] .ib-tot b { color: #e6edff; }
+html[data-theme="dark"] .ib-tot-new b { color: #6ee7b7; }
+html[data-theme="dark"] .ib-tot-new small { color: #a7f3d0; }
+html[data-theme="dark"] .ib-new-btn.on { color: #fff !important; }
+html[data-theme="dark"] .chip .count { background: #243255; color: #dbe7ff; }
+html[data-theme="dark"] .chip.on .count, html[data-theme="dark"] .tr-status-bar .chip.on .count { background: rgba(255, 255, 255, .25); color: #fff; }
+html[data-theme="dark"] .card-head .count, html[data-theme="dark"] h3 .count { background: #243255 !important; color: #dbe7ff !important; }
+html[data-theme="dark"] .delta.up { background: rgba(34, 197, 94, .18); color: #86efac; }
+html[data-theme="dark"] .delta.down { background: rgba(239, 68, 68, .2); color: #fca5a5; }
+html[data-theme="dark"] .delta.flat { background: rgba(148, 163, 184, .18); color: #cbd5e1; }
+html[data-theme="dark"] .kpi .delta.up, html[data-theme="dark"] .kd-hero .delta.up { background: rgba(220, 252, 231, .95); color: #15803d; }
+html[data-theme="dark"] .kpi .delta.down, html[data-theme="dark"] .kd-hero .delta.down { background: rgba(254, 226, 226, .95); color: #b91c1c; }

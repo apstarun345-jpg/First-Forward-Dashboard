@@ -44,3 +44,4 @@
 .tix-health { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: 12.5px; }
 .tix-recon { padding: 10px 14px; border-radius: 12px; margin-bottom: 12px; font-size: 13px; border: 1px solid; }
 .tix-chip { color: color-mix(in srgb, var(--accent) 62%, #111827) !important; background: color-mix(in srgb, var(--accent) 16%, #fff) !important; }
+html[data-theme="dark"] .tix-down { color: #fca5a5; }
