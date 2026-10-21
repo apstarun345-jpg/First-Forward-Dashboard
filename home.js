@@ -1208,6 +1208,7 @@ FF.pages = FF.pages || {};
       const link = (href, icon, label, n, tone) => `<a class="todo-item ${tone || ''}" href="${href}"><span class="todo-ic">${icon}</span><span class="todo-tx"><b>${n == null ? '' : esc(U.fmt(n))}</b> ${esc(label)}</span><span class="todo-go">→</span></a>`;
       // `info` = summary of the tag-request list (null while loading). Extra rows only appear when they are non-zero.
       const paint = (info) => {
+        lastInfo = info;
         const items = [];
         if (canReq) {
           const pending = info ? info.pending : null;
@@ -1244,7 +1245,7 @@ FF.pages = FF.pages || {};
       if (canReq && FF.auth.api) {
         FF.auth.api('/api/tag-requests').then((out) => {
           const list = (out && out.requests) || [];
-          lastInfo = summarize(list); paint(lastInfo);
+          paint(summarize(list));
         }).catch(() => {});
       }
     }
