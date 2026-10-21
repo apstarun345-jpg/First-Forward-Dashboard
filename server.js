@@ -230,8 +230,7 @@ const DEFAULT_SETTINGS = {
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
   stockLedger: { // 📒 dispatch ledger (barcode → dispatch date / name): First–Last barcode wali stock sheets
     ff1: { enabled: true, label: 'IDFC Stock Sheet (FF)', layout: 'ff', sheetId: '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M', gid: '0' },
-    gv1: { enabled: true, label: 'GV Stock Sheet (IDFC workbook)', layout: 'gv', sheetId: '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M', gid: '1205828388' },
-    gv2: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
+    gv3: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
   },
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
@@ -2820,11 +2819,10 @@ async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
 // 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet(s): First–Last barcode ranges → interval index.
 const LEDGER_TTL = 30 * 60e3;   // Google gviz rate-limit (429) se bachne ke liye 30 min
 const ledgerState = { at: 0, index: null, promise: null, key: '', errors: {}, counts: {}, retryAt: 0, good: {} };   // good = source id → last successful rows (fail hone par purana data rahe)
-const LEDGER_ID_FIX = { '1-IFccHvFZkPKna2vFFxD5plH5MT-L-dpyn1qA': '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA' };   // v249 me kata hua GV link save hua tha
 const ledgerSources = () => {
   const raw = (db.settings && db.settings.stockLedger) || {};
   const cfg = {};
-  for (const [k, v] of Object.entries(raw)) cfg[k] = v && LEDGER_ID_FIX[v.sheetId] ? { ...v, sheetId: LEDGER_ID_FIX[v.sheetId], enabled: true } : v;
+  for (const [k, v] of Object.entries(raw)) if (k !== 'gv1' && k !== 'gv2') cfg[k] = v   // purane (galat ID / private tab) GV entries ignore
   return Object.entries(cfg).filter(([, v]) => v && v.enabled !== false && /^[A-Za-z0-9_-]{20,}$/.test(String(v.sheetId || '')) && /^\d+$/.test(String(v.gid ?? ''))).map(([id, v]) => ({ id, ch: String(v.layout) === 'gv' ? 'gv' : 'ff', layout: String(v.layout) === 'gv' ? 'gv' : 'ff', sheetId: String(v.sheetId), gid: String(v.gid), label: String(v.label || id).slice(0, 60) }));
 };
 async function loadLedger() {

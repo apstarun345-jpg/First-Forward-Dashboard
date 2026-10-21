@@ -17,7 +17,7 @@ test('rowToEntry: FF vs GV column layouts, bad end → QNT approx', () => {
   const g = rowToEntry(gv, 'gv', 'gv', 3);
   assert.equal(g.agent, 'Sita'); assert.equal(g.agentId, 'G9'); assert.equal(g.hi, 600009); assert.equal(g.approx, true);
   assert.equal(rowToEntry(['x'], 'ff', 'ff', 1), null);
-  assert.equal(LAYOUT_LETTERS('gv').length, 12);
+  assert.equal(LAYOUT_LETTERS('gv').length, 11);
 });
 
 test('lookup: overlapping ranges, latest date first, per-channel', () => {

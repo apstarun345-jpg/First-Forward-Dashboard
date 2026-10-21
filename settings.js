@@ -612,7 +612,7 @@ FF.pages = FF.pages || {};
   /** 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet: First/Last barcode ranges → Master Search & Barcode Checker me dispatch date/naam. */
   function ledgerSection() {
     const sl = settings.stockLedger || {};
-    const defs = { ff1: { label: 'IDFC Stock Sheet (FF)', layout: 'ff' }, gv1: { label: 'GV Stock Sheet (IDFC workbook)', layout: 'gv' }, gv2: { label: 'GV STOCK SHEET', layout: 'gv' } };
+    const defs = { ff1: { label: 'IDFC Stock Sheet (FF)', layout: 'ff' }, gv3: { label: 'GV STOCK SHEET', layout: 'gv' } };
     const row = (k) => {
       const v = Object.assign({}, defs[k], sl[k] || {});
       return `<tr><td><label class="check"><input type="checkbox" data-path="stockLedger.${k}.enabled" ${v.enabled !== false ? 'checked' : ''}></label></td>
@@ -622,7 +622,7 @@ FF.pages = FF.pages || {};
         <td><input class="input mono" data-path="stockLedger.${k}.gid" value="${esc(v.gid || '')}" placeholder="gid" style="width:110px"></td></tr>`;
     };
     return section('📒 Dispatch ledger · stock sheets', `<p class="dim small">Master Search aur Barcode Checker me <b>dispatch date + kisko diya</b> in sheets ke <b>First / Last barcode</b> range se aata hai (server khud range expand karta hai). Har sheet <b>"Anyone with the link: Viewer"</b> honi chahiye. FF layout: <i>Date · Agent · ID · Class · Qty · First · Last…</i> · GV layout: <i>Date · ID · Agent · Mobile · Class · Qty · First · Last…</i>. Link paste karo — ID automatically nikal li jaati hai; <b>gid</b> = URL me <code>gid=…</code>.</p>
-      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>On</th><th>Naam</th><th>Layout</th><th>Sheet link / ID</th><th>gid</th></tr></thead><tbody>${['ff1', 'gv1', 'gv2'].map(row).join('')}</tbody></table></div>${saveBar('stockLedger')}`);
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>On</th><th>Naam</th><th>Layout</th><th>Sheet link / ID</th><th>gid</th></tr></thead><tbody>${['ff1', 'gv3'].map(row).join('')}</tbody></table></div>${saveBar('stockLedger')}`);
   }
   function dataTab() {
     const s = settings, fc = s.ffCommission || {}, sm = s.stockMovement || {}, cs = s.commissionSlabs || defaults.commissionSlabs || {};

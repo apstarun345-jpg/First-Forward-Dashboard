@@ -28,7 +28,7 @@ export function parseBarcode(value) {
 /** Layouts: column index (0 = A) of each field per sheet type. */
 export const LAYOUTS = {
   ff: { date: 0, agent: 1, agentId: 2, cls: 3, qty: 4, first: 5, last: 6, result: 7, actual: 8, status: 9, note1: 10, note2: 11 },
-  gv: { date: 0, agentId: 1, agent: 2, mobile: 3, cls: 4, qty: 5, first: 6, last: 7, actual: 8, status: 9, note1: 10, note2: 11 }
+  gv: { date: 0, agentId: 1, agent: 2, mobile: 3, cls: 4, qty: 5, first: 6, last: 7, actual: 8, status: 9, note1: 10 }   // GV sheet me sirf A..K columns hain (L par gviz error deta hai)
 };
 export const LAYOUT_LETTERS = (layout) => {
   const L = LAYOUTS[layout] || LAYOUTS.ff;
