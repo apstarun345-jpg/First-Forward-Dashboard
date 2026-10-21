@@ -2818,8 +2818,8 @@ async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
 }
 // ---------------------------------------------------------------------------------------------
 // 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet(s): First–Last barcode ranges → interval index.
-const LEDGER_TTL = 10 * 60e3;
-const ledgerState = { at: 0, index: null, promise: null, key: '', errors: {}, counts: {}, retryAt: 0 };
+const LEDGER_TTL = 30 * 60e3;   // Google gviz rate-limit (429) se bachne ke liye 30 min
+const ledgerState = { at: 0, index: null, promise: null, key: '', errors: {}, counts: {}, retryAt: 0, good: {} };   // good = source id → last successful rows (fail hone par purana data rahe)
 const LEDGER_ID_FIX = { '1-IFccHvFZkPKna2vFFxD5plH5MT-L-dpyn1qA': '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA' };   // v249 me kata hua GV link save hua tha
 const ledgerSources = () => {
   const raw = (db.settings && db.settings.stockLedger) || {};
@@ -2832,6 +2832,7 @@ async function loadLedger() {
   const entries = { ff: [], gv: [] }, errors = {}, counts = {};
   for (const src of srcs) {
     const letters = LAYOUT_LETTERS(src.layout);
+    const mine = [];
     const firstCol = letters[src.layout === 'gv' ? 6 : 5];
     let n = 0;
     try {
@@ -2842,15 +2843,21 @@ async function loadLedger() {
           const c0 = rows[i] && rows[i].c && rows[i].c[0];
           const e = ledgerRow(cells.map((v, k) => (k === 0 ? (serverDate(c0 ? c0.v : v) || serverDate(c0 ? c0.f : '') || serverDate(v) || v) : v)), src.layout, src.ch, n + 1, (x) => String(x || ''));
           n++;
-          if (e) { e.src = src.label; entries[src.ch].push(e); }
+          if (e) { e.src = src.label; mine.push(e); }
           if (i % 4000 === 3999) await yieldLoop();
         }
       }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 });
       counts[src.id] = n;
+      ledgerState.good[src.id] = { ch: src.ch, rows: mine, at: Date.now() };
     } catch (err) {
       const msg = String((err && err.message) || err);
       errors[src.id] = /\b40[13]\b/.test(msg) ? `${src.label}: sheet PRIVATE hai (Google ${/401/.test(msg) ? 401 : 403}) — Share → General access → "Anyone with the link" → Viewer karo`
-        : /\b404\b/.test(msg) ? `${src.label}: sheet / gid nahi mila (404) — link check karo` : msg.slice(0, 200);
+        : /\b404\b/.test(msg) ? `${src.label}: sheet / gid nahi mila (404) — link check karo`
+        : /429|rate|limit/i.test(msg) ? `${src.label}: Google Sheets rate-limit (429) — purana data dikha rahe hain, ~5 min me khud retry hoga`
+        : msg.slice(0, 200);
+      // Fail hua source → pichla successful data hi use karo (khaali index nahi)
+      const prev = ledgerState.good[src.id];
+      if (prev) { counts[src.id] = prev.rows.length; for (const e of prev.rows) entries[src.ch].push(e); }
     }
   }
   return { index: { ff: buildLedgerIndex(entries.ff), gv: buildLedgerIndex(entries.gv) }, errors, counts, key: JSON.stringify(srcs.map((x) => [x.id, x.sheetId, x.gid, x.layout])) };
@@ -2863,9 +2870,9 @@ function ledgerIndex(fresh) {
   if (!ledgerState.promise) {
     ledgerState.promise = loadLedger().then((out) => {
       ledgerState.index = out.index; ledgerState.key = out.key; ledgerState.errors = out.errors; ledgerState.counts = out.counts; ledgerState.at = Date.now();
-      ledgerState.retryAt = Object.keys(out.errors).length ? Date.now() + 60e3 : 0;
+      ledgerState.retryAt = Object.keys(out.errors).length ? Date.now() + 5 * 60e3 : 0;
       return out.index;
-    }).catch((err) => { ledgerState.errors = { all: String((err && err.message) || err).slice(0, 200) }; ledgerState.retryAt = Date.now() + 60e3; return ledgerState.index; })
+    }).catch((err) => { ledgerState.errors = { all: String((err && err.message) || err).slice(0, 200) }; ledgerState.retryAt = Date.now() + 5 * 60e3; return ledgerState.index; })
       .finally(() => { ledgerState.promise = null; });
   }
   return have && !fresh ? Promise.resolve(have) : ledgerState.promise;   // purana index turant, refresh peeche
