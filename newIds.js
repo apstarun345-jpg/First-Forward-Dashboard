@@ -32,11 +32,11 @@ FF.pages = FF.pages || {};
     const rows = visible(), s = d.summary || {};
     const months = d.months.slice(-6);
     mount.innerHTML = `
-      <div class="kpi-row">
-        <div class="kpi"><div class="kpi-v">${U.fmt(s.count)}</div><div class="kpi-l">🆕 New agents (Sheet4 me nahi)</div></div>
-        <div class="kpi"><div class="kpi-v">${U.fmt(s.tags)}</div><div class="kpi-l">Total tags issued</div></div>
-        <div class="kpi"><div class="kpi-v">${U.fmt(s.activeThisMonth)}</div><div class="kpi-l">Is mahine active${s.curYm ? ` (${esc(ymLabel(s.curYm))})` : ''}</div></div>
-        <div class="kpi"><div class="kpi-v">${U.fmt(s.newThisMonth)}</div><div class="kpi-l">Is mahine pehli baar</div></div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <div style="flex:1 1 180px;padding:14px 16px;border-radius:14px;background:var(--card,#fff);border:1px solid rgba(99,102,241,.25);box-shadow:0 1px 4px rgba(0,0,0,.06)"><div style="font-size:26px;font-weight:800;color:#1e3a8a">${U.fmt(s.count)}</div><div style="font-size:13px;color:#475569;margin-top:2px">🆕 New agents (Sheet4 me nahi)</div></div>
+        <div style="flex:1 1 180px;padding:14px 16px;border-radius:14px;background:var(--card,#fff);border:1px solid rgba(99,102,241,.25);box-shadow:0 1px 4px rgba(0,0,0,.06)"><div style="font-size:26px;font-weight:800;color:#1e3a8a">${U.fmt(s.tags)}</div><div style="font-size:13px;color:#475569;margin-top:2px">Total tags issued</div></div>
+        <div style="flex:1 1 180px;padding:14px 16px;border-radius:14px;background:var(--card,#fff);border:1px solid rgba(99,102,241,.25);box-shadow:0 1px 4px rgba(0,0,0,.06)"><div style="font-size:26px;font-weight:800;color:#1e3a8a">${U.fmt(s.activeThisMonth)}</div><div style="font-size:13px;color:#475569;margin-top:2px">Is mahine active${s.curYm ? ` (${esc(ymLabel(s.curYm))})` : ''}</div></div>
+        <div style="flex:1 1 180px;padding:14px 16px;border-radius:14px;background:var(--card,#fff);border:1px solid rgba(99,102,241,.25);box-shadow:0 1px 4px rgba(0,0,0,.06)"><div style="font-size:26px;font-weight:800;color:#1e3a8a">${U.fmt(s.newThisMonth)}</div><div style="font-size:13px;color:#475569;margin-top:2px">Is mahine pehli baar</div></div>
       </div>
       <div class="card"><div class="card-body">
         <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
