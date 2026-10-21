@@ -26,9 +26,12 @@ test('admin tag request: no mobile/address/pincode needed; barcodes saved + edit
     assert.equal(post.status, 201, JSON.stringify(out).slice(0, 200));
     const r = out.requests[0];
     assert.equal(r.firstBarcode, '608116-011-0558283'); assert.equal(r.lastBarcode, '608116-011-0558331');
+    const tl = await (await fetch(`${base}/api/tag-requests`, { method: 'POST', headers: H, body: JSON.stringify({ employee: { name: 'Admin' }, agents: [{ agentName: 'Some TL', kind: 'tl', dispatchName: 'Dispatch Person', mapName: 'MAPPED AGENT', mapId: '77001122', rows: [{ cls: 'VC4', approved: 10 }] }] }) })).json();
+    assert.equal(tl.requests[0].agent.mapName, 'MAPPED AGENT'); assert.equal(tl.requests[0].agent.mapId, '77001122');
     const put = await (await fetch(`${base}/api/tag-requests/${r.id}`, { method: 'PUT', headers: H, body: JSON.stringify({ lastBarcode: '608116-011-0558400 abc' }) })).json();
     assert.equal(put.request.lastBarcode, '608116-011-0558400');
     const cfg = await (await fetch(`${base}/api/tag-request-sheet`, { headers: H })).json();
+    assert.equal(cfg.fields.mapName, 'FASTag mapping name'); assert.equal(cfg.fields.mapId, 'FASTag mapping ID');
     assert.equal(cfg.fields.firstBarcode, 'First barcode'); assert.equal(cfg.fields.lastBarcode, 'Last barcode');
   } finally { app.kill('SIGTERM'); await once(app, 'exit').catch(() => {}); }
 });

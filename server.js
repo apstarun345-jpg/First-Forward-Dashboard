@@ -6198,6 +6198,7 @@ async function handleApi(req, res, url) {
     channel: a.channel === 'gv' ? 'gv' : 'ff',
     ...(String(a.dispatchName || '').trim() ? { dispatchName: shortText(String(a.dispatchName).replace(/\s+/g, ' '), 120) } : {}),
     ...(a.kind === 'tl' ? { kind: 'tl' } : {}),
+    ...(String(a.mapName || '').trim() ? { mapName: shortText(String(a.mapName).replace(/\s+/g, ' '), 120) } : {}), ...(String(a.mapId || '').trim() ? { mapId: shortText(String(a.mapId).replace(/\s+/g, ' '), 40) } : {}),
     ...(tagBarcode(a.firstBarcode) ? { firstBarcode: tagBarcode(a.firstBarcode) } : {}), ...(tagBarcode(a.lastBarcode) ? { lastBarcode: tagBarcode(a.lastBarcode) } : {}),
     mobile: String(a.mobile || a.phone || '').replace(/[^\d+]/g, '').slice(0, 16),
     address: shortText(String(a.address || a.fullAddress || '').replace(/\s+/g, ' '), 300),
@@ -6416,7 +6417,7 @@ async function handleApi(req, res, url) {
     // v3.30 — delivery ab AGENT ke address par (employee form me agent ka mobile/address/pincode bharta hai)
     agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty',
     // v3.51 — 🚚 courier naam (Delhivery / DTDC) — label + sheet dono me
-    courier: 'Courier', firstBarcode: 'First barcode', lastBarcode: 'Last barcode',
+    courier: 'Courier', firstBarcode: 'First barcode', lastBarcode: 'Last barcode', mapName: 'FASTag mapping name', mapId: 'FASTag mapping ID',
     itemName: 'Item Name', serialNumber: 'Serial Number', deviceName: 'Device Name', materialDescription: 'Material Details'
   };
   // 🪶 v3.51 — sheet ko chhota rakho: har AGENT ki EK row (saari classes ek hi cell me) + kam columns.
@@ -6653,8 +6654,11 @@ async function handleApi(req, res, url) {
       case 'deviceName': return req.deviceName || '';
       case 'materialDescription': return req.materialDescription || '';
       case 'status': return req.status || '';
-      case 'agentId': return x.agentId || '';
-      case 'agent': return x.agentName || '';
+      // 🔗 FASTag Mapping Name/ID bhari ho to sheet me wahi agent ID / naam jata hai jis par tags map hote hain
+      case 'agentId': return (req.agent && req.agent.mapId) || x.agentId || '';
+      case 'agent': return (req.agent && req.agent.mapName) || x.agentName || '';
+      case 'mapName': return (req.agent && req.agent.mapName) || '';
+      case 'mapId': return (req.agent && req.agent.mapId) || '';
       case 'tl': return x.tl || '';
       case 'channel': return ch;
       case 'cls': return x.cls || '';

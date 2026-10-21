@@ -111,7 +111,7 @@ FF.pages = FF.pages || {};
   }
   const rid = () => Math.random().toString(36).slice(2, 9);
   const emptyQty = () => { const q = {}; CLASS_LIST.forEach((c) => { q[c] = ''; }); return q; };
-  function newRow(patch) { return { id: rid(), agentId: '', name: '', tl: '', channel: '', tlFilter: '', isTl: false, dispatchName: '', q: emptyQty(), mobile: '', address: '', pincode: '', firstBarcode: '', lastBarcode: '', ...(patch || {}) }; }
+  function newRow(patch) { return { id: rid(), agentId: '', name: '', tl: '', channel: '', tlFilter: '', isTl: false, dispatchName: '', q: emptyQty(), mobile: '', address: '', pincode: '', firstBarcode: '', lastBarcode: '', mapName: '', mapId: '', ...(patch || {}) }; }
   if (!state.rows.length) state.rows = [newRow()];
 
   const norm = (v) => String(v == null ? '' : v).trim().toUpperCase().replace(/\s+/g, ' ');
@@ -1244,7 +1244,7 @@ body.colorful .from-hdr { color: #166534; }
   function suggestHtml(items) {
     if (!items.length) return `<div class="tr-suggest-empty">${state.index ? 'Koi match nahi mila — naya agent hai to naam likh kar aage badho' : 'Agent list load ho rahi hai…'}</div>`;
     return items.map((it, i) => it.kind === 'tl'
-      ? `<button type="button" class="tr-suggest-item tl ${i === 0 ? 'hot' : ''}" data-tr-pick="tl:${esc(norm(it.channel) + '|' + norm(it.name))}"><span class="tr-suggest-name">🧑‍💼 ${esc(it.name)}</span><small class="dim">TL · ${esc(it.agents)} agents · ${it.channel === 'gv' ? 'GV' : 'FF'} — TL select karo → poora data dikhega</small>${stockLine(it)}</button>`
+      ? `<button type="button" class="tr-suggest-item tl ${i === 0 ? 'hot' : ''}" data-tr-pick="tl:${esc(norm(it.channel) + '|' + norm(it.name))}"><span class="tr-suggest-name">🧑‍💼 ${esc(it.name)}</span><small class="dim">TL · ${esc(it.agents)} agents · ${it.channel === 'gv' ? 'GV' : 'FF'} — TL select karo → poora data dikhega</small>${stockLine(it)}</button><button type="button" class="tr-suggest-item tl" data-tr-pick="tlmap:${esc(norm(it.channel) + '|' + norm(it.name))}"><span class="tr-suggest-name">🔗 FASTag Mapping Name/ID — ${esc(it.name)}</span><small class="dim">TL ka naam alag hai / FASTag kisi aur naam-ID par map hain → mapping naam ya ID likho, sheet me wahi jayegi</small></button>`
       : `<button type="button" class="tr-suggest-item ${i === 0 ? 'hot' : ''}" data-tr-pick="agent:${esc(it.channel)}:${esc(it.agentId || '')}:${esc(norm(it.name))}"><span class="tr-suggest-name">${esc(it.name)}${it.agentId ? ` <small class="dim">#${esc(it.agentId)}</small>` : ''}</span><small class="dim">${it.tlName ? `TL ${esc(it.tlName)} · ` : ''}${it.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</small>${stockLine(it)}</button>`).join('');
   }
   /** Agent ke neeche ka status line — pakka match / "kya ye hai?" / naya agent. */
@@ -1532,6 +1532,10 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-contact-grid">
             <label class="field tr-span-all"><span class="dim small">🚚 Dispatch name${row.isTl ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'dispatchName')}" data-tr-a="dispatchName" maxlength="120" placeholder="Jis naam par dispatch karna hai (khaali = agent ka naam)" autocomplete="off" value="${esc(row.dispatchName)}"></label>
+            ${row.isTl ? `<label class="field"><span class="dim small">🔗 FASTag Mapping Name <small class="dim">(optional)</small></span>
+              <input class="input" data-tr-a="mapName" maxlength="120" list="tr-map-${esc(row.id)}" placeholder="Jis naam par FASTag map hain" autocomplete="off" value="${esc(row.mapName || '')}"><datalist id="tr-map-${esc(row.id)}">${(() => { try { return tlAgents(rec).filter((a) => !a.isSelf).slice(0, 80).map((a) => `<option value="${esc(a.name)}">`).join(''); } catch { return ''; } })()}</datalist></label>
+            <label class="field"><span class="dim small">🔗 FASTag Mapping ID <small class="dim">(optional)</small></span>
+              <input class="input mono" data-tr-a="mapId" maxlength="40" placeholder="Jis Agent ID par FASTag map hain" autocomplete="off" value="${esc(row.mapId || '')}"></label>` : ''}
             <label class="field"><span class="dim small">📱 Mobile number${askMobile ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'mobile')}" data-tr-a="mobile" inputmode="tel" maxlength="16" placeholder="10 digit mobile" autocomplete="off" value="${esc(row.mobile)}"></label>
             <label class="field"><span class="dim small">📮 Pincode${askAddress ? ' *' : ''}</span>
@@ -1741,17 +1745,18 @@ body.colorful .from-hdr { color: #166534; }
       const close = () => { box.hidden = true; };
       const markHot = () => { box.querySelectorAll('.tr-suggest-item').forEach((el, i) => el.classList.toggle('hot', i === hot)); };
       const pick = (val) => {
-        if (val.startsWith('tl:')) {
-          const [ch, nameKey] = val.slice(3).split('|');
+        if (val.startsWith('tl:') || val.startsWith('tlmap:')) {
+          const wantMap = val.startsWith('tlmap:');
+          const [ch, nameKey] = val.slice(wantMap ? 6 : 3).split('|');
           const g = idx_tl(ch, nameKey);
           close();
           if (!g) { U.toast('TL data nahi mila', 'warn'); return; }
           row.isTl = true; row.tlFilter = ''; row.agentId = ''; row.name = g.name; row.tl = g.name; row.channel = g.channel;
           // Agent/TL change means contact belongs to the previous selection — clear it immediately.
-          row.mobile = ''; row.dispatchName = ''; row.address = ''; row.pincode = '';
+          row.mobile = ''; row.dispatchName = ''; row.address = ''; row.pincode = ''; row.mapName = ''; row.mapId = '';
           row.fromBook = false; row.contactManual = false; row.addressSource = '';
           if (state.errs[row.id]) delete state.errs[row.id].agent;
-          rerenderCard('[data-tr-a="dispatchName"]');
+          rerenderCard(wantMap ? '[data-tr-a="mapName"]' : '[data-tr-a="dispatchName"]');
           U.toast(`👥 TL ${g.name} ka poora data neeche hai — dispatch name bharo ya uska koi agent chuno`, 'info');
           return;
         }
@@ -2039,6 +2044,7 @@ body.colorful .from-hdr { color: #166534; }
         dispatchName: clean(row.dispatchName), kind: row.isTl ? 'tl' : 'agent',
         tl: rec ? rec.tlName || '' : '', channel,
         mobile: String(row.mobile || '').replace(/[^\d+]/g, ''), address: clean(row.address), pincode: digits(row.pincode).slice(0, 6),
+        ...(row.isTl && clean(row.mapName) ? { mapName: clean(row.mapName) } : {}), ...(row.isTl && clean(row.mapId) ? { mapId: clean(row.mapId) } : {}),
         ...(clean(row.firstBarcode) ? { firstBarcode: clean(row.firstBarcode) } : {}), ...(clean(row.lastBarcode) ? { lastBarcode: clean(row.lastBarcode) } : {}),
         unmatched: !rec, metrics: rec ? groupMetrics(rec) : null, rows
       };
@@ -2483,7 +2489,7 @@ body.colorful .from-hdr { color: #166534; }
           key: `${r.id}::${k}`, agentKey: siblings > 1 ? g.agentKey : '', req: r, rows, siblings,
           agent: {
             name: a.name || first.agentName || '—', agentId: a.agentId || first.agentId || '',
-            tl: a.tl || (first.tl && first.tl !== '—' ? first.tl : ''), channel: (a.channel || first.channel) === 'gv' ? 'gv' : 'ff', unmatched: !!a.unmatched, kind: a.kind || 'agent', dispatchName: a.dispatchName || ''
+            tl: a.tl || (first.tl && first.tl !== '—' ? first.tl : ''), channel: (a.channel || first.channel) === 'gv' ? 'gv' : 'ff', unmatched: !!a.unmatched, kind: a.kind || 'agent', dispatchName: a.dispatchName || '', mapName: a.mapName || '', mapId: a.mapId || ''
           },
           contact: contactOf(r),
           total: rows.reduce((s, x) => s + num(x.approved), 0),
@@ -2652,7 +2658,7 @@ body.colorful .from-hdr { color: #166534; }
       <td class="tr-c-sel"><input type="checkbox" data-tr-sel="${esc(dr.key)}" ${sel ? 'checked' : ''} aria-label="Select"></td>
       <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="${esc(r.id)}">#${esc(String(r.id || '').slice(-6))}</small></td>
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
-      <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)} <button type="button" class="cp-btn" data-copy="${esc(dr.agent.agentId)}" title="Copy agent ID" aria-label="Copy agent ID">📋</button>` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
+      <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}${dr.agent.mapName || dr.agent.mapId ? `<small class="dim" title="FASTag Mapping — sheet me yahi naam/ID jata hai"> 🔗 ${esc(dr.agent.mapName || '')}${dr.agent.mapId ? ` #${esc(dr.agent.mapId)}` : ''}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)} <button type="button" class="cp-btn" data-copy="${esc(dr.agent.agentId)}" title="Copy agent ID" aria-label="Copy agent ID">📋</button>` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
         <span class="tr-tags"><span class="badge ${statusOf(r).tone} tr-st-inline" title="Status">${statusOf(r).label}</span><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
       <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a> <button type="button" class="cp-btn" data-copy="${esc(c.mobile)}" title="Copy mobile" aria-label="Copy mobile">📋</button><a class="cp-btn" target="_blank" rel="noopener" href="${esc(U.waLink('', c.mobile))}" title="WhatsApp" aria-label="WhatsApp">💬</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)} <button type="button" class="cp-btn" data-copy="${esc([c.address, c.pincode].filter(Boolean).join(', '))}" title="Copy address" aria-label="Copy address">📋</button></div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
       ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td><td class="tr-c-item-name"><div class="tr-item-chips sm" data-tr-item-name data-key="${esc(dr.key)}" role="group" aria-label="Items">${ITEM_NAME_OPTIONS.map((name) => `<label class="tr-item-chip ${hasItem(name, r.itemName) ? 'on' : ''}" title="${esc(ITEM_LABEL[name])}"><input type="checkbox" data-tr-item-cell="${esc(name)}" data-key="${esc(dr.key)}" ${hasItem(name, r.itemName) ? 'checked' : ''}> ${ITEM_ICON[name]} ${esc(ITEM_LABEL[name])}</label>`).join('')}</div>${r.serialNumber ? `<small class="dim">Serial: ${esc(r.serialNumber)}</small>` : ''}${r.deviceName ? `<small class="dim">Device: ${esc(r.deviceName)}</small>` : ''}${r.materialDescription ? `<small class="dim">Material: ${esc(r.materialDescription)}</small>` : ''} </td>` : ''}
@@ -3482,7 +3488,7 @@ body.colorful .from-hdr { color: #166534; }
       approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note',
       empName: 'Employee Name', empMobile: 'Employee mobile', empAddress: 'Employee address', empPincode: 'Employee pincode',
       agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty',
-      courier: 'Courier', firstBarcode: 'First barcode', lastBarcode: 'Last barcode'
+      courier: 'Courier', firstBarcode: 'First barcode', lastBarcode: 'Last barcode', mapName: 'FASTag mapping name', mapId: 'FASTag mapping ID'
     };
     const fields = s.fields && Object.keys(s.fields).length ? s.fields : FALLBACK_SHEET_FIELDS;
     const configuredCols = Array.isArray(cfg.columns) ? cfg.columns : [];
