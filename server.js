@@ -6225,6 +6225,7 @@ async function handleApi(req, res, url) {
       const itemName = normItemName(rl.itemName);
       if (!agent.name && !agent.agentId && !agent.mobile && !hasQty) return; // poora khaali block — chhod do
       if (agent.name.length < 2 && !agent.agentId) throw new HttpError(400, `Agent ${i + 1}: agent ka naam / ID zaroori hai.`);
+      if (agent.kind === 'tl' && !agent.mapName && !agent.mapId) throw new HttpError(400, `${label}: TL ke liye FASTag Mapping Name / ID zaroori hai.`);
       const mob = tagDigits(agent.mobile);
       if ((rl.askMobile || mob) && (mob.length < 10 || mob.length > 13)) throw new HttpError(400, `${label}: agent ka mobile number zaroori hai (10 digit).`);
       if (rl.askAddress) {

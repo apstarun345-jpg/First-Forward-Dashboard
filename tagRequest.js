@@ -1542,8 +1542,8 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-contact-grid">
             <label class="field tr-span-all"><span class="dim small">🚚 Dispatch name${row.isTl ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'dispatchName')}" data-tr-a="dispatchName" maxlength="120" placeholder="Jis naam par dispatch karna hai (khaali = agent ka naam)" autocomplete="off" value="${esc(row.dispatchName)}"></label>
-            ${row.isTl ? `<label class="field tr-span-all"><span class="dim small">🔗 FASTag Mapping Name / ID <small class="dim">(optional — TL ke FASTag jis agent naam/ID par map hain; sheet me TL ke agent name ki jagah yahi jayega)</small></span>
-              <div class="tr-search-wrap"><input class="input" data-tr-map maxlength="140" placeholder="Agent ID ya naam likho — dropdown se chuno" autocomplete="off" value="${esc(mapText(row))}"><div class="tr-suggest" data-tr-map-suggest hidden></div></div></label>` : ''}
+            ${row.isTl ? `<label class="field tr-span-all"><span class="dim small">🔗 FASTag Mapping Name / ID * <small class="dim">(zaroori — TL ke FASTag jis agent naam/ID par map hain; sheet me TL ke agent name ki jagah yahi jayega)</small></span>
+              <div class="tr-search-wrap"><input class="input${badCls(row.id, 'mapName')}" data-tr-map maxlength="140" placeholder="Agent ID ya naam likho — dropdown se chuno" autocomplete="off" value="${esc(mapText(row))}"><div class="tr-suggest" data-tr-map-suggest hidden></div></div></label>` : ''}
             <label class="field"><span class="dim small">📱 Mobile number${askMobile ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'mobile')}" data-tr-a="mobile" inputmode="tel" maxlength="16" placeholder="10 digit mobile" autocomplete="off" value="${esc(row.mobile)}"></label>
             <label class="field"><span class="dim small">📮 Pincode${askAddress ? ' *' : ''}</span>
@@ -1863,7 +1863,7 @@ body.colorful .from-hdr { color: #166534; }
         }));
       };
       mapInp.addEventListener('input', () => {
-        const v = mapInp.value.trim(); row.mapText = mapInp.value;
+        const v = mapInp.value.trim(); row.mapText = mapInp.value; clearErr(card, row.id, 'mapName');
         const d = digits(v);
         if (d.length >= 3 && !/[a-z]/i.test(v)) { row.mapId = d; row.mapName = ''; } else { row.mapName = v; row.mapId = ''; }
         mapShow();
@@ -2041,6 +2041,7 @@ body.colorful .from-hdr { color: #166534; }
       const n = state.rows.indexOf(row) + 1;
       if (String(row.name || row.agentId || '').trim().length < 2) mark(row.id, 'agent', 'Agent ka naam / ID likho (dropdown se chuno)');
       if (row.isTl && clean(row.dispatchName).length < 2) mark(row.id, 'dispatchName', 'TL ke naam par request hai — Dispatch name (jisko tag bhejna hai) zaroori hai');
+      if (row.isTl) { const m = resolveMap(row); if (!m.name && !m.id) mark(row.id, 'mapName', 'TL ke liye FASTag Mapping Name / ID chuno ya likho'); }
       const mob = digits(row.mobile);
       const staffForm = isAdmin() && !isPublic();   // admin ke liye mobile / address / pincode optional
       if (((!staffForm && cfg.askMobile !== false) || mob) && (mob.length < 10 || mob.length > 13)) mark(row.id, 'mobile', 'Agent ka 10 digit mobile number daalo');
