@@ -1183,6 +1183,8 @@ function upstreamUrl(params) {
   if (gid) p.set('gid', gid); else if (sheet) p.set('sheet', sheet);
   const tq = params.get('tq');
   if (tq) p.set('tq', tq);
+  const hdrRows = params.get('headers');
+  if (hdrRows && /^\d{1,2}$/.test(hdrRows)) p.set('headers', hdrRows);   // header rows ki ginti (tag-level rows ke liye 1)
   let range = params.get('range');
   if (!range) {
     const tabs = (db.settings && Array.isArray(db.settings.tabs)) ? db.settings.tabs : DEFAULT_TABS;

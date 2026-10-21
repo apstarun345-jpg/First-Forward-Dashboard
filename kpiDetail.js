@@ -1020,7 +1020,7 @@ window.FF = window.FF || {};
       if (spec.tlId && A.tlId) where.push(`${A.tlId} = ${D.lit(spec.tlId)}`);
       else if ((spec.tl || spec.tlName) && A.tlName) where.push(`${A.tlName} = ${D.lit(spec.tl || spec.tlName)}`);
       if (spec.cls && A.cls) where.push(`${A.cls} = ${D.lit(String(spec.cls).replace(/^VC/i, ''))}`);
-      const t = await D.query(A.tab || 'Tag Assignment', `select ${cols.join(', ')}${where.length ? ` where ${where.join(' and ')}` : ''} limit 50000`, {});
+      const t = await D.query(A.tab || 'Tag Assignment', `select ${cols.join(', ')}${where.length ? ` where ${where.join(' and ')}` : ''} limit 50000`, { headers: 1 });
       const rawRows = D.textRows(t), statusIndex = cols.indexOf(A.status);
       const isOut = (row) => statusIndex >= 0 && FF.gv && FF.gv.stockStatusKind && FF.gv.stockStatusKind(row[statusIndex]) === 'out';
       const rows = rawRows.filter((row) => !isOut(row));
@@ -1030,7 +1030,7 @@ window.FF = window.FF || {};
     const where = [];
     if (agent) where.push(`lower(${S.agentName}) = ${D.lit(agent.toLowerCase())}`);
     if (spec.cls) where.push(`${S.cls} = ${D.lit(String(spec.cls).replace(/^VC/i, ''))}`);
-    const t = await D.query(S.sheet || 'StockDataa', `select ${cols.join(', ')}${where.length ? ` where ${where.join(' and ')}` : ''} limit 50000`, {});
+    const t = await D.query(S.sheet || 'StockDataa', `select ${cols.join(', ')}${where.length ? ` where ${where.join(' and ')}` : ''} limit 50000`, { headers: 1 });
     return { header: t.cols.map((c) => c.label || c.id), rows: D.textRows(t), title: `${S.sheet || 'StockDataa'} (FF stock)` };
   }
   async function stockSheetRowsSection(host, kind, spec) {

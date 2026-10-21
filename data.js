@@ -211,19 +211,19 @@ window.FF = window.FF || {};
     let range = o.range !== undefined ? o.range : configuredRange;
     if (/^[A-Z]+[0-9]+:$/i.test(range)) range = range.toUpperCase() === 'A1:' ? '' : `${range}ZZZ`;
     const sourceId = cfg && cfg.source === 'gv' ? FF.config.gvSheetId : FF.config.sheetId;
-    const key = `${sourceId}|${sheetName}|${gid}|${range || ''}|${tq || ''}`;
+    const key = `${sourceId}|${sheetName}|${gid}|${range || ''}|${tq || ''}|${o.headers !== undefined ? o.headers : ''}`;
     const now = Date.now();
     const hit = cache.get(key);
     if (hit && (hit.pending || (!o.fresh && now - hit.t < TTL_MS))) return hit.promise;
 
-    const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(range ? { range } : {}) };
+    const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(range ? { range } : {}), ...(o.headers !== undefined ? { headers: String(o.headers) } : {}) };
     const attempts = [];
     const proxyUrl = FF.config.proxyPath && FF.config.proxy !== false
       ? buildUrl(FF.config.proxyPath, sheetName, tq, gid, extra) : '';
     // Browser se Google direct call: sirf tab jab mapping flag allow kare aur rate limit na ho.
     // (Yehi direct call 429 "Too Many Requests" HTML page laati thi — ab cooldown par band.)
     const directUrl = directAllowed()
-      ? buildUrl(directBase(sheetName), sheetName, tq, gid, range ? { range } : null) : '';
+      ? buildUrl(directBase(sheetName), sheetName, tq, gid, (range || o.headers !== undefined) ? { ...(range ? { range } : {}), ...(o.headers !== undefined ? { headers: String(o.headers) } : {}) } : null) : '';
     // Large inventory exact-match lookups may be faster against Google directly. Mapping opts in
     // per request; all other dashboard requests retain the normal proxy/cache-first behavior.
     if (o.directFirst) {
