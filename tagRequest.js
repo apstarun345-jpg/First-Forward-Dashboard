@@ -2094,6 +2094,85 @@ body.colorful .from-hdr { color: #166534; }
     return { employee: { name: clean(state.employee.name), ...(office && formCfg().askOffice ? { office } : {}) }, employeeToken: isPublic() ? state.employeeToken : '', ...(publicVisitId ? { publicVisitId } : {}), ...(liveShare ? { liveShare } : {}), note: clean(state.note), courier: clean(state.courier), itemName: normalizeItemName(state.itemName), serialNumber: hasItem('Biomatric Device') ? clean(state.serialNumber || '') : '', deviceName: hasItem('Biomatric Device') ? clean(state.deviceName || '') : '', materialDescription: hasItem('Matarial') ? clean(state.materialDescription || '') : '', agents };
   }
   const withTimeout = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
+  // ---- ✨ Send popup (English): instant "Sending…" → animated success with request details ----------
+  function sendPop() {
+    let ov = document.getElementById('tr-send-pop');
+    if (!ov) {
+      if (!document.getElementById('tr-send-pop-css')) {
+        const st = document.createElement('style'); st.id = 'tr-send-pop-css';
+        st.textContent = `
+#tr-send-pop{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(15,23,42,.55);backdrop-filter:blur(3px);animation:trpFade .18s ease-out}
+#tr-send-pop .trp-box{width:min(560px,100%);max-height:88vh;overflow:auto;background:var(--card,#fff);color:var(--ink,#0f172a);border-radius:20px;padding:22px 22px 18px;box-shadow:0 24px 70px rgba(0,0,0,.35);animation:trpPop .32s cubic-bezier(.2,1.3,.4,1)}
+#tr-send-pop h3{margin:10px 0 4px;font-size:20px;text-align:center}
+#tr-send-pop .trp-sub{margin:0 0 12px;text-align:center;opacity:.7;font-size:13px}
+#tr-send-pop .trp-ring{width:64px;height:64px;margin:0 auto;border-radius:50%;border:5px solid rgba(99,102,241,.2);border-top-color:#6366f1;animation:trpSpin .8s linear infinite}
+#tr-send-pop .trp-bar{height:5px;border-radius:5px;background:rgba(99,102,241,.15);overflow:hidden;margin:12px 0}
+#tr-send-pop .trp-bar i{display:block;height:100%;width:40%;background:linear-gradient(90deg,#6366f1,#06b6d4);border-radius:5px;animation:trpBar 1.1s ease-in-out infinite}
+#tr-send-pop .trp-ok{width:72px;height:72px;margin:0 auto;display:block}
+#tr-send-pop .trp-ok circle{fill:none;stroke:#16a34a;stroke-width:4;stroke-dasharray:166;stroke-dashoffset:166;animation:trpDraw .55s ease-out forwards}
+#tr-send-pop .trp-ok path{fill:none;stroke:#16a34a;stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:48;stroke-dashoffset:48;animation:trpDraw .35s .5s ease-out forwards}
+#tr-send-pop .trp-err{width:64px;height:64px;margin:0 auto;border-radius:50%;background:#fee2e2;color:#b91c1c;font-size:34px;display:flex;align-items:center;justify-content:center;animation:trpShake .4s}
+#tr-send-pop .trp-card{border:1px solid rgba(100,116,139,.25);border-radius:12px;padding:10px 12px;margin:8px 0;animation:trpUp .4s ease-out both}
+#tr-send-pop .trp-row{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:2px 0}
+#tr-send-pop .trp-row span:first-child{opacity:.65}
+#tr-send-pop .trp-id{font-family:ui-monospace,monospace;font-weight:700;color:#4f46e5}
+#tr-send-pop .trp-badge{display:inline-block;padding:1px 8px;border-radius:99px;background:#fef3c7;color:#92400e;font-size:12px;font-weight:700}
+#tr-send-pop .trp-btns{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
+@keyframes trpFade{from{opacity:0}to{opacity:1}}@keyframes trpPop{from{opacity:0;transform:scale(.85) translateY(14px)}to{opacity:1;transform:none}}
+@keyframes trpSpin{to{transform:rotate(360deg)}}@keyframes trpBar{0%{margin-left:-40%}100%{margin-left:100%}}
+@keyframes trpDraw{to{stroke-dashoffset:0}}@keyframes trpUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes trpShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}`;
+        document.head.appendChild(st);
+      }
+      ov = document.createElement('div'); ov.id = 'tr-send-pop';
+      ov.addEventListener('click', (e) => { if (e.target === ov && ov.dataset.busy !== '1') ov.remove(); });
+      document.body.appendChild(ov);
+    }
+    return ov;
+  }
+  function popSending(payload) {
+    const ov = sendPop(); ov.dataset.busy = '1';
+    const ags = payload.agents || [];
+    const tags = ags.reduce((s, a) => s + (a.rows || []).reduce((x, r) => x + (r.approved || 0), 0), 0);
+    ov.innerHTML = `<div class="trp-box" role="status" aria-live="polite"><div class="trp-ring"></div><h3>Sending your request…</h3>
+      <p class="trp-sub">${esc(String(ags.length))} agent${ags.length === 1 ? '' : 's'} · ${esc(fmt(tags))} tags — please wait a moment</p><div class="trp-bar"><i></i></div>
+      ${ags.slice(0, 4).map((a) => `<div class="trp-card"><div class="trp-row"><span>Agent</span><b>${esc(a.agentName || a.agentId || '—')}</b></div></div>`).join('')}</div>`;
+  }
+  function popSuccess(payload, out) {
+    const ov = sendPop(); ov.dataset.busy = '0';
+    const reqs = (out && out.requests) || (out && out.request ? [out.request] : []);
+    const ags = payload.agents || [];
+    const when = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const cards = ags.map((a, i) => {
+      const r = reqs[i] || {};
+      const cls = (a.rows || []).map((x) => `${esc(x.cls)} × ${esc(fmt(x.approved))}`).join(' · ') || '—';
+      const tot = (a.rows || []).reduce((s, x) => s + (x.approved || 0), 0);
+      const rows = [
+        ['Request ID', r.id ? `<span class="trp-id">#${esc(r.id)}</span>` : '—'],
+        [a.kind === 'tl' ? 'TL' : 'Agent', `<b>${esc(a.agentName || a.agentId || '—')}</b>${a.agentId ? ` <small>#${esc(a.agentId)}</small>` : ''}`],
+        ...(a.mapName || a.mapId ? [['FASTag mapping', `${esc(a.mapName || '')}${a.mapId ? ` <small>#${esc(a.mapId)}</small>` : ''}`]] : []),
+        ...(a.dispatchName ? [['Dispatch name', esc(a.dispatchName)]] : []),
+        ['Classes', cls], ['Total tags', `<b>${esc(fmt(tot))}</b>`],
+        ...(a.mobile ? [['Mobile', esc(a.mobile)]] : []), ...(a.pincode ? [['Pincode', esc(a.pincode)]] : []),
+        ...(a.firstBarcode || a.lastBarcode ? [['Barcodes', `${esc(a.firstBarcode || '—')} → ${esc(a.lastBarcode || '—')}`]] : []),
+        ['Status', '<span class="trp-badge">⏳ Pending approval</span>']
+      ];
+      return `<div class="trp-card" style="animation-delay:${0.15 + i * 0.08}s">${rows.map(([k, v]) => `<div class="trp-row"><span>${k}</span><span style="text-align:right">${v}</span></div>`).join('')}</div>`;
+    }).join('');
+    const extra = [payload.courier ? `Courier: ${esc(payload.courier)}` : '', payload.itemName ? `Items: ${esc(payload.itemName)}` : '', payload.note ? `Note: ${esc(payload.note)}` : ''].filter(Boolean).join(' · ');
+    ov.innerHTML = `<div class="trp-box" role="status"><svg class="trp-ok" viewBox="0 0 52 52"><circle cx="26" cy="26" r="25"/><path d="M14 27l8 8 16-17"/></svg>
+      <h3>Request sent to admin!</h3><p class="trp-sub">${esc(when)} · ${esc(String(ags.length))} request${ags.length === 1 ? '' : 's'} created${extra ? `<br>${extra}` : ''}</p>${cards}
+      <div class="trp-btns"><button class="btn primary" data-trp="close">Done</button><button class="btn" data-trp="again">➕ New request</button></div></div>`;
+    ov.querySelector('[data-trp="close"]').onclick = () => ov.remove();
+    ov.querySelector('[data-trp="again"]').onclick = () => { ov.remove(); state.done = null; state.view = 'form'; renderRoot(); };
+  }
+  function popError(msg, retry) {
+    const ov = sendPop(); ov.dataset.busy = '0';
+    ov.innerHTML = `<div class="trp-box" role="alert"><div class="trp-err">!</div><h3>Request not sent</h3><p class="trp-sub">${esc(msg || 'Something went wrong')}</p>
+      <div class="trp-btns"><button class="btn primary" data-trp="retry">Try again</button><button class="btn" data-trp="close">Close</button></div></div>`;
+    ov.querySelector('[data-trp="close"]').onclick = () => ov.remove();
+    ov.querySelector('[data-trp="retry"]').onclick = () => { ov.remove(); if (retry) retry(); };
+  }
   async function submit() {
     if (state.busy) return;
     if (!isPublic() && !(FF.auth && FF.auth.can && FF.auth.can('tagRequest'))) { U.toast('Is page ka access nahi hai', 'err'); return; }
@@ -2109,31 +2188,22 @@ body.colorful .from-hdr { color: #166534; }
       if (inp && inp.focus) setTimeout(() => inp.focus({ preventScroll: true }), 250);
       return;
     }
-    // 🧾 Last look before sending: who, how many tags, which courier — one line each.
-    try {
-      if (typeof window !== 'undefined' && typeof window.confirm === 'function' && !state.dup.force) {
-        const filled = state.rows.filter(rowHasContent);
-        const lines = filled.slice(0, 8).map((r) => `• ${String(r.name || r.agentId || '').trim() || 'Agent'} — ${fmt(rowTotal(r))} tags`);
-        if (filled.length > 8) lines.push(`… and ${filled.length - 8} more`);
-        const courier = state.courier ? `\nCourier: ${state.courier}` : '';
-        if (!window.confirm(`Send ${filled.length} request${filled.length === 1 ? '' : 's'} · ${fmt(grandTotal())} tags?\n\n${lines.join('\n')}${courier}`)) return;
-      }
-    } catch { /* confirm unavailable — just send */ }
     state.busy = 'send';
     const btn = rootEl.querySelector('[data-tr-act="send"]');
     const setBtn = (t) => { if (btn) { btn.disabled = true; btn.textContent = t; } };
-    setBtn('⏳ Sheet data check ho raha hai…');
-    // Snapshot ke liye index — slow network par form atke nahi (max ~6s, phir bina snapshot ke bhejo)
-    try { await withTimeout(Promise.all([buildIndex(), isPublic() ? null : withTimeout(loadExactStock(), 2500)]), 6000); } catch { /* snapshot optional */ }
+    setBtn('📤 Sending…');
+    // Snapshot sirf tab wait karo jab index abhi tak load hi na hua ho (max 1.2 s) — warna turant bhejo
+    if (!state.index) { try { await withTimeout(buildIndex(), 1200); } catch { /* snapshot optional */ } }
     const payload = buildPayload();
+    popSending(payload);
     // Same key across network retries prevents one tap from creating two batches.
     // The server verifies the payload fingerprint before replaying a previous result.
     if (!state.submitKey) state.submitKey = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `tr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
     payload.submissionId = state.submitKey;
     const api = isPublic() ? publicApi : (path, method, body) => FF.auth.api(path, method, body);
     try {
-      if (!state.dup.force) {
-        setBtn('🔁 Purani request check ho rahi hai…');
+      if (!state.dup.force && isPublic()) {   // admin / staff: extra round-trip nahi — duplicate server par 🔁 mark ho jata hai
+        setBtn('🔁 Checking earlier requests…');
         const chk = await publicApi('/api/public/tag-request/check', 'POST', { employee: payload.employee, agents: payload.agents.map((a) => ({ agentId: a.agentId, agentName: a.agentName, mobile: a.mobile, channel: a.channel, rows: a.rows.map((x) => ({ cls: x.cls, approved: x.approved })) })) }).catch(() => null);
         let list = (chk && chk.duplicates) || [];
         const ackd = state.dupAcked || {};
@@ -2141,6 +2211,7 @@ body.colorful .from-hdr { color: #166534; }
         if (list.length) {
           state.dup.list = list;
           state.busy = '';
+          { const pv = document.getElementById('tr-send-pop'); if (pv) pv.remove(); }
           renderForm();
           U.toast('🔁 This agent already has a recent request — please review', 'warn');
           const card = rootEl.querySelector('#tr-dup-card');
@@ -2149,7 +2220,7 @@ body.colorful .from-hdr { color: #166534; }
         }
       }
       state.dup = { list: [], force: false, busy: false };
-      setBtn('📤 Bhej rahe hain…');
+      setBtn('📤 Sending…');
       const path = isPublic() ? '/api/public/tag-request' : '/api/tag-requests';
       const out = await api(path, 'POST', payload);
       state.submitKey = ''; // success means the next intentional request gets a fresh key
@@ -2177,9 +2248,11 @@ body.colorful .from-hdr { color: #166534; }
         U.toast(`📤 ${reqs.length || 1} agent ki tag request admin ko chali gayi — status yahin dikhega`, 'ok');
       }
       renderRoot();
+      popSuccess(payload, out);
     } catch (err) {
       state.busy = '';
       U.toast('Request nahi gayi: ' + ((err && err.message) || ''), 'err');
+      popError((err && err.message) || 'Network problem — please try again', () => submit());
       const b = rootEl.querySelector('[data-tr-act="send"]');
       if (b) { b.disabled = false; b.textContent = '📤 Request submit karo'; }
     }
