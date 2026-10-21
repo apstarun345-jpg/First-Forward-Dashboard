@@ -170,7 +170,7 @@ window.FF = window.FF || {};
     if (FF.auth.user) items.push({ group: 'Pages', icon: '⚙️', label: 'Settings', sub: 'Branding · users · access · notifications · features', href: '#/settings' });
     // Sheets tabs
     (FF.config.tabs || []).forEach((t) => {
-      if (t && t.enabled !== false && FF.auth.can(`sheet:${t.id}`)) items.push({ group: 'Sheets', icon: t.icon || '📄', label: t.id, sub: t.desc || 'Sheet', href: `#/sheet/${encodeURIComponent(t.id)}` });
+      if (t && t.enabled !== false && !['StockDataa', 'REPORT', 'GV Master', 'GV REPORT', 'Tag Assignment'].includes(t.id) && FF.auth.can(`sheet:${t.id}`)) items.push({ group: 'Sheets', icon: t.icon || '📄', label: t.id, sub: t.desc || 'Sheet', href: `#/sheet/${encodeURIComponent(t.id)}` });
     });
     // Agents + TLs (store ke shared suggestions se — loaded data hi)
     let sugg = [];
@@ -192,7 +192,7 @@ window.FF = window.FF || {};
       const pm = new Date(now.getFullYear(), now.getMonth(), 0);
       const prevStart = `${pm.getFullYear()}-${pad(pm.getMonth() + 1)}-01`;
       const prevEnd = `${pm.getFullYear()}-${pad(pm.getMonth() + 1)}-${pad(pm.getDate())}`;
-      const mk = (label, sub, from, to) => items.push({ group: 'Dates', icon: '📅', label, sub, href: `#/rangeReport?from=${from}&to=${to}` });
+      const mk = () => {};   // v242 — Range Report hata diya
       mk('Aaj ki range report', `Aaj · ${today}`, today, today);
       mk('Kal (pichhla din) report', `Kal · ${yest}`, yest, yest);
       mk('Is hafte ka report', `Som → Aaj · ${weekStart} → ${today}`, weekStart, today);

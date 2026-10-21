@@ -108,16 +108,12 @@ test('certificates.topRows — ranked board se top-3, medals + values', () => {
 test('voice navigation (v3.8.3) — "X kholo" se page open hota hai', async () => {
   const calls = [];
   FF.app = { navigate: (page, params) => calls.push([page, params]) };
-  const out1 = await A.answer('master stock kholo');
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], 'masterStock');
-  assert.match(out1, /Master Stock/);
   const out2 = await A.answer('open data quality');
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1][0], 'dataQuality');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'dataQuality');
   // trigger word ke bina navigation nahi honi chahiye
-  await A.answer('master stock me kitne barcode hai');
-  assert.equal(calls.length, 2);
+  await A.answer('data quality me kitne barcode hai');
+  assert.equal(calls.length, 1);
   delete FF.app;
 });
 

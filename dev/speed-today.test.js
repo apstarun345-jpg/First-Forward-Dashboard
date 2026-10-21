@@ -90,7 +90,7 @@ test('lazy.js: har FF.pages module ya eager core me hai ya lazy group me', async
   const appSrc = await read('app.js');
   const RETIRED = ['controlTower', 'executive', 'tv', 'ffCommission', 'gvCommission', 'charts', 'forecast',
     'tlScorecard', 'stockRadar', 'savedViews', 'reportStudio', 'followups',
-    'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'sprints'];
+    'arena', 'fame', 'warRoom', 'activity', 'network', 'radar', 'reportCards', 'sprints', 'rangeReport', 'teamMap', 'masterStock', 'newAgents'];
   for (const page of RETIRED) {
     assert.ok(new RegExp(`\\b${page}: '[a-zA-Z]+'`).test(appSrc), `retired page "${page}" app.js RETIRED_PAGES me hona chahiye`);
     assert.ok(!map.has(page), `retired page "${page}" lazy GROUPS me wapas nahi aana chahiye`);

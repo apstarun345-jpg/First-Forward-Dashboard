@@ -869,7 +869,6 @@ FF.pages = FF.pages || {};
       <div class="ms-kundli-actions">
         ${MP() && SR() && MP().supports(p) ? `<button class="btn small primary" data-ms-inline="${esc(personKey(p))}">📂 Yahin poori report</button>` : ''}
         ${MP() && MP().supports(p) ? `<button class="btn small${SR() ? '' : ' primary'}" data-ms-profile="${esc(personKey(p))}">📊 Poori report${SR() ? ' (drawer)' : ''}</button>` : ''}
-        <a class="btn small" href="#/masterStock?q=${encodeURIComponent(p.name)}">🗄️ Register</a>
         ${p.kind.includes('agent') ? `<button class="btn small" data-ms-agent360="${esc(p.name)}">👁 Agent 360</button>` : ''}
         <button class="btn small" data-ms-tags="${esc(p.name)}">🏷️ Tags</button>
       </div>

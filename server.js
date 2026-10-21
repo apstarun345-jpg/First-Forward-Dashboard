@@ -122,8 +122,6 @@ try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package
 // `tabs` registry below, so the admin can add or hide sheet tabs and control each one per user.
 export const PAGE_PERMISSIONS = [
   { key: 'home', label: 'Home · highlights & charts', group: 'Pages' },
-  { key: 'rangeReport', label: 'Management · Range Report (custom from→to)', group: 'Management' },
-  { key: 'teamMap', label: 'Management · Team map (location, admin-only page)', group: 'Management' },
   { key: 'dataQuality', label: 'Management · Data Quality Center', group: 'Professional Insights' },
   { key: 'tagIssued', label: 'GV & FF Tag Issued (date-wise)', group: 'Pages' },
   { key: 'tagRequest', label: 'Management · Tag Request (IDFC agents · class-wise stock/tag request form)', group: 'Management' },
@@ -144,14 +142,12 @@ export const PAGE_PERMISSIONS = [
   { key: 'fastagMapping', label: 'GV Partner · FASTag Mapping (admin-only API mapping)', group: 'GV Partner' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
   { key: 'aiAnalyst', label: 'Management · AI Business Analyst (GV + FF review)', group: 'Management' },
-  { key: 'newAgents', label: 'Cross-channel · New Agents & TL Changes (FF + GV)', group: 'Cross Channel' },
   { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
   { key: 'ffAgentSummary', label: 'First Forward · Agent / TL Summary (share / PDF)', group: 'First Forward' },
   { key: 'gvAgentSummary', label: 'GV Partner · Agent / TL Summary (share / PDF)', group: 'GV Partner' },
   // Legacy key kept so existing saved permissions remain valid during migration.
   { key: 'agentSummary', label: 'Legacy · Agent / TL Summary (use channel-specific access above)', group: 'Cross Channel' },
   { key: 'dualChannel', label: 'Cross-channel · Identity & combined analysis', group: 'Cross Channel' },
-  { key: 'masterStock', label: 'Cross-channel · Master Stock (barcode/agent/TL/GV search)', group: 'Cross Channel' },
   { key: 'fastagChampions', label: 'Cross-channel · FASTag Champions (top agents/TLs)', group: 'Cross Channel' },
   { key: 'dispatchPlan', label: 'Cross-channel · Dispatch planner (auto box plan)', group: 'Cross Channel' },
   { key: 'compare', label: 'GV vs First Forward (comparison)', group: 'Cross Channel' },
@@ -198,8 +194,8 @@ export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
 // 🧹 v3.62 — naye users ko sirf wahi pages milte hain jo app me bache hain (retired pages ke perms
 // ki zaroorat nahi). Purane users ke saved perms waise hi rehte hain; wo bas kisi page se bind nahi
 // hote, isliye kuch bhi tootta nahi.
-const DEFAULT_USER_PERMS = ['home', 'dataQuality', 'tagIssued', 'rangeReport', 'masterSearch', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'dualChannel', 'masterStock', 'compare', 'teamMap',
-  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export', 'dispatchPlan', 'voiceAssistant', 'directAgents', 'newAgents', 'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary', 'agentSummary'];
+const DEFAULT_USER_PERMS = ['home', 'dataQuality', 'tagIssued', 'masterSearch', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'dualChannel', 'compare',
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export', 'dispatchPlan', 'voiceAssistant', 'directAgents', 'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary', 'agentSummary'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
 // users who have notification access; each user's own master/type preferences still apply.
@@ -705,7 +701,7 @@ function permissionDiff(before, after) {
 }
 const activityLast = new Map();
 // Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
-const CLIENT_PAGES = new Set(['home', 'tagIssued', 'tagRequest', 'targets', 'rangeReport', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'charts', 'dispatchPlan', 'tlScorecard']);
+const CLIENT_PAGES = new Set(['home', 'tagIssued', 'tagRequest', 'targets', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'charts', 'dispatchPlan', 'tlScorecard']);
 /** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
 function pageLinkFor(option, query) {
   const t = String(option || '').trim();
@@ -720,7 +716,6 @@ function pageLinkFor(option, query) {
   if (/stock/i.test(t)) return '#/stock';
   if (/trend/i.test(t)) return '#/trend';
   if (/targets/i.test(t)) return '#/targets';
-  if (/range\s*report/i.test(t)) return '#/rangeReport';
   if (/excel\s*bundle/i.test(t)) return '#/dashboard';
   if (/tag\s*issued/i.test(t)) return '#/tagIssued';
   if (/drawer|kpi/i.test(t)) return '#/dashboard';

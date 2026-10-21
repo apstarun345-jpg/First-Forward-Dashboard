@@ -77,10 +77,10 @@ test('GV: date-level — mid-month TL change picks the latest TL; first date kep
   const g2 = find(res, 'G2'); assert.equal(g2.isNew, true); assert.equal(new Date(g2.firstDate).toISOString().slice(0, 10), '2026-09-15');
 });
 
-test('page wiring: route, permission, script, service worker', async () => {
+test('page wiring: v242 — New Agents page sidebar / permissions se hata diya, module disk par hai', async () => {
   const fs = await import('node:fs/promises');
-  const [app, server, index, sw, pkg, lazy] = await Promise.all(['app.js', 'server.js', 'index.html', 'sw.js', 'package.json', 'lazy.js'].map((f) => fs.readFile(path.join(ROOT, f), 'utf8')));
-  // ⚡ newAgents lazy module hai — module reference index.html (eager) ya lazy.js (on-demand) me hota hai.
-  assert.match(app, /id: 'newAgents'/); assert.match(server, /key: 'newAgents'/); assert.match(index + lazy, /newAgents\.js|['"]newAgents['"]/); assert.match(sw, /newAgents|CACHE_NAME/); assert.match(pkg, /newAgents app/);
-  assert.equal(typeof FF.pages.newAgents.render, 'function');
+  const [app, server] = await Promise.all(['app.js', 'server.js'].map((f) => fs.readFile(path.join(ROOT, f), 'utf8')));
+  assert.doesNotMatch(app, /\{ id: 'newAgents'/); assert.doesNotMatch(server, /key: 'newAgents'/);
+  assert.match(app, /newAgents: 'home'/, 'purana link Home par jaata hai');
+  assert.equal(typeof FF.pages.newAgents.render, 'function', 'module (analysis helpers) abhi bhi load ho sakta hai');
 });

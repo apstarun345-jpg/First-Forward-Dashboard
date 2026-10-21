@@ -156,7 +156,6 @@ window.FF = window.FF || {};
     // ---- voice navigation (v3.8.3) — "X kholo / open X / X page" ----
     if (has('KHOLO', 'KHOL DO', 'KHOLNA', 'OPEN', 'DIKHAO', 'SHOW ME', 'NAVIGATE', 'GO TO', 'CHALAO', 'PAGE')) {
       const NAV_MAP = [
-        { keys: ['MASTER STOCK'], page: 'masterStock', label: 'Master Stock' },
         { keys: ['DUAL CHANNEL', 'DUAL AGENT'], page: 'dualChannel', label: 'Dual-channel Agents' },
         { keys: ['DATA QUALITY'], page: 'dataQuality', label: 'Data Quality Center' },
         { keys: ['DISPATCH'], page: 'dispatchPlan', label: 'Dispatch Planner' },

@@ -101,8 +101,6 @@ window.FF = window.FF || {};
     { id: 'masterSearch', icon: '🔎', label: 'Master Search', desc: 'GV + FF · naam / ID / mobile → seedha poora profile (koi list nahi)', perm: 'masterSearch', group: 'Management' },
     { id: 'barcodeChecker', icon: '🔢', label: 'Barcode Checker', desc: 'Barcode range / multiple barcodes → issued · in which agent\'s stock · missing', perm: 'barcodeChecker', group: 'Management' },
     { id: 'bulkTagStatus', icon: '🔍', label: 'Bulk Tag Status', desc: 'Bulk VRN / Tag ID / Barcode → GV issued, FF issued ya stock status', perm: 'bulkTagStatus', group: 'Management' },
-    { id: 'rangeReport', icon: '📅', label: 'Range Report', desc: 'Custom from→to report · FF + GV · Excel', perm: 'rangeReport', group: 'Management' },
-    { id: 'teamMap', icon: '🗺️', label: 'Team map', desc: 'Location + office distance (admin)', perm: 'teamMap', group: 'Management', feat: 'teamMap', adminOnly: true },
     { id: 'dashboard', icon: '📊', label: 'Dashboard', desc: 'FF + GV · KPIs & charts', perm: 'dashboard', group: 'Reports', twin: 'gvDashboard' },
     { id: 'trend', icon: '📈', label: 'Trend', desc: 'FF + GV · daily · monthly · last vs current', perm: 'trend', group: 'Reports', twin: 'gvTrend' },
     { id: 'performance', icon: '🏆', label: 'Performance', desc: 'FF + GV · agents & TLs', perm: 'performance', group: 'Reports', twin: 'gvPerformance' },
@@ -114,12 +112,10 @@ window.FF = window.FF || {};
     { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStockReport', group: 'GV Partner' },
     { id: 'fastagMapping', icon: '🔗', label: 'FASTag Mapping', desc: 'StockDataa lookup · barcode range / tag ID / agent mapping · CSV', perm: 'fastagMapping', group: 'GV Partner', adminOnly: true },
     { id: 'dualChannel', icon: '🔗', label: 'Dual-channel Agents', desc: 'Verified GV + FF overlap · separate & combined', perm: 'dualChannel', group: 'Cross Channel' },
-    { id: 'masterStock', icon: '🗄️', label: 'Master Stock', desc: 'Barcode / agent / TL / GV search · StockDataa ↔ Tag Assignment reconciliation', perm: 'masterStock', group: 'Cross Channel' },
     { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'Cross Channel' },
     { id: 'dataQuality', icon: '🕵️', label: 'Anomaly Detective', desc: 'Issuance drops · zero-activity agents · duplicate IDs · data mismatches', perm: 'dataQuality', group: 'Cross Channel' },
     { id: 'dispatchPlan', icon: '🚚', label: 'Dispatch Planner', desc: 'Auto box plan · printable pick-list · WhatsApp', perm: 'dispatchPlan', group: 'Cross Channel' },
     { id: 'directAgents', icon: '🧍', label: 'Direct Agents & TLs', desc: 'FF: TL Name APS · GV: TL ID + Name blank — ek hi rule poore site par', perm: 'directAgents', group: 'Cross Channel' },
-    { id: 'newAgents', icon: '🆕', label: 'New Agents & TL Changes', desc: 'Naye agents · TL badla / hata — FF + GV alag table, click → poori profile', perm: 'newAgents', group: 'Cross Channel' },
     { id: 'unusual', icon: '🚨', label: 'Unusual Activity', desc: 'High Wrong VRN · Replacement · Chassis · single-day spike — agent-wise flags (FF + GV)', perm: 'unusual', group: 'Cross Channel' },
     { id: 'ffAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'FF + GV · agent or TL → stock · issuance · ageing · PDF', perm: 'ffAgentSummary', group: 'Reports', twin: 'gvAgentSummary' },
     { id: 'gvAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'GV agent or TL → stock · issuance · ageing · PDF', perm: 'gvAgentSummary', group: 'Reports', twinOf: 'ffAgentSummary' },
@@ -138,8 +134,11 @@ window.FF = window.FF || {};
     charts: 'home', forecast: 'stock', tlScorecard: 'performance', stockRadar: 'stock',
     savedViews: 'home', reportStudio: 'home', followups: 'home',
     arena: 'home', fame: 'home', warRoom: 'home', activity: 'home', network: 'home',
-    radar: 'home', reportCards: 'home', sprints: 'home'
+    radar: 'home', reportCards: 'home', sprints: 'home',
+    // v242 — site halki: ye pages / sheet tabs sidebar se hata diye (purana link khule to Home)
+    rangeReport: 'home', teamMap: 'home', masterStock: 'home', newAgents: 'home'
   };
+  const HIDDEN_SHEETS = new Set(['StockDataa', 'REPORT', 'GV Master', 'GV REPORT', 'Tag Assignment']);
   const retiredTarget = (id) => (Object.prototype.hasOwnProperty.call(RETIRED_PAGES, id) ? RETIRED_PAGES[id] : '');
   const pageDef = (id) => PAGES.find((p) => p.id === id) || null;
   let current = { page: '', params: {}, token: 0 };
@@ -539,7 +538,7 @@ window.FF = window.FF || {};
     return !p.feat || !FF.config.features || FF.config.features[p.feat] !== false;
   }
   function allowed(page, params) { const perm = pagePerm(page, params); const p = pageDef(page); if (p && !featOk(p)) return false; return !perm || FF.auth.can(perm); }
-  function enabledTabs() { return (FF.config.allTabs ? FF.config.allTabs(true) : (FF.config.sheets || [])); }
+  function enabledTabs() { return (FF.config.allTabs ? FF.config.allTabs(true) : (FF.config.sheets || [])).filter((t) => !HIDDEN_SHEETS.has(t.id)); }
   function firstAllowedRoute() {
     if (FF.auth.can('home')) return { page: 'home', params: {} };
     const p = PAGES.find((x) => x.perm !== 'home' && featOk(x) && FF.auth.can(x.perm));
@@ -1051,6 +1050,12 @@ window.FF = window.FF || {};
     // capability Performance + Stock pages me already available hai. Purane bookmarks
     // ko broken lazy route par bhejne ke bajay existing Performance page par redirect karo.
     if (page === 'stockReport') { location.hash = '#/performance'; return; }
+    // v242 — hide kiye gaye sheet viewers (StockDataa / REPORT / GV Master / GV REPORT / Tag Assignment) → Home
+    if (page === 'sheet' && HIDDEN_SHEETS.has(params && params.name)) {
+      current = { page: 'home', params: {}, token: current.token + 1 };
+      if (location.hash !== '#/home') { try { history.replaceState(null, '', '#/home'); } catch { location.hash = '#/home'; } }
+      return renderCurrent(ctx);
+    }
     // 🧹 v3.62 — hata di gayi page (bookmark / purana link / notification link) → seedha safe page.
     const retired = retiredTarget(page);
     if (retired) {

@@ -77,7 +77,7 @@ test('resolvePage — lazy page (module load se pehle bhi) valid: dispatchPlan /
   assert.equal(FF.app.resolvePage('dispatchPlan'), 'dispatchPlan');
   assert.equal(FF.app.resolvePage('settings'), 'settings');
   assert.equal(FF.app.resolvePage('gvStockReport'), 'gvStockReport');
-  assert.equal(FF.app.resolvePage('newAgents'), 'newAgents');
+  assert.equal(FF.app.resolvePage('newAgents'), 'home', 'v242 — New Agents page hata diya');
 });
 
 test('resolvePage — 🧹 v3.62 me hata di gayi pages apne safe page par jaati hain', () => {

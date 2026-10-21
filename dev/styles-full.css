@@ -7856,3 +7856,5 @@ html[data-theme="dark"] .delta.flat { background: rgba(148, 163, 184, .18); colo
 html[data-theme="dark"] .kpi .delta.up, html[data-theme="dark"] .kd-hero .delta.up { background: rgba(220, 252, 231, .95); color: #15803d; }
 html[data-theme="dark"] .kpi .delta.down, html[data-theme="dark"] .kd-hero .delta.down { background: rgba(254, 226, 226, .95); color: #b91c1c; }
 html[data-theme="dark"] .tix-down { color: #fca5a5; }
+/* v242 — Range Report hata diya: Master Search ka 📅 date-range button bhi band */
+.ms-range-btn, .ms-range-pop { display: none !important; }
