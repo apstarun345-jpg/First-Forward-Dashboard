@@ -1502,6 +1502,16 @@ body.colorful .from-hdr { color: #166534; }
     const slot = card && card.querySelector ? card.querySelector('[data-tr-suggest-slot]') : null;
     if (slot) slot.innerHTML = contactSuggestHtml(row);
   }
+  /** 🔗 FASTag mapping box ka text: chuna hua "Naam · #ID" ya jo type kiya. */
+  const mapText = (row) => (row.mapText != null ? row.mapText : (row.mapName ? `${row.mapName}${row.mapId ? ` · #${row.mapId}` : ''}` : (row.mapId || '')));
+  /** Mapping naam/ID ko index se poora karo (sirf ID likhi ho to naam, sirf naam ho to ID). */
+  function resolveMap(row) {
+    let name = clean(row.mapName), id = clean(row.mapId);
+    const list = (state.index && state.index.list) || [];
+    if (id && !name) { const r = list.find((a) => digits(a.agentId) === digits(id)); if (r) name = r.name; }
+    else if (name && !id) { const r = list.filter((a) => norm(a.name) === norm(name)); if (r.length === 1) id = r[0].agentId || ''; }
+    return { name, id };
+  }
   function agentCardHtml(row, i) {
     const cfg = formCfg();
     const staff = isAdmin() && !isPublic();   // admin: mobile / address / pincode mandatory nahi + barcode fields
@@ -1532,10 +1542,8 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-contact-grid">
             <label class="field tr-span-all"><span class="dim small">🚚 Dispatch name${row.isTl ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'dispatchName')}" data-tr-a="dispatchName" maxlength="120" placeholder="Jis naam par dispatch karna hai (khaali = agent ka naam)" autocomplete="off" value="${esc(row.dispatchName)}"></label>
-            ${row.isTl ? `<label class="field"><span class="dim small">🔗 FASTag Mapping Name <small class="dim">(optional)</small></span>
-              <input class="input" data-tr-a="mapName" maxlength="120" list="tr-map-${esc(row.id)}" placeholder="Jis naam par FASTag map hain" autocomplete="off" value="${esc(row.mapName || '')}"><datalist id="tr-map-${esc(row.id)}">${(() => { try { return tlAgents(rec).filter((a) => !a.isSelf).slice(0, 80).map((a) => `<option value="${esc(a.name)}">`).join(''); } catch { return ''; } })()}</datalist></label>
-            <label class="field"><span class="dim small">🔗 FASTag Mapping ID <small class="dim">(optional)</small></span>
-              <input class="input mono" data-tr-a="mapId" maxlength="40" placeholder="Jis Agent ID par FASTag map hain" autocomplete="off" value="${esc(row.mapId || '')}"></label>` : ''}
+            ${row.isTl ? `<label class="field tr-span-all"><span class="dim small">🔗 FASTag Mapping Name / ID <small class="dim">(optional — TL ke FASTag jis agent naam/ID par map hain; sheet me TL ke agent name ki jagah yahi jayega)</small></span>
+              <div class="tr-search-wrap"><input class="input" data-tr-map maxlength="140" placeholder="Agent ID ya naam likho — dropdown se chuno" autocomplete="off" value="${esc(mapText(row))}"><div class="tr-suggest" data-tr-map-suggest hidden></div></div></label>` : ''}
             <label class="field"><span class="dim small">📱 Mobile number${askMobile ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'mobile')}" data-tr-a="mobile" inputmode="tel" maxlength="16" placeholder="10 digit mobile" autocomplete="off" value="${esc(row.mobile)}"></label>
             <label class="field"><span class="dim small">📮 Pincode${askAddress ? ' *' : ''}</span>
@@ -1753,10 +1761,10 @@ body.colorful .from-hdr { color: #166534; }
           if (!g) { U.toast('TL data nahi mila', 'warn'); return; }
           row.isTl = true; row.tlFilter = ''; row.agentId = ''; row.name = g.name; row.tl = g.name; row.channel = g.channel;
           // Agent/TL change means contact belongs to the previous selection — clear it immediately.
-          row.mobile = ''; row.dispatchName = ''; row.address = ''; row.pincode = ''; row.mapName = ''; row.mapId = '';
+          row.mobile = ''; row.dispatchName = ''; row.address = ''; row.pincode = ''; row.mapName = ''; row.mapId = ''; row.mapText = null;
           row.fromBook = false; row.contactManual = false; row.addressSource = '';
           if (state.errs[row.id]) delete state.errs[row.id].agent;
-          rerenderCard(wantMap ? '[data-tr-a="mapName"]' : '[data-tr-a="dispatchName"]');
+          rerenderCard(wantMap ? '[data-tr-map]' : '[data-tr-a="dispatchName"]');
           U.toast(`👥 TL ${g.name} ka poora data neeche hai — dispatch name bharo ya uska koi agent chuno`, 'info');
           return;
         }
@@ -1834,6 +1842,32 @@ body.colorful .from-hdr { color: #166534; }
       const clr = e.target.closest ? e.target.closest('.tr-filter-clear') : null;
       if (clr) { row.tlFilter = ''; rerenderCard('.tr-agent'); }
     });
+    // ---- 🔗 FASTag mapping box (TL rows) — ID ya naam likho → dropdown → chuno ------------------------
+    const mapInp = card.querySelector('[data-tr-map]'), mapBox = card.querySelector('[data-tr-map-suggest]');
+    if (mapInp && mapBox) {
+      const mapClose = () => { mapBox.hidden = true; };
+      const mapShow = () => {
+        const q = norm(mapInp.value), dq = digits(mapInp.value), list = (state.index && state.index.list) || [];
+        const hits = list.filter((a) => q && (norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)))).slice(0, 12);
+        mapBox.innerHTML = hits.length ? hits.map((a) => `<button type="button" class="tr-suggest-item" data-tr-mappick="${esc(a.channel)}|${esc(norm(a.name))}"><span class="tr-suggest-name">${esc(a.name)}${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}</span><small class="dim">${a.tlName ? `TL ${esc(a.tlName)} · ` : ''}${a.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</small></button>`).join('') : `<div class="tr-suggest-empty">${q ? 'Koi match nahi — jo likha hai wahi sheet me jayega' : 'Naam ya ID likho…'}</div>`;
+        mapBox.hidden = false;
+        mapBox.querySelectorAll('[data-tr-mappick]').forEach((b) => b.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const rec = state.index && state.index.byKey.get(b.dataset.trMappick);
+          if (!rec) return;
+          row.mapName = rec.name; row.mapId = rec.agentId || ''; row.mapText = `${rec.name}${rec.agentId ? ` · #${rec.agentId}` : ''}`;
+          mapInp.value = row.mapText; mapClose();
+        }));
+      };
+      mapInp.addEventListener('input', () => {
+        const v = mapInp.value.trim(); row.mapText = mapInp.value;
+        const d = digits(v);
+        if (d.length >= 3 && !/[a-z]/i.test(v)) { row.mapId = d; row.mapName = ''; } else { row.mapName = v; row.mapId = ''; }
+        mapShow();
+      });
+      mapInp.addEventListener('focus', () => { if (mapInp.value.trim()) mapShow(); });
+      mapInp.addEventListener('blur', () => setTimeout(mapClose, 150));
+    }
     // ---- agent contact (mobile · address · pincode) — typing par re-render nahi -------------------
     card.querySelectorAll('[data-tr-a]').forEach((el) => el.addEventListener('input', () => {
       const key = el.dataset.trA;
@@ -2044,7 +2078,7 @@ body.colorful .from-hdr { color: #166534; }
         dispatchName: clean(row.dispatchName), kind: row.isTl ? 'tl' : 'agent',
         tl: rec ? rec.tlName || '' : '', channel,
         mobile: String(row.mobile || '').replace(/[^\d+]/g, ''), address: clean(row.address), pincode: digits(row.pincode).slice(0, 6),
-        ...(row.isTl && clean(row.mapName) ? { mapName: clean(row.mapName) } : {}), ...(row.isTl && clean(row.mapId) ? { mapId: clean(row.mapId) } : {}),
+        ...(row.isTl ? (() => { const m = resolveMap(row); return { ...(m.name ? { mapName: m.name } : {}), ...(m.id ? { mapId: m.id } : {}) }; })() : {}),
         ...(clean(row.firstBarcode) ? { firstBarcode: clean(row.firstBarcode) } : {}), ...(clean(row.lastBarcode) ? { lastBarcode: clean(row.lastBarcode) } : {}),
         unmatched: !rec, metrics: rec ? groupMetrics(rec) : null, rows
       };
