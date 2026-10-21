@@ -324,7 +324,7 @@ const LEDGER_GV = { cols: ['date', 'Agent ID', 'Agent Name', 'Agent mob no.', 'C
   ['19-06-2025', 'APS03979', 'YASHWANT', '6203094514', 'VC 4', '100', '608116-011-0180780', '608116-011-0180880', '100', 'Issued', '', '']
 ] };
 // 🆕 Agent master (Sheet4): col A = New Agent ID, B = Legacy ID — aakhri 3 agents jaanbujhkar missing (New IDs test)
-const REGISTRY = { cols: ['New Agent ID', 'Old ID', 'Name'].map((l, i) => ({ id: L(i), label: l, type: 'string' })), rows: AGENTS.slice(0, Math.max(1, AGENTS.length - 3)).map((a) => [String(a.id), '', a.name]) };
+const REGISTRY = { cols: ['New Agent ID', 'Old ID', 'Name', 'TL ID', 'TL Name'].map((l, i) => ({ id: L(i), label: l, type: 'string' })), rows: AGENTS.slice(0, Math.max(1, AGENTS.length - 3)).map((a) => [String(a.id), '', a.name, 'TL1', 'Mock TL']) };
 const SHEETS = { REGISTRY, EIR, StockDataa: STOCK, REPORT, 'GV Master': GV_MASTER, 'Tag Assignment': GV_ASSIGN, 'GV REPORT': GV_REPORT, 'Stock Movements': STOCK_MOVEMENTS, Payout: PAYOUT, payout: PAYOUT, 'LEDGER FF': LEDGER_FF, 'LEDGER GV': LEDGER_GV };
 const GIDS = { '242489821': 'REPORT', '0': 'EIR', '1284424234': 'GV REPORT', '555': 'LEDGER FF', '556': 'LEDGER GV', '557': 'REGISTRY' };
 

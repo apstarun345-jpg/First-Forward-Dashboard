@@ -234,7 +234,7 @@ const DEFAULT_SETTINGS = {
     gv3: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
   },
   agentRegistry: { // 🆕 Agent master (Sheet4): col A = New Agent ID (EIR J se match). EIR me jo ID yahan nahi → "New IDs" page
-    enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B'
+    enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E'
   },
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
@@ -2869,6 +2869,36 @@ async function buildNewIds() {
   const summary = { count: rows.length, tags: rows.reduce((t, r) => t + r.total, 0), activeThisMonth: rows.filter((r) => r.months[curYm]).length, newThisMonth: rows.filter((r) => r.firstYm === curYm).length, curYm };
   return { at: new Date().toISOString(), registryCount: regIds.size, eirAgents: new Set(eir.rows.map((r) => idCellText(r, 0))).size, months, rows, summary };
 }
+// 🔎 Agent master search: Sheet4 se Agent ID / Name / TL ID / TL Name (multiple IDs ya naam ek saath)
+const regFullState = { at: 0, key: '', rows: null, promise: null };
+async function loadRegistryFull(fresh) {
+  const ar = (db.settings || {}).agentRegistry || {};
+  if (!ar.sheetId || !/^\d+$/.test(String(ar.gid ?? ''))) throw new Error('Settings → Agent master (Sheet4) ka link / gid set karo.');
+  const L = [colLetter(ar.idCol, 'A'), colLetter(ar.legacyCol, 'B'), colLetter(ar.nameCol, 'C'), colLetter(ar.tlIdCol, 'D'), colLetter(ar.tlNameCol, 'E')];
+  const key = JSON.stringify([ar.sheetId, ar.gid, L]);
+  if (!fresh && regFullState.rows && regFullState.key === key && Date.now() - regFullState.at < 10 * 60e3) return regFullState.rows;
+  if (!regFullState.promise) {
+    regFullState.promise = (async () => {
+      const q = new URLSearchParams({ id: ar.sheetId, gid: String(ar.gid), headers: '1', tq: `select ${L.join(', ')} limit 60000` });
+      const r = await gvizPageServer(q, `gid:${ar.gid}`);
+      const rows = r.rows.map((x) => ({ newId: idCellText(x, 0), id: idCellText(x, 1), name: idCellText(x, 2), tlId: idCellText(x, 3), tlName: idCellText(x, 4) })).filter((x) => x.newId || x.id || x.name);
+      regFullState.rows = rows; regFullState.key = key; regFullState.at = Date.now();
+      return rows;
+    })().finally(() => { regFullState.promise = null; });
+    regFullState.promise.catch(() => {});
+  }
+  return regFullState.promise;
+}
+function searchRegistry(rows, terms) {
+  const out = [];
+  for (const t of terms) {
+    const raw = String(t).trim(); if (!raw) continue;
+    const n = idNorm(raw), low = raw.toLowerCase(), isId = /^[A-Za-z]*\d[\dA-Za-z]*$/.test(raw.replace(/\s+/g, ''));
+    const hits = rows.filter((x) => (isId && (idNorm(x.newId) === n || idNorm(x.id) === n || idNorm(x.tlId) === n)) || (!isId && String(x.name).toLowerCase().includes(low)));
+    out.push({ term: raw, matches: hits.slice(0, 50), more: Math.max(0, hits.length - 50) });
+  }
+  return out;
+}
 function newIdsData(fresh) {
   const s = db.settings || {}, ar = s.agentRegistry || {};
   const key = JSON.stringify([ar.sheetId, ar.gid, ar.idCol, ar.legacyCol, s.sheetId, s.eirSheet]);
@@ -5387,6 +5417,14 @@ async function handleApi(req, res, url) {
     if (!data) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
     if (url.searchParams.get('summary') === '1') return sendJson(res, 200, { ok: true, summary: data.summary, at: data.at }, { 'Cache-Control': 'no-store' });
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ...data }), { 'Cache-Control': 'no-store' });
+  }
+  if (p === '/api/agent-master-search' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const terms = (Array.isArray(body.terms) ? body.terms : String(body.terms || '').split(/[\n,;\t]+/)).map((x) => String(x).trim()).filter(Boolean).slice(0, 500);
+    if (!terms.length) throw new HttpError(400, 'ID ya naam daalo.');
+    let rows; try { rows = await loadRegistryFull(!!body.fresh); } catch (err) { throw new HttpError(502, `Sheet4 load nahi hua: ${String((err && err.message) || err).slice(0, 200)}`); }
+    return sendJson(res, 200, { ok: true, total: rows.length, results: searchRegistry(rows, terms) }, { 'Cache-Control': 'no-store' });
   }
   // 🗺️ Stock mapping summary (home page): StockDataa tags → FF / GV / GV+FF / Office (same index, naya scan nahi).
   if (p === '/api/stock-map' && method === 'GET') {
@@ -8532,7 +8570,7 @@ async function handleApi(req, res, url) {
       if (ar.enabled !== undefined) ar.enabled = ar.enabled === true || ar.enabled === 'true';
       if (ar.sheetId !== undefined) { ar.sheetId = sheetIdFromLink(ar.sheetId) || String(ar.sheetId).trim(); if (ar.sheetId && !/^[A-Za-z0-9_-]{20,}$/.test(ar.sheetId)) throw new HttpError(400, 'Agent master: Google Sheet ka valid link / ID dein.'); }
       if (ar.gid !== undefined) { ar.gid = String(ar.gid).trim(); if (!/^\d{1,12}$/.test(ar.gid)) throw new HttpError(400, 'Agent master: gid sirf number hota hai (URL me gid=...).'); }
-      for (const k of ['idCol', 'legacyCol']) if (ar[k] !== undefined) { ar[k] = String(ar[k]).trim().toUpperCase(); if (ar[k] !== '' && !/^[A-Z]{1,3}$/.test(ar[k])) throw new HttpError(400, `Agent master: ${k} column letter hona chahiye (jaise A).`); }
+      for (const k of ['idCol', 'legacyCol', 'nameCol', 'tlIdCol', 'tlNameCol']) if (ar[k] !== undefined) { ar[k] = String(ar[k]).trim().toUpperCase(); if (ar[k] !== '' && !/^[A-Z]{1,3}$/.test(ar[k])) throw new HttpError(400, `Agent master: ${k} column letter hona chahiye (jaise A).`); }
       if (ar.label !== undefined) ar.label = String(ar.label).slice(0, 60);
     }
     if (patch.stockMapAlert !== undefined) {

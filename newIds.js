@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
 (function (FF) {
   'use strict';
   const U = FF.util, esc = U.esc;
-  const state = { data: null, q: '', sort: 'last', busy: false };
+  const state = { data: null, q: '', sort: 'last', busy: false, tab: 'new', sq: '', sres: null, sbusy: false, serr: '' };
   const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const ymLabel = (ym) => { const [y, m] = String(ym).split('-'); return `${MN[Number(m) - 1] || m} ${String(y).slice(2)}`; };
 
@@ -24,14 +24,49 @@ FF.pages = FF.pages || {};
     const body = rows.map((r) => [r.name, r.id, r.legacyId, r.assistId, r.assistName, ...d.months.map((m) => r.months[m] || 0), r.total]);
     FF.xlsx.download(`new-agent-ids-${U.stamp()}.xlsx`, [{ name: 'New IDs', header, rows: body }]);
   }
+  function searchHtml() {
+    const res = state.sres;
+    const rows = [];
+    if (res) res.results.forEach((r) => {
+      if (!r.matches.length) rows.push(`<tr><td class="mono">${esc(r.term)}</td><td colspan="6" class="dim">❌ Sheet4 me nahi mila</td></tr>`);
+      r.matches.forEach((m, i) => rows.push(`<tr><td class="mono">${i ? '' : esc(r.term)}</td><td class="mono">${esc(m.id || '—')}</td><td>${esc(m.name || '—')}</td><td class="mono">${esc(m.tlId || '—')}</td><td>${esc(m.tlName || '—')}</td><td class="mono dim">${esc(m.newId || '—')}</td></tr>`));
+      if (r.more) rows.push(`<tr><td></td><td colspan="5" class="dim">+${r.more} aur match — search chhota/exact karo</td></tr>`);
+    });
+    return `<div class="card"><div class="card-body">
+      <p class="dim small">Kai Agent ID ya naam ek saath daalo (line / comma se alag). ID exact match hoti hai (Agent ID, New Agent ID ya TL ID), naam me "contains" search.</p>
+      <textarea class="input mono" data-nid-sq rows="4" style="width:100%" placeholder="20354013&#10;6108274&#10;rohit panthi">${esc(state.sq)}</textarea>
+      <div class="row" style="gap:8px;margin-top:8px;align-items:center"><button class="btn primary" data-nid-search>🔎 Search Sheet4</button>${res ? `<button class="btn" data-nid-sxlsx>⬇️ Excel</button><span class="dim small">${U.fmt(res.results.length)} search · Sheet4 me ${U.fmt(res.total)} rows</span>` : ''}${state.sbusy ? '<span class="dim small">⏳ search ho raha hai…</span>' : ''}</div>
+      ${state.serr ? `<p style="color:#b91c1c">❌ ${esc(state.serr)}</p>` : ''}
+      ${res ? `<div class="table-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>Searched</th><th>Agent ID</th><th>Name</th><th>TL ID</th><th>TL Name</th><th>New Agent ID</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : ''}
+    </div></div>`;
+  }
+  async function runSearch() {
+    const ta = state.root.querySelector('[data-nid-sq]'); if (ta) state.sq = ta.value;
+    if (!state.sq.trim()) { state.serr = 'ID ya naam daalo.'; return paint(); }
+    state.sbusy = true; state.serr = ''; paint();
+    try { state.sres = await FF.auth.api('/api/agent-master-search', 'POST', { terms: state.sq.split(/[\n,;\t]+/).map((x) => x.trim()).filter(Boolean) }); }
+    catch (e) { state.serr = e && e.message ? e.message : 'Search fail'; }
+    state.sbusy = false; paint();
+  }
+  function searchXlsx() {
+    if (!state.sres) return;
+    const body = [];
+    state.sres.results.forEach((r) => { if (!r.matches.length) body.push([r.term, '', 'NOT FOUND', '', '', '']); r.matches.forEach((m) => body.push([r.term, m.id, m.name, m.tlId, m.tlName, m.newId])); });
+    FF.xlsx.download(`sheet4-search-${U.stamp()}.xlsx`, [{ name: 'Sheet4', header: ['Searched', 'Agent ID', 'Name', 'TL ID', 'TL Name', 'New Agent ID'], rows: body }]);
+  }
   function paint() {
     const root = state.root; if (!root) return;
     const mount = root.querySelector('[data-nid-body]'); if (!mount) return;
+    const tabs = `<div class="seg" style="margin-bottom:12px"><button type="button" class="seg-btn${state.tab === 'new' ? ' on' : ''}" data-nid-tab="new">🆕 New IDs</button><button type="button" class="seg-btn${state.tab === 'search' ? ' on' : ''}" data-nid-tab="search">🔎 Sheet4 search</button></div>`;
+    if (state.tab === 'search') { mount.innerHTML = tabs + searchHtml(); return; }
+    paintNew(mount, tabs);
+  }
+  function paintNew(mount, tabs) {
     const d = state.data;
-    if (!d) { mount.innerHTML = `<div class="card"><div class="card-body dim">${state.err ? `❌ ${esc(state.err)}` : '⏳ EIR aur Sheet4 match ho raha hai… (pehli baar 10-30 sec)'}</div></div>`; return; }
+    if (!d) { mount.innerHTML = tabs + `<div class="card"><div class="card-body dim">${state.err ? `❌ ${esc(state.err)}` : '⏳ EIR aur Sheet4 match ho raha hai… (pehli baar 10-30 sec)'}</div></div>`; return; }
     const rows = visible(), s = d.summary || {};
     const months = d.months.slice(-6);
-    mount.innerHTML = `
+    mount.innerHTML = tabs + `
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
         <div style="flex:1 1 180px;padding:14px 16px;border-radius:14px;background:var(--card,#fff);border:1px solid rgba(99,102,241,.25);box-shadow:0 1px 4px rgba(0,0,0,.06)"><div style="font-size:26px;font-weight:800;color:#1e3a8a">${U.fmt(s.count)}</div><div style="font-size:13px;color:#475569;margin-top:2px">🆕 New agents (Sheet4 me nahi)</div></div>
         <div style="flex:1 1 180px;padding:14px 16px;border-radius:14px;background:var(--card,#fff);border:1px solid rgba(99,102,241,.25);box-shadow:0 1px 4px rgba(0,0,0,.06)"><div style="font-size:26px;font-weight:800;color:#1e3a8a">${U.fmt(s.tags)}</div><div style="font-size:13px;color:#475569;margin-top:2px">Total tags issued</div></div>
@@ -70,9 +105,12 @@ FF.pages = FF.pages || {};
       <p class="sub">EIR me jin agents ne tags issue kiye par <b>Agent master (Sheet4)</b> me nahi hain — name, ID, assistant ID aur month-wise issuance. Admin Sheet4 ka link Settings → Data source me badal sakta hai.</p></div></div>
       <div data-nid-body></div></div>`;
     paint();
-    root.addEventListener('input', (e) => { if (e.target.matches('[data-nid-q]')) { state.q = e.target.value; const p = e.target.selectionStart; paint(); const q = root.querySelector('[data-nid-q]'); if (q) { q.focus(); try { q.setSelectionRange(p, p); } catch { /* ignore */ } } } });
+    root.addEventListener('input', (e) => { if (e.target.matches('[data-nid-sq]')) state.sq = e.target.value; if (e.target.matches('[data-nid-q]')) { state.q = e.target.value; const p = e.target.selectionStart; paint(); const q = root.querySelector('[data-nid-q]'); if (q) { q.focus(); try { q.setSelectionRange(p, p); } catch { /* ignore */ } } } });
     root.addEventListener('change', (e) => { if (e.target.matches('[data-nid-sort]')) { state.sort = e.target.value; paint(); } });
     root.addEventListener('click', (e) => {
+      const tb = e.target.closest('[data-nid-tab]'); if (tb) { state.tab = tb.dataset.nidTab; paint(); return; }
+      if (e.target.closest('[data-nid-search]')) { runSearch(); return; }
+      if (e.target.closest('[data-nid-sxlsx]')) { searchXlsx(); return; }
       if (e.target.closest('[data-nid-xlsx]')) exportXlsx();
       if (e.target.closest('[data-nid-refresh]')) { const mount = root.querySelector('[data-nid-body]'); if (mount) mount.insertAdjacentHTML('afterbegin', '<p class="dim small">⏳ Refresh ho raha hai…</p>'); load(true); }
     });
