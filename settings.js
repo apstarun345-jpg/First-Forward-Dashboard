@@ -612,7 +612,7 @@ FF.pages = FF.pages || {};
   /** 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet: First/Last barcode ranges → Master Search & Barcode Checker me dispatch date/naam. */
   function ledgerSection() {
     const sl = settings.stockLedger || {};
-    const defs = { ff1: { label: 'IDFC Stock Sheet (FF)', layout: 'ff' }, gv3: { label: 'GV STOCK SHEET', layout: 'gv' } };
+    const defs = { ff2: { label: 'FF Stock Sheet (Sheet11)', layout: 'ff' }, gv3: { label: 'GV STOCK SHEET', layout: 'gv' } };
     const row = (k) => {
       const v = Object.assign({}, defs[k], sl[k] || {});
       return `<tr><td><label class="check"><input type="checkbox" data-path="stockLedger.${k}.enabled" ${v.enabled !== false ? 'checked' : ''}></label></td>
@@ -622,7 +622,7 @@ FF.pages = FF.pages || {};
         <td><input class="input mono" data-path="stockLedger.${k}.gid" value="${esc(v.gid || '')}" placeholder="gid" style="width:110px"></td></tr>`;
     };
     return section('📒 Dispatch ledger · stock sheets', `<p class="dim small">Master Search aur Barcode Checker me <b>dispatch date + kisko diya</b> in sheets ke <b>First / Last barcode</b> range se aata hai (server khud range expand karta hai). Har sheet <b>"Anyone with the link: Viewer"</b> honi chahiye. FF layout: <i>Date · Agent · ID · Class · Qty · First · Last…</i> · GV layout: <i>Date · ID · Agent · Mobile · Class · Qty · First · Last…</i>. Link paste karo — ID automatically nikal li jaati hai; <b>gid</b> = URL me <code>gid=…</code>.</p>
-      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>On</th><th>Naam</th><th>Layout</th><th>Sheet link / ID</th><th>gid</th></tr></thead><tbody>${['ff1', 'gv3'].map(row).join('')}</tbody></table></div>${saveBar('stockLedger')}`);
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>On</th><th>Naam</th><th>Layout</th><th>Sheet link / ID</th><th>gid</th></tr></thead><tbody>${['ff2', 'gv3'].map(row).join('')}</tbody></table></div><p class="dim small">Sheet ya tab badalni ho to naya <b>link</b> aur <b>gid</b> (URL me <code>gid=…</code>, tab kholne par address bar me dikhta hai) daalo → Save → <b>Test</b> dabao. Sheet "Anyone with the link: Viewer" honi chahiye.</p>${saveBar('stockLedger')}<div class="btn-row" style="margin-top:8px"><button class="btn small" id="ldg-test">🧪 Test sources</button></div><div id="ldg-test-out" class="small" style="margin-top:6px"></div>`);
   }
   function dataTab() {
     const s = settings, fc = s.ffCommission || {}, sm = s.stockMovement || {}, cs = s.commissionSlabs || defaults.commissionSlabs || {};
@@ -2600,6 +2600,14 @@ FF.pages = FF.pages || {};
         const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout', 'gvCommissionRates', 'gvClassCch'].includes(btn.dataset.save);
         U.withButtonBusy(btn, () => save(patch, msg, { reload }), 'Saving…');
       }));
+      const ldgBtn = U.$('#ldg-test', body);
+      if (ldgBtn) ldgBtn.addEventListener('click', () => U.withButtonBusy(ldgBtn, async () => {
+        const o = U.$('#ldg-test-out', body);
+        try {
+          const r = await FF.auth.api('/api/dispatch-test', 'POST', {});
+          o.innerHTML = (r.sources || []).map((s) => `<div>${s.ok ? '✅' : '❌'} <b>${esc(s.label)}</b> — ${s.ok ? `ok · sample: ${esc((s.sample[0] || {}).agent || '')} · ${esc((s.sample[0] || {}).first || '')} → ${esc((s.sample[0] || {}).last || '')}` : esc(s.error)}</div>`).join('') || 'Koi source enabled nahi.';
+        } catch (err) { o.innerHTML = `❌ ${esc(String((err && err.message) || err))}`; }
+      }, 'Testing…'));
       // 📧 Features → email: status chips, pehle save phir test mail, aur 🩺 diagnose
       const emStatus = U.$('#em-status', body);
       const PROV_LABEL = { smtp: '📮 SMTP', appsscript: '🟢 Apps Script (Gmail)', resend: '⚡ Resend', brevo: '📨 Brevo' };

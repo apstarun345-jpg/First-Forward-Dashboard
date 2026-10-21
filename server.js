@@ -229,7 +229,7 @@ const DEFAULT_SETTINGS = {
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 }, // cockpit.js alert thresholds
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
   stockLedger: { // 📒 dispatch ledger (barcode → dispatch date / name): First–Last barcode wali stock sheets
-    ff1: { enabled: true, label: 'IDFC Stock Sheet (FF)', layout: 'ff', sheetId: '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M', gid: '0' },
+    ff2: { enabled: true, label: 'FF Stock Sheet (Sheet11)', layout: 'ff', sheetId: '1IWQfXDDM67gtZdjM21_WfvN-tVRZz4GxA3DeOnHuGj4', gid: '811063112' },
     gv3: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
   },
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
@@ -2823,7 +2823,7 @@ const ledgerState = { at: 0, index: null, promise: null, key: '', errors: {}, co
 const ledgerSources = () => {
   const raw = (db.settings && db.settings.stockLedger) || {};
   const cfg = {};
-  for (const [k, v] of Object.entries(raw)) if (k !== 'gv1' && k !== 'gv2') cfg[k] = v   // purane (galat ID / private tab) GV entries ignore
+  for (const [k, v] of Object.entries(raw)) if (k !== 'gv1' && k !== 'gv2' && !(v && v.sheetId === '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M')) cfg[k] = v   // purane (galat ID / private tab) GV entries ignore
   return Object.entries(cfg).filter(([, v]) => v && v.enabled !== false && /^[A-Za-z0-9_-]{20,}$/.test(String(v.sheetId || '')) && /^\d+$/.test(String(v.gid ?? ''))).map(([id, v]) => ({ id, ch: String(v.layout) === 'gv' ? 'gv' : 'ff', layout: String(v.layout) === 'gv' ? 'gv' : 'ff', sheetId: String(v.sheetId), gid: String(v.gid), label: String(v.label || id).slice(0, 60) }));
 };
 function ledgerEntry(row, letters, src, rowNo) {
@@ -5237,6 +5237,21 @@ async function handleApi(req, res, url) {
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', body, { 'Cache-Control': 'no-store' });
   }
   // 📒 Barcode → dispatch date + dispatch name (IDFC Stock Sheet / GV Stock Sheet ranges).
+  // 🧪 Settings → Dispatch ledger: har source ek baar padh kar dikhao (ok / rows sample / error)
+  if (p === '/api/dispatch-test' && method === 'POST') {
+    requireAdmin(user);
+    const out = [];
+    for (const src of ledgerSources()) {
+      const letters = LAYOUT_LETTERS(src.layout);
+      try {
+        const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${letters.join(', ')} where ${letters[src.layout === 'gv' ? 6 : 5]} is not null limit 3` });
+        const { rows } = await gvizPageServer(qp, `gid:${src.gid}`);
+        const sample = rows.map((r) => ledgerEntry(r, letters, src, 0)).filter(Boolean).map((e) => ({ date: e.date, agent: e.agent, first: e.first, last: e.last }));
+        out.push({ id: src.id, label: src.label, ok: sample.length > 0, sample, error: sample.length ? '' : 'Rows mili par First/Last barcode column samajh nahi aaya — layout (FF/GV) ya tab check karo' });
+      } catch (err) { out.push({ id: src.id, label: src.label, ok: false, sample: [], error: ledgerErrText(src, err) }); }
+    }
+    return sendJson(res, 200, { ok: true, sources: out }, { 'Cache-Control': 'no-store' });
+  }
   if (p === '/api/dispatch-lookup' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
     const body = await readBody(req);
