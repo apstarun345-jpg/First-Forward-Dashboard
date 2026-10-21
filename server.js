@@ -19,6 +19,7 @@ import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, r
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
 import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
 import { createMappingJobs } from './mapping-job.js';
+import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, LAYOUT_LETTERS } from './dispatch-ledger.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, mapRows as stockMapRows } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
@@ -109,7 +110,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'mapping-stock.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
 let APP_VERSION = '3.65.0';
@@ -227,6 +228,11 @@ const DEFAULT_SETTINGS = {
   ffPayout: { sheet: 'payout', gid: '', labelCol: '', classCol: '', rateCol: '', penaltyCol: '', noteCol: '' }, // FF sheet "payout" tab: per-class commission rate + penalty (blank = auto-detect)
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 }, // cockpit.js alert thresholds
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
+  stockLedger: { // 📒 dispatch ledger (barcode → dispatch date / name): First–Last barcode wali stock sheets
+    ff1: { enabled: true, label: 'IDFC Stock Sheet (FF)', layout: 'ff', sheetId: '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M', gid: '0' },
+    gv1: { enabled: true, label: 'GV Stock Sheet (IDFC workbook)', layout: 'gv', sheetId: '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M', gid: '1205828388' },
+    gv2: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
+  },
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
   // all other classes wait for an admin-entered official rate. Empty is unresolved, never zero.
@@ -2811,6 +2817,51 @@ async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
   } catch (err) { console.warn(`${label || 'stock'} snapshot:`, err.message); return null; }
 }
 // ---------------------------------------------------------------------------------------------
+// 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet(s): First–Last barcode ranges → interval index.
+const LEDGER_TTL = 10 * 60e3;
+const ledgerState = { at: 0, index: null, promise: null, key: '', errors: {}, counts: {}, retryAt: 0 };
+const ledgerSources = () => {
+  const cfg = (db.settings && db.settings.stockLedger) || {};
+  return Object.entries(cfg).filter(([, v]) => v && v.enabled !== false && /^[A-Za-z0-9_-]{20,}$/.test(String(v.sheetId || '')) && /^\d+$/.test(String(v.gid ?? ''))).map(([id, v]) => ({ id, ch: String(v.layout) === 'gv' ? 'gv' : 'ff', layout: String(v.layout) === 'gv' ? 'gv' : 'ff', sheetId: String(v.sheetId), gid: String(v.gid), label: String(v.label || id).slice(0, 60) }));
+};
+async function loadLedger() {
+  const srcs = ledgerSources();
+  const entries = { ff: [], gv: [] }, errors = {}, counts = {};
+  for (const src of srcs) {
+    const letters = LAYOUT_LETTERS(src.layout);
+    const firstCol = letters[src.layout === 'gv' ? 6 : 5];
+    let n = 0;
+    try {
+      await gvizPagesServer(src.sheetId, `gid:${src.gid}`, letters, `${firstCol} is not null`, async (rows) => {
+        for (let i = 0; i < rows.length; i++) {
+          const cells = letters.map((_, k) => serverCell(rows[i], k));
+          const e = ledgerRow(cells.map((v, k) => (k === 0 ? (serverDate(rows[i] && rows[i].c && rows[i].c[0] ? rows[i].c[0].v : v) || v) : v)), src.layout, src.ch, n + 1, (x) => String(x || ''));
+          n++;
+          if (e) { e.src = src.label; entries[src.ch].push(e); }
+          if (i % 4000 === 3999) await yieldLoop();
+        }
+      }, { headers: 1 });
+      counts[src.id] = n;
+    } catch (err) { errors[src.id] = String((err && err.message) || err).slice(0, 200); }
+  }
+  return { index: { ff: buildLedgerIndex(entries.ff), gv: buildLedgerIndex(entries.gv) }, errors, counts, key: JSON.stringify(srcs.map((x) => [x.id, x.sheetId, x.gid, x.layout])) };
+}
+function ledgerIndex(fresh) {
+  const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.layout]));
+  const have = ledgerState.index && ledgerState.key === key ? ledgerState.index : null;
+  const due = have && (Date.now() - ledgerState.at >= LEDGER_TTL || (Object.keys(ledgerState.errors).length && Date.now() >= ledgerState.retryAt));
+  if (have && !fresh && !due) return Promise.resolve(have);
+  if (!ledgerState.promise) {
+    ledgerState.promise = loadLedger().then((out) => {
+      ledgerState.index = out.index; ledgerState.key = out.key; ledgerState.errors = out.errors; ledgerState.counts = out.counts; ledgerState.at = Date.now();
+      ledgerState.retryAt = Object.keys(out.errors).length ? Date.now() + 60e3 : 0;
+      return out.index;
+    }).catch((err) => { ledgerState.errors = { all: String((err && err.message) || err).slice(0, 200) }; ledgerState.retryAt = Date.now() + 60e3; return ledgerState.index; })
+      .finally(() => { ledgerState.promise = null; });
+  }
+  return have && !fresh ? Promise.resolve(have) : ledgerState.promise;   // purana index turant, refresh peeche
+}
+// ---------------------------------------------------------------------------------------------
 // 🧓 Stock ageing (v3.31) — StockDataa + Tag Assignment ek baar padh kar compact index (10 min cache).
 // Browser ab 1 lakh rows download nahi karta; har drawer / page sirf agent-TL ke bucket counts leta hai.
 // ---------------------------------------------------------------------------------------------
@@ -2860,7 +2911,7 @@ function gvizPagesServer(...args) {
   heavyScanChain = run.catch(() => {});
   return run;
 }
-async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage) {
+async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage, extra) {
   const cols = letters.filter(Boolean);
   const base = `select ${cols.join(', ')}${where ? ` where ${where}` : ''}`;
   const id = String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
@@ -2869,7 +2920,11 @@ async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage) {
   const launch = (upTo) => {
     while (launched <= upTo && launched < STOCK_AGE_MAX_PAGES) {
       const page = launched++;
-      const job = gvizPageServer(new URLSearchParams({ id, sheet, tq: `${base} limit ${STOCK_AGE_PAGE_ROWS} offset ${page * STOCK_AGE_PAGE_ROWS}` }), sheet);
+      const qp = new URLSearchParams({ id, tq: `${base} limit ${STOCK_AGE_PAGE_ROWS} offset ${page * STOCK_AGE_PAGE_ROWS}` });
+      const gm = /^gid:(\d+)$/.exec(String(sheet));
+      if (gm) qp.set('gid', gm[1]); else qp.set('sheet', sheet);
+      if (extra && extra.headers) qp.set('headers', String(extra.headers));
+      const job = gvizPageServer(qp, sheet);
       job.catch(() => {});   // aage ke speculative pages fail / beech me ruk jaayein to unhandled rejection nahi
       inflight.set(page, job);
     }
@@ -5123,6 +5178,18 @@ async function handleApi(req, res, url) {
     if (!index) return sendJson(res, 200, stockAgePending());
     const body = JSON.stringify({ ...stockAgeSummary(index), building: !!stockAgeState.promise });
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', body, { 'Cache-Control': 'no-store' });
+  }
+  // 📒 Barcode → dispatch date + dispatch name (IDFC Stock Sheet / GV Stock Sheet ranges).
+  if (p === '/api/dispatch-lookup' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const list = (Array.isArray(body && body.barcodes) ? body.barcodes : []).map((x) => String(x || '').trim().slice(0, 60)).filter(Boolean).slice(0, 5000);
+    if (!list.length) throw new HttpError(400, 'Barcodes chahiye.');
+    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 25000); });
+    let index; try { index = await Promise.race([ledgerIndex(!!(body && body.fresh)), wait]); } finally { clearTimeout(timer); }
+    if (!index) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
+    const results = list.map((b) => dispatchFor(index, b));
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, results, meta: { at: new Date(ledgerState.at).toISOString(), counts: ledgerState.counts, errors: ledgerState.errors } }), { 'Cache-Control': 'no-store' });
   }
   // 🗺️ Stock mapping summary (home page): StockDataa tags → FF / GV / GV+FF / Office (same index, naya scan nahi).
   if (p === '/api/stock-map' && method === 'GET') {
@@ -8248,6 +8315,18 @@ async function handleApi(req, res, url) {
         clampNum(patch.dispatch, 'horizon', 1, 90, 'dispatch.horizon');
         clampNum(patch.dispatch, 'minNeed', 0, 100000, 'dispatch.minNeed');
         clampNum(patch.dispatch, 'top', 1, 500, 'dispatch.top');
+      }
+    }
+    if (patch.stockLedger !== undefined) {
+      const sl = patch.stockLedger;
+      if (!sl || typeof sl !== 'object' || Array.isArray(sl)) throw new HttpError(400, 'stockLedger object hona chahiye.');
+      for (const [k, v] of Object.entries(sl)) {
+        if (!/^[a-z0-9]{2,8}$/i.test(k) || !v || typeof v !== 'object') { delete sl[k]; continue; }
+        if (v.enabled !== undefined) v.enabled = v.enabled === true || v.enabled === 'true';
+        if (v.sheetId !== undefined) { v.sheetId = sheetIdFrom(v.sheetId) || String(v.sheetId).trim(); if (v.sheetId && !/^[A-Za-z0-9_-]{20,}$/.test(v.sheetId)) throw new HttpError(400, `${k}: Google Sheet ka valid link / ID dein.`); }
+        if (v.gid !== undefined) { v.gid = String(v.gid).trim(); if (v.gid !== '' && !/^\d{1,12}$/.test(v.gid)) throw new HttpError(400, `${k}: gid sirf number hota hai (URL me gid=...).`); }
+        if (v.layout !== undefined) v.layout = String(v.layout) === 'gv' ? 'gv' : 'ff';
+        if (v.label !== undefined) v.label = String(v.label).slice(0, 60);
       }
     }
     if (patch.stockMapAlert !== undefined) {

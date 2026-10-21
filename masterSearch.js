@@ -875,6 +875,47 @@ FF.pages = FF.pages || {};
     </article>`;
   }
 
+  /* 📒 Dispatch date / naam — IDFC Stock Sheet + GV Stock Sheet ranges (server expand). Async fill, cache per barcode. */
+  const dispCache = new Map();
+  const bcKey = (b) => String(b || '').replace(/\D/g, '').replace(/^0+/, '');
+  function dispText(hit) {
+    if (!hit) return { date: '—', name: '—', title: '' };
+    const parts = [];
+    ['ff', 'gv'].forEach((ch) => (hit[ch] || []).slice(0, 1).forEach((e) => parts.push({ ch, e, more: (hit[ch + 'Count'] || 1) - 1 })));
+    if (!parts.length) return { date: '—', name: '—', title: '' };
+    const two = parts.length > 1;
+    const dl = (iso) => (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) ? U.labelDateKey(iso, true) : (iso || '—'));
+    return {
+      date: parts.map((x) => `${two ? x.ch.toUpperCase() + ' ' : ''}${dl(x.e.date)}`).join(' | '),
+      name: parts.map((x) => `${two ? x.ch.toUpperCase() + ' · ' : ''}${x.e.agent || '—'}${x.e.agentId ? ` (${x.e.agentId})` : ''}${x.e.approx ? ' ~' : ''}${x.more > 0 ? ` +${x.more}` : ''}`).join(' | '),
+      title: parts.map((x) => `${x.ch.toUpperCase()}: ${x.e.first} → ${x.e.last} · ${x.e.src || ''} · row ${x.e.row}${x.e.approx ? ' (approx range)' : ''}`).join('\n')
+    };
+  }
+  function dispCellsHtml(key) {
+    const k = bcKey(key), d = dispCache.has(k) ? dispText(dispCache.get(k)) : null;
+    return `<td data-ms-disp="${esc(k)}" data-f="date" style="white-space:nowrap"${d && d.title ? ` title="${esc(d.title)}"` : ''}>${d ? esc(d.date) : '<span class="dim">…</span>'}</td><td data-ms-disp="${esc(k)}" data-f="name"${d && d.title ? ` title="${esc(d.title)}"` : ''}>${d ? esc(d.name) : '<span class="dim">…</span>'}</td>`;
+  }
+  async function loadDispatch(keys) {
+    const need = [...new Set((keys || []).map(bcKey).filter((k) => k && !dispCache.has(k)))];
+    if (!need.length || !FF.data || !FF.data.dispatchLookup) return null;
+    const { map, meta } = await FF.data.dispatchLookup(need);
+    need.forEach((k) => dispCache.set(k, map.get(k) || null));
+    return meta;
+  }
+  async function fillDispatch(root, res) {
+    if (!root || !res || !(res.tags || []).length) return;
+    try {
+      await loadDispatch(res.tags.slice(0, 60).map((t) => t.key));
+      root.querySelectorAll('td[data-ms-disp]').forEach((td) => {
+        const d = dispText(dispCache.get(td.dataset.msDisp));
+        td.textContent = td.dataset.f === 'date' ? d.date : d.name;
+        if (d.title) td.title = d.title;
+      });
+    } catch (err) {
+      root.querySelectorAll('td[data-ms-disp] .dim').forEach((sp) => { sp.textContent = '⚠'; sp.title = String((err && err.message) || err); });
+    }
+  }
+
   function resultsHtml(res) {
     if (!res.matched) {
       return `<div class="ms-empty"><b>“${esc(res.q)}” ke liye kuch nahi mila</b>
@@ -895,7 +936,7 @@ FF.pages = FF.pages || {};
     }
     if (res.tags.length) {
       parts.push(`<section class="ms-section"><h3>🏷️ Tags / barcodes <span class="dim small">${U.fmt(res.tags.length)} match</span></h3>
-        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / serial</th><th>Tag ID</th><th>FF holder</th><th>FF TL</th><th>FF mapping</th><th>GV holder</th><th>GV TL</th><th>GV unique</th><th>GV mapping</th><th>Class</th><th>Allocated</th></tr></thead><tbody>
+        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / serial</th><th>Tag ID</th><th>FF holder</th><th>FF TL</th><th>FF mapping</th><th>GV holder</th><th>GV TL</th><th>GV unique</th><th>GV mapping</th><th>Class</th><th>Allocated</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody>
         ${res.tags.slice(0, 60).map((t) => {
         const f = t.ff[0] || {}, g = t.gv[0] || {};
         const st = tagStatus(t);
@@ -904,7 +945,7 @@ FF.pages = FF.pages || {};
             <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
             <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(tlText(g.tlName, 'gv') || '—')}</td>
             <td>${esc(g.gvName || '—')}${g.gvId ? `<small>${esc(g.gvId)}</small>` : ''}</td><td><span class="badge ${st.gv.tone}">${esc(st.gv.text)}</span></td>
-            <td>${esc(f.cls || g.cls || '—')}</td><td>${esc(f.allocated || g.allocated || '—')}</td></tr>`;
+            <td>${esc(f.cls || g.cls || '—')}</td><td>${esc(f.allocated || g.allocated || '—')}</td>${dispCellsHtml(t.key)}</tr>`;
       }).join('')}
         </tbody></table></div>${res.tags.length > 60 ? `<p class="dim small">Pehle 60 rows dikhe — CSV me poori list.</p>` : ''}</section>`);
     }
@@ -940,6 +981,7 @@ FF.pages = FF.pages || {};
     document.body.classList.add('no-scroll');
     if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(wrap);
     inlineSingle(wrap.querySelector('.ms-panel-body'), res);
+    fillDispatch(wrap.querySelector('.ms-panel-body'), res);
     const box = wrap.querySelector('.ms-panel-box');
     wrap.addEventListener('click', async (e) => {
       if (e.target.closest('[data-ms-close]')) { closePanel(); return; }
@@ -957,14 +999,15 @@ FF.pages = FF.pages || {};
       if (again) { const nq = again.dataset.msAgain; closePanel(); const input = U.$('#master-search-input'); if (input) input.value = nq; openPanel(nq); return; }
       const csv = e.target.closest('[data-ms-csv]');
       if (csv) {
+        if ((res.tags || []).length) { try { await loadDispatch(res.tags.map((t) => t.key)); } catch { /* CSV bina dispatch columns ke bhi chalegi */ } }
         const rows = [];
-        res.tags.forEach((tt) => { const f = tt.ff[0] || {}, g = tt.gv[0] || {}; const st = tagStatus(tt); rows.push(['Tag', U.barcode(tt.key), f.agentName || '', f.tlName || '', g.agentName || '', g.tlName || '', g.gvName || '', f.cls || g.cls || '', st.t, f.allocated || g.allocated || '', 1]); });
-        res.people.forEach((p) => rows.push(['Person', p.name, KIND_LABEL[p.kind] || p.kind, [...p.tlSet].join(' / '), p.sub || '', '', '', [...p.classMap.keys()].join(' '), '', p.last || '', p.bars.size || p.n || 0]));
-        res.ids.forEach((v) => rows.push(['ID', v.id, v.name || '', KIND_LABEL[v.kind] || v.kind, v.tl || '', '', '', '', '', '', 1]));
+        res.tags.forEach((tt) => { const f = tt.ff[0] || {}, g = tt.gv[0] || {}; const st = tagStatus(tt); const d = dispText(dispCache.get(bcKey(tt.key))); rows.push(['Tag', U.barcode(tt.key), f.agentName || '', f.tlName || '', g.agentName || '', g.tlName || '', g.gvName || '', f.cls || g.cls || '', st.t, f.allocated || g.allocated || '', 1, d.date === '—' ? '' : d.date, d.name === '—' ? '' : d.name]); });
+        res.people.forEach((p) => rows.push(['Person', p.name, KIND_LABEL[p.kind] || p.kind, [...p.tlSet].join(' / '), p.sub || '', '', '', [...p.classMap.keys()].join(' '), '', p.last || '', p.bars.size || p.n || 0, '', '']));
+        res.ids.forEach((v) => rows.push(['ID', v.id, v.name || '', KIND_LABEL[v.kind] || v.kind, v.tl || '', '', '', '', '', '', 1, '', '']));
         const totCount = U.sum(rows, (r) => Number(r[10]) || 0);
-        rows.push(['Grand Total', `${rows.length} matches`, '', '', '', '', '', '', '', '', totCount]);
+        rows.push(['Grand Total', `${rows.length} matches`, '', '', '', '', '', '', '', '', totCount, '', '']);
         U.downloadCsv(`master-search-${U.slug(res.q || 'results')}-${U.stamp()}.csv`,
-          ['Type', 'Key / Name', 'FF or Agent', 'TL / Role', 'GV holder / ID', 'GV TL', 'GV unique', 'Class', 'Status', 'Allocated / Last', 'Count'], rows);
+          ['Type', 'Key / Name', 'FF or Agent', 'TL / Role', 'GV holder / ID', 'GV TL', 'GV unique', 'Class', 'Status', 'Allocated / Last', 'Count', 'Dispatch date', 'Dispatched to'], rows);
         return;
       }
       const pdfBtn = e.target.closest('[data-ms-pdf]');
@@ -1735,6 +1778,7 @@ FF.pages = FF.pages || {};
       }
       if ((res.ids || []).length || (res.tags || []).length) {
         out.innerHTML = `<div class="card"><div class="card-body"><h3 class="msp-h">🔖 ID / tag match</h3>${resultsHtml(res)}</div></div>`;
+        fillDispatch(out, res);
         return;
       }
       out.innerHTML = `<div class="card"><div class="card-body empty">“${esc(q)}” ke liye kuch nahi mila — doosra naam / ID / mobile try karo${chFilter ? ' (ya channel filter hatao)' : ''}.</div></div>`;

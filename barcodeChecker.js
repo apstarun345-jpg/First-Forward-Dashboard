@@ -75,8 +75,25 @@ FF.pages = FF.pages || {};
     bc: { label: '🏢 Master / BC stock', tone: 'gray' },
     nf: { label: '❓ Not found', tone: 'red' }
   };
-  const HEAD = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Allocated / Issue date', 'VRN', 'Note'];
-  const cells = (r) => [r.barcode, STATUS[r.k].label, r.tagId, r.cls, r.agent, r.agentId, r.tl, r.date, r.vrn, r.note];
+  const HEAD = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Allocated / Issue date', 'VRN', 'Note', 'Dispatch date', 'Dispatched to'];
+  const cells = (r) => [r.barcode, STATUS[r.k].label, r.tagId, r.cls, r.agent, r.agentId, r.tl, r.date, r.vrn, r.note, r.dDate || '', r.dName || ''];
+  const dLabel = (iso) => (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) && U.labelDateKey ? U.labelDateKey(iso, true) : (iso || ''));
+  /** 📒 Dispatch ledger (IDFC Stock Sheet / GV Stock Sheet First–Last ranges) → har barcode ki dispatch date + naam. */
+  async function attachDispatch(rows) {
+    try {
+      const { map, meta } = await FF.data.dispatchLookup(rows.map((r) => r.barcode));
+      rows.forEach((r) => {
+        const hit = map.get(String(r.barcode).replace(/\D/g, '').replace(/^0+/, ''));
+        if (!hit) return;
+        const parts = [];
+        ['ff', 'gv'].forEach((ch) => (hit[ch] || []).slice(0, 1).forEach((e) => parts.push({ ch, e, more: (hit[ch + 'Count'] || 1) - 1 })));
+        if (!parts.length) return;
+        r.dDate = parts.map((x) => `${parts.length > 1 ? x.ch.toUpperCase() + ' ' : ''}${dLabel(x.e.date) || '—'}`).join(' | ');
+        r.dName = parts.map((x) => `${parts.length > 1 ? x.ch.toUpperCase() + ' · ' : ''}${x.e.agent || '—'}${x.e.agentId ? ` (${x.e.agentId})` : ''}${x.e.approx ? ' ~' : ''}${x.more > 0 ? ` +${x.more}` : ''}`).join(' | ');
+      });
+      state.dispMeta = meta;
+    } catch (err) { state.dispMeta = { error: String((err && err.message) || err) }; }
+  }
   /** Ek barcode ka final row: stock row + EIR hit + anumaanit tag. */
   function makeRow(label, st, tag, inferred, is) {
     if (is) return { barcode: label, k: 'iss', tagId: tag, cls: is.cls, agent: is.agent, agentId: is.agentId, tl: is.tl, date: is.date, vrn: is.vrn, note: `${is.ch === 'GV Partner' ? 'GV' : 'FF'}${st ? ' · StockDataa me bhi hai' : inferred ? ' · tag ID barcode se anumaanit' : ''}${is.type ? ' · ' + is.type : ''}` };
@@ -128,6 +145,13 @@ FF.pages = FF.pages || {};
     const q = state.q.trim().toLowerCase();
     return (state.rows || []).filter((r) => (state.filter === 'all' || r.k === state.filter) && (!state.agent || r.agent === state.agent) && (!q || cells(r).join(' ').toLowerCase().includes(q)));
   }
+  function dispNote() {
+    const m = state.dispMeta;
+    if (!m) return '';
+    if (m.error) return `<p class="dim small">⚠️ Dispatch ledger load nahi hui: ${esc(m.error)}</p>`;
+    const errs = Object.entries(m.errors || {});
+    return errs.length ? `<p class="dim small">⚠️ Dispatch ledger ki kuch sheets nahi padh payi (${errs.map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(' · ')}) — sheet "Anyone with the link: Viewer" honi chahiye.</p>` : '';
+  }
   function resultsHtml() {
     const rows = state.rows;
     if (!rows) return '';
@@ -145,6 +169,7 @@ FF.pages = FF.pages || {};
         ${canX ? `<button type="button" class="btn small" data-bcc-xlsx="vis">⬇ Excel (filtered ${U.fmt(vis.length)})</button><button type="button" class="btn small" data-bcc-xlsx="all">⬇ Excel (sab)</button>` : ''}</div>
       ${agents.length ? `<details class="bcc-agents" ${agents.length <= 12 ? 'open' : ''}><summary><b>🧑‍💼 Agent-wise · ${U.fmt(agents.length)}</b> <span class="dim small">(naam par click = filter)</span></summary>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th><th class="num">📦 Stock</th><th class="num">✅ Issued</th><th class="num">Total</th></tr></thead><tbody>${agents.slice(0, 300).map(([k, o]) => `<tr class="clickable${state.agent === k ? ' on' : ''}" data-bcc-agent="${esc(k)}"><td><b>${esc(k)}</b></td><td>${esc(o.tl || '')}</td><td class="num">${U.fmt(o.st)}</td><td class="num">${U.fmt(o.iss)}</td><td class="num"><b>${U.fmt(o.st + o.iss)}</b></td></tr>`).join('')}</tbody></table></div></details>` : ''}
+      ${dispNote()}
       <p class="dim small">${U.fmt(vis.length)} rows${vis.length > show.length ? ` · pehli ${U.fmt(show.length)} dikh rahi — sab ke liye Excel` : ''}</p>
       <div class="table-wrap"><table class="tbl compact bcc-tbl"><thead><tr>${HEAD.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
       <tbody>${show.map((r) => `<tr class="bcc-${r.k}">${cells(r).map((v, i) => `<td${i === 0 || i === 2 ? ' class="mono"' : ''}>${i === 1 ? `<span class="badge ${STATUS[r.k].tone}">${esc(v)}</span>` : esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${HEAD.length}" class="empty">Is filter me kuch nahi</td></tr>`}</tbody></table></div>`;
@@ -195,6 +220,8 @@ FF.pages = FF.pages || {};
         let list; try { list = expandRange(first, last); } catch (err) { out.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; return; }
         out.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain (stock + issuance)…`);
         rows = await checkRange(first, last, isHex(tag) ? tag : '');
+        out.innerHTML = U.spinner('Dispatch ledger se dispatch date / naam mil raha hai…');
+        await attachDispatch(rows);
         title = `${first}_${last}`; state.lastKey = key;
       } else {
         const f = root.querySelector('[data-bcc-form="multi"]');
@@ -204,6 +231,8 @@ FF.pages = FF.pages || {};
         if (key === state.lastKey && state.rows) return;
         out.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain…`);
         rows = await checkMulti(list);
+        out.innerHTML = U.spinner('Dispatch ledger se dispatch date / naam mil raha hai…');
+        await attachDispatch(rows);
         title = `${list.length}-barcodes`; state.lastKey = key;
       }
       if (seq !== state.busy) return;

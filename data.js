@@ -346,6 +346,25 @@ window.FF = window.FF || {};
   // Escape a literal for the gviz query language (double-quoted string).
   function lit(value) { return `"${String(value).replace(/["\\]/g, '')}"`; }
 
-  FF.data = { query, today, gvToday, clearCache, status, parseGviz, cellText, identifierText, isIdentifierColumn, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError, RateLimitError, rateLimitPage, rateLimitStatus, markRateLimited,
+  /** 📒 Barcode → dispatch date / name (IDFC Stock Sheet + GV Stock Sheet ranges, server-side expand). Map(digits → {ff[],gv[]}). */
+  async function dispatchLookup(barcodes) {
+    const list = [...new Set((barcodes || []).map((b) => String(b || '').trim()).filter(Boolean))];
+    const out = new Map(); let meta = null;
+    if (!list.length || !FF.auth || typeof FF.auth.api !== 'function') return { map: out, meta };
+    for (let i = 0; i < list.length; i += 5000) {
+      const part = list.slice(i, i + 5000);
+      let data = null;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        data = await FF.auth.api('/api/dispatch-lookup', 'POST', { barcodes: part });
+        if (!(data && data.pending)) break;
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+      if (!data || !data.ok || data.pending) throw new Error('Dispatch ledger abhi ready nahi');
+      meta = data.meta || meta;
+      (data.results || []).forEach((r) => out.set(String(r.barcode).replace(/\D/g, '').replace(/^0+/, ''), r));
+    }
+    return { map: out, meta };
+  }
+  FF.data = { dispatchLookup, query, today, gvToday, clearCache, status, parseGviz, cellText, identifierText, isIdentifierColumn, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError, RateLimitError, rateLimitPage, rateLimitStatus, markRateLimited,
     get lastLoadAt() { return lastLoadAt; }, get lastSource() { return lastSource; } };
 })(window.FF);
