@@ -1216,6 +1216,7 @@ FF.pages = FF.pages || {};
           if (info && info.toDispatch) items.push(link('#/tagRequest', '🚚', `approved — dispatch pending`, info.toDispatch, 'warn'));
           if (info && info.sheetFail) items.push(link('#/tagRequest', '📗', `Google Sheet entry failed — resend`, info.sheetFail, 'warn'));
         }
+        if (FF.auth.can('newIds') && newIdsN != null) items.push(newIdsN ? link('#/newIds', '🆕', `new agent${newIdsN === 1 ? '' : 's'} — Sheet4 me entry baaki`, newIdsN, 'warn') : link('#/newIds', '✅', 'No new agents pending for Sheet4', null, 'ok'));
         if (FF.auth.can('stock')) items.push(link('#/stock', '📦', 'Check low-stock agents', null));
         if (FF.auth.can('performance')) items.push(link('#/performance', '🏁', 'Agent performance', null));
         if (FF.auth.can('fastagMapping')) items.push(link('#/fastagMapping', '🔗', 'FASTag Mapping — map & report', null));
@@ -1237,11 +1238,13 @@ FF.pages = FF.pages || {};
         });
         return { pending, late, lateDays, toDispatch, sheetFail };
       };
+      let newIdsN = null, lastInfo = null;
       paint(null);
+      if (FF.auth.can('newIds') && FF.auth.api) FF.auth.api('/api/new-ids?summary=1').then((o) => { if (o && o.summary) { newIdsN = o.summary.count; paint(lastInfo); } }).catch(() => {});
       if (canReq && FF.auth.api) {
         FF.auth.api('/api/tag-requests').then((out) => {
           const list = (out && out.requests) || [];
-          paint(summarize(list));
+          lastInfo = summarize(list); paint(lastInfo);
         }).catch(() => {});
       }
     }

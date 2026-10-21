@@ -63,6 +63,7 @@ window.FF = window.FF || {};
     masterSearch: [...PROFILE_DEPS, 'searchReport', 'masterSearch'],
     bulkTagStatus: ['bulkTagStatus'],
     barcodeChecker: ['barcodeChecker'],
+    newIds: ['newIds'],
     tagIssued: ['tagIssued'],
     performance: [...PROFILE_DEPS, 'agentBoard', 'performance'],
     targets: ['targets'],

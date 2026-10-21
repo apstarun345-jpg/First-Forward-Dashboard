@@ -128,6 +128,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'tagRequest', label: 'Management · Tag Request (IDFC agents · class-wise stock/tag request form)', group: 'Management' },
   { key: 'masterSearch', label: 'Management · Master Search (GV + FF naam/ID → seedha poora profile)', group: 'Management' },
   { key: 'barcodeChecker', label: 'Management · Barcode Checker (range / multiple barcodes)', group: 'Management' },
+  { key: 'newIds', label: 'Management · New IDs (EIR me hain par Agent master Sheet4 me nahi)', group: 'Management' },
   { key: 'bulkTagStatus', label: 'Management · Bulk Tag Status (VRN / Tag ID / Barcode → GV / FF / stock lookup)', group: 'Management' },
   { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
   { key: 'dashboard', label: 'First Forward · Dashboard', group: 'First Forward' },
@@ -232,6 +233,9 @@ const DEFAULT_SETTINGS = {
     ff2: { enabled: true, label: 'FF Stock Sheet (Sheet11)', layout: 'ff', sheetId: '1IWQfXDDM67gtZdjM21_WfvN-tVRZz4GxA3DeOnHuGj4', gid: '811063112' },
     gv3: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
   },
+  agentRegistry: { // 🆕 Agent master (Sheet4): col A = New Agent ID (EIR J se match). EIR me jo ID yahan nahi → "New IDs" page
+    enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B'
+  },
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
   // all other classes wait for an admin-entered official rate. Empty is unresolved, never zero.
@@ -260,7 +264,7 @@ const DEFAULT_SETTINGS = {
   stockSheet: 'StockDataa',
   stockGid: '',
   eirSheet: 'EIR',
-  eir: { tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA', agentId: 'J', agentName: 'L', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX', gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH', gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.' },
+  eir: { tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA', agentId: 'J', agentLegacyId: 'K', agentName: 'L', assistId: 'M', assistLegacyId: 'N', assistName: 'O', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX', gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH', gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.' },
   stock: { id: 'A', name: 'B', tagId: 'C', barcode: 'D', cls: 'E', tagType: 'F', bcAllocatedAt: 'G', agentId: 'H', agentName: 'I', agentAllocatedAt: 'J', tlName: 'K' },
   stockMovement: { enabled: false, sheet: 'Stock Movements', date: 'A', channel: 'B', type: 'C', quantity: 'D', cls: 'E', from: 'F', to: 'G', reference: 'H', note: 'I' },
   excludeTls: ['APS'],
@@ -2817,6 +2821,67 @@ async function stockSnapshotFrom(sheetId, sheet, clsCol, tagCol, label) {
   } catch (err) { console.warn(`${label || 'stock'} snapshot:`, err.message); return null; }
 }
 // ---------------------------------------------------------------------------------------------
+// 🆕 New IDs — EIR agents (J) − Agent master Sheet4 (col A) ---------------------------------------------------
+const newIdsState = { at: 0, data: null, promise: null, key: '' };
+const idCellText = (row, i) => {
+  const c = row && row.c && row.c[i];
+  if (!c || c.v === null || c.v === undefined) return '';
+  if (typeof c.v === 'number') return c.f ? String(c.f).replace(/[^\d]/g, '') || String(c.v) : (Number.isInteger(c.v) ? c.v.toFixed(0) : String(c.v));   // 18-digit ID double me bigad na jaye
+  return String(c.v).trim();
+};
+const idNorm = (v) => String(v === null || v === undefined ? '' : v).replace(/\.0+$/, '').replace(/\s+/g, '').toUpperCase();
+async function buildNewIds() {
+  const s = db.settings || {}, e = s.eir || {}, ar = s.agentRegistry || {};
+  if (!ar.sheetId || !/^\d+$/.test(String(ar.gid ?? ''))) throw new Error('Settings → Agent master (Sheet4) ka link / gid set karo.');
+  const idCol = colLetter(ar.idCol, 'A'), legacyCol = colLetter(ar.legacyCol, ''), cols = [...new Set([idCol, legacyCol].filter(Boolean))];
+  const regQ = new URLSearchParams({ id: ar.sheetId, gid: String(ar.gid), headers: '1', tq: `select ${cols.join(', ')} limit 60000` });
+  const eirSheet = s.eirSheet || e.sheet || 'EIR';
+  const L = { id: colLetter(e.agentId, 'J'), leg: colLetter(e.agentLegacyId, 'K'), name: colLetter(e.agentName, 'L'), aid: colLetter(e.assistId, 'M'), aleg: colLetter(e.assistLegacyId, 'N'), aname: colLetter(e.assistName, 'O'), date: colLetter(e.date, 'AA'), tag: colLetter(e.tagId, 'A') };
+  const sel = [L.id, L.leg, L.name, L.aid, L.aleg, L.aname];
+  const eirQ = new URLSearchParams({ id: String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: eirSheet, tq: `select ${sel.join(', ')}, year(${L.date}), month(${L.date}), count(${L.tag}) where ${L.date} is not null and ${L.id} is not null group by ${sel.join(', ')}, year(${L.date}), month(${L.date}) limit 40000` });
+  const [reg, eir] = await Promise.all([
+    gvizPageServer(regQ, `gid:${ar.gid}`).catch((err) => { throw new Error(`Agent master sheet: ${ledgerErrText({ label: ar.label || 'Sheet4' }, err)}`); }),
+    gvizPageServer(eirQ, eirSheet)
+  ]);
+  const regIds = new Set(), regLegacy = new Set();
+  for (const r of reg.rows) { const a = idNorm(idCellText(r, 0)); if (a) regIds.add(a); if (cols.length > 1) { const b = idNorm(idCellText(r, 1)); if (b) regLegacy.add(b); } }
+  const masterIds = new Set([idNorm(e.gvMasterId || '5845036')]);
+  const byId = new Map();
+  for (const r of eir.rows) {
+    const id = idCellText(r, 0), leg = idCellText(r, 1);
+    if (!id) continue;
+    if (regIds.has(idNorm(id)) || (leg && regLegacy.has(idNorm(leg))) || masterIds.has(idNorm(id)) || masterIds.has(idNorm(leg))) continue;
+    const y = Number(r.c && r.c[6] && r.c[6].v), m = Number(r.c && r.c[7] && r.c[7].v), n = Number(r.c && r.c[8] && r.c[8].v) || 0;
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !n) continue;
+    const ym = `${y}-${String(m + 1).padStart(2, '0')}`;
+    let a = byId.get(id);
+    if (!a) { a = { id, legacyId: leg, name: '', assistId: '', assistLegacyId: '', assistName: '', months: {}, total: 0, _nameN: 0 }; byId.set(id, a); }
+    a.months[ym] = (a.months[ym] || 0) + n; a.total += n;
+    const nm = idCellText(r, 2);
+    if (nm && n >= a._nameN) { a.name = nm; a._nameN = n; }
+    if (!a.legacyId && leg) a.legacyId = leg;
+    const ai = idCellText(r, 3); if (ai) { a.assistId = ai; a.assistLegacyId = idCellText(r, 4) || a.assistLegacyId; a.assistName = idCellText(r, 5) || a.assistName; }
+  }
+  const rows = [...byId.values()].map((a) => { const ms = Object.keys(a.months).sort(); delete a._nameN; return { ...a, firstYm: ms[0] || '', lastYm: ms[ms.length - 1] || '' }; });
+  rows.sort((x, y) => (y.lastYm || '').localeCompare(x.lastYm || '') || y.total - x.total);
+  const months = [...new Set(rows.flatMap((r) => Object.keys(r.months)))].sort();
+  const curYm = months[months.length - 1] || '';
+  const summary = { count: rows.length, tags: rows.reduce((t, r) => t + r.total, 0), activeThisMonth: rows.filter((r) => r.months[curYm]).length, newThisMonth: rows.filter((r) => r.firstYm === curYm).length, curYm };
+  return { at: new Date().toISOString(), registryCount: regIds.size, eirAgents: new Set(eir.rows.map((r) => idCellText(r, 0))).size, months, rows, summary };
+}
+function newIdsData(fresh) {
+  const s = db.settings || {}, ar = s.agentRegistry || {};
+  const key = JSON.stringify([ar.sheetId, ar.gid, ar.idCol, ar.legacyCol, s.sheetId, s.eirSheet]);
+  const have = newIdsState.data && newIdsState.key === key ? newIdsState.data : null;
+  const stale = have && Date.now() - newIdsState.at > 15 * 60e3;
+  if (have && !fresh && !stale) return Promise.resolve(have);
+  if (!newIdsState.promise) {
+    newIdsState.promise = buildNewIds().then((d) => { newIdsState.data = d; newIdsState.at = Date.now(); newIdsState.key = key; return d; }).finally(() => { newIdsState.promise = null; });
+    newIdsState.promise.catch(() => {});
+  }
+  return have && !fresh ? Promise.resolve(have) : newIdsState.promise;   // purana turant, refresh peeche
+}
+// ---------------------------------------------------------------------------------------------
 // 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet(s): First–Last barcode ranges → interval index.
 const LEDGER_TTL = 30 * 60e3;   // Google gviz rate-limit (429) se bachne ke liye 30 min
 const ledgerState = { at: 0, index: null, promise: null, key: '', errors: {}, counts: {}, retryAt: 0, good: {} };   // good = source id → last successful rows (fail hone par purana data rahe)
@@ -4841,7 +4906,7 @@ async function migrateUserPermissions() {
     ['performance', 'stockReport'], ['gvStock', 'gvStockReport'],
     ['savedViews', 'reportStudio'], ['compare', 'charts'],
     ['dualChannel', 'masterStock'], ['fastagChampions', 'arena'], ['fastagChampions', 'fame'], ['tv', 'warRoom'],
-    ['masterSearch', 'barcodeChecker']
+    ['masterSearch', 'barcodeChecker'], ['masterSearch', 'newIds']
   ];
   // 🔐 v234 — ek user par sirf EK baar (permVer). Pehle har restart par chalta tha → admin ne jo access hataya
   // (jaise Master Search / Voice) wo restart ke baad wapas aa jaata tha.
@@ -5312,6 +5377,16 @@ async function handleApi(req, res, url) {
     if (!index) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
     const results = list.map((b) => dispatchFor(index, b));
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, results, meta: { mode: 'index', at: new Date(ledgerState.at).toISOString(), counts: ledgerState.counts, errors: ledgerState.errors } }), { 'Cache-Control': 'no-store' });
+  }
+  // 🆕 New IDs: EIR me issuance karne wale agents jinki ID Agent master (Sheet4 col A) me nahi hai.
+  if (p === '/api/new-ids' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const fresh = url.searchParams.get('fresh') === '1';
+    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 40000); });
+    let data; try { data = await Promise.race([newIdsData(fresh), wait]); } catch (err) { throw new HttpError(502, `New IDs load nahi hua: ${String((err && err.message) || err).slice(0, 200)}`); } finally { clearTimeout(timer); }
+    if (!data) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
+    if (url.searchParams.get('summary') === '1') return sendJson(res, 200, { ok: true, summary: data.summary, at: data.at }, { 'Cache-Control': 'no-store' });
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ...data }), { 'Cache-Control': 'no-store' });
   }
   // 🗺️ Stock mapping summary (home page): StockDataa tags → FF / GV / GV+FF / Office (same index, naya scan nahi).
   if (p === '/api/stock-map' && method === 'GET') {
@@ -8450,6 +8525,15 @@ async function handleApi(req, res, url) {
         if (v.layout !== undefined) v.layout = String(v.layout) === 'gv' ? 'gv' : 'ff';
         if (v.label !== undefined) v.label = String(v.label).slice(0, 60);
       }
+    }
+    if (patch.agentRegistry !== undefined) {
+      const ar = patch.agentRegistry;
+      if (!ar || typeof ar !== 'object' || Array.isArray(ar)) throw new HttpError(400, 'agentRegistry object hona chahiye.');
+      if (ar.enabled !== undefined) ar.enabled = ar.enabled === true || ar.enabled === 'true';
+      if (ar.sheetId !== undefined) { ar.sheetId = sheetIdFromLink(ar.sheetId) || String(ar.sheetId).trim(); if (ar.sheetId && !/^[A-Za-z0-9_-]{20,}$/.test(ar.sheetId)) throw new HttpError(400, 'Agent master: Google Sheet ka valid link / ID dein.'); }
+      if (ar.gid !== undefined) { ar.gid = String(ar.gid).trim(); if (!/^\d{1,12}$/.test(ar.gid)) throw new HttpError(400, 'Agent master: gid sirf number hota hai (URL me gid=...).'); }
+      for (const k of ['idCol', 'legacyCol']) if (ar[k] !== undefined) { ar[k] = String(ar[k]).trim().toUpperCase(); if (ar[k] !== '' && !/^[A-Z]{1,3}$/.test(ar[k])) throw new HttpError(400, `Agent master: ${k} column letter hona chahiye (jaise A).`); }
+      if (ar.label !== undefined) ar.label = String(ar.label).slice(0, 60);
     }
     if (patch.stockMapAlert !== undefined) {
       const sm = patch.stockMapAlert;
