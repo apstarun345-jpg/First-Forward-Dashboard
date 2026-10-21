@@ -79,9 +79,9 @@ FF.pages = FF.pages || {};
   const cells = (r) => [r.barcode, STATUS[r.k].label, r.tagId, r.cls, r.agent, r.agentId, r.tl, r.date, r.vrn, r.note, r.dDate || '', r.dName || ''];
   const dLabel = (iso) => (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) && U.labelDateKey ? U.labelDateKey(iso, true) : (iso || ''));
   /** 📒 Dispatch ledger (IDFC Stock Sheet / GV Stock Sheet First–Last ranges) → har barcode ki dispatch date + naam. */
-  async function attachDispatch(rows) {
+  async function attachDispatch(rows, started) {
     try {
-      const { map, meta } = await FF.data.dispatchLookup(rows.map((r) => r.barcode));
+      const { map, meta } = await (started || FF.data.dispatchLookup(rows.map((r) => r.barcode)));
       rows.forEach((r) => {
         const hit = map.get(String(r.barcode).replace(/\D/g, '').replace(/^0+/, ''));
         r.dDate = r.dName = '—';
@@ -214,7 +214,7 @@ FF.pages = FF.pages || {};
     const out = root.querySelector('[data-bcc-out]');
     const seq = ++state.busy;
     try {
-      let rows, title;
+      let rows, title, dispatchP = null;
       if (kind === 'range') {
         const f = root.querySelector('[data-bcc-form="range"]');
         const first = f.first.value.trim(), last = f.last.value.trim(), tag = f.tag.value.trim().toUpperCase();
@@ -223,6 +223,8 @@ FF.pages = FF.pages || {};
         if (key === state.lastKey && state.rows) return;
         let list; try { list = expandRange(first, last); } catch (err) { out.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; return; }
         out.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain (stock + issuance)…`);
+        dispatchP = FF.data.dispatchLookup(list.map((x) => x.label));   // ⚡ stock check ke saath-saath dispatch lookup shuru
+        dispatchP.catch(() => {});
         rows = await checkRange(first, last, isHex(tag) ? tag : '');
         title = `${first}_${last}`; state.lastKey = key;
       } else {
@@ -232,6 +234,8 @@ FF.pages = FF.pages || {};
         const key = `m|${list.join('|')}`;
         if (key === state.lastKey && state.rows) return;
         out.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain…`);
+        dispatchP = FF.data.dispatchLookup(list);
+        dispatchP.catch(() => {});
         rows = await checkMulti(list);
         title = `${list.length}-barcodes`; state.lastKey = key;
       }
@@ -240,7 +244,7 @@ FF.pages = FF.pages || {};
       state.dispMeta = null;
       rows.forEach((r) => { r.dDate = SEARCHING; r.dName = SEARCHING; });
       paintResults();                       // ⚡ stock / issuance turant — dispatch date + naam peeche se bharte hain
-      await attachDispatch(rows);
+      await attachDispatch(rows, dispatchP);
       if (seq === state.busy && state.rows === rows) paintResults();
     } catch (err) {
       if (seq === state.busy) out.innerHTML = U.errorBox(err);

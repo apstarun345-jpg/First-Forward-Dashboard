@@ -2842,27 +2842,48 @@ const ledgerErrText = (src, err) => {
 };
 /** ⚡ Direct lookup — chhoti list (≤25 barcode) ke liye poori sheet load nahi: har sheet par sirf "first <= bc <= last" wali rows ka query. */
 const ledgerDirectCache = new Map();
+const LEDGER_DIRECT_LIMIT = 1500;   // ek cluster query ki max rows — isse zyada aaye to poora index
+/** Barcodes ko (prefix, serial-gap) ke clusters me todo → har cluster par EK query: "first <= hi and last >= lo". 5000 barcodes bhi 1–2 query. */
+function ledgerClusters(parsed) {
+  const byPfx = new Map();
+  for (const { p } of parsed) { const l = byPfx.get(p.pfx); if (l) l.push(p.n); else byPfx.set(p.pfx, [p.n]); }
+  const out = [];
+  for (const [pfx, nums] of byPfx) {
+    nums.sort((a, b) => a - b);
+    let lo = nums[0], prev = nums[0];
+    for (let k = 1; k < nums.length; k++) {
+      if (nums[k] - prev > 3000) { out.push({ pfx, lo, hi: prev }); lo = nums[k]; }
+      prev = nums[k];
+    }
+    out.push({ pfx, lo, hi: prev });
+  }
+  return out;
+}
 async function ledgerDirect(barcodes) {
   const srcs = ledgerSources();
   const errors = {}, sourcesOk = {};
   const entries = { ff: [], gv: [] };
   const parsed = barcodes.map((b) => ({ b, p: parseBarcode(b) })).filter((x) => x.p && x.p.pfx.length === 9);
+  const clusters = ledgerClusters(parsed);
+  let usable = parsed.length === barcodes.length && clusters.length <= 60;
+  const fmt = (pfx, n) => `${pfx.slice(0, 6)}-${pfx.slice(6)}-${String(n).padStart(7, '0')}`;
   const jobs = [];
-  for (const src of srcs) {
+  if (usable) for (const src of srcs) {
     const letters = LAYOUT_LETTERS(src.layout);
     const fc = letters[src.layout === 'gv' ? 6 : 5], lc = letters[src.layout === 'gv' ? 7 : 6];
-    for (const { p } of parsed) {
-      const bc = `${p.pfx.slice(0, 6)}-${p.pfx.slice(6)}-${String(p.n).padStart(7, '0')}`;
-      const ck = `${src.id}|${src.sheetId}|${src.gid}|${bc}`;
+    for (const c of clusters) {
+      const lo = fmt(c.pfx, c.lo), hi = fmt(c.pfx, c.hi);
+      const ck = `${src.id}|${src.sheetId}|${src.gid}|${lo}|${hi}`;
       const hit = ledgerDirectCache.get(ck);
       if (hit && Date.now() - hit.at < 10 * 60e3) { for (const e of hit.rows) entries[src.ch].push(e); sourcesOk[src.id] = true; continue; }
       jobs.push((async () => {
         try {
-          const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${letters.join(', ')} where ${fc} <= '${bc}' and ${lc} >= '${bc}' limit 30` });
+          const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${letters.join(', ')} where ${fc} <= '${hi}' and ${lc} >= '${lo}' limit ${LEDGER_DIRECT_LIMIT}` });
           const { rows } = await gvizPageServer(qp, `gid:${src.gid}`);
+          if (rows.length >= LEDGER_DIRECT_LIMIT) { usable = false; return; }   // bahut zyada overlap → poora index
           const mine = [];
           for (const r of rows) { const e = ledgerEntry(r, letters, src, 0); if (e) mine.push(e); }
-          if (ledgerDirectCache.size > 3000) ledgerDirectCache.clear();
+          if (ledgerDirectCache.size > 500) ledgerDirectCache.clear();
           ledgerDirectCache.set(ck, { at: Date.now(), rows: mine });
           for (const e of mine) entries[src.ch].push(e);
           sourcesOk[src.id] = true;
@@ -2871,7 +2892,7 @@ async function ledgerDirect(barcodes) {
     }
   }
   await Promise.all(jobs);
-  return { index: { ff: buildLedgerIndex(entries.ff), gv: buildLedgerIndex(entries.gv) }, errors, sources: srcs.map((s) => ({ id: s.id, label: s.label, ok: !!sourcesOk[s.id] && !errors[s.id] })), usable: parsed.length === barcodes.length };
+  return { index: { ff: buildLedgerIndex(entries.ff), gv: buildLedgerIndex(entries.gv) }, errors, sources: srcs.map((s) => ({ id: s.id, label: s.label, ok: !!sourcesOk[s.id] && !errors[s.id] })), usable };
 }
 async function loadLedger() {
   const srcs = ledgerSources();
@@ -5257,7 +5278,7 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const list = (Array.isArray(body && body.barcodes) ? body.barcodes : []).map((x) => String(x || '').trim().slice(0, 60)).filter(Boolean).slice(0, 5000);
     if (!list.length) throw new HttpError(400, 'Barcodes chahiye.');
-    if (list.length <= 25 && ledgerSources().length) {
+    if (ledgerSources().length) {
       try {
         const d = await ledgerDirect(list);
         if (d.usable) return sendJson(res, 200, { ok: true, results: list.map((b) => dispatchFor(d.index, b)), meta: { mode: 'direct', errors: d.errors, sources: d.sources } }, { 'Cache-Control': 'no-store' });
@@ -10047,7 +10068,6 @@ async function start() {
   bootState.stage = 'ready';
   bootState.error = null;
   console.log('✅ Durable storage loaded — dashboard is ready.');
-  setTimeout(() => { ledgerIndex(false).catch(() => {}); }, 75000).unref();   // 📒 dispatch ledger pehle se garam — pehli search turant
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length} · push ${vapidKeys ? `${pushSubs().length} device(s), VAPID from ${vapidSource}, TTL ${PUSH_TTL}s` : 'DISABLED (no VAPID key)'}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
