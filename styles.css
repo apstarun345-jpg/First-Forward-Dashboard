@@ -470,14 +470,19 @@ html[data-theme="dark"] .sug-result.gross > small { color: #5eead4; }
 .dkpis { grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); }
 .dkpi { min-width: 0; overflow-wrap: anywhere; }
 .dkpi small, .dkpi b, .dkpi span { display: block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+.pf-dispatch-head, .pf-dispatch-row { grid-template-columns: minmax(0, .8fr) minmax(0, .9fr) minmax(0, 1.3fr); }
 .pf-dispatch-head > *, .pf-dispatch-row > * { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .pf-dispatch-row > span { align-items: flex-end; }
 .today-tag-detail { display: inline-block; padding: 3px 7px; margin: 2px 2px 2px 0; border-radius: 7px; background: #f1f5f9; color: #334155; font-size: 10.5px; white-space: nowrap; }
 .pf-dispatch-card h4 { color: #0f766e; }
+.pf-dispatch-head, .pf-dispatch-row { display: grid; grid-template-columns: minmax(70px, .8fr) minmax(85px, .9fr) minmax(135px, 1.3fr); align-items: center; gap: 6px; }
 .pf-dispatch-head { padding: 7px 9px; border-bottom: 1px solid #ccfbf1; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.pf-dispatch-row { padding: 8px 9px; border-bottom: 1px solid #dbeafe; font-size: 12px; }
+.pf-dispatch-row:last-child { border-bottom: 0; }
 .pf-dispatch-row > span { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 .pf-dispatch-row small { color: var(--muted); font-size: 9px; font-weight: 700; }
 .pf-dispatch-gross-label { color: #0f766e; }
+.pf-dispatch-row .sug-chip.wo { font-size: 14px; padding: 4px 12px; }
 html[data-theme="dark"] .today-tag-detail { color: #cbd5e1; background: #1e293b; }
 html[data-theme="dark"] .pf-dispatch-card { background: linear-gradient(135deg, #0f292c, #172033); border-color: #115e59; }
 html[data-theme="dark"] .pf-dispatch-card h4, html[data-theme="dark"] .pf-dispatch-gross-label { color: #5eead4; }
@@ -525,9 +530,11 @@ body.side-open .side-backdrop { display: block; }
 .mp-kpi b { font-size: 18px; }
 .dkpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .dkpi { padding: 8px 9px; }
+.pf-dispatch-head, .pf-dispatch-row { grid-template-columns: minmax(62px, .8fr) minmax(0, .95fr) minmax(0, 1.2fr); gap: 5px; }
 }
 @media (max-width: 420px) {
 .mp-cells, .mp-kpis, .dkpis { grid-template-columns: 1fr; }
+.pf-dispatch-head, .pf-dispatch-row { grid-template-columns: 1fr 1fr; }
 .pf-dispatch-head > :last-child, .pf-dispatch-row > :last-child { grid-column: 1 / -1; text-align: left; align-items: flex-start; }
 }
 @media (max-width: 560px) {
@@ -6495,6 +6502,8 @@ body[data-cc] .kpi:not(.ua-kpi-card) .kpi-value, body[data-cc] .kpi:not(.ua-kpi-
 .aa-month select { border-radius: 9px; min-height: 34px; }
 .aa-pill.ok { border-color: #10b981; color: #047857; background: color-mix(in srgb, #10b981 9%, var(--card)); }
 .aa-pill.soft { color: var(--muted); font-weight: 600; }
+.aa-click { all: unset; box-sizing: border-box; cursor: pointer; display: block; }
+.aa-click:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 8px; }
 .aa-trio small, .aa-mini small { display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .aa-trio b { font-size: 18px; color: var(--ink); }
 .aa-mini b { display: block; font-size: 22px; margin: 2px 0; color: var(--ink); }
@@ -6724,6 +6733,9 @@ html.mobile-ui .login-only-shell .pro-hint { display: none !important; }
 .tr-item-chip.on { background: #eaf1ff; border-color: #9dbdff; color: #1d4ed8; }
 /* 📊 v235 — Agent / TL Summary: all agents issuance board */
 .ib-tools .input { width: auto; min-width: 150px; }
+.ib-tot small { font-size: 11px; font-weight: 700; color: var(--muted); }
+.ib-tot b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.ib-tot.main small { color: rgba(255, 255, 255, .85); }
 .ib-tbl .ib-sort { cursor: pointer; user-select: none; white-space: nowrap; }
 /* summary hero: name always white */
 /* v237 — Tag Requests: status tabs hamesha dikhen (phone par Filters sheet ke andar nahi) + table me agent ke neeche status */
@@ -6769,3 +6781,6 @@ html[data-theme-pack] .page-tagRequest .page-head .seg .seg-btn { padding: 6px 8
 @media (hover: none) {
 .chart-dl { opacity: .45 !important; padding: 1px 5px !important; font-size: 11px !important; top: -2px !important; right: -2px !important; box-shadow: none !important; }
 }
+/* v239 — contrast: amber / orange / pink text on light backgrounds was under 3:1 */
+.kpi-icon { filter: none; }
+body[data-cc] .kpi.g9 .kpi-value, body[data-cc] .kpi.g9 .kpi-value b, body[data-cc] .kpi.g9 .kpi-icon { color: #a16207; }

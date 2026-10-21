@@ -31,8 +31,6 @@ html[data-theme="dark"] .aa-chip.flat { background: #334155; color: #cbd5e1; }
 .aa-score { --ac: var(--brand); background: var(--card); border: 1px solid var(--line); border-top: 5px solid var(--ac); border-radius: 16px; padding: 14px 16px 12px; box-shadow: 0 2px 10px rgba(15,23,42,.06); display: grid; gap: 6px; }
 .aa-score-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .aa-score-name { font-weight: 800; font-size: 15px; color: var(--ac); }
-.aa-click { all: unset; box-sizing: border-box; cursor: pointer; display: block; }
-.aa-click:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 8px; }
 .aa-bigbtn { padding: 2px 0; }
 .aa-big { display: block; font-size: 38px; font-weight: 800; letter-spacing: -.03em; line-height: 1.05; color: var(--ink); }
 .aa-sub { display: block; font-size: 12px; color: var(--muted); margin-top: 3px; }

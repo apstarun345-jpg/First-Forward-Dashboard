@@ -1613,6 +1613,13 @@ html.mobile-ui .grid:is(.g-2, .g-3, .g-4, .g-2-1):has(table, .chart-shot, .donut
 html.mobile-ui .grid:has(> .card table, > .card .chart-shot, > div > table, > div > .chart-shot) { grid-template-columns: minmax(0, 1fr) !important; }
 
 
+/* v239 — phone: kam se kam readable text + tap area (UI audit) */
+html.mobile-ui .home-exp-stat > span, html.mobile-ui .sug-result > small, html.mobile-ui .pf-dispatch-row small, html.mobile-ui .ua-sc-score small, html.mobile-ui .tr-qty-groups > small { font-size: 10.5px !important; }
+html.mobile-ui a.dp2-tl, html.mobile-ui .ff-link-sm { display: inline-block; padding: 6px 2px; min-height: 28px; line-height: 1.3; }
+html.mobile-ui .cp-btn { min-width: 30px; min-height: 30px; }
+html.mobile-ui .aa-click { min-height: 32px; min-width: 32px; }
+
+
 /* ── Profile / Master Search type scale — web + app share ONE set of sizes ─────────────────────────
    Pehle phone / installed app par global "small 13–14px", "p,li 16–17px", ".btn 15px", tab 17px rules is
    section ke chhote labels ko bada kar dete the, web par wahi 9.5–12px the → app aur web alag dikhte the.

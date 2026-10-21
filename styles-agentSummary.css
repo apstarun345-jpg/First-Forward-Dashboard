@@ -37,10 +37,7 @@
 .ib-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .ib-totals { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .ib-tot { display: flex; flex-direction: column; padding: 8px 12px; border-radius: 14px; background: var(--pk-soft, #eef3fe); border: 1px solid var(--line, #e3eaf8); min-width: 90px; }
-.ib-tot small { font-size: 11px; font-weight: 700; color: var(--muted); }
-.ib-tot b { font-size: 17px; font-variant-numeric: tabular-nums; }
 .ib-tot.main { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff; border-color: transparent; }
-.ib-tot.main small { color: rgba(255, 255, 255, .85); }
 .ib-tot-new { cursor: pointer; background: linear-gradient(135deg, #ecfdf5, #d1fae5); border-color: #a7f3d0; }
 .ib-tot-new b { color: #047857; }
 .ib-tot-new.zero { opacity: .6; }
