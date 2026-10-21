@@ -460,6 +460,11 @@ let rlServed = 0;
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname.endsWith('/export') && url.searchParams.get('format') === 'csv' && url.searchParams.get('gid') === '557') {   // Sheet4 CSV export (asli sheet jaisa)
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8' });
+    return res.end([REGISTRY.cols.map((c) => q(c.label)).join(','), ...REGISTRY.rows.map((r, i) => r.map((v, k) => q(k === 1 && i === 0 ? '20354013' : v)).join(','))].join('\r\n'));
+  }
   if (!url.pathname.includes('/gviz/tq')) { res.writeHead(404); return res.end('not found'); }
   if (RL_SHEET && rlServed < RL_COUNT && (url.searchParams.get('sheet') === RL_SHEET || RL_SHEET === '*')) {
     rlServed++;

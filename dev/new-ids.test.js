@@ -37,6 +37,8 @@ test('/api/new-ids: Sheet4 me missing agents (mock: 3) + summary + validation', 
     assert.equal(out.rows.reduce((t, r) => t + r.total, 0), out.summary.tags);
     const sr = await (await fetch(`${base}/api/agent-master-search`, { method: 'POST', headers: H, body: JSON.stringify({ terms: [out.rows[0].id, 'zzzz nobody'] }) })).json();
     assert.equal(sr.ok, true); assert.equal(sr.results.length, 2); assert.equal(sr.results[0].matches.length, 0);
+    const legacy = await (await fetch(`${base}/api/agent-master-search`, { method: 'POST', headers: H, body: JSON.stringify({ terms: '20354013' }) })).json();
+    assert.ok(legacy.results[0].matches.length === 1 && legacy.results[0].matches[0].id === '20354013' && legacy.results[0].matches[0].tlId, 'CSV: Agent ID + TL ID aane chahiye');
     const byName = await (await fetch(`${base}/api/agent-master-search`, { method: 'POST', headers: H, body: JSON.stringify({ terms: 'a' }) })).json();
     assert.ok(byName.total >= 57);
     const sm = await (await fetch(`${base}/api/new-ids?summary=1`, { headers: H })).json();

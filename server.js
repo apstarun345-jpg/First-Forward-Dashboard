@@ -2840,11 +2840,11 @@ async function buildNewIds() {
   const sel = [L.id, L.leg, L.name, L.aid, L.aleg, L.aname];
   const eirQ = new URLSearchParams({ id: String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: eirSheet, tq: `select ${sel.join(', ')}, year(${L.date}), month(${L.date}), count(${L.tag}) where ${L.date} is not null and ${L.id} is not null group by ${sel.join(', ')}, year(${L.date}), month(${L.date}) limit 40000` });
   const [reg, eir] = await Promise.all([
-    gvizPageServer(regQ, `gid:${ar.gid}`).catch((err) => { throw new Error(`Agent master sheet: ${ledgerErrText({ label: ar.label || 'Sheet4' }, err)}`); }),
+    loadRegistryFull(true).catch((err) => { throw new Error(`Agent master sheet: ${ledgerErrText({ label: ar.label || 'Sheet4' }, err)}`); }),
     gvizPageServer(eirQ, eirSheet)
   ]);
   const regIds = new Set(), regLegacy = new Set();
-  for (const r of reg.rows) { const a = idNorm(idCellText(r, 0)); if (a) regIds.add(a); if (cols.length > 1) { const b = idNorm(idCellText(r, 1)); if (b) regLegacy.add(b); } }
+  for (const r of reg) { const a = idNorm(r.newId); if (a) regIds.add(a); const b = idNorm(r.id); if (b) { regLegacy.add(b); regIds.add(b); } }
   const masterIds = new Set([idNorm(e.gvMasterId || '5845036')]);
   const byId = new Map();
   for (const r of eir.rows) {
@@ -2867,10 +2867,34 @@ async function buildNewIds() {
   const months = [...new Set(rows.flatMap((r) => Object.keys(r.months)))].sort();
   const curYm = months[months.length - 1] || '';
   const summary = { count: rows.length, tags: rows.reduce((t, r) => t + r.total, 0), activeThisMonth: rows.filter((r) => r.months[curYm]).length, newThisMonth: rows.filter((r) => r.firstYm === curYm).length, curYm };
-  return { at: new Date().toISOString(), registryCount: regIds.size, eirAgents: new Set(eir.rows.map((r) => idCellText(r, 0))).size, months, rows, summary };
+  return { at: new Date().toISOString(), registryCount: reg.length, eirAgents: new Set(eir.rows.map((r) => idCellText(r, 0))).size, months, rows, summary };
 }
 // 🔎 Agent master search: Sheet4 se Agent ID / Name / TL ID / TL Name (multiple IDs ya naam ek saath)
 const regFullState = { at: 0, key: '', rows: null, promise: null };
+/** Minimal CSV parser (quotes, "" escape, CRLF). */
+function parseCsvText(text) {
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cur); cur = ''; }
+    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+    else if (c !== '\r') cur += c;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+const colIndex = (l) => String(l || '').toUpperCase().split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+/** Sheet4 ko CSV export se padho — gviz mixed (text+number) column ki minority values null kar deta hai (Agent ID / TL ID blank aate the). */
+async function registryRowsViaCsv(ar, L) {
+  const url = `${GVIZ_BASE}/spreadsheets/d/${String(ar.sheetId).replace(/[^A-Za-z0-9_-]/g, '')}/export?format=csv&gid=${encodeURIComponent(String(ar.gid))}`;
+  const out = await fetchUpstream(url);
+  if (out.status < 200 || out.status >= 300 || /^\s*<(!doctype|html)/i.test(out.body)) throw new Error(`CSV export HTTP ${out.status}`);
+  const t = parseCsvText(out.body).slice(1);   // header row hatao
+  const ix = L.map(colIndex), cell = (r, k) => String((ix[k] >= 0 && r[ix[k]]) || '').trim();
+  return t.map((r) => ({ newId: cell(r, 0), id: cell(r, 1), name: cell(r, 2), tlId: cell(r, 3), tlName: cell(r, 4) })).filter((x) => x.newId || x.id || x.name);
+}
 async function loadRegistryFull(fresh) {
   const ar = (db.settings || {}).agentRegistry || {};
   if (!ar.sheetId || !/^\d+$/.test(String(ar.gid ?? ''))) throw new Error('Settings → Agent master (Sheet4) ka link / gid set karo.');
@@ -2879,9 +2903,13 @@ async function loadRegistryFull(fresh) {
   if (!fresh && regFullState.rows && regFullState.key === key && Date.now() - regFullState.at < 10 * 60e3) return regFullState.rows;
   if (!regFullState.promise) {
     regFullState.promise = (async () => {
+      let rows = null;
+      try { rows = await registryRowsViaCsv(ar, L); } catch (err) { console.log(`Sheet4 CSV export fail (${String((err && err.message) || err).slice(0, 80)}) — gviz fallback`); }
+      if (!rows) {
       const q = new URLSearchParams({ id: ar.sheetId, gid: String(ar.gid), headers: '1', tq: `select ${L.join(', ')} limit 60000` });
       const r = await gvizPageServer(q, `gid:${ar.gid}`);
-      const rows = r.rows.map((x) => ({ newId: idCellText(x, 0), id: idCellText(x, 1), name: idCellText(x, 2), tlId: idCellText(x, 3), tlName: idCellText(x, 4) })).filter((x) => x.newId || x.id || x.name);
+      rows = r.rows.map((x) => ({ newId: idCellText(x, 0), id: idCellText(x, 1), name: idCellText(x, 2), tlId: idCellText(x, 3), tlName: idCellText(x, 4) })).filter((x) => x.newId || x.id || x.name);
+      }
       regFullState.rows = rows; regFullState.key = key; regFullState.at = Date.now();
       return rows;
     })().finally(() => { regFullState.promise = null; });
