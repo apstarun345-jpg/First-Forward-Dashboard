@@ -2644,9 +2644,9 @@ body.colorful .from-hdr { color: #166534; }
       <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="${esc(r.id)}">#${esc(String(r.id || '').slice(-6))}</small></td>
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
       <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)} <button type="button" class="cp-btn" data-copy="${esc(dr.agent.agentId)}" title="Copy agent ID" aria-label="Copy agent ID">📋</button>` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
-        <span class="tr-tags"><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
-      ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td><td class="tr-c-item-name"><div class="tr-item-chips sm" data-tr-item-name data-key="${esc(dr.key)}" role="group" aria-label="Items">${ITEM_NAME_OPTIONS.map((name) => `<label class="tr-item-chip ${hasItem(name, r.itemName) ? 'on' : ''}" title="${esc(ITEM_LABEL[name])}"><input type="checkbox" data-tr-item-cell="${esc(name)}" data-key="${esc(dr.key)}" ${hasItem(name, r.itemName) ? 'checked' : ''}> ${ITEM_ICON[name]} ${esc(ITEM_LABEL[name])}</label>`).join('')}</div>${r.serialNumber ? `<small class="dim">Serial: ${esc(r.serialNumber)}</small>` : ''}${r.deviceName ? `<small class="dim">Device: ${esc(r.deviceName)}</small>` : ''}${r.materialDescription ? `<small class="dim">Material: ${esc(r.materialDescription)}</small>` : ''} </td>` : ''}
+        <span class="tr-tags"><span class="badge ${statusOf(r).tone} tr-st-inline" title="Status">${statusOf(r).label}</span><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
       <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a> <button type="button" class="cp-btn" data-copy="${esc(c.mobile)}" title="Copy mobile" aria-label="Copy mobile">📋</button><a class="cp-btn" target="_blank" rel="noopener" href="${esc(U.waLink('', c.mobile))}" title="WhatsApp" aria-label="WhatsApp">💬</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)} <button type="button" class="cp-btn" data-copy="${esc([c.address, c.pincode].filter(Boolean).join(', '))}" title="Copy address" aria-label="Copy address">📋</button></div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
+      ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td><td class="tr-c-item-name"><div class="tr-item-chips sm" data-tr-item-name data-key="${esc(dr.key)}" role="group" aria-label="Items">${ITEM_NAME_OPTIONS.map((name) => `<label class="tr-item-chip ${hasItem(name, r.itemName) ? 'on' : ''}" title="${esc(ITEM_LABEL[name])}"><input type="checkbox" data-tr-item-cell="${esc(name)}" data-key="${esc(dr.key)}" ${hasItem(name, r.itemName) ? 'checked' : ''}> ${ITEM_ICON[name]} ${esc(ITEM_LABEL[name])}</label>`).join('')}</div>${r.serialNumber ? `<small class="dim">Serial: ${esc(r.serialNumber)}</small>` : ''}${r.deviceName ? `<small class="dim">Device: ${esc(r.deviceName)}</small>` : ''}${r.materialDescription ? `<small class="dim">Material: ${esc(r.materialDescription)}</small>` : ''} </td>` : ''}
       ${metricCellsHtml(dr)}
       <td class="tr-c-cls">${classCellHtml(dr)}</td>
       <td class="num tr-c-total"><b data-tr-rowtotal>${fmt(dr.total)}</b>${dr.requested !== dr.total ? `<small class="dim">req ${fmt(dr.requested)}</small>` : ''}</td>
@@ -2659,7 +2659,7 @@ body.colorful .from-hdr { color: #166534; }
     STATUS_KEYS.forEach((k) => { counts[k] = 0; });
     all.forEach((dr) => { const s = dr.req.status || 'pending'; counts[s] = num(counts[s]) + 1; });
     const chip = (k, label) => `<button type="button" class="chip ${state.filter.status === k ? 'on' : ''}" data-tr-chip="${k}">${label} <span class="count">${fmt(counts[k] || 0)}</span></button>`;
-    return chip('all', 'Sab') + STATUS_KEYS.map((k) => chip(k, STATUS[k].label)).join('');
+    return chip('all', 'All') + STATUS_KEYS.map((k) => chip(k, STATUS[k].label)).join('');
   }
   function channelFilterHtml(all) {
     if (!isAdmin()) return '';
@@ -2790,14 +2790,14 @@ body.colorful .from-hdr { color: #166534; }
         <div class="tr-req-filter">
           ${channelFilterHtml(displayRows(state.requests))}
           ${isAdmin() ? `<label class="tr-date-filter"><b>From</b><input class="input" type="date" data-tr-date="fromDate" aria-label="From date" value="${esc(state.filter.fromDate || '')}"></label><label class="tr-date-filter"><b>To</b><input class="input" type="date" data-tr-date="toDate" aria-label="To date" value="${esc(state.filter.toDate || '')}"></label><button type="button" class="btn small" data-tr-act="date-clear">Clear dates</button>` : ''}
-          <div class="tr-chips" data-tr-chips>${chipsHtml(displayRows(state.requests))}</div>
           ${isAdmin() ? needFilterHtml(displayRows(state.requests)) : ''}
           <input class="input tr-req-search" data-tr-search type="search" placeholder="🔎 Agent / employee / mobile / PIN / ID" value="${esc(state.filter.q)}">
           <button type="button" class="btn" data-tr-act="req-refresh" title="Nayi requests laao">↻</button>
-          <button type="button" class="btn tr-card-toggle" data-tr-act="card-toggle" title="Phone ke liye card view / poori table">▦ Cards</button>
-          <button type="button" class="btn tr-detail-toggle" data-tr-act="card-details" title="Cards me stock aur issuance numbers dikhao / chhupao">📊 Stock &amp; issuance</button>
         </div>
       </div>
+      <div class="tr-status-bar"><div class="tr-chips" data-tr-chips>${chipsHtml(displayRows(state.requests))}</div>
+        <span class="tr-view-btns"><button type="button" class="btn small tr-card-toggle" data-tr-act="card-toggle" title="Phone ke liye card view / poori table">▦ Cards</button>
+        <button type="button" class="btn small tr-detail-toggle" data-tr-act="card-details" title="Cards me stock aur issuance numbers dikhao / chhupao">📊 Stock &amp; issuance</button></span></div>
       <div data-tr-rc-banner></div>
       <div data-tr-rc-host></div>
       <div data-tr-nc-host></div>
@@ -2882,7 +2882,7 @@ body.colorful .from-hdr { color: #166534; }
   }
   // ---- 📱 Card view (phone) + swipe actions --------------------------------------------------------
   const cardsOn = () => {
-    try { const v = localStorage.getItem('ff_tr_cards'); if (v === '1') return true; if (v === '0') return false; } catch { /* default */ }
+    try { const v = localStorage.getItem('ff_tr_cards2'); if (v === '1') return true; if (v === '0') return false; } catch { /* default */ }
     return !!(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 720px)').matches);
   };
   const cardsDetail = () => { try { return localStorage.getItem('ff_tr_cards_detail') === '1'; } catch { return false; } };
@@ -3291,7 +3291,7 @@ body.colorful .from-hdr { color: #166534; }
       if (chip) { state.filter.status = chip.dataset.trChip; state.limit = PAGE_ROWS; state.edit = null; renderReqTable(); return; }
       const act = t.closest && t.closest('[data-tr-act]');
       if (act && act.dataset.trAct === 'date-clear') { state.filter.fromDate = ''; state.filter.toDate = ''; state.limit = PAGE_ROWS; renderReqTable(); return; }
-      if (act && act.dataset.trAct === 'card-toggle') { try { localStorage.setItem('ff_tr_cards', cardsOn() ? '0' : '1'); } catch { /* private mode */ } applyCardMode(); return; }
+      if (act && act.dataset.trAct === 'card-toggle') { try { localStorage.setItem('ff_tr_cards2', cardsOn() ? '0' : '1'); } catch { /* private mode */ } applyCardMode(); return; }
       if (act && act.dataset.trAct === 'card-details') { try { localStorage.setItem('ff_tr_cards_detail', cardsDetail() ? '0' : '1'); } catch { /* private mode */ } applyCardMode(); return; }
       if (act && act.dataset.trAct === 'req-refresh') { loadRequests(true).then(() => { renderReqTable(); U.toast('↻ Requests taaza', 'ok'); }); return; }
       if (act && act.dataset.trAct === 'more') { state.limit += PAGE_ROWS; renderReqTable(); return; }

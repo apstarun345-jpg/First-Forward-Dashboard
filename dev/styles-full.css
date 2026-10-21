@@ -7750,3 +7750,40 @@ html[data-theme="dark"] .tr-item-chip.on { background: #172f6b; color: #dbe7ff; 
 .ib-card .table-wrap { max-height: 520px; overflow: auto; }
 /* summary hero: name always white */
 html body .gs-hero h1, html body .gs-hero h2, html body .gs-hero .gs-name, html body .gs-hero-who h1, html body .gs-hero-who h2 { color: #fff !important; -webkit-text-fill-color: #fff !important; }
+
+/* v237 — Tag Requests: status tabs hamesha dikhen (phone par Filters sheet ke andar nahi) + table me agent ke neeche status */
+.tr-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 8px 0 10px; }
+.tr-status-bar .tr-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.tr-status-bar .tr-view-btns { display: inline-flex; gap: 6px; }
+.tr-status-bar .chip { font-weight: 700; }
+.tr-status-bar .chip[data-tr-chip="pending"].on { background: #d97706; border-color: #d97706; color: #fff; }
+.tr-status-bar .chip[data-tr-chip="approved"].on { background: #16a34a; border-color: #16a34a; color: #fff; }
+.tr-status-bar .chip[data-tr-chip="dispatched"].on { background: #2563eb; border-color: #2563eb; color: #fff; }
+.tr-status-bar .chip[data-tr-chip="rejected"].on { background: #dc2626; border-color: #dc2626; color: #fff; }
+.tr-status-bar .chip.on .count { background: rgba(255, 255, 255, .25); color: #fff; }
+
+.tr-st-inline { font-weight: 800; }
+@media (max-width: 720px) {
+  .tr-status-bar .tr-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 2px; width: 100%; }
+  .tr-status-bar .tr-chips::-webkit-scrollbar { display: none; }
+  .tr-status-bar .chip { flex: 0 0 auto; white-space: nowrap; }
+}
+/* v237 — phone: action bar ek line (scroll), bulk status buttons line me; cards compact + status upar */
+@media (max-width: 720px) {
+  .page-tagRequest .tr-req-actions { flex-wrap: nowrap !important; overflow-x: auto; align-items: center; gap: 6px; padding-bottom: 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .page-tagRequest .tr-req-actions::-webkit-scrollbar { display: none; }
+  .page-tagRequest .tr-req-actions .tr-bulk-status { display: contents !important; }
+  .page-tagRequest .tr-req-actions > *, .page-tagRequest .tr-req-actions .tr-bulk-status > * { flex: 0 0 auto !important; white-space: nowrap !important; }
+  .page-tagRequest .tr-req-actions .btn, .page-tagRequest .tr-req-actions .tr-selall { flex-direction: row !important; min-height: 34px !important; height: auto !important; padding: 6px 10px !important; font-size: 12.5px !important; gap: 4px !important; }
+  .page-tagRequest .tr-req-actions select.input { min-width: 0 !important; width: auto !important; height: 34px; font-size: 12.5px; }
+  .page-tagRequest #tr-req-card .card-head .card-right { display: none; }
+}
+.tr-req-wrap.tr-cards .tr-st-inline { display: inline-flex !important; }
+.tr-req-wrap.tr-cards td.tr-c-status .tr-st-cell > .badge:first-child { display: none; }
+.tr-req-wrap.tr-cards td.tr-c-courier { display: none !important; }
+.tr-req-wrap.tr-cards td.tr-c-item-name .tr-item-chips { display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; gap: 4px !important; }
+.tr-req-wrap.tr-cards td.tr-c-item-name .tr-item-chip { display: inline-flex !important; width: auto !important; padding: 4px 10px !important; font-size: 12px !important; min-height: 0 !important; height: auto !important; line-height: 1.2 !important; }
+.tr-req-wrap.tr-cards td.tr-c-item-name { grid-column: 1 / -1 !important; }
+.tr-req-wrap.tr-cards td.tr-c-status .tr-st-cell { flex-direction: row !important; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.tr-req-wrap.tr-cards td.tr-c-status .tr-st-cell select.input { flex: 1 1 140px; width: auto !important; min-width: 0; }
+.tr-req-wrap.tr-cards td.tr-c-item-name .tr-item-chip input { width: 15px !important; height: 15px !important; min-height: 0 !important; min-width: 0 !important; margin: 0 !important; }

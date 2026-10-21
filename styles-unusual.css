@@ -31,7 +31,6 @@
 .ua-sc-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding: 7px; border-radius: 10px; background: color-mix(in srgb, var(--brand) 5%, var(--card)); }
 .ua-sc-reasons { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 5px; }
 .ua-hit { background: color-mix(in srgb, #ef4444 8%, var(--card)); }
-.ua-filter-command .seg-btn { white-space: nowrap; }
 @media (max-width: 900px) {
 .ua-period-bar { grid-template-columns: 1fr; }
 .ua-custom-dates { grid-column: 1; }

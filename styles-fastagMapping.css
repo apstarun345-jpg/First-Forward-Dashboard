@@ -9,8 +9,6 @@
 .fm-tabs { display: flex; gap: 6px; padding: 0 16px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .fm-tab { flex: 0 0 auto; padding: 9px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .fm-pane[hidden] { display: none !important; }
-.fm-pane .fm-templates { margin-bottom: 10px; flex-wrap: wrap; }
-.fm-add-card .card-head, .fm-queue-card .card-head { flex-wrap: wrap; gap: 8px; }
 @media (max-width: 760px) {
 .fm-steps { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .fm-step { flex-direction: column; gap: 4px; padding: 8px 4px; text-align: center; }

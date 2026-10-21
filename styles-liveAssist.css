@@ -2,7 +2,6 @@
 .la-consent { position: fixed; inset: 0; z-index: 2200; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, .62); backdrop-filter: blur(3px); padding: 16px; }
 .la-consent-icon { font-size: 34px; }
 .la-consent-btns { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
-.la-pill .la-pill-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .la-admin { position: fixed; inset: 0; z-index: 2200; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, .62); backdrop-filter: blur(3px); padding: 16px; }
 .la-admin-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .la-admin-status { display: flex; align-items: center; gap: 8px; margin: 12px 0 6px; font-weight: 700; }

@@ -27,7 +27,6 @@
 .ask-ico[data-act="close"]:focus-visible { background: rgba(255,255,255,.48); outline: 2px solid rgba(255,255,255,.8); outline-offset: 1px; }
 @media (max-width: 480px) {
 .ask-head { gap: 5px; padding: 10px 9px; }
-.ask-ico[data-act="close"] { flex-basis: 34px; width: 34px; height: 34px; }
 }
 .ask-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(255,255,255,.55); opacity: 0; pointer-events: none; }
 .ask-fab[data-state="listening"] .ask-ring { animation: rbRing 1.4s ease-out infinite; }
@@ -51,7 +50,6 @@
 .ask-head { gap: 10px; padding: 10px 12px; align-items: center; }
 .ask-avatar { flex: none; width: 42px; height: 42px; border-radius: 14px; background: rgba(255,255,255,.18); display: grid; place-items: center; }
 .ask-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ask-head .ask-ico { flex: none; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; font-size: 13px; }
 .ask-hero { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, #6366f1 14%, var(--card)), color-mix(in srgb, #ec4899 12%, var(--card))); border: 1px solid color-mix(in srgb, #6366f1 25%, var(--line)); }
 .ask-msg { overflow-wrap: anywhere; }
 .ask-form { align-items: center; }

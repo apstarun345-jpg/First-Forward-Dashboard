@@ -47,6 +47,5 @@
 .ib-tot-new.zero { opacity: .6; }
 .ib-new { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .03em; color: #fff; background: linear-gradient(135deg, #10b981, #059669); vertical-align: middle; }
 .ib-new-btn.on { background: linear-gradient(135deg, #10b981, #059669) !important; color: #fff !important; border-color: transparent !important; }
-.ib-tbl .ib-sort { cursor: pointer; user-select: none; white-space: nowrap; }
 .ib-tbl .ib-sort.on { color: var(--brand, #1d4ed8); }
 .ib-tbl .ib-total { font-weight: 800; color: var(--brand, #1d4ed8); }

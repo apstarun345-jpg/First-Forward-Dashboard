@@ -13,7 +13,7 @@ import { parseStockDay, groupOf, buildStockAgeIndex, summaryOf, tagsFor, AGE_THR
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DAY = 86400e3;
-const TODAY = Date.UTC(2026, 9, 1) / DAY;                     // 1 Oct 2026
+const TODAY = Math.floor(Date.now() / DAY);                   // aaj (server endpoint test real clock use karta hai)
 const ago = (n) => { const d = new Date((TODAY - n) * DAY); return `${String(d.getUTCDate()).padStart(2, '0')}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${d.getUTCFullYear()} 10:00:00 IST`; };
 
 test('parseStockDay: sheet ke saare date formats', () => {
@@ -86,7 +86,7 @@ test('summaryOf + tagsFor: compact shape, agent / TL / months / group / unknown 
   const idx = buildStockAgeIndex({ ffRows, gvRows, todayDay: TODAY });
   const sum = summaryOf(idx);
   assert.equal(sum.ok, true);
-  assert.equal(sum.today, '2026-10-01');
+  assert.equal(sum.today, new Date(TODAY * DAY).toISOString().slice(0, 10));
   assert.ok(sum.ff.agents['537700000000000001'].a[0] > 0, 'avg age');
   assert.ok(sum.ff.field && sum.ff.parked);
   assert.equal(sum.gv.matched, 2);

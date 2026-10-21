@@ -150,4 +150,3 @@
 }
 .set-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 18px; }
 .set-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.set-group .seg { flex-wrap: wrap; }
