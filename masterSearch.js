@@ -1501,6 +1501,9 @@ FF.pages = FF.pages || {};
       const s = pr.stock || {}, t = pr.totals || {}, d = pr.dispatch || {}, ts = pr.tlStock || {}, m = pr.months || {};
       const c = (pr.calc && pr.calc.total) || {};
       const p1 = pr.projT1 || null;
+      // 🚦 Priority = stock cover (din) se — sheet ki priority sirf cover na ho tab fallback.
+      const th = (FF.config && FF.config.thresholds) || {};
+      const prioEff = c.cover != null ? (c.cover < (th.coverRed || 7) ? 'High' : c.cover < (th.coverOrange || 15) ? 'Medium' : 'Low') : (pr.priority || '');
       let bins = {};
       try { bins = (MP() && MP().groupBinsFor && MP().groupBinsFor(pr)) || {}; } catch { bins = {}; }
       const mix = (b) => (b && (num(b.VC4) || num(b.VC20) || num(b['VC5+'])) ? `VC4 ${U.fmt(b.VC4)} · VC20 ${U.fmt(b.VC20)} · VC5+ ${U.fmt(b['VC5+'])}` : '');
@@ -1541,7 +1544,7 @@ FF.pages = FF.pages || {};
       return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
           <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL summary' : 'Agent summary'}</h3>
           <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
-          <div class="card-right">${prioChip(pr.priority)}</div></div>
+          <div class="card-right">${prioChip(prioEff)}</div></div>
         <div class="card-body"><div class="mp-kpis msp-kpis">
           ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}${c.cover != null ? ` · run-rate ${U.fmt(c.rate, true)}/day → stock ~${U.fmt(Math.round(c.cover))} din chalega` : ''}`, spec('stock'))}
           ${isTl
@@ -1549,7 +1552,7 @@ FF.pages = FF.pages || {};
     : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}` : '')}
           ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), curMix, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
-          ${box('k3', '🚦 Priority', prioChip(pr.priority), `${c.cover != null ? `cover ${U.fmt(c.cover, true)} din` : 'cover —'} · run-rate ${U.fmt(c.rate, true)}/day (÷ ${U.fmt(c.elapsed)} din)`, isTl ? peopleSpec : spec('stock'))}
+          ${box('k3', '🚦 Priority', prioChip(prioEff), `${c.cover != null ? `cover ${U.fmt(c.cover, true)} din` : 'cover —'} · run-rate ${U.fmt(c.rate, true)}/day (÷ ${U.fmt(c.elapsed)} din)`, isTl ? peopleSpec : spec('stock'))}
           ${sug}
           ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur))}
           ${box('k10', '🎯 Expected this month · Run-rate', U.fmt((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0)), `Current pace ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days · report cutoff: previous day`, spec('mtd', m.cur))}
