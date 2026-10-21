@@ -19,7 +19,7 @@ import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, r
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
 import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
 import { createMappingJobs } from './mapping-job.js';
-import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, LAYOUT_LETTERS } from './dispatch-ledger.js';
+import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, mapRows as stockMapRows } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
@@ -1194,7 +1194,8 @@ function upstreamUrl(params) {
   let range = params.get('range');
   if (!range) {
     const tabs = (db.settings && Array.isArray(db.settings.tabs)) ? db.settings.tabs : DEFAULT_TABS;
-    const tabMatch = tabs.find((t) => (sheet && (t.tab === sheet || t.id === sheet)) || (gid && t.gid === gid));
+    const ownBook = !params.get('id') || String(params.get('id')).replace(/[^A-Za-z0-9_-]/g, '') === String(db.settings.sheetId || DEFAULT_SHEET_ID);   // dusri workbook (stock ledger) par EIR/REPORT tab ka range mat lagao
+    const tabMatch = !ownBook ? null : tabs.find((t) => (sheet && (t.tab === sheet || t.id === sheet)) || (gid && t.gid === gid));
     if (tabMatch && tabMatch.range) range = tabMatch.range;
     else if (tabMatch && (tabMatch.startCol || tabMatch.startRow || tabMatch.endCol || tabMatch.endRow)) {
       const from = `${tabMatch.startCol || 'A'}${tabMatch.startRow || 1}`;
@@ -2825,6 +2826,53 @@ const ledgerSources = () => {
   for (const [k, v] of Object.entries(raw)) if (k !== 'gv1' && k !== 'gv2') cfg[k] = v   // purane (galat ID / private tab) GV entries ignore
   return Object.entries(cfg).filter(([, v]) => v && v.enabled !== false && /^[A-Za-z0-9_-]{20,}$/.test(String(v.sheetId || '')) && /^\d+$/.test(String(v.gid ?? ''))).map(([id, v]) => ({ id, ch: String(v.layout) === 'gv' ? 'gv' : 'ff', layout: String(v.layout) === 'gv' ? 'gv' : 'ff', sheetId: String(v.sheetId), gid: String(v.gid), label: String(v.label || id).slice(0, 60) }));
 };
+function ledgerEntry(row, letters, src, rowNo) {
+  const cells = letters.map((_, k) => serverCell(row, k));
+  const c0 = row && row.c && row.c[0];
+  const e = ledgerRow(cells.map((v, k) => (k === 0 ? (serverDate(c0 ? c0.v : v) || serverDate(c0 ? c0.f : '') || serverDate(v) || v) : v)), src.layout, src.ch, rowNo, (x) => String(x || ''));
+  if (e) e.src = src.label;
+  return e;
+}
+const ledgerErrText = (src, err) => {
+  const msg = String((err && err.message) || err);
+  return /\b40[13]\b/.test(msg) ? `${src.label}: sheet PRIVATE hai (Google ${/401/.test(msg) ? 401 : 403}) — Share → General access → "Anyone with the link" → Viewer karo`
+    : /\b404\b/.test(msg) ? `${src.label}: sheet / gid nahi mila (404) — link check karo`
+    : /429|rate|limit/i.test(msg) ? `${src.label}: Google Sheets rate-limit (429) — thodi der baad khud retry hoga`
+    : `${src.label}: ${msg.slice(0, 160)}`;
+};
+/** ⚡ Direct lookup — chhoti list (≤25 barcode) ke liye poori sheet load nahi: har sheet par sirf "first <= bc <= last" wali rows ka query. */
+const ledgerDirectCache = new Map();
+async function ledgerDirect(barcodes) {
+  const srcs = ledgerSources();
+  const errors = {}, sourcesOk = {};
+  const entries = { ff: [], gv: [] };
+  const parsed = barcodes.map((b) => ({ b, p: parseBarcode(b) })).filter((x) => x.p && x.p.pfx.length === 9);
+  const jobs = [];
+  for (const src of srcs) {
+    const letters = LAYOUT_LETTERS(src.layout);
+    const fc = letters[src.layout === 'gv' ? 6 : 5], lc = letters[src.layout === 'gv' ? 7 : 6];
+    for (const { p } of parsed) {
+      const bc = `${p.pfx.slice(0, 6)}-${p.pfx.slice(6)}-${String(p.n).padStart(7, '0')}`;
+      const ck = `${src.id}|${src.sheetId}|${src.gid}|${bc}`;
+      const hit = ledgerDirectCache.get(ck);
+      if (hit && Date.now() - hit.at < 10 * 60e3) { for (const e of hit.rows) entries[src.ch].push(e); sourcesOk[src.id] = true; continue; }
+      jobs.push((async () => {
+        try {
+          const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${letters.join(', ')} where ${fc} <= '${bc}' and ${lc} >= '${bc}' limit 30` });
+          const { rows } = await gvizPageServer(qp, `gid:${src.gid}`);
+          const mine = [];
+          for (const r of rows) { const e = ledgerEntry(r, letters, src, 0); if (e) mine.push(e); }
+          if (ledgerDirectCache.size > 3000) ledgerDirectCache.clear();
+          ledgerDirectCache.set(ck, { at: Date.now(), rows: mine });
+          for (const e of mine) entries[src.ch].push(e);
+          sourcesOk[src.id] = true;
+        } catch (err) { errors[src.id] = ledgerErrText(src, err); }
+      })());
+    }
+  }
+  await Promise.all(jobs);
+  return { index: { ff: buildLedgerIndex(entries.ff), gv: buildLedgerIndex(entries.gv) }, errors, sources: srcs.map((s) => ({ id: s.id, label: s.label, ok: !!sourcesOk[s.id] && !errors[s.id] })), usable: parsed.length === barcodes.length };
+}
 async function loadLedger() {
   const srcs = ledgerSources();
   const entries = { ff: [], gv: [] }, errors = {}, counts = {};
@@ -2837,22 +2885,16 @@ async function loadLedger() {
       // heavyScanChain ke bahar: ye chhoti sheets hain; bade StockDataa scan ke peeche atakne se dispatch kabhi load nahi hota tha.
       await gvizPagesServerRaw(src.sheetId, `gid:${src.gid}`, letters, `${firstCol} is not null`, async (rows) => {
         for (let i = 0; i < rows.length; i++) {
-          const cells = letters.map((_, k) => serverCell(rows[i], k));
-          const c0 = rows[i] && rows[i].c && rows[i].c[0];
-          const e = ledgerRow(cells.map((v, k) => (k === 0 ? (serverDate(c0 ? c0.v : v) || serverDate(c0 ? c0.f : '') || serverDate(v) || v) : v)), src.layout, src.ch, n + 1, (x) => String(x || ''));
+          const e = ledgerEntry(rows[i], letters, src, n + 1);
           n++;
-          if (e) { e.src = src.label; mine.push(e); }
+          if (e) mine.push(e);
           if (i % 4000 === 3999) await yieldLoop();
         }
       }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 });
       counts[src.id] = n;
       ledgerState.good[src.id] = { ch: src.ch, rows: mine, at: Date.now() };
     } catch (err) {
-      const msg = String((err && err.message) || err);
-      errors[src.id] = /\b40[13]\b/.test(msg) ? `${src.label}: sheet PRIVATE hai (Google ${/401/.test(msg) ? 401 : 403}) — Share → General access → "Anyone with the link" → Viewer karo`
-        : /\b404\b/.test(msg) ? `${src.label}: sheet / gid nahi mila (404) — link check karo`
-        : /429|rate|limit/i.test(msg) ? `${src.label}: Google Sheets rate-limit (429) — purana data dikha rahe hain, ~5 min me khud retry hoga`
-        : msg.slice(0, 200);
+      errors[src.id] = ledgerErrText(src, err);
       // Fail hua source → pichla successful data hi use karo (khaali index nahi)
       const prev = ledgerState.good[src.id];
       if (prev) { counts[src.id] = prev.rows.length; for (const e of prev.rows) entries[src.ch].push(e); }
@@ -5200,11 +5242,17 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const list = (Array.isArray(body && body.barcodes) ? body.barcodes : []).map((x) => String(x || '').trim().slice(0, 60)).filter(Boolean).slice(0, 5000);
     if (!list.length) throw new HttpError(400, 'Barcodes chahiye.');
+    if (list.length <= 25 && ledgerSources().length) {
+      try {
+        const d = await ledgerDirect(list);
+        if (d.usable) return sendJson(res, 200, { ok: true, results: list.map((b) => dispatchFor(d.index, b)), meta: { mode: 'direct', errors: d.errors, sources: d.sources } }, { 'Cache-Control': 'no-store' });
+      } catch { /* neeche poora index */ }
+    }
     let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 25000); });
     let index; try { index = await Promise.race([ledgerIndex(!!(body && body.fresh)), wait]); } finally { clearTimeout(timer); }
     if (!index) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
     const results = list.map((b) => dispatchFor(index, b));
-    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, results, meta: { at: new Date(ledgerState.at).toISOString(), counts: ledgerState.counts, errors: ledgerState.errors } }), { 'Cache-Control': 'no-store' });
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, results, meta: { mode: 'index', at: new Date(ledgerState.at).toISOString(), counts: ledgerState.counts, errors: ledgerState.errors } }), { 'Cache-Control': 'no-store' });
   }
   // 🗺️ Stock mapping summary (home page): StockDataa tags → FF / GV / GV+FF / Office (same index, naya scan nahi).
   if (p === '/api/stock-map' && method === 'GET') {

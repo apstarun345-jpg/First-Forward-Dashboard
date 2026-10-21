@@ -84,6 +84,7 @@ FF.pages = FF.pages || {};
       const { map, meta } = await FF.data.dispatchLookup(rows.map((r) => r.barcode));
       rows.forEach((r) => {
         const hit = map.get(String(r.barcode).replace(/\D/g, '').replace(/^0+/, ''));
+        r.dDate = r.dName = '—';
         if (!hit) return;
         const parts = [];
         ['ff', 'gv'].forEach((ch) => (hit[ch] || []).slice(0, 1).forEach((e) => parts.push({ ch, e, more: (hit[ch + 'Count'] || 1) - 1 })));
@@ -92,8 +93,9 @@ FF.pages = FF.pages || {};
         r.dName = parts.map((x) => `${parts.length > 1 ? x.ch.toUpperCase() + ' · ' : ''}${x.e.agent || '—'}${x.e.agentId ? ` (${x.e.agentId})` : ''}${x.e.approx ? ' ~' : ''}${x.more > 0 ? ` +${x.more}` : ''}`).join(' | ');
       });
       state.dispMeta = meta;
-    } catch (err) { state.dispMeta = { error: String((err && err.message) || err) }; }
+    } catch (err) { rows.forEach((r) => { r.dDate = r.dName = ''; }); state.dispMeta = { error: String((err && err.message) || err) }; }
   }
+  const SEARCHING = '🔎 searching…';
   /** Ek barcode ka final row: stock row + EIR hit + anumaanit tag. */
   function makeRow(label, st, tag, inferred, is) {
     if (is) return { barcode: label, k: 'iss', tagId: tag, cls: is.cls, agent: is.agent, agentId: is.agentId, tl: is.tl, date: is.date, vrn: is.vrn, note: `${is.ch === 'GV Partner' ? 'GV' : 'FF'}${st ? ' · StockDataa me bhi hai' : inferred ? ' · tag ID barcode se anumaanit' : ''}${is.type ? ' · ' + is.type : ''}` };
@@ -150,7 +152,9 @@ FF.pages = FF.pages || {};
     if (!m) return '';
     if (m.error) return `<p class="dim small">⚠️ Dispatch ledger load nahi hui: ${esc(m.error)}</p>`;
     const errs = Object.entries(m.errors || {});
-    return errs.length ? `<p class="dim small">⚠️ Dispatch ledger: ${errs.map(([, v]) => esc(v)).join(' · ')}</p>` : '';
+    const src = (m.sources || []).map((s) => `${s.ok ? '✅' : '❌'} ${esc(s.label)}`).join(' · ');
+    if (!errs.length && src) return `<p class="dim small">📒 Dispatch ledger: ${src}</p>`;
+    return errs.length ? `<p class="dim small">⚠️ Dispatch ledger — ${src ? src + ' · ' : ''}${errs.map(([, v]) => esc(v)).join(' · ')}</p>` : '';
   }
   function resultsHtml() {
     const rows = state.rows;
@@ -220,8 +224,6 @@ FF.pages = FF.pages || {};
         let list; try { list = expandRange(first, last); } catch (err) { out.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; return; }
         out.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain (stock + issuance)…`);
         rows = await checkRange(first, last, isHex(tag) ? tag : '');
-        out.innerHTML = U.spinner('Dispatch ledger se dispatch date / naam mil raha hai…');
-        await attachDispatch(rows);
         title = `${first}_${last}`; state.lastKey = key;
       } else {
         const f = root.querySelector('[data-bcc-form="multi"]');
@@ -231,13 +233,15 @@ FF.pages = FF.pages || {};
         if (key === state.lastKey && state.rows) return;
         out.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain…`);
         rows = await checkMulti(list);
-        out.innerHTML = U.spinner('Dispatch ledger se dispatch date / naam mil raha hai…');
-        await attachDispatch(rows);
         title = `${list.length}-barcodes`; state.lastKey = key;
       }
       if (seq !== state.busy) return;
       state.rows = rows; state.title = title; state.filter = 'all'; state.agent = ''; state.q = '';
-      paintResults();
+      state.dispMeta = null;
+      rows.forEach((r) => { r.dDate = SEARCHING; r.dName = SEARCHING; });
+      paintResults();                       // ⚡ stock / issuance turant — dispatch date + naam peeche se bharte hain
+      await attachDispatch(rows);
+      if (seq === state.busy && state.rows === rows) paintResults();
     } catch (err) {
       if (seq === state.busy) out.innerHTML = U.errorBox(err);
     }

@@ -888,12 +888,12 @@ FF.pages = FF.pages || {};
     return {
       date: parts.map((x) => `${two ? x.ch.toUpperCase() + ' ' : ''}${dl(x.e.date)}`).join(' | '),
       name: parts.map((x) => `${two ? x.ch.toUpperCase() + ' · ' : ''}${x.e.agent || '—'}${x.e.agentId ? ` (${x.e.agentId})` : ''}${x.e.approx ? ' ~' : ''}${x.more > 0 ? ` +${x.more}` : ''}`).join(' | '),
-      title: parts.map((x) => `${x.ch.toUpperCase()}: ${x.e.first} → ${x.e.last} · ${x.e.src || ''} · row ${x.e.row}${x.e.approx ? ' (approx range)' : ''}`).join('\n')
+      title: parts.map((x) => `${x.ch.toUpperCase()}: ${x.e.first} → ${x.e.last} · ${x.e.src || ''}${x.e.row ? ` · row ${x.e.row}` : ""}${x.e.approx ? ' (approx range)' : ''}`).join('\n')
     };
   }
   function dispCellsHtml(key) {
     const k = bcKey(key), d = dispCache.has(k) ? dispText(dispCache.get(k)) : null;
-    return `<td data-ms-disp="${esc(k)}" data-f="date" style="white-space:nowrap"${d && d.title ? ` title="${esc(d.title)}"` : ''}>${d ? esc(d.date) : '<span class="dim">…</span>'}</td><td data-ms-disp="${esc(k)}" data-f="name"${d && d.title ? ` title="${esc(d.title)}"` : ''}>${d ? esc(d.name) : '<span class="dim">…</span>'}</td>`;
+    return `<td data-ms-disp="${esc(k)}" data-f="date" style="white-space:nowrap"${d && d.title ? ` title="${esc(d.title)}"` : ''}>${d ? esc(d.date) : '<span class="dim">🔎 searching…</span>'}</td><td data-ms-disp="${esc(k)}" data-f="name"${d && d.title ? ` title="${esc(d.title)}"` : ''}>${d ? esc(d.name) : '<span class="dim">🔎 searching…</span>'}</td>`;
   }
   async function loadDispatch(keys) {
     const need = [...new Set((keys || []).map(bcKey).filter((k) => k && !dispCache.has(k)))];
@@ -905,7 +905,14 @@ FF.pages = FF.pages || {};
   async function fillDispatch(root, res) {
     if (!root || !res || !(res.tags || []).length) return;
     try {
-      await loadDispatch(res.tags.slice(0, 60).map((t) => t.key));
+      const meta = await loadDispatch(res.tags.slice(0, 60).map((t) => t.key));
+      const first = root.querySelector('td[data-ms-disp]');
+      const wrapEl = first && first.closest('.table-wrap');
+      if (wrapEl && meta) {
+        const errs = Object.values(meta.errors || {}), srcs = (meta.sources || []).map((s) => `${s.ok ? '✅' : '❌'} ${esc(s.label)}`).join(' · ');
+        const old = wrapEl.previousElementSibling; if (old && old.classList.contains('ms-disp-note')) old.remove();
+        if (errs.length) wrapEl.insertAdjacentHTML('beforebegin', `<p class="dim small ms-disp-note">⚠️ Dispatch ledger — ${srcs ? srcs + ' · ' : ''}${errs.map(esc).join(' · ')}</p>`);
+      }
       root.querySelectorAll('td[data-ms-disp]').forEach((td) => {
         const d = dispText(dispCache.get(td.dataset.msDisp));
         td.textContent = td.dataset.f === 'date' ? d.date : d.name;
