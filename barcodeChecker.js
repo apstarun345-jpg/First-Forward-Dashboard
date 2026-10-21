@@ -150,7 +150,7 @@ FF.pages = FF.pages || {};
     if (!m) return '';
     if (m.error) return `<p class="dim small">⚠️ Dispatch ledger load nahi hui: ${esc(m.error)}</p>`;
     const errs = Object.entries(m.errors || {});
-    return errs.length ? `<p class="dim small">⚠️ Dispatch ledger ki kuch sheets nahi padh payi (${errs.map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(' · ')}) — sheet "Anyone with the link: Viewer" honi chahiye.</p>` : '';
+    return errs.length ? `<p class="dim small">⚠️ Dispatch ledger: ${errs.map(([, v]) => esc(v)).join(' · ')}</p>` : '';
   }
   function resultsHtml() {
     const rows = state.rows;

@@ -92,7 +92,8 @@ export function dispatchFor(indexes, barcode) {
   const pack = (e) => ({ date: e.date, agent: e.agent, agentId: e.agentId, cls: e.cls, qty: e.qty, first: e.first, last: e.last, status: e.status, note: e.note, row: e.row, approx: e.approx || undefined, src: e.src });
   const out = { barcode: str(barcode), ff: [], gv: [] };
   for (const ch of ['ff', 'gv']) {
-    const hits = lookupBarcode(indexes[ch], barcode);
+    const seen = new Set();
+    const hits = lookupBarcode(indexes[ch], barcode).filter((e) => { const k = `${e.date}|${e.lo}|${e.hi}|${String(e.agentId).toUpperCase()}`; if (seen.has(k)) return false; seen.add(k); return true; });   // same row 2 sheets me (mirror tab) → ek baar
     out[ch + 'Count'] = hits.length;
     out[ch] = hits.slice(0, 3).map(pack);
   }
