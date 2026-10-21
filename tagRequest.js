@@ -111,7 +111,7 @@ FF.pages = FF.pages || {};
   }
   const rid = () => Math.random().toString(36).slice(2, 9);
   const emptyQty = () => { const q = {}; CLASS_LIST.forEach((c) => { q[c] = ''; }); return q; };
-  function newRow(patch) { return { id: rid(), agentId: '', name: '', tl: '', channel: '', tlFilter: '', isTl: false, dispatchName: '', q: emptyQty(), mobile: '', address: '', pincode: '', ...(patch || {}) }; }
+  function newRow(patch) { return { id: rid(), agentId: '', name: '', tl: '', channel: '', tlFilter: '', isTl: false, dispatchName: '', q: emptyQty(), mobile: '', address: '', pincode: '', firstBarcode: '', lastBarcode: '', ...(patch || {}) }; }
   if (!state.rows.length) state.rows = [newRow()];
 
   const norm = (v) => String(v == null ? '' : v).trim().toUpperCase().replace(/\s+/g, ' ');
@@ -1504,7 +1504,8 @@ body.colorful .from-hdr { color: #166534; }
   }
   function agentCardHtml(row, i) {
     const cfg = formCfg();
-    const askMobile = cfg.askMobile !== false, askAddress = cfg.askAddress !== false;
+    const staff = isAdmin() && !isPublic();   // admin: mobile / address / pincode mandatory nahi + barcode fields
+    const askMobile = !staff && cfg.askMobile !== false, askAddress = !staff && cfg.askAddress !== false;
     const rec = exactAgent(row);
     const total = isFastag() ? rowTotal(row) : 0;
     const errs = state.errs[row.id] || {};
@@ -1538,6 +1539,10 @@ body.colorful .from-hdr { color: #166534; }
             <label class="field tr-span-all"><span class="dim small">🏠 Full address${askAddress ? ' *' : ''} <small class="dim">(house / street / area / city — tags isi address par jayenge)</small></span>
               <textarea class="input${badCls(row.id, 'address')}" data-tr-a="address" rows="2" maxlength="300" placeholder="e.g. 24, Shanti Nagar, Sodala, Jaipur">${esc(row.address)}</textarea></label>
           </div>
+          ${staff ? `<div class="tr-contact-grid"><label class="field"><span class="dim small">🔢 First barcode <small class="dim">(optional)</small></span>
+              <input class="input mono" data-tr-a="firstBarcode" inputmode="numeric" maxlength="30" placeholder="608116-011-0558283" autocomplete="off" value="${esc(row.firstBarcode || '')}"></label>
+            <label class="field"><span class="dim small">🔢 Last barcode <small class="dim">(optional)</small></span>
+              <input class="input mono" data-tr-a="lastBarcode" inputmode="numeric" maxlength="30" placeholder="608116-011-0558331" autocomplete="off" value="${esc(row.lastBarcode || '')}"></label></div>` : ''}
           <div class="tr-contact-slot" data-tr-suggest-slot>${contactSuggestHtml(row)}</div>
           ${row.fromBook ? '<p class="dim small tr-book-note">📇 Pichli request / Address book se purana mobile-address auto-fill hua — submit se pehle ek baar check kar lo.</p>' : ''}
           ${errList.length ? `<ul class="tr-err-list">${errList.map((m) => `<li>⚠️ ${esc(m)}</li>`).join('')}</ul>` : ''}
@@ -1830,6 +1835,7 @@ body.colorful .from-hdr { color: #166534; }
       let v = el.value;
       if (key === 'mobile') { const c = v.replace(/[^\d+\s-]/g, ''); if (c !== v) el.value = c; v = c.replace(/[\s-]/g, ''); }
       if (key === 'pincode') { const c = v.replace(/\D/g, '').slice(0, 6); if (c !== v) el.value = c; v = c; }
+      if (key === 'firstBarcode' || key === 'lastBarcode') { const c = v.replace(/[^\d-]/g, ''); if (c !== v) el.value = c; v = c; }
       row[key] = v;
        if (key === 'mobile' || key === 'address' || key === 'pincode') { row.contactManual = true; row.fromBook = false; row.addressSource = ''; }
       const ok = key === 'mobile' ? digits(v).length >= 10 : key === 'pincode' ? /^\d{6}$/.test(v) : key === 'dispatchName' ? clean(v).length >= 2 : clean(v).length >= 8;
@@ -1993,8 +1999,9 @@ body.colorful .from-hdr { color: #166534; }
       if (String(row.name || row.agentId || '').trim().length < 2) mark(row.id, 'agent', 'Agent ka naam / ID likho (dropdown se chuno)');
       if (row.isTl && clean(row.dispatchName).length < 2) mark(row.id, 'dispatchName', 'TL ke naam par request hai — Dispatch name (jisko tag bhejna hai) zaroori hai');
       const mob = digits(row.mobile);
-      if ((cfg.askMobile !== false || mob) && (mob.length < 10 || mob.length > 13)) mark(row.id, 'mobile', 'Agent ka 10 digit mobile number daalo');
-      if (cfg.askAddress !== false) {
+      const staffForm = isAdmin() && !isPublic();   // admin ke liye mobile / address / pincode optional
+      if (((!staffForm && cfg.askMobile !== false) || mob) && (mob.length < 10 || mob.length > 13)) mark(row.id, 'mobile', 'Agent ka 10 digit mobile number daalo');
+      if (cfg.askAddress !== false && !staffForm) {
         if (clean(row.address).length < 8) mark(row.id, 'address', 'Agent ka full address likho (house / street / area / city)');
         if (!/^\d{6}$/.test(digits(row.pincode))) mark(row.id, 'pincode', '6 digit pincode daalo');
       } else if (row.pincode && !/^\d{6}$/.test(digits(row.pincode))) mark(row.id, 'pincode', 'Pincode 6 digit ka hona chahiye');
@@ -2032,6 +2039,7 @@ body.colorful .from-hdr { color: #166534; }
         dispatchName: clean(row.dispatchName), kind: row.isTl ? 'tl' : 'agent',
         tl: rec ? rec.tlName || '' : '', channel,
         mobile: String(row.mobile || '').replace(/[^\d+]/g, ''), address: clean(row.address), pincode: digits(row.pincode).slice(0, 6),
+        ...(clean(row.firstBarcode) ? { firstBarcode: clean(row.firstBarcode) } : {}), ...(clean(row.lastBarcode) ? { lastBarcode: clean(row.lastBarcode) } : {}),
         unmatched: !rec, metrics: rec ? groupMetrics(rec) : null, rows
       };
     });
@@ -2612,6 +2620,7 @@ body.colorful .from-hdr { color: #166534; }
       ${status === 'pending' ? `<button class="btn small primary tr-approve" data-tr-op="approve" data-key="${esc(dr.key)}">✅ Approve</button>` : ''}
       <select class="input tr-status-sel" data-tr-status data-key="${esc(dr.key)}" aria-label="Status badlo">${STATUS_KEYS.map((k) => `<option value="${k}" ${k === status ? 'selected' : ''}>${STATUS[k].label}</option>`).join('')}</select>
       <select class="input tr-courier-sel" data-tr-courier data-key="${esc(dr.key)}" aria-label="Courier chuno" title="🚚 Courier — label par yahi naam chhapta hai">${courierPickOptions(r.courier).map((c) => `<option value="${esc(c)}" ${String(r.courier || '').toLowerCase() === c.toLowerCase() ? 'selected' : ''}>${c ? `🚚 ${esc(c)}` : '🚚 courier chuno'}</option>`).join('')}</select>
+      <div class="tr-bc-box" title="First / Last barcode — Google Sheet me column dropdown se chun sakte ho"><input class="input mono small" data-tr-bc="firstBarcode" data-key="${esc(dr.key)}" inputmode="numeric" maxlength="30" placeholder="🔢 First barcode" value="${esc(r.firstBarcode || '')}" style="width:100%;margin-top:4px"><input class="input mono small" data-tr-bc="lastBarcode" data-key="${esc(dr.key)}" inputmode="numeric" maxlength="30" placeholder="🔢 Last barcode" value="${esc(r.lastBarcode || '')}" style="width:100%;margin-top:4px"></div>
       ${r.adminNote ? `<small class="dim tr-note" title="${esc(r.adminNote)}">💬 ${esc(String(r.adminNote).slice(0, 60))}</small>` : ''}</div>`;
   }
   function actionsCellHtml(dr) {
@@ -3051,6 +3060,7 @@ body.colorful .from-hdr { color: #166534; }
     if (payload.status !== undefined) next.status = payload.status;
     if (payload.adminNote !== undefined) next.adminNote = String(payload.adminNote || '');
     if (payload.note !== undefined && (next.status || 'pending') === 'pending') next.note = String(payload.note || '');
+    for (const k of ['firstBarcode', 'lastBarcode']) if (payload[k] !== undefined) { const v = String(payload[k] || '').replace(/[^\d-]/g, ''); if (v) next[k] = v; else delete next[k]; }
     if (payload.courier !== undefined) {
       const courier = String(payload.courier || '').trim();
       if (courier) next.courier = courier; else delete next.courier;
@@ -3367,6 +3377,13 @@ body.colorful .from-hdr { color: #166534; }
         if (dr && t.value !== (dr.req.status || 'pending')) setStatus(dr, t.value, t);
         return;
       }
+      if (t.matches && t.matches('[data-tr-bc]')) {
+        const dr = findDr(t.dataset.key); if (!dr) return;
+        const f = t.dataset.trBc, val = String(t.value || '').replace(/[^\d-]/g, '');
+        if (val === String(dr.req[f] || '')) return;
+        putRequest(dr.req, { [f]: val }).then(() => U.toast(val ? `🔢 ${f === 'firstBarcode' ? 'First' : 'Last'} barcode save` : '🔢 Barcode hata diya', 'ok')).catch((err) => { U.toast('Barcode save nahi hua: ' + ((err && err.message) || ''), 'err'); renderReqTable(); });
+        return;
+      }
       if (t.matches && t.matches('[data-tr-courier]')) {
       if (t.matches && t.matches('[data-tr-item-cell]')) {
         const dr = findDr(t.dataset.key);
@@ -3465,7 +3482,7 @@ body.colorful .from-hdr { color: #166534; }
       approved: 'Approved qty', remark: 'Remark', note: 'Note', adminNote: 'Admin note',
       empName: 'Employee Name', empMobile: 'Employee mobile', empAddress: 'Employee address', empPincode: 'Employee pincode',
       agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty',
-      courier: 'Courier'
+      courier: 'Courier', firstBarcode: 'First barcode', lastBarcode: 'Last barcode'
     };
     const fields = s.fields && Object.keys(s.fields).length ? s.fields : FALLBACK_SHEET_FIELDS;
     const configuredCols = Array.isArray(cfg.columns) ? cfg.columns : [];

@@ -212,7 +212,7 @@ test('📝 form — employee + agent blocks: agent-wise validation aur payload',
   assert.deepEqual(out.errors, { rowId: 'employee', field: 'name' }, 'pehli galti = employee name');
   const [r1, r2, r3, r4] = out.ids;
   assert.ok(!out.errs[r1], 'pehla agent theek hai');
-  assert.deepEqual(Object.keys(out.errs[r2]).sort(), ['address', 'mobile', 'pincode', 'qty']);
+  assert.deepEqual(Object.keys(out.errs[r2]).sort(), ['mobile', 'pincode', 'qty'], 'admin: address optional (mobile/pincode sirf galat bhare to flag)');
   assert.ok(!out.errs[r3], 'khaali block ignore');
   assert.match(out.errs[r4].agent, /Agent 1/, 'same agent dobara → "upar Agent 1 me pehle se hai"');
   assert.equal(out.payload.agents.length, 3, 'khaali block payload me nahi');

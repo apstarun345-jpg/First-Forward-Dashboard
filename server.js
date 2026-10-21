@@ -6192,11 +6192,13 @@ async function handleApi(req, res, url) {
   const tagNameKey = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
   /** Agent key — client (tagRequest.js → agentKeyOf) bilkul yahi banata hai (inline class edit isi se). */
   const tagAgentKeyOf = (x) => `${x && x.channel === 'gv' ? 'gv' : 'ff'}|${String((x && x.agentId) || '').trim() ? `id:${String(x.agentId).trim()}` : `n:${tagNameKey(x && x.agentName)}`}`;
+  const tagBarcode = (v) => String(v ?? '').replace(/[^\d-]/g, '').slice(0, 30);
   const tagRequestAgent = (a) => ({
     name: shortText(a.agentName || a.name, 120), agentId: shortText(a.agentId, 40), tl: shortText(a.tl || a.tlName, 120),
     channel: a.channel === 'gv' ? 'gv' : 'ff',
     ...(String(a.dispatchName || '').trim() ? { dispatchName: shortText(String(a.dispatchName).replace(/\s+/g, ' '), 120) } : {}),
     ...(a.kind === 'tl' ? { kind: 'tl' } : {}),
+    ...(tagBarcode(a.firstBarcode) ? { firstBarcode: tagBarcode(a.firstBarcode) } : {}), ...(tagBarcode(a.lastBarcode) ? { lastBarcode: tagBarcode(a.lastBarcode) } : {}),
     mobile: String(a.mobile || a.phone || '').replace(/[^\d+]/g, '').slice(0, 16),
     address: shortText(String(a.address || a.fullAddress || '').replace(/\s+/g, ' '), 300),
     pincode: tagDigits(a.pincode || a.pin).slice(0, 6),
@@ -6368,6 +6370,7 @@ async function handleApi(req, res, url) {
       employee: ctx.employee, employeeToken: ctx.employeeToken || '', agent: d.agent,
       ...(submissionId ? { submissionId, submissionFingerprint } : {}),
       ...(ctx.courier ? { courier: ctx.courier } : {}),
+      ...(d.agent && d.agent.firstBarcode ? { firstBarcode: d.agent.firstBarcode } : {}), ...(d.agent && d.agent.lastBarcode ? { lastBarcode: d.agent.lastBarcode } : {}),
       itemName: normItemName(ctx.itemName),
       ...(ctx.serialNumber ? { serialNumber: ctx.serialNumber } : {}), ...(ctx.deviceName ? { deviceName: ctx.deviceName } : {}), ...(ctx.materialDescription ? { materialDescription: ctx.materialDescription } : {}),
       ...(ctx.source ? { source: ctx.source, ip: ctx.ip } : {}),
@@ -6413,7 +6416,7 @@ async function handleApi(req, res, url) {
     // v3.30 — delivery ab AGENT ke address par (employee form me agent ka mobile/address/pincode bharta hai)
     agentMobile: 'Agent mobile', agentAddress: 'Agent address', agentPincode: 'Agent pincode', requested: 'Requested qty',
     // v3.51 — 🚚 courier naam (Delhivery / DTDC) — label + sheet dono me
-    courier: 'Courier',
+    courier: 'Courier', firstBarcode: 'First barcode', lastBarcode: 'Last barcode',
     itemName: 'Item Name', serialNumber: 'Serial Number', deviceName: 'Device Name', materialDescription: 'Material Details'
   };
   // 🪶 v3.51 — sheet ko chhota rakho: har AGENT ki EK row (saari classes ek hi cell me) + kam columns.
@@ -6643,6 +6646,8 @@ async function handleApi(req, res, url) {
       case 'agentPincode': return (req.agent && req.agent.pincode) || '';
       case 'requested': return x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0;
       case 'courier': return req.courier || '';
+      case 'firstBarcode': return req.firstBarcode || '';
+      case 'lastBarcode': return req.lastBarcode || '';
       case 'itemName': return normItemName(req.itemName);
       case 'serialNumber': return req.serialNumber || '';
       case 'deviceName': return req.deviceName || '';
@@ -6835,7 +6840,8 @@ async function handleApi(req, res, url) {
     // 🧑‍🤝‍🧑 v3.30 — naya form: employee + har agent ka block → har agent ki ALAG request (batch).
     if (Array.isArray(body.agents) && body.agents.length) {
       const pcfg = publicTagFormConfig(); // wahi mandatory fields jo employee link par hain (ek jaisa form)
-      const drafts = tagAgentDrafts(body.agents, { askMobile: pcfg.askMobile !== false, askAddress: pcfg.askAddress !== false, itemName: body.itemName });
+      const isAdm = user.role === 'admin';   // admin ke liye mobile · address · pincode optional; baaki users + public link par config ke hisaab se mandatory
+      const drafts = tagAgentDrafts(body.agents, { askMobile: !isAdm && pcfg.askMobile !== false, askAddress: !isAdm && pcfg.askAddress !== false, itemName: body.itemName });
       if (!drafts.length) throw new HttpError(400, 'Kam se kam ek agent chahiye (naam + class qty).');
       const emp = body.employee && typeof body.employee === 'object' ? body.employee : {};
       const employee = { name: shortText(emp.name, 80) || user.name || user.username, ...(shortText(emp.office || emp.branch, 80) ? { office: shortText(emp.office || emp.branch, 80) } : {}) };
@@ -7010,6 +7016,8 @@ async function handleApi(req, res, url) {
       const c = shortText(body.courier, 40);
       if (c) row.courier = c; else delete row.courier;
     }
+    // 🔢 First / Last barcode — admin dispatch ke waqt bharta hai; Google Sheet me column dropdown se chun sakte hain.
+    for (const k of ['firstBarcode', 'lastBarcode']) if (body[k] !== undefined) { const v = tagBarcode(body[k]); if (v) row[k] = v; else delete row[k]; }
     if (body.itemName !== undefined) row.itemName = normItemName(body.itemName);
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
     if (Object.keys(body).every((k) => k === 'status')) persistBackground('notify'); // status-only → instant reply
