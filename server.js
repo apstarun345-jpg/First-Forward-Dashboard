@@ -2833,6 +2833,23 @@ function ledgerEntry(row, letters, src, rowNo) {
   if (e) e.src = src.label;
   return e;
 }
+/** Sheet ke khaali aakhri columns gviz me hote hi nahi (NO_COLUMN: K) → us column se pehle tak hi select karo, aur yaad rakho. */
+const ledgerColsCache = new Map();
+async function withLedgerLetters(src, fn) {
+  const key = `${src.sheetId}|${src.gid}|${src.layout}`;
+  let letters = LAYOUT_LETTERS(src.layout);
+  if (ledgerColsCache.has(key)) letters = letters.slice(0, ledgerColsCache.get(key));
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try { return await fn(letters); } catch (err) {
+      const m = /NO_COLUMN:?\s*([A-Z]{1,3})/i.exec(String((err && err.message) || err));
+      const at = m ? letters.indexOf(m[1].toUpperCase()) : -1;
+      const need = src.layout === 'gv' ? 7 : 6;   // last-barcode column tak to chahiye hi
+      if (at < 0 || at <= need) throw err;
+      letters = letters.slice(0, at); ledgerColsCache.set(key, at);
+    }
+  }
+  throw new Error('NO_COLUMN retry fail');
+}
 const ledgerErrText = (src, err) => {
   const msg = String((err && err.message) || err);
   return /\b40[13]\b/.test(msg) ? `${src.label}: sheet PRIVATE hai (Google ${/401/.test(msg) ? 401 : 403}) — Share → General access → "Anyone with the link" → Viewer karo`
@@ -2878,11 +2895,14 @@ async function ledgerDirect(barcodes) {
       if (hit && Date.now() - hit.at < 10 * 60e3) { for (const e of hit.rows) entries[src.ch].push(e); sourcesOk[src.id] = true; continue; }
       jobs.push((async () => {
         try {
-          const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${letters.join(', ')} where ${fc} <= '${hi}' and ${lc} >= '${lo}' limit ${LEDGER_DIRECT_LIMIT}` });
-          const { rows } = await gvizPageServer(qp, `gid:${src.gid}`);
+          const { rows, L } = await withLedgerLetters(src, async (lt) => {
+            const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${lt.join(', ')} where ${fc} <= '${hi}' and ${lc} >= '${lo}' limit ${LEDGER_DIRECT_LIMIT}` });
+            const out = await gvizPageServer(qp, `gid:${src.gid}`);
+            return { rows: out.rows, L: lt };
+          });
           if (rows.length >= LEDGER_DIRECT_LIMIT) { usable = false; return; }   // bahut zyada overlap → poora index
           const mine = [];
-          for (const r of rows) { const e = ledgerEntry(r, letters, src, 0); if (e) mine.push(e); }
+          for (const r of rows) { const e = ledgerEntry(r, L, src, 0); if (e) mine.push(e); }
           if (ledgerDirectCache.size > 500) ledgerDirectCache.clear();
           ledgerDirectCache.set(ck, { at: Date.now(), rows: mine });
           for (const e of mine) entries[src.ch].push(e);
@@ -2904,14 +2924,14 @@ async function loadLedger() {
     let n = 0;
     try {
       // heavyScanChain ke bahar: ye chhoti sheets hain; bade StockDataa scan ke peeche atakne se dispatch kabhi load nahi hota tha.
-      await gvizPagesServerRaw(src.sheetId, `gid:${src.gid}`, letters, `${firstCol} is not null`, async (rows) => {
+      await withLedgerLetters(src, (lt) => { n = 0; mine.length = 0; return gvizPagesServerRaw(src.sheetId, `gid:${src.gid}`, lt, `${firstCol} is not null`, async (rows) => {
         for (let i = 0; i < rows.length; i++) {
-          const e = ledgerEntry(rows[i], letters, src, n + 1);
+          const e = ledgerEntry(rows[i], lt, src, n + 1);
           n++;
           if (e) mine.push(e);
           if (i % 4000 === 3999) await yieldLoop();
         }
-      }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 });
+      }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 }); });
       counts[src.id] = n;
       ledgerState.good[src.id] = { ch: src.ch, rows: mine, at: Date.now() };
     } catch (err) {
@@ -5265,9 +5285,12 @@ async function handleApi(req, res, url) {
     for (const src of ledgerSources()) {
       const letters = LAYOUT_LETTERS(src.layout);
       try {
-        const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${letters.join(', ')} where ${letters[src.layout === 'gv' ? 6 : 5]} is not null limit 3` });
-        const { rows } = await gvizPageServer(qp, `gid:${src.gid}`);
-        const sample = rows.map((r) => ledgerEntry(r, letters, src, 0)).filter(Boolean).map((e) => ({ date: e.date, agent: e.agent, first: e.first, last: e.last }));
+        const { rows, L } = await withLedgerLetters(src, async (lt) => {
+          const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${lt.join(', ')} where ${letters[src.layout === 'gv' ? 6 : 5]} is not null limit 3` });
+          const o = await gvizPageServer(qp, `gid:${src.gid}`);
+          return { rows: o.rows, L: lt };
+        });
+        const sample = rows.map((r) => ledgerEntry(r, L, src, 0)).filter(Boolean).map((e) => ({ date: e.date, agent: e.agent, first: e.first, last: e.last }));
         out.push({ id: src.id, label: src.label, ok: sample.length > 0, sample, error: sample.length ? '' : 'Rows mili par First/Last barcode column samajh nahi aaya — layout (FF/GV) ya tab check karo' });
       } catch (err) { out.push({ id: src.id, label: src.label, ok: false, sample: [], error: ledgerErrText(src, err) }); }
     }

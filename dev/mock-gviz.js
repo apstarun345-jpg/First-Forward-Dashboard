@@ -315,7 +315,7 @@ const PAYOUT = {
 };
 STOCK.rows.push(...GV_MASTER_STOCK);
 // 📒 Dispatch ledger (IDFC Stock Sheet = FF layout · GV Stock Sheet = GV layout): First–Last barcode ranges.
-const LEDGER_FF = { cols: ['608', 'AGENT NAME', 'AGENT/TL', 'VC', 'QNT', 'SR. NO. START', 'ENDING', 'RESULT', 'Actual Qnt', 'Tag Mapped Name', 'MOBILE.NO', 'REFERENCE'].map((l, i) => ({ id: L(i), label: l, type: 'string' })), rows: [
+const LEDGER_FF = { cols: ['608', 'AGENT NAME', 'AGENT/TL', 'VC', 'QNT', 'SR. NO. START', 'ENDING', 'RESULT', 'Actual Qnt', 'Tag Mapped Name'].map((l, i) => ({ id: L(i), label: l, type: 'string' })), rows: [
   ['17/01/2024', 'RAHUL SHARMA', '5846000', '4', '100', '608116-011-0180700', '608116-011-0180799', 'DONE', '100', 'ISSUED', '', 'amit kumar'],
   ['12/02/2024', 'KIRAN SINGH', '5846009', '4', '50', '608116-011-0181500', '608116-011-0181549', 'DONE', '50', 'ISSUED', '9999999999', ''],
   ['01/03/2024', 'BAD END', '', '5', '5', '608116-009-0360396', '608116-009-0168547', 'DONE', '5', 'ISSUED', '', '']
@@ -419,6 +419,7 @@ function runQuery(sheet, tq) {
       if ((mm = s.match(/^year\((\w+)\)$/i))) return { kind: 'year', ci: colIdx(mm[1]), label: `year(${mm[1]})`, type: 'number' };
       if ((mm = s.match(/^month\((\w+)\)$/i))) return { kind: 'month', ci: colIdx(mm[1]), label: `month(${mm[1]})`, type: 'number' };
       if ((mm = s.match(/^sum\((\w+)\)$/i))) return { kind: 'sum', ci: colIdx(mm[1]), label: `sum ${mm[1]}`, type: 'number' };
+      if (!sheet.cols[colIdx(s)]) throw new Error(`Invalid query: NO_COLUMN: ${s.toUpperCase()}`);   // gviz: khaali trailing columns exist hi nahi karte
       return { kind: 'col', ci: colIdx(s), label: sheet.cols[colIdx(s)].label, type: sheet.cols[colIdx(s)].type };
     });
     const keyOf = (it, r) => { const v = r[it.ci]; if (it.kind === 'col') return v; const d = toDate(v); if (it.kind === 'year') return d ? d.getFullYear() : null; if (it.kind === 'month') return d ? d.getMonth() : null; return null; };
