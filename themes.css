@@ -418,6 +418,8 @@ html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions { display: flex;
 html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions::-webkit-scrollbar { display: none; }
 html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions > * { flex: none; white-space: nowrap; }
 html[data-theme-pack="desk"] .page-head .seg { flex-wrap: nowrap !important; }
+html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions > .seg, html.mobile-ui[data-theme-pack="desk"] .page-head .seg { flex: 1 1 100% !important; flex-wrap: wrap !important; min-width: 0; max-width: 100%; }
+html.mobile-ui[data-theme-pack="desk"] .page-head .seg .seg-btn { flex: 1 1 auto; }
 html[data-theme-pack="desk"] .page-head .seg-btn { white-space: nowrap; }
 html.mobile-ui[data-theme-pack="desk"] .page-head .head-actions .btn { padding: 8px 14px; font-size: 13px; }
 /* v226 — phone bottom bar: open page in a blue pill */

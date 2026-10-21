@@ -68,9 +68,51 @@ window.FF = window.FF || {};
       });
     } catch { /* optional */ }
   }
+  // 🏷️ v238 — bar chart ke x-labels jagah se lambe hon to har k-th label hi dikhao (kata hua "01 …" nahi)
+  function thinLabels(root) {
+    try {
+      const rows = new Set();
+      (root || document).querySelectorAll('.vcol-label').forEach((l) => { const col = l.closest('.vcol'); if (col && col.parentElement) rows.add(col.parentElement); });
+      rows.forEach((row) => {
+        const cols = [...row.children].filter((c) => c.classList && c.classList.contains('vcol'));
+        if (cols.length < 2) return;
+        const w = cols[0].getBoundingClientRect().width;
+        if (!w || row.__lblW === Math.round(w)) return;
+        row.__lblW = Math.round(w);
+        const labs = cols.map((c) => c.querySelector('.vcol-label'));
+        labs.forEach((l) => l && l.classList.remove('lbl-hide'));
+        const shown = labs.filter((l) => l && l.textContent.trim());
+        if (!shown.length) return;
+        const base = Math.max(1, Math.round(cols.length / shown.length));
+        const maxW = Math.max(...shown.map((l) => l.scrollWidth));
+        let k = Math.ceil((maxW + 6) / w);
+        const vb = row.closest('.vbars');
+        if (vb) vb.classList.remove('lbl-2');
+        if (k <= base) return;
+        // kam categories (VC4 · VC20 · All Comm …) → chhupao mat, 2 line me likho
+        if (cols.length <= 8 && base === 1) { if (vb) vb.classList.add('lbl-2'); return; }
+        k = Math.ceil(k / base) * base;
+        labs.forEach((l, i) => { if (l && i % k !== 0) l.classList.add('lbl-hide'); });
+      });
+    } catch { /* optional */ }
+  }
+  // 📊 v238 — koi table apne box se badi ho aur scroll wrapper me na ho to use scroll box me daal do (kata nahi)
+  function wrapTables(root) {
+    try {
+      (root || document).querySelectorAll('#main table, #drawer table').forEach((t) => {
+        if (t.__twrap) return;
+        const p = t.parentElement; if (!p) return;
+        for (let x = p; x && x !== document.body; x = x.parentElement) { const ox = getComputedStyle(x).overflowX; if (ox === 'auto' || ox === 'scroll') { t.__twrap = 1; return; } }
+        if (!p.clientWidth || t.getBoundingClientRect().width <= p.clientWidth + 2) return;
+        const w = document.createElement('div'); w.className = 'table-wrap auto-wrap';
+        p.insertBefore(w, t); w.appendChild(t); t.__twrap = 1;
+      });
+    } catch { /* optional */ }
+  }
+  if (typeof window !== 'undefined') { let rt = 0; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { thinLabels(document); wrapTables(document); }, 200); }); }
   if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
     let queued = false;
-    const run = () => { queued = false; tintKpis(document); iconHeads(document); zeroKpis(document); };
+    const run = () => { queued = false; tintKpis(document); iconHeads(document); zeroKpis(document); thinLabels(document); wrapTables(document); };
     const start = () => { try { new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(run); } }).observe(document.body, { childList: true, subtree: true }); run(); } catch { /* optional */ } };
     if (document.body) start(); else document.addEventListener('DOMContentLoaded', start, { once: true });
   }
@@ -125,7 +167,7 @@ window.FF = window.FF || {};
     const minPlotWidth = Math.max(0, Number(opts.minPlotWidth) || 0);
     const plotStyle = minPlotWidth ? ` style="min-width:${minPlotWidth}px"` : '';
     specs.set(cid, { kind: 'bars', opts: { ...opts, series } });
-    return `<div class="chart-shot" data-cid="${cid}"><div class="vbars" style="--h:${height}px"><div class="vbars-plot"${plotStyle}><div class="vgrid">${grid}</div><div class="vbars-cols">${cols}</div></div>${series.length > 1 || opts.legendAlways ? legend(series) : ''}</div></div>`;
+    return `<div class="chart-shot" data-cid="${cid}"><div class="vbars${minPlotWidth ? ' scroll-x' : ''}" style="--h:${height}px"><div class="vbars-plot"${plotStyle}><div class="vgrid">${grid}</div><div class="vbars-cols">${cols}</div></div>${series.length > 1 || opts.legendAlways ? legend(series) : ''}</div></div>`;
   }
 
   /** Horizontal bars. opts: { items:[{label, sub, value, compare, color, tip, attr}], max, format, compareLabel } */

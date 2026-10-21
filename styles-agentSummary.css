@@ -35,7 +35,6 @@
 .as-tl-note { margin: 8px 0 0; padding: 7px 11px; border-radius: 11px; background: rgba(255, 255, 255, .16); font-size: 12px; display: inline-block; }
 .as-head .badge.amber { background: #f59e0b; color: #fff; border: 0; }
 .ib-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.ib-tools .input { width: auto; min-width: 150px; }
 .ib-totals { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .ib-tot { display: flex; flex-direction: column; padding: 8px 12px; border-radius: 14px; background: var(--pk-soft, #eef3fe); border: 1px solid var(--line, #e3eaf8); min-width: 90px; }
 .ib-tot small { font-size: 11px; font-weight: 700; color: var(--muted); }

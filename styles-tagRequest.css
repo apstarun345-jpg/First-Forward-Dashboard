@@ -331,3 +331,7 @@ html[data-theme="dark"] .tr-item-chip.on { background: #172f6b; color: #dbe7ff; 
 .tr-req-wrap.tr-cards td.tr-c-status .tr-st-cell { flex-direction: row !important; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .tr-req-wrap.tr-cards td.tr-c-status .tr-st-cell select.input { flex: 1 1 140px; width: auto !important; min-width: 0; }
 .tr-req-wrap.tr-cards td.tr-c-item-name .tr-item-chip input { width: 15px !important; height: 15px !important; min-height: 0 !important; min-width: 0 !important; margin: 0 !important; }
+@media (max-width: 720px) {
+#tr-tabs.seg { display: flex !important; flex-wrap: wrap; gap: 4px; width: 100%; overflow: visible; }
+#tr-tabs.seg .seg-btn { flex: 1 1 auto; white-space: nowrap; padding: 7px 10px; }
+}

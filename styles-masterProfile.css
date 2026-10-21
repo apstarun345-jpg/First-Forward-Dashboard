@@ -48,7 +48,6 @@ html[data-theme="dark"] .mp-people-table thead th { background: color-mix(in srg
 .ms-issuance-card-head { font-size: 8.5px; }
 .ms-issuance-value { font-size: 20px; }
 .ms-issuance-foot { font-size: 8px; }
-.ms-issuance-title > div > small { max-width: 245px; }
 }
 .mp-kpi-top { min-width: 0; }
 .mp-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; border-bottom: 1px solid var(--line); margin: 2px 0 0; padding-bottom: 0; }

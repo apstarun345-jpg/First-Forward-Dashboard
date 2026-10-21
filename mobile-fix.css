@@ -1608,6 +1608,11 @@ html.mobile-ui #mobile-nav [hidden] {
   .ff-saved-view-save-row button { width:100% !important; }
 }
 
+/* v238 — phone: jis grid me chart / table / donut ho wo 1 column (2-col me table + chart kat rahe the) */
+html.mobile-ui .grid:is(.g-2, .g-3, .g-4, .g-2-1):has(table, .chart-shot, .donut, .vcol),
+html.mobile-ui .grid:has(> .card table, > .card .chart-shot, > div > table, > div > .chart-shot) { grid-template-columns: minmax(0, 1fr) !important; }
+
+
 /* ── Profile / Master Search type scale — web + app share ONE set of sizes ─────────────────────────
    Pehle phone / installed app par global "small 13–14px", "p,li 16–17px", ".btn 15px", tab 17px rules is
    section ke chhote labels ko bada kar dete the, web par wahi 9.5–12px the → app aur web alag dikhte the.
