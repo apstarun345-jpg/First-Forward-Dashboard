@@ -19,7 +19,7 @@ import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, r
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
 import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
 import { createMappingJobs } from './mapping-job.js';
-import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock } from './stock-age.js';
+import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, mapRows as stockMapRows } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
@@ -227,6 +227,7 @@ const DEFAULT_SETTINGS = {
   ffPayout: { sheet: 'payout', gid: '', labelCol: '', classCol: '', rateCol: '', penaltyCol: '', noteCol: '' }, // FF sheet "payout" tab: per-class commission rate + penalty (blank = auto-detect)
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 }, // cockpit.js alert thresholds
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
+  stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
   // all other classes wait for an admin-entered official rate. Empty is unresolved, never zero.
   gvCommissionRates: {
@@ -2900,7 +2901,7 @@ async function loadStockAgeIndex() {
   const gvL = { cls: colLetter(A.cls, 'A'), tagId: colLetter(A.tagId, 'B'), serial: colLetter(A.serial, 'C'), status: colLetter(A.status, 'D'), agentId: colLetter(A.agentId, 'E'), agentName: colLetter(A.agentName, 'F'), tlId: colLetter(A.tlId, 'G'), tlName: colLetter(A.tlName, 'H'), date: colLetter(A.allocatedAt, '') };
   const pick = (row, idx) => (idx >= 0 ? serverCell(row, idx) : '');
   const [y, m, d] = dateKeyNow().split('-').map(Number);
-  const opts = { todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.' };
+  const opts = { todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.', gvOutWords: (s.gvStockStatus && Array.isArray(s.gvStockStatus.outStock) && s.gvStockStatus.outStock.length ? s.gvStockStatus.outStock : ['ISSUE', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE']) };
   let builder = createStockAgeBuilder(opts);
   const gvBuf = [];   // GV ki umr FF (StockDataa) se match hoti hai → GV rows FF ke baad jodte hain (dono pages parallel padhe jaate hain)
   const ffJob = (async () => {
@@ -5129,6 +5130,23 @@ async function handleApi(req, res, url) {
     const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, false);
     if (!index) return sendJson(res, 200, stockAgePending());
     return sendJson(res, 200, { ok: true, at: new Date(index.at).toISOString(), building: !!stockAgeState.promise, errors: index.errors || null, map: index.map || null }, { 'Cache-Control': 'no-store' });
+  }
+  if ((p === '/api/stock-map/tags' || p === '/api/stock-map/csv') && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const q = url.searchParams;
+    const bucket = ['ff', 'gv', 'both', 'office', 'all'].includes(q.get('bucket')) ? q.get('bucket') : 'all';
+    const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, false);
+    if (!index) return sendJson(res, 200, stockAgePending());
+    const rows = stockMapRows(index, { bucket, cls: q.get('cls') || '', q: q.get('q') || '' });
+    if (p === '/api/stock-map/csv') {
+      const cell = (v) => { const t = String(v ?? ''); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : (/^[=+\-@]/.test(t) ? `'${t}` : t); };
+      const head = ['Tag ID', 'Barcode', 'Class', 'Tag type', 'Bucket', 'FF agent', 'FF agent ID', 'FF TL', 'GV agent', 'GV agent ID', 'GV TL', 'Age (days)'];
+      const lines = [head.join(',')].concat(rows.map((r) => [r.tagId, r.barcode, r.cls, r.type, r.bucket, r.ffAgent, r.ffAgentId, r.ffTl, r.gvAgent, r.gvAgentId, r.gvTl, r.age].map(cell).join(',')));
+      const name = `stock-map-${bucket}${q.get('cls') ? '-' + String(q.get('cls')).replace(/[^A-Za-z0-9]/g, '') : ''}-${dateKeyNow()}.csv`;
+      return sendMaybeCompressed(req, res, 200, 'text/csv; charset=utf-8', '\ufeff' + lines.join('\r\n'), { 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="${name}"` });
+    }
+    const offset = Math.max(0, Number(q.get('offset')) || 0), limit = q.get('all') === '1' ? 200000 : Math.max(1, Math.min(1000, Number(q.get('limit')) || 300));
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, total: rows.length, offset, rows: rows.slice(offset, offset + limit) }), { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/stock-age/tags' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -8230,6 +8248,23 @@ async function handleApi(req, res, url) {
         clampNum(patch.dispatch, 'horizon', 1, 90, 'dispatch.horizon');
         clampNum(patch.dispatch, 'minNeed', 0, 100000, 'dispatch.minNeed');
         clampNum(patch.dispatch, 'top', 1, 500, 'dispatch.top');
+      }
+    }
+    if (patch.stockMapAlert !== undefined) {
+      const sm = patch.stockMapAlert;
+      if (!sm || typeof sm !== 'object' || Array.isArray(sm)) throw new HttpError(400, 'stockMapAlert object hona chahiye.');
+      if (sm.enabled !== undefined) sm.enabled = sm.enabled === true || sm.enabled === 'true';
+      if (sm.limits !== undefined) {
+        if (!sm.limits || typeof sm.limits !== 'object' || Array.isArray(sm.limits)) throw new HttpError(400, 'stockMapAlert.limits object hona chahiye.');
+        const clean = {};
+        for (const cls of ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'VC20']) {
+          const raw = sm.limits[cls];
+          if (raw === undefined || raw === null || raw === '') { clean[cls] = ''; continue; }
+          const n = Number(raw);
+          if (!Number.isFinite(n) || n < 0 || n > 10000000) throw new HttpError(400, `${cls}: limit 0 se 10000000 ke beech number chahiye.`);
+          clean[cls] = Math.round(n);
+        }
+        sm.limits = clean;
       }
     }
     if (patch.email !== undefined) {

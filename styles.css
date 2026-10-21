@@ -6781,6 +6781,7 @@ html body .gs-hero h1, html body .gs-hero h2, html body .gs-hero .gs-name, html 
 }
 .hm-toprow b { white-space: normal !important; overflow-wrap: anywhere; text-overflow: clip !important; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.2; }
 .rcc-inputs label { min-width: 0; }
+.rcc-inputs .input { width: 100%; min-width: 0; box-sizing: border-box; }
 .vbars.lbl-2 .vbars-plot { padding-bottom: 30px; }
 .vbars.lbl-2 .vbars-cols { bottom: 30px; }
 .vbars.lbl-2 .vcol-label { white-space: normal !important; height: auto; bottom: -30px; line-height: 1.1; font-size: 9.5px; overflow-wrap: anywhere; }
@@ -6845,3 +6846,19 @@ html[data-theme="dark"] .kpi .delta.down, html[data-theme="dark"] .kd-hero .delt
 .smap-tbl th { font-size: 10px; white-space: normal; }
 .smap-foot td[colspan] { display: table-cell; }
 }
+/* v247 Stock mapping — clickable + Office stock warning */
+button.smap-tile { border: 0; text-align: left; font: inherit; cursor: pointer; transition: transform .12s, box-shadow .12s; }
+button.smap-tile:hover, button.smap-tile:focus-visible { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(15, 23, 42, .25); outline: none; }
+button.smap-cell { border: 0; font: inherit; font-weight: 700; cursor: pointer; transition: filter .12s, transform .12s; }
+button.smap-cell:hover, button.smap-cell:focus-visible { filter: brightness(1.12); transform: scale(1.05); outline: none; }
+button.smap-cell.smap-total { min-width: 64px; }
+.smap-link { border: 0; background: transparent; font: inherit; font-weight: 700; color: inherit; cursor: pointer; text-decoration: underline dotted; }
+.smap-warn { margin: 0 0 14px; padding: 12px 14px; border-radius: 14px; color: #fff; background: linear-gradient(135deg, #dc2626, #f97316); box-shadow: 0 6px 18px rgba(220, 38, 38, .3); }
+.smap-warn-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 8px; }
+.smap-warn-head .dim, .smap-warn-head .small { color: #fff !important; opacity: .95; }
+.smap-warn-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.smap-warn-chip { border: 0; cursor: pointer; font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 999px; background: rgba(255, 255, 255, .95); color: #7f1d1d; min-height: 32px; }
+.smap-warn-chip:hover { background: #fff; }
+.smap-dr-bar { align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.smap-dr-bar .input { min-width: 220px; flex: 1; }
+#home-stock-warn:empty { display: none; }

@@ -20,3 +20,17 @@ test('stock mapping buckets: FF / GV / GV+FF / Office; GV not-assigned ignored',
   assert.deepEqual({ ff: m.total.ff, gv: m.total.gv, both: m.total.both, office: m.total.office, total: m.total.total }, { ff: 1, gv: 1, both: 1, office: 2, total: 5 });
   assert.equal(m.gv.notAssigned, 1);
 });
+
+test('mapRows: bucket + class filter, GV issued/out status not mapped', async () => {
+  const { mapRows } = await import('../stock-age.js');
+  const b = createStockAgeBuilder({ todayDay: 20000, gvOutWords: ['ISSUED'] });
+  b.addFf([
+    { tagId: 'A', barcode: '1', cls: '4', agentId: '', agentName: '', tl: '' },
+    { tagId: 'B', barcode: '2', cls: '5', agentId: '', agentName: '', tl: '' }
+  ]);
+  b.addGv([{ tagId: 'A', serial: '1', cls: '4', status: 'ISSUED', agentId: 'G1', agentName: 'g' }, { tagId: 'B', serial: '2', cls: '5', status: 'IN STOCK', agentId: 'G2', agentName: 'g2' }]);
+  const idx = b.finish();
+  assert.equal(mapRows(idx, { bucket: 'office' }).length, 1);   // A: issued → office
+  assert.equal(mapRows(idx, { bucket: 'gv', cls: 'VC5' }).length, 1);
+  assert.equal(mapRows(idx, { bucket: 'all' }).length, 2);
+});

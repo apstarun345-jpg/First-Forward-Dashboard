@@ -723,9 +723,16 @@ FF.pages = FF.pages || {};
       ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Channel</th><th class="num">Total agents</th><th class="num">🚫 Direct</th><th>Examples</th></tr></thead><tbody>${rows.join('')}</tbody></table></div><p class="dim small">Ye numbers current loaded data se live hain. Rule save karne ke baad har page (dispatch, TL lists, search) naye rule par chalti hai.</p>`
       : '<div class="dim small">Data load nahi hua — login ke baad ye preview bharega.</div>';
   }
+  function stockMapAlertSection() {
+    const s = settings;
+    return section('🗺️ Stock mapping · Office stock warning', `<p class="dim small">Home page ke <b>Stock mapping</b> me <b>Office stock</b> (kisi ID me map nahi) ki class-wise limit set karo. Kisi class ka Office stock limit se <b>kam</b> hua to Home ke sabse upar warning dikhti rahegi. Khaali = us class ka alert nahi.</p><div class="form-grid">
+        <label class="check"><input type="checkbox" data-path="stockMapAlert.enabled" ${(settings.stockMapAlert || {}).enabled !== false ? 'checked' : ''}> <b>Office stock warning ON</b></label>
+        ${[['VC4', 'Car / Jeep / Van'], ['VC5', 'Light Commercial'], ['VC6', 'Three Axle Commercial'], ['VC7', 'Bus / Truck'], ['VC12', '4 to 6 axle'], ['VC16', 'Heavy Construction'], ['VC20', 'Light Goods']].map(([c, n]) => field(`${c} · ${n} — minimum Office stock`, numI(`stockMapAlert.limits.${c}`, ((settings.stockMapAlert || {}).limits || {})[c], 'min="0" placeholder="no alert"'))).join('')}
+      </div>${saveBar('stockMapAlert')}`);
+  }
   function rulesTab() {
     const t = settings.thresholds || {};
-    return section('📐 Thresholds & display', `<div class="form-grid">${field('Stock cover 🔴 red below (days)', numI('thresholds.coverRed', t.coverRed, 'min="0"'))}${field('Stock cover 🟠 orange below (days)', numI('thresholds.coverOrange', t.coverOrange, 'min="0"'))}${field('Stock cover 🟡 amber below (days)', numI('thresholds.coverAmber', t.coverAmber, 'min="0"'), '🟢 green above this')}${field('"Went quiet" after (inactive days)', numI('thresholds.inactiveDays', t.inactiveDays, 'min="1"'))}${field('Top N in rankings', numI('thresholds.topN', t.topN, 'min="3" max="50"'))}${field('Default rows per page', numI('pageSize', settings.pageSize, 'min="10" max="500"'))}</div>${check('allowSignup', settings.allowSignup !== false, 'Login page par "Sign up" allow karo (naye account admin approval ke baad hi chalte hain)')}${saveBar('rules')}`);
+    return section('📐 Thresholds & display', `<div class="form-grid">${field('Stock cover 🔴 red below (days)', numI('thresholds.coverRed', t.coverRed, 'min="0"'))}${field('Stock cover 🟠 orange below (days)', numI('thresholds.coverOrange', t.coverOrange, 'min="0"'))}${field('Stock cover 🟡 amber below (days)', numI('thresholds.coverAmber', t.coverAmber, 'min="0"'), '🟢 green above this')}${field('"Went quiet" after (inactive days)', numI('thresholds.inactiveDays', t.inactiveDays, 'min="1"'))}${field('Top N in rankings', numI('thresholds.topN', t.topN, 'min="3" max="50"'))}${field('Default rows per page', numI('pageSize', settings.pageSize, 'min="10" max="500"'))}</div>${check('allowSignup', settings.allowSignup !== false, 'Login page par "Sign up" allow karo (naye account admin approval ke baad hi chalte hain)')}${saveBar('rules')}`) + stockMapAlertSection();
   }
   // ---- 🔊 Sound & voice (Office Bell + Voice Announcer) — v3.18 ----------------------------------
   /** Naye tags ki awaaz yahan se test / configure hoti hai (topbar 🔊 menu ka hi doosra darwaza). */

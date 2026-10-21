@@ -968,19 +968,76 @@ FF.pages = FF.pages || {};
     const m = data && data.map;
     if (!m || !m.rows || !m.rows.length) return `<section class="card smap"><div class="card-head"><h3>🗺️ Stock mapping</h3></div><div class="card-body"><div class="empty">Mapping data abhi available nahi — StockDataa index ban raha hai ya sheet khali hai.</div></div></section>`;
     const T = m.total, fmt = (n) => U.fmt(n);
-    const tiles = SMAP_BUCKETS.map(([k, label, sub, cls]) => `<div class="smap-tile ${cls}"><span class="smap-tl">${label}</span><b>${fmt(T[k])}</b><em>${smapPct(T[k], T.total)}% · ${sub}</em></div>`).join('')
-      + `<div class="smap-tile smap-total"><span class="smap-tl">📦 Grand total</span><b>${fmt(T.total)}</b><em>StockDataa ke saare tags</em></div>`;
+    const tiles = SMAP_BUCKETS.map(([k, label, sub, cls]) => `<button type="button" class="smap-tile ${cls}" data-smap-b="${k}" title="Click → ${esc(label)} ke tags"><span class="smap-tl">${label}</span><b>${fmt(T[k])}</b><em>${smapPct(T[k], T.total)}% · ${sub}</em></button>`).join('')
+      + `<button type="button" class="smap-tile smap-total" data-smap-b="all" title="Click → saare tags"><span class="smap-tl">📦 Grand total</span><b>${fmt(T.total)}</b><em>StockDataa ke saare tags</em></button>`;
     const bar = SMAP_BUCKETS.map(([k, label, , cls]) => (T[k] ? `<i class="${cls}" style="flex:${T[k]}" title="${esc(label)} ${fmt(T[k])} (${smapPct(T[k], T.total)}%)"></i>` : '')).join('');
-    const rows = m.rows.map((r) => `<tr><td><b>${esc(String(r.cls).replace(/^VC/, ''))}</b></td><td>${esc(r.type || '')}</td>${SMAP_BUCKETS.map(([k, , , cls]) => `<td class="num"><span class="smap-cell ${cls}" style="--w:${r.total ? Math.max(4, Math.round((r[k] / r.total) * 100)) : 0}%">${fmt(r[k])}</span></td>`).join('')}<td class="num"><b>${fmt(r.total)}</b></td></tr>`).join('');
-    const foot = `<tr class="smap-foot"><td colspan="2"><b>Grand total</b></td>${SMAP_BUCKETS.map(([k]) => `<td class="num"><b>${fmt(T[k])}</b></td>`).join('')}<td class="num"><b>${fmt(T.total)}</b></td></tr>`;
+    const rows = m.rows.map((r) => `<tr><td><b>${esc(String(r.cls).replace(/^VC/, ''))}</b></td><td>${esc(r.type || '')}</td>${SMAP_BUCKETS.map(([k, , , cls]) => `<td class="num"><button type="button" class="smap-cell ${cls}" data-smap-b="${k}" data-smap-c="${esc(r.cls)}" title="${esc(r.cls)} · click → tags">${fmt(r[k])}</button></td>`).join('')}<td class="num"><button type="button" class="smap-cell smap-total" data-smap-b="all" data-smap-c="${esc(r.cls)}" title="${esc(r.cls)} · saare tags">${fmt(r.total)}</button></td></tr>`).join('');
+    const foot = `<tr class="smap-foot"><td colspan="2"><b>Grand total</b></td>${SMAP_BUCKETS.map(([k]) => `<td class="num"><button type="button" class="smap-link" data-smap-b="${k}">${fmt(T[k])}</button></td>`).join('')}<td class="num"><button type="button" class="smap-link" data-smap-b="all">${fmt(T.total)}</button></td></tr>`;
     const g = m.gv || {};
     const tl = (m.topTl || []).slice(0, 6).map((t) => `<span class="chip">${esc(t.tl)} <b>${fmt(t.ff)}</b>${t.both ? ` <small class="dim">(${fmt(t.both)} GV+FF)</small>` : ''}</span>`).join('');
     const warn = data.errors ? `<p class="dim small">⚠️ Sheet read adhura (${esc(Object.keys(data.errors).join(', '))}) — numbers purane/adhure ho sakte hain.</p>` : '';
     return `<section class="card smap"><div class="card-head"><div><h3>🗺️ Stock mapping · FF vs GV vs Office</h3><span class="dim small">StockDataa ka har tag Tag ID / Barcode se GV Tag Assignment se milaya gaya · GV "not assigned" count nahi</span></div><div class="card-right"><button class="btn small" data-smap-refresh title="Index dobara padho">↻ Refresh</button></div></div>
       <div class="card-body">${warn}<div class="smap-tiles">${tiles}</div><div class="smap-bar" aria-hidden="true">${bar}</div>
       <div class="table-wrap"><table class="tbl compact smap-tbl"><thead><tr><th>Class</th><th>Tag type</th>${SMAP_BUCKETS.map(([, l, , cls]) => `<th class="num ${cls}-h">${l}</th>`).join('')}<th class="num">Grand total</th></tr></thead><tbody>${rows}${foot}</tbody></table></div>
-      <div class="smap-notes"><span>🟩 GV Tag Assignment: <b>${fmt(g.assigned || 0)}</b> assigned · <b>${fmt(g.notAssigned || 0)}</b> not assigned (count nahi)</span>${g.notInStockData ? `<span>🔎 GV assigned par StockDataa me nahi: <b>${fmt(g.notInStockData)}</b></span>` : ''}<span class="dim">Office = StockDataa me hai par na FF agent ID me, na GV me</span></div>
+      <div class="smap-notes"><span>🟩 GV Tag Assignment: <b>${fmt(g.assigned || 0)}</b> in-stock assigned · <b>${fmt(g.notAssigned || 0)}</b> not assigned${g.outStatus ? ` · <b>${fmt(g.outStatus)}</b> issued/out` : ''} (count nahi)</span>${g.notInStockData ? `<span>🔎 GV assigned par StockDataa me nahi: <b>${fmt(g.notInStockData)}</b></span>` : ''}<span class="dim">Office = StockDataa me hai par na FF agent ID me, na GV me</span></div>
       ${tl ? `<div class="chip-row smap-tls"><span class="dim small">Top FF TLs (mapped):</span> ${tl}</div>` : ''}</div></section>`;
+  }
+  /** Office stock limit se niche wali classes (Settings → Stock mapping warning). */
+  function stockMapWarnings(data) {
+    const cfg = (FF.auth.settings && FF.auth.settings.stockMapAlert) || {};
+    const m = data && data.map;
+    if (cfg.enabled === false || !m || !m.rows) return [];
+    const out = [];
+    m.rows.forEach((r) => { const lim = Number((cfg.limits || {})[r.cls]); if ((cfg.limits || {})[r.cls] !== '' && (cfg.limits || {})[r.cls] != null && Number.isFinite(lim) && lim > 0 && r.office < lim) out.push({ cls: r.cls, type: r.type, office: r.office, limit: lim }); });
+    return out;
+  }
+  function stockWarnHtml(list) {
+    if (!list.length) return '';
+    const chips = list.map((w) => `<button type="button" class="smap-warn-chip" data-smap-b="office" data-smap-c="${esc(w.cls)}" title="Office stock ke tags dekho"><b>${esc(w.cls)}</b> ${esc(w.type || '')} · <b>${U.fmt(w.office)}</b> <small>/ limit ${U.fmt(w.limit)}</small></button>`).join('');
+    return `<section class="smap-warn" role="alert"><div class="smap-warn-head"><b>⚠️ Office stock kam hai</b><span class="dim small">${list.length} class limit se niche · click = tags dekho / download</span>${FF.auth.can && FF.auth.can('settings') ? '<a class="btn small" href="#/settings">⚙ Limit</a>' : ''}</div><div class="smap-warn-chips">${chips}</div></section>`;
+  }
+  const SMAP_LABEL = { ff: '🟦 First Forward', gv: '🟩 GV Partner', both: '🟪 GV + FF', office: '🟧 Office stock', all: '📦 All stock' };
+  async function openStockMapDrawer(bucket, cls) {
+    if (!FF.app || !FF.app.openDrawer) return;
+    const title = `${SMAP_LABEL[bucket] || bucket}${cls ? ` · ${cls}` : ''}`;
+    const qs = (extra) => `bucket=${encodeURIComponent(bucket)}${cls ? `&cls=${encodeURIComponent(cls)}` : ''}${extra || ''}`;
+    const body = FF.app.openDrawer({ kicker: '🗺️ Stock mapping', title, sub: 'StockDataa tags · FF / GV mapping', body: U.spinner('Tags load ho rahe hain…'), wide: true });
+    const host = body && body.querySelector ? body : U.$('#drawer-body');
+    const state = { q: '', rows: [], total: 0 };
+    const fetchPage = async (offset, limit, all) => {
+      for (let i = 0; i < 40; i++) {
+        const d = await FF.auth.api(`/api/stock-map/tags?${qs(`&offset=${offset}&limit=${limit}${all ? '&all=1' : ''}${state.q ? `&q=${encodeURIComponent(state.q)}` : ''}`)}`);
+        if (d && d.pending) { await new Promise((r) => setTimeout(r, 2500)); continue; }
+        return d;
+      }
+      throw new Error('Server index abhi ready nahi — thodi der baad try karo');
+    };
+    const paint = () => {
+      const canExp = FF.auth.can('export');
+      host.innerHTML = `<div class="btn-row smap-dr-bar"><input class="input" id="smap-q" placeholder="Search tag / barcode / agent / TL…" value="${esc(state.q)}">${canExp ? `<button class="btn small primary" id="smap-xlsx">⬇ Excel (all)</button><a class="btn small" id="smap-csv" href="/api/stock-map/csv?${qs(state.q ? `&q=${encodeURIComponent(state.q)}` : '')}" download>⬇ CSV</a>` : ''}<a class="btn small" href="#/stock">📦 Stock page</a><span class="dim small">${U.fmt(state.total)} tags · pehle ${U.fmt(state.rows.length)} dikh rahe</span></div>
+        <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Tag ID</th><th>Barcode</th><th>Class</th><th>Bucket</th><th>FF agent</th><th>FF TL</th><th>GV agent</th><th>GV TL</th><th class="num">Age</th></tr></thead><tbody>${state.rows.map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.tagId)}</td><td class="mono">${esc(r.barcode)}</td><td>${esc(r.cls)}</td><td>${esc(r.bucket)}</td><td>${esc(r.ffAgent)}${r.ffAgentId ? ` <small class="dim">${esc(r.ffAgentId)}</small>` : ''}</td><td>${esc(r.ffTl)}</td><td>${esc(r.gvAgent)}${r.gvAgentId ? ` <small class="dim">${esc(r.gvAgentId)}</small>` : ''}</td><td>${esc(r.gvTl)}</td><td class="num">${r.age === '' ? '—' : esc(r.age)}</td></tr>`).join('') || '<tr><td colspan="10" class="empty">Koi tag nahi.</td></tr>'}</tbody></table></div>
+        ${state.rows.length < state.total ? '<div class="btn-row"><button class="btn small" id="smap-more">⬇ Aur dikhao</button></div>' : ''}`;
+      const q = host.querySelector('#smap-q');
+      let tm = null;
+      if (q) q.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => { state.q = q.value.trim(); load(); }, 350); });
+      const more = host.querySelector('#smap-more');
+      if (more) more.addEventListener('click', async () => { more.disabled = true; try { const d = await fetchPage(state.rows.length, 300); state.rows = state.rows.concat(d.rows || []); state.total = d.total; paint(); } catch (e) { U.toast(e.message || 'Load nahi hua', 'err'); more.disabled = false; } });
+      const x = host.querySelector('#smap-xlsx');
+      if (x) x.addEventListener('click', async () => {
+        x.disabled = true; const old = x.textContent; x.textContent = 'Excel ban raha hai…';
+        try {
+          const d = await fetchPage(0, 1000, true);
+          const rows = (d.rows || []).map((r) => [r.tagId, r.barcode, r.cls, r.type, r.bucket, r.ffAgent, r.ffAgentId, r.ffTl, r.gvAgent, r.gvAgentId, r.gvTl, r.age]);
+          FF.xlsx.download(`stock-map-${bucket}${cls ? `-${cls}` : ''}-${U.stamp()}.xlsx`, [{ name: 'Tags', header: ['Tag ID', 'Barcode', 'Class', 'Tag type', 'Bucket', 'FF agent', 'FF agent ID', 'FF TL', 'GV agent', 'GV agent ID', 'GV TL', 'Age (days)'], rows }]);
+        } catch (e) { U.toast(e.message || 'Excel nahi bana', 'err'); }
+        x.disabled = false; x.textContent = old;
+      });
+    };
+    const load = async () => {
+      try { const d = await fetchPage(0, 300); state.rows = d.rows || []; state.total = d.total || 0; paint(); const q = host.querySelector('#smap-q'); if (q && state.q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
+      catch (e) { host.innerHTML = U.errorBox ? U.errorBox(e) : esc(e.message); }
+    };
+    load();
   }
   async function mountStockMap(el, allowed) {
     if (!el || !allowed || !FF.auth || typeof FF.auth.api !== 'function') return;
@@ -998,11 +1055,15 @@ FF.pages = FF.pages || {};
         }
         if (!el.isConnected) return;
         el.innerHTML = stockMapHtml(data);
+        const warnEl = document.getElementById('home-stock-warn');
+        if (warnEl) warnEl.innerHTML = stockWarnHtml(stockMapWarnings(data));
       } catch (err) {
         if (el.isConnected) el.innerHTML = `<section class="card smap"><div class="card-body">${U.errorBox ? U.errorBox(err) : esc(err.message || err)}<button class="btn small" data-smap-refresh>↻ Retry</button></div></section>`;
       }
     };
-    el.addEventListener('click', (e) => { if (e.target.closest('[data-smap-refresh]')) load(true); });
+    el.addEventListener('click', (e) => { if (e.target.closest('[data-smap-refresh]')) { load(true); return; } const t = e.target.closest('[data-smap-b]'); if (t) openStockMapDrawer(t.dataset.smapB, t.dataset.smapC || ''); });
+    const warnHost = document.getElementById('home-stock-warn');
+    if (warnHost) warnHost.addEventListener('click', (e) => { const t = e.target.closest('[data-smap-b]'); if (t) openStockMapDrawer(t.dataset.smapB, t.dataset.smapC || ''); });
     load(false);
   }
   const homeLayout = (() => {
@@ -1100,7 +1161,7 @@ FF.pages = FF.pages || {};
     const canFf = FF.auth.can('dashboard') || FF.auth.can('trend') || FF.auth.can('stock') || FF.auth.can('performance');
     const canGv = FF.auth.can('gvDashboard') || FF.auth.can('gvTrend') || FF.auth.can('gvStock') || FF.auth.can('gvPerformance');
 
-    root.innerHTML = `<div id="home-fresh-alert"></div><div class="home-hero v2">
+    root.innerHTML = `<div id="home-stock-warn"></div><div id="home-fresh-alert"></div><div class="home-hero v2">
         <div class="home-hero-main">
           ${avatar}
           <div>
