@@ -1139,7 +1139,7 @@ class HttpError extends Error { constructor(status, message) { super(message); t
 // gviz proxy cache — entry count AUR total bytes dono par cap. Pehle sirf 400 entries ka cap tha, size ka nahi:
 // bade bodies (StockDataa 25k-row pages, GV Master, EIR…) 512 MB wale instance ki heap bhar dete the (measured:
 // ek browsing session ke baad server RSS ~400 MB). Cap se upar jaane par sabse purani entries nikal jaati hain.
-const MAX_CACHE_BYTES = Math.max(8, Number(process.env.CACHE_MAX_MB) || 64) * 1024 * 1024;
+const MAX_CACHE_BYTES = Math.max(8, Number(process.env.CACHE_MAX_MB) || 40) * 1024 * 1024;
 class GvizCache extends Map {
   constructor() { super(); this.bytes = 0; }
   static sizeOf(entry) { return entry && typeof entry.body === 'string' ? entry.body.length : 0; }
@@ -1157,6 +1157,26 @@ class GvizCache extends Map {
   clear() { super.clear(); this.bytes = 0; }
 }
 const cache = new GvizCache();   // url → { at, body, status }
+// 🛡️ v241 — memory guard. 512 MB cross karte hi Render process maar deta tha aur site ~10 min 502 rehti thi
+// (GC thrash). Ab: 400 MB par caches khali (soft) · 470 MB par turant clean restart (hard, ~10 sec) — data durable storage me safe hai.
+const MEM_SOFT_MB = Number(process.env.MEM_SOFT_MB) || 400;
+const MEM_HARD_MB = Number(process.env.MEM_HARD_MB) || 470;
+const memGuard = { lastSoftAt: 0, softCount: 0, peakMB: 0 };
+function rssMB() { return Math.round(process.memoryUsage().rss / 1048576); }
+const memTimer = setInterval(() => {
+  const mb = rssMB();
+  if (mb > memGuard.peakMB) memGuard.peakMB = mb;
+  if (mb >= MEM_HARD_MB) {
+    console.error(`🛡️ memory guard: RSS ${mb} MB ≥ ${MEM_HARD_MB} MB — clean restart (OOM / 502 se bachne ke liye). Data durable storage me hai.`);
+    setTimeout(() => process.exit(1), 50);
+  } else if (mb >= MEM_SOFT_MB && Date.now() - memGuard.lastSoftAt > 30000) {
+    memGuard.lastSoftAt = Date.now(); memGuard.softCount++;
+    try { cache.clear(); } catch { /* ignore */ }
+    try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ }
+    console.warn(`🛡️ memory guard: RSS ${mb} MB ≥ ${MEM_SOFT_MB} MB — gviz cache khali kiya.`);
+  }
+}, 10000);
+if (memTimer.unref) memTimer.unref();
 const inflight = new Map(); // url → Promise
 const cacheMs = () => Math.max(0, Number(db.settings.cacheSeconds ?? DEFAULT_CACHE_SECONDS)) * 1000;
 
@@ -2834,7 +2854,15 @@ async function gvizPageServer(params, sheet) {
 }
 /** Tab ko STOCK_AGE_PAGE_ROWS ke pages me padho; har page `onPage(rows, at)` ko milta hai (poora sheet ek saath memory me nahi).
  *  Pages 3-ke-window me parallel aate hain par PROCESS hamesha order me hote hain (ageing ka raw order stable rahe). */
-async function gvizPagesServer(sheetId, sheet, letters, where, onPage) {
+// 🛡️ v241 — ek waqt me sirf EK bada sheet-scan (stock-age FF/GV, FASTag mapping …). Pehle 2–3 scan saath chalte the
+// (purana + naya index + raw pages) → 512 MB limit cross → OOM → 502. Ab line se chalte hain; peak memory ~aadha.
+let heavyScanChain = Promise.resolve();
+function gvizPagesServer(...args) {
+  const run = heavyScanChain.then(() => gvizPagesServerRaw(...args));
+  heavyScanChain = run.catch(() => {});
+  return run;
+}
+async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage) {
   const cols = letters.filter(Boolean);
   const base = `select ${cols.join(', ')}${where ? ` where ${where}` : ''}`;
   const id = String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
@@ -4918,7 +4946,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: APP_VERSION, storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length, tagRequestRecovery: tagReqRecoveryInfo } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: APP_VERSION, storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, memoryMB: rssMB(), memoryPeakMB: memGuard.peakMB, memorySoftTrims: memGuard.softCount, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length, tagRequestRecovery: tagReqRecoveryInfo } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
