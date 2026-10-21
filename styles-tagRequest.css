@@ -276,7 +276,6 @@ body.public-form .tr-hero .tr-public-brand { margin-bottom: 14px; }
 body.public-form .tr-hero .tr-public-logo { background: rgba(255, 255, 255, .16); color: #fff; border: 1px solid rgba(255, 255, 255, .25); }
 body.public-form .tr-hero .sub { margin: 0; max-width: 520px; font-size: 14px; line-height: 1.5; color: rgba(255, 255, 255, .82) !important; }
 body.public-form .tr-hero-stats:empty { display: none; }
-body.public-form .tr-hero-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; }
 body.public-form .tr-pill-tabs { margin: 0 0 14px; }
 body.public-form .tr-pill-tabs .seg { background: none; padding: 0; gap: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
 body.public-form .tr-pill-tabs .seg::-webkit-scrollbar { display: none; }
@@ -288,8 +287,6 @@ body.public-form .tr-agent-card.tr-has-err { border-color: #f3a9a9; }
 body.public-form .tr-agent-num { font-weight: 800; }
 body.public-form .tr-qty-row .input.tr-qty { border-radius: 12px; background: #eef4ff; border-color: #cfe0ff; color: #1d4ed8; }
 body.public-form .tr-send-btn { padding: 12px 22px; font-size: 14px; }
-body.public-form .tr-es-tags { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
-body.public-form .tr-st-list { display: grid; gap: 10px; }
 body.public-form .tr-st-card.st-approved { background: linear-gradient(0deg, #fff, #f6fdf9); }
 body.public-form .tr-st-card.st-rejected { background: linear-gradient(0deg, #fff, #fff7f7); }
 body.public-form .tr-done { border-radius: 28px; }
@@ -314,9 +311,6 @@ body.public-form .tr-submit-bar { border-radius: 24px; justify-content: space-be
 .tr-status-bar .chip[data-tr-chip="rejected"].on { background: #dc2626; border-color: #dc2626; color: #fff; }
 .tr-status-bar .chip.on .count { background: rgba(255, 255, 255, .25); color: #fff; }
 .tr-st-inline { font-weight: 800; }
-@media (max-width: 720px) {
-.tr-status-bar .tr-chips::-webkit-scrollbar { display: none; }
-}
 @media (max-width: 720px) {
 .page-tagRequest .tr-req-actions .tr-bulk-status { display: contents !important; }
 .page-tagRequest #tr-req-card .card-head .card-right { display: none; }

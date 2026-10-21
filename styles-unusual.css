@@ -60,4 +60,3 @@
 .dkpi-hero { grid-column: 1 / -1; border: 1.5px solid color-mix(in srgb, var(--brand, #4f46e5) 35%, transparent); background: color-mix(in srgb, var(--brand, #4f46e5) 6%, transparent); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .ua-kicker { color: #be123c; background: rgba(244, 63, 94, .12); border-color: rgba(244, 63, 94, .4); }
 html[data-theme="dark"] .ua-kicker, .ua-hero .ua-kicker, .ua-head .ua-kicker { color: #fda4af; background: rgba(244, 63, 94, .25); border-color: rgba(244, 63, 94, .45); }
-.ua-sc-metrics span { font-size: 10.5px; }

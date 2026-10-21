@@ -5123,6 +5123,13 @@ async function handleApi(req, res, url) {
     const body = JSON.stringify({ ...stockAgeSummary(index), building: !!stockAgeState.promise });
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', body, { 'Cache-Control': 'no-store' });
   }
+  // 🗺️ Stock mapping summary (home page): StockDataa tags → FF / GV / GV+FF / Office (same index, naya scan nahi).
+  if (p === '/api/stock-map' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, false);
+    if (!index) return sendJson(res, 200, stockAgePending());
+    return sendJson(res, 200, { ok: true, at: new Date(index.at).toISOString(), building: !!stockAgeState.promise, errors: index.errors || null, map: index.map || null }, { 'Cache-Control': 'no-store' });
+  }
   if (p === '/api/stock-age/tags' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
     const q = url.searchParams;

@@ -961,6 +961,50 @@ FF.pages = FF.pages || {};
   })();
   FF.homeFreshness = freshness;
 
+  // ---- 🗺️ Stock mapping: StockDataa ka poora stock → FF / GV / GV+FF / Office (server index se) ----
+  const SMAP_BUCKETS = [['ff', '🟦 First Forward', 'FF agents ke IDs me map', 'smap-ff'], ['gv', '🟩 GV Partner', 'sirf GV IDs me map', 'smap-gv'], ['both', '🟪 GV + FF', 'dono IDs me map', 'smap-both'], ['office', '🟧 Office stock', 'kisi ID me map nahi', 'smap-office']];
+  const smapPct = (v, t) => (t ? Math.round((v / t) * 1000) / 10 : 0);
+  function stockMapHtml(data) {
+    const m = data && data.map;
+    if (!m || !m.rows || !m.rows.length) return `<section class="card smap"><div class="card-head"><h3>🗺️ Stock mapping</h3></div><div class="card-body"><div class="empty">Mapping data abhi available nahi — StockDataa index ban raha hai ya sheet khali hai.</div></div></section>`;
+    const T = m.total, fmt = (n) => U.fmt(n);
+    const tiles = SMAP_BUCKETS.map(([k, label, sub, cls]) => `<div class="smap-tile ${cls}"><span class="smap-tl">${label}</span><b>${fmt(T[k])}</b><em>${smapPct(T[k], T.total)}% · ${sub}</em></div>`).join('')
+      + `<div class="smap-tile smap-total"><span class="smap-tl">📦 Grand total</span><b>${fmt(T.total)}</b><em>StockDataa ke saare tags</em></div>`;
+    const bar = SMAP_BUCKETS.map(([k, label, , cls]) => (T[k] ? `<i class="${cls}" style="flex:${T[k]}" title="${esc(label)} ${fmt(T[k])} (${smapPct(T[k], T.total)}%)"></i>` : '')).join('');
+    const rows = m.rows.map((r) => `<tr><td><b>${esc(String(r.cls).replace(/^VC/, ''))}</b></td><td>${esc(r.type || '')}</td>${SMAP_BUCKETS.map(([k, , , cls]) => `<td class="num"><span class="smap-cell ${cls}" style="--w:${r.total ? Math.max(4, Math.round((r[k] / r.total) * 100)) : 0}%">${fmt(r[k])}</span></td>`).join('')}<td class="num"><b>${fmt(r.total)}</b></td></tr>`).join('');
+    const foot = `<tr class="smap-foot"><td colspan="2"><b>Grand total</b></td>${SMAP_BUCKETS.map(([k]) => `<td class="num"><b>${fmt(T[k])}</b></td>`).join('')}<td class="num"><b>${fmt(T.total)}</b></td></tr>`;
+    const g = m.gv || {};
+    const tl = (m.topTl || []).slice(0, 6).map((t) => `<span class="chip">${esc(t.tl)} <b>${fmt(t.ff)}</b>${t.both ? ` <small class="dim">(${fmt(t.both)} GV+FF)</small>` : ''}</span>`).join('');
+    const warn = data.errors ? `<p class="dim small">⚠️ Sheet read adhura (${esc(Object.keys(data.errors).join(', '))}) — numbers purane/adhure ho sakte hain.</p>` : '';
+    return `<section class="card smap"><div class="card-head"><div><h3>🗺️ Stock mapping · FF vs GV vs Office</h3><span class="dim small">StockDataa ka har tag Tag ID / Barcode se GV Tag Assignment se milaya gaya · GV "not assigned" count nahi</span></div><div class="card-right"><button class="btn small" data-smap-refresh title="Index dobara padho">↻ Refresh</button></div></div>
+      <div class="card-body">${warn}<div class="smap-tiles">${tiles}</div><div class="smap-bar" aria-hidden="true">${bar}</div>
+      <div class="table-wrap"><table class="tbl compact smap-tbl"><thead><tr><th>Class</th><th>Tag type</th>${SMAP_BUCKETS.map(([, l, , cls]) => `<th class="num ${cls}-h">${l}</th>`).join('')}<th class="num">Grand total</th></tr></thead><tbody>${rows}${foot}</tbody></table></div>
+      <div class="smap-notes"><span>🟩 GV Tag Assignment: <b>${fmt(g.assigned || 0)}</b> assigned · <b>${fmt(g.notAssigned || 0)}</b> not assigned (count nahi)</span>${g.notInStockData ? `<span>🔎 GV assigned par StockDataa me nahi: <b>${fmt(g.notInStockData)}</b></span>` : ''}<span class="dim">Office = StockDataa me hai par na FF agent ID me, na GV me</span></div>
+      ${tl ? `<div class="chip-row smap-tls"><span class="dim small">Top FF TLs (mapped):</span> ${tl}</div>` : ''}</div></section>`;
+  }
+  async function mountStockMap(el, allowed) {
+    if (!el || !allowed || !FF.auth || typeof FF.auth.api !== 'function') return;
+    const load = async (force) => {
+      el.innerHTML = `<section class="card smap"><div class="card-body">${U.spinner('Stock mapping (StockDataa × GV Tag Assignment) calculate ho raha hai…')}</div></section>`;
+      const began = Date.now();
+      try {
+        let data = null;
+        for (;;) {
+          data = await FF.auth.api(`/api/stock-map`);
+          if (!(data && data.pending)) break;
+          if (Date.now() - began > 4 * 60e3) throw new Error('Server abhi bhi stock index bana raha hai — thodi der baad Refresh karo');
+          await new Promise((r) => setTimeout(r, Math.min(8000, Math.max(1000, Number(data.retryAfterMs) || 3000))));
+          if (!el.isConnected) return;
+        }
+        if (!el.isConnected) return;
+        el.innerHTML = stockMapHtml(data);
+      } catch (err) {
+        if (el.isConnected) el.innerHTML = `<section class="card smap"><div class="card-body">${U.errorBox ? U.errorBox(err) : esc(err.message || err)}<button class="btn small" data-smap-refresh>↻ Retry</button></div></section>`;
+      }
+    };
+    el.addEventListener('click', (e) => { if (e.target.closest('[data-smap-refresh]')) load(true); });
+    load(false);
+  }
   const homeLayout = (() => {
     const SECTIONS = [
       ['home-todo', "✅ Today's work"],
@@ -970,6 +1014,7 @@ FF.pages = FF.pages || {};
       ['home-pulse', '📡 Management pulse'],
       ['home-charts', '📊 Charts'],
       ['home-stock', '📦 Stock'],
+      ['home-stock-map', '🗺️ Stock mapping (FF · GV · Office)'],
       ['home-freshness', '🕒 Sheets last update']
     ];
     const ids = SECTIONS.map((x) => x[0]);
@@ -1081,6 +1126,7 @@ FF.pages = FF.pages || {};
       <div id="home-pulse"></div>
       <div id="home-charts">${U.spinner('Charts…')}</div>
       <div id="home-stock">${U.spinner('Stock (StockDataa + Tag Assignment)…')}</div>
+      <div id="home-stock-map"></div>
       <div id="home-freshness"></div>
       <p class="foot-note">🟩 GV aaj = <b>GV Master sheet</b> (live) · 🧾 Issuance history = <b>EIR</b> (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF) · 📦 Stock = <b>StockDataa</b> (FF) + <b>Tag Assignment</b> (GV) · 🟦 FF ka issuance T+1 aata hai · 🔎 Global search top bar par hai · full profile/results Management → Master Search me.</p>`;
 
@@ -1145,6 +1191,7 @@ FF.pages = FF.pages || {};
     const pulseMount = U.$('#home-pulse', root);
     const targetAchievementMount = U.$('#home-target-achievement', root);
     const stockMount = U.$('#home-stock', root);
+    mountStockMap(U.$('#home-stock-map', root), canFf);
 
     // ⚡ Home first paint: GV-only today endpoint is intentionally separate from the heavier
     // FF+GV history feed. This makes "AAJ KA LIVE" visible even when 30-day history is slow.

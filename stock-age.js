@@ -80,6 +80,44 @@ export function packNode(node) {
  *  gvRows: [{ cls, tagId, serial, status, agentId, agentName, tlId, tlName, date }]
  *  todayDay: aaj ka UTC day number (IST date) · masterId: GV master ID (5845036) — sirf label ke liye.
  */
+const NOT_ASSIGNED_RE = /^(not[\s_-]*assigned|unassigned|na|n\/a|none|null|nil|-+|0)$/i;
+/** GV Tag Assignment row tab "assigned" maani jaati hai jab uska GV agent ID / naam ho (not-assigned / blank nahi). */
+export function isGvAssigned(r) {
+  const id = str(r.agentId), name = str(r.agentName), st = str(r.status);
+  if (/not[\s_-]*assigned|unassigned/i.test(st)) return false;
+  const ok = (v) => v && !NOT_ASSIGNED_RE.test(v) && !/not[\s_-]*assigned|unassigned/i.test(v);
+  return !!(ok(id) || ok(name));
+}
+export const TAG_TYPE_LABEL = { VC4: 'Car / Jeep / Van', VC5: 'Light Commercial', VC6: 'Three Axle Commercial', VC7: 'Bus / Truck', VC12: '4 to 6 axle', VC16: 'Heavy Construction', VC20: 'Light Goods / Mini LCV' };
+const CLS_ORDER = ['VC12', 'VC16', 'VC4', 'VC5', 'VC6', 'VC7', 'VC20'];
+/** StockDataa ke har tag ko 4 me se ek bucket: FF (sirf FF agent ID me) · GV (sirf GV ID me) · BOTH (dono) · OFFICE (kahin map nahi).
+ *  Match: TAG_ID ya BARCODE (= GV serial). GV "not assigned" rows count nahi hoti. */
+export function buildMapSummary(ffRaw, gvMap, { masterDigits = '', parkedTlNorm = '' } = {}) {
+  const byCls = new Map();
+  const slot = (c) => { let x = byCls.get(c); if (!x) { x = { cls: c, ff: 0, gv: 0, both: 0, office: 0, total: 0 }; byCls.set(c, x); } return x; };
+  const seenTags = new Set(), seenBcs = new Set();
+  const tl = new Map();   // FF TL-wise: kitna FF-mapped aur usme se GV bhi
+  let parkedGv = 0;
+  for (const r of ffRaw || []) {
+    const tagU = str(r[0]).toUpperCase(), bc = normBarcode(r[1]);
+    seenTags.add(tagU); if (bc) seenBcs.add(bc);
+    const agentName = str(r[4]), agentDigits = digits(r[5]), tlName = str(r[6]);
+    const parked = (masterDigits && agentDigits === masterDigits) || (parkedTlNorm && normName(tlName) === parkedTlNorm) || (!agentDigits && !agentName);
+    const ffMapped = !parked;
+    const gvMapped = gvMap.tags.has(tagU) || (bc && gvMap.bcs.has(bc));
+    const c = slot(r[2] || 'NA');
+    c.total++;
+    if (ffMapped && gvMapped) c.both++; else if (ffMapped) c.ff++; else if (gvMapped) c.gv++; else c.office++;
+    if (gvMapped && !ffMapped) parkedGv++;
+    if (ffMapped) { const k = tlName || '— (TL blank)'; const t = tl.get(k) || { tl: k, ff: 0, both: 0 }; t.ff++; if (gvMapped) t.both++; tl.set(k, t); }
+  }
+  const rows = [...byCls.values()].sort((a, b) => (CLS_ORDER.indexOf(a.cls) + 1 || 99) - (CLS_ORDER.indexOf(b.cls) + 1 || 99)).map((x) => ({ ...x, type: TAG_TYPE_LABEL[x.cls] || '' }));
+  const total = rows.reduce((t, x) => ({ ff: t.ff + x.ff, gv: t.gv + x.gv, both: t.both + x.both, office: t.office + x.office, total: t.total + x.total }), { ff: 0, gv: 0, both: 0, office: 0, total: 0 });
+  // GV me assigned par StockDataa me nahi mile (alag ginti — total me nahi judte)
+  let gvNotInStock = 0;
+  gvMap.tags.forEach((t) => { if (!seenTags.has(t)) gvNotInStock++; });
+  return { rows, total, gv: { rows: gvMap.rows, assigned: gvMap.assigned, notAssigned: gvMap.notAssigned, notInStockData: gvNotInStock }, ffRows: (ffRaw || []).length, topTl: [...tl.values()].sort((a, b) => b.ff - a.ff).slice(0, 10) };
+}
 export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.' } = {}) {
   const today = Number.isFinite(todayDay) ? todayDay : Math.floor(Date.now() / DAY_MS);
   const ageOf = (day) => (day ? Math.max(0, Math.round(today - day)) : null);
@@ -96,6 +134,7 @@ export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl
   // field = agents ke paas (asli field stock) · parked = master (5845036) / "ApnaPayment Pvt. Ltd." / bina agent (BC + GV ka stock)
   const ff = { all: newNode('First Forward · poora StockDataa'), field: newNode('First Forward · field (agents ke paas)'), parked: newNode('🏬 Master / GV parked (ApnaPayment)'), agents: new Map(), tls: new Map(), raw: [], total: 0, unknown: 0, rows: 0 };
   const byTag = new Map(), byBarcode = new Map();
+  const gvMap = { tags: new Set(), bcs: new Set(), assigned: 0, notAssigned: 0, rows: 0 };   // 🗺️ mapping summary ke liye (finish par saaf)
   const gv = { all: newNode('GV Partner · poora network'), agents: new Map(), tls: new Map(), raw: [], total: 0, unknown: 0, matched: 0, own: 0, rows: 0 };
   /** FF (StockDataa) rows ka ek page / chunk. */
   function addFf(rows) {
@@ -138,6 +177,8 @@ export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl
       const tagId = str(r.tagId);
       if (!tagId || isHeaderTag(tagId, r.cls)) continue;
       gv.rows++;
+      gvMap.rows++;
+      if (isGvAssigned(r)) { gvMap.assigned++; gvMap.tags.add(tagId.toUpperCase()); const sb = normBarcode(r.serial); if (sb) gvMap.bcs.add(sb); } else gvMap.notAssigned++;
       let day = parseStockDay(r.date), src = day ? 'sheet' : '';
       if (day) gv.own++;
       if (!day) { day = byTag.get(tagId.toUpperCase()) || byBarcode.get(normBarcode(r.serial)) || 0; if (day) { src = 'stockdataa'; gv.matched++; } }
@@ -162,7 +203,9 @@ export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl
   }
   function finish() {
     byTag.clear(); byBarcode.clear(); pool.clear();
-    return { at: Date.now(), today, masterId: str(masterId), masterDigits, parkedTlNorm, ff, gv };
+    const map = buildMapSummary(ff.raw, gvMap, { masterDigits, parkedTlNorm });
+    gvMap.tags.clear(); gvMap.bcs.clear();
+    return { at: Date.now(), today, masterId: str(masterId), masterDigits, parkedTlNorm, ff, gv, map };
   }
   return { addFf, addGv, finish, get today() { return today; } };
 }

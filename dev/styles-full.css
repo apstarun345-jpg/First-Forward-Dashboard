@@ -7865,3 +7865,25 @@ html[data-theme="dark"] .tix-down { color: #fca5a5; }
 .chip-group .chip-label { flex: 0 0 170px; font-weight: 600; }
 .chip-group .chip { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
 @media (max-width: 640px) { .chip-groups { grid-template-columns: 1fr; } .chip-group .chip-label { flex: 0 0 100%; } }
+
+/* v246 Home — Stock mapping (FF · GV · GV+FF · Office) */
+.smap-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.smap-tile { border-radius: 14px; padding: 14px 14px 12px; color: #fff; display: flex; flex-direction: column; gap: 4px; min-width: 0; box-shadow: 0 6px 16px rgba(15, 23, 42, .14); }
+.smap-tile .smap-tl { font-size: 12px; font-weight: 700; letter-spacing: .02em; opacity: .95; }
+.smap-tile b { font-size: 28px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.smap-tile em { font-style: normal; font-size: 12px; opacity: .92; }
+.smap-ff { background: linear-gradient(135deg, #2563eb, #0ea5e9); }
+.smap-gv { background: linear-gradient(135deg, #16a34a, #84cc16); }
+.smap-both { background: linear-gradient(135deg, #7c3aed, #d946ef); }
+.smap-office { background: linear-gradient(135deg, #ea580c, #f59e0b); }
+.smap-total { background: linear-gradient(135deg, #1e3a8a, #334155); }
+.smap-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; margin: 0 0 14px; background: rgba(148, 163, 184, .25); }
+.smap-bar i { display: block; min-width: 3px; }
+.smap-tbl th.smap-ff-h { color: #2563eb; } .smap-tbl th.smap-gv-h { color: #16a34a; } .smap-tbl th.smap-both-h { color: #7c3aed; } .smap-tbl th.smap-office-h { color: #ea580c; }
+.smap-cell { display: inline-block; min-width: 64px; padding: 3px 10px; border-radius: 8px; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; text-align: right; }
+.smap-cell.smap-ff, .smap-cell.smap-gv, .smap-cell.smap-both, .smap-cell.smap-office { box-shadow: none; }
+.smap-foot td { background: rgba(37, 99, 235, .10); }
+.smap-notes { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 12px 0 4px; font-size: 13px; }
+.smap-tls { margin-top: 8px; }
+@media (max-width: 900px) { .smap-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .smap-total { grid-column: 1 / -1; } .smap-tile b { font-size: 24px; } }
+@media (max-width: 640px) { .smap-tbl th:nth-child(2), .smap-tbl td:nth-child(2) { display: none; } .smap-cell { min-width: 48px; padding: 3px 6px; font-size: 12px; } .smap-tbl th { font-size: 10px; white-space: normal; } .smap-foot td[colspan] { display: table-cell; } }
