@@ -231,7 +231,7 @@ const DEFAULT_SETTINGS = {
   stockLedger: { // 📒 dispatch ledger (barcode → dispatch date / name): First–Last barcode wali stock sheets
     ff1: { enabled: true, label: 'IDFC Stock Sheet (FF)', layout: 'ff', sheetId: '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M', gid: '0' },
     gv1: { enabled: true, label: 'GV Stock Sheet (IDFC workbook)', layout: 'gv', sheetId: '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M', gid: '1205828388' },
-    gv2: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
+    gv2: { enabled: false, label: 'GV STOCK SHEET (alag file)', layout: 'gv', sheetId: '', gid: '774013315' }
   },
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
@@ -2832,15 +2832,17 @@ async function loadLedger() {
     const firstCol = letters[src.layout === 'gv' ? 6 : 5];
     let n = 0;
     try {
-      await gvizPagesServer(src.sheetId, `gid:${src.gid}`, letters, `${firstCol} is not null`, async (rows) => {
+      // heavyScanChain ke bahar: ye chhoti sheets hain; bade StockDataa scan ke peeche atakne se dispatch kabhi load nahi hota tha.
+      await gvizPagesServerRaw(src.sheetId, `gid:${src.gid}`, letters, `${firstCol} is not null`, async (rows) => {
         for (let i = 0; i < rows.length; i++) {
           const cells = letters.map((_, k) => serverCell(rows[i], k));
-          const e = ledgerRow(cells.map((v, k) => (k === 0 ? (serverDate(rows[i] && rows[i].c && rows[i].c[0] ? rows[i].c[0].v : v) || v) : v)), src.layout, src.ch, n + 1, (x) => String(x || ''));
+          const c0 = rows[i] && rows[i].c && rows[i].c[0];
+          const e = ledgerRow(cells.map((v, k) => (k === 0 ? (serverDate(c0 ? c0.v : v) || serverDate(c0 ? c0.f : '') || serverDate(v) || v) : v)), src.layout, src.ch, n + 1, (x) => String(x || ''));
           n++;
           if (e) { e.src = src.label; entries[src.ch].push(e); }
           if (i % 4000 === 3999) await yieldLoop();
         }
-      }, { headers: 1 });
+      }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 });
       counts[src.id] = n;
     } catch (err) { errors[src.id] = String((err && err.message) || err).slice(0, 200); }
   }
@@ -2917,10 +2919,11 @@ async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage, extra)
   const id = String(sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
   const inflight = new Map();
   let launched = 0;
+  const PAGE_ROWS = (extra && extra.pageRows) || STOCK_AGE_PAGE_ROWS, WINDOW = (extra && extra.window) || STOCK_AGE_PAGE_WINDOW, MAX_PAGES = (extra && extra.maxPages) || STOCK_AGE_MAX_PAGES;
   const launch = (upTo) => {
-    while (launched <= upTo && launched < STOCK_AGE_MAX_PAGES) {
+    while (launched <= upTo && launched < MAX_PAGES) {
       const page = launched++;
-      const qp = new URLSearchParams({ id, tq: `${base} limit ${STOCK_AGE_PAGE_ROWS} offset ${page * STOCK_AGE_PAGE_ROWS}` });
+      const qp = new URLSearchParams({ id, tq: `${base} limit ${PAGE_ROWS} offset ${page * PAGE_ROWS}` });
       const gm = /^gid:(\d+)$/.exec(String(sheet));
       if (gm) qp.set('gid', gm[1]); else qp.set('sheet', sheet);
       if (extra && extra.headers) qp.set('headers', String(extra.headers));
@@ -2929,9 +2932,9 @@ async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage, extra)
       inflight.set(page, job);
     }
   };
-  launch(STOCK_AGE_PAGE_WINDOW - 1);
+  launch(WINDOW - 1);
   let firstSig = '', total = 0;
-  for (let page = 0; page < STOCK_AGE_MAX_PAGES; page++) {
+  for (let page = 0; page < MAX_PAGES; page++) {
     const { rows, ids } = await inflight.get(page);
     inflight.delete(page);
     if (page > 0 && rows.length) {
@@ -2942,8 +2945,8 @@ async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage, extra)
     const at = (L) => { const i = ids.indexOf(L); return i >= 0 ? i : cols.indexOf(L); };
     total += rows.length;
     await onPage(rows, at);
-    if (rows.length < STOCK_AGE_PAGE_ROWS) break;
-    launch(page + STOCK_AGE_PAGE_WINDOW);
+    if (rows.length < PAGE_ROWS) break;
+    launch(page + WINDOW);
   }
   return total;
 }
@@ -9969,6 +9972,7 @@ async function start() {
   bootState.stage = 'ready';
   bootState.error = null;
   console.log('✅ Durable storage loaded — dashboard is ready.');
+  setTimeout(() => { ledgerIndex(false).catch(() => {}); }, 75000).unref();   // 📒 dispatch ledger pehle se garam — pehli search turant
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length} · push ${vapidKeys ? `${pushSubs().length} device(s), VAPID from ${vapidSource}, TTL ${PUSH_TTL}s` : 'DISABLED (no VAPID key)'}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
     setTimeout(() => checkReports(true).catch(() => {}), 5000);
