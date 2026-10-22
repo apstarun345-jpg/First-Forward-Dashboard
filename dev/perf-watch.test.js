@@ -57,3 +57,21 @@ test('perfWatch: clicking a segment shows its full list; CSV exports that list',
   click({ '[data-pw-csv]': true, node: {} });
   assert.equal(U.csv.rows.length, 2); assert.equal(U.csv.rows[0][0], 'Drop'); assert.match(U.csv.name, /^ff-watchlist-hiDe-/);
 });
+
+test('perfWatch: top lists follow the selection (Direct agents → no TL agents anywhere)', () => {
+  const { FF, host, listeners } = load();
+  FF.perfWatch.mount(host, { ch: 'ff', rows, allCount: 20, months: { cur: '2026-10', last: '2026-09' }, onAgent() {}, onTl() {} });
+  assert.match(host.innerHTML, /page filters on · 20 total/);
+  listeners.click.forEach((f) => f({ target: { closest: (sel) => (sel === '[data-pw-seg]' ? { dataset: { pwSeg: 'direct' } } : null) } }));
+  const h = host.innerHTML;
+  assert.match(h, /within: Direct agents \(1 agents\)/);
+  const tops = h.split('class="pw-top"')[1];
+  assert.ok(tops.includes('Direct') && !tops.includes('Grow') && !tops.includes('HiDrop') && !tops.includes('TL A'), 'top lists only contain direct agents');
+  // TL dropdown = Direct agents
+  const { FF: FF2, host: host2, listeners: l2 } = load();
+  FF2.perfWatch.mount(host2, { ch: 'gv', rows, months: { cur: '2026-10', last: '2026-09' }, onAgent() {}, onTl() {} });
+  l2.change.forEach((f) => f({ target: { matches: (s) => s === '[data-pw-tl]', value: '__direct__' } }));
+  const body = host2.innerHTML.split('<tbody>')[1].split('</tbody>')[0];
+  assert.ok(body.includes('Direct') && !body.includes('TL A') && !body.includes('>Grow<'));
+  assert.ok(!host2.innerHTML.split('class="pw-top"')[1].includes('TL A'));
+});

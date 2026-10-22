@@ -850,7 +850,7 @@ FF.pages = FF.pages || {};
       if (!host || !FF.perfWatch) return;
       FF.perfWatch.mount(host, {
         ch: 'gv', title: 'GV Partner', months: { cur: U.ymKey(new Date()), last: U.prevMonthKey(U.ymKey(new Date())) }, recentLabel: 'Today',
-        rows: all.map((r) => ({ n: r.agentName, id: r.agentId, tl: r.tlName, direct: FF.config.isDirectAgent(r, 'gv'), last: r.lastTotal, cur: r.curTotal, g: r.growth, recent: r.todayIssued, stock: r.stockTotal, pri: gvPri(r), inact: gvInact(r), run: r.runrate, ref: r.agentName })),
+        allCount: all.length, rows: list.map((r) => ({ n: r.agentName, id: r.agentId, tl: r.tlName, direct: FF.config.isDirectAgent(r, 'gv'), last: r.lastTotal, cur: r.curTotal, g: r.growth, recent: r.todayIssued, stock: r.stockTotal, pri: gvPri(r), inact: gvInact(r), run: r.runrate, ref: r.agentName })),
         onAgent: (name) => { const r = all.find((x) => x.agentName === name); if (r) agentDrawer(r); },
         onTl: (name) => { const r = all.find((x) => x.tlName === name); openGvTlDrawer(name, (r && r.tlId) || ''); }
       });
