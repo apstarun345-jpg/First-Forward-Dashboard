@@ -1200,7 +1200,7 @@ FF.pages = FF.pages || {};
     const tlHead = (x) => `<thead><tr><th>TL</th><th class="num">Stock VC4 / Comm</th><th class="num">Avg/day</th><th class="num">VC4 days</th><th class="num">Comm days</th><th>Alert (VC4)</th><th>Alert (Comm)</th><th>${x}</th></tr></thead>`;
     const agentHead = (x) => `<thead><tr><th>Agent</th><th>TL</th><th class="num">${esc(state.months.last.slice(0, 3))}</th><th class="num">${esc(state.months.cur.slice(0, 3))}</th><th class="num">${x}</th><th>Last active</th><th>Status</th></tr></thead>`;
     const card = (title, count, tone, body, sub, name) => `<section class="card"><div class="card-head"><h3>${title} <span class="count ${tone}">${fmt(count)}</span></h3><div class="card-right dim">${sub || ''}${count && FF.auth.can('export') ? ` <button class="btn small" data-action="export" data-name="${name}">⬇ CSV</button>` : ''}</div></div>${count ? `<div class="table-wrap tall">${body}</div>` : '<div class="card-body empty">Sab theek hai — koi entry nahi.</div>'}</section>`;
-    el.innerHTML = `${dispatchCard}${card('🔴 High priority agents · dispatch', b.highPriority.length, 'red', `<table class="tbl">${agentHead('Stock days')}<tbody>${agentRows(b.highPriority, (a) => fmt(a.agentStockDays))}</tbody></table>`, 'Agent priority "High" · sorted by lowest stock days', 'high-priority-agents')}
+    el.innerHTML = `<div id="pf-watch"></div>${dispatchCard}${card('🔴 High priority agents · dispatch', b.highPriority.length, 'red', `<table class="tbl">${agentHead('Stock days')}<tbody>${agentRows(b.highPriority, (a) => fmt(a.agentStockDays))}</tbody></table>`, 'Agent priority "High" · sorted by lowest stock days', 'high-priority-agents')}
       ${card('🚨 Dispatch needed · TL stock risk', b.lowStock.length, 'red', `<table class="tbl">${tlHead('Priority')}<tbody>${tlRows(b.lowStock, (g) => g.tlPriority)}</tbody></table>`, 'Active TLs jinka VC4 (ya Commercial) stock alert risk dikha raha hai', 'tl-stock-risk')}
       ${card('🧊 Over-stocked TLs', b.overStock.length, 'amber', `<table class="tbl">${tlHead('TL status')}<tbody>${tlRows(b.overStock, (g) => g.tlStatus)}</tbody></table>`, 'Stock zaroorat se zyada — dispatch hold', 'tl-over-stock')}
       ${card('🚀 High growth agents', b.highGrowth.length, 'green', `<table class="tbl">${agentHead('Projected')}<tbody>${agentRows(b.highGrowth, (a) => `${fmt(a.curProjected)} <small class="dim">${a.growth}</small>`)}</tbody></table>`, `Projected ${GROWTH_HIGH}%+ upar vs ${esc(state.months.last)} · biggest gain first`, 'high-growth-agents')}
@@ -1209,6 +1209,17 @@ FF.pages = FF.pages || {};
       ${card(`😶 Went quiet · ${esc(state.months.last)} me issue kiya, ab ${FF.config.thresholds.inactiveDays || 3}+ din inactive`, b.dropped.length, 'amber', `<table class="tbl">${agentHead('Inactive days')}<tbody>${agentRows(b.dropped, (a) => (a.inactiveDays >= 99 ? 'Month' : String(a.inactiveDays)))}</tbody></table>`, 'TL follow-up list', 'went-quiet-agents')}
       ${card('🔖 Wrong VRN entries', b.wrongVrn.length, 'amber', `<table class="tbl">${agentHead('Wrong VRN')}<tbody>${agentRows(b.wrongVrn, (a) => fmt(a.wrongVrn))}</tbody></table>`, 'Is month wrong vehicle numbers wale agents', 'wrong-vrn-agents')}
       ${deGrowthListHtml(basis())}`;
+    // 🔎 Watchlist — growth / de-growth / inactive / priority / stock segments (all agents, own filters)
+    const wHost = el.querySelector('#pf-watch');
+    if (wHost && FF.perfWatch) {
+      const pri = (a) => { const v = String(a.priority || a.agentPriority || ''); return /high/i.test(v) ? 'High' : /medium/i.test(v) ? 'Medium' : /low/i.test(v) ? 'Low' : ''; };
+      FF.perfWatch.mount(wHost, {
+        ch: 'ff', title: 'First Forward', months: { cur: state.months.cur, last: state.months.last }, recentLabel: 'Last 7 days',
+        rows: state.agents.map((a) => ({ n: a.name, id: a.agentId || a.id, tl: tlLabel(a), direct: !!a.tlExcluded, last: a.lastTotal, cur: a.curTotal, g: a.growthNum, recent: a.weekTotal, stock: a.stockTotal, pri: pri(a), inact: a.inactiveDays, run: a.avgTotal, ref: a.__row })),
+        onAgent: (ref) => openAgent(Number(ref)),
+        onTl: (name) => { const g = state.allTlGroups.find((x) => (x.tlName || x.tlKey) === name); if (g) openTl(g.tlKey); }
+      });
+    }
   }
 
   // ---- page ------------------------------------------------------------------------------

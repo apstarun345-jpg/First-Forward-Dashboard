@@ -287,7 +287,7 @@ test('wiring: agentBoard.js lazy-load hota hai, SW shell index.html se derive ho
   const lazy = fs.readFileSync(path.join(ROOT, 'lazy.js'), 'utf8');
   const pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
   assert.ok(!idx.includes('agentBoard.js'), 'agentBoard index shell me eager nahi hai');
-  assert.match(lazy, /performance: \[\.\.\.PROFILE_DEPS, 'agentBoard', 'performance'\]/, 'performance page ki lazy dependency me hai');
+  assert.match(lazy, /performance: \[\.\.\.PROFILE_DEPS, 'agentBoard', 'perfWatch', 'performance'\]/, 'performance page ki lazy dependency me hai');
   // v3.61: SW ki precache list ab index.html se derive hoti hai (hard-coded ?v= pins drift karte the:
   // ./performance.js?v=105 precache tha jabki app ?v=109 maangta tha → 2.5 MB bekaar install download).
   // agentBoard lazy module hai → install par precache nahi; pehli use par runtime cache (cache-first).
