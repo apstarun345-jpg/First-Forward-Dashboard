@@ -9486,6 +9486,7 @@ async function servePersonalPage(req, res, rawToken) {
 
     // 🧠 Insights — inactive agents · high growth · de-growth · top performers · dead stock · projection
     let insightsHtml = '';
+    const insNav = [];
     if (hasSec('insights')) {
       const nrm = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
       const todayK = dateKeyNow();
@@ -9529,7 +9530,7 @@ async function servePersonalPage(req, res, rawToken) {
       const totPrev = list.reduce((x, a) => x + a.prevTot, 0);
       const proj = dayNo ? Math.round((totMtd / dayNo) * daysInMonth) : 0;
       const tile = (cls, label, val, sub) => `<div class="pb-kpi ${cls}"><small>${label}</small><b>${val}</b><span>${sub}</span></div>`;
-      const tbl = (id, title, heads, body, empty) => `<section class="pb-card"><div class="pb-card-head"><h3>${title}</h3>${expBtns(id, `${link.name} - ${title.replace(/<[^>]+>/g, '').replace(/[^\w\s-]/g, '').trim()}`)}</div>${body ? `<div class="pb-scroll"><table class="pb-tbl" id="${id}"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>` : `<p class="dim" style="padding:8px 4px">${empty}</p>`}</section>`;
+      const tbl = (id, title, heads, body, empty) => `${(insNav.push([id, title.replace(/<[^>]+>/g, '').trim()]), '')}<section class="pb-card" data-ins-sec="${id}"><div class="pb-card-head"><h3>${title}</h3>${expBtns(id, `${link.name} - ${title.replace(/<[^>]+>/g, '').replace(/[^\w\s-]/g, '').trim()}`)}</div>${body ? `<div class="pb-scroll"><table class="pb-tbl" id="${id}"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>` : `<p class="dim" style="padding:8px 4px">${empty}</p>`}</section>`;
       const inactiveBody = inactive.map((a) => `<tr data-gap="${a.gap === null ? 999 : a.gap}"><td><b>${escHtml(a.name)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td><td>${nf(a.mtd)}</td><td class="${a.stock ? 'pb-warn' : ''}">${stockInfo ? nf(a.stock) : '—'}</td></tr>`).join('');
       const growthBody = (arr) => arr.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td>${nf(a.prevSame)}</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(a.growth)}</td><td>${lastLbl(a)}</td></tr>`).join('');
       const inactMonth = list.filter((a) => a.mtd === 0).sort((a, b) => b.prevTot - a.prevTot || b.stock - a.stock);
@@ -9549,7 +9550,7 @@ async function servePersonalPage(req, res, rawToken) {
         ${isT ? tile('best', '🛑 Inactive 2 months', nf(inact2.length), `${nf(inactMonth.length)} inactive this month`) : ''}
         ${isT ? tile('issuance', '🔥 High growth / 🔻 de-growth', `${nf(highG.length)} / ${nf(highD.length)}`, '±50% vs same days last month') : ''}
       </section>
-      ${isT ? `<section class="pb-card"><div class="pb-card-head"><h3>😴 Inactive agents</h3><div class="pb-ins-filter" id="pl-ins-filter"><span class="dim small">Kitne din se issuance nahi:</span> ${[7, 10, 15, 30].map((d, i) => `<button type="button" class="pb-btn${i === 0 ? ' on' : ''}" data-ins-days="${d}">${d}+ din</button>`).join('')}</div>${expBtns('pl-tbl-inactive', `${link.name} - Inactive agents`)}</div>${inactiveBody ? `<div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-inactive"><thead><tr><th>Agent</th><th>Last active</th><th>Last month</th><th>MTD</th><th>Stock</th></tr></thead><tbody>${inactiveBody}</tbody></table></div><p class="dim small" id="pl-ins-empty" hidden style="padding:8px 4px">✅ Is filter me koi inactive agent nahi.</p>` : '<p class="dim" style="padding:8px 4px">✅ Sab agents active hain (pichhle 7 din me issuance).</p>'}<p class="pb-matrix-note">Aaj ka incomplete din count nahi hota · "60+ din" = pichhle 2 mahine me koi issuance nahi.</p></section>` : `<section class="pb-card"><h3>🕒 Last active</h3><div class="pb-kv"><span>Last issuance</span><b>${list[0] ? lastLbl(list[0]) : '—'}</b></div></section>`}
+      ${isT ? (insNav.push(['pl-tbl-inactive', '😴 Inactive agents (7+ days)']), '') : ''}${isT ? `<section class="pb-card" data-ins-sec="pl-tbl-inactive"><div class="pb-card-head"><h3>😴 Inactive agents</h3><div class="pb-ins-filter" id="pl-ins-filter"><span class="dim small">Kitne din se issuance nahi:</span> ${[7, 10, 15, 30].map((d, i) => `<button type="button" class="pb-btn${i === 0 ? ' on' : ''}" data-ins-days="${d}">${d}+ din</button>`).join('')}</div>${expBtns('pl-tbl-inactive', `${link.name} - Inactive agents`)}</div>${inactiveBody ? `<div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-inactive"><thead><tr><th>Agent</th><th>Last active</th><th>Last month</th><th>MTD</th><th>Stock</th></tr></thead><tbody>${inactiveBody}</tbody></table></div><p class="dim small" id="pl-ins-empty" hidden style="padding:8px 4px">✅ Is filter me koi inactive agent nahi.</p>` : '<p class="dim" style="padding:8px 4px">✅ Sab agents active hain (pichhle 7 din me issuance).</p>'}<p class="pb-matrix-note">Aaj ka incomplete din count nahi hota · "60+ din" = pichhle 2 mahine me koi issuance nahi.</p></section>` : `<section class="pb-card"><h3>🕒 Last active</h3><div class="pb-kv"><span>Last issuance</span><b>${list[0] ? lastLbl(list[0]) : '—'}</b></div></section>`}
       ${isT ? tbl('pl-tbl-inact-m', '😴 Inactive this month <small class="dim">(no issuance in the current month)</small>', ['Agent', 'Last active', 'Last month', 'MTD', 'Stock'], inactMonthBody, '✅ Every agent has issued this month.') : ''}
       ${isT ? tbl('pl-tbl-inact-2m', '🛑 Inactive 2 months <small class="dim">(no issuance last month and this month)</small>', ['Agent', 'Last active', 'Last month', 'MTD', 'Stock'], inact2Body, '✅ No agent is inactive for 2 months.') : ''}
       ${isT ? tbl('pl-tbl-high50', '🔥 High growth <small class="dim">(+50% or more vs same days last month)</small>', gHeads, growthBody(highG), 'No agent is at +50% or more.') : ''}
@@ -9575,7 +9576,7 @@ async function servePersonalPage(req, res, rawToken) {
     const firstTab = (tabDefs[0] && tabDefs[0].id) || 'overview';
     const stockQuickCsv = canExport && hasSec('stock') ? '<button type="button" class="pb-btn pb-btn-stock" id="pl-exp-stock-csv">📦 Stock CSV</button>' : '';
     // 📂 Side panel: sab reports ek jagah, phone par upar horizontal strip. Export buttons bhi yahin.
-    const tabsBarHtml = tabDefs.length ? `<aside class="pl-side" aria-label="Reports"><div class="pl-side-title">📂 Reports</div><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>`).join('')}</div>${canExport ? `<div class="pl-side-exp">${stockQuickCsv}<button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</aside>` : '';
+    const tabsBarHtml = tabDefs.length ? `<aside class="pl-side" aria-label="Reports"><div class="pl-side-title">📂 Reports</div><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>${t.id === 'insights' && insNav.length ? `<select id="pl-ins-select" class="pl-ins-select" aria-label="Insight lists"><option value="all">🧠 All insights</option>${insNav.map(([id, label]) => `<option value="${escHtml(id)}">${escHtml(label)}</option>`).join('')}</select>` : ''}`).join('')}</div>${canExport ? `<div class="pl-side-exp">${stockQuickCsv}<button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</aside>` : '';
     const noSectionsHtml = tabDefs.length ? '' : '<section class="pb-card pb-no-sections"><h3>🔒 No report sections enabled</h3><p class="dim">The administrator has not granted any report sections for this link. Contact them to request access.</p></section>';
 
     const html = personalShell({
@@ -9690,6 +9691,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pl-side-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:800;margin:2px 4px 8px}
 .pl-side .pb-tabs{flex-direction:column;flex-wrap:nowrap;gap:6px}
 .pl-side .pb-tab{text-align:left;width:100%}
+.pl-ins-select{width:100%;margin:-2px 0 2px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;font-size:12.5px;font-weight:600}
 .pl-side-exp{display:flex;flex-direction:column;gap:6px;margin-top:10px;padding-top:10px;border-top:1px dashed #e2e8f0}
 .pl-side-exp .pb-btn{width:100%;text-align:center}
 .pb-up{color:#16a34a}.pb-down{color:#dc2626}.pb-ins-filter{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.pb-ins-filter .pb-btn.on{background:#4338ca;color:#fff;border-color:#4338ca}
@@ -9839,10 +9841,20 @@ const PERSONAL_PORTAL_JS = `(function () {
     b.addEventListener('click', function () {
       var target = b.getAttribute('data-pl-tab');
       Array.prototype.forEach.call(tabBtns, function (x) { x.classList.toggle('on', x === b); });
+      if (target !== 'insights') { var sel0 = document.getElementById('pl-ins-select'); if (sel0) { sel0.value = 'all'; Array.prototype.forEach.call(document.querySelectorAll('[data-ins-sec]'), function (c) { c.hidden = false; }); } }
       Array.prototype.forEach.call(panes, function (p) {
         p.hidden = target !== 'all' && p.getAttribute('data-pl-pane') !== target;
       });
     });
+  });
+
+  // Insights dropdown — one list at a time (or all)
+  var insSel = document.getElementById('pl-ins-select');
+  if (insSel) insSel.addEventListener('change', function () {
+    var v = insSel.value, insBtn = document.querySelector('[data-pl-tab="insights"]');
+    if (insBtn) insBtn.click();
+    insSel.value = v;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ins-sec]'), function (c) { c.hidden = v !== 'all' && c.getAttribute('data-ins-sec') !== v; });
   });
 
   // Inactive-agent filter (7/10/15/30+ din)
