@@ -448,8 +448,8 @@ async function notifyGuardRun() {
     console.warn(`🛡️ notify guard: ${merged.added.length} tag request storage se wapas merge ki (koi doosra process aage badh gaya tha).`);
     try {
       recordNotification({
-        type: 'settings', title: `🛡️ ${merged.added.length} tag request storage se wapas mile`,
-        body: `Save se pehle check hua ki storage me ${merged.added.length} request zyada hain — wo ID-wise wapas jod di gayin (${merged.added.map(tagReqKeyOf).slice(0, 8).map((id) => `#${id}`).join(', ')}). Kuch delete nahi hua.`,
+        type: 'settings', title: `🛡️ ${merged.added.length} tag request(s) restored from storage`,
+        body: `Before saving, storage had ${merged.added.length} more request(s) than the save — they were merged back by ID (${merged.added.map(tagReqKeyOf).slice(0, 8).map((id) => `#${id}`).join(', ')}). Nothing was deleted.`,
         target: 'admin', meta: { source: 'notify-guard', ids: merged.added.map(tagReqKeyOf).slice(0, 20), link: '#/tagRequest?view=requests&recover=1' }
       });
     } catch { /* notification optional */ }
@@ -892,7 +892,7 @@ function noteActivity(user, page) {
   const key = `${user.username}:${cleanPage}`;
   if (Date.now() - (activityLast.get(key) || 0) < 60e3) return null;
   activityLast.set(key, Date.now());
-  return recordNotification({ type: 'activity', title: '👀 User ne page khola', body: `${user.name || user.username} ne "${cleanPage}" open kiya.`, target: 'admin', meta: { username: user.username, page: cleanPage, ...(CLIENT_PAGES.has(cleanPage) ? { link: `#/${cleanPage}` } : {}) } });
+  return recordNotification({ type: 'activity', title: '👀 User opened a page', body: `${user.name || user.username} opened "${cleanPage}".`, target: 'admin', meta: { username: user.username, page: cleanPage, ...(CLIENT_PAGES.has(cleanPage) ? { link: `#/${cleanPage}` } : {}) } });
 }
 function sha(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 function createSessionLocal(username) {
@@ -1974,6 +1974,13 @@ function snapshotDelta(prev, next) {
   const total = (Number(next.total) || 0) - (sameDate ? (Number(prev.total) || 0) : 0);
   return { total, classes, changed: sameDate ? (total !== 0 || Object.keys(classes).length > 0) : total > 0 };
 }
+function todayTotalsText(snap) {
+  const c = (snap && snap.classes) || {};
+  const total = Number(snap && snap.total) || 0;
+  const vc4 = Number(c.VC4) || 0, vc20 = Number(c.VC20) || 0;
+  const vc5 = Math.max(0, total - vc4 - vc20);
+  return `TODAY: VC4 ${vc4} | VC20 ${vc20} | VC5+ ${vc5} | ALL ${total}`;
+}
 function deltaText(delta) {
   const pieces = Object.entries(delta.classes || {}).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`);
   return `${delta.total > 0 ? '+' : ''}${delta.total} tags${pieces.length ? ` · ${pieces.join(' · ')}` : ''}`;
@@ -2659,14 +2666,14 @@ function unreadCountFor(u) {
 }
 /** Important alerts par notification actions (Android/desktop par dikhte hain). */
 const PUSH_ACTIONS = {
-  report: [{ action: 'open', title: '📊 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
-  alert: [{ action: 'open', title: '🔴 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
-  digest: [{ action: 'open', title: '🌅 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
-  signup: [{ action: 'open', title: '👤 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
-  request: [{ action: 'open', title: '🏷️ Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
-  monthly: [{ action: 'open', title: '📅 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
-  user: [{ action: 'open', title: '👤 Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }],
-  info: [{ action: 'open', title: 'ℹ️ Kholo' }, { action: 'dismiss', title: '✅ Theek hai' }]
+  report: [{ action: 'open', title: '📊 Open' }, { action: 'dismiss', title: '✅ OK' }],
+  alert: [{ action: 'open', title: '🔴 Open' }, { action: 'dismiss', title: '✅ OK' }],
+  digest: [{ action: 'open', title: '🌅 Open' }, { action: 'dismiss', title: '✅ OK' }],
+  signup: [{ action: 'open', title: '👤 Open' }, { action: 'dismiss', title: '✅ OK' }],
+  request: [{ action: 'open', title: '🏷️ Open' }, { action: 'dismiss', title: '✅ OK' }],
+  monthly: [{ action: 'open', title: '📅 Open' }, { action: 'dismiss', title: '✅ OK' }],
+  user: [{ action: 'open', title: '👤 Open' }, { action: 'dismiss', title: '✅ OK' }],
+  info: [{ action: 'open', title: 'ℹ️ Open' }, { action: 'dismiss', title: '✅ OK' }]
 };
 /** Fan-out a notification to every subscribed device that is actually allowed to see it.
  * A unique notification tag is deliberately used per notification ID — type-only tags caused
@@ -2708,7 +2715,7 @@ function pushFanout(item) {
       user: s.username,
       badge: unreadCountFor(u),
       lang: 'hi-IN',
-      actions: PUSH_ACTIONS[item.type] || [{ action: 'open', title: '🔔 Kholo' }],
+      actions: PUSH_ACTIONS[item.type] || [{ action: 'open', title: '🔔 Open' }],
       persist: important
     };
     handlePushResult(s, await deliverPush(s, data), { type: item.type, id: item.id });
@@ -2730,7 +2737,7 @@ function maybeMonthlyReport() {
     recordNotification({
       type: 'monthly',
       title: `📅 Monthly report ready · ${MON[prevM - 1]} ${prevY}`,
-      body: `${MON[prevM - 1]} ${prevY} ka FF vs GV comparison ready hai. Click karke Compare page par dono months side-by-side dekho.`,
+      body: `${MON[prevM - 1]} ${prevY} FF vs GV comparison is ready. Open the Compare page to see both months side by side.`,
       target: 'broadcast',
       routeKey: 'monthlyReport',
       meta: { monthlyReport: prev, link: `#/compare?monthA=${prev}&monthB=${prevPrev}` }
@@ -3631,8 +3638,8 @@ async function refreshStockState(force = false) {
       if (band === 'red') watch.coverAlertDate = dateKey;
       recordNotification({
         type: 'alert',
-        title: `${emoji[band]} VC4 stock cover ≈ ${Math.round(cover)} din`,
-        body: `Cover ${band} zone me${band === 'red' ? ` (< ${coverRed} din)` : ''} — VC4 stock ${vc4} ÷ MTD avg ${Math.round(avg)}/din.${worsened ? ` Pichhle check me ${prevBand} tha.` : ''} Stock page se class / TL wise dekho.`,
+        title: `${emoji[band]} VC4 stock cover ≈ ${Math.round(cover)} days`,
+        body: `Cover is in the ${band} zone${band === 'red' ? ` (< ${coverRed} days)` : ''} — VC4 stock ${vc4} ÷ MTD avg ${Math.round(avg)}/day.${worsened ? ` It was ${prevBand} at the last check.` : ''} See the Stock page for class / TL-wise detail.`,
         target: 'admin',
         routeKey: 'lowStock',
         meta: { link: '#/stock', band, cover: Math.round(cover), vc4, avg: Math.round(avg) }
@@ -3719,7 +3726,7 @@ function maybeInactiveUsers() {
       .map((u) => `${u.name} ${u.days === null ? '(kabhi login nahi kiya)' : `(${u.days} din)`}`);
     return recordNotification({
       type: 'info',
-      title: `💤 Inactive users · ${stale.length} user ${maxDays}+ din se nahi aaye`,
+      title: `💤 Inactive users · ${stale.length} user(s) inactive for ${maxDays}+ days`,
       body: list.join(', ') + (stale.length > 12 ? ' …' : ''),
       target: 'admin',
       routeKey: 'inactiveUsers',
@@ -3875,8 +3882,8 @@ function maybeBackupReminder() {
     persist('notify').catch(() => {});
     return recordNotification({
       type: 'info',
-      title: `☁️ Settings backup purana hai (${Math.floor(age)} din)`,
-      body: `Settings → ☁️ Storage & backup se settings JSON download kar lo — ${maxAge} din se purana ho chuka hai. Render/storage badalne se pehle ye zaroori hai.`,
+      title: `☁️ Settings backup is old (${Math.floor(age)} days)`,
+      body: `Download the settings JSON from Settings → ☁️ Storage & backup — it is older than ${maxAge} days. Do this before changing Render / storage.`,
       target: 'admin',
       routeKey: 'backupReminder',
       meta: { link: '#/settings?tab=backup', ageDays: Math.floor(age) }
@@ -4483,7 +4490,7 @@ async function maybeFollowup(force = false) {
     const top = list.slice(0, 15);
     const item = recordNotification({
       type: 'info',
-      title: `⏰ Follow-up · ${list.length} agent ${days}+ din silent`,
+      title: `⏰ Follow-up · ${list.length} agent(s) silent for ${days}+ days`,
       body: top.map((x) => `${x.name} (${x.days} din)`).join(', ') + (list.length > top.length ? ` …+${list.length - top.length}` : '') + `. In tak pahuncho — pichhla issuance ${days}+ din pehle.`,
       target: 'broadcast',
       routeKey: 'followup',
@@ -4577,7 +4584,7 @@ async function checkReports(force = false, selectedSources = null) {
           // `delta.changed` is reached only after a valid same-day class/total change or a
           // positive new-day count. Keep an explicit marker so clients never treat a generic
           // informational notification as a tag-issuance event.
-          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)} — Google Sheet me naya data aaya.`, target: 'admin', routeKey: 'reportUpdate', meta: { dataChange: true, source, snapshot: currentSnapshot, previous, delta, link: '#/tagIssued' } });
+          recordNotification({ type: 'report', title: `${label} report update`, body: `${next.date}: ${deltaText(delta)}\n${todayTotalsText(next)}`, target: 'admin', routeKey: 'reportUpdate', meta: { dataChange: true, source, snapshot: currentSnapshot, previous, delta, link: '#/tagIssued' } });
           changed.push(source);
           dirty = true;   // recordNotification ne bhi persist queue kiya hai
         }
@@ -4815,8 +4822,8 @@ async function finalizeLogin(req, res, u, loginId, ip) {
   if (ip && knownIps.size > 0 && !knownIps.has(ip) && feats().alerts.newLoginIp !== false) {
     recordNotification({
       type: 'alert',
-      title: `🔐 Naye IP se login — ${u.name || u.username}`,
-      body: `${u.username} ne "${loginId}" se ${ip} par login kiya — ye IP is account ke history me pehle nahi mila (${u.loginHistory.length} purane logins). Agar ye aap nahi the to password badal do.`,
+      title: `🔐 Login from a new IP — ${u.name || u.username}`,
+      body: `${u.username} logged in with "${loginId}" from ${ip} — this IP is not in the account's history (${u.loginHistory.length} earlier logins). If this wasn't you, change the password.`,
       target: 'admin',
       meta: { username: u.username, loginId, ip, link: '#/settings?tab=users' }
     });
@@ -4844,7 +4851,7 @@ async function finalizeLogin(req, res, u, loginId, ip) {
   const selfKey = `self-login:${u.username}`;
   if (!activityLast.has(selfKey) || Date.now() - activityLast.get(selfKey) > 60e3) {
     activityLast.set(selfKey, Date.now());
-    recordNotification({ type: 'login', title: `${greeting}, ${u.name || u.username} 👋`, body: 'Login successful. Dashboard ready hai — data background me load ho raha hai.', target: `user:${u.username}`, meta: { loginId, ip } });
+    recordNotification({ type: 'login', title: `${greeting}, ${u.name || u.username} 👋`, body: 'Login successful. Dashboard is ready — data is loading in the background.', target: `user:${u.username}`, meta: { loginId, ip } });
   }
   return sendJson(res, 200, { ok: true, user: publicUser(u), settings: settingsFor(u), permissions: permissionsFor(db.settings), tabs: db.settings.tabs }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
 }
@@ -5082,8 +5089,8 @@ async function recoveryHint() {
     tagReqRecoveryInfo = { at: null, missing: 0, found: 0, saves: 0, checkedAt: new Date().toISOString(), error: reason };
     if (db.users.length <= 1) {
       recordNotification({
-        type: 'settings', title: '⏪ Recovery taiyaar nahi hai — Code.gs deploy karo',
-        body: `Purani saves dhoondhne ke liye Apps Script me naya Code.gs chahiye. ${reason}`,
+        type: 'settings', title: '⏪ Recovery not ready — deploy Code.gs',
+        body: `A new Code.gs is needed in Apps Script to look up older saves. ${reason}`,
         target: 'admin', meta: { source: 'recovery-hint-error' }
       });
     }
@@ -5125,8 +5132,8 @@ async function tagReqRecoveryHint() {
       if (Date.now() - hintedAt < 12 * 3600e3) return tagReqRecoveryInfo; // din me ek hi baar
       db.notify.watch.tagReqRecoverHintAt = new Date().toISOString();
       recordNotification({
-        type: 'settings', title: `⏪ ${missing} tag request wapas laayi ja sakti hai`,
-        body: `Storage/history me ${missing} aisi request hai jo abhi Tag Request list me nahi dikh rahi (save me total ${found}). Kuch bhi apne aap nahi badla — 🏷️ Tag Request → 📥 Tag Requests → “⏪ Wapas lao” dabao (ya Settings → ⏪ Purana data wapas lao).`,
+        type: 'settings', title: `⏪ ${missing} tag request(s) can be recovered`,
+        body: `Storage/history has ${missing} request(s) that are not in the Tag Request list (save total ${found}). Nothing was changed automatically — open 🏷️ Tag Request → 📥 Tag Requests → “⏪ Restore” (or Settings → ⏪ Restore old data).`,
         target: 'admin', meta: { source: 'tagreq-recovery-hint', at: tagReqRecoveryInfo.at, missing, storageMissing, link: '#/tagRequest?view=requests&recover=1' }
       });
     }
@@ -5279,13 +5286,13 @@ async function handleApi(req, res, url) {
     if (first) {
       const token = await createSession(username);
       u.lastLoginAt = new Date().toISOString(); await persist('users');
-      recordNotification({ type: 'user', title: 'Welcome — Admin account ready', body: 'Aap first user hain, admin privileges mil gaye hain. Settings se branding aur data source set kar sakte ho.', target: `user:${username}`, meta: { first: true } });
+      recordNotification({ type: 'user', title: 'Welcome — Admin account ready', body: 'You are the first user and have admin privileges. Set branding and the data source from Settings.', target: `user:${username}`, meta: { first: true } });
       return sendJson(res, 200, { ok: true, user: publicUser(u), settings: db.settings, permissions: permissionsFor(db.settings), tabs: db.settings.tabs, first: true }, { 'Set-Cookie': cookieHeader(req, token, SESSION_DAYS * 86400) });
     }
     // 🔔 Admin ko turant notification (type 'signup' — Settings me "New account signup" toggle isi ko
     // control karta hai) + new user ko welcome notification
-    recordNotification({ type: 'signup', title: '🆕 Naya signup', body: `${u.name || username} ne account banaya hai (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings?tab=users' } });
-    recordNotification({ type: 'user', title: 'Account created ✓', body: 'Aapka account ban gaya hai. Admin approve karega, phir aap login kar paoge.', target: `user:${username}` });
+    recordNotification({ type: 'signup', title: '🆕 New signup', body: `${u.name || username} created an account (${u.email || u.mobile || 'no contact'}). Approval pending.`, target: 'admin', meta: { username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings?tab=users' } });
+    recordNotification({ type: 'user', title: 'Account created ✓', body: 'Your account has been created. You can log in once an admin approves it.', target: `user:${username}` });
     return sendJson(res, 200, { ok: true, pending: true, message: 'Account ban gaya. Admin approve karega, phir login kar paoge.' });
   }
   if (p === '/api/auth/login' && method === 'POST') {
@@ -5940,7 +5947,7 @@ async function handleApi(req, res, url) {
           recordNotification({
             type: 'click',
             title: `👆 ${opt}`,
-            body: `${user.name || user.username} ne "${opt}"${det ? ` — ${det}` : ''} use kiya.`,
+            body: `${user.name || user.username} used "${opt}"${det ? ` — ${det}` : ''}.`,
             target: 'admin',
             meta: { username: user.username, name: user.name, mobile: user.mobile, option: opt, details: det, link: pageLinkFor(opt) }
           });
@@ -5951,7 +5958,7 @@ async function handleApi(req, res, url) {
       recordNotification({
         type: 'settings',
         title: '⚙️ Settings update',
-        body: `${user.name || user.username} ne settings update ki${det ? `: ${det}` : 'ya'}.`,
+        body: `${user.name || user.username} updated settings${det ? `: ${det}` : ''}.`,
         target: 'admin',
         meta: { username: user.username, name: user.name, fields: det, link: '#/settings' }
       });
@@ -5980,7 +5987,7 @@ async function handleApi(req, res, url) {
     db.resets.push({ username: u.username, name: u.name || u.username, email: u.email || '', mobile: u.mobile || '', at: new Date().toISOString(), code: '', codeExpiresAt: null, resolved: false });
     await persist('resets');
     // 🔔 Admin ko password-reset request ki notification (in-app feed + mobile push dono me).
-    recordNotification({ type: 'user', title: '🔑 Password reset request', body: `${u.name || u.username} ne password reset ki request ki (${u.email || u.mobile || 'no contact'}). Settings → Users se ye account update kar sakte ho.`, target: 'admin', meta: { username: u.username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings?tab=users' } });
+    recordNotification({ type: 'user', title: '🔑 Password reset request', body: `${u.name || u.username} requested a password reset (${u.email || u.mobile || 'no contact'}). You can update this account from Settings → Users.`, target: 'admin', meta: { username: u.username, name: u.name, email: u.email, mobile: u.mobile, link: '#/settings?tab=users' } });
     logAudit(u, 'forgot_request', { target: u.username, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, found: true, help, message: `Request sent ✓ — admin will provide new password or 6-digit code (user: ${u.username}).` });
   }
@@ -6019,8 +6026,8 @@ async function handleApi(req, res, url) {
     if (!validPassword(body.next)) throw new HttpError(400, 'Naya password kam se kam 6 characters ka ho.');
     user.password = hashPassword(body.next); user.mustChangePassword = false;
     persist('users').catch(() => {});
-    recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: `user:${user.username}`, meta: { link: '#/settings?tab=account' } });
-    if (user.role !== 'admin') recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} ne apna password change kiya.`, target: 'admin', meta: { username: user.username, link: '#/settings?tab=users' } });
+    recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} changed their password.`, target: `user:${user.username}`, meta: { link: '#/settings?tab=account' } });
+    if (user.role !== 'admin') recordNotification({ type: 'user', title: '🔑 Password changed', body: `${user.name || user.username} changed their password.`, target: 'admin', meta: { username: user.username, link: '#/settings?tab=users' } });
     logAudit(user, 'password_changed', { target: user.username, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
@@ -6038,7 +6045,7 @@ async function handleApi(req, res, url) {
     }
     await persist('users');
     const profileChanges = changeList(beforeProfile, userSnapshot(user));
-    if (profileChanges.length) recordNotification({ type: 'user', title: `👤 Profile updated · ${user.name || user.username}`, body: `${user.name || user.username} ne apni details badli: ${profileChanges.map((c) => c.field).join(', ')}.`, target: 'admin', meta: { username: user.username, name: user.name, subject: user.username, changes: profileChanges, link: '#/settings?tab=account' } });
+    if (profileChanges.length) recordNotification({ type: 'user', title: `👤 Profile updated · ${user.name || user.username}`, body: `${user.name || user.username} updated their details: ${profileChanges.map((c) => c.field).join(', ')}.`, target: 'admin', meta: { username: user.username, name: user.name, subject: user.username, changes: profileChanges, link: '#/settings?tab=account' } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
   if (p === '/api/auth/location' && method === 'POST') {
@@ -6047,7 +6054,7 @@ async function handleApi(req, res, url) {
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) throw new HttpError(400, 'Location coordinates valid nahi hain.');
     user.lastLocation = { latitude: Number(lat.toFixed(6)), longitude: Number(lon.toFixed(6)), accuracy: Number.isFinite(accuracy) ? Math.max(0, Math.min(100000, Math.round(accuracy))) : null, at: new Date().toISOString() };
     await persist('users');
-    if (user.role !== 'admin') recordNotification({ type: 'location', title: 'User location shared', body: `${user.name || user.username} ne consent ke saath apni location share ki.`, target: 'admin', meta: { username: user.username, location: user.lastLocation, link: '#/settings?tab=users' } });
+    if (user.role !== 'admin') recordNotification({ type: 'location', title: 'User location shared', body: `${user.name || user.username} shared their location with consent.`, target: 'admin', meta: { username: user.username, location: user.lastLocation, link: '#/settings?tab=users' } });
     return sendJson(res, 200, { ok: true, user: publicUser(user) });
   }
 
@@ -6861,8 +6868,8 @@ async function handleApi(req, res, url) {
           meta: { requestId: out.created[0].id, requestIds: out.created.map((r) => r.id), batch: out.batch, rows: out.rows, agents: n, total: out.total, duplicates: out.dupCount, username: user.username, link: '#/tagRequest?view=requests' }
         });
         recordNotification({
-          type: 'request', title: '✅ Tag request bhej di gayi',
-          body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — admin ke paas pahunch gayi. Status Tag Request page par dikhega.`,
+          type: 'request', title: '✅ Tag request has been sent',
+          body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — sent to the admin. Status will show on the Tag Request page.`,
           target: `user:${user.username}`, meta: { requestId: out.created[0].id, link: '#/tagRequest?view=requests' }
         });
       } catch { /* notification optional */ }
@@ -6896,8 +6903,8 @@ async function handleApi(req, res, url) {
         meta: { requestId: row.id, rows: rows.length, total, classes: rows.reduce((a, r) => { a[r.cls] = (a[r.cls] || 0) + r.approved; return a; }, {}), username: user.username, link: '#/tagRequest?view=requests' }
       });
       recordNotification({
-        type: 'request', title: '✅ Tag request bhej di gayi',
-        body: `${rows.length} rows · ${total} tags — admin ke paas pahunch gayi. Status Tag Request page par dikhega.`,
+        type: 'request', title: '✅ Tag request has been sent',
+        body: `${rows.length} rows · ${total} tags — sent to the admin. Status will show on the Tag Request page.`,
         target: `user:${user.username}`, meta: { requestId: row.id, link: '#/tagRequest?view=requests' }
       });
     } catch { /* notification optional */ }
@@ -7910,7 +7917,7 @@ async function handleApi(req, res, url) {
     try {
       recordNotification({
         type: 'assist', title: `🎙️ Live Assist request · ${s.adminName}`,
-        body: `Admin aapse live baat karna chahte hain — sirf aapki ${mode === 'video' ? 'awaaz + camera' : 'awaaz'} jayegi, aur sirf aap Allow karoge tabhi. Screen par request khuli hogi.`,
+        body: `The admin wants to talk live — only your ${mode === 'video' ? 'voice + camera' : 'voice'} is shared, and only if you tap Allow. The request is open on your screen.`,
         target: `user:${username}`, meta: { sessionId: s.id, mode }
       });
     } catch { /* notification optional */ }
@@ -7966,13 +7973,13 @@ async function handleApi(req, res, url) {
       if (side !== 'user') throw new HttpError(403, 'Sirf jiske liye request hai wahi allow kar sakta hai.');
       if (s.status !== 'requested') throw new HttpError(400, `Session "${s.status}" hai — ab allow nahi ho sakta.`);
       s.status = 'active'; s.acceptedAt = now;
-      try { recordNotification({ type: 'assist', title: '🎙️ Live Assist allowed', body: `${s.userName} ne allow kiya — live session chalu (${s.mode}).`, target: 'admin', meta: { sessionId: s.id } }); } catch { /* optional */ }
+      try { recordNotification({ type: 'assist', title: '🎙️ Live Assist allowed', body: `${s.userName} allowed — live session started (${s.mode}).`, target: 'admin', meta: { sessionId: s.id } }); } catch { /* optional */ }
       logAudit(user, 'live_assist_accept', { target: s.id, note: s.mode, ip: clientIp(req) });
     } else if (action === 'decline') {
       if (side !== 'user') throw new HttpError(403, 'Sirf jinke liye request hai wahi decline kar sakte hain.');
       if (s.status !== 'requested') throw new HttpError(400, `Session "${s.status}" hai.`);
       s.status = 'declined'; s.endedAt = now; s.reason = 'user-declined';
-      try { recordNotification({ type: 'assist', title: '🎙️ Live Assist declined', body: `${s.userName} ne request decline kar di.`, target: 'admin', meta: { sessionId: s.id } }); } catch { /* optional */ }
+      try { recordNotification({ type: 'assist', title: '🎙️ Live Assist declined', body: `${s.userName} declined the request.`, target: 'admin', meta: { sessionId: s.id } }); } catch { /* optional */ }
       logAudit(user, 'live_assist_decline', { target: s.id, ip: clientIp(req) });
     } else { // end — dono me se koi bhi band kar sakta hai
       if (s.status === 'requested' || s.status === 'active') {
@@ -8289,7 +8296,7 @@ async function handleApi(req, res, url) {
       await Promise.all(saves);
       const verify = await probe.read();
       if (!verify || !Array.isArray(verify.users) || verify.users.length !== db.users.length) throw new Error('Verification failed');
-      recordNotification({ type: 'settings', title: '☁️ Data copied to Google Sheet storage', body: `${user.name || user.username} ne users/settings/sessions Google Sheet (APP_STORAGE) me copy kiye.`, target: 'admin', meta: { username: user.username, changes: [{ field: 'storage', before: STORAGE_BACKEND, after: 'appsscript (copied, set Render env next)' }] } });
+      recordNotification({ type: 'settings', title: '☁️ Data copied to Google Sheet storage', body: `${user.name || user.username} copied users/settings/sessions to the Google Sheet (APP_STORAGE).`, target: 'admin', meta: { username: user.username, changes: [{ field: 'storage', before: STORAGE_BACKEND, after: 'appsscript (copied, set Render env next)' }] } });
       return sendJson(res, 200, { ok: true, migrated: true, users: verify.users.length, spreadsheet: ping.spreadsheet || '' });
     } catch (err) {
       if (err instanceof HttpError) throw err;
@@ -8365,7 +8372,7 @@ async function handleApi(req, res, url) {
         tags = mergeMissingTagRequests(ws.tagRequests || [], { addressBook: ws.addressBook || null });
         if (tags.added.length || tags.addresses) { await persist('notify'); tagReqBaselineSync(); }
       }
-      recordNotification({ type: 'settings', title: '⏪ Purani save wapas layi gayi', body: `${user.name || user.username} ne ${new Date(snap.at).toLocaleString('en-IN')} ki save restore ki — ${summary.users} users, ${result.usersAdded} naye add, settings ${result.settingsRestored ? 'restore' : 'skip'}${tags && tags.added.length ? `, ${tags.added.length} tag request wapas` : ''}.`, target: 'admin', meta: { username: user.username, at: snap.at, tagRequests: tags ? tags.added.length : 0, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
+      recordNotification({ type: 'settings', title: '⏪ Older save restored', body: `${user.name || user.username} restored the save from ${new Date(snap.at).toLocaleString('en-IN')} — ${summary.users} users, ${result.usersAdded} added, settings ${result.settingsRestored ? 'restored' : 'skipped'}${tags && tags.added.length ? `, ${tags.added.length} tag request(s) recovered` : ''}.`, target: 'admin', meta: { username: user.username, at: snap.at, tagRequests: tags ? tags.added.length : 0, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
       return sendJson(res, 200, { ok: true, at: snap.at, restored: result, summary, locked: snap.locked, tagRequests: tags, current: currentSummary() });
     } catch (err) {
       if (err instanceof HttpError) throw err;
@@ -8394,7 +8401,7 @@ async function handleApi(req, res, url) {
         tags = mergeMissingTagRequests(ws.tagRequests || [], { addressBook: ws.addressBook || null });
         if (tags.added.length || tags.addresses) { await persist('notify'); tagReqBaselineSync(); }
       }
-      recordNotification({ type: 'settings', title: '⏪ Doosri sheet se data restore hua', body: `${user.name || user.username} ne ek alag Google Sheet se ${summary.users} users + settings restore kiye (${result.usersAdded} naye users add)${tags && tags.added.length ? ` + ${tags.added.length} tag request` : ''}.`, target: 'admin', meta: { username: user.username, tagRequests: tags ? tags.added.length : 0, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
+      recordNotification({ type: 'settings', title: '⏪ Data restored from another sheet', body: `${user.name || user.username} restored ${summary.users} users + settings from a different Google Sheet (${result.usersAdded} new users added)${tags && tags.added.length ? ` + ${tags.added.length} tag request(s)` : ''}.`, target: 'admin', meta: { username: user.username, tagRequests: tags ? tags.added.length : 0, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
       return sendJson(res, 200, { ok: true, restored: result, summary, tagRequests: tags, current: currentSummary() });
     } catch (err) {
       if (err instanceof HttpError) throw err;
@@ -8444,7 +8451,7 @@ async function handleApi(req, res, url) {
     }
     const summary = storedSummary(data);
     const result = await restoreStoredIntoDb(data, { ...recoveryMode(body), source: origin });
-    recordNotification({ type: 'settings', title: '⏪ Backup se data restore hua', body: `${user.name || user.username} ne ${origin} se ${summary.users} users + settings restore kiye (${result.usersAdded} naye add${result.usersUpdated ? `, ${result.usersUpdated} update` : ''}).`, target: 'admin', meta: { username: user.username, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
+    recordNotification({ type: 'settings', title: '⏪ Data restored from backup', body: `${user.name || user.username} restored ${summary.users} users + settings from ${origin} (${result.usersAdded} added${result.usersUpdated ? `, ${result.usersUpdated} updated` : ''}).`, target: 'admin', meta: { username: user.username, changes: [{ field: 'recovery', before: `${currentSummary().users} users`, after: `${result.usersTotal} users` }] } });
     return sendJson(res, 200, { ok: true, restored: result, summary, origin, current: currentSummary() });
   }
   // 6) Poora backup download (users + settings + sessions) — aage ke liye safety net
@@ -8677,7 +8684,7 @@ async function handleApi(req, res, url) {
     await persist('settings');
     if (patch.lastBackupAt) logAudit(user, 'backup_export', { ip: clientIp(req), note: 'settings JSON download' });
     else if (changes.length || body.reset) logAudit(user, 'settings_update', { ip: clientIp(req), note: (changes.slice(0, 5).map((c) => c.field).join(', ') + (changes.length > 5 ? '…' : '')) || 'reset' });
-    if (changes.length || body.reset) recordNotification({ type: 'settings', title: body.reset ? '⚙️ Settings reset to defaults' : `⚙️ Settings changed (${changes.length})`, body: `${user.name || user.username} ne ${changes.slice(0, 4).map((c) => c.field).join(', ')}${changes.length > 4 ? ` +${changes.length - 4} more` : ''} update kiya.`, target: 'admin', meta: { username: user.username, name: user.name, changes, reset: !!body.reset, link: '#/settings' } });
+    if (changes.length || body.reset) recordNotification({ type: 'settings', title: body.reset ? '⚙️ Settings reset to defaults' : `⚙️ Settings changed (${changes.length})`, body: `${user.name || user.username} updated ${changes.slice(0, 4).map((c) => c.field).join(', ')}${changes.length > 4 ? ` +${changes.length - 4} more` : ''}.`, target: 'admin', meta: { username: user.username, name: user.name, changes, reset: !!body.reset, link: '#/settings' } });
     return sendJson(res, 200, { ok: true, settings: db.settings });
   }
   if (p === '/api/cache/clear' && method === 'POST') { requireAdmin(user); cache.clear(); return sendJson(res, 200, { ok: true }); }
@@ -8699,7 +8706,7 @@ async function handleApi(req, res, url) {
     const u = { username, name: String(body.name || '').trim().slice(0, 80) || username, email: String(body.email || '').trim().slice(0, 120), mobile: String(body.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), role: body.role === 'admin' ? 'admin' : 'user', approved: body.approved !== false, permissions: perms, password: hashPassword(body.password), mustChangePassword: true, createdAt: new Date().toISOString(), lastLoginAt: null };
     db.users.push(u); await persist('users');
     logAudit(user, 'user_create', { target: username, ip: clientIp(req), note: `${u.role} · approved=${u.approved}` });
-    recordNotification({ type: 'user', title: `👤 New user created · ${u.name}`, body: `${user.name || user.username} ne ${u.username} (${u.role}) account banaya.`, target: 'admin', meta: { username: user.username, subject: u.username, changes: changeList({}, userSnapshot(u)), permissions: { added: perms, removed: [] }, link: '#/settings?tab=users' } });
+    recordNotification({ type: 'user', title: `👤 New user created · ${u.name}`, body: `${user.name || user.username} created the account ${u.username} (${u.role}).`, target: 'admin', meta: { username: user.username, subject: u.username, changes: changeList({}, userSnapshot(u)), permissions: { added: perms, removed: [] }, link: '#/settings?tab=users' } });
     return sendJson(res, 200, { ok: true, user: publicUser(u), permissions: permissionsFor(db.settings) });
   }
   if (p === '/api/users/reset-requests' && method === 'GET') {
@@ -8768,7 +8775,7 @@ async function handleApi(req, res, url) {
       const perms = permissionDiff(beforeUser.permissions, afterUser.permissions);
       if (body.password) userChanges.push({ field: 'password', before: '••••', after: 'reset by admin' });
       logAudit(user, 'user_update', { target: target.username, ip: clientIp(req), note: userChanges.slice(0, 5).map((c) => c.field).join(', ') || 'permissions/approve' });
-      if (userChanges.length || perms.added.length || perms.removed.length) recordNotification({ type: 'user', title: `👥 User updated · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} update kiya${perms.added.length || perms.removed.length ? ` · access +${perms.added.length} / −${perms.removed.length}` : ''}${userChanges.length ? ` · ${userChanges.map((c) => c.field).join(', ')}` : ''}.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: userChanges, permissions: perms, link: '#/settings?tab=users' } });
+      if (userChanges.length || perms.added.length || perms.removed.length) recordNotification({ type: 'user', title: `👥 User updated · ${target.name || target.username}`, body: `${user.name || user.username} updated ${target.username}${perms.added.length || perms.removed.length ? ` · access +${perms.added.length} / −${perms.removed.length}` : ''}${userChanges.length ? ` · ${userChanges.map((c) => c.field).join(', ')}` : ''}.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: userChanges, permissions: perms, link: '#/settings?tab=users' } });
       return sendJson(res, 200, { ok: true, user: publicUser(target) });
     }
     if (method === 'DELETE') {
@@ -8778,7 +8785,7 @@ async function handleApi(req, res, url) {
       for (const [k, s] of Object.entries(db.sessions)) if (s.username === target.username) delete db.sessions[k];
       await persist('users'); await persist('sessions');
       logAudit(user, 'user_delete', { target: target.username, ip: clientIp(req) });
-      recordNotification({ type: 'user', title: `🗑️ User deleted · ${target.name || target.username}`, body: `${user.name || user.username} ne ${target.username} ka account delete kiya.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: changeList(userSnapshot(target), {}), link: '#/settings?tab=users' } });
+      recordNotification({ type: 'user', title: `🗑️ User deleted · ${target.name || target.username}`, body: `${user.name || user.username} deleted the account ${target.username}.`, target: 'admin', meta: { username: user.username, subject: target.username, changes: changeList(userSnapshot(target), {}), link: '#/settings?tab=users' } });
       return sendJson(res, 200, { ok: true });
     }
   }

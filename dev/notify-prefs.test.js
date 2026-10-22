@@ -106,7 +106,7 @@ test('signup / reset request / user search / user click sab admin ki feed me aat
     const titles = items.map((i) => `${i.type}:${i.title}`).join('\n');
     assert.match(titles, /search:.*rahul/s, `admin ko user ki search notification chahiye — got:\n${titles}`);
     assert.match(titles, /click:.*Excel Bundle/s, `admin ko user ki click notification chahiye — got:\n${titles}`);
-    assert.match(titles, /activity:.*page khola/s, `admin ko user ke page open ki notification chahiye — got:\n${titles}`);
+    assert.match(titles, /activity:.*opened a page/s, `admin ko user ke page open ki notification chahiye — got:\n${titles}`);
     assert.match(titles, /user:.*New user created/s, 'admin ko naye user creation ki notification chahiye');
     // Deep links: notification tap (app ya phone panel) seedha sahi page par le jaye.
     const searchItem = items.find((i) => i.type === 'search');
