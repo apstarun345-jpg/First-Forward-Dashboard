@@ -67,7 +67,7 @@ test('Master Search KPI strip: every card that shows a number opens data', () =>
   // box(cls, label, value, sub, kpi) — pichhla argument spec hona chahiye (No-dispatch info box ko chhod kar)
   const boxes = strip.split(/\n/).filter((l) => /box\('k\d+'/.test(l) && !/No dispatch/.test(l));
   assert.ok(boxes.length >= 8, `box lines found (${boxes.length})`);
-  for (const key of ['Tags required', 'Priority', 'Dispatch · all tags', 'Growth', 'Expected this month']) {
+  for (const key of ['Tags required', 'Priority', 'Growth', 'Expected this month']) {
     const line = strip.split('\n').find((l) => /box\('k\d+'/.test(l) && l.includes(key));
     assert.ok(line, `${key} line`);
     assert.match(line, /(spec\('(?:mtd|stock)'|peopleSpec)/, `${key} card ka spec hai`);

@@ -6872,3 +6872,7 @@ button.smap-cell.smap-total { min-width: 64px; }
 .smap-dr-bar { align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
 .smap-dr-bar .input { min-width: 220px; flex: 1; }
 #home-stock-warn:empty { display: none; }
+.msp-cls-line{display:flex;gap:6px;align-items:center;justify-content:center;font-size:13px;margin:2px 0}
+.msp-plan-box .msp-plan{width:100%;margin:6px 0}
+.msp-plan-box .msp-plan th,.msp-plan-box .msp-plan td{font-size:12px;white-space:nowrap}
+.msp-plan-box{overflow-x:auto}

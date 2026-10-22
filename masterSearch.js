@@ -1564,6 +1564,28 @@ FF.pages = FF.pages || {};
       const spec = (scope, ym) => `src=${ch}&scope=${scope}${ym ? `&ym=${encodeURIComponent(ym)}` : ''}&${who}`;
       const peopleSpec = `src=${ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`;
       const box = (cls, label, value, sub, kpi) => `<div class="mp-kpi msp-kpi ${cls}${kpi ? ' kpi-clickable' : ''}"${kpi ? ` data-kpi="${esc(kpi)}" role="button" tabindex="0" title="Detail kholo"` : ''}><small>${label}</small><b>${value}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
+      // Class-wise plan: per class (VC4 / VC20 / VC5+) run-rate from its own issuance, cover from its own stock.
+      const days = num(c.days) || num(d.days) || 25, elapsed = Math.max(1, num(c.elapsed) || 1);
+      const lastDays = (() => { try { return U.daysInMonth(m.last) || 30; } catch { return 30; } })();
+      const hasBins = bins.cur && bins.stock && (num(bins.cur.VC4) || num(bins.cur.VC20) || num(bins.cur['VC5+']) || num(bins.stock.VC4) || num(bins.stock.VC20) || num(bins.stock['VC5+']) || num(bins.last && bins.last.VC4) || num(bins.last && bins.last.VC20) || num(bins.last && bins.last['VC5+']));
+      const clsDefs = hasBins ? ['VC4', 'VC20', 'VC5+'].map((k) => ({ k, stock: num(bins.stock && bins.stock[k]), cur: num(bins.cur && bins.cur[k]), last: num(bins.last && bins.last[k]) }))
+        : [{ k: 'VC4', stock: num(s.vc4), cur: num(t.curVc4), last: num(t.lastVc4) }, { k: 'VC20 + VC5+', stock: num(s.comm), cur: num(t.curComm), last: num(t.lastComm) }];
+      const redD = th.coverRed || 7, orgD = th.coverOrange || 15;
+      const plan = clsDefs.map((x) => {
+        let rate = x.cur / elapsed, basis = '';
+        if (!x.cur && x.last) { rate = x.last / lastDays; basis = 'last month'; }
+        const cover = rate > 0 ? x.stock / rate : null;
+        const prio = rate <= 0 ? 'None' : cover < redD ? 'High' : cover < orgD ? 'Medium' : 'Low';
+        const gross = Math.ceil(rate * days), net = Math.max(0, gross - x.stock);
+        return { ...x, rate, basis, cover, prio, gross, net };
+      });
+      const rank = { High: 3, Medium: 2, Low: 1, None: 0 };
+      const worst = plan.reduce((a, x) => (rank[x.prio] > rank[a] ? x.prio : a), 'None');
+      const chipOf = (p) => (p === 'None' ? '<span class="badge">No issuance</span>' : prioChip(p));
+      const needHtml = (x) => (x.prio === 'None' ? '<span class="dim">no need</span>' : x.net > 0 ? `<b class="sug-chip">${U.fmt(x.net)}</b>` : '<span class="badge green">stock enough</span>');
+      const prioBody = plan.map((x) => `<div class="msp-cls-line"><b>${esc(x.k)}</b> ${chipOf(x.prio)} <small class="dim">${x.cover != null ? `cover ${U.fmt(x.cover, true)} d` : 'no run-rate'}</small></div>`).join('');
+      const totNet = plan.reduce((a, x) => a + x.net, 0), totGross = plan.reduce((a, x) => a + x.gross, 0), totStock = plan.reduce((a, x) => a + x.stock, 0), totRate = plan.reduce((a, x) => a + x.rate, 0);
+      const planTable = `<table class="tbl compact msp-plan"><thead><tr><th>Class</th><th class="num">Issued MTD</th><th class="num">Rate/day</th><th class="num">Stock</th><th class="num">Need ${U.fmt(days)}d</th><th class="num">Dispatch (after stock)</th><th class="num">W/o stock</th></tr></thead><tbody>${plan.map((x) => `<tr><td><b>${esc(x.k)}</b></td><td class="num">${U.fmt(x.cur)}</td><td class="num">${U.fmt(x.rate, true)}${x.basis ? ` <small class="dim">(${x.basis})</small>` : ''}</td><td class="num">${U.fmt(x.stock)}</td><td class="num">${U.fmt(x.gross)}</td><td class="num">${needHtml(x)}</td><td class="num">${U.fmt(x.gross)}</td></tr>`).join('')}<tr class="row-total"><td><b>ALL</b></td><td class="num"><b>${U.fmt(plan.reduce((a, x) => a + x.cur, 0))}</b></td><td class="num"><b>${U.fmt(totRate, true)}</b></td><td class="num"><b>${U.fmt(totStock)}</b></td><td class="num"><b>${U.fmt(totGross)}</b></td><td class="num"><b>${U.fmt(totNet)}</b></td><td class="num"><b>${U.fmt(totGross)}</b></td></tr></tbody></table>`;
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
       const tlName = (pr.tl && pr.tl.name) || '';
       let sug = '';
@@ -1572,9 +1594,7 @@ FF.pages = FF.pages || {};
       } else if (pr.direct) {
         sug = box('k4', '🎯 Suggested dispatch', '<span class="dim">No dispatch</span>', `🚫 ${esc(pr.directLabel || 'Direct agent')} · priority ${esc(pr.priority || 'Low')} — abhi tags ki zarurat nahi`);
       } else {
-        sug = box('k4', `🎯 Sug. VC4 · ${U.fmt(d.days)} din`, sugPair(d.sugVc4, d.sugVc4Gross || 0), `avg ${U.fmt(d.avgVc4, true)}/day × ${U.fmt(d.days)} din − stock ${U.fmt(s.vc4)}`, `${spec('mtd', m.cur)}&group=VC4`)
-          + box('k5', '🎯 Sug. Commercial', sugPair(d.sugComm, d.sugCommGross || 0), `avg ${U.fmt(d.avgComm, true)}/day × ${U.fmt(d.days)} din − stock ${U.fmt(s.comm)}`, `${spec('mtd', m.cur)}&group=COMM`)
-          + box('k9', '🎯 Dispatch · all tags', sugPair(c.net, c.gross), `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(c.days)} din − stock ${U.fmt(c.stock)}`, spec('mtd', m.cur));
+        sug = `<div class="mp-kpi msp-kpi k4 msp-plan-box kpi-clickable" data-kpi="${esc(spec('mtd', m.cur))}" role="button" tabindex="0" style="grid-column:1/-1"><small>🎯 Dispatch plan · class-wise · ${U.fmt(days)} days</small>${planTable}<em>Need = (MTD issued ÷ ${U.fmt(elapsed)} days) × ${U.fmt(days)} − class stock. A class with no issuance needs no dispatch.</em></div>`;
       }
     /** 📈 Growth tile ka neeche wala text: kya compare hua + run-rate + expected month-end vs last month. */
     const growthSub = (p1, m) => {
@@ -1594,7 +1614,7 @@ FF.pages = FF.pages || {};
       return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
           <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL summary' : 'Agent summary'}</h3>
           <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
-          <div class="card-right">${prioChip(prioEff)}</div></div>
+          <div class="card-right">${prioChip(worst === 'None' ? prioEff : worst)}</div></div>
         <div class="card-body"><div class="mp-kpis msp-kpis">
           ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}${c.cover != null ? ` · run-rate ${U.fmt(c.rate, true)}/day → stock ~${U.fmt(Math.round(c.cover))} din chalega` : ''}`, spec('stock'))}
           ${isTl
@@ -1602,7 +1622,7 @@ FF.pages = FF.pages || {};
     : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}` : '')}
           ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), curMix, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
-          ${box('k3', '🚦 Priority', prioChip(prioEff), `${c.cover != null ? `cover ${U.fmt(c.cover, true)} din` : 'cover —'} · run-rate ${U.fmt(c.rate, true)}/day (÷ ${U.fmt(c.elapsed)} din)`, isTl ? peopleSpec : spec('stock'))}
+          ${box('k3', '🚦 Priority · by class', prioBody, `cover = class stock ÷ class run-rate · High < ${redD} d · Medium < ${orgD} d`, isTl ? peopleSpec : spec('stock'))}
           ${sug}
           ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur))}
           ${box('k10', '🎯 Expected this month · Run-rate', U.fmt((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0)), `Current pace ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days · report cutoff: previous day`, spec('mtd', m.cur))}
