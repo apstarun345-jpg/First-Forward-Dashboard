@@ -586,9 +586,10 @@ FF.pages = FF.pages || {};
       // Pehle Math.max(sheet, ledger) chalta tha, isliye GV REPORT page par TL ka last-month 440 dikhta
       // tha jabki sheet me 332 tha. Cell khaali hone par hi ledger aage aata hai.
       const sheetCur = r.curAvailable === true, sheetLast = r.lastAvailable === true;
-      const curVc4 = sheetCur ? (Number(r.curVc4) || 0) : Math.max(Number(r.curVc4) || 0, cur.vc4 || 0);
-      const curComm = sheetCur ? (Number(r.curComm) || 0) : Math.max(Number(r.curComm) || 0, cur.comm || 0);
-      const curTotal = sheetCur ? Math.max(Number(r.curTotal) || 0, curVc4 + curComm) : Math.max(Number(r.curTotal) || 0, cur.total || 0, curVc4 + curComm);
+      // Current month: sheet daily update hota hai (stale ho sakta hai) — live ledger bada ho to wahi sahi.
+      const curVc4 = Math.max(Number(r.curVc4) || 0, cur.vc4 || 0);
+      const curComm = Math.max(Number(r.curComm) || 0, cur.comm || 0);
+      const curTotal = Math.max(Number(r.curTotal) || 0, cur.total || 0, curVc4 + curComm);
       const lastVc4 = sheetLast ? (Number(r.lastVc4) || 0) : Math.max(Number(r.lastVc4) || 0, prev.vc4 || 0);
       const lastComm = sheetLast ? (Number(r.lastComm) || 0) : Math.max(Number(r.lastComm) || 0, prev.comm || 0);
       const lastTotal = sheetLast ? Math.max(Number(r.lastTotal) || 0, lastVc4 + lastComm) : Math.max(Number(r.lastTotal) || 0, prev.total || 0, lastVc4 + lastComm);

@@ -120,8 +120,18 @@ window.FF = window.FF || {};
     if (!host) return;
     ensureCss();
     const ch = opts.ch === 'gv' ? 'gv' : 'ff';
+    let basisDays = Number(opts.days) || 0;
+    if (!basisDays) { try { basisDays = Number(U.channelBasis(opts.ch === 'gv' ? 'gv' : 'ff').days) || 1; } catch (e) { basisDays = 1; } }
+    const th = (FF.config && FF.config.thresholds) || { coverRed: 7, coverOrange: 15 };
+    // Priority = stock cover (stock ÷ daily run-rate) — same rule everywhere; sheet label only if no data.
+    const coverPri = (cur, stock, fallback) => {
+      const rate = cur > 0 ? cur / Math.max(1, basisDays) : 0;
+      if (rate > 0) { const c = stock / rate; return c < (th.coverRed || 7) ? 'High' : c < (th.coverOrange || 15) ? 'Medium' : 'Low'; }
+      return stock > 0 ? 'Low' : (fallback || '');
+    };
     const rows = (opts.rows || []).map((r) => ({
       ...r,
+      pri: coverPri(Number(r.cur) || 0, Number(r.stock) || 0, r.pri),
       last: Number(r.last) || 0, cur: Number(r.cur) || 0, stock: Number(r.stock) || 0, recent: Number(r.recent) || 0,
       g: r.g === null || r.g === undefined || Number.isNaN(Number(r.g)) ? null : Number(r.g),
       inact: r.inact === null || r.inact === undefined ? (Number(r.cur) > 0 ? 0 : 99) : Number(r.inact),
@@ -130,9 +140,7 @@ window.FF = window.FF || {};
     const S = states[ch] || (states[ch] = { seg: 'all', q: '', tl: '', sort: 'cur', dir: 'desc', page: 1, hg: 25 });
     const pageSize = 50;
     const months = opts.months || { cur: 'MTD', last: 'Last month' };
-    const tlNames = [...new Set(rows.filter((r) => !r.direct && r.tl).map((r) => r.tl))].sort((a, b) => a.localeCompare(b));
-    const hasDirect = rows.some((r) => r.direct);
-
+    
     const draw = () => {
       const groups = segments(S.hg);
       const flat = groups.flatMap((g) => g.items);
@@ -141,7 +149,14 @@ window.FF = window.FF || {};
       flat.forEach((x) => { counts[x.id] = 0; sums[x.id] = 0; });
       rows.forEach((r) => flat.forEach((x) => { if (x.t(r)) { counts[x.id]++; sums[x.id] += r.cur; } }));
       const qn = norm(S.q);
-      let list = rows.filter((r) => seg.t(r));
+      const inSeg = rows.filter((r) => seg.t(r));
+      const isDirSeg = seg.id === 'direct';
+      const tlNames = [...new Set(inSeg.filter((r) => !r.direct && r.tl).map((r) => r.tl))].sort((a, b) => a.localeCompare(b));
+      const hasDirect = !isDirSeg && inSeg.some((r) => r.direct);
+      if (isDirSeg) S.tl = '';
+      else if (S.tl && S.tl !== '__direct__' && !tlNames.some((t) => norm(t) === norm(S.tl))) S.tl = '';
+      else if (S.tl === '__direct__' && !hasDirect) S.tl = '';
+      let list = inSeg;
       if (qn) list = list.filter((r) => qn.split(' ').every((t) => r._k.includes(t)));
       if (S.tl === '__direct__') list = list.filter((r) => r.direct);
       else if (S.tl) list = list.filter((r) => !r.direct && norm(r.tl) === norm(S.tl));
@@ -186,7 +201,7 @@ window.FF = window.FF || {};
           <div class="btn-row">${FF.auth && FF.auth.can && FF.auth.can('export') ? '<button class="btn small" data-pw-csv>⬇ CSV</button>' : ''}${seg.id !== 'all' || S.q || S.tl ? '<button class="btn small" data-pw-clear>✕ Show all</button>' : ''}</div></div>
         <div class="pw-ctl">
           <label>Search <input class="input" data-pw-q placeholder="Agent / ID / TL" value="${esc(S.q)}"></label>
-          <label>TL <select data-pw-tl><option value="">All TLs</option>${hasDirect ? `<option value="__direct__" ${S.tl === '__direct__' ? 'selected' : ''}>🚫 Direct agents</option>` : ''}${tlNames.map((t) => `<option value="${esc(t)}" ${norm(S.tl) === norm(t) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+          ${isDirSeg ? '<label>Scope <select disabled><option>🚫 Direct agents · no TL</option></select></label>' : `<label>TL <select data-pw-tl><option value="">All TLs</option>${hasDirect ? `<option value="__direct__" ${S.tl === '__direct__' ? 'selected' : ''}>🚫 Direct agents</option>` : ''}${tlNames.map((t) => `<option value="${esc(t)}" ${norm(S.tl) === norm(t) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`}
           <label>Sort by <select data-pw-sortsel>${SORTS.map(([k, l]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label>Order <select data-pw-dir><option value="desc" ${S.dir === 'desc' ? 'selected' : ''}>High → Low</option><option value="asc" ${S.dir === 'asc' ? 'selected' : ''}>Low → High</option></select></label>
         </div>
