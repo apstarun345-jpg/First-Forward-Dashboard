@@ -1526,23 +1526,24 @@ FF.pages = FF.pages || {};
       </div>
 
       <div class="card compact-card" style="margin-bottom:12px;background:var(--bg-subtle,#f8fafc)" id="pg-card">
-        <div class="card-head"><h3>👥 Custom Team Link <span class="dim small">(manual agents)</span></h3><span class="dim small">Khud agents chuno + TL naam rakho → link me sirf unhi agents ka poora data (issuance, stock, ageing…)</span></div>
+        <div class="card-head"><h3>👥 Custom Team Link <span class="dim small">(GV + First Forward)</span></h3><span class="dim small">Pick TLs and extra agents from GV, First Forward or both — the link shows one combined report for them.</span></div>
         <div class="finder-row" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
-          <select class="input" id="pg-source" style="width:auto"><option value="ff">🟦 First Forward</option><option value="gv">🟩 GV Partner</option></select>
-          <input class="input" id="pg-name" placeholder="👥 Team / group ka naam (e.g. Rahul Team)" style="min-width:210px;flex:1" maxlength="80">
-          <input class="input" id="pg-tl" placeholder="🧑‍💼 TL ka naam (link me dikhega)" style="min-width:190px;flex:1" maxlength="80">
+          <input class="input" id="pg-name" placeholder="👥 Team / group name (e.g. Rahul Team)" style="min-width:210px;flex:1" maxlength="80">
+          <input class="input" id="pg-tl" placeholder="🧑‍💼 Display name shown on the link (optional)" style="min-width:190px;flex:1" maxlength="80">
+          <select class="input" id="pg-scope" style="width:auto" title="Which channel to search in"><option value="both">🌐 Search GV + FF</option><option value="ff">🟦 First Forward only</option><option value="gv">🟩 GV Partner only</option></select>
         </div>
         <div class="finder-row" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
-          <div class="finder-input" style="min-width:260px;flex:1"><span class="finder-ico">🔎</span><input class="input" id="pg-agent" placeholder="Agent ka naam / ID type karo → click karke add karo" maxlength="80"></div>
-          <button class="btn small" id="pg-clear" type="button">🧹 Sab hatao</button>
+          <div class="finder-input" style="min-width:240px;flex:1"><span class="finder-ico">👥</span><input class="input" id="pg-tl-add" placeholder="Add a TL — type name / ID, click to add" maxlength="80"></div>
+          <div class="finder-input" style="min-width:240px;flex:1"><span class="finder-ico">🧑‍💼</span><input class="input" id="pg-agent" placeholder="Add an agent — type name / ID, click to add" maxlength="80"></div>
+          <button class="btn small" id="pg-clear" type="button">🧹 Clear all</button>
         </div>
-        <div id="pg-chips" class="chip-row" style="margin-bottom:8px;min-height:30px"><span class="dim small">Abhi koi agent nahi chuna</span></div>
+        <div id="pg-chips" class="chip-row" style="margin-bottom:8px;min-height:30px"><span class="dim small">Nothing selected yet</span></div>
         <div class="finder-row" style="flex-wrap:wrap;gap:8px">
-          <input class="input" id="pg-person-id" placeholder="🪪 Team ID (verification ke liye, koi bhi code)" style="width:250px" maxlength="40">
-          <input class="input" id="pg-mobile" type="tel" inputmode="numeric" placeholder="📱 10-digit Mobile" style="width:170px" maxlength="14">
-          <button class="btn primary" id="pg-create">🔗 Team link banao</button>
+          <input class="input" id="pg-person-id" placeholder="🪪 Team ID (any code, used for verification)" style="width:250px" maxlength="40">
+          <input class="input" id="pg-mobile" type="tel" inputmode="numeric" placeholder="📱 10-digit mobile" style="width:170px" maxlength="14">
+          <button class="btn primary" id="pg-create">🔗 Create team link</button>
         </div>
-        <span class="dim small" id="pg-msg" style="display:block;margin-top:6px">Allowed sections global default se lagte hain (⚙️ Access me badal sakte ho). Same naam se dobara banaoge to agents list update ho jayegi.</span>
+        <span class="dim small" id="pg-msg" style="display:block;margin-top:6px">Sections follow the global default (change per link with ⚙️ Access). Creating again with the same name updates the list. Agents already under a selected TL are not counted twice.</span>
       </div>
 
       <div class="card compact-card" style="margin-bottom:12px">
@@ -1562,8 +1563,8 @@ FF.pages = FF.pages || {};
           ? `<span class="badge blue" title="Exact TL/Agent ID + registered mobile are checked server-side">🔐 ${esc(l.personId)} · 📱 ••••${esc(String(l.mobile).slice(-4))}</span>`
           : '<span class="badge red" title="Report stays locked until both credentials are configured">⚠️ Setup needed</span>';
         return `<tr>
-        <td>${l.source === 'gv' ? '🟩 GV' : '🟦 FF'}</td>
-        <td>${l.kind === 'tl' ? '👥 TL' : (l.kind === 'group' ? `🧩 Team (${(l.members || []).length})` : '🧑‍💼 Agent')}</td>
+        <td>${l.source === 'both' ? '🟩 GV + 🟦 FF' : (l.source === 'gv' ? '🟩 GV' : '🟦 FF')}</td>
+        <td>${l.kind === 'tl' ? '👥 TL' : (l.kind === 'group' ? `🧩 Team (${(l.tls || []).length ? `${l.tls.length} TL · ` : ''}${(l.members || []).length})` : '🧑‍💼 Agent')}</td>
         <td><b>${esc(l.name)}</b><div class="dim small">${esc(String(l.createdAt || '').slice(0, 10))}</div></td>
         <td>${authBadge}</td>
         <td><div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:center">${secBadges}</div></td>
@@ -1659,39 +1660,66 @@ FF.pages = FF.pages || {};
     const ptCopy = U.$('#pt-copy', body);
     if (ptCopy) ptCopy.addEventListener('click', async () => { const ok = await U.copyText(`${origin}/portal`).catch(() => false); U.toast(ok === false ? 'Copy nahi hua — link select karke copy karo' : '📋 Common login link copy ho gaya ✓', ok === false ? 'err' : 'ok'); });
 
-    // 👥 Custom team link — admin manually agents chunta hai
-    (() => {
-      const gSrc = U.$('#pg-source', body), gName = U.$('#pg-name', body), gTl = U.$('#pg-tl', body), gAgent = U.$('#pg-agent', body);
-      const gChips = U.$('#pg-chips', body), gPid = U.$('#pg-person-id', body), gMob = U.$('#pg-mobile', body), gBtn = U.$('#pg-create', body), gMsg = U.$('#pg-msg', body), gClear = U.$('#pg-clear', body);
-      if (!gSrc || !gAgent || !gBtn) return;
-      const members = new Map();
-      const drawChips = () => {
-        gChips.innerHTML = members.size ? [...members.values()].map((m) => `<span class="chip on" style="display:inline-flex;gap:6px;align-items:center">${esc(m.name)}${m.id ? ` <small class="dim">${esc(m.id)}</small>` : ''}<button type="button" data-rm="${esc(m.name)}" style="border:0;background:transparent;cursor:pointer" aria-label="Hatao ${esc(m.name)}">✕</button></span>`).join(' ') + ` <span class="dim small">· ${members.size} agents</span>` : '<span class="dim small">Abhi koi agent nahi chuna</span>';
-        gChips.querySelectorAll('[data-rm]').forEach((x) => x.addEventListener('click', () => { members.delete(x.dataset.rm); drawChips(); }));
-      };
-      U.suggest(gAgent, {
-        min: 1,
-        items: () => suggestionItems(gSrc.value, 'agent', gAgent.value),
-        onPick: (it) => { if (!it || it._pending) return; const name = it.value || it.label; if (name) { members.set(name, { name, id: it.id || '' }); drawChips(); } gAgent.value = ''; },
-        onEnter: (q) => { const name = String(q || '').trim(); if (name) { members.set(name, { name, id: '' }); drawChips(); } gAgent.value = ''; }
+    // 👥 Custom team link — TLs + agents from GV and/or First Forward
+    const chanTag = (src) => (src === 'gv' ? '🟩 GV' : '🟦 FF');
+    const itemsFor = (scope, kind, q) => {
+      const srcs = scope === 'both' ? ['ff', 'gv'] : [scope === 'gv' ? 'gv' : 'ff'];
+      const out = [];
+      srcs.forEach((src) => {
+        suggestionItems(src, kind, q).forEach((it) => {
+          if (it._pending) { if (!out.some((x) => x._pending)) out.push(it); return; }
+          out.push({ ...it, src, kindLabel: `${chanTag(src)} ${kind === 'tl' ? 'TL' : 'Agent'}`, keywords: `${it.keywords || ''} ${src === 'gv' ? 'gv' : 'ff first forward'}` });
+        });
       });
-      gSrc.addEventListener('change', () => { members.clear(); drawChips(); });
-      gClear.addEventListener('click', () => { members.clear(); drawChips(); });
+      return out;
+    };
+    /** Shared picker: wires a TL box + an agent box to Maps and draws channel-tagged chips. */
+    const teamPicker = (root, ids, init, scopeOf) => {
+      const tls = new Map((init.tls || []).map((t) => [`${t.source || 'ff'}|${t.name}`, { name: t.name, id: t.id || '', source: t.source === 'gv' ? 'gv' : 'ff' }]));
+      const members = new Map((init.members || []).map((m) => { const src = m.source === 'gv' ? 'gv' : (m.source === 'ff' ? 'ff' : (init.baseSource === 'gv' ? 'gv' : 'ff')); return [`${src}|${m.name}`, { name: m.name, id: m.id || '', source: src }]; }));
+      const chips = root.querySelector(ids.chips);
+      const draw = () => {
+        const one = (kind, map, key, x) => `<span class="chip on" style="display:inline-flex;gap:6px;align-items:center;${kind === 'tl' ? 'background:#ede9fe;border-color:#c4b5fd;color:#5b21b6' : ''}">${kind === 'tl' ? '👥' : '🧑‍💼'} ${esc(x.name)} <small>${chanTag(x.source)}</small>${x.id ? ` <small class="dim">${esc(x.id)}</small>` : ''}<button type="button" data-rm="${esc(kind)}:${esc(key)}" title="Remove" style="border:0;background:none;cursor:pointer">✕</button></span>`;
+        const html = [...tls.entries()].map(([k, x]) => one('tl', tls, k, x)).concat([...members.entries()].map(([k, x]) => one('agent', members, k, x))).join('');
+        chips.innerHTML = html || '<span class="dim small">Nothing selected yet</span>';
+        chips.querySelectorAll('[data-rm]').forEach((x) => x.addEventListener('click', () => { const [kind, ...rest] = x.dataset.rm.split(':'); (kind === 'tl' ? tls : members).delete(rest.join(':')); draw(); }));
+      };
+      const bind = (sel, kind, map) => {
+        const el = root.querySelector(sel);
+        if (!el) return;
+        const add = (name, id, src) => { if (!name) return; map.set(`${src}|${name}`, { name, id: id || '', source: src }); draw(); };
+        U.suggest(el, {
+          min: 1,
+          items: () => itemsFor(scopeOf(), kind, el.value),
+          onPick: (it) => { if (!it || it._pending) return; add(it.value || it.label, it.id, it.src || 'ff'); el.value = ''; },
+          onEnter: (q) => { const v = String(q || '').trim(); const sc = scopeOf(); if (v && sc !== 'both') add(v, '', sc); el.value = ''; }
+        });
+      };
+      bind(ids.tl, 'tl', tls); bind(ids.agent, 'agent', members);
+      draw();
+      return { tls, members, draw, clear() { tls.clear(); members.clear(); draw(); }, sourceOf() { const set = new Set([...tls.values(), ...members.values()].map((x) => x.source)); return set.size > 1 ? 'both' : (set.has('gv') ? 'gv' : 'ff'); } };
+    };
+    (() => {
+      const gName = U.$('#pg-name', body), gTl = U.$('#pg-tl', body), gScope = U.$('#pg-scope', body);
+      const gPid = U.$('#pg-person-id', body), gMob = U.$('#pg-mobile', body), gBtn = U.$('#pg-create', body), gMsg = U.$('#pg-msg', body), gClear = U.$('#pg-clear', body);
+      if (!gBtn || !gScope) return;
+      const picker = teamPicker(body, { tl: '#pg-tl-add', agent: '#pg-agent', chips: '#pg-chips' }, { tls: [], members: [] }, () => gScope.value);
+      gClear.addEventListener('click', () => picker.clear());
       gBtn.addEventListener('click', async () => {
         const name = (gName.value || '').trim(), tlLabel = (gTl.value || '').trim();
         const personId = (gPid.value || '').trim(), mobile = (gMob.value || '').replace(/\D/g, '').slice(-10);
-        if (!name) return U.toast('Team / group ka naam likho', 'err');
-        if (!members.size) return U.toast('Kam se kam ek agent chuno', 'err');
-        if (personId.length < 2) return U.toast('Team ID (verification code) zaroori hai', 'err');
-        if (mobile.length !== 10) return U.toast('Registered 10-digit mobile zaroori hai', 'err');
+        if (!name) return U.toast('Enter a team / group name', 'err');
+        if (!picker.tls.size && !picker.members.size) return U.toast('Pick at least one TL or agent', 'err');
+        if (personId.length < 2) return U.toast('Team ID (verification code) is required', 'err');
+        if (mobile.length !== 10) return U.toast('Registered 10-digit mobile is required', 'err');
         await U.withButtonBusy(gBtn, async () => {
           try {
-            const out = await A.api('/api/personal-links', 'POST', { source: gSrc.value === 'gv' ? 'gv' : 'ff', kind: 'group', name, tlLabel, members: [...members.values()], personId, mobile });
+            const out = await A.api('/api/personal-links', 'POST', { source: picker.sourceOf(), kind: 'group', name, tlLabel, tls: [...picker.tls.values()], members: [...picker.members.values()], personId, mobile });
             await U.copyText(`${origin}/p/${out.link.token}`).catch(() => false);
-            U.toast(`🔗 Team link ${out.reused ? 'update' : 'ban'} gaya (${members.size} agents) aur copy ho gaya ✓`, 'ok');
+            U.toast(`🔗 Team link ${out.reused ? 'updated' : 'created'} (${picker.tls.size} TL · ${picker.members.size} agents) and copied ✓`, 'ok');
             await draw();
           } catch (err) { U.toast(err.message, 'err'); if (gMsg) gMsg.textContent = err.message; }
-        }, 'Link save ho raha hai…');
+        }, 'Saving link…');
       });
     })();
 
@@ -1730,7 +1758,7 @@ FF.pages = FF.pages || {};
       if (!link || !FF.app || !FF.app.openDrawer) return;
       const curSecs = Array.isArray(link.sections) ? link.sections : defSecs;
       FF.app.openDrawer({
-        kicker: `🔗 Personal Link Access · ${link.source === 'gv' ? 'GV Partner' : 'First Forward'}`,
+        kicker: `🔗 Personal Link Access · ${link.source === 'both' ? 'GV + First Forward' : (link.source === 'gv' ? 'GV Partner' : 'First Forward')}`,
         title: `${link.kind === 'tl' ? '👥' : (link.kind === 'group' ? '🧩' : '🧑‍💼')} ${link.name}`,
         sub: 'Set the exact registered ID/mobile and control which report sections this link may return',
         body: `<div class="kd-sec">
@@ -1740,9 +1768,11 @@ FF.pages = FF.pages || {};
             <label class="fld"><span>📱 Registered Mobile Number (10 digit)</span>
               <input class="input" id="ple-mob" type="tel" inputmode="numeric" value="${esc(link.mobile || '')}" placeholder="e.g. 9876543210" maxlength="14"></label>
           </div>
-          ${link.kind === 'group' ? `<h4 class="drawer-section-title" style="margin-top:14px">🧩 Team agents &amp; TL naam</h4>
-          <input class="input" id="ple-tl" value="${esc(link.tlLabel || '')}" placeholder="🧑‍💼 TL ka naam (link me dikhega)" maxlength="80" style="margin-bottom:8px">
-          <div class="finder-input" style="margin-bottom:8px"><span class="finder-ico">🔎</span><input class="input" id="ple-agent" placeholder="Agent naam / ID type karo → click karke add karo" maxlength="80"></div>
+          ${link.kind === 'group' ? `<h4 class="drawer-section-title" style="margin-top:14px">🧩 Team TLs &amp; agents</h4>
+          <input class="input" id="ple-tl" value="${esc(link.tlLabel || '')}" placeholder="🧑‍💼 Display name shown on the link" maxlength="80" style="margin-bottom:8px">
+          <select class="input" id="ple-scope" style="width:auto;margin-bottom:8px"><option value="both" ${link.source === 'both' ? 'selected' : ''}>🌐 Search GV + FF</option><option value="ff" ${link.source === 'ff' ? 'selected' : ''}>🟦 First Forward only</option><option value="gv" ${link.source === 'gv' ? 'selected' : ''}>🟩 GV Partner only</option></select>
+          <div class="finder-input" style="margin-bottom:8px"><span class="finder-ico">👥</span><input class="input" id="ple-tl-add" placeholder="Add a TL — type name / ID, click to add" maxlength="80"></div>
+          <div class="finder-input" style="margin-bottom:8px"><span class="finder-ico">🧑‍💼</span><input class="input" id="ple-agent" placeholder="Add an agent — type name / ID, click to add" maxlength="80"></div>
           <div id="ple-chips" class="chip-row" style="min-height:30px"></div>` : ''}
           <p class="check" style="margin-top:8px">🔐 <b>ID + exact registered mobile verification is mandatory.</b> No personal report HTML/data is returned until both match.</p>
           <h4 class="drawer-section-title" style="margin-top:14px">🎛️ Allowed Tabs &amp; Features</h4>
@@ -1757,20 +1787,10 @@ FF.pages = FF.pages || {};
       const dBody = document.getElementById('drawer-body');
       if (!dBody) return;
       wireSectionGroup(dBody, 'input[data-ple-sec]', 'pleSec');
-      const eMembers = new Map((Array.isArray(link.members) ? link.members : []).map((m) => [m.name, { name: m.name, id: m.id || '' }]));
+      let ePicker = null;
       if (link.kind === 'group') {
-        const eChips = dBody.querySelector('#ple-chips'), eAgent = dBody.querySelector('#ple-agent');
-        const drawE = () => {
-          eChips.innerHTML = eMembers.size ? [...eMembers.values()].map((m) => `<span class="chip on" style="display:inline-flex;gap:6px;align-items:center">${esc(m.name)}${m.id ? ` <small class="dim">${esc(m.id)}</small>` : ''}<button type="button" data-rm="${esc(m.name)}" style="border:0;background:transparent;cursor:pointer" aria-label="Hatao ${esc(m.name)}">✕</button></span>`).join(' ') + ` <span class="dim small">· ${eMembers.size} agents</span>` : '<span class="dim small">Koi agent nahi — kam se kam ek chahiye</span>';
-          eChips.querySelectorAll('[data-rm]').forEach((x) => x.addEventListener('click', () => { eMembers.delete(x.dataset.rm); drawE(); }));
-        };
-        drawE();
-        if (eAgent) U.suggest(eAgent, {
-          min: 1,
-          items: () => suggestionItems(link.source, 'agent', eAgent.value),
-          onPick: (it) => { if (!it || it._pending) return; const nm = it.value || it.label; if (nm) { eMembers.set(nm, { name: nm, id: it.id || '' }); drawE(); } eAgent.value = ''; },
-          onEnter: (q) => { const nm = String(q || '').trim(); if (nm) { eMembers.set(nm, { name: nm, id: '' }); drawE(); } eAgent.value = ''; }
-        });
+        const eScope = dBody.querySelector('#ple-scope');
+        ePicker = teamPicker(dBody, { tl: '#ple-tl-add', agent: '#ple-agent', chips: '#ple-chips' }, { tls: link.tls || [], members: link.members || [], baseSource: link.source }, () => (eScope ? eScope.value : 'both'));
       }
       const saveBtn = dBody.querySelector('#ple-save');
       if (saveBtn) saveBtn.addEventListener('click', () => U.withButtonBusy(saveBtn, async () => {
@@ -1781,8 +1801,8 @@ FF.pages = FF.pages || {};
         if (mobile.length !== 10) return U.toast('Registered 10-digit mobile number zaroori hai', 'err');
         const payload = { personId, mobile, sections };
         if (link.kind === 'group') {
-          if (!eMembers.size) return U.toast('Kam se kam ek agent rakho', 'err');
-          payload.members = [...eMembers.values()];
+          if (!ePicker.tls.size && !ePicker.members.size) return U.toast('Keep at least one TL or agent', 'err');
+          payload.members = [...ePicker.members.values()]; payload.tls = [...ePicker.tls.values()]; payload.source = ePicker.sourceOf();
           payload.tlLabel = (dBody.querySelector('#ple-tl') && dBody.querySelector('#ple-tl').value || '').trim();
         }
         await A.api(`/api/personal-links/${encodeURIComponent(link.id)}`, 'PUT', payload);

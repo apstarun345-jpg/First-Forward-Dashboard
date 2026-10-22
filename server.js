@@ -5638,8 +5638,17 @@ async function handleApi(req, res, url) {
     const seen = new Set();
     return (Array.isArray(arr) ? arr : []).map((m) => ({
       name: String((m && m.name) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80),
-      id: String((m && m.id) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40)
-    })).filter((m) => { const k = m.name.toLowerCase(); if (!m.name || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 80);
+      id: String((m && m.id) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40),
+      source: m && m.source === 'gv' ? 'gv' : (m && m.source === 'ff' ? 'ff' : '')
+    })).filter((m) => { const k = `${m.source}|${m.name.toLowerCase()}`; if (!m.name || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 120);
+  };
+  const normPlTls = (arr) => {
+    const seen = new Set();
+    return (Array.isArray(arr) ? arr : []).map((t) => ({
+      name: String((t && t.name) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80),
+      id: String((t && t.id) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40),
+      source: t && t.source === 'gv' ? 'gv' : 'ff'
+    })).filter((t) => { const k = `${t.source}|${t.name.toLowerCase()}`; if (!t.name || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 40);
   };
   const plDefaults = () => {
     const d = (db.settings && db.settings.personalLinkDefaults) || {};
@@ -5649,10 +5658,10 @@ async function handleApi(req, res, url) {
     const def = plDefaults();
     return {
       ...l,
-      source: l.source === 'gv' ? 'gv' : 'ff',
+      source: l.kind === 'group' ? plSrc(l.source) : (l.source === 'gv' ? 'gv' : 'ff'),
       personId: String(l.personId || '').trim().slice(0, 40),
       mobile: String(l.mobile || '').replace(/\D/g, '').slice(-10),
-      ...(l.kind === 'group' ? { members: normPlMembers(l.members), tlLabel: String(l.tlLabel || '').slice(0, 80) } : {}),
+      ...(l.kind === 'group' ? { members: normPlMembers(l.members), tls: normPlTls(l.tls), tlLabel: String(l.tlLabel || '').slice(0, 80) } : {}),
       requireAuth: true,
       sections: Array.isArray(l.sections) ? normPlSections(plBackfill(l)) : def.sections
     };
@@ -5681,12 +5690,14 @@ async function handleApi(req, res, url) {
     requireAdmin(user);
     const body = await readBody(req);
     const kind = body.kind === 'tl' ? 'tl' : (body.kind === 'group' ? 'group' : 'agent');
-    const source = body.source === 'gv' ? 'gv' : 'ff';
+    const kindForSrc = body.kind === 'group' ? 'group' : 'x';
+    const source = kindForSrc === 'group' ? plSrc(body.source) : (body.source === 'gv' ? 'gv' : 'ff');
     const name = String(body.name || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80);
     if (!name) throw new HttpError(400, kind === 'group' ? 'Group / team ka naam likho.' : 'Agent/TL ka exact naam likho.');
     const members = kind === 'group' ? normPlMembers(body.members) : [];
+    const tls = kind === 'group' ? normPlTls(body.tls) : [];
     const tlLabel = kind === 'group' ? String(body.tlLabel || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80) : '';
-    if (kind === 'group' && !members.length) throw new HttpError(400, 'Kam se kam ek agent chuno.');
+    if (kind === 'group' && !members.length && !tls.length) throw new HttpError(400, 'Kam se kam ek TL ya agent chuno.');
     if (feats().personalLinks === false) throw new HttpError(403, 'Personal links feature band hai — Features tab se ON karo.');
     const personId = String(body.personId || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40);
     const mobile = String(body.mobile || '').replace(/\D/g, '').slice(-10);
@@ -5694,13 +5705,13 @@ async function handleApi(req, res, url) {
     if (mobile.length !== 10) throw new HttpError(400, 'Personal link ke liye registered 10-digit mobile configure karo.');
     const def = plDefaults();
     const sections = Array.isArray(body.sections) ? normPlSections(body.sections) : def.sections;
-    const duplicate = (db.settings.personalLinks || []).find((l) => (l.source === 'gv' ? 'gv' : 'ff') === source && l.kind === kind && String(l.name).toLowerCase() === name.toLowerCase() && l.enabled !== false);
+    const duplicate = (db.settings.personalLinks || []).find((l) => (l.kind === 'group' ? plSrc(l.source) : (l.source === 'gv' ? 'gv' : 'ff')) === source && l.kind === kind && String(l.name).toLowerCase() === name.toLowerCase() && l.enabled !== false);
     if (duplicate) {
       const credentialsChanged = String(duplicate.personId || '') !== personId || String(duplicate.mobile || '').replace(/\D/g, '').slice(-10) !== mobile;
       duplicate.personId = personId;
       duplicate.mobile = mobile;
       duplicate.requireAuth = true;
-      if (kind === 'group') { duplicate.members = members; duplicate.tlLabel = tlLabel; }
+      if (kind === 'group') { duplicate.members = members; duplicate.tls = tls; duplicate.tlLabel = tlLabel; }
       if (Array.isArray(body.sections)) duplicate.sections = sections;
       if (credentialsChanged || Array.isArray(body.sections)) revokePersonalLinkSessions(duplicate.id);
       await persist('settings');
@@ -5711,7 +5722,7 @@ async function handleApi(req, res, url) {
     const link = {
       id: `pl_${crypto.randomBytes(6).toString('hex')}`, source, kind, name,
       personId, mobile, requireAuth: true, sections,
-      ...(kind === 'group' ? { members, tlLabel } : {}),
+      ...(kind === 'group' ? { members, tls, tlLabel } : {}),
       token: crypto.randomBytes(18).toString('hex'), enabled: true, by: user.username, createdAt: new Date().toISOString()
     };
     if (!Array.isArray(db.settings.personalLinks)) db.settings.personalLinks = [];
@@ -5743,7 +5754,11 @@ async function handleApi(req, res, url) {
     link.mobile = mobile;
     link.requireAuth = true;
     if (link.kind === 'group') {
-      if (Array.isArray(body.members)) { const m = normPlMembers(body.members); if (!m.length) throw new HttpError(400, 'Kam se kam ek agent chahiye.'); link.members = m; }
+      const nextMembers = Array.isArray(body.members) ? normPlMembers(body.members) : normPlMembers(link.members);
+      const nextTls = Array.isArray(body.tls) ? normPlTls(body.tls) : normPlTls(link.tls);
+      if (!nextMembers.length && !nextTls.length) throw new HttpError(400, 'Kam se kam ek TL ya agent chahiye.');
+      link.members = nextMembers; link.tls = nextTls;
+      if (body.source !== undefined) link.source = plSrc(body.source);
       if (body.tlLabel !== undefined) link.tlLabel = String(body.tlLabel || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80);
     }
     if (Array.isArray(body.sections)) { link.sections = normPlSections(body.sections); link.secV = 2; }
@@ -7659,11 +7674,11 @@ async function handleApi(req, res, url) {
     let hits = all.filter((l) => l && l.enabled !== false && normId(l.personId) === rawId && String(l.mobile || '').replace(/\D/g, '').slice(-10) === rawMob);
     if (!hits.length) throw new HttpError(403, 'ID ya password match nahi hua — sahi ID aur registered mobile daalo.');
     if (body.linkId) hits = hits.filter((l) => l.id === String(body.linkId));
-    if (hits.length > 1) return sendJson(res, 200, { ok: true, choices: hits.slice(0, 8).map((l) => ({ id: l.id, name: l.name, kind: l.kind, source: l.source === 'gv' ? 'gv' : 'ff' })) }, { 'Cache-Control': 'no-store' });
+    if (hits.length > 1) return sendJson(res, 200, { ok: true, choices: hits.slice(0, 8).map((l) => ({ id: l.id, name: l.name, kind: l.kind, source: l.kind === 'group' ? plSrc(l.source) : (l.source === 'gv' ? 'gv' : 'ff') })) }, { 'Cache-Control': 'no-store' });
     if (!hits.length) throw new HttpError(403, 'Link nahi mila.');
     const link = hits[0];
     const session = createPersonalLinkSession(req, link);
-    try { const wl = { ...link, source: link.source === 'gv' ? 'gv' : 'ff' }; personalDailyRows(wl).catch(() => {}); if (isTeamLink(wl)) personalTeamAgents(wl).catch(() => {}); } catch { /* best-effort */ }
+    try { const wl = { ...link, source: link.kind === 'group' ? plSrc(link.source) : (link.source === 'gv' ? 'gv' : 'ff') }; personalDailyRows(wl).catch(() => {}); if (isTeamLink(wl)) personalTeamAgents(wl).catch(() => {}); } catch { /* best-effort */ }
     return sendJson(res, 200, { ok: true, url: `/p/${link.token}` }, { 'Set-Cookie': session.cookie, 'Cache-Control': 'no-store' });
   }
   if (p === '/api/public/personal-link/verify' && method === 'POST') {
@@ -7688,7 +7703,7 @@ async function handleApi(req, res, url) {
 
     const session = createPersonalLinkSession(req, savedLink);
     // 🔥 v187 — verify hote hi sheet data background me garam karo, page reload par seedha cache se khule.
-    try { const wl = { ...savedLink, source: savedLink.source === 'gv' ? 'gv' : 'ff' }; personalDailyRows(wl).catch(() => {}); if (isTeamLink(wl)) personalTeamAgents(wl).catch(() => {}); } catch { /* best-effort */ }
+    try { const wl = { ...savedLink, source: savedLink.kind === 'group' ? plSrc(savedLink.source) : (savedLink.source === 'gv' ? 'gv' : 'ff') }; personalDailyRows(wl).catch(() => {}); if (isTeamLink(wl)) personalTeamAgents(wl).catch(() => {}); } catch { /* best-effort */ }
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': session.cookie, 'Cache-Control': 'no-store' });
   }
   if (p === '/api/public/personal-link/logout' && method === 'POST') {
@@ -8969,6 +8984,82 @@ function personalWindow() {
   return { start, currentStart: `${todayKey.slice(0, 7)}-01`, today: reportThrough };
 }
 // 👥 v180 — "group" link: admin ne manually kuch agents chune + ek TL/group naam rakha → sirf unhi agents ka data.
+const plSrc = (v) => (v === 'gv' ? 'gv' : (v === 'both' ? 'both' : 'ff'));
+const plNormName = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+const plMemberSrc = (m, link) => (m && m.source === 'gv' ? 'gv' : (m && m.source === 'ff' ? 'ff' : (link && link.source === 'gv' ? 'gv' : 'ff')));
+/** 🧩 Combo team link — TLs + manual agents, GV aur FF dono se. */
+function isComboLink(l) {
+  if (!l || l.kind !== 'group') return false;
+  if (l.source === 'both' || (Array.isArray(l.tls) && l.tls.length)) return true;
+  const base = l.source === 'gv' ? 'gv' : 'ff';
+  return (Array.isArray(l.members) ? l.members : []).some((m) => m && m.source && m.source !== base);
+}
+function comboTlParts(link) {
+  return (Array.isArray(link.tls) ? link.tls : []).filter((t) => t && t.name).map((t) => ({ source: plMemberSrc(t, link), name: String(t.name), personId: String(t.id || '') }));
+}
+async function comboSplit(link) {
+  const tlParts = comboTlParts(link);
+  const known = { ff: new Set(), gv: new Set() };
+  const tlMaps = [];
+  for (const part of tlParts) {
+    let m = new Map();
+    try { m = await personalTeamAgents({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] }); } catch { /* ignore */ }
+    m.forEach((_v, n) => known[part.source].add(plNormName(n)));
+    tlMaps.push({ part, map: m });
+  }
+  const memBySrc = { ff: [], gv: [] };
+  (Array.isArray(link.members) ? link.members : []).forEach((m) => {
+    const src = plMemberSrc(m, link);
+    if (m && m.name && !known[src].has(plNormName(m.name))) memBySrc[src].push({ name: String(m.name) });
+  });
+  return { tlParts, tlMaps, memBySrc };
+}
+async function comboTeamAgents(link) {
+  const out = new Map();
+  const merge = (m) => { for (const [n, dm] of m) { if (!out.has(n)) out.set(n, new Map()); const t = out.get(n); for (const [d, v] of dm) t.set(d, Math.max(t.get(d) || 0, v)); } };
+  const sp = await comboSplit(link);
+  sp.tlMaps.forEach((x) => merge(x.map));
+  for (const src of ['ff', 'gv']) if (sp.memBySrc[src].length) { try { merge(await personalTeamAgents({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] })); } catch { /* ignore */ } }
+  return out;
+}
+async function comboDailyRows(link) {
+  const sp = await comboSplit(link);
+  const agg = new Map();
+  const add = (rows) => rows.forEach((r) => { const k = `${r.date}|${r.cls}`; const o = agg.get(k) || { date: r.date, cls: r.cls, n: 0 }; o.n += r.n; agg.set(k, o); });
+  for (const part of sp.tlParts) { try { add(await personalDailyRows({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] })); } catch { /* ignore */ } }
+  for (const src of ['ff', 'gv']) if (sp.memBySrc[src].length) { try { add(await personalDailyRows({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] })); } catch { /* ignore */ } }
+  return [...agg.values()];
+}
+function mergePersonalStock(list) {
+  const parts = list.filter(Boolean);
+  if (!parts.length) return null;
+  const out = { t: [0, 0], c: [[0, 0, 0, 0], [0, 0, 0, 0]], o: [0, 0], agents: [], byCls: {}, personId: '' };
+  const seen = new Set();
+  parts.forEach((p) => {
+    if (!out.personId && p.personId) out.personId = p.personId;
+    for (let g = 0; g < 2; g++) { out.t[g] += (p.t || [])[g] || 0; out.o[g] = Math.max(out.o[g], (p.o || [])[g] || 0); for (let i = 0; i < 4; i++) out.c[g][i] += (((p.c || [])[g]) || [])[i] || 0; }
+    (p.agents || []).forEach((a) => { const k = plNormName(a && a.n); if (k && seen.has(k)) return; if (k) seen.add(k); out.agents.push(a); });
+    Object.entries(p.byCls || {}).forEach(([cls, v]) => {
+      const e = out.byCls[cls] || (out.byCls[cls] = { t: 0, c: [0, 0, 0, 0], o: 0 });
+      e.t += v.t || 0; e.o = Math.max(e.o, v.o || 0); for (let i = 0; i < 4; i++) e.c[i] += (v.c || [])[i] || 0;
+    });
+  });
+  out.agents.sort((a, b) => ((b.t || [0, 0])[0] + (b.t || [0, 0])[1]) - ((a.t || [0, 0])[0] + (a.t || [0, 0])[1]));
+  return out;
+}
+function personalStockFor(sidx, link) {
+  if (!isComboLink(link)) return personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : (link.kind === 'group' ? 'group' : 'agent'), link.kind === 'group' ? personalMemberNames(link) : link.name);
+  const res = [];
+  const known = { ff: new Set(), gv: new Set() };
+  comboTlParts(link).forEach((part) => {
+    const r = personalStock(sidx, part.source, 'tl', part.name);
+    if (r) { res.push(r); (r.agents || []).forEach((a) => known[part.source].add(plNormName(a && a.n))); }
+  });
+  const bySrc = { ff: [], gv: [] };
+  (Array.isArray(link.members) ? link.members : []).forEach((m) => { const src = plMemberSrc(m, link); if (m && m.name && !known[src].has(plNormName(m.name))) bySrc[src].push(String(m.name)); });
+  ['ff', 'gv'].forEach((src) => { if (bySrc[src].length) { const r = personalStock(sidx, src, 'group', bySrc[src]); if (r) res.push(r); } });
+  return mergePersonalStock(res);
+}
 const isTeamLink = (l) => !!l && (l.kind === 'tl' || l.kind === 'group');
 function personalMemberNames(link) {
   return (Array.isArray(link && link.members) ? link.members : []).map((m) => String((m && m.name) || '').trim()).filter(Boolean).slice(0, 80);
@@ -9041,6 +9132,7 @@ async function personalGvMasterRows(link) {
   return [];
 }
 async function personalDailyRows(link) {
+  if (isComboLink(link)) return comboDailyRows(link);
   const c = personalConfig(link);
   const { start, today } = personalWindow();
   const extra = `, ${c.masterCol}, ${c.tlCol}`;
@@ -9081,6 +9173,7 @@ async function personalDailyRows(link) {
   return rows;
 }
 async function personalTeamAgents(link) {
+  if (isComboLink(link)) return comboTeamAgents(link);
   const c = personalConfig(link);
   const { start, today } = personalWindow();
   const extra = `, ${c.masterCol}, ${c.tlCol}`;
@@ -9237,7 +9330,7 @@ async function servePersonalPage(req, res, rawToken) {
   const hasVisibleSection = allowedSecs.some((key) => key !== 'export');
   const canExport = hasVisibleSection && hasSec('export');
   const requireAuth = true;
-  const link = { ...savedLink, source: savedLink.source === 'gv' ? 'gv' : 'ff' };
+  const link = { ...savedLink, source: savedLink.kind === 'group' ? plSrc(savedLink.source) : (savedLink.source === 'gv' ? 'gv' : 'ff') };
   try {
     const needsIssuance = hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights');
     const needsStock = hasSec('stock') || hasSec('ageing') || (hasSec('insights') && isTeamLink(link));
@@ -9277,7 +9370,7 @@ async function servePersonalPage(req, res, rawToken) {
             if (timer && timer.unref) timer.unref();
           })
         ]);
-        const sres = personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : (link.kind === 'group' ? 'group' : 'agent'), link.kind === 'group' ? personalMemberNames(link) : link.name);
+        const sres = personalStockFor(sidx, link);
         stockMeta.state = sres ? 'ok' : 'nomatch';
         return sres;
       } catch (err) {
@@ -9582,7 +9675,7 @@ async function servePersonalPage(req, res, rawToken) {
     const html = personalShell({
       title: `${link.name} · Performance`,
       heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`,
-      sub: `${link.source === 'gv' ? 'GV Partner' : 'First Forward'} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
+      sub: `${link.source === 'both' || isComboLink(link) ? 'GV Partner + First Forward' : (link.source === 'gv' ? 'GV Partner' : 'First Forward')} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${(link.tls || []).length ? `${link.tls.length} TL${link.tls.length > 1 ? 's' : ''} + ` : ''}${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
       token,
       requireAuth,
       authorized: true,
