@@ -9448,7 +9448,9 @@ async function personalGvMasterRows(link, win) {
   const sheetId = String(db.settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
   for (const tq of tries) {
     try {
-      const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: m.tab || 'GV Master', tq })));
+      // Live (today-only) window: short cache so "Issued today" matches the site (30s), not the 10-min default.
+      const liveWin = !!win && win.start === win.today;
+      const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: m.tab || 'GV Master', tq })), liveWin ? { maxAgeMs: 30e3 } : undefined);
       if (out.status < 200 || out.status >= 300) continue;
       const table = parseGvizServer(out.body);
       const rows = [];
@@ -9459,6 +9461,7 @@ async function personalGvMasterRows(link, win) {
         const cls = classBucket(cch || (vcl ? (/^vc/i.test(vcl) ? vcl : `VC${vcl}`) : ''));
         rows.push({ agent: serverCell(row, 0).trim(), date: dk, cls, n: serverNumber(serverCell(row, 4)) });
       }
+      if (!rows.length && tq !== tries[tries.length - 1]) continue;   // empty ≠ no data: try the next date format
       return rows;
     } catch { /* next attempt */ }
   }
@@ -9696,7 +9699,7 @@ async function servePersonalPage(req, res, rawToken) {
     const classRowsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance'))
       ? personalAgentClassRows(link).catch(() => new Map()) : Promise.resolve(new Map());
     const livePromise = hasSec('overview')
-      ? Promise.race([personalLiveToday(link), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 2500); if (t.unref) t.unref(); })]).catch(() => null)
+      ? Promise.race([personalLiveToday(link), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 5000); if (t.unref) t.unref(); })]).catch(() => null)
       : Promise.resolve(null);
     const teamPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights') || hasSec('stock'))
       ? personalTeamAgents(link) : Promise.resolve(new Map());
