@@ -9257,16 +9257,19 @@ function personalStockFor(sidx, link) {
 }
 /** Class bucket for a stock/issuance class string: VC4 | VC20 | VC5+. */
 const plBucket = (x) => { const u = String(x || '').toUpperCase().replace(/\s+/g, ''); return u === 'VC4' ? 'VC4' : u === 'VC20' ? 'VC20' : 'VC5+'; };
+/** Actual class label: 4 / VC4 → VC4, 20 → VC20, 5 → VC5 … (anything else keeps its short name). */
+const plCls = (x) => { const u = String(x == null ? '' : x).toUpperCase().replace(/\s+/g, ''); if (!u) return 'VC4'; if (/^\d+$/.test(u)) return `VC${u}`; return /^VC\d+\+?$/.test(u) ? u : u.slice(0, 12); };
+const plClsRank = (k) => { const m = /(\d+)/.exec(k); return m ? Number(m[1]) + (/\+$/.test(k) ? 0.5 : 0) : 999; };
 /** Per-agent class-wise issuance: Map(normName → { name, c: { VC4: [last, cur], VC20: [..], 'VC5+': [..] } }). Two grouped queries
  *  (last month / this month) so the result stays small even for big teams. */
 async function personalAgentClassRows(link) {
   const out = new Map();
   const add = (name, cls, which, n) => {
     const k = plNormName(name); if (!k || !n) return;
-    let o = out.get(k); if (!o) { o = { name: String(name).trim(), c: { VC4: [0, 0], VC20: [0, 0], 'VC5+': [0, 0] } }; out.set(k, o); }
-    o.c[plBucket(cls)][which] += n;
+    let o = out.get(k); if (!o) { o = { name: String(name).trim(), c: {} }; out.set(k, o); }
+    const ck = plCls(cls); (o.c[ck] = o.c[ck] || [0, 0])[which] += n;
   };
-  const merge = (m) => { for (const [k, v] of m) { let o = out.get(k); if (!o) { out.set(k, v); continue; } for (const b of Object.keys(v.c)) for (let w = 0; w < 2; w++) o.c[b][w] = Math.max(o.c[b][w], v.c[b][w]); } };
+  const merge = (m) => { for (const [k, v] of m) { let o = out.get(k); if (!o) { out.set(k, v); continue; } for (const b of Object.keys(v.c)) { o.c[b] = o.c[b] || [0, 0]; for (let w = 0; w < 2; w++) o.c[b][w] = Math.max(o.c[b][w], v.c[b][w]); } } };
   if (isComboLink(link)) {
     const sp = await comboSplit(link);
     const parts = [...sp.tlParts.map((p) => ({ kind: 'tl', source: p.source, name: p.name, personId: p.personId, members: [] }))];
@@ -9291,7 +9294,7 @@ async function personalAgentClassRows(link) {
       if ((c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
       const cells = (row && row.c) || [];
       const agent = serverCell(row, 0).trim(); if (!agent) continue;
-      add(agent, classBucket(serverCell(row, 1)), which, serverNumber(serverCell(row, Math.max(0, cells.length - 1)))); n++;
+      add(agent, serverCell(row, 1), which, serverNumber(serverCell(row, Math.max(0, cells.length - 1)))); n++;
     }
     return n;
   };
@@ -10119,16 +10122,18 @@ async function servePersonalPage(req, res, rawToken) {
           else addStockCls(personalClassStockByAgent(stockIdxRef.v, defSrc, 'group', personalMemberNames(link)));
         } catch { /* stock by class optional */ }
       }
-      const B3 = ['VC4', 'VC20', 'VC5+'];
       const liveCls = new Map();
-      if (live) live.agents.forEach((a) => { const o = { VC4: 0, VC20: 0, 'VC5+': 0 }; Object.entries(a.cls || {}).forEach(([k4, v4]) => { o[plBucket(k4)] += v4; }); liveCls.set(nk(a.name), o); });
+      if (live) live.agents.forEach((a) => { const o = {}; Object.entries(a.cls || {}).forEach(([k4, v4]) => { const ck = plCls(k4); o[ck] = (o[ck] || 0) + v4; }); liveCls.set(nk(a.name), o); });
+      const classSet = new Set(['VC4', 'VC20']);
       for (const [k5, p] of peopleMap) {
         const cr = classRows.get(k5), sc = stockCls.get(k5), lc = liveCls.get(k5);
         if (!cr && !sc && !lc) continue;
         p.c = {};
-        B3.forEach((b) => { p.c[b] = [cr ? cr.c[b][0] : 0, cr ? cr.c[b][1] : 0, sc ? sc[b] : 0, lc ? lc[b] : 0]; });
-        if (cr) { p.l = B3.reduce((a, b) => a + p.c[b][0], 0); p.m = B3.reduce((a, b) => a + p.c[b][1], 0); }
-        if (sc) p.st = B3.reduce((a, b) => a + p.c[b][2], 0);
+        const keys = new Set([...(cr ? Object.keys(cr.c) : []), ...(sc ? Object.keys(sc) : []), ...(lc ? Object.keys(lc) : [])]);
+        keys.forEach((b) => { p.c[b] = [cr && cr.c[b] ? cr.c[b][0] : 0, cr && cr.c[b] ? cr.c[b][1] : 0, sc ? sc[b] || 0 : 0, lc ? lc[b] || 0 : 0]; classSet.add(b); });
+        const sumK = (i) => Object.values(p.c).reduce((a, x) => a + x[i], 0);
+        if (cr) { p.l = sumK(0); p.m = sumK(1); }
+        if (sc) p.st = sumK(2);
       }
       const items = [...peopleMap.values()];
       tlGroups.forEach((g) => {
@@ -10136,14 +10141,14 @@ async function servePersonalPage(req, res, rawToken) {
         const sum = (f) => ags.reduce((a, x) => a + (x[f] || 0), 0);
         let tlStock = sum('st');
         try { if (stockIdxRef.v) { const sr = personalStock(stockIdxRef.v, g.src, 'tl', g.name); if (sr) tlStock = (sr.t[0] || 0) + (sr.t[1] || 0); } } catch { /* keep sum */ }
-        const tlC = { VC4: [0, 0, 0, 0], VC20: [0, 0, 0, 0], 'VC5+': [0, 0, 0, 0] };
-        ags.forEach((x) => { if (x.c) B3.forEach((b) => { for (let i = 0; i < 4; i++) tlC[b][i] += x.c[b][i]; }); });
+        const tlC = {};
+        ags.forEach((x) => { if (x.c) Object.keys(x.c).forEach((b) => { const t = tlC[b] = tlC[b] || [0, 0, 0, 0]; for (let i = 0; i < 4; i++) t[i] += x.c[b][i]; }); });
         try {
-          if (stockIdxRef.v) { const sr = personalStock(stockIdxRef.v, g.src, 'tl', g.name); if (sr && sr.byCls) { B3.forEach((b) => { tlC[b][2] = 0; }); Object.entries(sr.byCls).forEach(([k6, v6]) => { tlC[plBucket(k6)][2] += v6.t || 0; }); } }
+          if (stockIdxRef.v) { const sr = personalStock(stockIdxRef.v, g.src, 'tl', g.name); if (sr && sr.byCls) { Object.keys(tlC).forEach((b) => { tlC[b][2] = 0; }); Object.entries(sr.byCls).forEach(([k6, v6]) => { const ck = plCls(k6); const t = tlC[ck] = tlC[ck] || [0, 0, 0, 0]; t[2] += v6.t || 0; classSet.add(ck); }); } }
         } catch { /* keep agent sums */ }
         items.push({ k: 't', n: g.name, s: g.src, ag: ags.length, m: sum('m'), l: sum('l'), d: sum('d'), st: tlStock, c: tlC, members: ags.map((x) => x.n) });
       });
-      const dataJson = JSON.stringify({ items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
+      const dataJson = JSON.stringify({ classes: [...classSet].sort((a, b) => plClsRank(a) - plClsRank(b)), items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
       dispatchOk = issueOk && stockOk && items.some((x) => x.k === 'a' && x.c);
       searchHtml = `<section class="pb-card pl-search" id="pl-search"><div class="pl-search-row"><span class="pl-search-ico">🔎</span><input id="pl-search-q" type="search" placeholder="Search a TL or agent in this link…" autocomplete="off" aria-label="Search TL or agent"><div id="pl-search-drop" class="pl-search-drop" hidden></div></div><div id="pl-search-res"></div><script type="application/json" id="pl-search-data">${dataJson}</script></section>`;
     }
@@ -10357,7 +10362,7 @@ body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);fon
 .pb-split{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:16px;align-items:center}
 @media(max-width:900px){.pb-split{grid-template-columns:1fr}}
 .pl-pr{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:800;color:#fff;background:#16a34a}
-.pb-kpi .pl-pr{color:#fff;font-size:13px;padding:2px 14px}.pl-dngrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}.pl-dngrid .pb-card{margin:0}
+.pb-wrap .pb-kpi .pl-pr{color:#fff;font-size:13px;padding:2px 14px}.pl-dngrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}.pl-dngrid .pb-card{margin:0}
 .pl-pr.high{background:#dc2626}.pl-pr.medium{background:#f59e0b}.pl-pr.low{background:#16a34a}
 .pb-kpi.pl-hi{border-top-color:#dc2626!important}.pb-kpi.pl-md{border-top-color:#f59e0b!important}
 .pl-prf{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
@@ -10642,7 +10647,7 @@ const PERSONAL_PORTAL_JS = `(function () {
     if (!dataEl || !qEl) return;
     var D; try { D = JSON.parse(dataEl.textContent || '{}'); } catch (e) { return; }
     var items = D.items || [], drop = document.getElementById('pl-search-drop'), res = document.getElementById('pl-search-res');
-    var B3 = ['VC4', 'VC20', 'VC5+'], RANK = { High: 0, Medium: 1, Low: 2 };
+    var G1 = ['VC4', 'VC20'], B3 = (D.classes && D.classes.length ? D.classes : ['VC4', 'VC20', 'VC5+']), G2 = B3.filter(function (k) { return G1.indexOf(k) < 0; }), RANK = { High: 0, Medium: 1, Low: 2 };
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function nf(n) { return Number(n || 0).toLocaleString('en-IN'); }
     function f1(n) { return Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 }); }
@@ -10657,39 +10662,47 @@ const PERSONAL_PORTAL_JS = `(function () {
       return { rate: rate, cover: cover, pr: pr, need: Math.max(0, Math.ceil(rate * D.days - v[2])), gross: Math.ceil(rate * D.days) };
     }
     function worst(a, b) { return RANK[a] <= RANK[b] ? a : b; }
-    function overall(it) { var g1 = calc(sumC(it, ['VC4', 'VC20'])), g2 = calc(sumC(it, ['VC5+'])); return { g1: g1, g2: g2, pr: worst(g1.pr, g2.pr), need: g1.need + g2.need, gross: g1.gross + g2.gross }; }
+    function overall(it) { var g1 = calc(sumC(it, G1)), g2 = calc(sumC(it, G2)); return { g1: g1, g2: g2, pr: worst(g1.pr, g2.pr), need: g1.need + g2.need, gross: g1.gross + g2.gross }; }
     function prBadge(p) { return '<span class="pl-pr ' + p.toLowerCase() + '">' + p + '</span>'; }
     function coverTxt(c) { return c === null ? '—' : (c >= 99 ? '99+' : f1(c)) + ' d'; }
     function tile(label, val, sub, cls) { return '<div class="pb-kpi ' + (cls || '') + '"><small>' + label + '</small><b>' + val + '</b><span>' + (sub || '') + '</span></div>'; }
     // ---- donut charts: class-wise issuance + stock ----
-    var DN = { VC4: '#6366f1', VC20: '#06b6d4', 'VC5+': '#f59e0b' };
-    function donut(title, vals, top, sub) {
-      var tot = 0; B3.forEach(function (k) { tot += vals[k] || 0; });
+    var DN = { VC4: '#6366f1', VC20: '#06b6d4', 'VC4/VC20': '#6366f1', VC5: '#f59e0b', 'VC5+': '#f59e0b', VC6: '#10b981', VC7: '#f43f5e', VC12: '#8b5cf6', VC15: '#fb923c', VC16: '#64748b' };
+    var DNF = ['#0ea5e9', '#84cc16', '#ec4899', '#14b8a6', '#a855f7', '#eab308', '#94a3b8'], dnI = 0;
+    function dnColor(k) { if (!DN[k]) DN[k] = DNF[dnI++ % DNF.length]; return DN[k]; }
+    // entries: [{ l: label, v: value }]
+    function donut(title, entries, top, sub) {
+      var list = entries.filter(function (e) { return e.v > 0; }), tot = 0; list.forEach(function (e) { tot += e.v; });
       var h = '<div class="pb-card"><div class="pb-card-head"><h3>' + title + '</h3></div>';
       if (!tot) return h + '<p class="dim" style="text-align:center;padding:26px 0">No data</p></div>';
       var R = 62, C = 2 * Math.PI * R, off = 0, arcs = '', leg = '';
-      B3.forEach(function (k) {
-        var v = vals[k] || 0; if (!v) return;
-        var len = v / tot * C;
-        arcs += '<circle cx="80" cy="80" r="' + R + '" fill="none" stroke="' + DN[k] + '" stroke-width="22" stroke-dasharray="' + len.toFixed(2) + ' ' + (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '" transform="rotate(-90 80 80)"><title>' + k + ': ' + nf(v) + '</title></circle>';
+      list.forEach(function (e) {
+        var len = e.v / tot * C, col = dnColor(e.l);
+        arcs += '<circle cx="80" cy="80" r="' + R + '" fill="none" stroke="' + col + '" stroke-width="22" stroke-dasharray="' + len.toFixed(2) + ' ' + (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '" transform="rotate(-90 80 80)"><title>' + esc(e.l) + ': ' + nf(e.v) + '</title></circle>';
         off += len;
-        leg += '<li><i style="background:' + DN[k] + '"></i><span>' + k + '</span><b>' + nf(v) + '</b><em>' + Math.round(v / tot * 100) + '%</em></li>';
+        leg += '<li><i style="background:' + col + '"></i><span>' + esc(e.l) + '</span><b>' + nf(e.v) + '</b><em>' + Math.round(e.v / tot * 100) + '%</em></li>';
       });
       return h + '<div class="pb-donut"><svg viewBox="0 0 160 160" width="170" height="170" role="img"><circle cx="80" cy="80" r="' + R + '" fill="none" stroke="#eef2f7" stroke-width="22"/>' + arcs +
         '<text x="80" y="78" text-anchor="middle" class="pb-dn-top">' + nf(top) + '</text><text x="80" y="96" text-anchor="middle" class="pb-dn-sub">' + sub + '</text></svg><ul class="pb-dn-legend">' + leg + '</ul></div></div>';
     }
     function donuts(it) {
       if (!it.c) return '';
-      var mtd = {}, last = {}, stk = {}, tm = 0, tl = 0, ts = 0;
-      B3.forEach(function (k) { var a = it.c[k] || [0, 0, 0, 0]; last[k] = a[0]; mtd[k] = a[1]; stk[k] = a[2]; tl += a[0]; tm += a[1]; ts += a[2]; });
-      return '<div class="pl-dngrid">' + (D.issue ? donut('📈 Issuance · MTD by class', mtd, tm, 'MTD') + donut('🗓️ Issuance · last month by class', last, tl, 'Last month') : '') + (D.stock ? donut('📦 Stock by class', stk, ts, 'In stock') : '') + '</div>';
+      var mtd = [], last = [], stk = [], tm = 0, tl = 0, ts = 0, s48 = 0;
+      B3.forEach(function (k) {
+        var a = it.c[k] || [0, 0, 0, 0];
+        mtd.push({ l: k, v: a[1] }); last.push({ l: k, v: a[0] }); tm += a[1]; tl += a[0]; ts += a[2];
+        if (G1.indexOf(k) >= 0) s48 += a[2]; else stk.push({ l: k, v: a[2] });
+      });
+      stk.unshift({ l: 'VC4/VC20', v: s48 });
+      return '<div class="pl-dngrid">' + (D.issue ? donut('📈 Issuance · MTD by class', mtd, tm, 'MTD') + donut('🗓️ Issuance · last month by class', last, tl, 'Last month') : '') + (D.stock ? donut('📦 Stock by class <small class="dim">(VC4 + VC20 together)</small>', stk, ts, 'In stock') : '') + '</div>';
     }
     // ---- class-wise table (VC4 / VC20 group, VC5+ group, total) ----
     function classTable(it) {
       if (!it.c) return '<p class="dim small">Class-wise data is not available for this ' + (it.k === 't' ? 'TL' : 'agent') + ' yet.</p>';
-      var rowsDef = [
-        ['VC4 / VC20', ['VC4', 'VC20'], 'grp'], ['&nbsp;&nbsp;↳ VC4', ['VC4'], 'sub'], ['&nbsp;&nbsp;↳ VC20', ['VC20'], 'sub'], ['VC5+', ['VC5+'], 'grp'], ['Total', B3, 'tot']
-      ];
+      var has = function (k) { var a = it.c[k]; return a && (a[0] || a[1] || a[2] || a[3]); };
+      var rowsDef = [['VC4 / VC20', G1, 'grp'], ['&nbsp;&nbsp;↳ VC4', ['VC4'], 'sub'], ['&nbsp;&nbsp;↳ VC20', ['VC20'], 'sub'], ['VC5+ <small class="dim">(all other classes)</small>', G2, 'grp']];
+      G2.forEach(function (k) { if (has(k)) rowsDef.push(['&nbsp;&nbsp;↳ ' + esc(k), [k], 'sub']); });
+      rowsDef.push(['Total', B3, 'tot']);
       var body = rowsDef.map(function (d) {
         var v = sumC(it, d[1]), c = calc(v), main = d[2] !== 'sub';
         return '<tr class="pl-cr ' + d[2] + '"><td><b>' + d[0] + '</b></td>' +
@@ -10706,8 +10719,8 @@ const PERSONAL_PORTAL_JS = `(function () {
       return list.map(function (a, i) {
         var o = overall(a);
         return '<tr class="pl-res-row" data-name="' + esc(a.n) + '"><td>' + (i + 1) + '</td><td><b>' + esc(a.n) + '</b> ' + chBadge(a) + (opts && opts.tl && a.tl ? ' <small class="dim">· ' + esc(a.tl) + '</small>' : '') + '</td>' +
-          '<td>' + nf(sumC(a, ['VC4', 'VC20'])[2]) + '</td><td>' + nf(sumC(a, ['VC4', 'VC20'])[1]) + '</td><td>' + coverTxt(o.g1.cover) + '</td><td><b>' + nf(o.g1.need) + '</b></td>' +
-          '<td>' + nf(sumC(a, ['VC5+'])[2]) + '</td><td>' + nf(sumC(a, ['VC5+'])[1]) + '</td><td>' + coverTxt(o.g2.cover) + '</td><td><b>' + nf(o.g2.need) + '</b></td>' +
+          '<td>' + nf(sumC(a, G1)[2]) + '</td><td>' + nf(sumC(a, G1)[1]) + '</td><td>' + coverTxt(o.g1.cover) + '</td><td><b>' + nf(o.g1.need) + '</b></td>' +
+          '<td>' + nf(sumC(a, G2)[2]) + '</td><td>' + nf(sumC(a, G2)[1]) + '</td><td>' + coverTxt(o.g2.cover) + '</td><td><b>' + nf(o.g2.need) + '</b></td>' +
           '<td>' + prBadge(o.pr) + '</td><td><b>' + nf(o.need) + '</b></td></tr>';
       }).join('');
     }
@@ -10797,7 +10810,7 @@ const PERSONAL_PORTAL_JS = `(function () {
         var counts = countPr(scope), list = sortAgents(filterPr(scope, st.f));
         var totNeed1 = 0, totNeed2 = 0; scope.forEach(function (a) { var o = overall(a); totNeed1 += o.g1.need; totNeed2 += o.g2.need; });
         var tlRows = tlsAll.filter(function (t) { return t.c; }).map(function (t) { var o = overall(t); var ags = items.filter(function (x) { return x.k === 'a' && x.c && norm(x.tl) === norm(t.n); }), cc = countPr(ags);
-          return '<tr class="pl-tl-row" data-tl="' + esc(t.n) + '"><td><b>' + esc(t.n) + '</b> ' + chBadge(t) + '</td><td>' + nf(t.ag) + '</td><td>' + nf(sumC(t, ['VC4', 'VC20'])[2]) + '</td><td>' + nf(o.g1.need) + '</td><td>' + nf(sumC(t, ['VC5+'])[2]) + '</td><td>' + nf(o.g2.need) + '</td><td>' + prBadge(o.pr) + '</td><td><b class="pb-hot">' + nf(cc.High) + '</b></td><td>' + nf(cc.Medium) + '</td></tr>'; }).join('');
+          return '<tr class="pl-tl-row" data-tl="' + esc(t.n) + '"><td><b>' + esc(t.n) + '</b> ' + chBadge(t) + '</td><td>' + nf(t.ag) + '</td><td>' + nf(sumC(t, G1)[2]) + '</td><td>' + nf(o.g1.need) + '</td><td>' + nf(sumC(t, G2)[2]) + '</td><td>' + nf(o.g2.need) + '</td><td>' + prBadge(o.pr) + '</td><td><b class="pb-hot">' + nf(cc.High) + '</b></td><td>' + nf(cc.Medium) + '</td></tr>'; }).join('');
         dp.innerHTML = '<section class="pb-kpis">' + tile('🔴 High priority', nf(counts.High), 'cover < ' + D.red + ' days', 'pl-hi') + tile('🟠 Medium priority', nf(counts.Medium), 'cover < ' + D.orange + ' days', 'pl-md') + tile('🟢 Low', nf(counts.Low), 'covered') +
           tile('Need · VC4 / VC20', nf(totNeed1), 'tags after stock · ' + D.days + ' days') + tile('Need · VC5+', nf(totNeed2), 'tags after stock · ' + D.days + ' days') + '</section>' +
           (tlRows ? '<section class="pb-card"><div class="pb-card-head"><h3>👥 TL-wise priority <small class="dim">click a TL to filter</small></h3></div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-dp-tl"><thead><tr><th>TL</th><th>Agents</th><th>VC4/VC20 stock</th><th>Need</th><th>VC5+ stock</th><th>Need</th><th>Priority</th><th>High agents</th><th>Medium agents</th></tr></thead><tbody>' + tlRows + '</tbody></table></div></section>' : '') +

@@ -310,7 +310,7 @@ export function personalClassStockByAgent(index, ch, kind, name) {
   const out = new Map();
   const c = index && index[ch === 'gv' ? 'gv' : 'ff'];
   if (!c) return out;
-  const bucket = (x) => { const u = String(x || 'VC4').toUpperCase().replace(/\s+/g, ''); return u === 'VC4' ? 'VC4' : u === 'VC20' ? 'VC20' : 'VC5+'; };
+  const bucket = (x) => { const u = String(x || 'VC4').toUpperCase().replace(/\s+/g, ''); if (/^\d+$/.test(u)) return `VC${u}`; return /^VC\d+\+?$/.test(u) ? u : (u.slice(0, 12) || 'VC4'); };
   let keySet;
   if (kind === 'tl') {
     const want = normName(name);
@@ -326,8 +326,8 @@ export function personalClassStockByAgent(index, ch, kind, name) {
     const node = c.agents.get(k);
     const nm = normName(node ? node.n : '');
     if (!nm) continue;
-    const e = out.get(nm) || { VC4: 0, VC20: 0, 'VC5+': 0 };
-    e[bucket(r[2])]++;
+    const e = out.get(nm) || {};
+    const bk = bucket(r[2]); e[bk] = (e[bk] || 0) + 1;
     out.set(nm, e);
   }
   return out;

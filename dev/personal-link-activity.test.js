@@ -39,7 +39,7 @@ test('personal link: activity feed, alerts, live presence and partial views', as
     if (/^select \w+, \w+, \w+, count\(/.test(tq.trim())) {
       const n = tq.includes(`>= date '${curKey}-01'`) ? 3 : 5;
       const who = ffTl ? ['Agent F1', '1'] : (gvTl ? ['Agent G1', GV] : null);
-      rows = who ? [{ c: [{ v: who[0] }, { v: '4' }, { v: who[1] }, { v: n }] }] : [];
+      rows = who ? [{ c: [{ v: who[0] }, { v: '4' }, { v: who[1] }, { v: n }] }, { c: [{ v: who[0] }, { v: '6' }, { v: who[1] }, { v: n - 2 }] }] : [];
     } else if (ffTl) rows = [mk('Agent F1', '1', 4)];
     else if (gvTl) rows = [mk('Agent G1', GV, 6)];
     else if (gvSolo) rows = [mk('GV Solo', GV, 3)];
@@ -113,7 +113,8 @@ test('personal link: activity feed, alerts, live presence and partial views', as
     const f1 = sd.items.find((i) => i.n === 'Agent F1' && i.k === 'a');
     assert.ok(f1 && f1.c, 'agent has class-wise data');
     assert.deepEqual(f1.c.VC4.slice(0, 2), [5, 3], 'VC4 last month / MTD from the class query');
-    assert.deepEqual(f1.c.VC20.slice(0, 2), [0, 0]);
+    assert.deepEqual(f1.c.VC6.slice(0, 2), [3, 1], 'actual class VC6 is kept (not folded into VC5+)');
+    assert.ok(!f1.c.VC20, 'no VC20 issuance → no VC20 key'); assert.ok(sd.classes.includes('VC4') && sd.classes.includes('VC20') && sd.classes.includes('VC6'), 'class list');
     const tlF = sd.items.find((i) => i.k === 't' && i.n === 'FF Boss');
     assert.deepEqual(tlF.c.VC4.slice(0, 2), [5, 3], 'TL class totals are the sum of its agents');
     // 8) admin live preview opens the report without the visitor session, read-only
