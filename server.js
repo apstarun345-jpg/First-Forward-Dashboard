@@ -9060,6 +9060,73 @@ function personalStockFor(sidx, link) {
   ['ff', 'gv'].forEach((src) => { if (bySrc[src].length) { const r = personalStock(sidx, src, 'group', bySrc[src]); if (r) res.push(r); } });
   return mergePersonalStock(res);
 }
+/** 🟢 Today Live — today's issuance per agent (GV: GV Master live rows, FF: EIR rows dated today). */
+async function personalEirTodayRows(link, today) {
+  const c = personalConfig(link);
+  const tq = `select ${c.agentCol}, ${c.clsCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} = date '${today}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${c.clsCol}, ${c.masterCol}`;
+  const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+  const out = await fetchUpstreamCached(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const rows = [];
+  for (const row of table.rows || []) {
+    const gvRow = isGvPersonalRow(serverCell(row, 2));
+    if ((c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
+    const cells = (row && row.c) || [];
+    const agent = serverCell(row, 0).trim();
+    if (agent) rows.push({ agent, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, Math.max(0, cells.length - 1))) });
+  }
+  return rows;
+}
+async function personalLiveToday(link) {
+  const today = dateKeyNow();
+  const win = { start: today, today };
+  const parts = [];
+  if (isComboLink(link)) {
+    const sp = await comboSplit(link);   // manual agents already under a selected TL are dropped
+    sp.tlParts.forEach((p) => parts.push({ kind: 'tl', source: p.source, name: p.name, personId: p.personId, members: [] }));
+    ['ff', 'gv'].forEach((src) => { if (sp.memBySrc[src].length) parts.push({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] }); });
+  } else {
+    parts.push({ kind: link.kind, source: link.source === 'gv' ? 'gv' : 'ff', name: link.name, personId: link.personId, members: link.members || [] });
+  }
+  const agents = new Map(), seen = new Set();
+  for (const part of parts) {
+    let rows = [];
+    try { rows = part.source === 'gv' ? await personalGvMasterRows(part, win) : await personalEirTodayRows(part, today); } catch { rows = []; }
+    for (const r of rows) {
+      const name = r.agent || part.name;
+      const key = `${part.source}|${plNormName(name)}`;
+      const dedupe = `${key}|${r.cls}`;
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      const a = agents.get(key) || { name, src: part.source, total: 0, cls: {} };
+      a.cls[r.cls] = (a.cls[r.cls] || 0) + r.n; a.total += r.n; agents.set(key, a);
+    }
+  }
+  const list = [...agents.values()].filter((a) => a.total > 0).sort((a, b) => b.total - a.total);
+  const byCls = {};
+  list.forEach((a) => Object.entries(a.cls).forEach(([k, v]) => { byCls[k] = (byCls[k] || 0) + v; }));
+  return { date: today, agents: list, total: list.reduce((x, a) => x + a.total, 0), byCls, at: new Date().toISOString() };
+}
+const DONUT_COLORS = { VC4: '#6366f1', VC20: '#06b6d4', VC5: '#f59e0b', VC6: '#10b981', VC7: '#f43f5e', VC12: '#8b5cf6', VC15: '#fb923c', VC16: '#64748b', 'VC5+': '#f59e0b' };
+const DONUT_FALLBACK = ['#0ea5e9', '#84cc16', '#ec4899', '#14b8a6', '#a855f7', '#eab308', '#94a3b8'];
+function donutHtml(items, centerTop, centerSub) {
+  const list = items.filter((i) => i && i.value > 0);
+  const total = list.reduce((x, i) => x + i.value, 0);
+  const R = 62, C = 2 * Math.PI * R;
+  let off = 0, fi = 0;
+  const arcs = list.map((i) => {
+    const color = i.color || DONUT_COLORS[i.label] || DONUT_FALLBACK[fi++ % DONUT_FALLBACK.length];
+    i.color = color;
+    const len = (i.value / total) * C;
+    const el = `<circle cx="80" cy="80" r="${R}" fill="none" stroke="${color}" stroke-width="22" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 80 80)"><title>${escHtml(i.label)}: ${i.value}</title></circle>`;
+    off += len;
+    return el;
+  }).join('');
+  if (!total) return '<p class="dim" style="text-align:center;padding:26px 0">No data yet</p>';
+  const nf0 = (n) => Number(n || 0).toLocaleString('en-IN');
+  return `<div class="pb-donut"><svg viewBox="0 0 160 160" width="170" height="170" role="img"><circle cx="80" cy="80" r="${R}" fill="none" stroke="#eef2f7" stroke-width="22"/>${arcs}<text x="80" y="78" text-anchor="middle" class="pb-dn-top">${escHtml(centerTop)}</text><text x="80" y="96" text-anchor="middle" class="pb-dn-sub">${escHtml(centerSub)}</text></svg><ul class="pb-dn-legend">${list.map((i) => `<li><i style="background:${i.color}"></i><span>${escHtml(i.label)}</span><b>${nf0(i.value)}</b><em>${Math.round((i.value / total) * 100)}%</em></li>`).join('')}</ul></div>`;
+}
 const isTeamLink = (l) => !!l && (l.kind === 'tl' || l.kind === 'group');
 function personalMemberNames(link) {
   return (Array.isArray(link && link.members) ? link.members : []).map((m) => String((m && m.name) || '').trim()).filter(Boolean).slice(0, 80);
@@ -9094,10 +9161,10 @@ function isFfPersonalRow(master) {
 }
 /** 🟩 GV personal fallback — EIR ke GV columns (AU–AZ) khaali hon to GV Master tab se TL / agent ki issuance padho.
     Date text ho ya date-typed: 3 koshish (seedha, toDate, bina date filter) aur date JS me filter. */
-async function personalGvMasterRows(link) {
+async function personalGvMasterRows(link, win) {
   const m = (db.settings.gv && db.settings.gv.master) || {};
   const col = { date: m.date || 'P', cch: m.cch || 'G', vcl: m.vClass || 'F', tag: m.tagId || 'I', agent: m.agentName || 'B', uid: m.uniqueId || 'A', tlId: m.tlId || 'C', tlName: m.tlName || 'D' };
-  const { start, today } = personalWindow();
+  const { start, today } = win || personalWindow();
   const low = (n) => gvizLiteral(String(n).toLowerCase());
   const pid = String(link.personId || '').trim().toUpperCase();
   let who;
@@ -9336,6 +9403,9 @@ async function servePersonalPage(req, res, rawToken) {
     const needsStock = hasSec('stock') || hasSec('ageing') || (hasSec('insights') && isTeamLink(link));
     // Start independent sheet/index work together so verified links don't wait for serial requests.
     const rowsPromise = needsIssuance ? personalDailyRows(link) : Promise.resolve([]);
+    const livePromise = hasSec('overview')
+      ? Promise.race([personalLiveToday(link), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 2500); if (t.unref) t.unref(); })]).catch(() => null)
+      : Promise.resolve(null);
     const teamPromise = isTeamLink(link) && (hasSec('issuance') || hasSec('performance') || hasSec('insights'))
       ? personalTeamAgents(link) : Promise.resolve(new Map());
     // ⚡ v187 — page kabhi latka nahi: sheet data 3s me na aaye to turant "ready ho raha hai" page (auto-retry);
@@ -9655,9 +9725,56 @@ async function servePersonalPage(req, res, rawToken) {
       ${isT && stockInfo ? tbl('pl-tbl-dead', '📦 Stock but no issuance <small class="dim">(0 this month)</small>', ['Agent', 'Stock', 'Last active', 'Last month'], dead.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td class="pb-warn"><b>${nf(a.stock)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td></tr>`).join(''), '✅ Every agent holding stock has issued this month.') : ''}`;
     }
 
+    // 🟢 Today Live + 🍩 donut charts
+    const lvTbl = (id, title, heads, body, empty) => `<section class="pb-card"><div class="pb-card-head"><h3>${title}</h3>${expBtns(id, `${link.name} - ${title.replace(/<[^>]+>/g, '').replace(/[^\w\s-]/g, '').trim()}`)}</div>${body ? `<div class="pb-scroll"><table class="pb-tbl" id="${id}"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>` : `<p class="dim" style="padding:8px 4px">${empty}</p>`}</section>`;
+    const live = await livePromise;
+    const lvNorm = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+    const grp3 = (obj) => { const o = { VC4: 0, VC20: 0, 'VC5+': 0 }; Object.entries(obj || {}).forEach(([k, v]) => { const u = String(k).toUpperCase().replace(/\s+/g, ''); o[u === 'VC4' ? 'VC4' : u === 'VC20' ? 'VC20' : 'VC5+'] += v; }); return o; };
+    const donutIssue = donutHtml(Object.entries(st.cls || {}).map(([label, value]) => ({ label, value })), nf(st.mtd), 'MTD issued');
+    const donutStock = stockInfo ? donutHtml(Object.entries(stockInfo.byCls || {}).map(([label, v]) => ({ label, value: v.t })), nf(stTotal), 'in stock') : '<p class="dim" style="text-align:center;padding:26px 0">Stock data is not available yet</p>';
+    const ageC = totAgeC;
+    const ageItems = stockInfo ? [
+      { label: '0–1 month', value: Math.max(0, stTotal - ageC[0]), color: '#22c55e' }, { label: '1–3 months', value: Math.max(0, ageC[0] - ageC[1]), color: '#84cc16' },
+      { label: '3–5 months', value: Math.max(0, ageC[1] - ageC[2]), color: '#f59e0b' }, { label: '5–6 months', value: Math.max(0, ageC[2] - ageC[3]), color: '#f97316' }, { label: '6+ months', value: ageC[3], color: '#ef4444' }
+    ] : [];
+    const donutAge = stockInfo ? donutHtml(ageItems, nf(stTotal), 'by age') : '<p class="dim" style="text-align:center;padding:26px 0">Ageing data is not available yet</p>';
+    const chartsHtml = `<section class="pb-grid3"><div class="pb-card"><h3>🍩 Issuance · class mix (MTD)</h3>${donutIssue}</div><div class="pb-card"><h3>📦 Stock · class mix</h3>${donutStock}</div><div class="pb-card"><h3>⏳ Stock · ageing</h3>${donutAge}</div></section>`;
+    const rosterNames = new Map();
+    for (const nm of byAgentMap.keys()) rosterNames.set(lvNorm(nm), nm);
+    if (stockInfo && stockInfo.agents) stockInfo.agents.forEach((a) => rosterNames.set(lvNorm(a.n), a.n));
+    personalMemberNames(link).forEach((nm) => rosterNames.set(lvNorm(nm), nm));
+    let liveHtml = '';
+    if (hasSec('overview')) {
+      const refreshBtn = '<button type="button" class="pb-btn" data-pl-live-refresh>🔄 Refresh</button>';
+      if (!live) {
+        liveHtml = `<section class="pb-card"><div class="pb-card-head"><h3>🟢 Today Live</h3>${refreshBtn}</div><p class="pb-note">⏳ Live data is still loading from the sheet — tap Refresh in a few seconds.</p></section>`;
+      } else {
+        const g3 = grp3(live.byCls);
+        const liveNames = new Set(live.agents.map((a) => lvNorm(a.name)));
+        const notLive = [...rosterNames.entries()].filter(([k]) => !liveNames.has(k)).map(([, v]) => v).sort((a, b) => a.localeCompare(b));
+        const isT2 = isTeamLink(link);
+        const chan = (src) => (src === 'gv' ? '<span class="pb-chan gv">GV</span>' : '<span class="pb-chan ff">FF</span>');
+        const both = live.agents.some((a) => a.src === 'gv') && live.agents.some((a) => a.src === 'ff');
+        const liveRows = live.agents.map((a, i) => { const c3 = grp3(a.cls); return `<tr><td>${i + 1}</td><td><b>${escHtml(a.name)}</b> ${both || link.source === 'both' ? chan(a.src) : ''}</td><td>${nf(c3.VC4)}</td><td>${nf(c3.VC20)}</td><td>${nf(c3['VC5+'])}</td><td><b>${nf(a.total)}</b></td><td>${pct(a.total, live.total)}%</td></tr>`; }).join('');
+        const tiles = [
+          tile('issuance', '🟢', 'Issued today', nf(live.total), escHtml(live.date)),
+          tile('previous', '🚗', 'VC4', nf(g3.VC4), `${pct(g3.VC4, live.total)}% of today`),
+          tile('streak', '🚚', 'VC20', nf(g3.VC20), `${pct(g3.VC20, live.total)}% of today`),
+          tile('best', '🛻', 'VC5+', nf(g3['VC5+']), `${pct(g3['VC5+'], live.total)}% of today`),
+          isT2 ? tile('stock', '🟢', 'Agents live', nf(live.agents.length), `${rosterNames.size ? Math.round((live.agents.length / rosterNames.size) * 100) : 0}% of ${nf(rosterNames.size)}`) : ''
+        ].join('');
+        liveHtml = `<section class="pb-card pb-live-head"><div class="pb-card-head"><div><h3><span class="pb-pulse"></span> Today Live · ${escHtml(live.date)}</h3><p class="pb-matrix-note">Updated ${escHtml(new Date(live.at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }))} IST · auto-refreshes every 2 min while this tab is open</p></div>${refreshBtn}</div></section>
+          <section class="pb-kpis">${tiles}</section>
+          <section class="pb-grid2"><div class="pb-card"><h3>🍩 Today · class mix</h3>${donutHtml([{ label: 'VC4', value: g3.VC4 }, { label: 'VC20', value: g3.VC20 }, { label: 'VC5+', value: g3['VC5+'] }], nf(live.total), 'issued today')}</div>
+          <div class="pb-card"><h3>🔴 Not live yet <small class="dim">(${nf(notLive.length)} ${isT2 ? 'agents' : ''})</small></h3>${isT2 ? (notLive.length ? `<div class="pb-chips">${notLive.slice(0, 120).map((n) => `<span class="pb-chip">${escHtml(n)}</span>`).join('')}</div>${notLive.length > 120 ? `<p class="dim small">+${nf(notLive.length - 120)} more</p>` : ''}` : '<p class="dim">✅ Everyone has issued today.</p>') : '<p class="dim">Team view only.</p>'}</div></section>
+          ${lvTbl('pl-tbl-live', `🟢 Live today — ${isT2 ? 'who is issuing' : 'issuance'} <small class="dim">(${nf(live.agents.length)} live)</small>`, ['#', isT2 ? 'Agent' : 'Name', 'VC4', 'VC20', 'VC5+', 'Total', 'Share'], liveRows, 'Nobody has issued yet today.')}`;
+      }
+    }
+
     // Build only tabs that the admin granted; an "All" view can expose only emitted sections.
     const tabDefs = [
       { id: 'overview', label: '📊 Overview', show: hasSec('overview') },
+      { id: 'live', label: '🟢 Today Live', show: hasSec('overview') },
       { id: 'stock', label: '📦 Class-wise Stock', show: hasSec('stock') },
       { id: 'issuance', label: `📅 Date${isTeamLink(link) ? ' & Agent' : ''} Issuance`, show: hasSec('issuance') },
       { id: 'performance', label: '🏆 Performance', show: hasSec('performance') },
@@ -9695,6 +9812,7 @@ async function servePersonalPage(req, res, rawToken) {
             <div class="pb-kpi best"><small>🏆 Best Day</small><b>${nf(st.best.n)}</b><span>${escHtml(st.best.date)}</span></div>
           </section>
           <section class="pb-card"><div class="pb-card-head"><div><h3>📊 Daily Issuance · Current Month (${escHtml(ym)})</h3><p class="pb-matrix-note">Current month · data through ${escHtml(reportThrough || 'no completed day')} · today's incomplete report excluded</p></div><span class="pb-btn pb-count-badge"><small>MTD ISSUED</small><b>${nf(st.mtd)} tags</b></span></div><div class="pb-bars">${bars || '<p class="dim">no data</p>'}</div></section>
+          ${chartsHtml}
           <section class="pb-grid2">
             <div class="pb-card"><h3>🏷️ Class mix (MTD)</h3>${clsRows}</div>
             <div class="pb-card"><h3>📈 Snapshot</h3>
@@ -9704,6 +9822,7 @@ async function servePersonalPage(req, res, rawToken) {
             </div>
           </section>
         </div>` : ''}
+        ${hasSec('overview') ? `<div class="pl-pane" data-pl-pane="live" hidden>${liveHtml}</div>` : ''}
         ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${!stockInfo && stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>` : ''}${classStockCardHtml}</div>` : ''}
         ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div>` : ''}
         ${hasSec('performance') ? `<div class="pl-pane" data-pl-pane="performance" hidden>${perfCardHtml}${teamHtml}</div>` : ''}
@@ -9844,6 +9963,35 @@ body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);fon
 .pb-wrap .pb-rank{border-bottom:1px solid #f1f5f9}
 .pb-wrap .pb-foot{color:#94a3b8;margin-top:22px}
 @media(max-width:760px){.pb-wrap .pb-head{padding:16px}.pb-wrap .pb-head h1{font-size:18px}.pb-wrap .pb-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.pb-wrap .pb-kpi b{font-size:23px}.pb-wrap .pl-side{padding:8px}.pb-wrap .pl-side .pb-tab{border-left:0;border-bottom:3px solid transparent;border-radius:8px}.pb-wrap .pl-side .pb-tab.on{border-bottom-color:#4f46e5}}
+/* ── v280: full-screen layout, donut charts, Today Live ── */
+body{padding:clamp(10px,1.6vw,26px)}
+.pb-wrap,.pb-wrap{max-width:none;width:100%;margin:0}
+.pl-layout{grid-template-columns:clamp(210px,16vw,270px) minmax(0,1fr);gap:clamp(12px,1.4vw,22px)}
+.pb-wrap .pl-side{top:12px;max-height:calc(100vh - 24px);overflow:auto}
+.pb-wrap .pb-kpis{grid-template-columns:repeat(auto-fit,minmax(clamp(170px,14vw,240px),1fr))}
+.pb-wrap .pb-scroll{max-height:72vh;overflow:auto}
+.pb-grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:14px}
+.pb-grid3 .pb-card{margin-bottom:0}
+.pb-grid2{margin-bottom:14px}
+.pb-donut{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;padding:6px 0 2px}
+.pb-donut svg{flex:0 0 auto;filter:drop-shadow(0 4px 10px rgba(15,23,42,.10))}
+.pb-dn-top{font-size:22px;font-weight:800;fill:#0f172a;font-variant-numeric:tabular-nums}
+.pb-dn-sub{font-size:9.5px;font-weight:700;fill:#64748b;text-transform:uppercase;letter-spacing:.06em}
+.pb-dn-legend{list-style:none;min-width:130px;flex:1 1 130px;max-width:260px}
+.pb-dn-legend li{display:grid;grid-template-columns:12px 1fr auto 40px;align-items:center;gap:7px;padding:4px 0;font-size:12.5px;border-bottom:1px dashed #eef2f7}
+.pb-dn-legend li:last-child{border:0}
+.pb-dn-legend i{width:11px;height:11px;border-radius:50%;display:block}
+.pb-dn-legend span{color:#334155;font-weight:600}.pb-dn-legend b{font-variant-numeric:tabular-nums;color:#0f172a}
+.pb-dn-legend em{font-style:normal;color:#94a3b8;font-size:11.5px;text-align:right}
+.pb-chips{display:flex;flex-wrap:wrap;gap:6px;max-height:300px;overflow:auto}
+.pb-chip{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600}
+.pb-chan{display:inline-block;border-radius:6px;padding:0 6px;font-size:10.5px;font-weight:800;margin-left:4px;vertical-align:1px}
+.pb-chan.gv{background:#dcfce7;color:#166534}.pb-chan.ff{background:#dbeafe;color:#1e40af}
+.pb-pulse{display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;margin-right:4px;box-shadow:0 0 0 0 rgba(34,197,94,.6);animation:pbpulse 1.6s infinite}
+@keyframes pbpulse{70%{box-shadow:0 0 0 9px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+.pb-live-head{background:linear-gradient(120deg,#f0fdf4,#ecfeff)!important;border-color:#bbf7d0!important}
+@media(max-width:1100px){.pb-grid3{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){.pb-grid3{grid-template-columns:1fr}.pb-wrap .pl-side{max-height:none}.pl-layout{grid-template-columns:1fr}}
 </style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
 <header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(personName || db.settings.brand || 'FF').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
 <div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p>${sub}</p>` : ''}</div></div>
@@ -9992,8 +10140,25 @@ const PERSONAL_PORTAL_JS = `(function () {
       Array.prototype.forEach.call(panes, function (p) {
         p.hidden = target !== 'all' && p.getAttribute('data-pl-pane') !== target;
       });
+      try { if (history.replaceState) history.replaceState(null, '', '#' + target); } catch (e) {}
     });
   });
+  // Open the tab named in the URL hash (e.g. #live after a refresh)
+  (function () {
+    var h = (location.hash || '').replace('#', '');
+    if (!h) return;
+    var hb = document.querySelector('[data-pl-tab="' + h + '"]');
+    if (hb) hb.click();
+  })();
+
+  // Today Live — manual refresh + auto-refresh every 2 min while the Live tab is open
+  function liveReload() { try { location.reload(); } catch (e) {} }
+  var liveBtns = document.querySelectorAll('[data-pl-live-refresh]');
+  Array.prototype.forEach.call(liveBtns, function (b) { b.addEventListener('click', function () { b.disabled = true; b.textContent = '⏳ Refreshing…'; liveReload(); }); });
+  setInterval(function () {
+    var lp = document.querySelector('[data-pl-pane="live"]');
+    if (lp && !lp.hidden && !document.hidden) liveReload();
+  }, 120000);
 
   // Insights dropdown — one list at a time (or all)
   var insSel = document.getElementById('pl-ins-select');

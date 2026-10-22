@@ -68,6 +68,13 @@ test('team link: TLs + agents from GV and FF are combined without double countin
     assert.match(html, /GV Partner \+ First Forward/, 'heading shows both channels');
     assert.match(html, /2 TLs \+ 2 agents/, 'TL + agent counts');
     for (const name of ['Agent F1', 'Agent G1', 'GV Solo']) assert.ok(html.includes(name), `${name} is in the combined report`);
+    // v280: Today Live tab, donut charts, full-width layout
+    assert.match(html, /data-pl-tab="live"/, 'Today Live tab button');
+    assert.match(html, /data-pl-pane="live"/, 'Today Live pane');
+    assert.match(html, /Today Live/, 'Today Live heading');
+    assert.match(html, /class="pb-donut"/, 'donut charts are rendered');
+    assert.match(html, /Issuance · class mix/, 'issuance donut card');
+    assert.match(html, /\.pb-wrap,\.pb-wrap\{max-width:none/, 'dashboard is full width');
     // Agent F1 is under the selected FF TL → not queried again as a manual member
     assert.ok(!seen.some((q) => /L = 'Agent F1'/.test(q)), 'agents already under a selected TL are not queried twice');
     // edit: drop a TL, keep members
