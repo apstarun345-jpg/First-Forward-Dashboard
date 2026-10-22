@@ -9355,16 +9355,17 @@ async function personalLiveToday(link) {
   } else {
     parts.push({ kind: link.kind, source: link.source === 'gv' ? 'gv' : 'ff', name: link.name, personId: link.personId, members: link.members || [] });
   }
-  const agents = new Map(), seen = new Set();
-  for (const part of parts) {
-    let rows = [];
-    try { rows = part.source === 'gv' ? await personalGvMasterRows(part, win) : await personalEirTodayRows(part, today); } catch { rows = []; }
+  const agents = new Map(), owner = new Map();
+  // Parts fetched in parallel. Rows are per agent · timestamp · class, so one agent has MANY rows a day —
+  // sum them all. De-dupe only ACROSS parts (agent under a selected TL and also added by name).
+  const fetched = await Promise.all(parts.map((part) => (part.source === 'gv' ? personalGvMasterRows(part, win) : personalEirTodayRows(part, today)).catch(() => [])));
+  for (let pi = 0; pi < parts.length; pi++) {
+    const part = parts[pi], rows = fetched[pi] || [];
     for (const r of rows) {
       const name = r.agent || part.name;
       const key = `${part.source}|${plNormName(name)}`;
-      const dedupe = `${key}|${r.cls}`;
-      if (seen.has(dedupe)) continue;
-      seen.add(dedupe);
+      if (owner.has(key) && owner.get(key) !== pi) continue;
+      owner.set(key, pi);
       const a = agents.get(key) || { name, src: part.source, total: 0, cls: {} };
       a.cls[r.cls] = (a.cls[r.cls] || 0) + r.n; a.total += r.n; agents.set(key, a);
     }
@@ -9684,7 +9685,8 @@ async function servePersonalPage(req, res, rawToken) {
   const chView = linkChannels.length > 1 && linkChannels.includes(chReq) ? chReq : 'all';
   const link = chView === 'all' ? baseLink : plChannelView(baseLink, chView);
   const wantPartial = urlQ.get('partial') === '1';
-  const wantFresh = urlQ.get('fresh') === '1';
+  // Browser refresh (full page load) always rebuilds with live data; only quick GV/FF switches reuse the 45s cache.
+  const wantFresh = urlQ.get('fresh') === '1' || !wantPartial;
   const cacheKey = `${token}|${chView}|${allowedSecs.join(',')}|${canExport ? 1 : 0}`;
   const replyPage = (v) => {
     if (wantPartial) return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, view: chView, sub: v.sub, body: v.inner, at: v.at || Date.now() }), noStore);
