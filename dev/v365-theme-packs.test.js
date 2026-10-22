@@ -137,7 +137,7 @@ test('🕒 v179 — Sheets freshness: last filled row + Drive edit history via A
   assert.match(gs, /body\.action === 'sheetmeta'/);
   assert.match(gs, /getLastUpdated\(\)/);
   assert.match(gs, /Drive\.Revisions\.list/);
-  assert.match(gs, /CODE_VERSION = 'v3\.73'/);
+  assert.match(gs, /CODE_VERSION = 'v3\.74'/);
   assert.match(srv, /\/api\/sheet-freshness/);
   assert.match(home, /serverCompute/);
   assert.match(home, /Last filled row/);

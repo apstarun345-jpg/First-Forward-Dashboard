@@ -196,9 +196,9 @@ test('🎨 settings/theme — dark mode is opt-in and Tag Request order rows sta
   const css = await read('dev/styles-full.css');
   assert.match(css, /\.tr-col-label[\s\S]{0,260}color: #0f172a !important/);
   const tr = await read('tagRequest.js');
-  assert.match(tr, /tr-col-index/);
-  assert.match(tr, /data-tr-order-key/);
-  assert.match(tr, /columns: \[\.\.\.card\.querySelectorAll/);
+  assert.match(tr, /tr-col-letter/);
+  assert.match(tr, /data-tr-map-key/);
+  assert.match(tr, /columnMap: \(\(\) =>/);
 });
 
 test('📗 Tag Request Sheet — configurable column order + one Agent spacer row', async () => {
@@ -334,10 +334,9 @@ test('🏷️ Tag Request — column order list always renders with fallback fie
   const css = await read('dev/styles-full.css');
   assert.match(tag, /const FALLBACK_SHEET_FIELDS = \{/);
   assert.match(tag, /s\.fields && Object\.keys\(s\.fields\)\.length \? s\.fields : FALLBACK_SHEET_FIELDS/);
-  assert.match(tag, /data-tr-cols-order aria-label="Google Sheet column order"/);
-  assert.match(tag, /columns available · checked columns will be written in this exact order/);
-  assert.match(tag, /const refreshOrderIndexes = \(\) =>/);
-  assert.match(tag, /refreshOrderIndexes\(\);/);
+  assert.match(tag, /data-tr-colmap aria-label="Google Sheet column letters"/);
+  assert.match(tag, /fields mapped · entries are written only into these columns/);
+  assert.match(tag, /const refreshMap = \(\) =>/);
   assert.match(css, /\.tr-cols-order\{[\s\S]{0,500}display:flex !important/);
   assert.match(css, /\.tr-cols-order \.tr-col-order \*\{color:#0f172a !important;?\}/);
   assert.match(css, /html\[data-theme="dark"\] \.tr-cols-order \.tr-col-order \*\{color:#e2e8f0 !important;?\}/);

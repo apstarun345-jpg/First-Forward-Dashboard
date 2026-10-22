@@ -75,7 +75,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.73';
+const CODE_VERSION = 'v3.74';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -373,6 +373,37 @@ function doPost(e) {
       });
       if (!incomingHeader.length && rows.length) {
         throw new Error('header is required when rows are supplied');
+      }
+      // 🔤 v3.74 — COLUMN-LETTER mode: body.positions = 0-based sheet column index for every incoming column.
+      // Values go to EXACTLY those columns (A=0, B=1 …) on the next free row — no heading matching, no column moves.
+      if (Array.isArray(body.positions) && body.positions.length && body.positions.length === incomingHeader.length) {
+        var pos = body.positions.map(function (n) { return Math.max(0, Math.min(200, Number(n) || 0)); });
+        var maxPos = Math.max.apply(null, pos);
+        if (sh.getMaxColumns() < maxPos + 1) sh.insertColumnsAfter(sh.getMaxColumns(), maxPos + 1 - sh.getMaxColumns());
+        var lastRowAll = sh.getLastRow();
+        // header text only where the cell in row 1 is still empty (never overwrites your headings)
+        var row1 = sh.getRange(1, 1, 1, Math.max(sh.getMaxColumns(), maxPos + 1)).getValues()[0];
+        pos.forEach(function (c, i) { if (incomingHeader[i] && !String(row1[c] == null ? '' : row1[c]).trim()) { var hc = sh.getRange(1, c + 1); hc.setValue(incomingHeader[i]); try { hc.setFontWeight('bold'); } catch (e) {} } });
+        // next free row = below the last filled cell of the MAPPED columns
+        var lastMapped = 1;
+        if (lastRowAll > 1) {
+          pos.forEach(function (c) {
+            var colVals = sh.getRange(1, c + 1, lastRowAll, 1).getValues();
+            for (var k = colVals.length - 1; k >= 1; k--) { if (String(colVals[k][0] == null ? '' : colVals[k][0]).trim() !== '') { if (k + 1 > lastMapped) lastMapped = k + 1; break; } }
+          });
+        }
+        var startAt = lastMapped + 1;
+        if (rows.length && sh.getMaxRows() < startAt + rows.length - 1) sh.insertRowsAfter(sh.getMaxRows(), startAt + rows.length - 1 - sh.getMaxRows());
+        // write each contiguous block of mapped columns in one call (other columns are not touched)
+        var order = pos.map(function (c, i) { return { c: c, i: i }; }).sort(function (a, b) { return a.c - b.c; });
+        var blocks = [], cur = null;
+        order.forEach(function (o) { if (cur && o.c === cur.last + 1) { cur.items.push(o); cur.last = o.c; } else { cur = { first: o.c, last: o.c, items: [o] }; blocks.push(cur); } });
+        blocks.forEach(function (b) {
+          var vals = rows.map(function (r) { return b.items.map(function (o) { var v = r[o.i]; v = v === undefined || v === null ? '' : v; return typeof v === 'object' ? JSON.stringify(v) : v; }); });
+          if (vals.length) sh.getRange(startAt, b.first + 1, vals.length, b.items.length).setValues(vals);
+        });
+        SpreadsheetApp.flush();
+        return json_({ ok: true, positional: true, tab: tabName, added: rows.length, atRow: startAt, columns: pos, spreadsheet: ss.getName(), spreadsheetId: ss.getId(), url: ss.getUrl() });
       }
       // Admin setting can control exact column order. The same API works with
       // { columnOrder: ['Name', 'Agent ID', 'Date', ...] } from the dashboard.

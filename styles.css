@@ -6884,3 +6884,18 @@ button.smap-cell.smap-total { min-width: 64px; }
 .msp-cls-line .c3,.msp-cls-line .c2{font-weight:500}
 
 .tr-tl-link{color:#4338ca;font-weight:800;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}.tr-tl-link:hover{color:#1d4ed8;text-decoration:underline}
+
+/* v283 — sheet column-letter mapping */
+.tr-colmap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-top:8px}
+.tr-colmap{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;border:1px solid var(--line,#e2e8f0);border-radius:10px;background:var(--surf,#fff);cursor:text}
+.tr-colmap.on{border-color:#6366f1;background:#eef2ff}
+.tr-colmap.dup{border-color:#ef4444;background:#fef2f2}
+.tr-colmap .tr-col-label{font-size:12.5px;font-weight:600}
+.tr-col-letter{width:54px!important;text-align:center;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:5px 6px!important}
+.tr-colmap-prev{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+.tr-prev-chip{background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;border-radius:999px;padding:3px 10px;font-size:12px}
+.tr-prev-chip b{background:#4f46e5;color:#fff;border-radius:6px;padding:0 6px;margin-right:4px}
+.tr-prev-chip.dup{background:#fef2f2;border-color:#fecaca;color:#991b1b}.tr-prev-chip.dup b{background:#dc2626}
+.tr-prev-warn{color:#b91c1c;font-weight:700;font-size:12px}
+html[data-theme="dark"] .tr-colmap{background:#111827;border-color:#334155;color:#e2e8f0}
+html[data-theme="dark"] .tr-colmap.on{background:#1e1b4b;border-color:#6366f1}

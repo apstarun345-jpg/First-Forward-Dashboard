@@ -3635,20 +3635,19 @@ body.colorful .from-hdr { color: #166534; }
     const configuredCols = Array.isArray(cfg.columns) ? cfg.columns : [];
     const savedCols = configuredCols.filter((k) => fields[k]);
     const orderedCols = [...savedCols, ...Object.keys(fields).filter((k) => !savedCols.includes(k))];
-    const colBox = orderedCols.map((k, idx) => {
+    // 🔤 v283 — each field gets a sheet COLUMN LETTER (blank = not written). Old saved order → A, B, C… as the starting point.
+    const idxToLetter = (i) => { let n = i + 1, out = ''; while (n > 0) { const m = (n - 1) % 26; out = String.fromCharCode(65 + m) + out; n = Math.floor((n - 1) / 26); } return out; };
+    const cmap = cfg.columnMap && typeof cfg.columnMap === 'object' ? cfg.columnMap : null;
+    const letterOf = (k) => (cmap ? clean(cmap[k] || '') : (savedCols.includes(k) ? idxToLetter(savedCols.indexOf(k)) : ''));
+    const colBox = orderedCols.map((k) => {
       const label = clean(fields[k] || k.replace(/([A-Z])/g, ' $1')).replace(/^./, (x) => x.toUpperCase());
-      const checked = savedCols.includes(k);
-      return `<div class="tr-col-order" draggable="true" data-tr-order-key="${esc(k)}">
-        <span class="tr-col-index">${idx + 1}</span>
-        <span class="tr-drag" title="Drag karke order badlo">☷</span>
-        <input type="checkbox" data-tr-col="${esc(k)}" ${checked ? 'checked' : ''}>
+      const L = letterOf(k);
+      return `<label class="tr-colmap ${L ? 'on' : ''}" data-tr-map-key="${esc(k)}">
         <span class="tr-col-label">${esc(label)}</span>
-        <span class="tr-col-move">
-          <button type="button" class="btn tiny" data-tr-col-up title="Upar">↑</button>
-          <button type="button" class="btn tiny" data-tr-col-down title="Neeche">↓</button>
-        </span>
-      </div>`;
+        <input class="input tr-col-letter" data-tr-col-letter="${esc(k)}" value="${esc(L)}" maxlength="2" placeholder="—" autocomplete="off" spellcheck="false" aria-label="Sheet column for ${esc(label)}">
+      </label>`;
     }).join('');
+    const mappedCount = orderedCols.filter((k) => letterOf(k)).length;
     const targetId = sheetIdOfLink(cfg.sheetLink) || cfg.spreadsheetId || '';
     const noAgentCols = !['agentMobile', 'agentAddress', 'agentPincode'].some((k) => configuredCols.includes(k));
     return `<section class="card" id="tr-sheet-card"><div class="card-head"><h3>📗 Google Sheet me direct entry <span class="badge ${cfg.enabled ? 'green' : ''}">${cfg.enabled ? 'ON' : 'OFF'}</span></h3>
@@ -3674,8 +3673,10 @@ body.colorful .from-hdr { color: #166534; }
               <span class="dim small">Pending, Dispatched ya Rejected par nayi entry nahi hogi.</span>
             </span></label>
         </div>
-        <label class="field" style="display:block;margin-top:8px"><span class="dim small"><b>Kaunse columns sheet me aayein + kis order me aayein</b> — checkbox = ON/OFF · ☷ Drag ya ↑↓ = order. Example: <b>Agent Name → Agent ID → Date → Time…</b></span>
-          <div class="tr-cols-grid tr-cols-order" data-tr-cols-order aria-label="Google Sheet column order">${colBox || '<div class="tr-col-empty">Column definitions load nahi hui — defaults shown after refresh.</div>'}</div><p class="dim small"><b>${orderedCols.length}</b> columns available · checked columns will be written in this exact order.</p></label>
+        <div class="field" style="display:block;margin-top:8px"><span class="dim small"><b>Which sheet column gets which entry</b> — type the column letter next to a field (e.g. <b>Date → A</b>, <b>Agent → B</b>). Leave a field blank and it is not written. Each letter can be used once.</span>
+          <div class="tr-colmap-grid" data-tr-colmap aria-label="Google Sheet column letters">${colBox || '<div class="tr-col-empty">Field list did not load — refresh the page.</div>'}</div>
+          <div class="tr-colmap-prev" data-tr-colmap-prev></div>
+          <p class="dim small"><b data-tr-colmap-count>${mappedCount}</b> fields mapped · entries are written only into these columns on the next free row; your other columns are not touched. Needs Apps Script <b>Code.gs v3.74</b>.</p></div>
         <div class="btn-row" style="margin-top:10px">
           <button class="btn primary" data-tr-sheet-act="save">💾 Save settings</button>
           <button class="btn" data-tr-sheet-act="toggle">${cfg.enabled ? '⏸ Sync OFF karo' : '▶️ Sync ON karo'}</button>
@@ -3796,59 +3797,28 @@ body.colorful .from-hdr { color: #166534; }
     function attach() {
       const card = rootEl.querySelector('#tr-sheet-card');
       if (!card) return;
-      const orderBox = card.querySelector('[data-tr-cols-order]');
-      let dragKey = '';
-      const refreshOrderIndexes = () => {
-        if (!orderBox) return;
-        orderBox.querySelectorAll('.tr-col-order').forEach((row, idx) => {
-          const n = row.querySelector('.tr-col-index');
-          if (n) n.textContent = String(idx + 1);
+      const mapBox = card.querySelector('[data-tr-colmap]');
+      const letterVal = (inp) => String(inp.value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+      const letterNum = (L) => { let n = 0; for (const ch of L) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
+      const refreshMap = () => {
+        if (!mapBox) return;
+        const seen = new Map(); let count = 0;
+        mapBox.querySelectorAll('[data-tr-col-letter]').forEach((inp) => {
+          const L = letterVal(inp); const row = inp.closest('.tr-colmap');
+          if (inp.value !== L) inp.value = L;
+          if (row) { row.classList.toggle('on', !!L); row.classList.remove('dup'); }
+          if (L) { count++; if (!seen.has(L)) seen.set(L, []); seen.get(L).push(inp); }
         });
+        let dups = 0;
+        seen.forEach((arr) => { if (arr.length > 1) { dups++; arr.forEach((i) => { const r = i.closest('.tr-colmap'); if (r) r.classList.add('dup'); }); } });
+        const prev = card.querySelector('[data-tr-colmap-prev]');
+        if (prev) {
+          const list = [...seen.entries()].sort((a, b) => letterNum(a[0]) - letterNum(b[0]));
+          prev.innerHTML = list.length ? list.map(([L, arr]) => `<span class="tr-prev-chip ${arr.length > 1 ? 'dup' : ''}"><b>${L}</b> ${esc(arr.map((i) => (i.closest('.tr-colmap').querySelector('.tr-col-label') || {}).textContent || '').join(' + '))}</span>`).join('') + (dups ? '<span class="tr-prev-warn">⚠️ A column letter is used twice — fix it before saving.</span>' : '') : '<span class="dim small">No column selected yet.</span>';
+        }
+        const cn = card.querySelector('[data-tr-colmap-count]'); if (cn) cn.textContent = String(count);
       };
-      if (orderBox) {
-        orderBox.addEventListener('dragstart', (e) => {
-          const row = e.target.closest && e.target.closest('.tr-col-order');
-          if (!row) return;
-          dragKey = row.dataset.trOrderKey || '';
-          row.classList.add('dragging');
-          try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragKey); } catch {}
-        });
-        orderBox.addEventListener('dragend', (e) => {
-          const row = e.target.closest && e.target.closest('.tr-col-order');
-          if (row) row.classList.remove('dragging');
-          dragKey = '';
-        });
-        orderBox.addEventListener('dragover', (e) => {
-          const row = e.target.closest && e.target.closest('.tr-col-order');
-          if (!row || !dragKey) return;
-          e.preventDefault();
-          row.classList.add('drag-over');
-        });
-        orderBox.addEventListener('dragleave', (e) => {
-          const row = e.target.closest && e.target.closest('.tr-col-order');
-          if (row) row.classList.remove('drag-over');
-        });
-        orderBox.addEventListener('drop', (e) => {
-          const target = e.target.closest && e.target.closest('.tr-col-order');
-          if (!target || !dragKey) return;
-          e.preventDefault();
-          target.classList.remove('drag-over');
-          const dragged = orderBox.querySelector(`.tr-col-order[data-tr-order-key="${CSS.escape(dragKey)}"]`);
-          if (!dragged || dragged === target) return;
-          const rect = target.getBoundingClientRect();
-          if (e.clientY < rect.top + rect.height / 2) target.before(dragged); else target.after(dragged);
-          refreshOrderIndexes();
-        });
-        orderBox.addEventListener('click', (e) => {
-          const btn = e.target.closest && e.target.closest('[data-tr-col-up],[data-tr-col-down]');
-          if (!btn) return;
-          const row = btn.closest('.tr-col-order');
-          if (!row) return;
-          if (btn.hasAttribute('data-tr-col-up') && row.previousElementSibling) row.previousElementSibling.before(row);
-          if (btn.hasAttribute('data-tr-col-down') && row.nextElementSibling) row.nextElementSibling.after(row);
-          refreshOrderIndexes();
-        });
-      }
+      if (mapBox) { mapBox.addEventListener('input', refreshMap); refreshMap(); }
             const act = (name, fn) => { const b = card.querySelector(`[data-tr-sheet-act="${name}"]`); if (b) b.addEventListener('click', fn); };
       const collect = () => ({
         sheetLink: (card.querySelector('[data-tr-sheet="sheetLink"]') || {}).value || '',
@@ -3856,15 +3826,15 @@ body.colorful .from-hdr { color: #166534; }
         rowMode: (card.querySelector('[data-tr-sheet="rowMode"]') || {}).value || 'agent-class-gap',
         onSubmit: false,
         onStatus: true,
-        columns: [...card.querySelectorAll('.tr-col-order')].filter((row) => {
-          const cb = row.querySelector('[data-tr-col]');
-          return cb && cb.checked;
-        }).map((row) => row.dataset.trOrderKey).filter(Boolean)
+        columnMap: (() => { const m = {}; card.querySelectorAll('[data-tr-col-letter]').forEach((inp) => { const L = letterVal(inp); if (L) m[inp.getAttribute('data-tr-col-letter')] = L; }); return m; })()
       });
       act('save', () => {
         const patch = collect();
         const before = JSON.parse(JSON.stringify(state.sheet.config || {}));
-        const optimistic = { ...before, ...patch, columns: [...(patch.columns || [])] };
+        const letters = Object.values(patch.columnMap || {});
+        if (!letters.length) { U.toast('Pick a column letter for at least one field.', 'warn'); return; }
+        if (new Set(letters).size !== letters.length) { U.toast('A column letter is used twice — give each field its own column.', 'warn'); return; }
+        const optimistic = { ...before, ...patch, columns: Object.entries(patch.columnMap).sort((a, b) => a[1].length - b[1].length || a[1].localeCompare(b[1])).map(([k]) => k) };
         state.sheet.config = optimistic;
         if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach();
         U.toast('💾 Sheet settings applied ✓ · saving in background…', 'ok');

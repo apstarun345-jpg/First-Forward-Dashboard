@@ -28,7 +28,7 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
       calls.push({ action: body.action, kinds: body.records ? Object.keys(body.records) : [] });
       let out;
       if (body.secret !== secret) out = { ok: false, error: 'unauthorized (secret mismatch)' };
-      else if (body.action === 'ping') out = { ok: true, tab: 'APP_STORAGE', spreadsheet, url: 'https://docs.google.com/spreadsheets/d/mock/edit' };
+      else if (body.action === 'ping') out = { ok: true, version: 'v3.74', tab: 'APP_STORAGE', spreadsheet, url: 'https://docs.google.com/spreadsheets/d/mock/edit' };
       else if (body.action === 'read') out = { ok: true, records: structuredClone(records) };
       else if (body.action === 'write') {
         const at = new Date().toISOString();
@@ -68,7 +68,7 @@ export function startMockAppsScript({ secret, spreadsheet = 'Mock Sheet' } = {})
           if (!appends.includes(tabState)) appends.push(tabState);
           if (!tabState.header && Array.isArray(body.header) && body.header.length) tabState.header = body.header.slice();
           const atRow = tabState.rows.length + (tabState.header ? 2 : 1);
-          tabState.rows.push(...rows);
+          tabState.rows.push(...rows); if (Array.isArray(body.positions)) tabState.positions = body.positions.slice();
           out = { ok: true, tab, added: rows.length, atRow, spreadsheet, spreadsheetId: targetId, url: `https://docs.google.com/spreadsheets/d/${targetId}/edit` };
         }
       }

@@ -6700,9 +6700,27 @@ async function handleApi(req, res, url) {
       default: return '';
     }
   };
+  // 🔤 v283 — admin picks the sheet COLUMN LETTER for each field (Date → A, Agent → C …) instead of drag order.
+  const sheetColLetterToIdx = (L) => { const t = String(L || '').trim().toUpperCase(); if (!/^[A-Z]{1,2}$/.test(t)) return -1; let n = 0; for (const ch of t) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
+  const sheetIdxToColLetter = (i) => { let n = Number(i) + 1, out = ''; while (n > 0) { const m = (n - 1) % 26; out = String.fromCharCode(65 + m) + out; n = Math.floor((n - 1) / 26); } return out; };
+  /** columnMap {field:'A'} → [{field, idx}] sorted by column (invalid / unknown / duplicate dropped). */
+  function tagSheetMapped(cfg) {
+    const map = cfg && cfg.columnMap && typeof cfg.columnMap === 'object' ? cfg.columnMap : null;
+    if (!map) return null;
+    const used = new Set(), out = [];
+    for (const [f, L] of Object.entries(map)) {
+      if (!TAG_SHEET_FIELDS[f]) continue;
+      const idx = sheetColLetterToIdx(L);
+      if (idx < 0 || used.has(idx)) continue;
+      used.add(idx); out.push({ field: f, idx });
+    }
+    out.sort((a, b) => a.idx - b.idx);
+    return out.length ? out : null;
+  }
   /** Request → sheet rows (rowMode ke hisaab se) + header. `event` = new / status / manual. */
   function tagSheetRows(req, cfg, event) {
-    const cols = (cfg.columns || []).filter((c) => TAG_SHEET_FIELDS[c]);
+    const mapped = tagSheetMapped(cfg);
+    const cols = mapped ? mapped.map((m) => m.field) : (cfg.columns || []).filter((c) => TAG_SHEET_FIELDS[c]);
     const header = cols.map((c) => TAG_SHEET_FIELDS[c]);
     const rowsIn = Array.isArray(req.rows) ? req.rows : [];
     const mk = (x) => cols.map((c) => tagSheetFieldValue(c, x, req, event));
@@ -6755,7 +6773,7 @@ async function handleApi(req, res, url) {
     } else {
       data = rowsIn.map(mk); // 'class' — har agent × class ki alag row (default)
     }
-    return { header, rows: data };
+    return { header, rows: data, positions: mapped ? mapped.map((m) => m.idx) : null };
   }
   /** Ek ya kai requests (ek submit ka batch) ek hi appendrows call me — rows ka order bana rehta hai aur
    *  Apps Script par kam calls. `throwOnFail` sirf manual/test push ke liye. */
@@ -6799,10 +6817,11 @@ async function handleApi(req, res, url) {
       return null;
     }
     let header = [];
+    let positions = null;
     const rows = [];
     const counts = reqs.map((r, ri) => {
       const out = tagSheetRows(r, cfg, event);
-      header = out.header;
+      header = out.header; positions = out.positions;
       rows.push(...out.rows);
       // 🧩 Preferred batch layout: one blank spacer between agents.
       if (cfg.rowMode === 'agent-class-gap' && ri < reqs.length - 1) rows.push(header.map(() => ''));
@@ -6826,7 +6845,20 @@ async function handleApi(req, res, url) {
     const tabName = String(cfg.tab || 'Tag Requests').slice(0, 80) || 'Tag Requests';
     // v3.27 — sheetLink me ID diya ho to entry US ALAG SHEET me jaati hai (Apps Script openById
     // karta hai). Link khaali ho to purana behaviour: script jis sheet se bandha hai usi me.
-    const out = await store.call('appendrows', { tab: tabName, header, rows, ...(targetId ? { spreadsheetId: targetId } : {}) });
+    if (positions) {
+      // Column-letter mode needs Code.gs v3.74+ — an older script would map by heading names and shuffle columns.
+      let ver = '';
+      try { const pong = await store.call('ping'); ver = String((pong && pong.version) || ''); } catch { /* handled below */ }
+      const vn = (ver.match(/(\d+)\.(\d+)/) || []).slice(1).map(Number);
+      if (!vn.length || vn[0] < 3 || (vn[0] === 3 && vn[1] < 74)) {
+        const msg = 'Column-letter entry needs the new google-apps-script/Code.gs (v3.74) — deploy it (Manage deployments → New version), then retry.';
+        const at0 = new Date().toISOString();
+        reqs.forEach((r) => { r.sheetSync = { at: at0, event, error: msg.slice(0, 160), tab: String(cfg.tab || '') }; });
+        if (throwOnFail) throw new HttpError(502, msg);
+        throw new Error(msg);
+      }
+    }
+    const out = await store.call('appendrows', { tab: tabName, header, rows, ...(positions ? { positions } : {}), ...(targetId ? { spreadsheetId: targetId } : {}) });
     // Purana Code.gs deploy (v3.25) spreadsheetId ignore karta hai — tab wo chup-chaap APP_STORAGE
     // wali sheet me likh deta. Isliye response ke URL se verify karo ki entry SAHI sheet me gayi.
     if (targetId && out && out.url && !String(out.url).includes(targetId)) {
@@ -7778,9 +7810,24 @@ async function handleApi(req, res, url) {
     cfg.onSubmit = false;
     cfg.onStatus = true;
     if (c.rowMode !== undefined && ['class', 'agent', 'agent-class-gap', 'request'].includes(c.rowMode)) cfg.rowMode = c.rowMode;
-    if (Array.isArray(c.columns)) {
+    if (c.columnMap && typeof c.columnMap === 'object' && !Array.isArray(c.columnMap)) {
+      const clean = {}; const seen = new Map();
+      for (const [f, L] of Object.entries(c.columnMap)) {
+        const letter = String(L || '').trim().toUpperCase();
+        if (!letter) continue;
+        if (!TAG_SHEET_FIELDS[f]) continue;
+        const idx = sheetColLetterToIdx(letter);
+        if (idx < 0) throw new HttpError(400, `Column "${String(L).slice(0, 6)}" is not valid — use letters A to ZZ.`);
+        if (seen.has(idx)) throw new HttpError(400, `Column ${letter} is used twice (${TAG_SHEET_FIELDS[seen.get(idx)]} and ${TAG_SHEET_FIELDS[f]}) — give each field its own column.`);
+        seen.set(idx, f); clean[f] = sheetIdxToColLetter(idx);
+      }
+      if (Object.keys(clean).length) {
+        cfg.columnMap = clean;
+        cfg.columns = [...seen.entries()].sort((a, b) => a[0] - b[0]).map(([, f]) => f);
+      }
+    } else if (Array.isArray(c.columns)) {
       const cols = c.columns.map((x) => String(x)).filter((x) => TAG_SHEET_FIELDS[x]);
-      if (cols.length) cfg.columns = [...new Set(cols)];
+      if (cols.length) { cfg.columns = [...new Set(cols)]; delete cfg.columnMap; }
     }
     if (c.publicForm && typeof c.publicForm === 'object') {
       const pcfg = publicTagFormConfig();
@@ -7804,7 +7851,7 @@ async function handleApi(req, res, url) {
     }
     cfg.updatedAt = new Date().toISOString(); cfg.updatedBy = user.username;
     await persist('notify');
-    logAudit(user, 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · target ${cfg.spreadsheetId || 'script-sheet'} · ${cfg.columns.length} cols · ${cfg.rowMode}`, ip: clientIp(req) });
+    logAudit(user, 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · target ${cfg.spreadsheetId || 'script-sheet'} · ${cfg.columns.length} cols${cfg.columnMap ? ' (by letter)' : ''} · ${cfg.rowMode}`, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, config: cfg, connected: !!sheetSyncStore(), publicForm: publicTagView(), targetId: cfg.spreadsheetId || '' });
   }
   if (p === '/api/tag-request-sheet/test' && method === 'POST') {
@@ -8997,6 +9044,20 @@ function isComboLink(l) {
 function comboTlParts(link) {
   return (Array.isArray(link.tls) ? link.tls : []).filter((t) => t && t.name).map((t) => ({ source: plMemberSrc(t, link), name: String(t.name), personId: String(t.id || '') }));
 }
+/** Channels (gv / ff) a team link covers — used for the GV | FF switch. */
+function plLinkChannels(link) {
+  if (!link || link.kind !== 'group') return [];
+  const set = new Set();
+  (Array.isArray(link.tls) ? link.tls : []).forEach((t) => { if (t && t.name) set.add(plMemberSrc(t, link)); });
+  (Array.isArray(link.members) ? link.members : []).forEach((m) => { if (m && m.name) set.add(plMemberSrc(m, link)); });
+  return ['gv', 'ff'].filter((c) => set.has(c));
+}
+/** Same link, restricted to one channel's TLs + agents. */
+function plChannelView(link, ch) {
+  return { ...link, source: ch,
+    tls: (Array.isArray(link.tls) ? link.tls : []).filter((t) => t && plMemberSrc(t, link) === ch),
+    members: (Array.isArray(link.members) ? link.members : []).filter((m) => m && plMemberSrc(m, link) === ch) };
+}
 async function comboSplit(link) {
   const tlParts = comboTlParts(link);
   const known = { ff: new Set(), gv: new Set() };
@@ -9059,6 +9120,21 @@ function personalStockFor(sidx, link) {
   (Array.isArray(link.members) ? link.members : []).forEach((m) => { const src = plMemberSrc(m, link); if (m && m.name && !known[src].has(plNormName(m.name))) bySrc[src].push(String(m.name)); });
   ['ff', 'gv'].forEach((src) => { if (bySrc[src].length) { const r = personalStock(sidx, src, 'group', bySrc[src]); if (r) res.push(r); } });
   return mergePersonalStock(res);
+}
+/** GV vs FF split of a combined link (TLs / agents / MTD / last month / stock). */
+async function personalChannelSplit(baseLink, sidx, ym, prevYm) {
+  const out = [];
+  for (const ch of plLinkChannels(baseLink)) {
+    const sub = plChannelView(baseLink, ch);
+    let rows = [];
+    try { rows = await personalDailyRows(sub); } catch { rows = []; }
+    let mtd = 0, last = 0;
+    rows.forEach((r) => { const d = String(r.date); if (d.startsWith(ym)) mtd += r.n; else if (d.startsWith(prevYm)) last += r.n; });
+    let stock = null;
+    try { if (sidx) { const sr = personalStockFor(sidx, sub); if (sr) stock = (sr.t[0] || 0) + (sr.t[1] || 0); } } catch { stock = null; }
+    out.push({ ch, tls: (sub.tls || []).length, agents: personalMemberNames(sub).length, mtd, last, stock });
+  }
+  return out;
 }
 /** 🟢 Today Live — today's issuance per agent (GV: GV Master live rows, FF: EIR rows dated today). */
 async function personalEirTodayRows(link, today) {
@@ -9397,7 +9473,12 @@ async function servePersonalPage(req, res, rawToken) {
   const hasVisibleSection = allowedSecs.some((key) => key !== 'export');
   const canExport = hasVisibleSection && hasSec('export');
   const requireAuth = true;
-  const link = { ...savedLink, source: savedLink.kind === 'group' ? plSrc(savedLink.source) : (savedLink.source === 'gv' ? 'gv' : 'ff') };
+  const baseLink = { ...savedLink, source: savedLink.kind === 'group' ? plSrc(savedLink.source) : (savedLink.source === 'gv' ? 'gv' : 'ff') };
+  // 🔀 GV | FF switch — ?ch=gv / ?ch=ff shows only that channel of a combined link
+  const linkChannels = plLinkChannels(baseLink);
+  const chReq = (() => { try { return new URL(req.url, 'http://x').searchParams.get('ch') || ''; } catch { return ''; } })();
+  const chView = linkChannels.length > 1 && linkChannels.includes(chReq) ? chReq : 'all';
+  const link = chView === 'all' ? baseLink : plChannelView(baseLink, chView);
   try {
     const needsIssuance = hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights');
     const needsStock = hasSec('stock') || hasSec('ageing') || (hasSec('insights') && isTeamLink(link));
@@ -9406,7 +9487,7 @@ async function servePersonalPage(req, res, rawToken) {
     const livePromise = hasSec('overview')
       ? Promise.race([personalLiveToday(link), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 2500); if (t.unref) t.unref(); })]).catch(() => null)
       : Promise.resolve(null);
-    const teamPromise = isTeamLink(link) && (hasSec('issuance') || hasSec('performance') || hasSec('insights'))
+    const teamPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights') || hasSec('stock'))
       ? personalTeamAgents(link) : Promise.resolve(new Map());
     // ⚡ v187 — page kabhi latka nahi: sheet data 3s me na aaye to turant "ready ho raha hai" page (auto-retry);
     // upar ke fetch background me chalte rehte hain (inflight + cache) isliye agla try seedha cache se khulta hai.
@@ -9429,6 +9510,7 @@ async function servePersonalPage(req, res, rawToken) {
     const tlNamePromise = link.kind === 'group' ? Promise.resolve(String(link.tlLabel || '')) : (!isTeamLink(link) && hasVisibleSection
       ? personalAgentTl(link) : Promise.resolve(''));
     // 📦 Stock ka state batana zaroori hai — pehle timeout par chupchap "—" dikhta tha (user ko lagta tha data hi nahi hai).
+    const stockIdxRef = { v: null };
     const stockMeta = { state: 'off' };   // off | ok | loading (index ban raha) | nomatch (naam StockDataa me nahi) | error
     const stockPromise = needsStock ? (async () => {
       let timer = null;
@@ -9440,6 +9522,7 @@ async function servePersonalPage(req, res, rawToken) {
             if (timer && timer.unref) timer.unref();
           })
         ]);
+        stockIdxRef.v = sidx;
         const sres = personalStockFor(sidx, link);
         stockMeta.state = sres ? 'ok' : 'nomatch';
         return sres;
@@ -9454,7 +9537,7 @@ async function servePersonalPage(req, res, rawToken) {
     const rows = await rowsPromise;
     // 🔗 v3.79 — issuance khaali ho to 404 nahi: agar StockDataa me is naam ka stock mil jaye to page stock ke saath
     // khulta hai (naye TL / naye mahine ke shuru me issuance abhi zero hota hai). Dono na mile to saaf message.
-    if (needsIssuance && !rows.length) {
+    if (needsIssuance && !rows.length && chView === 'all') {
       const stockOnly = await stockPromise;
       if (!stockOnly) return fail(404, `"${link.name}" has no issuance or stock in the data yet. Check the spelling — re-select the name in Settings → Personal links.`);
     }
@@ -9465,9 +9548,9 @@ async function servePersonalPage(req, res, rawToken) {
     const ym = dateKeyNow().slice(0, 7);
     const normPerson = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
     let byAgentMap = new Map();
-    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights'))) {
+    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights') || hasSec('stock'))) {
       goal = ((Array.isArray(db.settings.tlTargets) ? db.settings.tlTargets : []).find((t) => t && t.ym === ym && normPerson(t.tl) === normPerson(link.name)) || null);
-      if (hasSec('issuance') || hasSec('performance') || hasSec('insights')) byAgentMap = await teamPromise;
+      byAgentMap = await teamPromise.catch(() => new Map());
       for (const [name, m] of byAgentMap) {
         let mtdA = 0;
         for (const [d, n] of m) if (d.startsWith(ym)) mtdA += n;
@@ -9771,6 +9854,65 @@ async function servePersonalPage(req, res, rawToken) {
       }
     }
 
+    // 🔀 GV | FF switch + channel split (combined links only)
+    const CH_NAME = { gv: 'GV Partner', ff: 'First Forward' };
+    const chIcon = { gv: '🟩', ff: '🟦' };
+    let chSwitchHtml = '', splitHtml = '';
+    if (linkChannels.length > 1) {
+      const cnt = (ch) => { const v = plChannelView(baseLink, ch); const t = (v.tls || []).length; const m = personalMemberNames(v).length; return `${t ? `${t} TL${t > 1 ? 's' : ''}` : ''}${t && m ? ' + ' : ''}${m ? `${m} agent${m > 1 ? 's' : ''}` : ''}`; };
+      const chip = (id, label, sub) => `<a class="pl-ch ${chView === id ? 'on' : ''} ${id}" data-pl-ch href="?ch=${id}" aria-current="${chView === id}"><b>${label}</b><small>${escHtml(sub)}</small></a>`;
+      chSwitchHtml = `<nav class="pl-chbar" aria-label="Channel">${chip('all', '🌐 All', 'GV + FF together')}${linkChannels.map((c) => chip(c, `${chIcon[c]} ${CH_NAME[c]}`, cnt(c))).join('')}</nav>`;
+      if (chView === 'all' && hasSec('overview')) {
+        const split = await personalChannelSplit(baseLink, stockIdxRef.v, ym, prevYm).catch(() => []);
+        if (split.length) {
+          const sumM = split.reduce((a, x) => a + x.mtd, 0) || 0;
+          const srows = split.map((x) => `<tr><td><span class="pb-chan ${x.ch}">${x.ch.toUpperCase()}</span> <b>${CH_NAME[x.ch]}</b></td><td>${nf(x.tls)}</td><td>${nf(x.agents)}</td><td><b>${nf(x.mtd)}</b> <small class="dim">${pct(x.mtd, sumM)}%</small></td><td>${nf(x.last)}</td><td>${x.stock === null ? '—' : nf(x.stock)}</td><td><a class="pb-btn" data-pl-ch href="?ch=${x.ch}">Open →</a></td></tr>`).join('');
+          splitHtml = `<section class="pb-card"><div class="pb-card-head"><h3>🔀 Channel split · GV vs First Forward</h3></div><div class="pb-split"><div class="pb-scroll"><table class="pb-tbl"><thead><tr><th>Channel</th><th>TLs</th><th>Direct agents</th><th>MTD issued</th><th>Last month</th><th>Stock</th><th></th></tr></thead><tbody>${srows}</tbody></table></div>${donutHtml(split.map((x) => ({ label: CH_NAME[x.ch], value: x.mtd, color: x.ch === 'gv' ? '#16a34a' : '#2563eb' })), nf(sumM), 'MTD issued')}</div></section>`;
+        }
+      }
+    }
+    // 🔎 Scoped search — only the TLs / agents this link covers
+    let searchHtml = '';
+    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance'))) {
+      const issueOk = hasSec('overview') || hasSec('issuance') || hasSec('performance');
+      const stockOk = hasSec('stock') || hasSec('overview') || hasSec('ageing');
+      const nk = plNormName;
+      const defSrc = link.source === 'gv' ? 'gv' : 'ff';
+      const agentSrc = new Map(), agentTl = new Map(), tlGroups = [];
+      if (isComboLink(link)) {
+        const sp = await comboSplit(link).catch(() => null);
+        if (sp) {
+          sp.tlMaps.forEach(({ part, map }) => { const names = [...map.keys()]; tlGroups.push({ name: part.name, src: part.source, agents: names }); names.forEach((n) => { agentSrc.set(nk(n), part.source); agentTl.set(nk(n), part.name); }); });
+          ['ff', 'gv'].forEach((s2) => sp.memBySrc[s2].forEach((m) => agentSrc.set(nk(m.name), s2)));
+        }
+      } else if (link.kind === 'tl') {
+        const names = [...byAgentMap.keys()];
+        tlGroups.push({ name: link.name, src: defSrc, agents: names });
+        names.forEach((n) => agentTl.set(nk(n), link.name));
+      }
+      if (live) live.agents.forEach((a) => { if (!agentSrc.has(nk(a.name))) agentSrc.set(nk(a.name), a.src); });
+      const stockBy = new Map();
+      if (stockInfo && stockInfo.agents) stockInfo.agents.forEach((a) => stockBy.set(nk(a.n), (a.t[0] || 0) + (a.t[1] || 0)));
+      const liveBy = new Map();
+      if (live) live.agents.forEach((a) => liveBy.set(nk(a.name), a.total));
+      const peopleMap = new Map();
+      const addPerson = (name) => { const k = nk(name); if (!k) return null; let p = peopleMap.get(k); if (!p) { p = { k: 'a', n: String(name).trim(), s: agentSrc.get(k) || defSrc, tl: agentTl.get(k) || '', m: 0, l: 0, d: 0, st: 0 }; peopleMap.set(k, p); } return p; };
+      for (const [name, dm] of byAgentMap) { const p = addPerson(name); if (!p) continue; for (const [d, n] of dm) { if (String(d).startsWith(ym)) p.m += n; else if (String(d).startsWith(prevYm)) p.l += n; } }
+      personalMemberNames(link).forEach((n) => addPerson(n));
+      if (stockInfo && stockInfo.agents) stockInfo.agents.forEach((a) => addPerson(a.n));
+      for (const [k2, p] of peopleMap) { p.d = liveBy.get(k2) || 0; p.st = stockBy.get(k2) || 0; }
+      const items = [...peopleMap.values()];
+      tlGroups.forEach((g) => {
+        const ags = g.agents.map((n) => peopleMap.get(nk(n))).filter(Boolean);
+        const sum = (f) => ags.reduce((a, x) => a + (x[f] || 0), 0);
+        let tlStock = sum('st');
+        try { if (stockIdxRef.v) { const sr = personalStock(stockIdxRef.v, g.src, 'tl', g.name); if (sr) tlStock = (sr.t[0] || 0) + (sr.t[1] || 0); } } catch { /* keep sum */ }
+        items.push({ k: 't', n: g.name, s: g.src, ag: ags.length, m: sum('m'), l: sum('l'), d: sum('d'), st: tlStock, members: ags.map((x) => x.n) });
+      });
+      const dataJson = JSON.stringify({ items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, both: linkChannels.length > 1 }).replace(/</g, '\\u003c');
+      searchHtml = `<section class="pb-card pl-search" id="pl-search"><div class="pl-search-row"><span class="pl-search-ico">🔎</span><input id="pl-search-q" type="search" placeholder="Search a TL or agent in this link…" autocomplete="off" aria-label="Search TL or agent"><div id="pl-search-drop" class="pl-search-drop" hidden></div></div><div id="pl-search-res"></div><script type="application/json" id="pl-search-data">${dataJson}</script></section>`;
+    }
+
     // Build only tabs that the admin granted; an "All" view can expose only emitted sections.
     const tabDefs = [
       { id: 'overview', label: '📊 Overview', show: hasSec('overview') },
@@ -9792,13 +9934,13 @@ async function servePersonalPage(req, res, rawToken) {
     const html = personalShell({
       title: `${link.name} · Performance`,
       heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`,
-      sub: `${link.source === 'both' || isComboLink(link) ? 'GV Partner + First Forward' : (link.source === 'gv' ? 'GV Partner' : 'First Forward')} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${(link.tls || []).length ? `${link.tls.length} TL${link.tls.length > 1 ? 's' : ''} + ` : ''}${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
+      sub: `${chView === 'all' && (link.source === 'both' || linkChannels.length > 1) ? 'GV Partner + First Forward' : (link.source === 'gv' ? 'GV Partner' : 'First Forward')} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${(link.tls || []).length ? `${link.tls.length} TL${link.tls.length > 1 ? 's' : ''} + ` : ''}${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
       token,
       requireAuth,
       authorized: true,
       personName: link.name,
       body: `
-      <div id="pl-portal-content"><div class="pl-layout">
+      <div id="pl-portal-content">${chSwitchHtml}${searchHtml}<div class="pl-layout">
         ${tabsBarHtml}
         <div class="pl-main">
         ${noSectionsHtml}
@@ -9812,6 +9954,7 @@ async function servePersonalPage(req, res, rawToken) {
             <div class="pb-kpi best"><small>🏆 Best Day</small><b>${nf(st.best.n)}</b><span>${escHtml(st.best.date)}</span></div>
           </section>
           <section class="pb-card"><div class="pb-card-head"><div><h3>📊 Daily Issuance · Current Month (${escHtml(ym)})</h3><p class="pb-matrix-note">Current month · data through ${escHtml(reportThrough || 'no completed day')} · today's incomplete report excluded</p></div><span class="pb-btn pb-count-badge"><small>MTD ISSUED</small><b>${nf(st.mtd)} tags</b></span></div><div class="pb-bars">${bars || '<p class="dim">no data</p>'}</div></section>
+          ${splitHtml}
           ${chartsHtml}
           <section class="pb-grid2">
             <div class="pb-card"><h3>🏷️ Class mix (MTD)</h3>${clsRows}</div>
@@ -9963,6 +10106,27 @@ body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);fon
 .pb-wrap .pb-rank{border-bottom:1px solid #f1f5f9}
 .pb-wrap .pb-foot{color:#94a3b8;margin-top:22px}
 @media(max-width:760px){.pb-wrap .pb-head{padding:16px}.pb-wrap .pb-head h1{font-size:18px}.pb-wrap .pb-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.pb-wrap .pb-kpi b{font-size:23px}.pb-wrap .pl-side{padding:8px}.pb-wrap .pl-side .pb-tab{border-left:0;border-bottom:3px solid transparent;border-radius:8px}.pb-wrap .pl-side .pb-tab.on{border-bottom-color:#4f46e5}}
+.pl-chbar{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 14px}
+.pl-ch{display:flex;flex-direction:column;gap:1px;padding:10px 18px;border-radius:14px;border:1.5px solid #e2e8f0;background:#fff;color:#334155;text-decoration:none;min-width:170px;box-shadow:0 2px 8px rgba(15,23,42,.05);transition:.15s}
+.pl-ch b{font-size:14px;font-weight:800}.pl-ch small{font-size:11.5px;color:#64748b}
+.pl-ch:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(15,23,42,.10)}
+.pl-ch.on{color:#fff;border-color:transparent;background:linear-gradient(120deg,#4f46e5,#6366f1)}.pl-ch.on small{color:#e0e7ff}
+.pl-ch.gv.on{background:linear-gradient(120deg,#15803d,#22c55e)}.pl-ch.ff.on{background:linear-gradient(120deg,#1d4ed8,#3b82f6)}
+.pl-search{padding:12px 14px!important}
+.pl-search-row{position:relative;display:flex;align-items:center;gap:10px}
+.pl-search-ico{font-size:17px}
+#pl-search-q{flex:1;border:1.5px solid #c7d2fe;border-radius:12px;padding:11px 14px;font-size:14.5px;background:#f8faff;outline:none;min-width:0}
+#pl-search-q:focus{border-color:#6366f1;background:#fff;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.pl-search-drop{position:absolute;left:30px;right:0;top:calc(100% + 6px);background:#fff;border:1px solid #c7d2fe;border-radius:12px;box-shadow:0 14px 34px rgba(15,23,42,.16);z-index:30;max-height:340px;overflow:auto;padding:4px}
+.pl-search-opt{display:block;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:8px 10px;font-size:13.5px;cursor:pointer;color:#0f172a}
+.pl-search-opt:hover{background:#eef2ff}
+.pl-search-none{padding:12px;color:#64748b;font-size:13px}
+.pl-tag{display:inline-block;border-radius:6px;padding:0 7px;font-size:10.5px;font-weight:800;color:#fff;background:#0ea5e9}.pl-tag.t{background:#7c3aed}
+.pl-res{margin-top:12px;border-top:1px dashed #e2e8f0;padding-top:12px}
+.pl-res-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:15px}
+.pl-res-row{cursor:pointer}
+.pb-split{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:16px;align-items:center}
+@media(max-width:900px){.pb-split{grid-template-columns:1fr}}
 /* ── v280: full-screen layout, donut charts, Today Live ── */
 body{padding:clamp(10px,1.6vw,26px)}
 .pb-wrap,.pb-wrap{max-width:none;width:100%;margin:0}
@@ -10149,6 +10313,72 @@ const PERSONAL_PORTAL_JS = `(function () {
     if (!h) return;
     var hb = document.querySelector('[data-pl-tab="' + h + '"]');
     if (hb) hb.click();
+  })();
+
+  // Channel switch (GV | FF | All) — keep the open tab when switching
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pl-ch]'), function (a) {
+    a.addEventListener('click', function (e) { e.preventDefault(); window.location.href = a.getAttribute('href') + (window.location.hash || ''); });
+  });
+
+  // Scoped search — only the TLs / agents this link covers
+  (function () {
+    var dataEl = document.getElementById('pl-search-data'), qEl = document.getElementById('pl-search-q');
+    if (!dataEl || !qEl) return;
+    var D; try { D = JSON.parse(dataEl.textContent || '{}'); } catch (e) { return; }
+    var items = D.items || [], drop = document.getElementById('pl-search-drop'), res = document.getElementById('pl-search-res');
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function nf(n) { return Number(n || 0).toLocaleString('en-IN'); }
+    function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+    items.forEach(function (it) { it._k = norm(it.n); });
+    function chBadge(it) { return D.both ? '<span class="pb-chan ' + it.s + '">' + it.s.toUpperCase() + '</span>' : ''; }
+    function find(q) {
+      var toks = norm(q).split(' ').filter(Boolean);
+      if (!toks.length) return [];
+      var hits = items.filter(function (it) { return toks.every(function (t) { return it._k.indexOf(t) >= 0; }); });
+      hits.sort(function (a, b) { return (a.k === b.k ? 0 : (a.k === 't' ? -1 : 1)) || (b.m - a.m) || a.n.localeCompare(b.n); });
+      return hits.slice(0, 14);
+    }
+    var shown = [];
+    function paintDrop() {
+      shown = find(qEl.value);
+      if (!qEl.value.trim()) { drop.hidden = true; return; }
+      drop.innerHTML = shown.length ? shown.map(function (it, i) {
+        return '<button type="button" class="pl-search-opt" data-i="' + i + '"><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b> ' + chBadge(it) +
+          (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + (it.k === 't' ? ' <small class="dim">· ' + nf(it.ag) + ' agents</small>' : '') + '</button>';
+      }).join('') : '<div class="pl-search-none">No TL / agent with this name in this link.</div>';
+      drop.hidden = false;
+    }
+    function tile(label, val, sub) { return '<div class="pb-kpi"><small>' + label + '</small><b>' + val + '</b><span>' + (sub || '') + '</span></div>'; }
+    function tiles(it) {
+      var t = '';
+      if (D.issue) { t += tile('MTD issued', nf(it.m), esc(D.ym)) + tile('Last month', nf(it.l), esc(D.prevYm)); }
+      if (D.live) t += tile('Issued today', nf(it.d), 'live');
+      if (D.stock) t += tile('Stock', nf(it.st), it.k === 't' ? 'TL total' : 'in hand');
+      if (it.k === 't') t = tile('Agents', nf(it.ag), 'under this TL') + t;
+      return '<section class="pb-kpis">' + t + '</section>';
+    }
+    function openItem(it) {
+      qEl.value = it.n; drop.hidden = true;
+      var h = '<div class="pl-res-head"><div><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b> ' + chBadge(it) +
+        (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + '</div><button type="button" class="pb-btn" id="pl-search-clear">✕ Close</button></div>' + tiles(it);
+      if (it.k === 't') {
+        var names = {}; (it.members || []).forEach(function (n) { names[norm(n)] = 1; });
+        var ags = items.filter(function (x) { return x.k === 'a' && names[x._k]; }).sort(function (a, b) { return b.m - a.m; });
+        h += '<div class="pb-scroll"><table class="pb-tbl"><thead><tr><th>#</th><th>Agent</th>' + (D.issue ? '<th>MTD</th><th>Last month</th>' : '') + (D.live ? '<th>Today</th>' : '') + (D.stock ? '<th>Stock</th>' : '') + '</tr></thead><tbody>' +
+          (ags.length ? ags.map(function (a, i) { return '<tr class="pl-res-row" data-name="' + esc(a.n) + '"><td>' + (i + 1) + '</td><td><b>' + esc(a.n) + '</b></td>' + (D.issue ? '<td>' + nf(a.m) + '</td><td>' + nf(a.l) + '</td>' : '') + (D.live ? '<td>' + nf(a.d) + '</td>' : '') + (D.stock ? '<td>' + nf(a.st) + '</td>' : '') + '</tr>'; }).join('') : '<tr><td colspan="6" class="dim">No agents found for this TL.</td></tr>') + '</tbody></table></div>';
+      }
+      res.innerHTML = '<div class="pl-res">' + h + '</div>';
+      var cl = document.getElementById('pl-search-clear'); if (cl) cl.addEventListener('click', function () { res.innerHTML = ''; qEl.value = ''; });
+      Array.prototype.forEach.call(res.querySelectorAll('.pl-res-row'), function (tr) {
+        tr.addEventListener('click', function () { var nm = norm(tr.getAttribute('data-name')); for (var i = 0; i < items.length; i++) { if (items[i].k === 'a' && items[i]._k === nm) { openItem(items[i]); break; } } });
+      });
+      try { res.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+    }
+    qEl.addEventListener('input', paintDrop);
+    qEl.addEventListener('focus', function () { if (qEl.value.trim()) paintDrop(); });
+    qEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var f = find(qEl.value)[0]; if (f) openItem(f); else paintDrop(); } if (e.key === 'Escape') drop.hidden = true; });
+    drop.addEventListener('click', function (e) { var b = e.target.closest ? e.target.closest('.pl-search-opt') : null; if (b) openItem(shown[Number(b.getAttribute('data-i'))]); });
+    document.addEventListener('click', function (e) { if (!e.target.closest || !e.target.closest('#pl-search')) drop.hidden = true; });
   })();
 
   // Today Live — manual refresh + auto-refresh every 2 min while the Live tab is open

@@ -75,6 +75,24 @@ test('team link: TLs + agents from GV and FF are combined without double countin
     assert.match(html, /class="pb-donut"/, 'donut charts are rendered');
     assert.match(html, /Issuance · class mix/, 'issuance donut card');
     assert.match(html, /\.pb-wrap,\.pb-wrap\{max-width:none/, 'dashboard is full width');
+    // v283: GV | FF switch, channel split, scoped search
+    assert.match(html, /class="pl-chbar"/, 'channel switch bar');
+    assert.match(html, /href="\?ch=gv"/); assert.match(html, /href="\?ch=ff"/);
+    assert.match(html, /Channel split/, 'GV vs FF split card in All view');
+    assert.match(html, /id="pl-search-q"/, 'scoped search bar');
+    const sd = JSON.parse(html.match(/id="pl-search-data">([^<]*)</)[1]);
+    const names = sd.items.map((i) => i.n);
+    for (const n of ['Agent F1', 'Agent G1', 'GV Solo', 'FF Boss', 'GV Boss']) assert.ok(names.includes(n), `search covers ${n}`);
+    assert.ok(!names.includes('Somebody Else'), 'search only has people from this link');
+    const gvHtml = await (await fetch(`${server.base}/p/${made.json.link.token}?ch=gv`, { headers: { cookie } })).text();
+    assert.match(gvHtml, /class="pl-ch on gv"/, 'GV chip active ' + (gvHtml.match(/<p>([^<]{0,200})<\/p>/) || [])[1]);
+    assert.ok(gvHtml.includes('Agent G1') && gvHtml.includes('GV Solo'), 'GV view has GV agents');
+    assert.ok(!gvHtml.includes('Agent F1') && !gvHtml.includes('FF Boss'), 'GV view has no FF people');
+    const ffHtml = await (await fetch(`${server.base}/p/${made.json.link.token}?ch=ff`, { headers: { cookie } })).text();
+    assert.ok(ffHtml.includes('Agent F1') && !ffHtml.includes('Agent G1') && !ffHtml.includes('GV Solo'), 'FF view has only FF people');
+    const portalJs = await (await fetch(`${server.base}/p-portal.js`)).text();
+    assert.doesNotThrow(() => new Function(portalJs), 'portal client JS parses');
+    assert.match(portalJs, /pl-search-data/); assert.match(portalJs, /data-pl-ch/);
     // Agent F1 is under the selected FF TL → not queried again as a manual member
     assert.ok(!seen.some((q) => /L = 'Agent F1'/.test(q)), 'agents already under a selected TL are not queried twice');
     // edit: drop a TL, keep members
