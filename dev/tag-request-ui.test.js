@@ -166,7 +166,7 @@ test('📥 request row — ek hi row me sab (koi Kholo nahi): stock 🚗/🚚, i
   const [dr] = TR._test.displayRows([rahul]);
   const html = TR._test.reqRowHtml(dr);
   assert.ok(!/Kholo|data-tr-open/.test(html), 'drawer / Kholo button nahi');
-  for (const s of ['data-tr-sel="tagreq_aaa111::agent"', 'Ramesh Yadav', 'Jaipur office', 'Rahul Sharma', '#1001', 'TL TL One', '☏ 9876500001', 'Gandhi Nagar', '📮 302015', 'data-tr-item-name']) assert.ok(html.includes(s), `row me "${s}"`);
+  for (const s of ['data-tr-sel="tagreq_aaa111::agent"', 'Ramesh Yadav', 'Jaipur office', 'Rahul Sharma', '#1001', 'data-tr-tlgo="TL One"', '☏ 9876500001', 'Gandhi Nagar', '📮 302015', 'data-tr-item-name']) assert.ok(html.includes(s), `row me "${s}"`);
   for (const m of ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth', 'suggest']) assert.ok(html.includes(`data-tr-m="${m}"`), `metric cell ${m}`);
   assert.match(html, /data-tr-m="stock">[\s\S]{0,260}<b class="tr-big-num">17<\/b>/, 'stock total (snapshot)');
   assert.match(html, /data-tr-m="core"><b class="tr-big-num">14<\/b>/);

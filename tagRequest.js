@@ -111,6 +111,22 @@ FF.pages = FF.pages || {};
   }
   const rid = () => Math.random().toString(36).slice(2, 9);
   const emptyQty = () => { const q = {}; CLASS_LIST.forEach((c) => { q[c] = ''; }); return q; };
+  /** TL name → clickable; opens Master Search with the full TL data. */
+  function tlLink(name) {
+    const n = String(name || '').trim();
+    if (!n || n === '—') return esc(n);
+    return `<a href="#" class="tr-tl-link" data-tr-tlgo="${esc(n)}" title="Open ${esc(n)} in Master Search">${esc(n)}</a>`;
+  }
+  if (typeof window !== 'undefined' && typeof document !== 'undefined' && !window.__trTlLinkBound) {
+    window.__trTlLinkBound = true;
+    document.addEventListener('click', (e) => {
+      const a = e.target && e.target.closest ? e.target.closest('[data-tr-tlgo]') : null;
+      if (!a) return;
+      e.preventDefault(); e.stopPropagation();
+      const name = a.getAttribute('data-tr-tlgo');
+      try { if (FF.masterSearch && FF.masterSearch.openSearchPage) FF.masterSearch.openSearchPage(name); else location.hash = `#/masterSearch?q=${encodeURIComponent(name)}`; } catch { /* ignore */ }
+    }, true);
+  }
   function newRow(patch) { return { id: rid(), agentId: '', name: '', tl: '', channel: '', tlFilter: '', isTl: false, dispatchName: '', q: emptyQty(), mobile: '', address: '', pincode: '', firstBarcode: '', lastBarcode: '', mapName: '', mapId: '', ...(patch || {}) }; }
   if (!state.rows.length) state.rows = [newRow()];
 
@@ -1252,7 +1268,7 @@ body.colorful .from-hdr { color: #166534; }
     const rec = exactAgent(row);
     const filter = row.tlFilter ? ` <button type="button" class="chip on tr-filter-clear" title="TL filter hatao">TL: ${esc(row.tlFilter)} ✕</button>` : '';
     if (rec && rec.isTl) return `<span class="badge purple">👥 TL</span> <span class="badge green">${rec.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span> <b>${esc(rec.name)}</b> · ${fmt(rec.agents ? rec.agents.size : 0)} agents <small class="dim">— TL ke naam par request · dispatch name neeche bharo</small>`;
-    if (rec) return `<span class="badge green">${rec.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span> <b>${esc(rec.name)}</b>${rec.agentId ? ` · ID <b>${esc(rec.agentId)}</b>` : ''}${rec.tlName ? ` · TL <b>${esc(rec.tlName)}</b>` : ''}${filter}`;
+    if (rec) return `<span class="badge green">${rec.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span> <b>${esc(rec.name)}</b>${rec.agentId ? ` · ID <b>${esc(rec.agentId)}</b>` : ''}${rec.tlName ? ` · TL <b>${tlLink(rec.tlName)}</b>` : ''}${filter}`;
     const q = String(row.name || row.agentId || '').trim();
     if (!q) return (state.index ? '<span class="dim small">Naam / ID likhna shuru karo — agents + TL dropdown me aayenge; chunte hi ID + TL bhar jayega</span>' : '<span class="dim small">⏳ agent list load ho rahi hai…</span>') + filter;
     if (!state.index) return '<span class="dim small">⏳ agent list load ho rahi hai…</span>' + filter;
@@ -1383,7 +1399,7 @@ body.colorful .from-hdr { color: #166534; }
     if (!all.length) return `<div class="tr-sb-empty dim small">Is search / filter me koi agent nahi mila.</div>`;
     const tot = (list, key) => list.reduce((s, a) => s + num(key.split('.').reduce((o, k) => (o == null ? o : o[k]), a)), 0);
     const body = shown.map((a) => `<tr class="tr-sb-row" data-tr-sb-pick="agent:${esc(a.channel)}:${esc(a.agentId || '')}:${esc(norm(a.name))}" title="${esc(a.name)} ko form me jodo">
-        <td class="tr-sb-name"><b>${esc(a.name)}</b>${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}<small class="dim">${a.tlName ? `TL ${esc(a.tlName)}` : 'Direct'}</small></td>
+        <td class="tr-sb-name"><b>${esc(a.name)}</b>${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}<small class="dim">${a.tlName ? `TL ${tlLink(a.tlName)}` : 'Direct'}</small></td>
         <td class="tr-sb-ch"><span class="badge ${a.channel === 'gv' ? 'green' : 'blue'}">${a.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span></td>
         <td class="num"><b>${fmt(num(a.core && a.core.stock))}</b></td>
         <td class="num"><b>${fmt(num(a.comm && a.comm.stock))}</b></td>
@@ -2783,7 +2799,7 @@ body.colorful .from-hdr { color: #166534; }
       <td class="tr-c-sel"><input type="checkbox" data-tr-sel="${esc(dr.key)}" ${sel ? 'checked' : ''} aria-label="Select"></td>
       <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="${esc(r.id)}">#${esc(String(r.id || '').slice(-6))}</small></td>
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
-      <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}${dr.agent.mapName || dr.agent.mapId ? `<small class="dim" title="FASTag Mapping — sheet me yahi naam/ID jata hai"> 🔗 ${esc(dr.agent.mapName || '')}${dr.agent.mapId ? ` #${esc(dr.agent.mapId)}` : ''}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)} <button type="button" class="cp-btn" data-copy="${esc(dr.agent.agentId)}" title="Copy agent ID" aria-label="Copy agent ID">📋</button>` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${esc(dr.agent.tl)}` : ''}</small>
+      <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}${dr.agent.mapName || dr.agent.mapId ? `<small class="dim" title="FASTag Mapping — sheet me yahi naam/ID jata hai"> 🔗 ${esc(dr.agent.mapName || '')}${dr.agent.mapId ? ` #${esc(dr.agent.mapId)}` : ''}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)} <button type="button" class="cp-btn" data-copy="${esc(dr.agent.agentId)}" title="Copy agent ID" aria-label="Copy agent ID">📋</button>` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${tlLink(dr.agent.tl)}` : ''}</small>
         <span class="tr-tags"><span class="badge ${statusOf(r).tone} tr-st-inline" title="Status">${statusOf(r).label}</span><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
       <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a> <button type="button" class="cp-btn" data-copy="${esc(c.mobile)}" title="Copy mobile" aria-label="Copy mobile">📋</button><a class="cp-btn" target="_blank" rel="noopener" href="${esc(U.waLink('', c.mobile))}" title="WhatsApp" aria-label="WhatsApp">💬</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)} <button type="button" class="cp-btn" data-copy="${esc([c.address, c.pincode].filter(Boolean).join(', '))}" title="Copy address" aria-label="Copy address">📋</button></div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
       ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td><td class="tr-c-item-name"><div class="tr-item-chips sm" data-tr-item-name data-key="${esc(dr.key)}" role="group" aria-label="Items">${ITEM_NAME_OPTIONS.map((name) => `<label class="tr-item-chip ${hasItem(name, r.itemName) ? 'on' : ''}" title="${esc(ITEM_LABEL[name])}"><input type="checkbox" data-tr-item-cell="${esc(name)}" data-key="${esc(dr.key)}" ${hasItem(name, r.itemName) ? 'checked' : ''}> ${ITEM_ICON[name]} ${esc(ITEM_LABEL[name])}</label>`).join('')}</div>${r.serialNumber ? `<small class="dim">Serial: ${esc(r.serialNumber)}</small>` : ''}${r.deviceName ? `<small class="dim">Device: ${esc(r.deviceName)}</small>` : ''}${r.materialDescription ? `<small class="dim">Material: ${esc(r.materialDescription)}</small>` : ''} </td>` : ''}
