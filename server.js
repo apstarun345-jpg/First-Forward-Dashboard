@@ -10357,6 +10357,7 @@ body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);fon
 .pb-split{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:16px;align-items:center}
 @media(max-width:900px){.pb-split{grid-template-columns:1fr}}
 .pl-pr{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:800;color:#fff;background:#16a34a}
+.pb-kpi .pl-pr{color:#fff;font-size:13px;padding:2px 14px}.pl-dngrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}.pl-dngrid .pb-card{margin:0}
 .pl-pr.high{background:#dc2626}.pl-pr.medium{background:#f59e0b}.pl-pr.low{background:#16a34a}
 .pb-kpi.pl-hi{border-top-color:#dc2626!important}.pb-kpi.pl-md{border-top-color:#f59e0b!important}
 .pl-prf{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
@@ -10660,6 +10661,29 @@ const PERSONAL_PORTAL_JS = `(function () {
     function prBadge(p) { return '<span class="pl-pr ' + p.toLowerCase() + '">' + p + '</span>'; }
     function coverTxt(c) { return c === null ? '—' : (c >= 99 ? '99+' : f1(c)) + ' d'; }
     function tile(label, val, sub, cls) { return '<div class="pb-kpi ' + (cls || '') + '"><small>' + label + '</small><b>' + val + '</b><span>' + (sub || '') + '</span></div>'; }
+    // ---- donut charts: class-wise issuance + stock ----
+    var DN = { VC4: '#6366f1', VC20: '#06b6d4', 'VC5+': '#f59e0b' };
+    function donut(title, vals, top, sub) {
+      var tot = 0; B3.forEach(function (k) { tot += vals[k] || 0; });
+      var h = '<div class="pb-card"><div class="pb-card-head"><h3>' + title + '</h3></div>';
+      if (!tot) return h + '<p class="dim" style="text-align:center;padding:26px 0">No data</p></div>';
+      var R = 62, C = 2 * Math.PI * R, off = 0, arcs = '', leg = '';
+      B3.forEach(function (k) {
+        var v = vals[k] || 0; if (!v) return;
+        var len = v / tot * C;
+        arcs += '<circle cx="80" cy="80" r="' + R + '" fill="none" stroke="' + DN[k] + '" stroke-width="22" stroke-dasharray="' + len.toFixed(2) + ' ' + (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '" transform="rotate(-90 80 80)"><title>' + k + ': ' + nf(v) + '</title></circle>';
+        off += len;
+        leg += '<li><i style="background:' + DN[k] + '"></i><span>' + k + '</span><b>' + nf(v) + '</b><em>' + Math.round(v / tot * 100) + '%</em></li>';
+      });
+      return h + '<div class="pb-donut"><svg viewBox="0 0 160 160" width="170" height="170" role="img"><circle cx="80" cy="80" r="' + R + '" fill="none" stroke="#eef2f7" stroke-width="22"/>' + arcs +
+        '<text x="80" y="78" text-anchor="middle" class="pb-dn-top">' + nf(top) + '</text><text x="80" y="96" text-anchor="middle" class="pb-dn-sub">' + sub + '</text></svg><ul class="pb-dn-legend">' + leg + '</ul></div></div>';
+    }
+    function donuts(it) {
+      if (!it.c) return '';
+      var mtd = {}, last = {}, stk = {}, tm = 0, tl = 0, ts = 0;
+      B3.forEach(function (k) { var a = it.c[k] || [0, 0, 0, 0]; last[k] = a[0]; mtd[k] = a[1]; stk[k] = a[2]; tl += a[0]; tm += a[1]; ts += a[2]; });
+      return '<div class="pl-dngrid">' + (D.issue ? donut('📈 Issuance · MTD by class', mtd, tm, 'MTD') + donut('🗓️ Issuance · last month by class', last, tl, 'Last month') : '') + (D.stock ? donut('📦 Stock by class', stk, ts, 'In stock') : '') + '</div>';
+    }
     // ---- class-wise table (VC4 / VC20 group, VC5+ group, total) ----
     function classTable(it) {
       if (!it.c) return '<p class="dim small">Class-wise data is not available for this ' + (it.k === 't' ? 'TL' : 'agent') + ' yet.</p>';
@@ -10671,7 +10695,7 @@ const PERSONAL_PORTAL_JS = `(function () {
         return '<tr class="pl-cr ' + d[2] + '"><td><b>' + d[0] + '</b></td>' +
           (D.issue ? '<td>' + nf(v[0]) + '</td><td><b>' + nf(v[1]) + '</b></td>' : '') + (D.live ? '<td>' + nf(v[3]) + '</td>' : '') +
           (D.stock ? '<td><b>' + nf(v[2]) + '</b></td>' : '') +
-          (D.issue && D.stock ? '<td>' + (main ? f1(c.rate) : '') + '</td><td>' + (main ? coverTxt(c.cover) : '') + '</td><td>' + (main && d[2] === 'grp' ? prBadge(c.pr) : '') + '</td><td>' + (main ? '<b>' + nf(c.need) + '</b>' : '') + '</td><td>' + (main ? nf(c.gross) : '') + '</td>' : '') + '</tr>';
+          (D.issue && D.stock ? '<td>' + (main ? f1(c.rate) : '') + '</td><td>' + (main ? coverTxt(c.cover) : '') + '</td><td>' + (main && (d[2] === 'grp' || d[2] === 'tot') ? prBadge(d[2] === 'tot' ? overall(it).pr : c.pr) : '') + '</td><td>' + (main ? '<b>' + nf(c.need) + '</b>' : '') + '</td><td>' + (main ? nf(c.gross) : '') + '</td>' : '') + '</tr>';
       }).join('');
       return '<div class="pb-scroll"><table class="pb-tbl pl-ctbl" id="pl-tbl-class"><thead><tr><th>Class</th>' + (D.issue ? '<th>Last month</th><th>MTD</th>' : '') + (D.live ? '<th>Today</th>' : '') + (D.stock ? '<th>Stock</th>' : '') +
         (D.issue && D.stock ? '<th>Run / day</th><th>Cover</th><th>Priority</th><th>Need (after stock)</th><th>Need (w/o stock)</th>' : '') + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
@@ -10749,7 +10773,7 @@ const PERSONAL_PORTAL_JS = `(function () {
       qEl.value = it.n; state.q = it.n; drop.hidden = true; tlFilter = D.issue && D.stock ? 'all' : 'all';
       var h = '<div class="pl-res-head"><div><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b> ' + chBadge(it) +
         (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + '</div><button type="button" class="pb-btn" id="pl-search-clear">✕ Close</button></div>' + tiles(it) +
-        '<div class="pb-card-head"><h3>🎯 Class-wise issuance · stock · priority</h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-class" data-pl-title="' + esc(it.n) + ' - class wise">⬇ CSV</button></div>' : '') + '</div>' + classTable(it);
+        donuts(it) + '<div class="pb-card-head"><h3>🎯 Class-wise issuance · stock · priority</h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-class" data-pl-title="' + esc(it.n) + ' - class wise">⬇ CSV</button></div>' : '') + '</div>' + classTable(it);
       if (it.k === 't') h += '<div class="pb-card-head" style="margin-top:14px"><h3>🧑‍💼 Agents under ' + esc(it.n) + ' <small class="dim">— who needs tags</small></h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-res-agents" data-pl-title="' + esc(it.n) + ' - agents">⬇ CSV</button></div>' : '') + '</div><div id="pl-res-agents"></div>';
       res.innerHTML = '<div class="pl-res">' + h + '</div>';
       var cl = document.getElementById('pl-search-clear'); if (cl) cl.addEventListener('click', function () { res.innerHTML = ''; qEl.value = ''; state.q = ''; schedulePing(); });

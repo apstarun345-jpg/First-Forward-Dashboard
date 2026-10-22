@@ -125,7 +125,7 @@ test('personal link: activity feed, alerts, live presence and partial views', as
     // 9) client JS
     const js = await (await fetch(`${server.base}/p-portal.js`)).text();
     assert.doesNotThrow(() => new Function(js));
-    for (const needle of ['personal-link/event', 'personal-link/ping', 'fetchView', 'partial=1']) assert.ok(js.includes(needle), needle);
+    for (const needle of ['Stock by class', 'Issuance · MTD by class', 'personal-link/event', 'personal-link/ping', 'fetchView', 'partial=1']) assert.ok(js.includes(needle), needle);
     // 10) link list carries activity stats
     const list = await call('/api/personal-links', 'GET', null, admin);
     assert.ok(list.json.links[0].activity.lastActivity, 'link list has last activity');
