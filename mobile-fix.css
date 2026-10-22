@@ -1217,7 +1217,11 @@ html.mobile-ui .tr-req-tbl .tr-big-num { font-size: 28px !important; }
 html.mobile-ui .tr-req-tbl .tr-class-break b { font-size: 21px !important; }
 html.mobile-ui .tr-req-tbl .tr-class-label { font-size: 18px !important; }
 html.mobile-ui .tr-req-tbl .tr-class-grid > span b { font-size: 19px !important; }
-html.mobile-ui .tr-req-tbl .tr-class-grid > span strong { font-size: 21px !important; }
+html.mobile-ui .tr-req-tbl .tr-class-grid > span strong { font-size: 19px !important; }
+/* v268 — mobile: class chips (VC4 stock / issuance) kat rahe the — ek column, poori width, overflow band nahi */
+html.mobile-ui .tr-req-tbl .tr-class-grid { grid-template-columns: 1fr !important; gap: 4px !important; }
+html.mobile-ui .tr-req-tbl .tr-class-grid > span { overflow: visible !important; padding: 3px 8px !important; min-width: max-content; justify-content: space-between !important; gap: 10px !important; }
+html.mobile-ui .tr-req-tbl .tr-class-grid > span b { font-size: 17px !important; }
 
 html.mobile-ui .chip,
 html.mobile-ui .home-exp-chip,
