@@ -1290,7 +1290,8 @@ FF.pages = FF.pages || {};
       ['inactiveUsers', '💤 Inactive app users', 'Dashboard login inactivity report'],
       ['backupReminder', '☁️ Backup reminder', 'Settings backup purana hone par'],
       ['smartAlert', '🧠 Smart Action Center', 'Combined actionable alert — target pace, stock cover, zero issuance, pending requests'],
-      ['tagRequest', '🏷️ Tag Request (employee link / form)', 'Nayi tag request aane par admin ko + employee ko confirmation']
+      ['tagRequest', '🏷️ Tag Request (employee link / form)', 'Nayi tag request aane par admin ko + employee ko confirmation'],
+      ['personalLink', '🔗 Personal link activity', 'Login, search, page open and downloads on personal links']
     ];
     const routeOptions = (value) => [['admin', '👑 Sirf admin'], ['users', '👥 Sirf users'], ['both', '📢 Admin + users'], ['off', '⛔ Kisi ko nahi']]
       .map(([v, label]) => `<option value="${v}" ${value === v ? 'selected' : ''}>${label}</option>`).join('');
@@ -1457,9 +1458,11 @@ FF.pages = FF.pages || {};
     const draw = async () => { if (typeof redraw === 'function') await redraw(); else await linksTab(body); };
     let links = [];
     let plDef = { requireAuth: true, sections: PL_SECTIONS_META.map((s) => s.key) };
+    let plAlerts = { login: true, failed: true, open: true, search: true, tab: false, export: true, logout: true };
     try {
       const res = await A.api('/api/personal-links');
       links = res.links || [];
+      if (res.alerts) plAlerts = res.alerts;
       if (res.defaults) plDef = res.defaults;
     } catch (err) { body.innerHTML = U.errorBox(err); return; }
     const on = !settings || !settings.features || settings.features.personalLinks !== false;
@@ -1555,6 +1558,13 @@ FF.pages = FF.pages || {};
         </div>
       </div>
 
+      <div class="card compact-card" style="margin-bottom:12px">
+        <div class="card-head"><h3>🔔 Link activity alerts</h3><span class="dim small">Get a notification (bell + push) whenever someone uses a personal link</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px" id="pl-alerts">
+          ${[['login', '🔐 Login'], ['failed', '⚠️ Failed login'], ['open', '👀 Link / report opened'], ['search', '🔍 Searches'], ['tab', '🪟 Tab & channel switches'], ['export', '⬇️ Downloads'], ['logout', '🚪 Logout']].map(([k, label]) => `<label class="chip ${plAlerts[k] !== false ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-pl-alert="${k}" ${plAlerts[k] !== false ? 'checked' : ''}> ${label}</label>`).join('')}
+        </div>
+        <p class="dim small" style="margin-top:8px">Tap <b>📡</b> on a link to see its live activity and watch the visitor's screen live. Audience can be changed in Features → Notification audience.</p>
+      </div>
       ${links.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Source</th><th>Kind</th><th>Naam</th><th>🔐 Auth (ID · Mobile)</th><th>🎛️ Allowed Sections</th><th>Link</th><th>Status</th><th>Actions</th></tr></thead><tbody>
       ${links.map((l) => {
         const secs = Array.isArray(l.sections) ? l.sections : defSecs;
@@ -1569,8 +1579,9 @@ FF.pages = FF.pages || {};
         <td>${authBadge}</td>
         <td><div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:center">${secBadges}</div></td>
         <td class="mono small"><a href="/p/${esc(l.token)}" target="_blank" rel="noopener">${esc(origin)}/p/${esc(String(l.token).slice(0, 10))}…</a></td>
-        <td>${l.enabled !== false ? '<span class="badge green">✅ ON</span>' : '<span class="badge red">⛔ OFF</span>'}</td>
+        <td>${l.enabled !== false ? '<span class="badge green">✅ ON</span>' : '<span class="badge red">⛔ OFF</span>'}${l.activity && l.activity.online ? ' <span class="badge green" title="Viewing right now">● Live</span>' : (l.activity && l.activity.lastActivity ? `<div class="dim small" title="Last activity">${esc(new Date(l.activity.lastActivity).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }))}</div>` : '')}</td>
         <td class="num" style="white-space:nowrap">
+          <button class="btn small pl-act" data-id="${esc(l.id)}" data-name="${esc(l.name)}" title="Activity feed + live view">📡</button>
           <button class="btn small pl-edit" data-id="${esc(l.id)}" title="Access, ID/Mobile aur (Team link me) agents / TL naam edit karo">⚙️ ${l.kind === 'group' ? 'Edit' : 'Access'}</button>
           <button class="btn small pl-copy" data-token="${esc(l.token)}" title="Poora URL copy karo">📋</button>
           <button class="btn small pl-wa" data-token="${esc(l.token)}" data-name="${esc(l.name)}" data-id="${esc(l.personId || '')}" title="WhatsApp par bhejo">💬</button>
@@ -1812,6 +1823,33 @@ FF.pages = FF.pages || {};
       }, 'Saving…'));
     }));
 
+    U.$$('input[data-pl-alert]', body).forEach((cb) => cb.addEventListener('change', async () => {
+      const chip = cb.closest('.chip'); if (chip) chip.classList.toggle('on', cb.checked);
+      try { await A.api('/api/personal-links/alerts', 'PUT', { [cb.dataset.plAlert]: cb.checked }); U.toast('Alert setting saved ✓', 'ok'); }
+      catch (err) { cb.checked = !cb.checked; if (chip) chip.classList.toggle('on', cb.checked); U.toast(err.message, 'err'); }
+    }));
+    U.$$('.pl-act', body).forEach((b) => b.addEventListener('click', async () => {
+      const icons = { login: '🔐', login_failed: '⚠️', link_open: '👀', page_open: '📄', search: '🔍', search_open: '🎯', tab: '🪟', channel: '🔀', dispatch_filter: '🚚', refresh: '🔄', export: '⬇️', logout: '🚪' };
+      const paint = async () => {
+        const host = document.getElementById('pl-act-body'); if (!host) return;
+        let out; try { out = await A.api(`/api/personal-links/activity?linkId=${encodeURIComponent(b.dataset.id)}&limit=100`); } catch (err) { host.innerHTML = U.errorBox(err); return; }
+        const live = (out.live || []).filter((x) => x.online);
+        const st = out.stats || {};
+        host.innerHTML = `<div class="kd-sec">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+            <span class="badge ${live.length ? 'green' : ''}">${live.length ? '● Viewing now' : '○ Not viewing'}</span>
+            <span class="badge blue">🔐 ${st.logins || 0} logins</span><span class="badge blue">📄 ${st.opens || 0} report opens</span>
+          </div>
+          ${live.map((x) => `<div class="check" style="margin-bottom:8px">👁 <b>${esc((x.state || {}).ch === 'gv' ? 'GV Partner' : ((x.state || {}).ch === 'ff' ? 'First Forward' : 'All'))}</b> · tab <b>${esc((x.state || {}).tab || 'overview')}</b>${(x.state || {}).q ? ` · search <b>${esc(x.state.q)}</b>` : ''} <button class="btn small primary" data-pl-watch="${esc(x.sessionId)}" style="margin-left:8px">▶ Watch live</button></div>`).join('')}
+          ${(out.events || []).length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Time</th><th>Action</th><th>Where</th><th>IP</th></tr></thead><tbody>${out.events.map((e) => `<tr><td class="small">${esc(new Date(e.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</td><td style="text-align:left">${icons[e.kind] || '•'} ${esc(e.label)}</td><td class="small">${esc((e.ch || '').toUpperCase())} ${esc(e.tab || '')}</td><td class="small dim">${esc(e.ip || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="dim">No activity yet — it appears here as soon as someone opens this link.</p>'}
+          <div class="btn-row" style="margin-top:12px"><button class="btn" id="pl-act-refresh">🔄 Refresh</button></div>
+        </div>`;
+        const rf = host.querySelector('#pl-act-refresh'); if (rf) rf.addEventListener('click', paint);
+        host.querySelectorAll('[data-pl-watch]').forEach((w) => w.addEventListener('click', () => { const go = () => { if (FF.liveView && FF.liveView.watchPublic) FF.liveView.watchPublic(w.dataset.plWatch); else U.toast('Live view is not available', 'err'); }; if (FF.liveView) go(); else if (FF.lazy && FF.lazy.shellNeed) FF.lazy.shellNeed(['liveView']).then(go).catch(go); else go(); }));
+      };
+      FF.app.openDrawer({ kicker: '📡 Link activity', title: b.dataset.name || 'Personal link', sub: 'Logins, searches, pages opened and downloads — plus a live view of the visitor\'s screen', body: '<div id="pl-act-body"><p class="dim">Loading…</p></div>' });
+      await paint();
+    }));
     U.$$('.pl-copy', body).forEach((b) => b.addEventListener('click', () => {
       const url = `${origin}/p/${b.dataset.token}`;
       U.copyText(url).then(() => U.toast('📋 Link copy ho gaya', 'ok')).catch(() => { window.prompt('Copy karo:', url); });

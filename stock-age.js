@@ -305,6 +305,34 @@ export function personalStock(index, ch, kind, name) {
   return out;
 }
 
+/** Per-agent class-wise stock counts for a TL's agents or a custom group: Map(normName(agent) → { VC4, VC20, 'VC5+' }). */
+export function personalClassStockByAgent(index, ch, kind, name) {
+  const out = new Map();
+  const c = index && index[ch === 'gv' ? 'gv' : 'ff'];
+  if (!c) return out;
+  const bucket = (x) => { const u = String(x || 'VC4').toUpperCase().replace(/\s+/g, ''); return u === 'VC4' ? 'VC4' : u === 'VC20' ? 'VC20' : 'VC5+'; };
+  let keySet;
+  if (kind === 'tl') {
+    const want = normName(name);
+    keySet = new Set();
+    c.agents.forEach((n, k) => { if (normName(n.tl) === want) keySet.add(k); });
+  } else {
+    keySet = resolveKeys(c, ch === 'gv' ? 'gv' : 'ff', 'agent', (Array.isArray(name) ? name : [name]).filter((x) => str(x)));
+  }
+  if (!keySet.size) return out;
+  for (const r of c.raw || []) {
+    const k = r[8];
+    if (!keySet.has(k)) continue;
+    const node = c.agents.get(k);
+    const nm = normName(node ? node.n : '');
+    if (!nm) continue;
+    const e = out.get(nm) || { VC4: 0, VC20: 0, 'VC5+': 0 };
+    e[bucket(r[2])]++;
+    out.set(nm, e);
+  }
+  return out;
+}
+
 /** Agent key resolution: digits / ID / naam — client jo bhi bheje. */
 function resolveKeys(chIndex, ch, kind, keyList) {
   const map = kind === 'tl' ? chIndex.tls : chIndex.agents;

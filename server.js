@@ -20,7 +20,7 @@ import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, disp
 import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
-import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, mapRows as stockMapRows } from './stock-age.js';
+import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
@@ -206,7 +206,8 @@ const DEFAULT_NOTIFICATION_ROUTES = Object.freeze({
   zeroDay: 'admin', agentAnomaly: 'admin', tlAnomaly: 'admin', followup: 'both',
   champion: 'both', reportUpdate: 'both', inactiveUsers: 'admin', backupReminder: 'admin',
   smartAlert: 'admin', // 🧠 Smart Action Center
-  tagRequest: 'admin'   // 🏷️ IDFC Agents Tag Request → admin ke paas
+  tagRequest: 'admin',  // 🏷️ IDFC Agents Tag Request → admin ke paas
+  personalLink: 'admin' // 🔗 Personal link activity (login · search · page open) → admin
 });
 const NOTIFICATION_AUDIENCES = new Set(['admin', 'users', 'both', 'off']);
 
@@ -883,6 +884,10 @@ function publicLiveSummary(entry, now = Date.now(), includeEvents = false) {
     active: age < 90e3 && entry.visible !== false && entry.engaged !== false,
     online: age < 45e3 && entry.visible !== false
   };
+  if (entry.kind === 'personal') {
+    const st = entry.state || {};
+    Object.assign(out, { mode: 'visit', sharing: false, kind: 'personal', page: 'personal', title: `Personal link · ${entry.name || ''}`, mirror: entry.mirror || '', state: { ch: st.ch || 'all', tab: st.tab || 'overview', q: st.q || '' }, pointer: null, viewport: null, scroll: null, linkId: entry.linkId || '', ip: entry.ip || '' });
+  }
   if (includeEvents) out.events = Array.isArray(entry.events) ? entry.events.slice(-80) : [];
   return out;
 }
@@ -962,6 +967,94 @@ function revokePersonalLinkSessions(linkId) {
 function clearPersonalLinkCookie(req, link) {
   return `${personalLinkCookieName(link && link.token)}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${isSecure(req) ? '; Secure' : ''}`;
 }
+
+// ---------------------------------------------------------------------------------------------
+// 🔗 Personal link activity — admin alerts + live preview (in-memory feed; bell notifications persist)
+// ---------------------------------------------------------------------------------------------
+const PL_ALERT_DEFAULTS = Object.freeze({ login: true, failed: true, open: true, search: true, tab: false, export: true, logout: true });
+const PL_KIND_ALERT = { login: 'login', login_failed: 'failed', link_open: 'open', page_open: 'open', search: 'search', search_open: 'search', tab: 'tab', channel: 'tab', dispatch_filter: 'tab', refresh: 'tab', export: 'export', logout: 'logout' };
+const PL_KIND_META = {
+  login: ['🔐', 'Logged in', 'page'], login_failed: ['⚠️', 'Failed login', 'action'], link_open: ['👀', 'Link opened', 'page'], page_open: ['📄', 'Report opened', 'page'],
+  search: ['🔍', 'Searched', 'search'], search_open: ['🎯', 'Opened result', 'search'], tab: ['🪟', 'Switched tab', 'tab'], channel: ['🔀', 'Switched channel', 'tab'],
+  dispatch_filter: ['🚚', 'Dispatch filter', 'tab'], refresh: ['🔄', 'Refreshed data', 'click'], export: ['⬇️', 'Exported', 'click'], logout: ['🚪', 'Logged out', 'action']
+};
+const PL_THROTTLE_MS = { search: 20e3, search_open: 5e3, tab: 15e3, channel: 5e3, dispatch_filter: 15e3, page_open: 10 * 60e3, link_open: 10 * 60e3, login_failed: 30e3 };
+const plActivityLog = [];
+const plNotifyLast = new Map();
+function plAlertCfg() {
+  const saved = db.settings && db.settings.personalLinkAlerts;
+  const out = { ...PL_ALERT_DEFAULTS };
+  if (saved && typeof saved === 'object') for (const k of Object.keys(out)) if (typeof saved[k] === 'boolean') out[k] = saved[k];
+  return out;
+}
+const plCleanText = (v, max = 120) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+const plCleanSid = (v) => { const x = String(v || '').trim(); return /^[A-Za-z0-9_-]{16,64}$/.test(x) ? x : ''; };
+function plRecordActivity(link, req, kind, label, meta = {}, sid = '') {
+  try {
+    if (!link || !PL_KIND_META[kind]) return null;
+    const now = Date.now();
+    const ip = clientIp(req);
+    const ev = { at: now, linkId: link.id, linkName: link.name || 'Link', kind, label: plCleanText(label, 160) || PL_KIND_META[kind][1], ip, sid: sid || '', ch: plCleanText(meta.ch, 4), tab: plCleanText(meta.tab, 24) };
+    plActivityLog.push(ev);
+    if (plActivityLog.length > 600) plActivityLog.splice(0, plActivityLog.length - 500);
+    // live-preview feed of this visitor
+    const live = sid ? publicLiveSessions.get(sid) : null;
+    if (live && live.kind === 'personal') {
+      live.events.push({ at: now, kind: PL_KIND_META[kind][2], label: ev.label, page: 'personal' });
+      if (live.events.length > 80) live.events = live.events.slice(-80);
+      live.lastSeen = now; live.updatedAt = now;
+    }
+    const alertKey = PL_KIND_ALERT[kind];
+    if (alertKey && plAlertCfg()[alertKey] !== false) {
+      const gap = PL_THROTTLE_MS[kind] || 0;
+      const tkey = `${link.id}:${kind}:${sid || ip}`;
+      if (!gap || now - (plNotifyLast.get(tkey) || 0) >= gap) {
+        plNotifyLast.set(tkey, now);
+        if (plNotifyLast.size > 800) { const cut = now - 3600e3; for (const [k, t] of plNotifyLast) if (t < cut) plNotifyLast.delete(k); }
+        const kindName = link.kind === 'tl' ? 'TL' : (link.kind === 'group' ? 'Team' : 'Agent');
+        recordNotification({
+          type: 'activity', title: `${PL_KIND_META[kind][0]} ${link.name || 'Personal link'} · ${PL_KIND_META[kind][1]}`,
+          body: `${kindName} link · ${ev.label}${ev.ch ? ` · ${ev.ch.toUpperCase()}` : ''}${ip ? ` · ${ip}` : ''}`,
+          target: 'admin', routeKey: 'personalLink',
+          meta: { personalLinkId: link.id, ...(sid ? { publicSessionId: sid } : {}), link: '#/settings?tab=links', ip }
+        });
+      }
+    }
+    return ev;
+  } catch { return null; }
+}
+function plLiveEntry(link, req, body, now = Date.now()) {
+  const sid = plCleanSid(body && body.sid);
+  if (!sid) return null;
+  let entry = publicLiveSessions.get(sid);
+  const ch = ['gv', 'ff', 'all'].includes(String(body.ch || '')) ? String(body.ch) : 'all';
+  const tab = plCleanText(body.tab, 24).replace(/[^a-z0-9_-]/gi, '') || 'overview';
+  const q = plCleanText(body.q, 60);
+  const mirror = `/p/${encodeURIComponent(link.token)}?embed=live${ch !== 'all' ? `&ch=${ch}` : ''}${q ? `&q=${encodeURIComponent(q)}` : ''}#${tab}`;
+  if (!entry || entry.kind !== 'personal' || entry.linkId !== link.id) {
+    entry = { sessionId: sid, mode: 'visit', kind: 'personal', linkId: link.id, name: link.name || 'Personal link', startedAt: now, lastSeen: now, updatedAt: now, visible: true, engaged: true, pointer: null, viewport: null, scroll: null, events: [], ip: clientIp(req) };
+    publicLiveSessions.set(sid, entry);
+  }
+  entry.name = link.name || entry.name;
+  entry.mirror = mirror; entry.state = { ch, tab, q };
+  entry.visible = body.visible !== false; entry.engaged = entry.visible;
+  entry.lastSeen = now; entry.updatedAt = now;
+  return entry;
+}
+function plLinkStats(linkId) {
+  let last = 0, opens = 0, logins = 0;
+  for (const ev of plActivityLog) {
+    if (ev.linkId !== linkId) continue;
+    if (ev.at > last) last = ev.at;
+    if (ev.kind === 'page_open') opens++;
+    if (ev.kind === 'login') logins++;
+  }
+  const now = Date.now();
+  let online = false, sessionId = '';
+  for (const e of publicLiveSessions.values()) if (e.kind === 'personal' && e.linkId === linkId && now - Number(e.lastSeen || 0) < 45e3 && e.visible !== false) { online = true; sessionId = e.sessionId; break; }
+  return { lastActivity: last || null, opens, logins, online, sessionId };
+}
+
 function sessionUser(req) {
   const token = parseCookies(req).ff_sid;
   if (!token) return null;
@@ -5666,10 +5759,31 @@ async function handleApi(req, res, url) {
       sections: Array.isArray(l.sections) ? normPlSections(plBackfill(l)) : def.sections
     };
   };
+  if (p === '/api/personal-links/alerts' && (method === 'GET' || method === 'PUT')) {
+    requireAdmin(user);
+    if (method === 'PUT') {
+      const body = await readBody(req);
+      const next = { ...plAlertCfg() };
+      const src = body && body.alerts && typeof body.alerts === 'object' ? body.alerts : body;
+      for (const k of Object.keys(PL_ALERT_DEFAULTS)) if (typeof src[k] === 'boolean') next[k] = src[k];
+      db.settings.personalLinkAlerts = next;
+      await persist('settings');
+    }
+    return sendJson(res, 200, { ok: true, alerts: plAlertCfg(), route: notificationRoutes().personalLink });
+  }
+  if (p === '/api/personal-links/activity' && method === 'GET') {
+    requireAdmin(user);
+    const linkId = String(url.searchParams.get('linkId') || '').slice(0, 80);
+    const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 80));
+    const events = plActivityLog.filter((e) => !linkId || e.linkId === linkId).slice(-limit).reverse();
+    const now = Date.now();
+    const live = [...publicLiveSessions.values()].filter((e) => e.kind === 'personal' && (!linkId || e.linkId === linkId)).sort((a, b) => Number(b.lastSeen || 0) - Number(a.lastSeen || 0)).slice(0, 10).map((e) => publicLiveSummary(e, now, false));
+    return sendJson(res, 200, { ok: true, events, live, stats: linkId ? plLinkStats(linkId) : null });
+  }
   if (p === '/api/personal-links' && method === 'GET') {
     requireAdmin(user);
-    const links = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).map(normPlLink);
-    return sendJson(res, 200, { links, defaults: plDefaults(), availableSections: PL_ALL_SECTIONS });
+    const links = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).map((l) => ({ ...normPlLink(l), activity: plLinkStats(l.id) }));
+    return sendJson(res, 200, { links, defaults: plDefaults(), availableSections: PL_ALL_SECTIONS, alerts: plAlertCfg() });
   }
   if (p === '/api/personal-links/defaults' && method === 'POST') {
     requireAdmin(user);
@@ -7730,10 +7844,11 @@ async function handleApi(req, res, url) {
 
     // Exact normalized ID + exact registered mobile; no name-as-ID or partial-ID fallback.
     const normId = (s) => String(s || '').trim().toUpperCase().replace(/[\s#-]+/g, '');
-    if (normId(cfgId) !== normId(rawId)) throw new HttpError(403, `${savedLink.kind === 'tl' ? 'TL ID' : 'Agent ID'} match nahi hua — sahi ID daalo.`);
-    if (cfgMob !== rawMob) throw new HttpError(403, 'Mobile number match nahi hua — registered 10-digit mobile number daalo.');
+    if (normId(cfgId) !== normId(rawId)) { plRecordActivity(savedLink, req, 'login_failed', `Wrong ${savedLink.kind === 'tl' ? 'TL' : 'Agent'} ID entered`, {}, plCleanSid(body.sid)); throw new HttpError(403, `${savedLink.kind === 'tl' ? 'TL ID' : 'Agent ID'} match nahi hua — sahi ID daalo.`); }
+    if (cfgMob !== rawMob) { plRecordActivity(savedLink, req, 'login_failed', 'Wrong mobile number entered', {}, plCleanSid(body.sid)); throw new HttpError(403, 'Mobile number match nahi hua — registered 10-digit mobile number daalo.'); }
 
     const session = createPersonalLinkSession(req, savedLink);
+    plRecordActivity(savedLink, req, 'login', 'Logged in with ID + mobile', {}, plCleanSid(body.sid));
     // 🔥 v187 — verify hote hi sheet data background me garam karo, page reload par seedha cache se khule.
     try { const wl = { ...savedLink, source: savedLink.kind === 'group' ? plSrc(savedLink.source) : (savedLink.source === 'gv' ? 'gv' : 'ff') }; personalDailyRows(wl).catch(() => {}); if (isTeamLink(wl)) personalTeamAgents(wl).catch(() => {}); } catch { /* best-effort */ }
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': session.cookie, 'Cache-Control': 'no-store' });
@@ -7744,10 +7859,29 @@ async function handleApi(req, res, url) {
     const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
     if (savedLink) {
       const value = parseCookies(req)[personalLinkCookieName(savedLink.token)];
-      if (value) personalLinkSessions.delete(sha(value));
+      if (value) { if (personalLinkSession(req, savedLink)) plRecordActivity(savedLink, req, 'logout', 'Locked / logged out', {}, plCleanSid(body.sid)); personalLinkSessions.delete(sha(value)); }
+      const lsid = plCleanSid(body.sid); if (lsid) publicLiveSessions.delete(lsid);
       return sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearPersonalLinkCookie(req, savedLink), 'Cache-Control': 'no-store' });
     }
     return sendJson(res, 200, { ok: true });
+  }
+  // 📡 Personal link activity: one beacon for events (search / tab / export / page open) and one heartbeat for the live preview.
+  if ((p === '/api/public/personal-link/event' || p === '/api/public/personal-link/ping') && method === 'POST') {
+    const ip = clientIp(req);
+    if (!publicRateOk(`plev:${ip}`, 240, 60e3)) return sendJson(res, 429, { ok: false });
+    const body = await readBody(req);
+    const token = String(body.token || '').trim();
+    const link = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
+    if (!link || link.enabled === false || !personalLinkSession(req, link)) return sendJson(res, 401, { ok: false });
+    const now = Date.now();
+    prunePublicLiveSessions(now);
+    const entry = plLiveEntry(link, req, body, now);
+    if (p.endsWith('/event')) {
+      const kind = String(body.kind || '');
+      const meta = { ch: ['gv', 'ff', 'all'].includes(String(body.ch || '')) ? String(body.ch) : '', tab: plCleanText(body.tab, 24) };
+      if (PL_KIND_META[kind] && kind !== 'login' && kind !== 'login_failed' && kind !== 'link_open') plRecordActivity(link, req, kind, body.label, meta, entry ? entry.sessionId : '');
+    }
+    return sendJson(res, 200, { ok: true, at: now }, { 'Cache-Control': 'no-store' });
   }
   // 🌐 Public form config (admin) — link ON/OFF + kaunse fields dikhein.
   if (p === '/api/public-tag-form' && method === 'PUT') {
@@ -9121,6 +9255,52 @@ function personalStockFor(sidx, link) {
   ['ff', 'gv'].forEach((src) => { if (bySrc[src].length) { const r = personalStock(sidx, src, 'group', bySrc[src]); if (r) res.push(r); } });
   return mergePersonalStock(res);
 }
+/** Class bucket for a stock/issuance class string: VC4 | VC20 | VC5+. */
+const plBucket = (x) => { const u = String(x || '').toUpperCase().replace(/\s+/g, ''); return u === 'VC4' ? 'VC4' : u === 'VC20' ? 'VC20' : 'VC5+'; };
+/** Per-agent class-wise issuance: Map(normName → { name, c: { VC4: [last, cur], VC20: [..], 'VC5+': [..] } }). Two grouped queries
+ *  (last month / this month) so the result stays small even for big teams. */
+async function personalAgentClassRows(link) {
+  const out = new Map();
+  const add = (name, cls, which, n) => {
+    const k = plNormName(name); if (!k || !n) return;
+    let o = out.get(k); if (!o) { o = { name: String(name).trim(), c: { VC4: [0, 0], VC20: [0, 0], 'VC5+': [0, 0] } }; out.set(k, o); }
+    o.c[plBucket(cls)][which] += n;
+  };
+  const merge = (m) => { for (const [k, v] of m) { let o = out.get(k); if (!o) { out.set(k, v); continue; } for (const b of Object.keys(v.c)) for (let w = 0; w < 2; w++) o.c[b][w] = Math.max(o.c[b][w], v.c[b][w]); } };
+  if (isComboLink(link)) {
+    const sp = await comboSplit(link);
+    const parts = [...sp.tlParts.map((p) => ({ kind: 'tl', source: p.source, name: p.name, personId: p.personId, members: [] }))];
+    ['ff', 'gv'].forEach((src) => { if (sp.memBySrc[src].length) parts.push({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] }); });
+    for (const part of parts) { try { merge(await personalAgentClassRows(part)); } catch { /* part failed */ } }
+    return out;
+  }
+  const c = personalConfig(link);
+  const { start, today } = personalWindow();
+  const curStart = `${dateKeyNow().slice(0, 7)}-01`;
+  const lastEnd = new Date(`${curStart}T00:00:00Z`); lastEnd.setUTCDate(0);
+  const lastEndKey = `${lastEnd.getUTCFullYear()}-${pad2(lastEnd.getUTCMonth() + 1)}-${pad2(lastEnd.getUTCDate())}`;
+  const run = async (from, to, which) => {
+    const tq = `select ${c.agentCol}, ${c.clsCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${from}' and ${c.dateCol} <= date '${to}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${c.clsCol}, ${c.masterCol} limit 20000`;
+    const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+    const res = await fetchUpstreamCached(upstreamUrl(params));
+    if (res.status < 200 || res.status >= 300) throw new Error(`sheet ${res.status}`);
+    const table = parseGvizServer(res.body);
+    let n = 0;
+    for (const row of table.rows || []) {
+      const gvRow = isGvPersonalRow(serverCell(row, 2));
+      if ((c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
+      const cells = (row && row.c) || [];
+      const agent = serverCell(row, 0).trim(); if (!agent) continue;
+      add(agent, classBucket(serverCell(row, 1)), which, serverNumber(serverCell(row, Math.max(0, cells.length - 1)))); n++;
+    }
+    return n;
+  };
+  const [n1, n2] = await Promise.all([run(start, lastEndKey, 0).catch(() => 0), (curStart <= today ? run(curStart, today, 1).catch(() => 0) : Promise.resolve(0))]);
+  if (!n1 && !n2 && c.source === 'gv') {
+    for (const r of await personalGvMasterRows(link)) { const d = String(r.date); add(r.agent || '', r.cls, d.startsWith(curStart.slice(0, 7)) ? 1 : 0, r.n); }
+  }
+  return out;
+}
 /** GV vs FF split of a combined link (TLs / agents / MTD / last month / stock). */
 async function personalChannelSplit(baseLink, sidx, ym, prevYm) {
   const out = [];
@@ -9436,6 +9616,13 @@ function personalRequestsHtml(link) {
 }
 const PORTAL_LOGIN_JS = "(function(){var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');\n      function go(extra){e.hidden=true;b.disabled=true;b.textContent='\u23f3 Logging in\u2026';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;\n      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){\n        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}\n        if(x.j.url){location.href=x.j.url;return;}\n        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'\ud83d\udfe9 ':'\ud83d\udfe6 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='\ud83d\udd13 Login';}\n      }).catch(function(err){e.textContent='\u26a0\ufe0f '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='\ud83d\udd13 Login';});}\n      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();";
 
+// ⚡ short-lived rendered-page cache (per link + channel view) so tab/channel switches and reloads are instant
+const plPageCache = new Map();
+const PL_CACHE_MS = 45e3;
+function plCachePut(key, val) {
+  plPageCache.set(key, { ...val, at: Date.now() });
+  if (plPageCache.size > 150) { const old = [...plPageCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 50); old.forEach(([k]) => plPageCache.delete(k)); }
+}
 async function servePersonalPage(req, res, rawToken) {
   const token = String(rawToken || '').split(/[/?#]/)[0].trim();
   const noStore = { 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' };
@@ -9444,8 +9631,12 @@ async function servePersonalPage(req, res, rawToken) {
   const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
   if (!savedLink) return fail(404, 'This link has either expired or is wrong. Ask the admin for a new one.');
   if (savedLink.enabled === false) return fail(403, 'The admin has disabled this link.');
-  const hasSession = personalLinkSession(req, savedLink);
+  const urlQ = (() => { try { return new URL(req.url, 'http://x').searchParams; } catch { return new URLSearchParams(); } })();
+  // 👁 Admin live preview: the admin's own dashboard session may open the page inside the live-view mirror (read-only, never logged).
+  const adminPreview = urlQ.get('embed') === 'live' && (() => { const u = sessionUser(req); return !!(u && u.role === 'admin'); })();
+  const hasSession = adminPreview || personalLinkSession(req, savedLink);
   if (!hasSession) {
+    if (req.method !== 'HEAD') plRecordActivity(savedLink, req, 'link_open', 'Opened the link (login screen)');
     const idLabel = savedLink.kind === 'tl' ? 'TL ID' : (savedLink.kind === 'group' ? 'Team ID' : 'Agent ID');
     const credentialsReady = String(savedLink.personId || '').trim().length >= 2 && String(savedLink.mobile || '').replace(/\D/g, '').length === 10;
     const gate = `<section class="pb-card pb-auth-card" id="pl-auth-gate">
@@ -9479,11 +9670,21 @@ async function servePersonalPage(req, res, rawToken) {
   const chReq = (() => { try { return new URL(req.url, 'http://x').searchParams.get('ch') || ''; } catch { return ''; } })();
   const chView = linkChannels.length > 1 && linkChannels.includes(chReq) ? chReq : 'all';
   const link = chView === 'all' ? baseLink : plChannelView(baseLink, chView);
+  const wantPartial = urlQ.get('partial') === '1';
+  const wantFresh = urlQ.get('fresh') === '1';
+  const cacheKey = `${token}|${chView}|${allowedSecs.join(',')}|${canExport ? 1 : 0}`;
+  const replyPage = (v) => {
+    if (wantPartial) return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, view: chView, sub: v.sub, body: v.inner, at: v.at || Date.now() }), noStore);
+    return sendHtml(res, 200, personalShell({ title: v.title, heading: v.heading, sub: v.sub, token, requireAuth: true, authorized: true, personName: link.name, body: `<div id="pl-portal-content">${v.inner}</div>` }), noStore);
+  };
+  if (!wantFresh) { const hit = plPageCache.get(cacheKey); if (hit && Date.now() - hit.at < PL_CACHE_MS) return replyPage(hit); }
   try {
     const needsIssuance = hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights');
     const needsStock = hasSec('stock') || hasSec('ageing') || (hasSec('insights') && isTeamLink(link));
     // Start independent sheet/index work together so verified links don't wait for serial requests.
     const rowsPromise = needsIssuance ? personalDailyRows(link) : Promise.resolve([]);
+    const classRowsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance'))
+      ? personalAgentClassRows(link).catch(() => new Map()) : Promise.resolve(new Map());
     const livePromise = hasSec('overview')
       ? Promise.race([personalLiveToday(link), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 2500); if (t.unref) t.unref(); })]).catch(() => null)
       : Promise.resolve(null);
@@ -9498,6 +9699,7 @@ async function servePersonalPage(req, res, rawToken) {
         new Promise((resolve) => { const t = setTimeout(() => resolve(false), 3000); if (t.unref) t.unref(); })
       ]);
       if (!ready) {
+        if (wantPartial) return sendJson(res, 202, { ok: false, loading: true }, noStore);
         return sendHtml(res, 200, personalShell({
           title: `${link.name} · Loading`,
           heading: `👋 Welcome, <b>${escHtml(link.name)}</b>`,
@@ -9873,14 +10075,17 @@ async function servePersonalPage(req, res, rawToken) {
     }
     // 🔎 Scoped search — only the TLs / agents this link covers
     let searchHtml = '';
+    let dispatchOk = false;
     if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance'))) {
       const issueOk = hasSec('overview') || hasSec('issuance') || hasSec('performance');
       const stockOk = hasSec('stock') || hasSec('overview') || hasSec('ageing');
       const nk = plNormName;
       const defSrc = link.source === 'gv' ? 'gv' : 'ff';
       const agentSrc = new Map(), agentTl = new Map(), tlGroups = [];
+      let spRef = null;
       if (isComboLink(link)) {
         const sp = await comboSplit(link).catch(() => null);
+        spRef = sp;
         if (sp) {
           sp.tlMaps.forEach(({ part, map }) => { const names = [...map.keys()]; tlGroups.push({ name: part.name, src: part.source, agents: names }); names.forEach((n) => { agentSrc.set(nk(n), part.source); agentTl.set(nk(n), part.name); }); });
           ['ff', 'gv'].forEach((s2) => sp.memBySrc[s2].forEach((m) => agentSrc.set(nk(m.name), s2)));
@@ -9901,15 +10106,45 @@ async function servePersonalPage(req, res, rawToken) {
       personalMemberNames(link).forEach((n) => addPerson(n));
       if (stockInfo && stockInfo.agents) stockInfo.agents.forEach((a) => addPerson(a.n));
       for (const [k2, p] of peopleMap) { p.d = liveBy.get(k2) || 0; p.st = stockBy.get(k2) || 0; }
+      // 🎯 class-wise issuance (last / MTD) + stock per agent → client computes cover, priority and dispatch need
+      const classRows = await classRowsPromise;
+      const stockCls = new Map();
+      const addStockCls = (m) => { for (const [k3, v3] of m) stockCls.set(plNormName(k3), v3); };
+      if (stockIdxRef.v) {
+        try {
+          if (isComboLink(link)) {
+            tlGroups.forEach((g) => addStockCls(personalClassStockByAgent(stockIdxRef.v, g.src, 'tl', g.name)));
+            if (spRef) ['ff', 'gv'].forEach((s2) => { if (spRef.memBySrc[s2].length) addStockCls(personalClassStockByAgent(stockIdxRef.v, s2, 'group', spRef.memBySrc[s2].map((m) => m.name))); });
+          } else if (link.kind === 'tl') addStockCls(personalClassStockByAgent(stockIdxRef.v, defSrc, 'tl', link.name));
+          else addStockCls(personalClassStockByAgent(stockIdxRef.v, defSrc, 'group', personalMemberNames(link)));
+        } catch { /* stock by class optional */ }
+      }
+      const B3 = ['VC4', 'VC20', 'VC5+'];
+      const liveCls = new Map();
+      if (live) live.agents.forEach((a) => { const o = { VC4: 0, VC20: 0, 'VC5+': 0 }; Object.entries(a.cls || {}).forEach(([k4, v4]) => { o[plBucket(k4)] += v4; }); liveCls.set(nk(a.name), o); });
+      for (const [k5, p] of peopleMap) {
+        const cr = classRows.get(k5), sc = stockCls.get(k5), lc = liveCls.get(k5);
+        if (!cr && !sc && !lc) continue;
+        p.c = {};
+        B3.forEach((b) => { p.c[b] = [cr ? cr.c[b][0] : 0, cr ? cr.c[b][1] : 0, sc ? sc[b] : 0, lc ? lc[b] : 0]; });
+        if (cr) { p.l = B3.reduce((a, b) => a + p.c[b][0], 0); p.m = B3.reduce((a, b) => a + p.c[b][1], 0); }
+        if (sc) p.st = B3.reduce((a, b) => a + p.c[b][2], 0);
+      }
       const items = [...peopleMap.values()];
       tlGroups.forEach((g) => {
         const ags = g.agents.map((n) => peopleMap.get(nk(n))).filter(Boolean);
         const sum = (f) => ags.reduce((a, x) => a + (x[f] || 0), 0);
         let tlStock = sum('st');
         try { if (stockIdxRef.v) { const sr = personalStock(stockIdxRef.v, g.src, 'tl', g.name); if (sr) tlStock = (sr.t[0] || 0) + (sr.t[1] || 0); } } catch { /* keep sum */ }
-        items.push({ k: 't', n: g.name, s: g.src, ag: ags.length, m: sum('m'), l: sum('l'), d: sum('d'), st: tlStock, members: ags.map((x) => x.n) });
+        const tlC = { VC4: [0, 0, 0, 0], VC20: [0, 0, 0, 0], 'VC5+': [0, 0, 0, 0] };
+        ags.forEach((x) => { if (x.c) B3.forEach((b) => { for (let i = 0; i < 4; i++) tlC[b][i] += x.c[b][i]; }); });
+        try {
+          if (stockIdxRef.v) { const sr = personalStock(stockIdxRef.v, g.src, 'tl', g.name); if (sr && sr.byCls) { B3.forEach((b) => { tlC[b][2] = 0; }); Object.entries(sr.byCls).forEach(([k6, v6]) => { tlC[plBucket(k6)][2] += v6.t || 0; }); } }
+        } catch { /* keep agent sums */ }
+        items.push({ k: 't', n: g.name, s: g.src, ag: ags.length, m: sum('m'), l: sum('l'), d: sum('d'), st: tlStock, c: tlC, members: ags.map((x) => x.n) });
       });
-      const dataJson = JSON.stringify({ items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, both: linkChannels.length > 1 }).replace(/</g, '\\u003c');
+      const dataJson = JSON.stringify({ items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
+      dispatchOk = issueOk && stockOk && items.some((x) => x.k === 'a' && x.c);
       searchHtml = `<section class="pb-card pl-search" id="pl-search"><div class="pl-search-row"><span class="pl-search-ico">🔎</span><input id="pl-search-q" type="search" placeholder="Search a TL or agent in this link…" autocomplete="off" aria-label="Search TL or agent"><div id="pl-search-drop" class="pl-search-drop" hidden></div></div><div id="pl-search-res"></div><script type="application/json" id="pl-search-data">${dataJson}</script></section>`;
     }
 
@@ -9917,6 +10152,7 @@ async function servePersonalPage(req, res, rawToken) {
     const tabDefs = [
       { id: 'overview', label: '📊 Overview', show: hasSec('overview') },
       { id: 'live', label: '🟢 Today Live', show: hasSec('overview') },
+      { id: 'dispatch', label: '🚚 Dispatch Priority', show: dispatchOk },
       { id: 'stock', label: '📦 Class-wise Stock', show: hasSec('stock') },
       { id: 'issuance', label: `📅 Date${isTeamLink(link) ? ' & Agent' : ''} Issuance`, show: hasSec('issuance') },
       { id: 'performance', label: '🏆 Performance', show: hasSec('performance') },
@@ -9931,16 +10167,7 @@ async function servePersonalPage(req, res, rawToken) {
     const tabsBarHtml = tabDefs.length ? `<aside class="pl-side" aria-label="Reports"><div class="pl-side-title">📂 Reports</div><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>${t.id === 'insights' && insNav.length ? `<select id="pl-ins-select" class="pl-ins-select" aria-label="Insight lists"><option value="all">🧠 All insights</option>${insNav.map(([id, label]) => `<option value="${escHtml(id)}">${escHtml(label)}</option>`).join('')}</select>` : ''}`).join('')}</div>${canExport ? `<div class="pl-side-exp">${stockQuickCsv}<button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</aside>` : '';
     const noSectionsHtml = tabDefs.length ? '' : '<section class="pb-card pb-no-sections"><h3>🔒 No report sections enabled</h3><p class="dim">The administrator has not granted any report sections for this link. Contact them to request access.</p></section>';
 
-    const html = personalShell({
-      title: `${link.name} · Performance`,
-      heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`,
-      sub: `${chView === 'all' && (link.source === 'both' || linkChannels.length > 1) ? 'GV Partner + First Forward' : (link.source === 'gv' ? 'GV Partner' : 'First Forward')} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${(link.tls || []).length ? `${link.tls.length} TL${link.tls.length > 1 ? 's' : ''} + ` : ''}${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`,
-      token,
-      requireAuth,
-      authorized: true,
-      personName: link.name,
-      body: `
-      <div id="pl-portal-content">${chSwitchHtml}${searchHtml}<div class="pl-layout">
+    const innerHtml = `${chSwitchHtml}${searchHtml}<div class="pl-layout">
         ${tabsBarHtml}
         <div class="pl-main">
         ${noSectionsHtml}
@@ -9966,6 +10193,7 @@ async function servePersonalPage(req, res, rawToken) {
           </section>
         </div>` : ''}
         ${hasSec('overview') ? `<div class="pl-pane" data-pl-pane="live" hidden>${liveHtml}</div>` : ''}
+        ${dispatchOk ? '<div class="pl-pane" data-pl-pane="dispatch" hidden><div id="pl-dispatch"></div></div>' : ''}
         ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${!stockInfo && stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>` : ''}${classStockCardHtml}</div>` : ''}
         ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div>` : ''}
         ${hasSec('performance') ? `<div class="pl-pane" data-pl-pane="performance" hidden>${perfCardHtml}${teamHtml}</div>` : ''}
@@ -9974,9 +10202,10 @@ async function servePersonalPage(req, res, rawToken) {
         ${hasSec('requests') ? `<div class="pl-pane" data-pl-pane="requests" hidden>${personalRequestsHtml(link)}</div>` : ''}
         <p class="pb-foot">Read-only link · live data from the sheet · ${escHtml(db.settings.brand || 'Dashboard')}</p>
         </div>
-      </div></div>`
-    });
-    return sendHtml(res, 200, html, noStore);
+      </div>`;
+    const pageVals = { title: `${link.name} · Performance`, heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`, sub: `${chView === 'all' && (link.source === 'both' || linkChannels.length > 1) ? 'GV Partner + First Forward' : (link.source === 'gv' ? 'GV Partner' : 'First Forward')} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${(link.tls || []).length ? `${link.tls.length} TL${link.tls.length > 1 ? 's' : ''} + ` : ''}${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`, inner: innerHtml };
+    if (stockMeta.state !== 'loading') plCachePut(cacheKey, pageVals);
+    return replyPage({ ...pageVals, at: Date.now() });
   } catch (err) {
     console.warn('personal page:', err.message);
     return fail(500, 'Data did not load — try again in a while.');
@@ -10127,6 +10356,13 @@ body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);fon
 .pl-res-row{cursor:pointer}
 .pb-split{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:16px;align-items:center}
 @media(max-width:900px){.pb-split{grid-template-columns:1fr}}
+.pl-pr{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:800;color:#fff;background:#16a34a}
+.pl-pr.high{background:#dc2626}.pl-pr.medium{background:#f59e0b}.pl-pr.low{background:#16a34a}
+.pb-kpi.pl-hi{border-top-color:#dc2626!important}.pb-kpi.pl-md{border-top-color:#f59e0b!important}
+.pl-prf{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+.pl-prf .pb-btn.on{background:#4f46e5;border-color:#4f46e5;color:#fff}
+.pl-ctbl .pl-cr.grp td{background:#eef2ff!important}.pl-ctbl .pl-cr.tot td{background:#e0e7ff!important;font-weight:800}.pl-ctbl .pl-cr.sub td{color:#64748b;font-size:12px}
+.pl-tl-row{cursor:pointer}
 /* ── v280: full-screen layout, donut charts, Today Live ── */
 body{padding:clamp(10px,1.6vw,26px)}
 .pb-wrap,.pb-wrap{max-width:none;width:100%;margin:0}
@@ -10158,7 +10394,7 @@ body{padding:clamp(10px,1.6vw,26px)}
 @media(max-width:760px){.pb-grid3{grid-template-columns:1fr}.pb-wrap .pl-side{max-height:none}.pl-layout{grid-template-columns:1fr}}
 </style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
 <header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(personName || db.settings.brand || 'FF').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
-<div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p>${sub}</p>` : ''}</div></div>
+<div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p id="pl-sub">${sub}</p>` : ''}</div></div>
 ${requireAuth ? `<button type="button" class="pb-btn" id="pl-lock-btn" ${authorized ? '' : 'hidden'} title="Lock Personal Link">🔒 Lock</button>` : ''}</header>
 ${body || ''}
 </div>
@@ -10249,19 +10485,42 @@ const PERSONAL_PORTAL_JS = `(function () {
   if (!root) return;
   var token = root.getAttribute('data-token') || '';
   var person = root.getAttribute('data-person') || 'Partner';
+  var authorized = root.getAttribute('data-authorized') === '1';
+  var embed = /[?&]embed=live/.test(location.search);
   var lockBtn = document.getElementById('pl-lock-btn');
   var form = document.getElementById('pl-auth-form');
+  var holder = document.getElementById('pl-portal-content');
+  var CH_LABEL = { all: 'All', gv: 'GV Partner', ff: 'First Forward' };
   // Stock index abhi ban raha ho to thodi der baad page apne aap refresh (CSP ki wajah se inline script nahi).
   var rl = document.getElementById('pl-reload');
   if (rl) setTimeout(function () { window.location.reload(); }, Number(rl.getAttribute('data-reload-ms')) || 2500);
-  var pend = document.getElementById('pl-stock-pending');
-  if (pend) setTimeout(function () { window.location.reload(); }, Number(pend.getAttribute('data-refresh-ms')) || 8000);
+
+  // ---- visitor id (per browser tab) + activity beacon -> admin notifications / live preview ----
+  function rnd(n) { var a = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', s = ''; try { var u = new Uint8Array(n); crypto.getRandomValues(u); for (var i = 0; i < n; i++) s += a.charAt(u[i] % a.length); } catch (e) { for (var j = 0; j < n; j++) s += a.charAt(Math.floor(Math.random() * a.length)); } return s; }
+  var sid = ''; try { sid = sessionStorage.getItem('plSid') || ''; if (!/^[A-Za-z0-9_-]{16,64}$/.test(sid)) { sid = rnd(24); sessionStorage.setItem('plSid', sid); } } catch (e) { sid = rnd(24); }
+  var qs = new URLSearchParams(location.search);
+  var state = { ch: qs.get('ch') || 'all', tab: (location.hash || '').replace('#', '') || 'overview', q: '' };
+  var plQ = qs.get('q') || '';
+  function post(url, data) {
+    try { fetch(url, { method: 'POST', credentials: 'same-origin', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).catch(function () {}); } catch (e) {}
+  }
+  function track(kind, label, meta) {
+    if (embed || !authorized) return;
+    post('/api/public/personal-link/event', { token: token, sid: sid, kind: kind, label: label, ch: state.ch, tab: state.tab, q: state.q, meta: meta || {} });
+  }
+  var pingT = 0;
+  function ping() { if (embed || !authorized || !holder) return; post('/api/public/personal-link/ping', { token: token, sid: sid, ch: state.ch, tab: state.tab, q: state.q, visible: !document.hidden }); }
+  function schedulePing() { clearTimeout(pingT); pingT = setTimeout(ping, 700); }
+  if (authorized && holder && !embed) {
+    setInterval(function () { if (!document.hidden) ping(); }, 20000);
+    document.addEventListener('visibilitychange', ping);
+  }
 
   if (lockBtn) lockBtn.addEventListener('click', function () {
     lockBtn.disabled = true;
     fetch('/api/public/personal-link/logout', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: token })
+      body: JSON.stringify({ token: token, sid: sid })
     }).finally(function () { window.location.reload(); });
   });
 
@@ -10279,7 +10538,7 @@ const PERSONAL_PORTAL_JS = `(function () {
       fetch('/api/public/personal-link/verify', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token, personId: pid, mobile: mob })
+        body: JSON.stringify({ token: token, personId: pid, mobile: mob, sid: sid })
       }).then(function (r) {
         return r.json().then(function (j) { return { ok: r.ok, json: j }; });
       }).then(function (out) {
@@ -10293,44 +10552,153 @@ const PERSONAL_PORTAL_JS = `(function () {
     });
   }
 
-  // Tab switching
-  var tabBtns = document.querySelectorAll('[data-pl-tab]');
-  var panes = document.querySelectorAll('[data-pl-pane]');
-  Array.prototype.forEach.call(tabBtns, function (b) {
-    b.addEventListener('click', function () {
-      var target = b.getAttribute('data-pl-tab');
-      Array.prototype.forEach.call(tabBtns, function (x) { x.classList.toggle('on', x === b); });
-      if (target !== 'insights') { var sel0 = document.getElementById('pl-ins-select'); if (sel0) { sel0.value = 'all'; Array.prototype.forEach.call(document.querySelectorAll('[data-ins-sec]'), function (c) { c.hidden = false; }); } }
-      Array.prototype.forEach.call(panes, function (p) {
-        p.hidden = target !== 'all' && p.getAttribute('data-pl-pane') !== target;
-      });
-      try { if (history.replaceState) history.replaceState(null, '', '#' + target); } catch (e) {}
+  // ---- instant GV | FF | All switch: views are fetched once (prefetched in the background) and swapped in place ----
+  var views = {}, curCh = 'all', busy = false;
+  function chFromHref(h) { var m = /[?&]ch=(\\w+)/.exec(h || ''); return m ? m[1] : 'all'; }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function fetchView(ch, fresh, tries) {
+    tries = tries || 0;
+    var u = location.pathname + '?ch=' + encodeURIComponent(ch) + '&partial=1' + (fresh ? '&fresh=1' : '');
+    return fetch(u, { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) {
+      var ct = r.headers.get('content-type') || '';
+      if (ct.indexOf('json') < 0) throw new Error('session');
+      return r.json().then(function (j) { return { status: r.status, j: j }; });
+    }).then(function (o) {
+      if (o.status === 202 || (o.j && o.j.loading)) { if (tries < 8) return wait(1500).then(function () { return fetchView(ch, fresh, tries + 1); }); throw new Error('slow'); }
+      if (!o.j || !o.j.ok) throw new Error('bad');
+      views[ch] = { html: o.j.body, sub: o.j.sub, at: o.j.at || Date.now() };
+      return views[ch];
     });
+  }
+  function activateTab(target, quiet) {
+    if (!holder) return;
+    var btns = holder.querySelectorAll('[data-pl-tab]'), panes = holder.querySelectorAll('[data-pl-pane]');
+    var hit = null; Array.prototype.forEach.call(btns, function (b) { if (b.getAttribute('data-pl-tab') === target) hit = b; });
+    if (!hit && btns.length) { hit = btns[0]; target = hit.getAttribute('data-pl-tab'); }
+    Array.prototype.forEach.call(btns, function (x) { x.classList.toggle('on', x === hit); });
+    if (target !== 'insights') { var sel0 = document.getElementById('pl-ins-select'); if (sel0) { sel0.value = 'all'; Array.prototype.forEach.call(document.querySelectorAll('[data-ins-sec]'), function (c) { c.hidden = false; }); } }
+    Array.prototype.forEach.call(panes, function (p) { p.hidden = target !== 'all' && p.getAttribute('data-pl-pane') !== target; });
+    state.tab = target || state.tab;
+    try { if (history.replaceState) history.replaceState(null, '', location.pathname + (curCh !== 'all' ? '?ch=' + curCh : '') + (embed ? '' : '') + '#' + state.tab); } catch (e) {}
+    return hit;
+  }
+  function applyView(ch, v) {
+    curCh = ch; state.ch = ch;
+    holder.innerHTML = v.html;
+    var sub = document.getElementById('pl-sub'); if (sub && v.sub) sub.innerHTML = v.sub;
+    bindContent();
+    activateTab(state.tab, true);
+  }
+  function goView(ch) {
+    if (!holder || ch === curCh || busy) return;
+    track('channel', 'Switched to ' + (CH_LABEL[ch] || ch), { ch: ch });
+    var v = views[ch];
+    if (v) {
+      applyView(ch, v); schedulePing();
+      if (Date.now() - v.at > 60000) fetchView(ch, true).then(function (nv) { var q = document.getElementById('pl-search-q'); if (curCh === ch && !(q && q.value)) applyView(ch, nv); }).catch(function () {});
+      return;
+    }
+    busy = true; holder.style.opacity = '.55';
+    fetchView(ch, false).then(function (nv) { applyView(ch, nv); schedulePing(); }).catch(function () { window.location.href = location.pathname + '?ch=' + ch + location.hash; }).then(function () { busy = false; holder.style.opacity = ''; });
+  }
+  function softRefresh(force) {
+    if (!holder || busy) return;
+    var q = document.getElementById('pl-search-q');
+    if (!force && q && q.value) return;
+    fetchView(curCh, true).then(function (v) { applyView(curCh, v); }).catch(function () { if (force) { try { location.reload(); } catch (e) {} } });
+  }
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('[data-pl-ch]');
+    if (!a || !holder) return;
+    e.preventDefault(); goView(chFromHref(a.getAttribute('href')));
   });
-  // Open the tab named in the URL hash (e.g. #live after a refresh)
-  (function () {
-    var h = (location.hash || '').replace('#', '');
-    if (!h) return;
-    var hb = document.querySelector('[data-pl-tab="' + h + '"]');
-    if (hb) hb.click();
-  })();
-
-  // Channel switch (GV | FF | All) — keep the open tab when switching
-  Array.prototype.forEach.call(document.querySelectorAll('[data-pl-ch]'), function (a) {
-    a.addEventListener('click', function (e) { e.preventDefault(); window.location.href = a.getAttribute('href') + (window.location.hash || ''); });
+  window.addEventListener('hashchange', function () {
+    var h = (location.hash || '').replace('#', ''); if (!h || !holder || h === state.tab) return;
+    activateTab(h, true);
   });
 
-  // Scoped search — only the TLs / agents this link covers
+  function bindContent() {
+    var pend = document.getElementById('pl-stock-pending');
+    if (pend) setTimeout(function () { softRefresh(false); }, Number(pend.getAttribute('data-refresh-ms')) || 8000);
+    // Tab switching
+    var tabBtns = document.querySelectorAll('[data-pl-tab]');
+    Array.prototype.forEach.call(tabBtns, function (b) {
+      b.addEventListener('click', function () {
+        var target = b.getAttribute('data-pl-tab');
+        activateTab(target);
+        track('tab', 'Opened tab "' + (b.textContent || target).replace(/\\s+/g, ' ').trim() + '"');
+        schedulePing();
+      });
+    });
+    // Open the tab named in the URL hash (e.g. #live after a refresh)
+    var onChip = document.querySelector('.pl-ch.on'); if (onChip) { curCh = chFromHref(onChip.getAttribute('href')); state.ch = curCh; }
+    var h0 = (state.tab || '').replace('#', '');
+    if (h0) activateTab(h0, true);
+
+  // Scoped search + Dispatch priority — only the TLs / agents this link covers (all data is embedded, so it is instant)
   (function () {
     var dataEl = document.getElementById('pl-search-data'), qEl = document.getElementById('pl-search-q');
     if (!dataEl || !qEl) return;
     var D; try { D = JSON.parse(dataEl.textContent || '{}'); } catch (e) { return; }
     var items = D.items || [], drop = document.getElementById('pl-search-drop'), res = document.getElementById('pl-search-res');
+    var B3 = ['VC4', 'VC20', 'VC5+'], RANK = { High: 0, Medium: 1, Low: 2 };
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function nf(n) { return Number(n || 0).toLocaleString('en-IN'); }
+    function f1(n) { return Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 }); }
     function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
     items.forEach(function (it) { it._k = norm(it.n); });
     function chBadge(it) { return D.both ? '<span class="pb-chan ' + it.s + '">' + it.s.toUpperCase() + '</span>' : ''; }
+    // ---- numbers: v = [last month, MTD, stock, today] ----
+    function sumC(it, names) { var r = [0, 0, 0, 0]; names.forEach(function (n) { var a = (it.c && it.c[n]) || [0, 0, 0, 0]; for (var i = 0; i < 4; i++) r[i] += a[i]; }); return r; }
+    function calc(v) {
+      var rate = v[1] / D.elapsed, cover = rate > 0 ? v[2] / rate : null;
+      var pr = rate > 0 ? (cover < D.red ? 'High' : (cover < D.orange ? 'Medium' : 'Low')) : 'Low';
+      return { rate: rate, cover: cover, pr: pr, need: Math.max(0, Math.ceil(rate * D.days - v[2])), gross: Math.ceil(rate * D.days) };
+    }
+    function worst(a, b) { return RANK[a] <= RANK[b] ? a : b; }
+    function overall(it) { var g1 = calc(sumC(it, ['VC4', 'VC20'])), g2 = calc(sumC(it, ['VC5+'])); return { g1: g1, g2: g2, pr: worst(g1.pr, g2.pr), need: g1.need + g2.need, gross: g1.gross + g2.gross }; }
+    function prBadge(p) { return '<span class="pl-pr ' + p.toLowerCase() + '">' + p + '</span>'; }
+    function coverTxt(c) { return c === null ? '—' : (c >= 99 ? '99+' : f1(c)) + ' d'; }
+    function tile(label, val, sub, cls) { return '<div class="pb-kpi ' + (cls || '') + '"><small>' + label + '</small><b>' + val + '</b><span>' + (sub || '') + '</span></div>'; }
+    // ---- class-wise table (VC4 / VC20 group, VC5+ group, total) ----
+    function classTable(it) {
+      if (!it.c) return '<p class="dim small">Class-wise data is not available for this ' + (it.k === 't' ? 'TL' : 'agent') + ' yet.</p>';
+      var rowsDef = [
+        ['VC4 / VC20', ['VC4', 'VC20'], 'grp'], ['&nbsp;&nbsp;↳ VC4', ['VC4'], 'sub'], ['&nbsp;&nbsp;↳ VC20', ['VC20'], 'sub'], ['VC5+', ['VC5+'], 'grp'], ['Total', B3, 'tot']
+      ];
+      var body = rowsDef.map(function (d) {
+        var v = sumC(it, d[1]), c = calc(v), main = d[2] !== 'sub';
+        return '<tr class="pl-cr ' + d[2] + '"><td><b>' + d[0] + '</b></td>' +
+          (D.issue ? '<td>' + nf(v[0]) + '</td><td><b>' + nf(v[1]) + '</b></td>' : '') + (D.live ? '<td>' + nf(v[3]) + '</td>' : '') +
+          (D.stock ? '<td><b>' + nf(v[2]) + '</b></td>' : '') +
+          (D.issue && D.stock ? '<td>' + (main ? f1(c.rate) : '') + '</td><td>' + (main ? coverTxt(c.cover) : '') + '</td><td>' + (main && d[2] === 'grp' ? prBadge(c.pr) : '') + '</td><td>' + (main ? '<b>' + nf(c.need) + '</b>' : '') + '</td><td>' + (main ? nf(c.gross) : '') + '</td>' : '') + '</tr>';
+      }).join('');
+      return '<div class="pb-scroll"><table class="pb-tbl pl-ctbl" id="pl-tbl-class"><thead><tr><th>Class</th>' + (D.issue ? '<th>Last month</th><th>MTD</th>' : '') + (D.live ? '<th>Today</th>' : '') + (D.stock ? '<th>Stock</th>' : '') +
+        (D.issue && D.stock ? '<th>Run / day</th><th>Cover</th><th>Priority</th><th>Need (after stock)</th><th>Need (w/o stock)</th>' : '') + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
+        (D.issue && D.stock ? '<p class="dim small" style="margin-top:6px">Priority: cover &lt; ' + D.red + ' days = High · &lt; ' + D.orange + ' days = Medium · else Low. Need = run rate × ' + D.days + ' days (− stock).</p>' : '');
+    }
+    // ---- agents table (priority aware); used in TL result and in the Dispatch tab ----
+    function agentRows(list, opts) {
+      return list.map(function (a, i) {
+        var o = overall(a);
+        return '<tr class="pl-res-row" data-name="' + esc(a.n) + '"><td>' + (i + 1) + '</td><td><b>' + esc(a.n) + '</b> ' + chBadge(a) + (opts && opts.tl && a.tl ? ' <small class="dim">· ' + esc(a.tl) + '</small>' : '') + '</td>' +
+          '<td>' + nf(sumC(a, ['VC4', 'VC20'])[2]) + '</td><td>' + nf(sumC(a, ['VC4', 'VC20'])[1]) + '</td><td>' + coverTxt(o.g1.cover) + '</td><td><b>' + nf(o.g1.need) + '</b></td>' +
+          '<td>' + nf(sumC(a, ['VC5+'])[2]) + '</td><td>' + nf(sumC(a, ['VC5+'])[1]) + '</td><td>' + coverTxt(o.g2.cover) + '</td><td><b>' + nf(o.g2.need) + '</b></td>' +
+          '<td>' + prBadge(o.pr) + '</td><td><b>' + nf(o.need) + '</b></td></tr>';
+      }).join('');
+    }
+    var AGENT_HEAD = '<thead><tr><th>#</th><th>Agent</th><th>VC4/VC20 stock</th><th>MTD</th><th>Cover</th><th>Need</th><th>VC5+ stock</th><th>MTD</th><th>Cover</th><th>Need</th><th>Priority</th><th>Total need</th></tr></thead>';
+    function sortAgents(list) { return list.slice().sort(function (a, b) { var x = overall(a), y = overall(b); return (RANK[x.pr] - RANK[y.pr]) || (y.need - x.need) || (b.m - a.m); }); }
+    function prFilterHtml(id, counts, cur) {
+      return '<div class="pl-prf" id="' + id + '">' + [['all', 'All', counts.all], ['High', '🔴 High', counts.High], ['Medium', '🟠 Medium', counts.Medium], ['Low', '🟢 Low', counts.Low], ['need', '🚚 Needs tags', counts.need]].map(function (x) {
+        return '<button type="button" class="pb-btn ' + (cur === x[0] ? 'on' : '') + '" data-prf="' + x[0] + '">' + x[1] + ' <b>' + nf(x[2]) + '</b></button>'; }).join('') + '</div>';
+    }
+    function countPr(list) { var c = { all: list.length, High: 0, Medium: 0, Low: 0, need: 0 }; list.forEach(function (a) { var o = overall(a); c[o.pr]++; if (o.need > 0) c.need++; }); return c; }
+    function filterPr(list, f) { return list.filter(function (a) { var o = overall(a); return f === 'all' || (f === 'need' ? o.need > 0 : o.pr === f); }); }
+    function agentTable(id, list, empty, opts) {
+      return '<div class="pb-scroll"><table class="pb-tbl" id="' + id + '">' + AGENT_HEAD + '<tbody>' + (list.length ? agentRows(list, opts) : '<tr><td colspan="12" class="dim">' + empty + '</td></tr>') + '</tbody></table></div>';
+    }
+    // ---- search ----
     function find(q) {
       var toks = norm(q).split(' ').filter(Boolean);
       if (!toks.length) return [];
@@ -10338,57 +10706,93 @@ const PERSONAL_PORTAL_JS = `(function () {
       hits.sort(function (a, b) { return (a.k === b.k ? 0 : (a.k === 't' ? -1 : 1)) || (b.m - a.m) || a.n.localeCompare(b.n); });
       return hits.slice(0, 14);
     }
-    var shown = [];
+    var shown = [], lastTrack = '';
     function paintDrop() {
       shown = find(qEl.value);
       if (!qEl.value.trim()) { drop.hidden = true; return; }
       drop.innerHTML = shown.length ? shown.map(function (it, i) {
+        var o = D.issue && D.stock && it.c ? overall(it) : null;
         return '<button type="button" class="pl-search-opt" data-i="' + i + '"><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b> ' + chBadge(it) +
-          (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + (it.k === 't' ? ' <small class="dim">· ' + nf(it.ag) + ' agents</small>' : '') + '</button>';
+          (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + (it.k === 't' ? ' <small class="dim">· ' + nf(it.ag) + ' agents</small>' : '') + (o ? ' ' + prBadge(o.pr) : '') + '</button>';
       }).join('') : '<div class="pl-search-none">No TL / agent with this name in this link.</div>';
       drop.hidden = false;
+      var q = qEl.value.trim();
+      if (q.length >= 2 && q !== lastTrack) { clearTimeout(paintDrop._t); paintDrop._t = setTimeout(function () { lastTrack = q; state.q = q; schedulePing(); track('search', 'Searched "' + q + '"' + (shown.length ? ' · ' + shown.length + ' match' + (shown.length > 1 ? 'es' : '') : ' · no match'), { q: q, hits: shown.length }); }, 900); }
     }
-    function tile(label, val, sub) { return '<div class="pb-kpi"><small>' + label + '</small><b>' + val + '</b><span>' + (sub || '') + '</span></div>'; }
     function tiles(it) {
-      var t = '';
-      if (D.issue) { t += tile('MTD issued', nf(it.m), esc(D.ym)) + tile('Last month', nf(it.l), esc(D.prevYm)); }
+      var t = '', o = D.issue && D.stock && it.c ? overall(it) : null;
+      if (it.k === 't') t += tile('Agents', nf(it.ag), 'under this TL');
+      if (D.issue) t += tile('MTD issued', nf(it.m), esc(D.ym)) + tile('Last month', nf(it.l), esc(D.prevYm));
       if (D.live) t += tile('Issued today', nf(it.d), 'live');
       if (D.stock) t += tile('Stock', nf(it.st), it.k === 't' ? 'TL total' : 'in hand');
-      if (it.k === 't') t = tile('Agents', nf(it.ag), 'under this TL') + t;
+      if (o) t += tile('Priority', prBadge(o.pr), 'cover based', 'pl-pr-tile') + tile('Dispatch need', nf(o.need), 'after stock · ' + D.days + ' days');
       return '<section class="pb-kpis">' + t + '</section>';
     }
-    function openItem(it) {
-      qEl.value = it.n; drop.hidden = true;
-      var h = '<div class="pl-res-head"><div><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b> ' + chBadge(it) +
-        (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + '</div><button type="button" class="pb-btn" id="pl-search-clear">✕ Close</button></div>' + tiles(it);
-      if (it.k === 't') {
-        var names = {}; (it.members || []).forEach(function (n) { names[norm(n)] = 1; });
-        var ags = items.filter(function (x) { return x.k === 'a' && names[x._k]; }).sort(function (a, b) { return b.m - a.m; });
-        h += '<div class="pb-scroll"><table class="pb-tbl"><thead><tr><th>#</th><th>Agent</th>' + (D.issue ? '<th>MTD</th><th>Last month</th>' : '') + (D.live ? '<th>Today</th>' : '') + (D.stock ? '<th>Stock</th>' : '') + '</tr></thead><tbody>' +
-          (ags.length ? ags.map(function (a, i) { return '<tr class="pl-res-row" data-name="' + esc(a.n) + '"><td>' + (i + 1) + '</td><td><b>' + esc(a.n) + '</b></td>' + (D.issue ? '<td>' + nf(a.m) + '</td><td>' + nf(a.l) + '</td>' : '') + (D.live ? '<td>' + nf(a.d) + '</td>' : '') + (D.stock ? '<td>' + nf(a.st) + '</td>' : '') + '</tr>'; }).join('') : '<tr><td colspan="6" class="dim">No agents found for this TL.</td></tr>') + '</tbody></table></div>';
-      }
-      res.innerHTML = '<div class="pl-res">' + h + '</div>';
-      var cl = document.getElementById('pl-search-clear'); if (cl) cl.addEventListener('click', function () { res.innerHTML = ''; qEl.value = ''; });
-      Array.prototype.forEach.call(res.querySelectorAll('.pl-res-row'), function (tr) {
-        tr.addEventListener('click', function () { var nm = norm(tr.getAttribute('data-name')); for (var i = 0; i < items.length; i++) { if (items[i].k === 'a' && items[i]._k === nm) { openItem(items[i]); break; } } });
+    var tlFilter = 'all';
+    function paintTlAgents(it) {
+      var names = {}; (it.members || []).forEach(function (n) { names[norm(n)] = 1; });
+      var all = items.filter(function (x) { return x.k === 'a' && names[x._k]; });
+      var box = document.getElementById('pl-res-agents'); if (!box) return;
+      var list = sortAgents(filterPr(all, tlFilter));
+      var counts = countPr(all);
+      box.innerHTML = (D.issue && D.stock ? prFilterHtml('pl-res-prf', counts, tlFilter) : '') + agentTable('pl-tbl-res-agents', list, 'No agents match this filter.');
+      var prf = document.getElementById('pl-res-prf');
+      if (prf) prf.addEventListener('click', function (e) { var b = e.target.closest ? e.target.closest('[data-prf]') : null; if (b) { tlFilter = b.getAttribute('data-prf'); paintTlAgents(it); } });
+      bindRows(box);
+    }
+    function bindRows(scope) {
+      Array.prototype.forEach.call(scope.querySelectorAll('.pl-res-row'), function (tr) {
+        tr.addEventListener('click', function () { var nm = norm(tr.getAttribute('data-name')); for (var i = 0; i < items.length; i++) { if (items[i].k === 'a' && items[i]._k === nm) { openItem(items[i], true); break; } } });
       });
+    }
+    function openItem(it, quiet) {
+      qEl.value = it.n; state.q = it.n; drop.hidden = true; tlFilter = D.issue && D.stock ? 'all' : 'all';
+      var h = '<div class="pl-res-head"><div><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b> ' + chBadge(it) +
+        (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + '</div><button type="button" class="pb-btn" id="pl-search-clear">✕ Close</button></div>' + tiles(it) +
+        '<div class="pb-card-head"><h3>🎯 Class-wise issuance · stock · priority</h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-class" data-pl-title="' + esc(it.n) + ' - class wise">⬇ CSV</button></div>' : '') + '</div>' + classTable(it);
+      if (it.k === 't') h += '<div class="pb-card-head" style="margin-top:14px"><h3>🧑‍💼 Agents under ' + esc(it.n) + ' <small class="dim">— who needs tags</small></h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-res-agents" data-pl-title="' + esc(it.n) + ' - agents">⬇ CSV</button></div>' : '') + '</div><div id="pl-res-agents"></div>';
+      res.innerHTML = '<div class="pl-res">' + h + '</div>';
+      var cl = document.getElementById('pl-search-clear'); if (cl) cl.addEventListener('click', function () { res.innerHTML = ''; qEl.value = ''; state.q = ''; schedulePing(); });
+      if (it.k === 't') paintTlAgents(it);
+      if (!quiet || true) track('search_open', 'Opened ' + (it.k === 't' ? 'TL ' : 'agent ') + it.n + (D.both ? ' (' + it.s.toUpperCase() + ')' : ''), { name: it.n, kind: it.k });
       try { res.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
     }
     qEl.addEventListener('input', paintDrop);
     qEl.addEventListener('focus', function () { if (qEl.value.trim()) paintDrop(); });
     qEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var f = find(qEl.value)[0]; if (f) openItem(f); else paintDrop(); } if (e.key === 'Escape') drop.hidden = true; });
     drop.addEventListener('click', function (e) { var b = e.target.closest ? e.target.closest('.pl-search-opt') : null; if (b) openItem(shown[Number(b.getAttribute('data-i'))]); });
-    document.addEventListener('click', function (e) { if (!e.target.closest || !e.target.closest('#pl-search')) drop.hidden = true; });
+    if (!window.__plDropClose) { window.__plDropClose = true; document.addEventListener('click', function (e) { var dd = document.getElementById('pl-search-drop'); if (dd && (!e.target.closest || !e.target.closest('#pl-search'))) dd.hidden = true; }); }
+
+    // ---- 🚚 Dispatch priority tab (TLs: who needs tags — High / Medium first) ----
+    var dp = document.getElementById('pl-dispatch');
+    if (dp && D.issue && D.stock) {
+      var agentsAll = items.filter(function (x) { return x.k === 'a' && x.c; }), tlsAll = items.filter(function (x) { return x.k === 't'; });
+      var st = { f: 'High', tl: '' };
+      var paintDp = function () {
+        var scope = agentsAll.filter(function (a) { return !st.tl || norm(a.tl) === norm(st.tl); });
+        var counts = countPr(scope), list = sortAgents(filterPr(scope, st.f));
+        var totNeed1 = 0, totNeed2 = 0; scope.forEach(function (a) { var o = overall(a); totNeed1 += o.g1.need; totNeed2 += o.g2.need; });
+        var tlRows = tlsAll.filter(function (t) { return t.c; }).map(function (t) { var o = overall(t); var ags = items.filter(function (x) { return x.k === 'a' && x.c && norm(x.tl) === norm(t.n); }), cc = countPr(ags);
+          return '<tr class="pl-tl-row" data-tl="' + esc(t.n) + '"><td><b>' + esc(t.n) + '</b> ' + chBadge(t) + '</td><td>' + nf(t.ag) + '</td><td>' + nf(sumC(t, ['VC4', 'VC20'])[2]) + '</td><td>' + nf(o.g1.need) + '</td><td>' + nf(sumC(t, ['VC5+'])[2]) + '</td><td>' + nf(o.g2.need) + '</td><td>' + prBadge(o.pr) + '</td><td><b class="pb-hot">' + nf(cc.High) + '</b></td><td>' + nf(cc.Medium) + '</td></tr>'; }).join('');
+        dp.innerHTML = '<section class="pb-kpis">' + tile('🔴 High priority', nf(counts.High), 'cover < ' + D.red + ' days', 'pl-hi') + tile('🟠 Medium priority', nf(counts.Medium), 'cover < ' + D.orange + ' days', 'pl-md') + tile('🟢 Low', nf(counts.Low), 'covered') +
+          tile('Need · VC4 / VC20', nf(totNeed1), 'tags after stock · ' + D.days + ' days') + tile('Need · VC5+', nf(totNeed2), 'tags after stock · ' + D.days + ' days') + '</section>' +
+          (tlRows ? '<section class="pb-card"><div class="pb-card-head"><h3>👥 TL-wise priority <small class="dim">click a TL to filter</small></h3></div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-dp-tl"><thead><tr><th>TL</th><th>Agents</th><th>VC4/VC20 stock</th><th>Need</th><th>VC5+ stock</th><th>Need</th><th>Priority</th><th>High agents</th><th>Medium agents</th></tr></thead><tbody>' + tlRows + '</tbody></table></div></section>' : '') +
+          '<section class="pb-card"><div class="pb-card-head"><h3>🚚 Tag dispatch priority' + (st.tl ? ' · ' + esc(st.tl) + ' <button type="button" class="pb-btn" id="pl-dp-cleartl">✕ all TLs</button>' : '') + '</h3>' +
+          (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-dp-agents" data-pl-title="Dispatch priority">⬇ CSV</button><button type="button" class="pb-btn pb-btn-pdf" data-pl-pdf="pl-tbl-dp-agents" data-pl-title="Dispatch priority">⬇ PDF</button></div>' : '') + '</div>' +
+          prFilterHtml('pl-dp-prf', counts, st.f) + agentTable('pl-tbl-dp-agents', list, 'No agents in this priority.', { tl: true }) + '</section>';
+        var prf = document.getElementById('pl-dp-prf');
+        if (prf) prf.addEventListener('click', function (e) { var b = e.target.closest ? e.target.closest('[data-prf]') : null; if (b) { st.f = b.getAttribute('data-prf'); track('dispatch_filter', 'Dispatch priority filter: ' + st.f, {}); paintDp(); } });
+        Array.prototype.forEach.call(dp.querySelectorAll('.pl-tl-row'), function (tr) { tr.addEventListener('click', function () { st.tl = tr.getAttribute('data-tl'); paintDp(); }); });
+        var ct = document.getElementById('pl-dp-cleartl'); if (ct) ct.addEventListener('click', function () { st.tl = ''; paintDp(); });
+        bindRows(dp);
+      };
+      paintDp();
+    }
+    if (embed && plQ) { var f0 = find(plQ)[0]; if (f0) openItem(f0, true); }
   })();
 
-  // Today Live — manual refresh + auto-refresh every 2 min while the Live tab is open
-  function liveReload() { try { location.reload(); } catch (e) {} }
-  var liveBtns = document.querySelectorAll('[data-pl-live-refresh]');
-  Array.prototype.forEach.call(liveBtns, function (b) { b.addEventListener('click', function () { b.disabled = true; b.textContent = '⏳ Refreshing…'; liveReload(); }); });
-  setInterval(function () {
-    var lp = document.querySelector('[data-pl-pane="live"]');
-    if (lp && !lp.hidden && !document.hidden) liveReload();
-  }, 120000);
+  // Today Live — manual refresh (in place, no page reload)
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pl-live-refresh]'), function (b) { b.addEventListener('click', function () { b.disabled = true; b.textContent = '⏳ Refreshing…'; track('refresh', 'Refreshed live data'); softRefresh(true); }); });
 
   // Insights dropdown — one list at a time (or all)
   var insSel = document.getElementById('pl-ins-select');
@@ -10415,6 +10819,26 @@ const PERSONAL_PORTAL_JS = `(function () {
       applyIns(Number(b.getAttribute('data-ins-days')));
     });
     applyIns(7);
+  }
+  }
+
+  // Auto-refresh the Live tab every 2 min (in place) — paused while a search is open or the tab is hidden
+  setInterval(function () {
+    var lp = document.querySelector('[data-pl-pane="live"]');
+    if (lp && !lp.hidden && !document.hidden) softRefresh(false);
+  }, 120000);
+
+  if (holder) {
+    bindContent();
+    views[curCh] = { html: holder.innerHTML, sub: (document.getElementById('pl-sub') || {}).innerHTML, at: Date.now() };
+    if (authorized && !embed) {
+      track('page_open', 'Opened report' + (document.querySelector('.pl-chbar') ? ' · ' + (CH_LABEL[curCh] || curCh) : '') + ' · tab ' + state.tab);
+      ping();
+      // warm the other channel views so the GV | FF switch is instant
+      var others = Array.prototype.map.call(document.querySelectorAll('.pl-chbar [data-pl-ch]'), function (a) { return chFromHref(a.getAttribute('href')); }).filter(function (c) { return c !== curCh; });
+      var warm = function (i) { if (i >= others.length) return; fetchView(others[i], false).catch(function () {}).then(function () { setTimeout(function () { warm(i + 1); }, 300); }); };
+      setTimeout(function () { warm(0); }, 900);
+    }
   }
 
   function extractTable(tbl) {
@@ -10473,6 +10897,7 @@ const PERSONAL_PORTAL_JS = `(function () {
       var data = extractTable(tbl);
       if (data && data.rows.length) {
         var title = csvBtn.getAttribute('data-pl-title') || (person + '-report');
+        track('export', 'Downloaded CSV · ' + title);
         downloadCsv(title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.csv', data.headers, data.rows);
       }
       return;
@@ -10483,6 +10908,7 @@ const PERSONAL_PORTAL_JS = `(function () {
       var data2 = extractTable(tbl2);
       if (data2 && data2.rows.length) {
         var title2 = pdfBtn.getAttribute('data-pl-title') || (person + ' Report');
+        track('export', 'Downloaded PDF · ' + title2);
         exportPdfTables(title2, [{ title: title2, headers: data2.headers, rows: data2.rows }]);
       }
       return;
@@ -10490,6 +10916,7 @@ const PERSONAL_PORTAL_JS = `(function () {
     var stockBtn = e.target.closest && e.target.closest('#pl-exp-stock-csv');
     if (stockBtn) {
       var stockData = extractTable(document.getElementById('pl-tbl-cls-stock'));
+      if (stockData && stockData.rows.length) track('export', 'Downloaded stock CSV');
       if (stockData && stockData.rows.length) downloadCsv((person + '-stock').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.csv', stockData.headers, stockData.rows);
       return;
     }
@@ -10504,6 +10931,7 @@ const PERSONAL_PORTAL_JS = `(function () {
         allRows.push([secName].concat(d.headers));
         d.rows.forEach(function (r) { allRows.push([secName].concat(r)); });
       });
+      if (allRows.length) track('export', 'Downloaded full report CSV');
       if (allRows.length) downloadCsv((person + '-full-report').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.csv', allHeaders, allRows);
       return;
     }
@@ -10515,6 +10943,7 @@ const PERSONAL_PORTAL_JS = `(function () {
         var sec = t.closest('.pb-card') && t.closest('.pb-card').querySelector('h3');
         list.push({ title: sec ? sec.textContent.trim() : 'Table', headers: d.headers, rows: d.rows });
       });
+      track('export', 'Downloaded full report PDF');
       exportPdfTables(person + ' - Complete Performance & Stock Report', list);
     }
   });

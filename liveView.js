@@ -336,7 +336,11 @@
     const inst = U.$('#lv-instant', m);
     if (inst) inst.textContent = `render ${exactClock(Date.now())} · poll ${(live.speed / 1000).toFixed(1)}s`;
     const clockBox = U.$('#lv-data-clock', m);
-    if (clockBox && live.publicSessionId) {
+    if (clockBox && live.publicSessionId && p.kind === 'personal') {
+      const st = p.state || {};
+      const chName = ({ gv: 'GV Partner', ff: 'First Forward', all: 'GV + FF (All)' })[st.ch] || 'All';
+      clockBox.innerHTML = `<div class="notify-line muted" style="border-radius:10px;margin-top:10px"><b style="color:#e2e8f0">Personal link visitor</b><br>Channel: <b style="color:#5eead4">${esc(chName)}</b> · Tab: <b style="color:#5eead4">${esc(st.tab || 'overview')}</b>${st.q ? ` · Search: <b style="color:#fde047">${esc(st.q)}</b>` : ''}<br>${p.ip ? `IP: <b>${esc(p.ip)}</b><br>` : ''}Read-only mirror of the same report — cursor / typed values are not shared.</div>`;
+    } else if (clockBox && live.publicSessionId) {
       const ids = Array.isArray(p.requestIds) ? p.requestIds.slice(0, 5).map(esc).join(', ') : '';
       clockBox.innerHTML = `<div class="notify-line muted" style="border-radius:10px;margin-top:10px"><b style="color:#e2e8f0">Employee link activity</b><br>${p.sharing ? 'Live interaction sharing: <b style="color:#5eead4">employee opted in</b>' : 'Page Preview only: <b style="color:#facc15">visitor screen, cursor aur typed values share nahi ho rahe</b>'}<br>${ids ? `Request ID(s): <b>${ids}</b>` : 'Request IDs submission ke baad yahan dikhengi.'}</div>`;
     } else if (clockBox) {
@@ -354,11 +358,23 @@
       </div>`;
     }
     m.classList.toggle('is-live', !!(online && p.active));
-    pageEl.textContent = `${p.title || ''} · #/${p.page || ''}${p.sharing ? ' · Live Share ON' : ' · Preview only — visitor ka actual screen data nahi'}`;
+    pageEl.textContent = p.kind === 'personal' ? `${p.title || ''} · ${((p.state || {}).ch || 'all').toUpperCase()} · ${(p.state || {}).tab || 'overview'}${(p.state || {}).q ? ` · "${(p.state || {}).q}"` : ''}` : `${p.title || ''} · #/${p.page || ''}${p.sharing ? ' · Live Share ON' : ' · Preview only — visitor ka actual screen data nahi'}`;
     fit(p);
     // page mirror
     const page = String(p.page || 'home').replace(/^#?\/?/, '');
-    if (live.mirror && page !== live.lastPage) {
+    if (live.mirror && p.mirror && p.kind === 'personal') {
+      // Personal link: mirror the visitor's exact view (channel + search by URL, tab by hash).
+      const cut = String(p.mirror).indexOf('#');
+      const mPath = cut < 0 ? p.mirror : p.mirror.slice(0, cut), mHash = cut < 0 ? '' : p.mirror.slice(cut);
+      if (frame.dataset.mirrorPath !== mPath) {
+        frame.dataset.mirrorPath = mPath; frame.dataset.loaded = '0';
+        frame.onload = () => { frame.dataset.loaded = '1'; };
+        frame.src = p.mirror;
+      } else if (frame.dataset.loaded === '1' && mHash) {
+        try { if (frame.contentWindow.location.hash !== mHash) frame.contentWindow.location.hash = mHash; } catch (_) { /* same-origin only */ }
+      }
+      live.lastPage = 'personal';
+    } else if (live.mirror && page !== live.lastPage) {
       live.lastPage = page;
       const base = live.publicSessionId ? '/tag-request?embed=live' : `${location.pathname}?embed=live#/${page}`;
       try {
