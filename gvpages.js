@@ -326,7 +326,7 @@ FF.pages = FF.pages || {};
   // ================================================================================================
   // 📦 GV Stock (Tag Assignment)
   // ================================================================================================
-  const STOCK_VIEWS = [['overview', '📊 Overview'], ['tl', '👥 TL-wise'], ['agent', '🧑‍💼 Agent-wise'], ['class', '🚗 Class-wise']];
+  const STOCK_VIEWS = [['overview', '📊 Overview'], ['tl', '👥 TL-wise'], ['agent', '🧑‍💼 Agent-wise'], ['class', 'Class-wise']];
   let stockView = 'overview';
   let stockSel = { tl: '', agent: '' };
 
@@ -439,7 +439,7 @@ FF.pages = FF.pages || {};
       }).join('') || `<div class="empty-state">Koi GV agent match nahi hua — dropdown se select karo.</div>`;
     } else {
       const classRows = byTlClass;
-      viewHtml = `${card('🚗 GV Stock by Class <span class="dim">(TL split)</span>', tableHtml(['Class', 'Group', 'Stock', 'Share', 'Top TL'], classes.map((c) => {
+      viewHtml = `${card('GV Stock by Class <span class="dim">(TL split)</span>', tableHtml(['Class', 'Group', 'Stock', 'Share', 'Top TL'], classes.map((c) => {
         const rowsForClass = classRows.filter((r) => r.cls === c);
         const top = U.topEntries(U.groupSum(rowsForClass, (r) => r.tlName || 'Unassigned', (r) => r.n), 1)[0];
         return `<tr><td><b>${esc(c)}</b></td><td>${esc(G.classGroup(c))}</td><td class="num"><b>${U.fmt(U.sum(rowsForClass, (r) => r.n))}</b></td><td class="num">${U.fmtPct(U.pctOf(U.sum(rowsForClass, (r) => r.n), total), 0)}</td><td>${top ? `${esc(top[0])} <span class="dim">(${U.fmt(top[1])})</span>` : '—'}</td></tr>`;
@@ -712,7 +712,7 @@ FF.pages = FF.pages || {};
       <div class="grid g-3">${miniKpi('Stock (total)', U.fmt(r.stockTotal), `VC4 ${U.fmt(r.stockVc4)} · Comm ${U.fmt(r.stockComm)}`, '', { scope: 'stock', agent: r.agentName, agentId: r.agentId || '', channel: 'gv' })}${miniKpi('MTD issuance', U.fmt(r.curTotal), `VC4 ${U.fmt(r.curVc4)} · Comm ${U.fmt(r.curComm)}`, 'g3', profileDrill('mtd', currentYm))}${miniKpi('Last month', U.fmt(r.lastTotal), `VC4 ${U.fmt(r.lastVc4)} · Comm ${U.fmt(r.lastComm)}`, '', profileDrill('month', previousYm))}</div>
       <div class="grid g-3" style="margin-top:10px">${miniKpi('Growth', U.deltaHtml(r.growth, { decimals: 0 }), `Today: ${U.fmt(r.todayIssued)}`, '', profileDrill('mtd', currentYm))}${miniKpi('Active days (MTD)', U.fmt(r.curDays), `Last month: ${U.fmt(r.lastDays)}`, '', profileDrill('mtd', currentYm))}${miniKpi('Runrate', U.fmt(r.runrate), `VC4 ${U.fmt(r.runrateVc4)} · Comm ${U.fmt(r.runrateComm)}`, '', profileDrill('mtd', currentYm))}</div>
       <div class="grid g-2" style="margin-top:12px">
-        <div>${card('🚗 MTD class split', clsRows.length ? C.bars({ labels: clsRows.map(([k]) => k), height: 180, series: [{ name: 'Issued', values: clsRows.map(([, v]) => v), color: '#0d9488' }], showValues: true, onClickAttr: (i) => drillAttr({ src: 'gv', scope: 'mtd', ym: currentYm, agent: r.agentName, agentId: r.agentId || '', channel: 'gv', cls: clsRows[i][0] }) }) : '<div class="empty">MTD data nahi</div>')}</div>
+        <div>${card('MTD class split', clsRows.length ? C.bars({ labels: clsRows.map(([k]) => k), height: 180, series: [{ name: 'Issued', values: clsRows.map(([, v]) => v), color: '#0d9488' }], showValues: true, onClickAttr: (i) => drillAttr({ src: 'gv', scope: 'mtd', ym: currentYm, agent: r.agentName, agentId: r.agentId || '', channel: 'gv', cls: clsRows[i][0] }) }) : '<div class="empty">MTD data nahi</div>')}</div>
         <div>${card(`📅 Last month (${esc(previousYm)}) class split`, lastClsRows.length ? C.bars({ labels: lastClsRows.map(([k]) => k), height: 180, series: [{ name: 'Last month', values: lastClsRows.map(([, v]) => v), color: '#6366f1' }], showValues: true, onClickAttr: (i) => drillAttr({ src: 'gv', scope: 'month', ym: previousYm, agent: r.agentName, agentId: r.agentId || '', channel: 'gv', cls: lastClsRows[i][0] }) }) : '<div class="empty">Last month data nahi</div>')}</div>
       </div>
       <div class="grid g-2" style="margin-top:12px">
@@ -977,7 +977,7 @@ FF.pages = FF.pages || {};
     const pageRows = filtered.slice((stockReportState.page - 1) * stockReportState.pageSize, stockReportState.page * stockReportState.pageSize);
     const discrepancy = totals.stock - assignmentTotal;
     const rerender = () => renderStockReport(root, { view: stockReportState.view });
-    const controls = `<div class="card controls"><div class="seg">${[['agents', '🧑‍💼 Agents'], ['tls', '👥 TLs'], ['classes', '🚗 Classes'], ['dispatch', '🎯 Dispatch / Direct']].map(([key, label]) => `<button class="seg-btn ${stockReportState.view === key ? 'on' : ''}" data-gvsr-view="${key}">${label}</button>`).join('')}</div><div class="ctrl-row">
+    const controls = `<div class="card controls"><div class="seg">${[['agents', '🧑‍💼 Agents'], ['tls', '👥 TLs'], ['classes', 'Classes'], ['dispatch', '🎯 Dispatch / Direct']].map(([key, label]) => `<button class="seg-btn ${stockReportState.view === key ? 'on' : ''}" data-gvsr-view="${key}">${label}</button>`).join('')}</div><div class="ctrl-row">
       <label>Find <input class="input" id="gvsr-q" placeholder="Agent / TL / ID / mobile" value="${esc(stockReportState.q)}"></label>
       <label>TL <select id="gvsr-tl"><option value="">All TLs</option>${gvDirectList.length ? `<option value="__direct__" ${stockReportState.tl === '__direct__' ? 'selected' : ''}>🚫 Direct Agents · no TL (${gvDirectList.length})</option>` : ''}${tlNames.map((name) => `<option value="${esc(name)}" ${norm(name) === norm(stockReportState.tl) ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
       <label>Class <select id="gvsr-cls"><option value="">All classes</option>${classNames.map((name) => `<option value="${esc(name)}" ${name === stockReportState.cls ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>

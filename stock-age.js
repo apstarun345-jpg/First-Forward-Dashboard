@@ -11,7 +11,7 @@
  *     uski allocation date (J, phir G = BC/master ko allocate hone ki date) li jaati hai.
  *
  * Buckets cumulative hain (v3.28 jaise): ≥ 1 mahina (30 din) · ≥ 3 (90) · ≥ 5 (150) · ≥ 6 (180).
- * Groups: 0 = 🚗 VC4 + VC20 (car) · 1 = 🚚 VC5+ (commercial).
+ * Groups: 0 = VC4 + VC20 (car) · 1 = VC5+ (commercial).
  * Pure functions — dev/stock-age.test.js inhe seedha test karta hai. */
 
 export const AGE_THRESH = [30, 90, 150, 180];
@@ -38,7 +38,7 @@ export function parseStockDay(value) {
   if (m) { const mi = MONTHS.indexOf(m[2].toLowerCase()); const y = +m[3] < 100 ? 2000 + +m[3] : +m[3]; if (mi >= 0) return Date.UTC(y, mi, +m[1]) / DAY_MS; }
   return 0;
 }
-/** VC4 / VC20 → 0 (🚗 core) · baaki sab → 1 (🚚 VC5+). */
+/** VC4 / VC20 → 0 (core) · baaki sab → 1 (VC5+). */
 export function groupOf(cls) {
   const c = str(cls).toUpperCase().replace(/^VC/, '').replace(/\.0+$/, '');
   return c === '4' || c === '20' ? 0 : 1;

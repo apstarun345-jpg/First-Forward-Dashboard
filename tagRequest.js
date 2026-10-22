@@ -7,7 +7,7 @@
  *                          VC4·VC5·VC6·VC7·VC12·VC16). "➕ Add new agent" se naya block. Agent ne
  *                          employee se tag maange → employee uski request yahan bharta hai.
  *   3. 📤 Submit        — system chup-chaap sheet data check karta hai (stock / last month / MTD —
- *                          🚗 VC4+VC20 aur 🚚 VC5+ alag) aur snapshot saath bhejta hai. Server HAR AGENT
+ *                          VC4+VC20 aur VC5+ alag) aur snapshot saath bhejta hai. Server HAR AGENT
  *                          ki alag request banata hai (apna ID / status / edit / label).
  *   4. 🔎 Status        — employee link par agent ke MOBILE number (ya Request ID) se status.
  *   5. 📥 Tag Requests  — admin: har request EK ROW me (koi "Kholo" nahi) — stock total + 🚗/🚚,
@@ -21,7 +21,7 @@
  *   • 🔍 Search dropdown me har agent/TL ke saath stock · pichhle mahine · is mahine (MTD) —
  *     naam likhte hi sabka stock saamne (employee link par bhi, koi login nahi).
  *   • 📦 "Sabhi agents ka stock" board (employee card ke neeche, collapsed) — poora agent list,
- *     search + 🟦 FF / 🟩 GV filter, 🚗 VC4+VC20 · 🚚 VC5+ · total stock · last · MTD · cover din.
+ *     search + 🟦 FF / 🟩 GV filter, VC4+VC20 · VC5+ · total stock · last · MTD · cover din.
  *     Row par click → woh agent seedha form me jud jaata hai. Admin ise Link settings se OFF kar sakta hai.
  *   • 📥 Admin table ke footer me colourful total chips (rows · approved tags · stock · suggestion).
  *
@@ -222,7 +222,7 @@ FF.pages = FF.pages || {};
     return state.formCfgPromise;
   }
 
-  // ---- 📚 index: agent → stock / issuance / TL / priority (+ 🚗 VC4+VC20 · 🚚 VC5+ groups) ----------
+  // ---- 📚 index: agent → stock / issuance / TL / priority (+ VC4+VC20 · VC5+ groups) ----------
   /** 🚗 core = VC4 + VC20 (car/jeep) · 🚚 comm = VC5+ (commercial). */
   const groupOf = (cls, group) => {
     const g = String(group || '');
@@ -1240,7 +1240,7 @@ body.colorful .from-hdr { color: #166534; }
     return [...tls, ...agents];
   }
   /** Ek line me stock + issuance — naam likhte hi employee ko turant pata chal jaye kitna stock hai. */
-  const stockLine = (it) => `<small class="tr-s-stock" title="Stock (🚗 VC4+VC20 · 🚚 VC5+) · pichhle mahine issue · is mahine MTD">📦 stock <b>${fmt(it.stock)}</b> · last <b>${fmt(it.last)}</b> · MTD <b>${fmt(it.cur)}</b></small>`;
+  const stockLine = (it) => `<small class="tr-s-stock" title="Stock (VC4+VC20 · VC5+) · pichhle mahine issue · is mahine MTD">📦 stock <b>${fmt(it.stock)}</b> · last <b>${fmt(it.last)}</b> · MTD <b>${fmt(it.cur)}</b></small>`;
   function suggestHtml(items) {
     if (!items.length) return `<div class="tr-suggest-empty">${state.index ? 'Koi match nahi mila — naya agent hai to naam likh kar aage badho' : 'Agent list load ho rahi hai…'}</div>`;
     return items.map((it, i) => it.kind === 'tl'
@@ -1291,13 +1291,13 @@ body.colorful .from-hdr { color: #166534; }
       ${box('prio', '🚦 Priority', prioChip, `${cover == null ? 'cover —' : `cover ${fmt(cover, true)} din`}${o.agents != null ? ` · 👥 ${fmt(o.agents)} agents${o.self ? ' + TL' : ''}` : ''}${rec.channel === 'gv' ? ' · 🟩 GV' : ' · 🟦 FF'}`)}
     </div>`;
   }
-  /** Agent ke qty-list ke neeche: boxes + EK class-wise table (VC20 🚗 VC4+VC20 group me ginta hai). */
+  /** Agent ke qty-list ke neeche: boxes + EK class-wise table (VC20 VC4+VC20 group me ginta hai). */
   function agentGroupSummaryHtml(rec) {
     if (!rec || rec.isTl) return '';
-    return personBoxesHtml(rec) + classBreakdownHtml(rec, { title: '📊 Class-wise (VC4 · VC20 · VC5+)', note: 'VC20 ki apni request row nahi — wo 🚗 VC4 + VC20 group me ginta hai.' });
+    return personBoxesHtml(rec) + classBreakdownHtml(rec, { title: '📊 Class-wise (VC4 · VC20 · VC5+)', note: 'VC20 ki apni request row nahi — wo VC4 + VC20 group me ginta hai.' });
   }
   /** 📊 VC4 · VC20 · VC5+ ka stock / last month / current MTD + suggested qty (stock − aur bina stock).
-   *  VC20 ki apni class row nahi hoti (wo 🚗 VC4+VC20 me judta hai) — isliye VC20 = core − VC4. */
+   *  VC20 ki apni class row nahi hoti (wo VC4+VC20 me judta hai) — isliye VC20 = core − VC4. */
   function classBreakdownRows(rec, m) {
     const g = m || groupMetrics(rec);
     const days = Math.max(1, num(g.days) || 1);
@@ -1393,7 +1393,7 @@ body.colorful .from-hdr { color: #166534; }
         <td class="num">${num(a.cur) > 0 && num(a.stock) > 0 ? `<span class="dim small">${fmt(Math.round((num(a.stock) / num(a.cur)) * 10) / 10, 1)} din</span>` : '<span class="dim small">—</span>'}</td>
       </tr>`).join('');
     return `<div class="table-wrap tall tr-sb-wrap"><table class="tbl compact tr-sb-tbl">
-      <thead><tr><th>Agent</th><th>Channel</th><th class="num" title="VC4 + VC20 (car/jeep)">🚗 VC4/VC20</th><th class="num" title="VC5+ (commercial)">🚚 VC5+</th><th class="num">Stock total</th><th class="num">Last month</th><th class="num">MTD</th><th class="num" title="stock ÷ is mahine ka average per din">Cover</th></tr></thead>
+      <thead><tr><th>Agent</th><th>Channel</th><th class="num" title="VC4 + VC20 (car/jeep)">VC4/VC20</th><th class="num" title="VC5+ (commercial)">VC5+</th><th class="num">Stock total</th><th class="num">Last month</th><th class="num">MTD</th><th class="num" title="stock ÷ is mahine ka average per din">Cover</th></tr></thead>
       <tbody>${body}</tbody>
       <tfoot><tr class="row-total"><td><b>${fmt(all.length)} agents</b></td><td></td><td class="num"><b>${fmt(tot(all, 'core.stock'))}</b></td><td class="num"><b>${fmt(tot(all, 'comm.stock'))}</b></td><td class="num"><b>${fmt(tot(all, 'stock'))}</b></td><td class="num"><b>${fmt(tot(all, 'last'))}</b></td><td class="num"><b>${fmt(tot(all, 'cur'))}</b></td><td></td></tr></tfoot>
     </table></div>
@@ -1416,7 +1416,7 @@ body.colorful .from-hdr { color: #166534; }
             <div class="tr-sb-chips" data-tr-sb-chips>${stockBoardChipsHtml()}</div>
           </div>
           <div data-tr-sb-body>${stockBoardTableHtml()}</div>
-          <p class="dim small" style="margin:8px 0 0">🚗 = VC4 + VC20 (car/jeep) · 🚚 = VC5+ (commercial) · <b>Cover</b> = stock ÷ is mahine ka average per din · ye numbers sheet ke live data se hain (FF kal tak · GV aaj tak).</p>
+          <p class="dim small" style="margin:8px 0 0">VC4 + VC20 = car/jeep · VC5+ = commercial · <b>Cover</b> = stock ÷ is mahine ka average per din · ye numbers sheet ke live data se hain (FF kal tak · GV aaj tak).</p>
         </div>
       </details></section>`;
   }
@@ -1602,7 +1602,7 @@ body.colorful .from-hdr { color: #166534; }
         <button type="button" class="btn" data-tr-act="clear">🧹 Clear</button>
         <button type="button" class="btn primary tr-send-btn" data-tr-act="send" ${busy ? 'disabled' : ''}>${busy ? '⏳ Bhej rahe hain…' : '📤 Request submit karo'}</button>
       </div>
-      <p class="dim small">🔎 On submit, the system checks the agent's <b>stock</b>, <b>last month</b> and <b>current month</b> issuance (🚗 VC4+VC20 · 🚚 VC5+ separately) from the sheet and sends it to the admin. Each agent's request is created separately — check the status in the <b>🔎 Status</b> tab with the agent's mobile number.</p>`;
+      <p class="dim small">🔎 On submit, the system checks the agent's <b>stock</b>, <b>last month</b> and <b>current month</b> issuance (VC4+VC20 · VC5+ separately) from the sheet and sends it to the admin. Each agent's request is created separately — check the status in the <b>🔎 Status</b> tab with the agent's mobile number.</p>`;
     rootEl.querySelectorAll('.tr-agent-card').forEach(bindAgentCard);
     bindStockBoard(rootEl);
     bindFormGlobal();
@@ -2647,7 +2647,13 @@ body.colorful .from-hdr { color: #166534; }
     snap: 'Submit ke waqt ka snapshot (live data me agent nahi mila)',
     rows: 'Sirf requested classes ka data (purani request)'
   };
-  const subLine = (a, b, d) => `<small class="tr-m-sub">🚗 ${fmt(a, d)} · 🚚 ${fmt(b, d)}</small>`;
+  /** Aligned label : value lines (VC4+VC20 / VC5+ …) — emoji nahi, seedha class text. */
+  const grpLines = (items) => `<div class="tr-grp">${items.map(([k, v]) => `<span class="tr-grp-k">${esc(k)}</span><span class="tr-grp-v">${v}</span>`).join('')}</div>`;
+  const subLine = (a, b, d) => grpLines([['VC4+VC20', fmt(a, d)], ['VC5+', fmt(b, d)]]);
+  /** Growth = month-end projection vs last month (metricNumbers jaisa hi). */
+  const growthFor = (cur, last, days, ym) => { const exp = U.projectMonthEnd(cur, days, ym); return last > 0 ? ((exp - last) / last) * 100 : (exp > 0 ? null : 0); };
+  const growthTone = (g) => (g === null ? 'up' : g > 0.05 ? 'up' : g < -0.05 ? 'down' : 'flat');
+  const growthVal = (g) => `<b class="tr-gv ${growthTone(g)}">${growthSmall(g)}</b>`;
   const growthHtml = (g) => (g === null ? '<span class="delta up">🆕 new</span>' : `<span class="delta ${g > 0.05 ? 'up' : g < -0.05 ? 'down' : 'flat'}">${g > 0.05 ? '▲ +' : g < -0.05 ? '▼ ' : ''}${fmt(g, 1)}%</span>`);
   const growthSmall = (g) => (g === null ? 'new' : `${g > 0 ? '+' : ''}${fmt(g, 0)}%`);
   /** Metric cells — admin rows also show both stock-adjusted and no-stock-deduction suggestions. */
@@ -2687,11 +2693,18 @@ body.colorful .from-hdr { color: #166534; }
       `<td class="num tr-m tr-m-current" data-tr-m="cur"><b class="tr-big-num">${fmt(n.total.cur)}</b><div class="tr-class-grid">${classLineHtml('cur')}</div></td>`,
       `<td class="num tr-m" data-tr-m="rate" title="${fmt(n.total.cur)} ÷ ${fmt(n.days)} din"><b>${fmt(n.total.rate, 1)}</b>${subLine(n.core.rate, n.comm.rate, 1)}</td>`,
       `<td class="num tr-m" data-tr-m="exp"><b>${fmt(n.total.exp)}</b>${subLine(n.core.exp, n.comm.exp)}</td>`,
-      `<td class="num tr-m" data-tr-m="growth">${growthHtml(n.total.growth)}<small class="tr-m-sub">🚗 ${growthSmall(n.core.growth)} · 🚚 ${growthSmall(n.comm.growth)}</small>${isAdmin() ? needBadgeHtml(dr) : ''}</td>`
+      `<td class="num tr-m tr-m-growth" data-tr-m="growth">${(() => {
+        let items;
+        if (rec) {
+          const rows = classBreakdownRows(rec, m);
+          items = rows.filter(([label]) => label !== 'Total').map(([label, r]) => [label, growthVal(growthFor(num(r.cur), num(r.last), n.days, n.ym))]);
+        } else items = [['VC4+VC20', growthVal(n.core.growth)], ['VC5+', growthVal(n.comm.growth)]];
+        return `${grpLines(items)}<div class="tr-gr-all"><span class="tr-grp-k">All classes</span>${growthHtml(n.total.growth)}</div>`;
+      })()}${isAdmin() ? needBadgeHtml(dr) : ''}</td>`
     ];
     if (isAdmin()) cells.push(`<td class="num tr-m tr-c-suggest" data-tr-m="suggest" title="The no-deduction quantity does not subtract current stock.">
       <div class="tr-suggest-pair"><span class="tr-suggest-net"><small>After stock</small><b>${fmt(n.total.suggest.net)}</b></span><span class="tr-suggest-gross"><small>Without stock deduction</small><b>${fmt(n.total.suggest.gross)}</b></span></div>
-      <small class="tr-m-sub">🚗 ${fmt(n.core.suggest.net)}/${fmt(n.core.suggest.gross)} · 🚚 ${fmt(n.comm.suggest.net)}/${fmt(n.comm.suggest.gross)}</small>
+      ${grpLines([['VC4+VC20', `${fmt(n.core.suggest.net)}/${fmt(n.core.suggest.gross)}`], ['VC5+', `${fmt(n.comm.suggest.net)}/${fmt(n.comm.suggest.gross)}`]])}
     </td>`);
     return cells.join('');
   }
@@ -2967,7 +2980,7 @@ body.colorful .from-hdr { color: #166534; }
         <tbody data-tr-tbody><tr><td colspan="${requestColumnCount()}">${U.spinner('Requests load ho rahi hain…')}</td></tr></tbody>
       </table></div>
       <div class="tr-req-foot dim small" data-tr-foot></div>
-      <p class="dim small tr-legend">🚗 = VC4 + VC20 (car/jeep) · 🚚 = VC5+ (commercial) · Run rate = current MTD ÷ din (FF: kal tak, GV: aaj tak) · Expected = run rate × mahine ke din · Growth = expected vs last month · <i class="tr-src live"></i> live data · <i class="tr-src snap"></i> submit ke waqt ka snapshot · Approve ke baad ☑ select → 🖨️ Print selected = har request ka label sirf ek baar.</p>
+      <p class="dim small tr-legend">VC4 + VC20 = car/jeep · VC5+ = commercial · Run rate = current MTD ÷ din (FF: kal tak, GV: aaj tak) · Expected = run rate × mahine ke din · Growth = expected vs last month · <i class="tr-src live"></i> live data · <i class="tr-src snap"></i> submit ke waqt ka snapshot · Approve ke baad ☑ select → 🖨️ Print selected = har request ka label sirf ek baar.</p>
     </section>`;
   }
   function renderRequests() {

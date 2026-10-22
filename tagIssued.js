@@ -398,7 +398,7 @@ FF.pages = FF.pages || {};
     const topFf = U.topEntries(ffAgentTotals, rankCount);
     const hb = (list, sel, valueLabel, off) => C.hbars({ valueLabel, items: list.map(([name, o], i) => ({ label: name, sub: sel === 'total' ? `VC4 ${U.fmt(o.vc4)} · Commercial ${U.fmt(o.comm)}` : '', value: o[sel], color: C.PALETTE[(i + off) % C.PALETTE.length] })) });
     return `<div class="grid g-2">${card('🏆 Top GV agents', hb(top((o) => o.total), 'total', 'Tags', 0))}${card('⭐ Top First Forward agents', `${C.hbars({ valueLabel: 'Tags', items: topFf.map(([name, n], i) => ({ label: name, value: n, color: C.PALETTE[i % C.PALETTE.length] })) })}<small class="dim">FF agent source month-level hai — partial month me poora month judta hai.</small>`)}</div>
-      <div class="grid g-2">${card('🚗 Top GV VC4 agents', hb(top((o) => o.vc4), 'vc4', 'VC4 tags', 0))}${card('🚚 Top GV Commercial agents', hb(top((o) => o.comm), 'comm', 'Commercial tags', 3))}</div>
+      <div class="grid g-2">${card('Top GV VC4 agents', hb(top((o) => o.vc4), 'vc4', 'VC4 tags', 0))}${card('Top GV Commercial agents', hb(top((o) => o.comm), 'comm', 'Commercial tags', 3))}</div>
       ${card('🏢 Top GV teams / supervisors', C.hbars({ valueLabel: 'Tags', items: U.topEntries(gvTlMap, rankCount).map(([name, n], i) => ({ label: name, value: n, color: C.PALETTE[(i + 5) % C.PALETTE.length] })) }))}`;
   }
 

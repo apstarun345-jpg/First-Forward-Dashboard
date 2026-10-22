@@ -1437,9 +1437,9 @@ FF.pages = FF.pages || {};
       const pct = (n) => (tot('total') ? ` <small class="dim">${Math.round((n / tot('total')) * 100)}%</small>` : '');
       const peak = days.reduce((best, d) => (d.total > (best ? best.total : -1) ? d : best), null);
       const classChips = days.length ? `<div class="msp-trend-sum">
-          <span class="msp-tsum vc4"><small>🚗 VC4</small><b>${U.fmt(tot('vc4'))}</b>${pct(tot('vc4'))}</span>
-          <span class="msp-tsum vc20"><small>🛻 VC20</small><b>${U.fmt(tot('vc20'))}</b>${pct(tot('vc20'))}</span>
-          <span class="msp-tsum vc5p"><small>🚚 VC5+</small><b>${U.fmt(tot('vc5p'))}</b>${pct(tot('vc5p'))}</span>
+          <span class="msp-tsum vc4"><small>VC4</small><b>${U.fmt(tot('vc4'))}</b>${pct(tot('vc4'))}</span>
+          <span class="msp-tsum vc20"><small>VC20</small><b>${U.fmt(tot('vc20'))}</b>${pct(tot('vc20'))}</span>
+          <span class="msp-tsum vc5p"><small>VC5+</small><b>${U.fmt(tot('vc5p'))}</b>${pct(tot('vc5p'))}</span>
           <span class="msp-tsum total"><small>🏷️ Total · ${U.fmt(days.length)} din</small><b>${U.fmt(tot('total'))}</b> <small class="dim">avg ${U.fmt(tot('total') / Math.max(1, days.length), true)}/din</small></span>
           ${peak ? `<span class="msp-tsum peak"><small>⭐ Best din</small><b>${esc(U.labelDateKey(`${ym}-${U.pad2(peak.day)}`, true))}</b> <small class="dim">${U.fmt(peak.total)} tags</small></span>` : ''}
         </div>` : '';

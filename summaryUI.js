@@ -91,8 +91,8 @@ window.FF = window.FF || {};
   function classTableHtml(v) {
     const rows = v.classes || [];
     const max = Math.max(1, ...rows.map((c) => Math.max(c.cur || 0, c.last || 0, c.stock || 0)));
-    if (!rows.length) return '<section class="card gs-card"><div class="card-head"><h3>🚗 Class-wise</h3></div><div class="card-body empty">Koi class row nahi mili.</div></section>';
-    return `<section class="card gs-card"><div class="card-head"><h3>🚗 Class-wise · issuance &amp; stock</h3><span class="dim small">Row par click = us class ki tag rows</span></div>
+    if (!rows.length) return '<section class="card gs-card"><div class="card-head"><h3>Class-wise</h3></div><div class="card-body empty">Koi class row nahi mili.</div></section>';
+    return `<section class="card gs-card"><div class="card-head"><h3>Class-wise · issuance &amp; stock</h3><span class="dim small">Row par click = us class ki tag rows</span></div>
       <div class="table-wrap"><table class="tbl compact gs-class">
         <thead><tr><th>Class</th><th class="num">${esc(v.lastYm)}</th><th class="num">${esc(v.ym)}</th><th class="num">Growth</th><th class="num">Stock</th><th></th></tr></thead>
         <tbody>${rows.map((c) => `<tr class="clickable" data-gs-cls="${esc(c.cls)}">

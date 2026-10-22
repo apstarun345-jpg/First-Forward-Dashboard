@@ -94,8 +94,8 @@ FF.pages = FF.pages || {};
       output.innerHTML = `${FF.insights.ui.vividMetrics(cxKpis)}<div class="chart-range-note">${esc(U.labelDate(date(from),true))} – ${esc(U.labelDate(date(to),true))} · FF ${U.fmt(ff.total)} tags · GV ${U.fmt(gv.total)} tags · Total ${U.fmt(ff.total+gv.total)}</div>
         <div class="grid g-2">${card('📈 Daily issuance trend · GV vs FF', `${trend}${tooLong}`)}${card('🤝 Total share by channel', totalsDonut)}</div>
         <div class="grid g-2">${card('🏷️ Vehicle class comparison', classChart)}${card('🔧 Issuance, replacement & exceptions', `${opsChart}<p class="dim small">GV source me separate Wrong VRN field available nahi hai; GV ka Wrong VRN chart value unavailable hai.</p>`)}</div>
-        <div class="grid g-2">${card('🏆 Top GV agents · all tags', bars(top('total'),'total','Tags'))}${card('🚗 Top GV VC4 agents', bars(top('vc4'),'vc4','VC4 tags'))}</div>
-        <div class="grid g-2">${card('🚚 Top GV Commercial agents', bars(top('commercial'),'commercial','Commercial tags'))}${card('🏢 Top GV TLs / supervisors', C.hbars({items:U.topEntries(teams,12).map(([label,value],i)=>({label,value,color:C.PALETTE[(i+4)%C.PALETTE.length]})),valueLabel:'Tags'}))}</div>
+        <div class="grid g-2">${card('🏆 Top GV agents · all tags', bars(top('total'),'total','Tags'))}${card('Top GV VC4 agents', bars(top('vc4'),'vc4','VC4 tags'))}</div>
+        <div class="grid g-2">${card('Top GV Commercial agents', bars(top('commercial'),'commercial','Commercial tags'))}${card('🏢 Top GV TLs / supervisors', C.hbars({items:U.topEntries(teams,12).map(([label,value],i)=>({label,value,color:C.PALETTE[(i+4)%C.PALETTE.length]})),valueLabel:'Tags'}))}</div>
         ${card('⭐ Top First Forward agents · month-level source', C.hbars({items:topFf,valueLabel:'Tags'}) + '<p class="dim small">FF agent totals are available by month only; partial-month date ranges include the full month(s).')}`;
       C.mount(output);
       FF.insights.ui.bindMetricDetails(output, 'Daily FF vs GV detail', ['Date', 'First Forward', 'GV Partner', 'Total', 'GV share'], dailyTableRows, {

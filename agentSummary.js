@@ -626,7 +626,7 @@ FF.pages = FF.pages || {};
     ].filter((x, i) => i !== 1 || Boolean(x));
 
     if ((p.classTable || []).length) {
-      lines.push('', `*🚗 Class-wise Issuance & Stock (${p.lastYm || 'Last'} → ${p.curYm || 'MTD'}):*`);
+      lines.push('', `*Class-wise Issuance & Stock (${p.lastYm || 'Last'} → ${p.curYm || 'MTD'}):*`);
       p.classTable.forEach((c) => {
         lines.push(`• ${c.cls}: Last ${fmt(c.last)} → MTD *${fmt(c.cur)}* | Stock: *${fmt(c.stock)}*`);
       });
@@ -1202,7 +1202,7 @@ FF.pages = FF.pages || {};
 
       <div class="as-two">
         <div class="card">
-          <div class="card-head"><h3>🚗 Class-wise Issuance &amp; Stock</h3><span class="dim small">${esc(p.lastYm || 'Last')} → ${esc(p.curYm || 'MTD')} · Row par click karke details kholein</span></div>
+          <div class="card-head"><h3>Class-wise Issuance &amp; Stock</h3><span class="dim small">${esc(p.lastYm || 'Last')} → ${esc(p.curYm || 'MTD')} · Row par click karke details kholein</span></div>
           <div class="table-wrap"><table class="tbl compact">
             <thead><tr><th>Class</th><th class="num">${esc(p.lastYm || 'Last')}</th><th class="num">${esc(p.curYm || 'MTD')}</th><th class="num">Growth</th><th class="num">Stock</th></tr></thead>
             <tbody>${clsRows.map((c) => `<tr class="clickable" data-kpi="${esc(`${stockSpec}&cls=${encodeURIComponent(c.cls)}`)}"><td><b>${esc(c.cls)}</b></td><td class="num">${fmt(c.last)}</td><td class="num"><b>${fmt(c.cur)}</b></td><td class="num">${U.pctHtml(c.growth)}</td><td class="num">${fmt(c.stock)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No class rows</td></tr>'}</tbody>

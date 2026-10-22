@@ -50,7 +50,7 @@ window.FF = window.FF || {};
   };
   const SUGGEST_CHIPS = () => [
     ['wrong VRN kitne', T('❌ Wrong VRN?', '❌ Wrong VRN?')],
-    ['top vc4 agents', T('🚗 Top VC4', '🚗 Top VC4')],
+    ['top vc4 agents', T('Top VC4', 'Top VC4')],
     ['top gv agents', T('🟩 Top GV agents', '🟩 Top GV agents')],
     ['briefing do', T('☀️ Briefing', '☀️ Briefing')],
     ['aaj ka total issuance', T('📊 Aaj ka total', "📊 Today's total")],

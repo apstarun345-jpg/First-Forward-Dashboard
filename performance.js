@@ -401,7 +401,7 @@ FF.pages = FF.pages || {};
     if (idx < 0) throw new Error('REPORT tab ka header (Agent Profile Details…) nahi mila — sheet structure badal gayi?');
     resolveSchema(rows[idx], rows[idx + 1] || []);
     state.agents = buildAgents(rows, idx + 2);
-    attachBins(state.agents, classBinsIndex()); // 🚗 EIR 4-way bins (VC4/VC20/VC5+) per agent
+    attachBins(state.agents, classBinsIndex()); // EIR 4-way bins (VC4/VC20/VC5+) per agent
     if (!state.agents.length) throw new Error('REPORT me koi agent row nahi mili.');
     state.allTlGroups = buildTlGroups(state.agents, false);
     state.sourceTable = table;
@@ -449,7 +449,7 @@ FF.pages = FF.pages || {};
     k.weekTotal = k.week.reduce((a, b) => a + b, 0); k.lastDay = k.week[6];
     k.growth = k.lastTotal > 0 ? (k.projected / k.lastTotal - 1) * 100 : null;
     k.dailyAvg = k.curTotal / ffDays();
-    // 🚗 EIR 4-way split (agentClass bins) — filtered lists use their people rows; full-scope
+    // EIR 4-way split (agentClass bins) — filtered lists use their people rows; full-scope
     // totals above are taken directly from the exact daily ledger.
     if (!k.exactSource) {
       k.curVc20 = U.sum(list, (a) => (a.curBins ? a.curBins.VC20 : 0));
@@ -488,7 +488,7 @@ FF.pages = FF.pages || {};
     const agg = (ym) => { const o = { VC4: 0, VC20: 0, 'VC5+': 0, total: 0, repl: 0 }; mine.filter((r) => r.ym === ym).forEach((r) => { o[r.group] += r.n; o.total += r.n; if (r.type === 'REPLACEMENT') o.repl += r.n; }); return o; };
     return { cur, last, curS: agg(cur), lastS: agg(last), curLabel: U.labelYM(cur), lastLabel: U.labelYM(last), day: latest.getDate() };
   }
-  const CLASS_DEFINE = '<div class="dim small" style="margin-top:8px">🚗 <b>VC4</b> = 4-wheeler (payable) · 🛻 <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b></div>';
+  const CLASS_DEFINE = '<div class="dim small" style="margin-top:8px"><b>VC4</b> = 4-wheeler (payable) · <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b></div>';
   function vsCommercialCard(title, cur, last, labels, note) {
     const lc = labels || { cur: state.months.cur, last: state.months.last };
     const split = cur.vc20 != null && cur.vc5p != null && last.vc20 != null && last.vc5p != null;
@@ -501,7 +501,7 @@ FF.pages = FF.pages || {};
     return `<div class="dsec"><h4>${title}</h4>${C.bars({ labels: head, height: 150, series: [{ name: lc.last, values: rows.map(([, , b]) => b), color: '#c7d2fe' }, { name: lc.cur, values: rows.map(([, a]) => a), color: '#6366f1' }], legendAlways: true })}
       <table class="tbl compact" style="margin-top:10px"><thead><tr><th></th><th class="num">${esc(lc.cur)}</th><th class="num">${esc(lc.last)}</th><th class="num">Growth</th><th class="num">Share (cur)</th></tr></thead><tbody>${rows.map(([l, a, b]) => `<tr><td><b>${l}</b></td><td class="num"><b>${fmt(a)}</b></td><td class="num">${fmt(b)}</td><td class="num">${U.deltaHtml(U.growth(a, b), { decimals: 0 })}</td><td class="num">${share(a, cur.total)}</td></tr>`).join('')}</tbody></table>${note ? `<div class="dim small" style="margin-top:6px">${note}</div>` : ''}${CLASS_DEFINE}</div>`;
   }
-  // 🚗 EIR agentClass se per-agent 4-way bins (cur + prev month) — classSplit ka bulk version.
+  // EIR agentClass se per-agent 4-way bins (cur + prev month) — classSplit ka bulk version.
   function classBinsIndex() {
     const rows = S.get('agentClass') || [];
     const daily = S.get('daily') || [];
@@ -668,7 +668,7 @@ FF.pages = FF.pages || {};
     const row = (label, calc, strong) => `<div class="pf-dispatch-row ${strong ? 'pf-dispatch-row-total' : ''}"><b>${label}</b><span class="pf-dispatch-after"><small>After stock</small><b class="sug-chip">${fmt(calc.net)}</b></span><span class="pf-dispatch-gross"><small>Without subtracting stock</small><b class="sug-chip wo">${fmt(calc.gross)}</b></span></div>`;
     const agentSum = U.sum(group.agents, (a) => Math.max(0, Math.ceil((a.curVc4 / b.days) * days - a.stockVc4)));
     const agentSumComm = U.sum(group.agents, (a) => Math.max(0, Math.ceil((a.curNvc4 / b.days) * days - a.stockNvc4)));
-    return `<div class="dsec pf-dispatch-card"><h4>🚚 Suggested dispatch quantity · TL level · ${fmt(days)} days</h4><p class="dim small">📅 ${esc(basisLine('ff', b))} — isliye TL run-rate = TL issue ÷ <b>${fmt(b.days)} din</b> × ${fmt(days)} din. TL stock ghata kar "After stock", bina ghate "Without subtracting stock".</p><div class="pf-dispatch-head"><span>Class</span><span>After stock</span><span class="pf-dispatch-gross-label">Without subtracting stock</span></div>${row('VC4', vc4)}${row('Commercial', comm)}${row('All tags', all, true)}
+    return `<div class="dsec pf-dispatch-card"><h4>Suggested dispatch quantity · TL level · ${fmt(days)} days</h4><p class="dim small">📅 ${esc(basisLine('ff', b))} — isliye TL run-rate = TL issue ÷ <b>${fmt(b.days)} din</b> × ${fmt(days)} din. TL stock ghata kar "After stock", bina ghate "Without subtracting stock".</p><div class="pf-dispatch-head"><span>Class</span><span>After stock</span><span class="pf-dispatch-gross-label">Without subtracting stock</span></div>${row('VC4', vc4)}${row('Commercial', comm)}${row('All tags', all, true)}
       <div class="dgrid" style="margin-top:8px">
         <div class="drow"><span>Run-rate VC4 · Comm · Total (÷ ${fmt(b.days)} din)</span><b>${fmt(vc4.rate, true)} · ${fmt(comm.rate, true)} · ${fmt(all.rate, true)}/day</b></div>
         <div class="drow"><span>Expected month-end</span><b>${fmt(U.projectMonthEnd(curTotal, b.days, ym))}${group.tlProjected ? ` <small class="dim">(sheet ${fmt(group.tlProjected)})</small>` : ''}</b></div>
@@ -790,7 +790,7 @@ FF.pages = FF.pages || {};
     const agSpec = `agent=${encodeURIComponent(agent.name)}&agentId=${encodeURIComponent(agent.agentId || '')}`;
     // Issuance totals, class split and drill-down all share the EIR-authoritative aggregate now.
     // REPORT is retained only for operational fields and its percentage/status metadata.
-    const eirNote = `🚗 Issuance total aur class split dono <b>EIR</b> ke same authoritative ledger se hain · operational run-rate basis ${esc(b.shortLabel || b.label)} tak hai.`;
+    const eirNote = `Issuance total aur class split dono <b>EIR</b> ke same authoritative ledger se hain · operational run-rate basis ${esc(b.shortLabel || b.label)} tak hai.`;
     const summary = `<div class="dsec"><div class="dkpis">
         <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=mtd&ym=${esc(ymCur)}&${agSpec}&title=${encodeURIComponent(`${agent.name} · ${state.months.cur} MTD`)}" title="Click to drill down into ${esc(agent.name)} ${esc(state.months.cur)} MTD"><small>${esc(state.months.cur)} MTD</small><b>${fmt(agent.curTotal)}</b><span>VC4 ${fmt(agent.curVc4)} · Comm ${fmt(agent.curNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
         <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=month&ym=${esc(ymLast)}&${agSpec}&title=${encodeURIComponent(`${agent.name} · ${state.months.last}`)}" title="Click to drill down into ${esc(agent.name)} ${esc(state.months.last)}"><small>${esc(state.months.last)}</small><b>${fmt(agent.lastTotal)}</b><span>VC4 ${fmt(agent.lastVc4)} · Comm ${fmt(agent.lastNvc4)}</span></div>
@@ -832,7 +832,7 @@ FF.pages = FF.pages || {};
     const tlSpec = `tl=${encodeURIComponent(tlNameVal)}`;
     // Issuance totals, class split and drill-down all share the EIR-authoritative aggregate now.
     // REPORT is retained only for operational fields and its percentage/status metadata.
-    const eirNote = `🚗 Issuance total aur class split dono <b>EIR</b> ke same authoritative ledger se hain · operational run-rate basis ${esc(b.shortLabel || b.label)} tak hai.`;
+    const eirNote = `Issuance total aur class split dono <b>EIR</b> ke same authoritative ledger se hain · operational run-rate basis ${esc(b.shortLabel || b.label)} tak hai.`;
     const growthKpi = `<div class="dkpi kpi-clickable" data-kpi="src=ff&scope=mtd&ym=${esc(ymCur)}&${tlSpec}&title=${encodeURIComponent(`TL ${tlNameVal} · Growth`)}" title="Click to drill down into TL ${esc(tlNameVal)} Growth"><small>Growth</small><b>${trend(group.tlGrowth)}</b><span>till ${esc(b.shortLabel || b.label)} · aaj ka data kal aata hai</span></div>`;
     const body = `<div class="dsec"><div class="dkpis">
         <div class="dkpi kpi-clickable" data-kpi="src=ff&scope=mtd&ym=${esc(ymCur)}&${tlSpec}&title=${encodeURIComponent(`TL ${tlNameVal} · ${state.months.cur} MTD`)}" title="Click to drill down into TL ${esc(tlNameVal)} ${esc(state.months.cur)} MTD"><small>${esc(state.months.cur)} MTD</small><b>${fmt(group.tlCurTotal)}</b><span>VC4 ${fmt(group.tlCurVc4)} · Comm ${fmt(group.tlCurNvc4)} · till ${esc(b.shortLabel || b.label)}</span></div>
@@ -1016,7 +1016,7 @@ FF.pages = FF.pages || {};
     const topTls = [...state.tlGroups].sort((a, b) => (b.tlCurTotal || 0) - (a.tlCurTotal || 0)).slice(0, topN);
     const activity = [['active', 'Active'], ['inactive-3', 'Inactive 1–3 days'], ['inactive-7', 'Inactive 4–7 days'], ['inactive-8', 'Inactive 8+ days'], ['inactive-month', 'Inactive in month'], ['notfound', 'Not found'], ['other', 'Other']].map(([key, label]) => [label, state.filtered.filter((a) => a.activeCat === key).length, key]).filter((r) => r[1] > 0);
     const shareCur = k.curTotal ? (k.curVc4 / k.curTotal) * 100 : 0, shareLast = k.lastTotal ? (k.lastVc4 / k.lastTotal) * 100 : 0;
-    const agg = classAggFiltered(); // 🚗 EIR 4-way (VC4 / VC20 / VC5+ / All Comm)
+    const agg = classAggFiltered(); // EIR 4-way (VC4 / VC20 / VC5+ / All Comm)
     const aggTitle = agg ? `⚖️ Class split · ${esc(agg.lastLabel)} → ${esc(agg.curLabel)}` : `⚖️ VC4 vs Commercial · ${esc(state.months.last)} → ${esc(state.months.cur)}`;
     const aggShare = agg
       ? `${U.fmtPct(agg.lastS.total ? (agg.lastS.VC4 / agg.lastS.total) * 100 : 0, 0)} → ${U.fmtPct(agg.curS.total ? (agg.curS.VC4 / agg.curS.total) * 100 : 0, 0)}`

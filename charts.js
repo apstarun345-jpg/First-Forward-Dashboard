@@ -29,7 +29,7 @@ window.FF = window.FF || {};
   const PACK_ON = () => PALETTE[0] !== BASE_PALETTE[0] || PALETTE[1] !== BASE_PALETTE[1];
   const tc = (c) => { if (!c || !PACK_ON()) return c; const i = BASE_PALETTE.indexOf(String(c).toLowerCase()); return i >= 0 ? PALETTE[i] : c; };
   syncPackPalette();
-  // 🚗🚚 v226 — KPI cards bhi class ke rang me: title me VC4 = neela, Commercial / VC20 / VC5+ = orange (har page par, ek jagah se).
+  // 🚗v226 — KPI cards bhi class ke rang me: title me VC4 = neela, Commercial / VC20 / VC5+ = orange (har page par, ek jagah se).
   function tintKpis(root) {
     try {
       (root || document).querySelectorAll('.kpi:not([data-cls-tint]), .gs-kpi:not([data-cls-tint])').forEach((k) => {
@@ -119,7 +119,7 @@ window.FF = window.FF || {};
   let seq = 0;
   const specs = new Map();
 
-  // 🚗🚚 v226 — har class ka ek pakka rang, poori site par: VC4 = neela, VC20 / VC5+ / commercial = orange.
+  // 🚗v226 — har class ka ek pakka rang, poori site par: VC4 = neela, VC20 / VC5+ / commercial = orange.
   const CLS = { VC4: '#2563eb', VC20: '#f59e0b', 'VC5+': '#ea580c', NVC4: '#f97316', COMMERCIAL: '#f97316', 'ALL COMM': '#f97316', COMM: '#f97316',
     VC5: '#fb923c', VC6: '#f97316', VC7: '#ea580c', VC12: '#d9480f', VC16: '#c2410c' };
   const cc = (n) => CLS[String(n == null ? '' : n).trim().toUpperCase().replace(/\s+/g, ' ')] || null;

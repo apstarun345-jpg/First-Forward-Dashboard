@@ -42,7 +42,7 @@ FF.pages = FF.pages || {};
   const EXPLORER_FILTERS = {
     channels: [['ff', '🟦 First Forward'], ['gv', '🟩 GV Partner']],
     types: [['replacement', '🔁 Replacement'], ['chassis', '🔧 Chassis']],
-    classes: [['VC4', '🚗 VC4'], ['VC20', '🛻 VC20'], ['VC5+', '🚚 VC5+']]
+    classes: [['VC4', 'VC4'], ['VC20', 'VC20'], ['VC5+', 'VC5+']]
   };
   const cleanSet = (values, options) => new Set([...U.asValueSet(values)].filter((v) => options.includes(String(v))));
   function explorerDateKey(value) {
@@ -244,9 +244,9 @@ FF.pages = FF.pages || {};
         `<b>${esc(daily.tipLabels[i] || key)}</b>`,
         `🟦 First Forward: <b>${U.fmt(daily.byChannel.ff[i] || 0)}</b>`,
         `🟩 GV Partner: <b>${U.fmt(daily.byChannel.gv[i] || 0)}</b>`,
-        `🚗 VC4: <b>${U.fmt(daily.byClass.VC4[i] || 0)}</b>`,
-        `🛻 VC20: <b>${U.fmt(daily.byClass.VC20[i] || 0)}</b>`,
-        `🚚 VC5+: <b>${U.fmt(daily.byClass['VC5+'][i] || 0)}</b>`,
+        `VC4: <b>${U.fmt(daily.byClass.VC4[i] || 0)}</b>`,
+        `VC20: <b>${U.fmt(daily.byClass.VC20[i] || 0)}</b>`,
+        `VC5+: <b>${U.fmt(daily.byClass['VC5+'][i] || 0)}</b>`,
         `🔧 Chassis: <b>${U.fmt(daily.byType.chassis[i] || 0)}</b>`,
         `🔁 Replacement: <b>${U.fmt(daily.byType.replacement[i] || 0)}</b>`,
         `🏷️ Total: <b>${U.fmt(total)}</b>`

@@ -498,7 +498,7 @@ window.FF = window.FF || {};
     if (rows.length < 2) return '';
     const list = rows.slice().sort((a, b) => (num(b.sugVc4) + num(b.sugComm)) - (num(a.sugVc4) + num(a.sugComm)) || b.stockTotal - a.stockTotal);
     const s = (k) => sumBy(list, k);
-    return sec('ab-dispatch', `🚚 Kis agent ko kitna dispatch chahiye · ${fmt(c.days)} din`, `
+    return sec('ab-dispatch', `Kis agent ko kitna dispatch chahiye · ${fmt(c.days)} din`, `
       <div class="table-wrap"><table class="tbl compact ab-tbl">
         <thead><tr><th>Agent</th><th class="num">VC4 stock</th><th class="num">Comm stock</th><th class="num">Sug VC4 <small>after stock</small></th><th class="num">Sug Comm <small>after stock</small></th><th class="num">W/o stock VC4</th><th class="num">W/o stock Comm</th><th class="num">Total sugg.</th></tr></thead>
         <tbody>${list.map((a) => `<tr class="clickable${a.isSelf ? ' ab-self' : ''}"${openAttr(a.name, kindFor(c.ch, a.isSelf ? true : false), a.id)}>

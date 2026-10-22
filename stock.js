@@ -47,9 +47,9 @@ FF.pages = FF.pages || {};
     if (days < t.coverAmber) return `<span class="badge amber">🟡 ${U.fmt(days)} days</span>`;
     return `<span class="badge green">🟢 ${U.fmt(days)} days</span>`;
   }
-  // 🚗 4-way class helpers — VC4 | VC20 | VC5+ · All Comm = VC20 + VC5+ (NVC4)
+  // 4-way class helpers — VC4 | VC20 | VC5+ · All Comm = VC20 + VC5+ (NVC4)
   const binsFromByClass = (byClass) => { const b = { VC4: 0, VC20: 0, 'VC5+': 0 }; if (byClass) for (const [c, n] of byClass) { const g = FF.model.classGroup(c); b[g] = (b[g] || 0) + n; } return b; };
-  const classDefine = '<div class="dim small" style="margin-top:8px">🚗 <b>VC4</b> = 4-wheeler (payable) · 🛻 <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b></div>';
+  const classDefine = '<div class="dim small" style="margin-top:8px"><b>VC4</b> = 4-wheeler (payable) · <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b></div>';
   function classTable(stBins, isBins, elapsed) {
     const st = [stBins.VC4, stBins.VC20, stBins['VC5+'], (stBins.VC20 || 0) + (stBins['VC5+'] || 0)];
     const is = [isBins.VC4 || 0, isBins.VC20 || 0, isBins['VC5+'] || 0, (isBins.VC20 || 0) + (isBins['VC5+'] || 0)];
@@ -96,7 +96,7 @@ FF.pages = FF.pages || {};
     const agentClass = (S.get('agentClass') || []).filter((a) => a.channel !== 'GV Partner');
     for (const a of issued) { if (a.ym !== cur) continue; tlIssued.set(norm(a.tlName), (tlIssued.get(norm(a.tlName)) || 0) + a.n); agIssued.set(norm(a.name), (agIssued.get(norm(a.name)) || 0) + a.n); }
     for (const a of agentClass) { if (a.ym !== cur || a.group !== 'VC4') continue; agIssuedVc4.set(norm(a.name), (agIssuedVc4.get(norm(a.name)) || 0) + a.n); }
-    // 🚗 MTD issued ka 4-way bins (VC4 / VC20 / VC5+) — agent + TL dono ke liye
+    // MTD issued ka 4-way bins (VC4 / VC20 / VC5+) — agent + TL dono ke liye
     const agBins = new Map(), tlBins = new Map();
     const emptyBins = () => ({ VC4: 0, VC20: 0, 'VC5+': 0 });
     for (const a of agentClass) {
@@ -290,7 +290,7 @@ FF.pages = FF.pages || {};
       </div>
       ${!FF.config.feat || FF.config.feat('stockTrend') !== false ? `<div id="st-trend-card">${card('📉 Stock trend <span class="dim">(server snapshots · last 30 din)</span>', `<div id="st-trend"><div class="dim small">History load ho rahi hai…</div></div>`, `<span class="dim small" id="st-trend-cover"></span>`)}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('recon') !== false ? `<div id="st-recon-card">${card('🧾 FF stock balance <span class="dim">(is mahine · implied movement)</span>', `<div id="st-recon"><div class="dim small">Reconciliation load ho raha hai…</div></div>`, '<span class="dim small">Is mahine ka implied movement (issued + net stock change)</span>')}</div>` : ''}
-      ${!FF.config.feat || FF.config.feat('agedStock') !== false ? `<div id="st-aged-card">${card('🧓 Stock ageing · kitna stock kitna purana <span class="dim">(StockDataa <b>Agent Allocated At</b> se · 1 / 3 / 5 / 6+ mahine · 🚗 VC4+VC20 alag, 🚚 VC5+ alag · month ke saath ⬇ CSV)</span>', `<div id="st-aged"><div class="dim small">Stock ageing load ho rahi hai…</div></div>`, `<span class="dim small" id="st-aged-note"></span>`)}</div>` : ''}
+      ${!FF.config.feat || FF.config.feat('agedStock') !== false ? `<div id="st-aged-card">${card('🧓 Stock ageing · kitna stock kitna purana <span class="dim">(StockDataa <b>Agent Allocated At</b> se · 1 / 3 / 5 / 6+ mahine · VC4+VC20 alag, VC5+ alag · month ke saath ⬇ CSV)</span>', `<div id="st-aged"><div class="dim small">Stock ageing load ho rahi hai…</div></div>`, `<span class="dim small" id="st-aged-note"></span>`)}</div>` : ''}
       ${!FF.config.feat || FF.config.feat('tlCover') !== false ? card(`📈 TL-wise cover <span class="dim">(sabse kam cover upar · VC4 stock ÷ avg daily issuance MTD)</span>`, `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>TL</th><th class="num">VC4 stock</th><th class="num">MTD issued</th><th class="num">Avg / din</th><th>Cover</th></tr></thead><tbody>${(() => {
         const sorted = [...tls].sort((a, b) => (a.cover === null ? 1 : b.cover === null ? -1 : a.cover - b.cover)).slice(0, 14);
         return sorted.map((t) => `<tr data-pick-tl="${esc(t.name)}" class="clickable"><td><b>${esc(t.name)}</b></td><td class="num">${U.fmt(t.vc4)}</td><td class="num">${U.fmt(t.iss)}</td><td class="num">${P.elapsed ? U.fmt(t.iss / P.elapsed, 1) : '—'}</td><td>${coverBadge(t.cover)}</td></tr>`).join('');

@@ -9,7 +9,7 @@
  *   🟩 GV  (Tag Assignment) → sheet me allocation date nahi: Settings → gv.assignment.allocatedAt ho to wahi,
  *                             warna GV tag ko StockDataa me TAG_ID / barcode (= GV serial) se match karke
  *                             uski allocation date (BC / master ko mila tab se).
- * Buckets cumulative: ≥ 1 mahina (30 din) · ≥ 3 (90) · ≥ 5 (150) · ≥ 6 (180) — 🚗 VC4 + VC20 aur 🚚 VC5+ alag.
+ * Buckets cumulative: ≥ 1 mahina (30 din) · ≥ 3 (90) · ≥ 5 (150) · ≥ 6 (180) — VC4 + VC20 aur VC5+ alag.
  *
  * Public API (sab safe / no-throw):
  *   FF.stockAge.ready(force)                 → Promise<index>
@@ -28,7 +28,7 @@ window.FF = window.FF || {};
   const U = FF.util;
   const esc = U.esc;
 
-  const GROUP_LABEL = { core: '🚗 VC4 + VC20', comm: '🚚 VC5+ (commercial)' };
+  const GROUP_LABEL = { core: 'VC4 + VC20', comm: 'VC5+ (commercial)' };
   const GROUP_ORDER = ['core', 'comm'];
   const CH_LABEL = { ff: '🟦 First Forward', gv: '🟩 GV Partner' };
   function groupOf(cls) { const c = String(cls || '').toUpperCase().replace(/^VC/, ''); return (c === '4' || c === '20') ? 'core' : 'comm'; }

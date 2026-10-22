@@ -425,7 +425,7 @@
       <div class="a360-overview-note"><span>Overview combines FF + GV where the source has a verified agent ID or exact name match.</span><span class="dim">Last calculated ${esc(new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }))}</span></div>`;
     const issuancePane = `${sec('📈 Issuance trend · FF (EIR) + GV', table(['Month', 'FF tags', 'GV tags', 'Total'], monthly.map((m) => [esc(m.ym), U.fmt(m.ff), U.fmt(m.gv), `<b>${U.fmt(m.ff + m.gv)}</b>`])), 'EIR months × channel')}
       ${gvMonths.length ? sec('🟩 GV monthly · tags / amount / commission', table(['Month', 'Tags', 'Amount', 'Commission', '₹ / tag'], gvMonths.map((m) => [esc(m.ym), U.fmt(m.tags), money(m.amount, 0), money(m.commission, 2), m.tags ? (m.commission / m.tags).toFixed(2) : '—']))) : '<p class="dim small">GV monthly history unavailable.</p>'}`;
-    const stockPane = `${sec('🚗 Class split (stock)', table(['Source', 'Class', 'Tags'], [
+    const stockPane = `${sec('Class split (stock)', table(['Source', 'Class', 'Tags'], [
         ...classesOf(ffStock, 'group').map(([cls, n]) => [statusPillSafe('FF stock'), esc(cls), U.fmt(n)]),
         ...classesOf(gvStockClass, 'group').map(([cls, n]) => [statusPillSafe('GV stock'), esc(cls), U.fmt(n)])
       ]))}
@@ -577,7 +577,7 @@
         <label class="fld"><span>Growth %</span><input class="input" type="number" name="growth" min="-50" max="150" value="${growth}" style="width:82px"></label>
         <label class="fld"><span>Safety din</span><input class="input" type="number" name="safety" min="0" max="30" value="${safety}" style="width:70px"></label>
         <label class="fld"><span>Box size</span><input class="input" type="number" name="box" min="1" max="500" value="${perBox}" style="width:78px"></label>
-        <label class="fld"><span>Dispatch pool</span><select class="select" data-param="pool"><option value="eligible" ${pool === 'eligible' ? 'selected' : ''}>🚚 Need stock (direct excluded)</option><option value="direct" ${pool === 'direct' ? 'selected' : ''}>🏷️ Direct agents · tag required (no stock)</option><option value="all" ${pool === 'all' ? 'selected' : ''}>All forecast agents</option></select></label>
+        <label class="fld"><span>Dispatch pool</span><select class="select" data-param="pool"><option value="eligible" ${pool === 'eligible' ? 'selected' : ''}>Need stock (direct excluded)</option><option value="direct" ${pool === 'direct' ? 'selected' : ''}>🏷️ Direct agents · tag required (no stock)</option><option value="all" ${pool === 'all' ? 'selected' : ''}>All forecast agents</option></select></label>
         <label class="fld"><span>Channel</span><select class="select" data-param="channel"><option value="all">Both</option><option value="ff" ${channel === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${channel === 'gv' ? 'selected' : ''}>GV Partner</option></select></label>
         <input class="input" name="q" value="${esc(params.q || '')}" placeholder="Agent / TL / risk…"><button class="btn primary">Apply</button></form>
       </div>

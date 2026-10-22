@@ -47,9 +47,9 @@ FF.pages = FF.pages || {};
   }
   function classHelp() {
     return `<div class="class-defs" role="note">
-      <span><b>🚗 VC4</b> = 4-wheeler (car/jeep/van · payable)</span>
-      <span><b>🛻 VC20</b> = vehicle class 20 commercial</span>
-      <span><b>🚚 VC5+</b> = baaki commercial classes (VC5/6/7/12/15/16…)</span>
+      <span><b>VC4</b> = 4-wheeler (car/jeep/van · payable)</span>
+      <span><b>VC20</b> = vehicle class 20 commercial</span>
+      <span><b>VC5+</b> = baaki commercial classes (VC5/6/7/12/15/16…)</span>
       <span><b>All Commercial / NVC4</b> = VC20 + VC5+</span>
     </div>`;
   }

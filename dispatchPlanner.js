@@ -451,7 +451,7 @@ FF.pages = FF.pages || {};
     ch: { label: 'Channel', icon: '🌐', all: '🌐 Both', opts: [['ff', '🟦 First Forward', 'ff'], ['gv', '🟩 GV Partner', 'gv']] },
     type: { label: 'Type', icon: '👥', all: '👥 All', opts: [['managed', '🧑‍💼 TL-managed', ''], ['direct', '🚫 Direct agents', 'violet']] },
     prio: { label: 'Priority', icon: '🎚️', all: 'All', opts: [['High', '🔴 High', 'red'], ['Medium', '🟠 Medium', 'amber'], ['Low', '🟢 Low', 'green'], ['other', '📄 Other / source', 'gray']] },
-    basis: { label: 'Tags', icon: '🏷️', all: '🏷️ All tags', opts: [['vc4', '🚗 VC4', ''], ['comm', '🚛 Commercial', '']], single: true },
+    basis: { label: 'Tags', icon: '🏷️', all: '🏷️ All tags', opts: [['vc4', 'VC4', ''], ['comm', '🚛 Commercial', '']], single: true },
     need: { label: 'Need', icon: '🚚', all: 'All', opts: [['need', '🚚 Dispatch chahiye', ''], ['low', '🚨 Cover < 7 din', 'red'], ['zero', '0 stock', '']] }
   };
   function chipsHtml(all) {
@@ -761,7 +761,7 @@ FF.pages = FF.pages || {};
         <div class="dp2-search"><span>🔎</span><input class="input" id="dp2-q" placeholder="Agent / TL / ID search…" value="${esc(state.q)}">
           <button type="button" class="btn small" id="dp2-tl" title="Ek se zyada TL chuno">👥 TL</button>
           <button type="button" class="btn small" id="dp2-prio" title="Ek se zyada priority chuno">🎚️ Priority</button>
-          <button type="button" class="btn small" id="dp2-need" title="Ek se zyada condition chuno">🚚 Need</button>
+          <button type="button" class="btn small" id="dp2-need" title="Ek se zyada condition chuno">Need</button>
           <button type="button" class="btn small" id="dp2-ch" title="Channel chuno">🌐 Channel</button>
           <button class="btn small" id="dp2-clear">✕ Clear</button></div>
       </section>
@@ -845,7 +845,7 @@ FF.pages = FF.pages || {};
         <span class="dp2-sel-sum">Required <b>${fmt(t.required)}</b> · WITH stock <b>${fmt(t.net)}</b> · W/O <b>${fmt(t.gross)}</b></span>
         <span class="dp2-sel-actions">
           <button class="btn small" data-dp-sel="all">☑ Visible select</button>
-          <button class="btn small" data-dp-sel="needy">🚚 Jinko dispatch chahiye</button>
+          <button class="btn small" data-dp-sel="needy">Jinko dispatch chahiye</button>
           <button class="btn small" data-dp-sel="csv">⬇ CSV</button>
           <button class="btn small" data-dp-sel="xlsx">⬇ Excel</button>
           <button class="btn small" data-dp-sel="wa">📲 WhatsApp</button>

@@ -247,7 +247,7 @@ const DEFAULT_SETTINGS = {
       VC7: { source: 'manual', rate: '' }, VC12: { source: 'manual', rate: '' }
     }
   },
-  dispatchEmail: { ...DEFAULT_DISPATCH_EMAIL }, // 🚚 recurring, selectable Dispatch Planner email
+  dispatchEmail: { ...DEFAULT_DISPATCH_EMAIL }, // recurring, selectable Dispatch Planner email
   commissionSlabs: {
     enabled: false, model: 'agentTier',
     channels: {
@@ -532,7 +532,7 @@ function settingsFor(u) {
   if (s.email) s.email = { provider: s.email.provider || 'auto', host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '', resendKey: '', brevoKey: '' };
   delete s.personalLinks; // 🔗 secret tokens sirf admin ko
   delete s.schedules;     // 🗓 admin ke custom reminders
-  delete s.dispatchEmail; // 🚚 selected recipients + delivery schedule sirf admin ko
+  delete s.dispatchEmail; // selected recipients + delivery schedule sirf admin ko
   return s;
 }
 /** sw.js ka CACHE_NAME — app version (update-toast ke liye). */
@@ -3933,7 +3933,7 @@ async function sendWeeklyEmail(force = false) {
     const avg = w.days ? (w.ff + w.gv) / w.days : 0;
     const cover = avg > 0 ? stock.classes.VC4 / avg : 0;
     const band = !cover ? '' : cover < coverRed ? '🔴' : cover < coverOrange ? '🟠' : cover < coverAmber ? '🟡' : '🟢';
-    coverTxt = cover ? `\n🚗 VC4 cover ≈ ${Math.round(cover)} din ${band}` : '';
+    coverTxt = cover ? `\nVC4 cover ≈ ${Math.round(cover)} din ${band}` : '';
   }
   const subject = `📬 Weekly digest · ${weekKey} week (FF ${w.ff} · GV ${w.gv})`;
   const text = [
@@ -5569,7 +5569,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { ok: !!out, detail: out || 'no data' });
     } catch (err) { throw new HttpError(502, `Report email fail: ${err.message}`); }
   }
-  // 🚚 Send the current Dispatch Planner selection immediately (admin test / preview).
+  // Send the current Dispatch Planner selection immediately (admin test / preview).
   if (p === '/api/dispatch-email/test' && method === 'POST') {
     requireAdmin(user);
     const body = await readBody(req);
@@ -6206,7 +6206,7 @@ async function handleApi(req, res, url) {
     ...(a.unmatched === true || a.matched === false ? { unmatched: true } : {}) // sheet data me nahi mila (naya agent?)
   });
   const tagMetricNum = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : 0; };
-  /** Submit ke waqt ka data snapshot (🚗 VC4+VC20 · 🚚 VC5+) — admin ko live data na mile to yahi dikhe. */
+  /** Submit ke waqt ka data snapshot (VC4+VC20 · VC5+) — admin ko live data na mile to yahi dikhe. */
   const tagRequestMetrics = (m) => {
     if (!m || typeof m !== 'object') return null;
     const g = (x) => ({ stock: tagMetricNum(x && x.stock), last: tagMetricNum(x && x.last), cur: tagMetricNum(x && x.cur) });
@@ -7016,7 +7016,7 @@ async function handleApi(req, res, url) {
     }
     if (body.adminNote !== undefined) row.adminNote = shortText(body.adminNote, 300);
     if (body.note !== undefined && row.status === 'pending') row.note = shortText(body.note, 300);
-    // 🚚 v3.51 — courier naam (Delhivery / DTDC …) admin yahin se badal sakta hai; label + sheet me chhapta hai.
+    // v3.51 — courier naam (Delhivery / DTDC …) admin yahin se badal sakta hai; label + sheet me chhapta hai.
     if (body.courier !== undefined) {
       const c = shortText(body.courier, 40);
       if (c) row.courier = c; else delete row.courier;
@@ -8151,7 +8151,7 @@ async function handleApi(req, res, url) {
       const data = {
         tagId: String(row && row.tagId || '').trim().slice(0, 180),
         serialNo: String(row && row.serialNo || '').trim().slice(0, 180),
-        // 🚗 StockDataa TAG_CLASS plain number (4, 5, 6, 7, 12, 16) ho to bhi API ko
+        // StockDataa TAG_CLASS plain number (4, 5, 6, 7, 12, 16) ho to bhi API ko
         // hamesha "VC4…" canonical form hi jaaye — tabhi mapping hoti hai.
         vcType: normalizeVcType(row && row.vcType),
         agentId: String(row && row.agentId || '').trim().slice(0, 100)
@@ -9279,7 +9279,7 @@ async function servePersonalPage(req, res, rawToken) {
       const sc = (stockInfo && stockInfo.byCls && stockInfo.byCls[c]) || { t: 0, c: [0, 0, 0, 0], o: 0 };
       if (!sc.t && !['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12'].includes(c)) return '';
       totClsStock += sc.t; totCls1m += sc.c[0]; totCls3m += sc.c[1];
-      const grp = c === 'VC4' || c === 'VC20' ? '🚗 Core' : '🚚 Comm';
+      const grp = c === 'VC4' || c === 'VC20' ? 'VC4 + VC20' : 'VC5+';
       return `<tr><td><b>${escHtml(c)}</b></td><td>${grp}</td><td><b>${nf(sc.t)}</b></td><td>${nf(sc.c[0])}</td><td class="${sc.c[1] ? 'pb-warn' : ''}">${nf(sc.c[1])}</td></tr>`;
     }).filter(Boolean).join('');
     const classStockCardHtml = `<section class="pb-card"><div class="pb-card-head"><h3>📦 Class-wise Stock</h3>${expBtns('pl-tbl-cls-stock', `${link.name} - Class-wise Stock`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-cls-stock"><thead><tr><th>Tag Class</th><th>Category</th><th>In Stock</th><th>Stock ≥1M</th><th>Stock ≥3M</th></tr></thead><tbody>${classStockRowsHtml}</tbody><tfoot><tr><td>Grand Total</td><td>All Classes</td><td>${nf(totClsStock || stTotal)}</td><td>${nf(totCls1m)}</td><td>${nf(totCls3m)}</td></tr></tfoot></table></div></section>`;
@@ -9305,7 +9305,7 @@ async function servePersonalPage(req, res, rawToken) {
     });
     const dateRowsList = [...byDateMap.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 62);
     const dSum = (k) => dateRowsList.reduce((a, x) => a + x[k], 0);
-    const dateTableHtml = `<section class="pb-card"><div class="pb-card-head"><h3>📅 Date-wise Issuance (${dateRowsList.length} active days)</h3>${expBtns('pl-tbl-date-iss', `${link.name} - Date-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-date-iss"><thead><tr><th>Date</th><th>VC4</th><th>VC20</th><th>🚚 VC5+</th><th>Total Issued</th></tr></thead><tbody>${dateRowsList.map((d) => `<tr><td><b>${escHtml(d.date)}</b></td><td>${nf(d.vc4)}</td><td>${nf(d.vc20)}</td><td>${nf(d.comm)}</td><td><b>${nf(d.total)}</b></td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(dSum('vc4'))}</td><td>${nf(dSum('vc20'))}</td><td>${nf(dSum('comm'))}</td><td>${nf(dSum('total'))}</td></tr></tfoot></table></div></section>`;
+    const dateTableHtml = `<section class="pb-card"><div class="pb-card-head"><h3>📅 Date-wise Issuance (${dateRowsList.length} active days)</h3>${expBtns('pl-tbl-date-iss', `${link.name} - Date-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-date-iss"><thead><tr><th>Date</th><th>VC4</th><th>VC20</th><th>VC5+</th><th>Total Issued</th></tr></thead><tbody>${dateRowsList.map((d) => `<tr><td><b>${escHtml(d.date)}</b></td><td>${nf(d.vc4)}</td><td>${nf(d.vc20)}</td><td>${nf(d.comm)}</td><td><b>${nf(d.total)}</b></td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(dSum('vc4'))}</td><td>${nf(dSum('vc20'))}</td><td>${nf(dSum('comm'))}</td><td>${nf(dSum('total'))}</td></tr></tfoot></table></div></section>`;
 
 
     // 2B. 📅 Date × Agent matrix — agent rows, calendar-date columns, current month through yesterday.
@@ -9342,7 +9342,7 @@ async function servePersonalPage(req, res, rawToken) {
     // 3. 🧓 Stock Ageing Table (Group-wise + Agent-wise for TL)
     const totAgeC = [0, 1, 2, 3].map((i) => (stockInfo ? stockInfo.c[0][i] + stockInfo.c[1][i] : 0));
     const maxOld = stockInfo ? Math.max(stockInfo.o[0] || 0, stockInfo.o[1] || 0) : 0;
-    const ageHtml = stockInfo ? `<section class="pb-card"><div class="pb-card-head"><h3>🧓 Stock ageing</h3>${expBtns('pl-tbl-ageing', `${link.name} - Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ageing"><thead><tr><th>Group</th><th>Total</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th><th>Oldest</th></tr></thead><tbody>${[['🚗 VC4+VC20', 0], ['🚚 VC5+', 1]].map(([lbl, g]) => `<tr><td>${lbl}</td><td>${nf(stockInfo.t[g])}</td>${stockInfo.c[g].map((x, i) => `<td class="${i >= 2 && x ? 'pb-hot' : i === 1 && x ? 'pb-warn' : ''}">${nf(x)}</td>`).join('')}<td>${stockInfo.o[g] ? `${nf(stockInfo.o[g])}d` : '—'}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(stTotal)}</td>${totAgeC.map((x) => `<td>${nf(x)}</td>`).join('')}<td>${maxOld ? `${nf(maxOld)}d` : '—'}</td></tr></tfoot></table></div></section>` : '<section class="pb-card"><h3>🧓 Stock ageing</h3><p class="dim">Stock ageing data abhi uplabdh nahi hai.</p></section>';
+    const ageHtml = stockInfo ? `<section class="pb-card"><div class="pb-card-head"><h3>🧓 Stock ageing</h3>${expBtns('pl-tbl-ageing', `${link.name} - Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ageing"><thead><tr><th>Group</th><th>Total</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th><th>Oldest</th></tr></thead><tbody>${[['VC4+VC20', 0], ['VC5+', 1]].map(([lbl, g]) => `<tr><td>${lbl}</td><td>${nf(stockInfo.t[g])}</td>${stockInfo.c[g].map((x, i) => `<td class="${i >= 2 && x ? 'pb-hot' : i === 1 && x ? 'pb-warn' : ''}">${nf(x)}</td>`).join('')}<td>${stockInfo.o[g] ? `${nf(stockInfo.o[g])}d` : '—'}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(stTotal)}</td>${totAgeC.map((x) => `<td>${nf(x)}</td>`).join('')}<td>${maxOld ? `${nf(maxOld)}d` : '—'}</td></tr></tfoot></table></div></section>` : '<section class="pb-card"><h3>🧓 Stock ageing</h3><p class="dim">Stock ageing data abhi uplabdh nahi hai.</p></section>';
 
     let agentAgeTable = '';
     if (isTeamLink(link) && stockInfo && stockInfo.agents && stockInfo.agents.length) {
@@ -9352,7 +9352,7 @@ async function servePersonalPage(req, res, rawToken) {
       const ag3m = agList.reduce((a, x) => a + x.c[0][1] + x.c[1][1], 0);
       const ag5m = agList.reduce((a, x) => a + x.c[0][2] + x.c[1][2], 0);
       const ag6m = agList.reduce((a, x) => a + x.c[0][3] + x.c[1][3], 0);
-      agentAgeTable = `<section class="pb-card"><div class="pb-card-head"><h3>👥 Agent-wise Stock Ageing (${agList.length} agents)</h3>${expBtns('pl-tbl-ag-age', `${link.name} - Agent Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ag-age"><thead><tr><th>Agent</th><th>Total Stock</th><th>🚗 Core</th><th>🚚 Comm</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th></tr></thead><tbody>${agList.map((a) => `<tr><td>${escHtml(a.n)}</td><td><b>${nf(a.t[0] + a.t[1])}</b></td><td>${nf(a.t[0])}</td><td>${nf(a.t[1])}</td><td>${nf(a.c[0][0] + a.c[1][0])}</td><td class="${a.c[0][1] + a.c[1][1] ? 'pb-warn' : ''}">${nf(a.c[0][1] + a.c[1][1])}</td><td class="${a.c[0][2] + a.c[1][2] ? 'pb-hot' : ''}">${nf(a.c[0][2] + a.c[1][2])}</td><td class="${a.c[0][3] + a.c[1][3] ? 'pb-hot' : ''}">${nf(a.c[0][3] + a.c[1][3])}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(agTot)}</td><td>${nf(agList.reduce((a, x) => a + x.t[0], 0))}</td><td>${nf(agList.reduce((a, x) => a + x.t[1], 0))}</td><td>${nf(ag1m)}</td><td>${nf(ag3m)}</td><td>${nf(ag5m)}</td><td>${nf(ag6m)}</td></tr></tfoot></table></div></section>`;
+      agentAgeTable = `<section class="pb-card"><div class="pb-card-head"><h3>👥 Agent-wise Stock Ageing (${agList.length} agents)</h3>${expBtns('pl-tbl-ag-age', `${link.name} - Agent Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ag-age"><thead><tr><th>Agent</th><th>Total Stock</th><th>VC4 + VC20</th><th>Comm</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th></tr></thead><tbody>${agList.map((a) => `<tr><td>${escHtml(a.n)}</td><td><b>${nf(a.t[0] + a.t[1])}</b></td><td>${nf(a.t[0])}</td><td>${nf(a.t[1])}</td><td>${nf(a.c[0][0] + a.c[1][0])}</td><td class="${a.c[0][1] + a.c[1][1] ? 'pb-warn' : ''}">${nf(a.c[0][1] + a.c[1][1])}</td><td class="${a.c[0][2] + a.c[1][2] ? 'pb-hot' : ''}">${nf(a.c[0][2] + a.c[1][2])}</td><td class="${a.c[0][3] + a.c[1][3] ? 'pb-hot' : ''}">${nf(a.c[0][3] + a.c[1][3])}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(agTot)}</td><td>${nf(agList.reduce((a, x) => a + x.t[0], 0))}</td><td>${nf(agList.reduce((a, x) => a + x.t[1], 0))}</td><td>${nf(ag1m)}</td><td>${nf(ag3m)}</td><td>${nf(ag5m)}</td><td>${nf(ag6m)}</td></tr></tfoot></table></div></section>`;
     }
 
     // 4. 👥 TL Agent-wise Issuance — inventory fields live only in the stock section.
@@ -9389,7 +9389,7 @@ async function servePersonalPage(req, res, rawToken) {
     const fmtG = (g) => (g === null || !isFinite(g) ? '—' : `${g >= 0 ? '+' : ''}${Math.round(g)}%`);
     const growthPct = compG !== null ? fmtG(compG) : fmtG(rateG);
     const growthBasis = compG !== null ? `vs 1–${elapsed} ${prevYm}` : 'run-rate vs last month (no same-day data for last month)';
-    const perfStockRow = hasSec('stock') ? `<tr><td><b>Current Stock in Hand</b></td><td><b>${nf(stTotal)} tags</b></td><td>🚗 Core: ${nf(stCore)} · 🚚 Comm: ${nf(stComm)}</td><td>≥3M Old: ${nf(totAgeC[1])} tags</td></tr>` : '';
+    const perfStockRow = hasSec('stock') ? `<tr><td><b>Current Stock in Hand</b></td><td><b>${nf(stTotal)} tags</b></td><td>VC4 + VC20: ${nf(stCore)} · VC5+: ${nf(stComm)}</td><td>≥3M Old: ${nf(totAgeC[1])} tags</td></tr>` : '';
     const perfStockTotal = hasSec('stock') ? `<td>Stock: ${nf(stTotal)}</td>` : '<td>Performance details</td>';
     const perfCardHtml = `<section class="pb-card"><div class="pb-card-head"><h3>🏆 Performance &amp; Growth Scorecard</h3>${expBtns('pl-tbl-perf', `${link.name} - Performance Scorecard`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-perf"><thead><tr><th>Metric</th><th>Current Value</th><th>Benchmark / Reference</th><th>Status / Delta</th></tr></thead><tbody>
       <tr><td><b>MTD Issued (${escHtml(ym)})</b></td><td><b>${nf(st.mtd)}</b></td><td>Same days (${escHtml(prevYm)}): ${nf(st.prevSame)} · ${escHtml(growthBasis)}</td><td class="${(growthG || 0) >= 0 ? 'pb-up' : 'pb-hot'}">${diff >= 0 ? '▲ +' : '▼ '}${nf(Math.abs(diff))} (${escHtml(growthPct)})</td></tr>
@@ -9415,7 +9415,7 @@ async function servePersonalPage(req, res, rawToken) {
       tile('previous', '🎯', 'Month-end projection', nf(projected), `at this pace · ${daysCur} days`)
     ];
     if (hasSec('stock')) summaryTiles.push(stockInfo
-      ? tile('stock', '📦', 'Stock (total)', nf(stTotal), `🚗 ${nf(stCore)} · 🚚 ${nf(stComm)}`)
+      ? tile('stock', '📦', 'Stock (total)', nf(stTotal), `VC4+VC20 ${nf(stCore)} · VC5+ ${nf(stComm)}`)
       : tile('stock', '📦', 'Stock (total)', '—', escHtml(stockNote)));
     if (hasSec('stock') || hasSec('ageing')) summaryTiles.push(stockInfo
       ? tile('stock', '🧓', 'Purana stock ≥3M', nf(totAgeC[1]), `≥6M: ${nf(totAgeC[3])} · ${stTotal ? Math.round((totAgeC[1] / stTotal) * 100) : 0}% stock`)
