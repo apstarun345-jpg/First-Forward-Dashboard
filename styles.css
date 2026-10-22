@@ -6879,3 +6879,6 @@ button.smap-cell.smap-total { min-width: 64px; }
 .msp-plan-box .msp-plan{width:100%;margin:6px 0}
 .msp-plan-box .msp-plan th,.msp-plan-box .msp-plan td{font-size:12px;white-space:nowrap}
 .msp-plan-box{overflow-x:auto}
+.msp-hl{display:inline-block;padding:1px 9px;border-radius:999px;font-weight:700;font-size:11.5px;line-height:1.5;background:#f1f5f9;color:#334155;white-space:nowrap}
+.msp-hl.red{background:#fee2e2;color:#b91c1c}.msp-hl.amber{background:#ffedd5;color:#c2410c}.msp-hl.green{background:#dcfce7;color:#15803d}.msp-hl.blue{background:#dbeafe;color:#1d4ed8}
+.msp-cls-line .c3,.msp-cls-line .c2{font-weight:500}

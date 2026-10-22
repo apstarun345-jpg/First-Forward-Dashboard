@@ -1581,7 +1581,7 @@ FF.pages = FF.pages || {};
       const who = isTl ? `tl=${encodeURIComponent(pr.name)}${pr.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.id)}` : ''}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
       const spec = (scope, ym) => `src=${ch}&scope=${scope}${ym ? `&ym=${encodeURIComponent(ym)}` : ''}&${who}`;
       const peopleSpec = `src=${ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`;
-      const box = (cls, label, value, sub, kpi) => `<div class="mp-kpi msp-kpi ${cls}${kpi ? ' kpi-clickable' : ''}"${kpi ? ` data-kpi="${esc(kpi)}" role="button" tabindex="0" title="Detail kholo"` : ''}><small>${label}</small><b>${value}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
+      const box = (cls, label, value, sub, kpi, attrs) => `<div class="mp-kpi msp-kpi ${cls}${kpi || attrs ? ' kpi-clickable' : ''}"${attrs ? ` ${attrs} role="button" tabindex="0" title="Click for details"` : (kpi ? ` data-kpi="${esc(kpi)}" role="button" tabindex="0" title="Detail kholo"` : '')}><small>${label}</small><b>${value}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
       // Class-wise plan: two groups — VC4 / VC20 (combined) and VC5+ — each with its own run-rate and stock.
       const days = num(c.days) || num(d.days) || 25, elapsed = Math.max(1, num(c.elapsed) || 1);
       const lastDays = (() => { try { return U.daysInMonth(m.last) || 30; } catch { return 30; } })();
@@ -1610,9 +1610,9 @@ FF.pages = FF.pages || {};
       const worst = plan.reduce((a, x) => (rank[x.prio] > rank[a] ? x.prio : a), 'None');
       const sm = '';
       const chipOf = (p) => (p === 'None' ? '<span class="badge">No issuance</span>' : prioChip(p));
-      const prioBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2">${chipOf(x.prio)}</span><span class="c3 dim">${x.cover != null ? `cover ${U.fmt(x.cover, true)} d` : ''}</span></div>`).join('');
+      const prioBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2">${chipOf(x.prio)}</span><span class="c3">${x.cover != null ? `<span class="msp-hl ${x.cover < redD ? 'red' : x.cover < orgD ? 'amber' : 'green'}">cover ${U.fmt(x.cover, true)} d</span>` : '<span class="dim">no run-rate</span>'}</span></div>`).join('');
       const prioSub = plan.map((x) => `${esc(x.k)}: stock ${U.fmt(x.stock)} ÷ ${U.fmt(x.rate, true)}/day`).join(' · ');
-      const planBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2">need <b>${x.prio === 'None' ? '0' : U.fmt(x.net)}</b></span><span class="c3 dim">w/o stock ${U.fmt(x.gross)}</span></div>`).join('');
+      const planBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2"><span class="msp-hl ${x.prio === 'None' || !x.net ? 'green' : x.prio === 'High' ? 'red' : 'amber'}">need ${x.prio === 'None' ? '0' : U.fmt(x.net)}</span></span><span class="c3"><span class="msp-hl blue">w/o stock ${U.fmt(x.gross)}</span></span></div>`).join('');
       const planSub = plan.map((x) => `${esc(x.k)}: ${U.fmt(x.rate, true)}/day × ${U.fmt(days)} − stock ${U.fmt(x.stock)}${x.basis ? ` (${x.basis} rate)` : ''}`).join(' · ');
       const wd = workedDays(pr, isTl, ch, m.cur);
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
@@ -1649,11 +1649,11 @@ FF.pages = FF.pages || {};
           ${isTl
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
     : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}` : '')}
-          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${curMix}<br>🗓️ Worked <b>${U.fmt(wd)}</b> of ${U.fmt(elapsed)} days`, spec('mtd', m.cur))}
+          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${curMix}<br>🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span>`, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
-          ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur))}
+          ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
           ${box('k10', '🎯 Expected this month · Run-rate', U.fmt((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0)), `Current pace ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days · report cutoff: previous day`, spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
         </div>${notFound}</div></section>`;
@@ -2080,17 +2080,21 @@ FF.pages = FF.pages || {};
           ['Stock (total)', s.total || d.stock.length], ['Stock cover (din)', c.cover != null ? Math.round(c.cover) : ''], ['Run-rate / day', c.rate != null ? Math.round(c.rate * 10) / 10 : ''],
           [`Issued ${U.labelYM ? U.labelYM(d.cur) : d.cur}`, t.curTotal || 0], [`Issued ${U.labelYM ? U.labelYM(d.last) : d.last}`, t.lastTotal || 0], ['Priority', pr.priority || ''],
           ...AGE_BUCKETS.map((b, i) => [`Ageing · ${b.label}`, ages[i]]));
+        const L = (ym) => (U.labelYM ? U.labelYM(ym) : ym);
+        // 1) Stock + pivot — ageing buckets are added to the stock pivot automatically.
         const sp = pivot(d.stock, (x) => x.agent || '—', (x) => x.cls || 'NA');
-        sheets.push({ name: `Stock pivot${sfx(ch)}`, header: ['Agent', ...sp.cols, 'Total'], rows: sp.rows });
-        const ap = pivot(d.stock, (x) => x.agent || '—', (x) => (bucketOfAge(x.age) || { label: 'Date nahi' }).label, [...AGE_BUCKETS.map((b) => b.label), 'Date nahi']);
-        sheets.push({ name: `Ageing pivot${sfx(ch)}`, header: ['Agent', ...ap.cols, 'Total'], rows: ap.rows });
-        [[d.cur, 'MTD'], [d.last, 'Last month']].forEach(([ym, lbl]) => {
+        const ageCols = [...AGE_BUCKETS.map((b) => b.label), 'Date nahi'];
+        const ap = pivot(d.stock, (x) => x.agent || '—', (x) => (bucketOfAge(x.age) || { label: 'Date nahi' }).label, ageCols);
+        const ageMap = new Map(ap.rows.map((r) => [r[0], r.slice(1, 1 + ageCols.length)]));
+        sheets.push({ name: `Stock pivot${sfx(ch)}`, header: ['Agent', ...sp.cols, 'Total', ...ageCols.map((c) => `Age · ${c}`)], rows: sp.rows.map((r) => [...r, ...(ageMap.get(r[0]) || ageCols.map(() => 0))]) });
+        sheets.push({ name: `Stock${sfx(ch)}`, header: AGE_HEAD, rows: d.stock.map(ageRowCells) });
+        // 2) Current month issuance + pivot, 3) Last month issuance + pivot
+        [[d.cur, 'Current'], [d.last, 'Last']].forEach(([ym, lbl]) => {
           const rows = d.issue.filter((r) => ymOf(r[0]) === ym);
           const ip = pivot(rows, (r) => r[7] || '—', (r) => r[3] || 'NA');
-          sheets.push({ name: `Issuance ${lbl}${sfx(ch)}`.slice(0, 31), header: [`Agent · ${U.labelYM ? U.labelYM(ym) : ym}`, ...ip.cols, 'Total'], rows: ip.rows });
+          sheets.push({ name: `${lbl} issuance pivot${sfx(ch)}`.slice(0, 31), header: [`Agent · ${L(ym)}`, ...ip.cols, 'Total'], rows: ip.rows });
+          sheets.push({ name: `${lbl} issuance${sfx(ch)}`.slice(0, 31), header: (FF.kpiDetail && FF.kpiDetail.RAW_HEAD) || ['Date', 'Tag ID', 'VRN', 'Class', 'Type', 'VRN type', 'Status', 'Agent', 'Agent ID', 'TL', 'Channel', 'Barcode / serial'], rows });
         });
-        sheets.push({ name: `Stock tags${sfx(ch)}`, header: AGE_HEAD, rows: d.stock.map(ageRowCells) });
-        sheets.push({ name: `Issuance tags${sfx(ch)}`, header: (FF.kpiDetail && FF.kpiDetail.RAW_HEAD) || ['Date', 'Tag ID', 'VRN', 'Class', 'Type', 'VRN type', 'Status', 'Agent', 'Agent ID', 'TL', 'Channel', 'Barcode / serial'], rows: d.issue });
       });
       sheets.unshift({ name: 'Summary', header: ['Field', 'Value'], rows: summary });
       FF.xlsx.download(`${U.slug(REPORT_CTX.name)}-full-report-${U.stamp()}.xlsx`, sheets);
@@ -2099,6 +2103,68 @@ FF.pages = FF.pages || {};
       U.toast('Report nahi bani: ' + ((err && err.message) || err), 'err');
     } finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
   }
+  // ===== 📈 Growth drill — what is driving growth up / down (agent-wise for a TL, class-wise always) =====
+  const growthGrp = (cls) => { const k = String(cls || '').toUpperCase().replace(/\s+/g, ''); return k === 'VC4' ? 'VC4' : k === 'VC20' ? 'VC20' : 'VC5+'; };
+  const num = (v) => Number(v) || 0;
+  function growthBreakdown(d, pr) {
+    const p1 = pr.projT1 || {};
+    const cut = Math.max(1, Math.round(num((p1.basis && p1.basis.growthElapsed) || (pr.calc && pr.calc.total && pr.calc.total.elapsed) || 31)));
+    const people = new Map(), classes = new Map();
+    const touch = (map, key, init) => { if (!map.has(key)) map.set(key, { ...init, curN: 0, lastN: 0, lastFull: 0, curFull: 0 }); return map.get(key); };
+    d.issue.forEach((r) => {
+      const ym = ymOf(r[0]), day = Number(String(r[0]).slice(8, 10)) || 0;
+      if (ym !== d.cur && ym !== d.last) return;
+      const p = touch(people, r[8] || r[7] || '—', { name: r[7] || '—', id: r[8] || '' });
+      const c = touch(classes, growthGrp(r[3]), { name: growthGrp(r[3]) });
+      [p, c].forEach((o) => {
+        if (ym === d.cur) { o.curFull += 1; if (day <= cut) o.curN += 1; } else { o.lastFull += 1; if (day <= cut) o.lastN += 1; }
+      });
+    });
+    const status = (o) => (o.curN > 0 && o.lastFull === 0 ? 'new' : o.curN === 0 && o.lastN > 0 ? 'stopped' : o.curN > o.lastN ? 'up' : o.curN < o.lastN ? 'down' : 'flat');
+    const fin = (map) => [...map.values()].map((o) => ({ ...o, delta: o.curN - o.lastN, st: status(o) })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || b.curN - a.curN);
+    const P = fin(people), C = fin(classes);
+    const tot = P.reduce((a, o) => ({ cur: a.cur + o.curN, last: a.last + o.lastN }), { cur: 0, last: 0 });
+    return { cut, P, C, tot };
+  }
+  const GROWTH_ST = { new: '<span class="msp-hl blue">🆕 New</span>', stopped: '<span class="msp-hl red">⏹ Stopped</span>', up: '<span class="msp-hl green">▲ Existing · up</span>', down: '<span class="msp-hl amber">▼ Existing · down</span>', flat: '<span class="msp-hl">= Existing · same</span>' };
+  async function openGrowth(ch) {
+    const pr = REPORT_CTX.prs[ch];
+    if (!pr) { U.toast('Profile abhi load ho raha hai — 2 sec baad try karo', 'warn'); return; }
+    const isTl = /tl$/.test(String(pr.kind || ''));
+    FF.app.openDrawer({ kicker: 'Growth drivers', title: pr.name, body: U.spinner('Loading growth data…'), wide: true, loading: true, age: false });
+    try {
+      if (FF.lazy && FF.lazy.shellNeed) await FF.lazy.shellNeed(['kpiDetail', 'stockAge']);
+      const d = await reportData(ch, pr);
+      const g = growthBreakdown(d, pr);
+      const pct = g.tot.last ? ((g.tot.cur - g.tot.last) / g.tot.last) * 100 : null;
+      const L = (ym) => (U.labelYM ? U.labelYM(ym, true) : ym);
+      const chip = (o) => `<span class="kd-chip">${esc(o.name)} <b>${o.delta > 0 ? '+' : ''}${U.fmt(o.delta)}</b></span>`;
+      const ups = g.P.filter((o) => o.delta > 0).slice(0, 6), downs = g.P.filter((o) => o.delta < 0).slice(0, 6);
+      const share = (o) => (g.tot.cur - g.tot.last ? `${Math.round((o.delta / (g.tot.cur - g.tot.last)) * 100)}%` : '—');
+      const peopleTbl = `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>${isTl ? 'Agent' : 'Agent'}</th><th>ID</th><th>Status</th><th class="num">${esc(L(d.last))} (1–${g.cut})</th><th class="num">${esc(L(d.cur))} (1–${g.cut})</th><th class="num">Change</th><th class="num">Share of change</th><th class="num">Last month full</th></tr></thead><tbody>${g.P.map((o) => `<tr><td><b>${esc(o.name)}</b></td><td>${esc(o.id)}</td><td>${GROWTH_ST[o.st]}</td><td class="num">${U.fmt(o.lastN)}</td><td class="num">${U.fmt(o.curN)}</td><td class="num"><b style="font-size:inherit;display:inline;color:${o.delta > 0 ? '#16a34a' : o.delta < 0 ? '#dc2626' : 'inherit'}">${o.delta > 0 ? '+' : ''}${U.fmt(o.delta)}</b></td><td class="num">${share(o)}</td><td class="num">${U.fmt(o.lastFull)}</td></tr>`).join('') || '<tr><td colspan="8" class="dim">No issuance in these two months</td></tr>'}</tbody></table></div>`;
+      const classTbl = `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">${esc(L(d.last))} (1–${g.cut})</th><th class="num">${esc(L(d.cur))} (1–${g.cut})</th><th class="num">Change</th><th class="num">Growth</th></tr></thead><tbody>${['VC4', 'VC20', 'VC5+'].map((k) => g.C.find((o) => o.name === k) || { name: k, curN: 0, lastN: 0, delta: 0 }).map((o) => `<tr><td><b>${esc(o.name)}</b></td><td class="num">${U.fmt(o.lastN)}</td><td class="num">${U.fmt(o.curN)}</td><td class="num">${o.delta > 0 ? '+' : ''}${U.fmt(o.delta)}</td><td class="num">${o.lastN ? U.pctHtml((o.delta / o.lastN) * 100, { decimals: 0 }) : (o.curN ? '<span class="msp-hl blue">new</span>' : '—')}</td></tr>`).join('')}</tbody></table></div>`;
+      const newN = g.P.filter((o) => o.st === 'new').length, stopN = g.P.filter((o) => o.st === 'stopped').length;
+      const body = `<p class="dim small">Same period compared: days 1–${g.cut} of ${esc(L(d.cur))} vs days 1–${g.cut} of ${esc(L(d.last))}. New = no issuance at all last month. Stopped = issued last month, none this month.</p>
+        <p><b>${U.fmt(g.tot.last)}</b> → <b>${U.fmt(g.tot.cur)}</b> · ${pct === null ? 'no base' : U.pctHtml(pct, { decimals: 1 })} · ${U.fmt(g.P.length)} ${g.P.length === 1 ? 'agent' : 'agents'} · <span class="msp-hl blue">${U.fmt(newN)} new</span> <span class="msp-hl red">${U.fmt(stopN)} stopped</span></p>
+        ${isTl && ups.length ? `<h4>▲ Growth is up because of</h4><div class="kd-chips">${ups.map(chip).join('')}</div>` : ''}
+        ${isTl && downs.length ? `<h4>▼ Growth is down because of</h4><div class="kd-chips">${downs.map(chip).join('')}</div>` : ''}
+        <h4>By class</h4>${classTbl}
+        <h4>${isTl ? 'Agent-wise' : 'Agent'} change</h4>${peopleTbl}`;
+      const dl = FF.auth.can('export') ? '<button class="btn small" data-msp-growth-xlsx>⬇ Excel</button>' : '';
+      FF.app.openDrawer({ kicker: 'Growth drivers', title: `${pr.name} · growth`, sub: `${U.fmt(g.tot.last)} → ${U.fmt(g.tot.cur)}`, body, wide: true, actions: dl, age: false, replace: true });
+      const btn = document.querySelector('#drawer-actions [data-msp-growth-xlsx]');
+      if (btn) btn.onclick = () => FF.xlsx.download(`growth-${U.slug(pr.name)}-${U.stamp()}.xlsx`, [
+        { name: 'Agents', header: ['Agent', 'ID', 'Status', `${L(d.last)} 1-${g.cut}`, `${L(d.cur)} 1-${g.cut}`, 'Change', 'Last month full', 'This month full'], rows: g.P.map((o) => [o.name, o.id, o.st, o.lastN, o.curN, o.delta, o.lastFull, o.curFull]) },
+        { name: 'Classes', header: ['Class', `${L(d.last)} 1-${g.cut}`, `${L(d.cur)} 1-${g.cut}`, 'Change'], rows: ['VC4', 'VC20', 'VC5+'].map((k) => { const o = g.C.find((x) => x.name === k) || { lastN: 0, curN: 0, delta: 0 }; return [k, o.lastN, o.curN, o.delta]; }) }
+      ]);
+    } catch (err) {
+      FF.app.openDrawer({ kicker: 'Growth drivers', title: pr.name, body: U.errorBox(err), wide: true, replace: true, age: false });
+    }
+  }
+  document.addEventListener('click', (e) => {
+    const gt = e.target && e.target.closest && e.target.closest('[data-msp-growth]');
+    if (gt) { e.preventDefault(); e.stopImmediatePropagation(); openGrowth(gt.dataset.mspGrowth).catch(() => {}); }
+  }, true);
   document.addEventListener('click', (e) => {
     const t = e.target;
     if (!t || !t.closest) return;
