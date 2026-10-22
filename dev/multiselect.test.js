@@ -87,10 +87,10 @@ test('multiple channels can be selected at once (FF + GV)', () => {
 
 test('multiple priorities combine with OR, not AND', () => {
   const all = rows();
-  DP.state.prio = new Set(['High']);
-  assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name).sort(), ['GV Ramesh', 'Ravi Kumar']);
+  DP.state.prio = new Set(['High']);   // priority = stock cover: Direct Dev 3d, GV Free 5d, GV Ramesh 0d
+  assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name).sort(), ['Direct Dev', 'GV Free', 'GV Ramesh']);
   DP.state.prio = new Set(['High', 'Medium']);
-  assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name).sort(), ['Direct Dev', 'GV Ramesh', 'Ravi Kumar']);
+  assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name).sort(), ['Direct Dev', 'GV Free', 'GV Ramesh', 'Ravi Kumar']);
   DP.state.prio = new Set(['High', 'Medium', 'Low']);
   assert.equal(all.filter((r) => DP.passes(r)).length, 5);
 });
@@ -100,7 +100,9 @@ test('two dims combine with AND while values inside a dim are OR', () => {
   DP.state.ch = new Set(['gv']); DP.state.prio = new Set(['High', 'Low']);
   assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name).sort(), ['GV Free', 'GV Ramesh']);
   DP.state.prio = new Set(['High']);
-  assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name), ['GV Ramesh']);
+  assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name).sort(), ['GV Free', 'GV Ramesh']);
+  DP.state.prio = new Set(['Low']);
+  assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name), []);
 });
 
 test('back-compat: old single string filter values still work', () => {
@@ -128,7 +130,7 @@ test('channelLabel + filterOptions describe the multi-selection', () => {
   reset();
   const prio = DP.filterOptions('prio', all);
   assert.deepEqual(prio.map((o) => o.value), ['High', 'Medium', 'Low', 'other']);
-  assert.equal(prio.find((o) => o.value === 'High').count, 2);
+  assert.equal(prio.find((o) => o.value === 'High').count, 3);
   assert.deepEqual(DP.filterOptions('basis', all), [], 'single-select dims have no multi options');
 });
 

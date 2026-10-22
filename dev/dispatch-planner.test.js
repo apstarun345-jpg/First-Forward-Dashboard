@@ -92,10 +92,13 @@ test('Dispatch Planner shows per-agent stock class counts for FF and GV', () => 
 test('direct agents: tags for High/Medium, none for Low', () => {
   const d = rows().find((x) => x.name === 'Direct Dev');
   assert.equal(d.direct, true); assert.equal(d.tagged, true); assert.match(d.action.t, /Tags/);
+  // Priority is derived from cover (stock ÷ run-rate): GV Free has 5 tags vs 1/day → High → tags needed.
   const f = rows().find((x) => x.name === 'GV Free');
-  assert.equal(f.tagged, false); assert.equal(f.action.t, 'No dispatch');
+  assert.equal(f.priority, 'High'); assert.equal(f.tagged, true);
+  const covered = DP.withCalc({ ...DP.collectAgents().find((x) => x.name === 'GV Free'), stock: { vc4: 500, comm: 0, total: 500 } }, 'total');
+  assert.equal(covered.priority, 'Low'); assert.equal(covered.tagged, false); assert.equal(covered.action.t, 'No dispatch');
   const raw = rows().find((x) => x.name === 'Source Review');
-  assert.equal(raw.priority, 'Review soon'); assert.equal(raw.tagged, false, 'unmapped source priority must not imply High/Medium tag need');
+  assert.equal(raw.sheetPriority, 'Review soon', 'sheet value is kept for reference'); assert.equal(raw.priority, 'High', 'no stock + issuance = High by cover');
 });
 
 test('TL-wise rows: TL stock from sheet, direct group per channel, priority', () => {
@@ -105,11 +108,11 @@ test('TL-wise rows: TL stock from sheet, direct group per channel, priority', ()
   assert.equal(one.agents, 2); assert.equal(one.curV, 336); assert.equal(one.rate, 12);
   assert.equal(one.stockV, 300, 'TL stock (sheet) not agent sum');
   assert.equal(one.net, 0); assert.equal(one.required, 300);
-  assert.equal(one.priority, 'Medium');
+  assert.equal(one.priority, 'Low', 'TL cover 300 ÷ 12 = 25 days');
   assert.equal(tls.filter((t) => t.direct).length, 2, 'FF + GV direct groups');
   const gvTl = tls.find((t) => t.ch === 'gv' && !t.direct);
   assert.equal(gvTl.name, 'GV TL');
-  assert.equal(gvTl.priority, '', 'GV TL priority is not present in the source report, so do not infer it from agents');
+  assert.equal(gvTl.priority, 'High', 'GV TL has no stock but issuance → High by cover');
 });
 
 test('filters + sort + totals', () => {
@@ -117,7 +120,7 @@ test('filters + sort + totals', () => {
   DP.state.ch = 'ff'; DP.state.type = 'managed'; DP.state.prio = 'all'; DP.state.need = 'all'; DP.state.tl = ''; DP.state.q = '';
   assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name).sort(), ['Ravi Kumar', 'Sita Devi']);
   DP.state.type = 'all'; DP.state.prio = 'Medium';
-  assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name), ['Direct Dev']);
+  assert.deepEqual(all.filter((r) => DP.passes(r)).map((r) => r.name), ['Ravi Kumar']);
   DP.state.ch = 'all'; DP.state.prio = 'all'; DP.state.need = 'need';
   const need = DP.sortRows(all.filter((r) => DP.passes(r)), { key: 'net', dir: 'desc' });
   assert.deepEqual(need.map((r) => r.name).sort(), ['GV Ramesh', 'Ravi Kumar']);

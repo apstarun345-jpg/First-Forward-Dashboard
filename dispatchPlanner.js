@@ -313,6 +313,15 @@ FF.pages = FF.pages || {};
     // v3.31: har row apne channel ke din se — FF = kal tak ka data (1 tareekh = pichhle month ke poore din),
     // GV = live (aaj − 1). Pehle dono ke liye max(1, aaj − 1) = 1 din lagta tha (1 tareekh par ~30× galat).
     const c = U.dispatchCalc({ cur: r.cur[basis], last: r.last[basis], stock: r.stock[basis], ch: r.ch, elapsed: chDays(r.ch) });
+    // Priority is derived from real stock cover (stock ÷ run-rate) — the sheet's Priority Level column
+    // stays Low even for agents with issuance and no stock, so it is kept only as `sheetPriority`.
+    const th = (FF.config && FF.config.thresholds) || {};
+    const redD = th.coverRed || 7, orgD = th.coverOrange || 15;
+    let priority = r.priority;
+    if (c.rate > 0) priority = c.cover == null ? 'Low' : c.cover < redD ? 'High' : c.cover < orgD ? 'Medium' : 'Low';
+    else if (!KNOWN_PRIORITIES.has(priority) && !clean(priority)) priority = 'Low';
+    else if (KNOWN_PRIORITIES.has(priority)) priority = 'Low';
+    r = { ...r, sheetPriority: r.priority, priority };
     const tagged = r.direct && (r.priority === 'High' || r.priority === 'Medium');
     let action;
     if (r.direct) action = tagged ? { t: '🏷️ Tags chahiye', cls: 'violet' } : { t: 'No dispatch', cls: 'gray' };
