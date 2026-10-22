@@ -9001,6 +9001,45 @@ function isGvPersonalRow(master) {
 function isFfPersonalRow(master) {
   return !isGvPersonalRow(master);
 }
+/** 🟩 GV personal fallback — EIR ke GV columns (AU–AZ) khaali hon to GV Master tab se TL / agent ki issuance padho.
+    Date text ho ya date-typed: 3 koshish (seedha, toDate, bina date filter) aur date JS me filter. */
+async function personalGvMasterRows(link) {
+  const m = (db.settings.gv && db.settings.gv.master) || {};
+  const col = { date: m.date || 'P', cch: m.cch || 'G', vcl: m.vClass || 'F', tag: m.tagId || 'I', agent: m.agentName || 'B', uid: m.uniqueId || 'A', tlId: m.tlId || 'C', tlName: m.tlName || 'D' };
+  const { start, today } = personalWindow();
+  const low = (n) => gvizLiteral(String(n).toLowerCase());
+  const pid = String(link.personId || '').trim().toUpperCase();
+  let who;
+  if (link.kind === 'tl') who = `(lower(${col.tlName}) = ${low(link.name)}${pid ? ` or upper(${col.tlId}) = ${gvizLiteral(pid)}` : ''})`;
+  else if (link.kind === 'group') { const names = personalMemberNames(link); who = names.length ? `(${names.map((n) => `lower(${col.agent}) = ${low(n)}`).join(' or ')})` : `${col.agent} = ''`; }
+  else who = `(lower(${col.agent}) = ${low(link.name)}${pid ? ` or upper(${col.uid}) = ${gvizLiteral(pid)}` : ''})`;
+  const select = `select ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}, count(${col.tag})`;
+  const group = `group by ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}`;
+  const base = `${col.tag} is not null and ${who}`;
+  const tries = [
+    `${select} where ${base} and ${col.date} >= date '${start}' and ${col.date} <= date '${today}' ${group}`,
+    `${select} where ${base} and toDate(${col.date}) >= date '${start}' and toDate(${col.date}) <= date '${today}' ${group}`,
+    `${select} where ${base} ${group} limit 20000`
+  ];
+  const sheetId = String(db.settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  for (const tq of tries) {
+    try {
+      const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: m.tab || 'GV Master', tq })));
+      if (out.status < 200 || out.status >= 300) continue;
+      const table = parseGvizServer(out.body);
+      const rows = [];
+      for (const row of table.rows || []) {
+        const dk = serverDate(serverCell(row, 1));
+        if (!dk || dk < start || dk > today) continue;
+        const cch = String(serverCell(row, 2) || '').trim(), vcl = String(serverCell(row, 3) || '').trim().replace(/\.0+$/, '');
+        const cls = classBucket(cch || (vcl ? (/^vc/i.test(vcl) ? vcl : `VC${vcl}`) : ''));
+        rows.push({ agent: serverCell(row, 0).trim(), date: dk, cls, n: serverNumber(serverCell(row, 4)) });
+      }
+      return rows;
+    } catch { /* next attempt */ }
+  }
+  return [];
+}
 async function personalDailyRows(link) {
   const c = personalConfig(link);
   const { start, today } = personalWindow();
@@ -9033,6 +9072,12 @@ async function personalDailyRows(link) {
     if ((c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
     rows.push({ date: dk, cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, Math.max(0, cells.length - 1))) });
   }
+  if (!rows.length && c.source === 'gv') {
+    const gm = await personalGvMasterRows(link);
+    const agg = new Map();
+    gm.forEach((r) => { const k = `${r.date}|${r.cls}`; agg.set(k, { date: r.date, cls: r.cls, n: (agg.get(k) ? agg.get(k).n : 0) + r.n }); });
+    return [...agg.values()];
+  }
   return rows;
 }
 async function personalTeamAgents(link) {
@@ -9054,6 +9099,14 @@ async function personalTeamAgents(link) {
     if ((c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
     if (!byAgent.has(name)) byAgent.set(name, new Map());
     byAgent.get(name).set(dk, (byAgent.get(name).get(dk) || 0) + serverNumber(serverCell(row, Math.max(0, cells.length - 1))));
+  }
+  if (!byAgent.size && c.source === 'gv') {
+    for (const r of await personalGvMasterRows(link)) {
+      const name = r.agent || '';
+      if (!name) continue;
+      if (!byAgent.has(name)) byAgent.set(name, new Map());
+      byAgent.get(name).set(r.date, (byAgent.get(name).get(r.date) || 0) + r.n);
+    }
   }
   return byAgent;
 }
@@ -9479,6 +9532,12 @@ async function servePersonalPage(req, res, rawToken) {
       const tbl = (id, title, heads, body, empty) => `<section class="pb-card"><div class="pb-card-head"><h3>${title}</h3>${expBtns(id, `${link.name} - ${title.replace(/<[^>]+>/g, '').replace(/[^\w\s-]/g, '').trim()}`)}</div>${body ? `<div class="pb-scroll"><table class="pb-tbl" id="${id}"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>` : `<p class="dim" style="padding:8px 4px">${empty}</p>`}</section>`;
       const inactiveBody = inactive.map((a) => `<tr data-gap="${a.gap === null ? 999 : a.gap}"><td><b>${escHtml(a.name)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td><td>${nf(a.mtd)}</td><td class="${a.stock ? 'pb-warn' : ''}">${stockInfo ? nf(a.stock) : '—'}</td></tr>`).join('');
       const growthBody = (arr) => arr.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td>${nf(a.prevSame)}</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(a.growth)}</td><td>${lastLbl(a)}</td></tr>`).join('');
+      const inactMonth = list.filter((a) => a.mtd === 0).sort((a, b) => b.prevTot - a.prevTot || b.stock - a.stock);
+      const inact2 = list.filter((a) => a.mtd === 0 && a.prevTot === 0).sort((a, b) => b.stock - a.stock);
+      const highG = list.filter((a) => a.growth !== null && a.growth >= 50).sort((a, b) => b.growth - a.growth || b.mtd - a.mtd);
+      const highD = list.filter((a) => a.growth !== null && a.growth <= -50).sort((a, b) => a.growth - b.growth || b.prevSame - a.prevSame);
+      const inactRows = (arr) => arr.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td><td>${nf(a.mtd)}</td><td class="${a.stock ? 'pb-warn' : ''}">${stockInfo ? nf(a.stock) : '—'}</td></tr>`).join('');
+      const inactMonthBody = inactRows(inactMonth), inact2Body = inactRows(inact2);
       const freshBody = fresh.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td>0</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(null)}</td><td>${lastLbl(a)}</td></tr>`).join('');
       const gHeads = ['Agent', `Last month (1–${dayNo || 1})`, 'MTD', 'Growth', 'Last active'];
       const isT = isTeamLink(link);
@@ -9487,8 +9546,14 @@ async function servePersonalPage(req, res, rawToken) {
         ${tile('best', '🔮 Month-end expected', nf(proj), `last month ${nf(totPrev)}`)}
         ${isT ? tile('streak', '🟢 Active (≤3 din)', nf(active3), `${list.length ? Math.round(active3 / list.length * 100) : 0}% team`) : ''}
         ${isT ? tile('previous', '😴 Inactive (7+ din)', nf(inactive.length), `${zeroMtd} agents ka MTD zero`) : ''}
+        ${isT ? tile('best', '🛑 Inactive 2 months', nf(inact2.length), `${nf(inactMonth.length)} inactive this month`) : ''}
+        ${isT ? tile('issuance', '🔥 High growth / 🔻 de-growth', `${nf(highG.length)} / ${nf(highD.length)}`, '±50% vs same days last month') : ''}
       </section>
       ${isT ? `<section class="pb-card"><div class="pb-card-head"><h3>😴 Inactive agents</h3><div class="pb-ins-filter" id="pl-ins-filter"><span class="dim small">Kitne din se issuance nahi:</span> ${[7, 10, 15, 30].map((d, i) => `<button type="button" class="pb-btn${i === 0 ? ' on' : ''}" data-ins-days="${d}">${d}+ din</button>`).join('')}</div>${expBtns('pl-tbl-inactive', `${link.name} - Inactive agents`)}</div>${inactiveBody ? `<div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-inactive"><thead><tr><th>Agent</th><th>Last active</th><th>Last month</th><th>MTD</th><th>Stock</th></tr></thead><tbody>${inactiveBody}</tbody></table></div><p class="dim small" id="pl-ins-empty" hidden style="padding:8px 4px">✅ Is filter me koi inactive agent nahi.</p>` : '<p class="dim" style="padding:8px 4px">✅ Sab agents active hain (pichhle 7 din me issuance).</p>'}<p class="pb-matrix-note">Aaj ka incomplete din count nahi hota · "60+ din" = pichhle 2 mahine me koi issuance nahi.</p></section>` : `<section class="pb-card"><h3>🕒 Last active</h3><div class="pb-kv"><span>Last issuance</span><b>${list[0] ? lastLbl(list[0]) : '—'}</b></div></section>`}
+      ${isT ? tbl('pl-tbl-inact-m', '😴 Inactive this month <small class="dim">(no issuance in the current month)</small>', ['Agent', 'Last active', 'Last month', 'MTD', 'Stock'], inactMonthBody, '✅ Every agent has issued this month.') : ''}
+      ${isT ? tbl('pl-tbl-inact-2m', '🛑 Inactive 2 months <small class="dim">(no issuance last month and this month)</small>', ['Agent', 'Last active', 'Last month', 'MTD', 'Stock'], inact2Body, '✅ No agent is inactive for 2 months.') : ''}
+      ${isT ? tbl('pl-tbl-high50', '🔥 High growth <small class="dim">(+50% or more vs same days last month)</small>', gHeads, growthBody(highG), 'No agent is at +50% or more.') : ''}
+      ${isT ? tbl('pl-tbl-down50', '🔻 High de-growth <small class="dim">(−50% or worse vs same days last month)</small>', gHeads, growthBody(highD), '✅ No agent is at −50% or worse.') : ''}
       ${isT ? tbl('pl-tbl-high', `🚀 High growth <small class="dim">(pichhle mahine ke same din se zyada)</small>`, gHeads, growthBody(high), 'Abhi koi agent growth me nahi hai.') : ''}
       ${isT && fresh.length ? tbl('pl-tbl-new', '🆕 Naye active <small class="dim">(pichhle mahine same period me 0, ab issuance)</small>', gHeads, freshBody, '') : ''}
       ${isT ? tbl('pl-tbl-down', `📉 De-growth <small class="dim">(pichhle mahine ke same din se kam)</small>`, gHeads, growthBody(down), '✅ Koi agent de-growth me nahi.') : ''}
