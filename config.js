@@ -315,7 +315,8 @@ FF.config = {
       const tl = String(agent.tlName || agent.tl || '').trim();
       if (tl && this.isExcludedTl(tl)) return true;
       if (!tl && !String(agent.tlId || agent.supervisorId || '').trim()) return true;
-      return selfSupervised;
+      // FF: a TL's own agent row (TL = itself) is a real TL, not a direct agent — only APS / no TL is direct.
+      return false;
     };
     const gvRule = () => {
       const tl = String(agent.tlName || agent.tl || '').trim();

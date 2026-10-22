@@ -27,6 +27,7 @@ test('shared Direct Agent classifier: channel-specific rules (FF = APS, GV = no 
   // First Forward: TL Name "APS" (or excluded/placeholder TL) = direct
   assert.equal(classify({ tlName: 'APS', tlId: 'APN2354', agentId: '5' }, 'ff'), true, 'FF: APS = direct even if an id exists');
   assert.equal(classify({ tlName: 'AJAY SINGH M', tlId: 'APN2354' }, 'ff'), false, 'FF: real TL-managed agent is not direct');
+  assert.equal(classify({ agentName: 'ARYAN', agentId: 'APN9', tlName: 'ARYAN', tlId: 'APN9' }, 'ff'), false, 'FF: TL own row (self) is a real TL, not direct');
   assert.equal(classify({ tlName: 'UNASSIGNED' }, 'ff'), true, 'FF: placeholder TL name = direct');
 
   // GV: TL ID AND TL Name both blank = direct

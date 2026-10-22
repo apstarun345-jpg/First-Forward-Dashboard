@@ -590,24 +590,32 @@ FF.pages = FF.pages || {};
       const curVc4 = Math.max(Number(r.curVc4) || 0, cur.vc4 || 0);
       const curComm = Math.max(Number(r.curComm) || 0, cur.comm || 0);
       const curTotal = Math.max(Number(r.curTotal) || 0, cur.total || 0, curVc4 + curComm);
-      const lastVc4 = sheetLast ? (Number(r.lastVc4) || 0) : Math.max(Number(r.lastVc4) || 0, prev.vc4 || 0);
-      const lastComm = sheetLast ? (Number(r.lastComm) || 0) : Math.max(Number(r.lastComm) || 0, prev.comm || 0);
-      const lastTotal = sheetLast ? Math.max(Number(r.lastTotal) || 0, lastVc4 + lastComm) : Math.max(Number(r.lastTotal) || 0, prev.total || 0, lastVc4 + lastComm);
+      // Sheet-first only when the sheet really has a number; a 0 / blank sheet cell falls back to the tag ledger
+      // (GV REPORT often shows 0 for every agent while EIR / GV Master has the real last month).
+      const sheetLastOk = sheetLast && (Number(r.lastTotal) || 0) + (Number(r.lastVc4) || 0) + (Number(r.lastComm) || 0) > 0;
+      const lastVc4 = sheetLastOk ? (Number(r.lastVc4) || 0) : Math.max(Number(r.lastVc4) || 0, prev.vc4 || 0);
+      const lastComm = sheetLastOk ? (Number(r.lastComm) || 0) : Math.max(Number(r.lastComm) || 0, prev.comm || 0);
+      const lastTotal = sheetLastOk ? Math.max(Number(r.lastTotal) || 0, lastVc4 + lastComm) : Math.max(Number(r.lastTotal) || 0, prev.total || 0, lastVc4 + lastComm);
       const curByClass = { ...(r.curByClass || {}) };
       // Class detail bhi sheet-first: sheet ke class columns bhare hue hain to ledger unke upar max nahi karta.
       if (!r.curClassAvailable) Object.entries(cur.byClass || {}).forEach(([cls, n]) => { curByClass[cls] = Math.max(curByClass[cls] || 0, n); });
       const lastByClass = { ...(r.lastByClass || {}) };
-      if (!sheetLast) Object.entries(prev.byClass || {}).forEach(([cls, n]) => { lastByClass[cls] = Math.max(lastByClass[cls] || 0, n); });
+      if (!sheetLastOk) Object.entries(prev.byClass || {}).forEach(([cls, n]) => { lastByClass[cls] = Math.max(lastByClass[cls] || 0, n); });
       if (lastVc4 > (lastByClass.VC4 || 0)) lastByClass.VC4 = lastVc4;
       const sumLastCommByClass = Object.entries(lastByClass).filter(([k]) => k !== 'VC4').reduce((s, [, n]) => s + (Number(n) || 0), 0);
       if (lastComm > sumLastCommByClass) lastByClass['VC5+'] = (lastByClass['VC5+'] || 0) + (lastComm - sumLastCommByClass);
       const finalGrowth = U.growth(curTotal, lastTotal);
+      // 🎯 Priority = stock cover (stock ÷ run-rate/day) — one rule for KPI, chips, TL table and watchlist.
+      const thr = (FF.config && FF.config.thresholds) || {};
+      const rate = lastDay ? curTotal / lastDay : 0, stockN = Number(r.stockTotal) || 0;
+      const coverPriority = rate > 0 ? (stockN / rate < (thr.coverRed || 7) ? 'High' : stockN / rate < (thr.coverOrange || 15) ? 'Medium' : 'Low') : (stockN > 0 ? 'Low' : (r.priority || ''));
       return { ...r,
         lastDays, lastVc4, lastComm, lastTotal, lastByClass,
         curDays, replace: curReplace, chassis: curChassis, curVc4, curComm, curTotal, curByClass,
         todayIssued, todayIssuedSource: eirToday ? 'EIR' : (todayIssued ? 'GV REPORT' : 'EIR + GV REPORT'), expected: expected(curTotal),
         runrateVc4: lastDay ? curVc4 / lastDay : 0, runrateComm: lastDay ? curComm / lastDay : 0,
-        runrate: lastDay ? curTotal / lastDay : 0, growth: finalGrowth !== null ? finalGrowth : r.growth,
+        runrate: lastDay ? curTotal / lastDay : 0, priority: coverPriority, prioritySheet: r.priority,
+        growth: finalGrowth,   // null when last month is 0 (new agent) — never the sheet's stale −100%
         // TL snapshot bhi sheet-first: GV REPORT ki TL columns (TL Last Month Issued / TL Issuance In
         // Current Month) sheet ka apna TL total hain — unke upar ledger ka jod nahi lagta.
         tlLastAvailable: r.tlLastAvailable === true,
@@ -913,7 +921,11 @@ FF.pages = FF.pages || {};
       if (th) { const k = th.dataset.sort; if (perf.sort.key === k) perf.sort.dir = perf.sort.dir === 'asc' ? 'desc' : 'asc'; else { perf.sort.key = k; perf.sort.dir = 'desc'; } rerender(); return; }
       // 👥 TL row / TL bar par click = TL 360 drawer (TL ka apna + saare agents ka issuance-stock).
       const tlEl = e.target.closest('[data-gvp-tl]');
-      if (tlEl && tlEl.dataset.gvpTl) { openGvTlDrawer(tlEl.dataset.gvpTl, tlEl.dataset.gvpTlid || ''); return; }
+      if (tlEl && tlEl.dataset.gvpTl) {
+        // 🚫 Direct row → stay here: Agents tab filtered to direct agents (no jump to the Direct Agents page)
+        if (tlEl.dataset.gvpTlid === '__direct__' || /^🚫|^direct/i.test(U.clean(tlEl.dataset.gvpTl))) { perf.tl = '__direct__'; perf.view = 'agents'; perf.page = 1; history.replaceState(null, '', '#/gvPerformance?view=agents'); rerender(); return; }
+        openGvTlDrawer(tlEl.dataset.gvpTl, tlEl.dataset.gvpTlid || ''); return;
+      }
       const row = e.target.closest('tr[data-agent]');
       if (row) { const r = all.find((x) => x.agentName === row.dataset.agent); if (r) agentDrawer(r); }
       const barAgent = e.target.closest('[data-gvp-agent]');
