@@ -170,7 +170,7 @@ test('🧠 v184 — personal link Insights tab (inactive, growth, de-growth, dea
   assert.match(srv, /High growth/);
   assert.match(srv, /De-growth/);
   assert.match(srv, /data-ins-days/);
-  assert.match(srv, /Stock hai par issuance nahi/);
+  assert.match(srv, /Stock but no issuance/);
   assert.match(st, /key: 'insights'/);
 });
 
@@ -183,8 +183,8 @@ test('🧠 v186 — old personal links with Performance get Insights unless admi
 
 test('⚡ v187 — personal page never hangs: 3s time-box loading page + prewarm on verify', () => {
   const srv = read('server.js');
-  assert.match(srv, /Report taiyar ho rahi hai/);
-  assert.match(srv, /Aapka report load ho raha hai/);
+  assert.match(srv, /Preparing your report/);
+  assert.match(srv, /Loading your report/);
   assert.match(srv, /sheet data background me garam karo/);
 });
 

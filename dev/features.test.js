@@ -636,7 +636,7 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.ok(htmlT.includes('pl-tbl-date-matrix') && htmlT.includes('Agent Name') && htmlT.includes('MTD Total'), 'TL report includes the current-month agent-by-date issuance matrix');
     assert.ok(htmlT.includes('Daily Issuance · Current Month') && htmlT.includes('MTD ISSUED'), 'TL graph shows current-month total through yesterday');
     assert.ok(htmlT.includes('Team · agent-wise issuance'), 'TL agent-wise issuance is included');
-    assert.ok(htmlT.includes('Team (is mahine)'), 'TL team performance list included');
+    assert.ok(htmlT.includes('Team (this month)'), 'TL team performance list included');
     // 📊 Summary + side panel (v3.77): MTD / last month / growth / run-rate / projection tiles, tabs side panel me
     assert.ok(htmlT.includes('pb-kpis-sum') && htmlT.includes('Run rate') && htmlT.includes('Month-end projection') && htmlT.includes('Last month ('), 'TL summary tiles (MTD, last month, growth, run-rate, projection)');
     assert.ok(htmlT.includes('class="pl-side"') && htmlT.includes('id="pl-tabs"') && htmlT.includes('class="pl-main"'), 'reports side panel layout');

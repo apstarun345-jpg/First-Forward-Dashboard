@@ -7661,7 +7661,7 @@ async function handleApi(req, res, url) {
   // A successful check creates an HttpOnly server-side session; the page never trusts DOM hiding.
   // 🚪 v189 — ek common Portal link: har agent/TL apna ID + registered mobile (password) daal ke seedha apni report kholta hai.
   if (p === '/api/public/portal-login' && method === 'POST') {
-    if (feats().personalLinks === false) throw new HttpError(404, 'Ye feature admin ne band kar rakha hai.');
+    if (feats().personalLinks === false) throw new HttpError(404, 'This feature has been turned off by the admin.');
     const ip = clientIp(req);
     if (!publicRateOk(`plportal:${ip}`, 30, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada attempts — thodi der baad try karo.');
     const body = await readBody(req);
@@ -9277,7 +9277,7 @@ function personalRequestsHtml(link) {
     if (rows.length) mine.push({ r, rows });
   });
   mine.sort((a, b) => Date.parse(b.r.at || 0) - Date.parse(a.r.at || 0));
-  if (!mine.length) return '<section class="pb-card"><h3>🏷️ My Tag Requests</h3><p class="dim">Abhi tak koi Tag Request nahi mili.</p></section>';
+  if (!mine.length) return '<section class="pb-card"><h3>🏷️ My Tag Requests</h3><p class="dim">No Tag Requests yet.</p></section>';
   const badge = (st) => {
     const v = String(st || 'pending').toLowerCase();
     const map = { approved: ['#16a34a', 'Approved'], dispatched: ['#2563eb', 'Dispatched'], rejected: ['#dc2626', 'Rejected'], pending: ['#d97706', 'Pending'] };
@@ -9291,13 +9291,13 @@ function personalRequestsHtml(link) {
   }).join('');
   return `<section class="pb-card"><h3>🏷️ My Tag Requests</h3><div class="pb-tbl-wrap" style="overflow:auto"><table class="pb-tbl"><thead><tr><th>Date</th>${isTl ? '<th>Agent</th>' : ''}<th>Class-wise qty</th><th>Status</th><th>Courier</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
 }
-const PORTAL_LOGIN_JS = "(function(){var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');\n      function go(extra){e.hidden=true;b.disabled=true;b.textContent='\u23f3 Login ho raha hai\u2026';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;\n      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){\n        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}\n        if(x.j.url){location.href=x.j.url;return;}\n        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'\ud83d\udfe9 ':'\ud83d\udfe6 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='\ud83d\udd13 Login';}\n      }).catch(function(err){e.textContent='\u26a0\ufe0f '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='\ud83d\udd13 Login';});}\n      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();";
+const PORTAL_LOGIN_JS = "(function(){var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');\n      function go(extra){e.hidden=true;b.disabled=true;b.textContent='\u23f3 Logging in\u2026';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;\n      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){\n        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}\n        if(x.j.url){location.href=x.j.url;return;}\n        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'\ud83d\udfe9 ':'\ud83d\udfe6 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='\ud83d\udd13 Login';}\n      }).catch(function(err){e.textContent='\u26a0\ufe0f '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='\ud83d\udd13 Login';});}\n      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();";
 
 async function servePersonalPage(req, res, rawToken) {
   const token = String(rawToken || '').split(/[/?#]/)[0].trim();
   const noStore = { 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' };
   const fail = (code, msg) => sendHtml(res, code, personalShell({ title: 'Link unavailable', heading: '🔒 Link unavailable', body: `<p>${escHtml(msg)}</p>` }), noStore);
-  if (feats().personalLinks === false) return fail(404, 'Ye feature admin ne band kar rakha hai.');
+  if (feats().personalLinks === false) return fail(404, 'This feature has been turned off by the admin.');
   const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
   if (!savedLink) return fail(404, 'This link has either expired or is wrong. Ask the admin for a new one.');
   if (savedLink.enabled === false) return fail(403, 'The admin has disabled this link.');
@@ -9308,7 +9308,7 @@ async function servePersonalPage(req, res, rawToken) {
     const gate = `<section class="pb-card pb-auth-card" id="pl-auth-gate">
       <div class="pb-auth-ico">🔐</div>
       <h2>Personal Report · Verification Required</h2>
-      <p class="dim">Assigned <b>${idLabel}</b> aur registered <b>10-digit mobile number</b> verify karke hi report khulegi.</p>
+      <p class="dim">Assigned <b>${idLabel}</b> and the registered <b>10-digit mobile number</b> to open the report.</p>
       ${credentialsReady ? `<form class="pb-auth-form" id="pl-auth-form" autocomplete="off">
         <label class="pb-fld"><span>🪪 ${idLabel} *</span><input class="pb-inp" id="pl-inp-id" required placeholder="Enter your ${idLabel}" maxlength="40" autocomplete="off"></label>
         <label class="pb-fld"><span>📱 Registered Mobile Number *</span><input class="pb-inp" id="pl-inp-mob" type="tel" inputmode="numeric" required placeholder="10-digit mobile" maxlength="14" autocomplete="off"></label>
@@ -9350,9 +9350,9 @@ async function servePersonalPage(req, res, rawToken) {
         return sendHtml(res, 200, personalShell({
           title: `${link.name} · Loading`,
           heading: `👋 Welcome, <b>${escHtml(link.name)}</b>`,
-          sub: 'Report taiyar ho rahi hai…',
+          sub: 'Preparing your report…',
           token, requireAuth, authorized: true, personName: link.name,
-          body: '<section class="pb-card" style="text-align:center;padding:36px 18px"><div style="font-size:34px">⏳</div><h3>Aapka report load ho raha hai…</h3><p class="dim" style="margin-top:6px">Sheet se live data aa raha hai — yeh page apne aap khul jayega.</p></section><div id="pl-reload" data-reload-ms="2500" hidden></div>'
+          body: '<section class="pb-card" style="text-align:center;padding:36px 18px"><div style="font-size:34px">⏳</div><h3>Loading your report…</h3><p class="dim" style="margin-top:6px">Live data is loading from the sheet — this page will open automatically.</p></section><div id="pl-reload" data-reload-ms="2500" hidden></div>'
         }), noStore);
       }
     }
@@ -9386,7 +9386,7 @@ async function servePersonalPage(req, res, rawToken) {
     // khulta hai (naye TL / naye mahine ke shuru me issuance abhi zero hota hai). Dono na mile to saaf message.
     if (needsIssuance && !rows.length) {
       const stockOnly = await stockPromise;
-      if (!stockOnly) return fail(404, `"${link.name}" ka issuance aur stock dono abhi data me nahi mile. Naam ki spelling check karein — Settings → Personal links me naam dobara choose karein.`);
+      if (!stockOnly) return fail(404, `"${link.name}" has no issuance or stock in the data yet. Check the spelling — re-select the name in Settings → Personal links.`);
     }
     const st = personalStats(rows);
     const reportThrough = st.monthDays && st.monthDays.length ? st.monthDays[st.monthDays.length - 1].date : '';
@@ -9495,7 +9495,7 @@ async function servePersonalPage(req, res, rawToken) {
     // 3. 🧓 Stock Ageing Table (Group-wise + Agent-wise for TL)
     const totAgeC = [0, 1, 2, 3].map((i) => (stockInfo ? stockInfo.c[0][i] + stockInfo.c[1][i] : 0));
     const maxOld = stockInfo ? Math.max(stockInfo.o[0] || 0, stockInfo.o[1] || 0) : 0;
-    const ageHtml = stockInfo ? `<section class="pb-card"><div class="pb-card-head"><h3>🧓 Stock ageing</h3>${expBtns('pl-tbl-ageing', `${link.name} - Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ageing"><thead><tr><th>Group</th><th>Total</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th><th>Oldest</th></tr></thead><tbody>${[['VC4+VC20', 0], ['VC5+', 1]].map(([lbl, g]) => `<tr><td>${lbl}</td><td>${nf(stockInfo.t[g])}</td>${stockInfo.c[g].map((x, i) => `<td class="${i >= 2 && x ? 'pb-hot' : i === 1 && x ? 'pb-warn' : ''}">${nf(x)}</td>`).join('')}<td>${stockInfo.o[g] ? `${nf(stockInfo.o[g])}d` : '—'}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(stTotal)}</td>${totAgeC.map((x) => `<td>${nf(x)}</td>`).join('')}<td>${maxOld ? `${nf(maxOld)}d` : '—'}</td></tr></tfoot></table></div></section>` : '<section class="pb-card"><h3>🧓 Stock ageing</h3><p class="dim">Stock ageing data abhi uplabdh nahi hai.</p></section>';
+    const ageHtml = stockInfo ? `<section class="pb-card"><div class="pb-card-head"><h3>🧓 Stock ageing</h3>${expBtns('pl-tbl-ageing', `${link.name} - Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ageing"><thead><tr><th>Group</th><th>Total</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th><th>Oldest</th></tr></thead><tbody>${[['VC4+VC20', 0], ['VC5+', 1]].map(([lbl, g]) => `<tr><td>${lbl}</td><td>${nf(stockInfo.t[g])}</td>${stockInfo.c[g].map((x, i) => `<td class="${i >= 2 && x ? 'pb-hot' : i === 1 && x ? 'pb-warn' : ''}">${nf(x)}</td>`).join('')}<td>${stockInfo.o[g] ? `${nf(stockInfo.o[g])}d` : '—'}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(stTotal)}</td>${totAgeC.map((x) => `<td>${nf(x)}</td>`).join('')}<td>${maxOld ? `${nf(maxOld)}d` : '—'}</td></tr></tfoot></table></div></section>` : '<section class="pb-card"><h3>🧓 Stock ageing</h3><p class="dim">Stock ageing data is not available yet.</p></section>';
 
     let agentAgeTable = '';
     if (isTeamLink(link) && stockInfo && stockInfo.agents && stockInfo.agents.length) {
@@ -9521,7 +9521,7 @@ async function servePersonalPage(req, res, rawToken) {
       const sum = (k) => list.reduce((a, r) => a + r[k], 0);
       teamTable = list.length ? `<section class="pb-card"><div class="pb-card-head"><h3>👥 Team · agent-wise issuance (${list.length} agents)</h3>${expBtns('pl-tbl-team', `${link.name} - Team Agent-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-team"><thead><tr><th>Agent</th><th>Last Month Issued</th><th>MTD Issued</th><th>Combined</th></tr></thead><tbody>${list.map((r) => `<tr><td>${escHtml(r.name)}</td><td>${nf(r.last)}</td><td><b>${nf(r.mtd)}</b></td><td>${nf(r.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(sum('last'))}</td><td>${nf(sum('mtd'))}</td><td>${nf(sum('total'))}</td></tr></tfoot></table></div></section>` : '';
     }
-    const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (is mahine)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
+    const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (this month)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
 
     // 5. 🏆 Performance Scorecard Table
     // Growth rule (same as main site): pichle mahine ke SAME din (1..kal) vs is mahine 1..kal.
@@ -9560,7 +9560,7 @@ async function servePersonalPage(req, res, rawToken) {
     })[stockMeta.state] || '';
     const tile = (cls, ico, label, val, sub) => `<div class="pb-kpi ${cls}"><small>${ico} ${label}</small><b>${val}</b><span>${sub}</span></div>`;
     const summaryTiles = [
-      tile('issuance', '📈', `MTD issued (${escHtml(ym)})`, nf(st.mtd), `1–${elapsed} tak`),
+      tile('issuance', '📈', `MTD issued (${escHtml(ym)})`, nf(st.mtd), `days 1–${elapsed}`),
       tile('previous', '🗓️', `Last month (${escHtml(prevYm)})`, nf(lastMonthTotal), `full ${daysPrev}-day total`),
       tile('streak', '⚖️', 'Same days, last month', nf(st.prevSame), `1–${elapsed} ${escHtml(prevYm)}`),
       tile('best', '📊', 'Growth', `<span class="${(growthG || 0) >= 0 ? 'up' : 'down'}">${growthPct}</span>`, escHtml(growthBasis)),
@@ -9571,8 +9571,8 @@ async function servePersonalPage(req, res, rawToken) {
       ? tile('stock', '📦', 'Stock (total)', nf(stTotal), `VC4+VC20 ${nf(stCore)} · VC5+ ${nf(stComm)}`)
       : tile('stock', '📦', 'Stock (total)', '—', escHtml(stockNote)));
     if (hasSec('stock') || hasSec('ageing')) summaryTiles.push(stockInfo
-      ? tile('stock', '🧓', 'Purana stock ≥3M', nf(totAgeC[1]), `≥6M: ${nf(totAgeC[3])} · ${stTotal ? Math.round((totAgeC[1] / stTotal) * 100) : 0}% stock`)
-      : tile('stock', '🧓', 'Purana stock ≥3M', '—', escHtml(stockNote)));
+      ? tile('stock', '🧓', 'Old stock ≥3M', nf(totAgeC[1]), `≥6M: ${nf(totAgeC[3])} · ${stTotal ? Math.round((totAgeC[1] / stTotal) * 100) : 0}% stock`)
+      : tile('stock', '🧓', 'Old stock ≥3M', '—', escHtml(stockNote)));
     const stockPendingEl = stockMeta.state === 'loading' ? '<div id="pl-stock-pending" data-refresh-ms="6000" hidden></div>' : '';
     const summaryHtml = `<section class="pb-kpis pb-kpis-sum">${summaryTiles.join('')}</section>${stockNote && stockMeta.state !== 'loading' ? `<p class="pb-note">⚠️ ${escHtml(stockNote)}</p>` : stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>${stockPendingEl}` : ''}`;
     const tlName = await tlNamePromise;
@@ -9609,7 +9609,7 @@ async function servePersonalPage(req, res, rawToken) {
         const growth = prevSame > 0 ? Math.round(((mtd - prevSame) / prevSame) * 100) : null;
         return { name: pp.name, mtd, prevTot, prevSame, last, gap, growth, stock: stockBy.get(nrm(pp.name)) || 0 };
       });
-      const lastLbl = (a) => (a.last ? `${escHtml(a.last)} · ${a.gap <= 1 ? 'kal' : a.gap + ' din pehle'}` : '<span class="pb-warn">60+ din — data nahi</span>');
+      const lastLbl = (a) => (a.last ? `${escHtml(a.last)} · ${a.gap <= 1 ? 'yesterday' : a.gap + ' days ago'}` : '<span class="pb-warn">60+ days — no data</span>');
       const growthLbl = (g) => (g === null ? '<span class="dim">new</span>' : `<b class="${g >= 0 ? 'pb-up' : 'pb-down'}">${g >= 0 ? '▲' : '▼'} ${Math.abs(g)}%</b>`);
       const inactive = list.filter((a) => a.gap === null || a.gap >= 7).sort((a, b) => (b.gap === null ? 999 : b.gap) - (a.gap === null ? 999 : a.gap));
       const active3 = list.filter((a) => a.gap !== null && a.gap <= 3).length;
@@ -9638,21 +9638,21 @@ async function servePersonalPage(req, res, rawToken) {
       insightsHtml = `<section class="pb-kpis">
         ${tile('issuance', '📈 MTD issued', nf(totMtd), `${isT ? list.length + ' agents' : escHtml(ym)}`)}
         ${tile('best', '🔮 Month-end expected', nf(proj), `last month ${nf(totPrev)}`)}
-        ${isT ? tile('streak', '🟢 Active (≤3 din)', nf(active3), `${list.length ? Math.round(active3 / list.length * 100) : 0}% team`) : ''}
-        ${isT ? tile('previous', '😴 Inactive (7+ din)', nf(inactive.length), `${zeroMtd} agents ka MTD zero`) : ''}
+        ${isT ? tile('streak', '🟢 Active (≤3 days)', nf(active3), `${list.length ? Math.round(active3 / list.length * 100) : 0}% team`) : ''}
+        ${isT ? tile('previous', '😴 Inactive (7+ days)', nf(inactive.length), `${zeroMtd} agents with zero MTD`) : ''}
         ${isT ? tile('best', '🛑 Inactive 2 months', nf(inact2.length), `${nf(inactMonth.length)} inactive this month`) : ''}
         ${isT ? tile('issuance', '🔥 High growth / 🔻 de-growth', `${nf(highG.length)} / ${nf(highD.length)}`, '±50% vs same days last month') : ''}
       </section>
-      ${isT ? (insNav.push(['pl-tbl-inactive', '😴 Inactive agents (7+ days)']), '') : ''}${isT ? `<section class="pb-card" data-ins-sec="pl-tbl-inactive"><div class="pb-card-head"><h3>😴 Inactive agents</h3><div class="pb-ins-filter" id="pl-ins-filter"><span class="dim small">Kitne din se issuance nahi:</span> ${[7, 10, 15, 30].map((d, i) => `<button type="button" class="pb-btn${i === 0 ? ' on' : ''}" data-ins-days="${d}">${d}+ din</button>`).join('')}</div>${expBtns('pl-tbl-inactive', `${link.name} - Inactive agents`)}</div>${inactiveBody ? `<div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-inactive"><thead><tr><th>Agent</th><th>Last active</th><th>Last month</th><th>MTD</th><th>Stock</th></tr></thead><tbody>${inactiveBody}</tbody></table></div><p class="dim small" id="pl-ins-empty" hidden style="padding:8px 4px">✅ Is filter me koi inactive agent nahi.</p>` : '<p class="dim" style="padding:8px 4px">✅ Sab agents active hain (pichhle 7 din me issuance).</p>'}<p class="pb-matrix-note">Aaj ka incomplete din count nahi hota · "60+ din" = pichhle 2 mahine me koi issuance nahi.</p></section>` : `<section class="pb-card"><h3>🕒 Last active</h3><div class="pb-kv"><span>Last issuance</span><b>${list[0] ? lastLbl(list[0]) : '—'}</b></div></section>`}
+      ${isT ? (insNav.push(['pl-tbl-inactive', '😴 Inactive agents (7+ days)']), '') : ''}${isT ? `<section class="pb-card" data-ins-sec="pl-tbl-inactive"><div class="pb-card-head"><h3>😴 Inactive agents</h3><div class="pb-ins-filter" id="pl-ins-filter"><span class="dim small">No issuance for:</span> ${[7, 10, 15, 30].map((d, i) => `<button type="button" class="pb-btn${i === 0 ? ' on' : ''}" data-ins-days="${d}">${d}+ days</button>`).join('')}</div>${expBtns('pl-tbl-inactive', `${link.name} - Inactive agents`)}</div>${inactiveBody ? `<div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-inactive"><thead><tr><th>Agent</th><th>Last active</th><th>Last month</th><th>MTD</th><th>Stock</th></tr></thead><tbody>${inactiveBody}</tbody></table></div><p class="dim small" id="pl-ins-empty" hidden style="padding:8px 4px">✅ No inactive agents for this filter.</p>` : '<p class="dim" style="padding:8px 4px">✅ All agents are active (issued in the last 7 days).</p>'}<p class="pb-matrix-note">Today's incomplete day is not counted · "60+ days" = no issuance in the last 2 months.</p></section>` : `<section class="pb-card"><h3>🕒 Last active</h3><div class="pb-kv"><span>Last issuance</span><b>${list[0] ? lastLbl(list[0]) : '—'}</b></div></section>`}
       ${isT ? tbl('pl-tbl-inact-m', '😴 Inactive this month <small class="dim">(no issuance in the current month)</small>', ['Agent', 'Last active', 'Last month', 'MTD', 'Stock'], inactMonthBody, '✅ Every agent has issued this month.') : ''}
       ${isT ? tbl('pl-tbl-inact-2m', '🛑 Inactive 2 months <small class="dim">(no issuance last month and this month)</small>', ['Agent', 'Last active', 'Last month', 'MTD', 'Stock'], inact2Body, '✅ No agent is inactive for 2 months.') : ''}
       ${isT ? tbl('pl-tbl-high50', '🔥 High growth <small class="dim">(+50% or more vs same days last month)</small>', gHeads, growthBody(highG), 'No agent is at +50% or more.') : ''}
       ${isT ? tbl('pl-tbl-down50', '🔻 High de-growth <small class="dim">(−50% or worse vs same days last month)</small>', gHeads, growthBody(highD), '✅ No agent is at −50% or worse.') : ''}
-      ${isT ? tbl('pl-tbl-high', `🚀 High growth <small class="dim">(pichhle mahine ke same din se zyada)</small>`, gHeads, growthBody(high), 'Abhi koi agent growth me nahi hai.') : ''}
-      ${isT && fresh.length ? tbl('pl-tbl-new', '🆕 Naye active <small class="dim">(pichhle mahine same period me 0, ab issuance)</small>', gHeads, freshBody, '') : ''}
-      ${isT ? tbl('pl-tbl-down', `📉 De-growth <small class="dim">(pichhle mahine ke same din se kam)</small>`, gHeads, growthBody(down), '✅ Koi agent de-growth me nahi.') : ''}
-      ${isT ? tbl('pl-tbl-top', '🥇 Top performers (MTD)', ['#', 'Agent', 'MTD', 'Share', 'Last active'], top.map((a, i) => `<tr><td>${i + 1}</td><td><b>${escHtml(a.name)}</b></td><td><b>${nf(a.mtd)}</b></td><td>${pct(a.mtd, totMtd)}%</td><td>${lastLbl(a)}</td></tr>`).join(''), 'Is mahine abhi issuance nahi.') : `<section class="pb-card"><h3>📈 Growth</h3><div class="pb-kv"><span>Last month same period (1–${dayNo || 1})</span><b>${nf(list[0] ? list[0].prevSame : 0)}</b></div><div class="pb-kv"><span>MTD</span><b>${nf(totMtd)}</b></div><div class="pb-kv"><span>Growth</span><b>${list[0] ? growthLbl(list[0].growth) : '—'}</b></div></section>`}
-      ${isT && stockInfo ? tbl('pl-tbl-dead', '📦 Stock hai par issuance nahi <small class="dim">(is mahine 0)</small>', ['Agent', 'Stock', 'Last active', 'Last month'], dead.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td class="pb-warn"><b>${nf(a.stock)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td></tr>`).join(''), '✅ Jinke paas stock hai sabne is mahine issue kiya hai.') : ''}`;
+      ${isT ? tbl('pl-tbl-high', `🚀 High growth <small class="dim">(above the same days last month)</small>`, gHeads, growthBody(high), 'No agent is growing right now.') : ''}
+      ${isT && fresh.length ? tbl('pl-tbl-new', '🆕 Newly active <small class="dim">(0 in the same period last month, issuing now)</small>', gHeads, freshBody, '') : ''}
+      ${isT ? tbl('pl-tbl-down', `📉 De-growth <small class="dim">(below the same days last month)</small>`, gHeads, growthBody(down), '✅ No agent is in de-growth.') : ''}
+      ${isT ? tbl('pl-tbl-top', '🥇 Top performers (MTD)', ['#', 'Agent', 'MTD', 'Share', 'Last active'], top.map((a, i) => `<tr><td>${i + 1}</td><td><b>${escHtml(a.name)}</b></td><td><b>${nf(a.mtd)}</b></td><td>${pct(a.mtd, totMtd)}%</td><td>${lastLbl(a)}</td></tr>`).join(''), 'No issuance yet this month.') : `<section class="pb-card"><h3>📈 Growth</h3><div class="pb-kv"><span>Last month same period (1–${dayNo || 1})</span><b>${nf(list[0] ? list[0].prevSame : 0)}</b></div><div class="pb-kv"><span>MTD</span><b>${nf(totMtd)}</b></div><div class="pb-kv"><span>Growth</span><b>${list[0] ? growthLbl(list[0].growth) : '—'}</b></div></section>`}
+      ${isT && stockInfo ? tbl('pl-tbl-dead', '📦 Stock but no issuance <small class="dim">(0 this month)</small>', ['Agent', 'Stock', 'Last active', 'Last month'], dead.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td class="pb-warn"><b>${nf(a.stock)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td></tr>`).join(''), '✅ Every agent holding stock has issued this month.') : ''}`;
     }
 
     // Build only tabs that the admin granted; an "All" view can expose only emitted sections.
@@ -9694,7 +9694,7 @@ async function servePersonalPage(req, res, rawToken) {
             <div class="pb-kpi streak"><small>🔥 Active Streak</small><b>${nf(st.streak)}</b><span>days active 🔥</span></div>
             <div class="pb-kpi best"><small>🏆 Best Day</small><b>${nf(st.best.n)}</b><span>${escHtml(st.best.date)}</span></div>
           </section>
-          <section class="pb-card"><div class="pb-card-head"><div><h3>📊 Daily Issuance · Current Month (${escHtml(ym)})</h3><p class="pb-matrix-note">Current month · data through ${escHtml(reportThrough || 'no completed day')} · today's incomplete report excluded</p></div><span class="pb-btn pb-count-badge"><small>MTD ISSUED</small><b>${nf(st.mtd)} tags</b></span></div><div class="pb-bars">${bars || '<p class="dim">data nahi</p>'}</div></section>
+          <section class="pb-card"><div class="pb-card-head"><div><h3>📊 Daily Issuance · Current Month (${escHtml(ym)})</h3><p class="pb-matrix-note">Current month · data through ${escHtml(reportThrough || 'no completed day')} · today's incomplete report excluded</p></div><span class="pb-btn pb-count-badge"><small>MTD ISSUED</small><b>${nf(st.mtd)} tags</b></span></div><div class="pb-bars">${bars || '<p class="dim">no data</p>'}</div></section>
           <section class="pb-grid2">
             <div class="pb-card"><h3>🏷️ Class mix (MTD)</h3>${clsRows}</div>
             <div class="pb-card"><h3>📈 Snapshot</h3>
@@ -9710,7 +9710,7 @@ async function servePersonalPage(req, res, rawToken) {
         ${hasSec('insights') ? `<div class="pl-pane" data-pl-pane="insights" hidden>${insightsHtml}</div>` : ''}
         ${hasSec('ageing') ? `<div class="pl-pane" data-pl-pane="ageing" hidden>${ageHtml}${agentAgeTable}</div>` : ''}
         ${hasSec('requests') ? `<div class="pl-pane" data-pl-pane="requests" hidden>${personalRequestsHtml(link)}</div>` : ''}
-        <p class="pb-foot">Read-only link · data live sheet se · ${escHtml(db.settings.brand || 'Dashboard')}</p>
+        <p class="pb-foot">Read-only link · live data from the sheet · ${escHtml(db.settings.brand || 'Dashboard')}</p>
         </div>
       </div></div>`
     });
@@ -9790,8 +9790,62 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-up{color:#16a34a}.pb-down{color:#dc2626}.pb-ins-filter{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.pb-ins-filter .pb-btn.on{background:#4338ca;color:#fff;border-color:#4338ca}
 .pb-note{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:8px 12px;margin:0 0 12px}
 @media(max-width:760px){.pl-layout{grid-template-columns:1fr}.pl-side{position:static;padding:8px}.pl-side-title{display:none}.pl-side .pb-tabs{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.pl-side .pb-tab{width:auto;white-space:nowrap}.pl-side-exp{flex-direction:row;flex-wrap:wrap;margin-top:8px;padding-top:8px}.pl-side-exp .pb-btn{width:auto}}
+
+/* ===== v279 — professional theme layer ===== */
+:root{--ink:#0f172a;--mut:#64748b;--line:#e2e8f0;--surf:#fff;--bg:#eef2f7;--pri:#4f46e5;--pri2:#2563eb;--ok:#16a34a;--bad:#dc2626;--warn:#d97706}
+body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.pb-wrap{max-width:1240px}
+.pb-wrap .pb-head{background:linear-gradient(115deg,#1e1b4b 0%,#312e81 45%,#1d4ed8 100%);border:0;color:#fff;padding:20px 24px;border-radius:20px;box-shadow:0 14px 34px rgba(30,27,75,.28);position:relative;overflow:hidden}
+.pb-wrap .pb-head::after{content:"";position:absolute;right:-60px;top:-80px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.18),transparent 70%)}
+.pb-wrap .pb-head h1{font-size:22px;font-weight:800;color:#fff;letter-spacing:-.01em}
+.pb-wrap .pb-head h1 b{color:#fde68a}
+.pb-wrap .pb-head p{color:#c7d2fe;font-size:13px;margin-top:2px}
+.pb-wrap .pb-head p b{color:#fff}
+.pb-wrap .pb-logo{width:54px;height:54px;border-radius:16px;background:linear-gradient(135deg,#fbbf24,#f97316);color:#1e1b4b;font-size:19px;box-shadow:0 6px 16px rgba(0,0,0,.25);border:2px solid rgba(255,255,255,.35)}
+.pb-wrap .pb-head .pb-btn{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.3);color:#fff;backdrop-filter:blur(4px)}
+.pb-wrap .pb-head .pb-btn:hover{background:rgba(255,255,255,.26)}
+.pb-wrap .pb-card{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 6px 18px rgba(15,23,42,.045)}
+.pb-wrap .pb-card:hover{border-color:#c7d2fe;box-shadow:0 1px 2px rgba(15,23,42,.05),0 10px 26px rgba(79,70,229,.09)}
+.pb-wrap .pb-card h3{font-size:15px;font-weight:800;color:var(--ink);letter-spacing:-.005em}
+.pb-wrap .pb-card-head{padding-bottom:10px;border-bottom:1px solid #f1f5f9;margin-bottom:12px}
+.pb-wrap .pb-card h3 small{font-weight:600;color:var(--mut)}
+/* KPI tiles */
+.pb-wrap .pb-kpis{grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.pb-wrap .pb-kpis .pb-kpi{background:var(--surf);border:1px solid var(--line);border-top:4px solid var(--pri);border-radius:14px;padding:14px 14px 13px;text-align:left;box-shadow:0 1px 2px rgba(15,23,42,.04),0 6px 16px rgba(15,23,42,.04)}
+.pb-wrap .pb-kpis .pb-kpi:nth-child(6n+1){border-top-color:#6366f1}.pb-wrap .pb-kpis .pb-kpi:nth-child(6n+2){border-top-color:#06b6d4}.pb-wrap .pb-kpis .pb-kpi:nth-child(6n+3){border-top-color:#8b5cf6}.pb-wrap .pb-kpis .pb-kpi:nth-child(6n+4){border-top-color:#f59e0b}.pb-wrap .pb-kpis .pb-kpi:nth-child(6n+5){border-top-color:#10b981}.pb-wrap .pb-kpis .pb-kpi:nth-child(6n){border-top-color:#f43f5e}
+.pb-wrap .pb-kpi small{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
+.pb-wrap .pb-kpi b{font-size:28px;font-weight:800;color:var(--ink);margin:4px 0 2px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.pb-wrap .pb-kpi span{font-size:12px;color:var(--mut)}
+.pb-wrap .pb-kpi .up{color:var(--ok)}.pb-wrap .pb-kpi .down{color:var(--bad)}
+/* side navigation */
+.pb-wrap .pl-side{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 6px 18px rgba(15,23,42,.05)}
+.pb-wrap .pl-side-title{color:#6366f1;font-size:11px;letter-spacing:.12em}
+.pb-wrap .pl-side .pb-tab{background:transparent;border:0;border-left:3px solid transparent;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700;color:#475569}
+.pb-wrap .pl-side .pb-tab:hover{background:#f1f5f9;color:var(--ink)}
+.pb-wrap .pl-side .pb-tab.on{background:linear-gradient(90deg,#eef2ff,#f5f3ff);color:#3730a3;border-left-color:#4f46e5;box-shadow:none}
+.pb-wrap .pl-ins-select{border:1.5px solid #c7d2fe;background:#f8faff;color:#3730a3;font-weight:700;border-radius:10px;margin:2px 0 6px}
+.pb-wrap .pl-side-exp{border-top:1px solid var(--line)}
+.pb-wrap .pb-btn{background:#fff;border:1px solid #cbd5e1;border-radius:9px;padding:6px 12px;font-weight:700;color:#334155}
+.pb-wrap .pb-btn:hover{background:#f1f5f9;border-color:#94a3b8}
+.pb-wrap .pb-btn-pdf{background:#eef2ff;border-color:#a5b4fc;color:#3730a3}.pb-wrap .pb-btn-stock{background:#ecfdf5;border-color:#6ee7b7;color:#047857}
+/* tables */
+.pb-wrap .pb-scroll{border:1px solid var(--line);border-radius:12px;margin:0}
+.pb-wrap .pb-tbl{font-size:13px}
+.pb-wrap .pb-tbl th{background:#1e293b;color:#e2e8f0;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;padding:11px 10px;position:sticky;top:0}
+.pb-wrap .pb-tbl td{padding:10px;border-bottom:1px solid #f1f5f9;font-variant-numeric:tabular-nums;color:#1e293b}
+.pb-wrap .pb-tbl tbody tr:nth-child(even) td{background:#f8fafc}
+.pb-wrap .pb-tbl tbody tr:hover td{background:#eef2ff}
+.pb-wrap .pb-tbl tfoot td{background:#e0e7ff;border-top:2px solid #a5b4fc;color:#312e81;font-weight:800}
+.pb-wrap .pb-up{color:var(--ok);font-weight:800}.pb-wrap .pb-down,.pb-wrap .pb-hot{color:var(--bad);font-weight:800}.pb-wrap .pb-warn{color:var(--warn)}
+.pb-wrap .pb-ins-filter .pb-btn.on{background:#4f46e5;border-color:#4f46e5;color:#fff}
+.pb-wrap .pb-note{border-radius:12px}
+.pb-wrap .pb-bar{background:linear-gradient(180deg,#6366f1,#a5b4fc);border-radius:6px 6px 2px 2px}
+.pb-wrap .pb-track{height:11px;background:#e2e8f0}.pb-wrap .pb-fill{background:linear-gradient(90deg,#6366f1,#06b6d4)}
+.pb-wrap .pb-rank{border-bottom:1px solid #f1f5f9}
+.pb-wrap .pb-foot{color:#94a3b8;margin-top:22px}
+@media(max-width:760px){.pb-wrap .pb-head{padding:16px}.pb-wrap .pb-head h1{font-size:18px}.pb-wrap .pb-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.pb-wrap .pb-kpi b{font-size:23px}.pb-wrap .pl-side{padding:8px}.pb-wrap .pl-side .pb-tab{border-left:0;border-bottom:3px solid transparent;border-radius:8px}.pb-wrap .pl-side .pb-tab.on{border-bottom-color:#4f46e5}}
 </style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
-<header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(db.settings.brand || 'FF').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
+<header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(personName || db.settings.brand || 'FF').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
 <div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p>${sub}</p>` : ''}</div></div>
 ${requireAuth ? `<button type="button" class="pb-btn" id="pl-lock-btn" ${authorized ? '' : 'hidden'} title="Lock Personal Link">🔒 Lock</button>` : ''}</header>
 ${body || ''}
