@@ -24,7 +24,8 @@ FF.pages = FF.pages || {};
   // 📊 v235 — "All agents issuance" board: har agent ka month total — VC4 · VC20 · VC5+ · Total · Replacement · Chassis
   // (FF = EIR agent-class rows · GV = GV issuance rows). Month filter, kisi bhi column par sort (default Total ↓), search, Excel.
   const ISSUE_COLS = [['vc4', 'VC4'], ['vc20', 'VC20'], ['vc5p', 'VC5+'], ['total', 'Total'], ['replacement', 'Replacement'], ['chassis', 'Chassis'], ['wrongVrn', 'Wrong VRN']];
-  const issueBoardState = { ff: { month: '', sort: 'total', dir: -1, q: '', limit: 100, onlyNew: false }, gv: { month: '', sort: 'total', dir: -1, q: '', limit: 100, onlyNew: false } };
+  const issueBoardState = { ff: { month: '', sort: 'total', dir: -1, q: '', tl: '', limit: 100, onlyNew: false }, gv: { month: '', sort: 'total', dir: -1, q: '', tl: '', limit: 100, onlyNew: false } };
+  const issueBoardPaint = { ff: null, gv: null };
   const issueBoardCache = { ff: null, gv: null };
   async function issueBoardRows(channel) {
     const isGv = channel === 'gv';
@@ -87,6 +88,7 @@ FF.pages = FF.pages || {};
     };
     const paint = () => {
       let list = build();
+      if (st.tl) { const tk = norm(st.tl); list = list.filter((r) => norm(r.tl) === tk || norm(r.name) === tk); }
       const tot = list.reduce((a, r) => { ISSUE_COLS.forEach(([k]) => { a[k] = (a[k] || 0) + r[k]; }); return a; }, {});
       const nNew = list.filter((r) => r.isNew).length;
       if (st.onlyNew) list = list.filter((r) => r.isNew);
@@ -96,7 +98,7 @@ FF.pages = FF.pages || {};
       const cols = ISSUE_COLS.filter(([k]) => !(isGv && k === 'wrongVrn'));
       const th = (k, l) => `<th class="num ib-sort ${st.sort === k ? 'on' : ''}" data-ib-sort="${k}" title="Sort by ${l}">${l}${st.sort === k ? (st.dir < 0 ? ' ▼' : ' ▲') : ''}</th>`;
       const shown = list.slice(0, st.limit);
-      host.innerHTML = `<div class="card-head"><h3>📊 All agents — issuance <span class="dim">${isGv ? 'GV Partner' : 'First Forward'}</span></h3>
+      host.innerHTML = `<div class="card-head"><h3>📊 ${st.tl ? `TL ${esc(st.tl)} — agents` : 'All agents'} — issuance <span class="dim">${isGv ? 'GV Partner' : 'First Forward'}</span>${st.tl ? ' <button type="button" class="btn small" data-ib-cleartl title="Show all agents">✕ Show all agents</button>' : ''}</h3>
         <div class="card-right ib-tools">
           <select class="input" data-ib-month aria-label="Month">${data.months.slice().reverse().map((m) => `<option value="${esc(m)}" ${m === st.month ? 'selected' : ''}>${esc(U.labelYM(m))}</option>`).join('')}</select>
           <input class="input" data-ib-q type="search" placeholder="Filter agent / TL / ID…" value="${esc(st.q)}" autocomplete="off">
@@ -109,6 +111,7 @@ FF.pages = FF.pages || {};
           <tbody>${shown.map((r, i) => `<tr class="clickable" data-ib-pick="${esc(r.name)}" data-ib-id="${esc(r.id)}" title="Open ${esc(r.name)}'s full summary"><td>${i + 1}</td><td><b>${esc(r.name)}</b>${r.isNew ? ' <span class="ib-new" title="First issuance this month">NEW</span>' : ''}${r.id ? ` <small class="dim">${esc(r.id)}</small>` : ''}</td><td class="dim">${esc(r.tl || '—')}</td>${cols.map(([k]) => `<td class="num ${k === 'total' ? 'ib-total' : ''}">${r[k] ? fmt(r[k]) : '<span class="dim">0</span>'}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length + 3}" class="empty">${st.onlyNew ? 'No new agents' : 'No issuance'} in ${esc(U.labelYM(st.month))}.</td></tr>`}</tbody></table></div>
           ${list.length > shown.length ? `<div style="text-align:center;margin-top:8px"><button class="btn small" data-ib-more>⬇ Show all ${fmt(list.length)} agents</button></div>` : ''}
         </div>`;
+      const ct = host.querySelector('[data-ib-cleartl]'); if (ct) ct.addEventListener('click', () => { st.tl = ''; st.limit = 100; paint(); });
       const mo = host.querySelector('[data-ib-month]'); if (mo) mo.addEventListener('change', () => { st.month = mo.value; st.limit = 100; paint(); });
       const qi = host.querySelector('[data-ib-q]'); if (qi) { let t = 0; qi.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { st.q = qi.value; const pos = qi.selectionStart; paint(); const n = host.querySelector('[data-ib-q]'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch { /* ignore */ } } }, 200); }); }
       host.querySelectorAll('[data-ib-new]').forEach((b) => b.addEventListener('click', () => { st.onlyNew = !st.onlyNew; st.limit = 100; paint(); }));
@@ -124,10 +127,20 @@ FF.pages = FF.pages || {};
         else U.toast('Excel not available', 'warn');
       });
     };
+    issueBoardPaint[channel] = { host, paint };
     paint();
   }
+  /** TL searched → board shows only that TL's agents ('' = everyone). */
+  function setIssueBoardTl(channel, tlName) {
+    const st = issueBoardState[channel]; if (!st) return;
+    const v = clean(tlName);
+    if (st.tl === v) return;
+    st.tl = v; st.limit = 100;
+    const p = issueBoardPaint[channel];
+    if (p && p.host && p.host.isConnected) { try { p.paint(); } catch { /* repaint best effort */ } }
+  }
 
-  FF.issueBoard = { mount: mountIssueBoard };
+  FF.issueBoard = { mount: mountIssueBoard, setTl: setIssueBoardTl };
   async function loadPeople(channel) {
     const isGv = channel === 'gv';
     const kind = isGv ? 'gv-agent' : 'ff-agent';

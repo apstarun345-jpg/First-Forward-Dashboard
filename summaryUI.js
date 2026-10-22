@@ -672,8 +672,8 @@ window.FF = window.FF || {};
           </div>
           <div class="gs-quick"><span class="dim small">⚡ Turant kholo:</span><div id="gs-sug" class="gs-sug"></div></div>
         </div></div>
-        <section class="card ib-card" id="gs-issue-board"></section>
         <div id="gs-body">${U.spinner(`${label} ka data load ho raha hai…`)}</div>
+        <section class="card ib-card" id="gs-issue-board"></section>
       </div>`;
       const body = U.$('#gs-body', root), qEl = U.$('#gs-q', root), drop = U.$('#gs-drop', root), sug = U.$('#gs-sug', root);
       const asked = params && (params.name || params.q);
@@ -689,6 +689,7 @@ window.FF = window.FF || {};
             <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''} <small class="dim">· ${fmt(p.cur)} mtd · ${fmt(p.stock)} stock${(p.today !== undefined) ? ` · ${fmt(p.today)} aaj` : ''}</small></button>`;
         }).join('') : '<span class="dim small">Koi matching naam/ID/mobile nahi mila</span>';
       };
+      try { if (FF.issueBoard && FF.issueBoard.setTl) FF.issueBoard.setTl(ch, ''); } catch { /* optional */ }
       // 📊 v235 — all agents issuance board (month · sort · Excel); row click → usi agent ka poora summary
       if (FF.issueBoard && FF.issueBoard.mount) void FF.issueBoard.mount(U.$('#gs-issue-board', root), ch, (name, id) => {
         const norm2 = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -723,6 +724,7 @@ window.FF = window.FF || {};
         if (!person) return;
         const seq = ++pickSeq;
         S.person = person;
+        try { if (FF.issueBoard && FF.issueBoard.setTl) FF.issueBoard.setTl(ch, /tl$/.test(String(person.kind || '')) ? person.name : ''); } catch { /* optional */ }
         drop.hidden = true;
         if (qEl) qEl.value = person.name;
         body.innerHTML = U.spinner(`${person.name} ka report ban raha hai…`);
