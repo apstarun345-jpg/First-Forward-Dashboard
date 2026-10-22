@@ -6887,6 +6887,11 @@ async function handleApi(req, res, url) {
     } else {
       data = rowsIn.map(mk); // 'class' — har agent × class ki alag row (default)
     }
+    // 🖐️ Biometric Device / Material requests have no class rows — still write ONE row (agent + item/serial/device columns).
+    if (!data.length && !rowsIn.length && req.agent) {
+      const ag = req.agent;
+      data = [mk({ agentId: ag.agentId || '', agentName: ag.name || '', tl: ag.tl || '', channel: ag.channel || 'ff', cls: '', approved: req.serialNumber ? 1 : 0, requested: req.serialNumber ? 1 : 0, last: 0, cur: 0, stock: 0, cover: null, priority: '', growth: null, sugNet: 0, sugGross: 0, remark: '' })];
+    }
     return { header, rows: data, positions: mapped ? mapped.map((m) => m.idx) : null };
   }
   /** Ek ya kai requests (ek submit ka batch) ek hi appendrows call me — rows ka order bana rehta hai aur
@@ -6894,11 +6899,13 @@ async function handleApi(req, res, url) {
   const tagRequestAgentKey = (req) => {
     const rows = Array.isArray(req && req.rows) ? req.rows : [];
     const keys = rows.map((x) => `${String(x && x.agentId || '').trim()}|${String(x && x.agentName || '').trim().toLowerCase()}`).filter((x) => x !== '|');
+    if (!keys.length && req && req.agent) return `${String(req.agent.agentId || '').trim()}|${String(req.agent.name || '').trim().toLowerCase()}`;
     return keys.length ? keys[keys.length - 1] : '';
   };
   const tagRequestFirstAgentKey = (req) => {
     const rows = Array.isArray(req && req.rows) ? req.rows : [];
     const x = rows.find((r) => r && (r.agentId || r.agentName));
+    if (!x && req && req.agent) return `${String(req.agent.agentId || '').trim()}|${String(req.agent.name || '').trim().toLowerCase()}`;
     return x ? `${String(x.agentId || '').trim()}|${String(x.agentName || '').trim().toLowerCase()}` : '';
   };
 
