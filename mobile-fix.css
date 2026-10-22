@@ -1659,3 +1659,10 @@ html :is(.main, #drawer) :is(.msp-page, .mp, .ps, .pi) { line-height: 1.45; }
 html :is(.main, #drawer) :is(.ps-tip) { font-size: 12px !important; }
 html :is(.main, #drawer) :is(.ps-tip small, .ps-tip .pi-tip-l) { font-size: var(--pf-label) !important; }
 html :is(.main, #drawer) :is(.ps-tip strong) { font-size: 13px !important; }
+
+/* v294 — KPI titles: never split a word in the middle ("Replaceme / nt"). Wrap only between words,
+   shrink the title a little on phones so long single words (Replacement, Commercial) fit. */
+.kpi .kpi-title { overflow-wrap: normal !important; word-break: normal !important; hyphens: manual; min-width: 0; }
+html.mobile-ui .kpi .kpi-title { font-size: 12px !important; letter-spacing: -0.01em; }
+html.mobile-ui .kpi .kpi-icon { flex-shrink: 0; }
+.hm-highest-list b { overflow-wrap: break-word !important; word-break: normal !important; }
