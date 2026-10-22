@@ -1545,6 +1545,24 @@ FF.pages = FF.pages || {};
         return ` · <span class="badge ${cls}" title="Latest issuance wala din (${esc(U.fmt(qty))} tags)">🕒 Last active: ${esc(U.labelDateKey(best))} · ${ago}</span>`;
       } catch { return ''; }
     }
+    /** Working days = distinct days this month with issuance (n>0) for this agent / TL. */
+    function workedDays(pr, isTl, ch, ym) {
+      try {
+        let rows = [];
+        if (ch === 'gv' && FF.gv && FF.gv.liveDailyRows) { try { rows = FF.gv.liveDailyRows() || []; } catch { rows = []; } }
+        if (!rows.length) rows = (FF.store && FF.store.get && FF.store.get('daily')) || [];
+        const nk = normName(pr.name), id = normName(pr.id || '');
+        const days = new Set();
+        for (const r of rows) {
+          if ((ch === 'gv') !== (r.channel === 'GV Partner')) continue;
+          if (!(Number(r.n) > 0)) continue;
+          const k = String(r.key || ''); if (!k || (ym && k.slice(0, 7) !== ym)) continue;
+          const hit = isTl ? (normName(r.tlName) === nk || normName(r.agentName) === nk) : (normName(r.agentName) === nk || (id && normName(r.agentId) === id));
+          if (hit) days.add(k);
+        }
+        return days.size;
+      } catch { return 0; }
+    }
     function kpiStripHtml(pr) {
       if (!pr) return '';
       const isTl = /tl$/.test(String(pr.kind || '')), ch = pr.ch || chOfP(pr);
@@ -1590,12 +1608,13 @@ FF.pages = FF.pages || {};
       });
       const rank = { High: 3, Medium: 2, Low: 1, None: 0 };
       const worst = plan.reduce((a, x) => (rank[x.prio] > rank[a] ? x.prio : a), 'None');
-      const sm = 'font-size:12px;font-weight:600;line-height:1.5';
+      const sm = '';
       const chipOf = (p) => (p === 'None' ? '<span class="badge">No issuance</span>' : prioChip(p));
-      const prioBody = plan.map((x) => `<div class="msp-cls-line" style="${sm}">${esc(x.k)} ${chipOf(x.prio)} <span class="dim">${x.cover != null ? `cover ${U.fmt(x.cover, true)} d` : ''}</span></div>`).join('');
+      const prioBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2">${chipOf(x.prio)}</span><span class="c3 dim">${x.cover != null ? `cover ${U.fmt(x.cover, true)} d` : ''}</span></div>`).join('');
       const prioSub = plan.map((x) => `${esc(x.k)}: stock ${U.fmt(x.stock)} ÷ ${U.fmt(x.rate, true)}/day`).join(' · ');
-      const planBody = plan.map((x) => `<div class="msp-cls-line" style="${sm}">${esc(x.k)} · need ${x.prio === 'None' ? '<span class="dim">0</span>' : `<span class="sug-chip">${U.fmt(x.net)}</span>`} <span class="dim">(w/o stock ${U.fmt(x.gross)})</span></div>`).join('');
+      const planBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2">need <b>${x.prio === 'None' ? '0' : U.fmt(x.net)}</b></span><span class="c3 dim">w/o stock ${U.fmt(x.gross)}</span></div>`).join('');
       const planSub = plan.map((x) => `${esc(x.k)}: ${U.fmt(x.rate, true)}/day × ${U.fmt(days)} − stock ${U.fmt(x.stock)}${x.basis ? ` (${x.basis} rate)` : ''}`).join(' · ');
+      const wd = workedDays(pr, isTl, ch, m.cur);
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
       const tlName = (pr.tl && pr.tl.name) || '';
       let sug = '';
@@ -1630,7 +1649,7 @@ FF.pages = FF.pages || {};
           ${isTl
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
     : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}` : '')}
-          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), curMix, spec('mtd', m.cur))}
+          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${curMix}<br>🗓️ Worked <b>${U.fmt(wd)}</b> of ${U.fmt(elapsed)} days`, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
