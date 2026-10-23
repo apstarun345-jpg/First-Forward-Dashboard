@@ -185,10 +185,22 @@ window.FF = window.FF || {};
       </div></details>`;
   }
 
+  /** Class-wise donuts: issuance (this month) and stock in hand, by class (VC4, VC5, VC6 …). */
+  function donutsHtml(v) {
+    const rows = v.classes || [];
+    const C = FF.charts;
+    if (!C || !C.donut || !rows.length) return '';
+    const mk = (key) => rows.map((c) => ({ label: c.cls || 'NA', value: Number(c[key]) || 0 })).filter((x) => x.value > 0).sort((a, b) => b.value - a.value);
+    const cur = mk('cur'), stock = mk('stock');
+    const one = (title, items, sub) => `<section class="card gs-card"><div class="card-head"><h3>${title}</h3></div><div class="card-body">${items.length ? C.donut({ items, size: 170, subtitle: sub }) : '<div class="empty">No data</div>'}</div></section>`;
+    return `<div class="gs-grid2">${one(`🏷️ Issuance by class · ${esc(v.ym || '')}`, cur, 'tags')}${one('📦 Stock in hand by class', stock, 'in stock')}</div>`;
+  }
+
   function reportHtml(v) {
     return `<div class="gs-report">
       ${heroHtml(v)}
       ${cardsHtml(v)}
+      ${donutsHtml(v)}
       ${sourcesHtml(v)}
       <div class="gs-grid2">${classTableHtml(v)}${trendHtml(v)}</div>
       ${teamHtml(v)}

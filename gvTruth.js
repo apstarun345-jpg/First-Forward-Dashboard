@@ -601,10 +601,11 @@ window.FF = window.FF || {};
       const tName = truth.tlName || spec.tl || spec.name;
       const tId = truth.tlId || spec.tlId || spec.id;
       // Do not OR an exact TL ID with the display name: duplicate names would leak another TL's rows.
-      where.push(tId ? `${L.tlId} = ${lit(tId)}` : `${L.tlName} = ${lit(tName)}`);
+      // TL's own tags can carry a blank TL column — include rows held under the TL's own agent ID too.
+      where.push(tId ? `(${L.tlId} = ${lit(tId)} or ${L.agentId} = ${lit(tId)})` : `${L.tlName} = ${lit(tName)}`);
     } else if (spec.id || truth.id) {
+      // Exact agent ID only: direct / self-TL agents have a blank or self TL in Tag Assignment.
       where.push(`${L.agentId} = ${lit(spec.id || truth.id)}`);
-      if ((spec.tlId || truth.tlId) && L.tlId) where.push(`${L.tlId} = ${lit(spec.tlId || truth.tlId)}`);
     } else {
       where.push(`${L.agentName} = ${lit(spec.name)}`);
     }
