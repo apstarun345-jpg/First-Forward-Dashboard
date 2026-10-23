@@ -430,7 +430,7 @@ FF.pages = FF.pages || {};
         if (!key || key < from || key > to) continue;
         recs.push({
           ch: 'gv', key, vrn: r.vrn, tagId: r.tagId || r.serial || '', cls: r.cls || 'VC4',
-          vrnType: r.tagType || '', agentId: r.agentId || '', agentName: r.agentName || '', tlName: r.tlName || '',
+          vrnType: (FF.config.vrnStatus && FF.config.vrnStatus(r.vrn)) || r.tagType || '', agentId: r.agentId || '', agentName: r.agentName || '', tlName: r.tlName || '',
           status: r.status || ''
         });
       }

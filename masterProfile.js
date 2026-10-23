@@ -96,7 +96,7 @@ window.FF = window.FF || {};
         d: r.date,
         n: 1,
         type: /replacement/i.test(`${r.status || ''} ${r.tagType || ''}`) ? 'REPLACEMENT' : 'ISSUANCE',
-        vrnType: r.tagType || 'VRN',
+        vrnType: (FF.config.vrnStatus && FF.config.vrnStatus(r.vrn)) || r.tagType || 'VRN',
         channel: 'GV Partner',
         source: 'GV Master'
       }));

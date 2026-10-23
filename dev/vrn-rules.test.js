@@ -36,3 +36,11 @@ test('VRN rules wired: server default + validation + live feed, Settings section
   assert.match(home, /kpi\('g-red', 'Wrong VRN'/);
   assert.match(gv, /wrongVrn: count\(\(r\) => \/wrong\/i\.test\(r\.vrnType/);
 });
+
+test('VRN rules: drill-down rows (Load all rows) use the same length rule as the card', async () => {
+  const read = (f) => fs.readFile(new URL(`../${f}`, import.meta.url), 'utf8');
+  const kd = await read('kpiDetail.js');
+  assert.match(kd, /vrnType: FF\.config\.vrnStatus\(r\.vrn\) \|\| r\.tagType/, 'GV Master raw rows');
+  assert.match(kd, /channel === 'GV Partner' && FF\.config\.vrnStatus\(D\.cellText\(r\[2\]\)\)/, 'EIR fallback GV rows');
+  assert.match(kd, /FF\.gv\.need\('master'\)/, 'waits for GV Master (today rows live only there)');
+});

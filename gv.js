@@ -1083,7 +1083,7 @@ window.FF = window.FF || {};
       fromEir.push({
         date: r.date, d: r.date, key: k, ym: r.ym, day: r.day, cls: r.cls, group: r.group,
         type: /replace/i.test(`${r.status || ''} ${r.tagType || ''}`) ? 'REPLACEMENT' : 'ISSUANCE',
-        status: r.status || 'Issuance', tagType: r.tagType || '', vrnType: r.tagType || '', channel: 'GV Partner',
+        status: r.status || 'Issuance', tagType: r.tagType || '', vrnType: gvVrnType(r), vrnRule: !!FF.config.vrnStatus(r.vrn), channel: 'GV Partner',
         agentId: p.agentId, agentName: p.agentName, tlId: p.tlId, tlName: p.tlName, n: 1
       });
     }

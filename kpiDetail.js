@@ -724,7 +724,7 @@ window.FF = window.FF || {};
       const type = /replacement/i.test(r.status || '') ? 'REPLACEMENT' : 'ISSUANCE';
       const row = {
         key, tagId: r.tagId || '', vrn: r.vrn || '', cls: r.cls, group: r.group, type,
-        vrnType: r.tagType || '', status: r.status || '', channel: 'GV Partner',
+        vrnType: FF.config.vrnStatus(r.vrn) || r.tagType || '', vrnRule: !!FF.config.vrnStatus(r.vrn), status: r.status || '', channel: 'GV Partner',
         agentName: r.agentName || '', agentId: r.agentId || '', tlName: r.tlName || '', tlId: r.tlId || '',
         barcode: r.serial || '', amount: Number(r.amount) || 0, commission: Number(r.commission) || 0, n: 1
       };
@@ -750,6 +750,10 @@ window.FF = window.FF || {};
     const wantFf = spec.src === 'ff' || spec.src === 'both';
     // 🟩 GV side — GV Master tab se (live). Master load ho chuka hai to Google par dobara query nahi.
     const eirOnly = eirOnlySpec(spec);
+    // GV ki aaj ki rows sirf GV Master me hoti hain (EIR me nahi) — pehle master load hone do (max 25s).
+    if (wantGv && !eirOnly && FF.gv && typeof FF.gv.need === 'function' && !gvMasterScopeAvailable(spec)) {
+      await Promise.race([FF.gv.need('master').catch(() => null), new Promise((r) => setTimeout(r, 25000))]);
+    }
     const gvRows = wantGv && !eirOnly ? gvMasterRawRows(spec, p) : [];
     const gvFromMaster = wantGv && !eirOnly && gvMasterScopeAvailable(spec);
     out.push(...gvRows);
@@ -785,7 +789,7 @@ window.FF = window.FF || {};
         const agentId = channel === 'GV Partner' ? (D.cellText(r[12]) || D.cellText(r[8])) : (D.cellText(r[8]) || D.cellText(r[12]));
         const wanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
         if (wanted.length && ![agentName, agentId].map(personKey).some((key) => wanted.includes(key))) continue;
-        const row = { key: d ? U.dateKey(d) : '', tagId: D.cellText(r[1]), cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: D.cellText(r[5]), channel, agentName, agentId, tlName: D.cellText(r[9]), n: 1, barcode: '' };
+        const row = { key: d ? U.dateKey(d) : '', tagId: D.cellText(r[1]), cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: (channel === 'GV Partner' && FF.config.vrnStatus(D.cellText(r[2]))) || D.cellText(r[5]), vrnRule: channel === 'GV Partner' && !!FF.config.vrnStatus(D.cellText(r[2])), channel, agentName, agentId, tlName: D.cellText(r[9]), n: 1, barcode: '' };
         if (filt && !filt.fn(row)) continue;
         if (!rowMatchesSpec(row, spec)) continue;
         out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), agentName, agentId, D.cellText(r[9]), channel, '']);
