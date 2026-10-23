@@ -532,18 +532,25 @@ FF.pages = FF.pages || {};
       <h4 class="tix-drv-title">${title}</h4>
       ${view.length ? `<div class="table-wrap"><table class="tbl compact tix-drvtbl"><thead><tr><th>#</th><th>${DRV.level === 'tls' ? 'TL / team' : 'Agent'}</th><th>Ch</th><th>Type</th><th>TL</th><th class="num">Last</th><th class="num">Now</th><th class="num">Change</th><th class="num">%</th><th>Status</th></tr></thead><tbody>${trs}</tbody></table></div>`
         : '<div class="empty">Nothing to show for this filter.</div>'}
-      <small class="dim">Source: EIR sheet (same as the KPI cards, like-for-like days). Click a name to open the full summary.</small>`;
+      <small class="dim">Source: FF = EIR sheet, GV = GV Master (agent / TL names) — like-for-like days as in the KPI cards. Click a name to open the full summary.</small>`;
   }
 
-  async function paintDrivers(root, m, preset) {
+  async function paintDrivers(root, m, preset, chRows) {
     const host = root.querySelector('#ti-drv-body');
     if (!host) return;
     const v = await loadDriverRows(m);
     const again = root.querySelector('#ti-drv-body');
     if (!again) return;
     if (v.failed) { again.innerHTML = `<div class="empty">Could not load agent data (${esc((v.err && v.err.message) || 'error')}). <button class="btn small" type="button" data-drv-retry>Retry</button></div>`; return; }
-    DRV.model = m; DRV.rows = v.rows;
-    again.innerHTML = driversHtml(m, v.rows);
+    // GV side: names/TLs come from the GV Master ledger (EIR's GV rows often carry no agent identity) — same source as "Top GV agents".
+    const gvMaster = ((chRows && chRows.gvMasterRows) || []).map((r) => ({
+      id: r.agentId || '', name: r.agentName || r.agentId || 'Unknown', tlId: r.tlId || '', tlName: r.tlName || '', channel: 'GV Partner',
+      cls: r.cls, group: r.group, dateKey: r.key || (r.date ? U.dateKey(r.date) : ''), n: r.n === undefined ? 1 : (Number(r.n) || 0)
+    })).filter((r) => r.dateKey);
+    const eirGv = v.rows.filter((r) => r.channel === 'GV Partner');
+    DRV.model = m; DRV.rows = v.rows.filter((r) => r.channel !== 'GV Partner').concat(gvMaster.length ? gvMaster : eirGv);
+    DRV.gvSource = gvMaster.length ? 'GV Master' : 'EIR';
+    again.innerHTML = driversHtml(m, DRV.rows);
   }
 
   // ---------------------------------------------------------------- page
@@ -617,7 +624,7 @@ FF.pages = FF.pages || {};
         <details class="tix-people" open><summary>👥 Agents & Teams</summary>${peopleHtml(m, rows)}</details>
         <p class="foot-note">Source: EIR sheet (FF + GV = master ID 5845036, T+1) · Top agents: GV Master · ${esc(rangeLabel(from, to, true))} · Data ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())} · ↻ se fresh data</p>`;
       C.mount(body);
-      paintDrivers(body, m, preset);
+      paintDrivers(body, m, preset, rows);
 
       const newHash = `#/tagIssued?from=${from}&to=${to}&date=${to}`;
       if (location.hash !== newHash) { try { history.replaceState(null, '', newHash); } catch (e) { /* ignore */ } }
@@ -671,7 +678,7 @@ FF.pages = FF.pages || {};
       if (set) { const [k, v] = set.dataset.drvSet.split(':'); DRV[k] = v; if (k === 'level' && v === 'tls' && DRV.scope === 'tl') DRV.scope = 'tl'; redraw(); return; }
       const mx = e.target.closest('[data-mx-ch]');
       if (mx) { DRV.ch = mx.dataset.mxCh; DRV.scope = mx.dataset.mxScope === 'direct' ? 'direct' : mx.dataset.mxScope === 'tl' ? 'tl' : 'all'; redraw(); return; }
-      if (e.target.closest('[data-drv-retry]')) { DRV.cache.clear(); const m = DRV.model; if (m) paintDrivers(body, m, preset); return; }
+      if (e.target.closest('[data-drv-retry]')) { DRV.cache.clear(); const m = DRV.model; if (m) paintDrivers(body, m, preset, channelRows()); return; }
       if (e.target.closest('[data-drv-csv]')) {
         const rowsOut = (DRV.lastRows || []).map((o, i) => [i + 1, o.name, o.id, o.ch === 'gv' ? 'GV' : 'FF', typeLabel(o), o.tl || '', o.prev, o.cur, o.delta, o.growth === null ? '' : Math.round(o.growth * 10) / 10, drvStatus(o)]);
         U.downloadCsv(`growth-drivers-${DRV.dir}-${from}-${to}.csv`, ['#', 'Name', 'ID', 'Channel', 'Type', 'TL', 'Last', 'Now', 'Change', 'Growth %', 'Status'], rowsOut);
