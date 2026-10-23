@@ -7081,6 +7081,31 @@ async function handleApi(req, res, url) {
   async function pushTagRequestToSheet(req, event, throwOnFail) {
     return pushTagRequestsToSheet([req], event, throwOnFail);
   }
+  const isSheetSynced = (r) => !!((r.sheetApprovalSync && r.sheetApprovalSync.at) || (r.sheetSync && r.sheetSync.at && !r.sheetSync.error));
+  /** Approved requests → Google Sheet: ONE appendrows call for the whole batch, serialized, and auto-retried
+   *  (Apps Script is sometimes slow/busy — a failed push is retried after 20s / 60s / 3min). */
+  let sheetSyncChain = Promise.resolve();
+  function syncApprovedToSheet(rows, event = 'status:approved') {
+    const list = (rows || []).filter(Boolean);
+    if (!list.length || !tagSheetConfig().enabled) return Promise.resolve();
+    const run = async (attempt) => {
+      const todo = list.filter((r) => r.status === 'approved' && !isSheetSynced(r));
+      if (!todo.length) return;
+      try {
+        await pushTagRequestsToSheet(todo, event, true);
+        persist('notify').catch(() => {});
+      } catch (err) {
+        const msg = String((err && err.message) || err).slice(0, 160);
+        console.warn(`tag-request sheet sync (${todo.length} rows, try ${attempt + 1}):`, msg);
+        todo.forEach((r) => { r.sheetSync = { at: new Date().toISOString(), event, error: msg }; });
+        persist('notify').catch(() => {});
+        const delays = [20e3, 60e3, 180e3];
+        if (attempt < delays.length) { await new Promise((ok) => setTimeout(ok, delays[attempt])); return run(attempt + 1); }
+      }
+    };
+    sheetSyncChain = sheetSyncChain.then(() => run(0)).catch(() => {});
+    return sheetSyncChain;
+  }
   if (p === '/api/tag-requests' && method === 'GET') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
     // ⏪ v3.50 — boot scan me purani save ke missing requests mile the? UI banner ko batao.
@@ -7176,17 +7201,7 @@ async function handleApi(req, res, url) {
     }
     if (updated.length) persistBackground('notify');
     // 📗 Sheet sync sirf pehli baar Approved par (PUT wala rule) — background me ek-ek karke.
-    if (toSheet.length && tagSheetConfig().enabled) {
-      (async () => {
-        for (const row of toSheet) {
-          try { await pushTagRequestToSheet(row, 'status:approved'); } catch (err) {
-            console.warn('tag-request sheet sync (bulk approved):', err.message);
-            row.sheetSync = { at: new Date().toISOString(), event: 'status:approved', error: String(err.message || err).slice(0, 160) };
-          }
-        }
-        persist('notify').catch(() => {});
-      })();
-    }
+    if (toSheet.length && tagSheetConfig().enabled) syncApprovedToSheet(toSheet);
     // Requester ko ek notification (apni requests ke count ke saath), har request ka alag nahi.
     try {
       const perUser = new Map();
@@ -7275,10 +7290,7 @@ async function handleApi(req, res, url) {
     if (body.status === 'approved' && prevStatus !== 'approved' && tagSheetConfig().enabled) {
       // Re-approval (e.g. Pending → Approved again) = admin ka naya intent: purana sync marker hata do, entry dobara jaye.
       delete row.sheetApprovalSync; delete row.sheetSync;
-      pushTagRequestToSheet(row, 'status:approved').then(() => persist('notify').catch(() => {})).catch((err) => {
-        console.warn('tag-request sheet sync (approved):', err.message);
-        row.sheetSync = { at: new Date().toISOString(), event: 'status:approved', error: String(err.message || err).slice(0, 160) };
-      });
+      syncApprovedToSheet([row]);
     }
     // Requester ko status update ka notification (admin ne kuch badla to).
     if (user.role === 'admin' && row.by !== user.username) {
@@ -8098,6 +8110,18 @@ async function handleApi(req, res, url) {
       targetSpreadsheetId: targetId, targetExists: target ? !!target.exists : null,
       note: notes.join(' ')
     });
+  }
+  if (p === '/api/tag-request-sheet/push-many' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const w = workspaceStore();
+    const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map((x) => String(x || '')));
+    const rows = (w.tagRequests || []).filter((r) => ids.has(r.id) && r.status === 'approved' && !isSheetSynced(r));
+    if (!rows.length) return sendJson(res, 200, { ok: true, added: 0, requests: 0, note: 'Nothing to send — all selected approved requests are already in the sheet.' });
+    const out = await pushTagRequestsToSheet(rows, 'manual', true);
+    await persist('notify');
+    logAudit(user, 'tag_sheet_push', { target: `${rows.length} requests`, note: `${out.added} rows → ${out.tab || ''}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, added: out.added, requests: rows.length, ids: rows.map((r) => r.id), tab: out.tab });
   }
   if (p === '/api/tag-request-sheet/push' && method === 'POST') {
     requireAdmin(user);

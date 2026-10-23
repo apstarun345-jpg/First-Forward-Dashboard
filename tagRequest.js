@@ -2782,7 +2782,7 @@ body.colorful .from-hdr { color: #166534; }
       <button class="btn small" data-tr-op="color1" data-key="${k}" title="Colorful Label Print / PDF">🎨</button>
       <button class="btn small" data-tr-op="pdf1" data-key="${k}" title="Is request ka label PDF download">📄</button>
       <button class="btn small" data-tr-op="copy" data-key="${k}" title="Label text copy (WhatsApp ke liye)">📋</button>
-      ${isAdmin() && r.status === 'approved' && !(r.sheetApprovalSync && r.sheetApprovalSync.at) && !(r.sheetSync && r.sheetSync.at && !r.sheetSync.error) ? `<button class="btn small" data-tr-op="push" data-key="${k}" title="Approved request ko Google Sheet me bhejo">📗</button>` : ''}
+      ${isAdmin() && r.status === 'approved' && !(r.sheetApprovalSync && r.sheetApprovalSync.at) && !(r.sheetSync && r.sheetSync.at && !r.sheetSync.error) ? `<button class="btn small" data-tr-op="push" data-key="${k}" title="Send this approved request to the Google Sheet">📗 Sheet entry</button>` : ''}
       ${canDeleteReq(r) ? `<button class="btn small" data-tr-op="del" data-key="${k}" title="Request delete">🗑</button>` : ''}
     </div>`;
   }
@@ -2938,6 +2938,7 @@ body.colorful .from-hdr { color: #166534; }
             </select>
             <button type="button" class="btn" data-tr-bulk="apply-status" disabled>Apply</button>
           </span>` : ''}
+          ${isAdmin() ? '<button type="button" class="btn" data-tr-bulk="sheet" disabled title="Send the selected approved requests to the Google Sheet (only those not yet entered)">📗 Sheet entry</button>' : ''}
           <button type="button" class="btn" data-tr-bulk="csv" title="Selected (ya saari dikhti) rows ka CSV">⬇ CSV</button>
           <button type="button" class="btn small" data-tr-bulk="none" hidden>✕ Selection hatao</button>
           ${isAdmin() ? '<button type="button" class="btn small" data-tr-act="recover" title="Google Sheet ki purani saves (APP_STORAGE_HISTORY) se gayab ho chuki tag requests wapas laao — kuch delete nahi hota">⏪ Wapas lao</button>' : ''}
@@ -3169,6 +3170,8 @@ body.colorful .from-hdr { color: #166534; }
     if (ap) { const p = selectedRequests().filter((r) => (r.status || 'pending') === 'pending').length; ap.disabled = !p; ap.textContent = p ? `✅ Approve selected (${fmt(p)})` : '✅ Approve selected'; }
     const dp = card.querySelector('[data-tr-bulk="dispatch"]');
     if (dp) { const p = selectedRequests().filter((r) => (r.status || 'pending') !== 'dispatched').length; dp.disabled = !p; dp.textContent = p ? `🚚 Dispatch selected (${fmt(p)})` : '🚚 Dispatch selected'; }
+    const sh = card.querySelector('[data-tr-bulk="sheet"]');
+    if (sh) { const p = selectedRequests().filter((r) => r.status === 'approved' && !(r.sheetApprovalSync && r.sheetApprovalSync.at) && !(r.sheetSync && r.sheetSync.at && !r.sheetSync.error)).length; sh.disabled = !p; sh.textContent = p ? `📗 Sheet entry (${fmt(p)})` : '📗 Sheet entry'; }
     const sel = card.querySelector('[data-tr-bulk-status]');
     if (sel) sel.disabled = !n;
     const apply = card.querySelector('[data-tr-bulk="apply-status"]');
@@ -3438,6 +3441,14 @@ body.colorful .from-hdr { color: #166534; }
         else if (op === 'approve') bulkApprove();
         else if (op === 'dispatch') bulkSetStatus('dispatched');
         else if (op === 'apply-status') { const sv = card.querySelector('[data-tr-bulk-status]'); bulkSetStatus(sv ? sv.value : ''); }
+        else if (op === 'sheet') {
+          const ids = selectedRequests().filter((r) => r.status === 'approved' && !(r.sheetApprovalSync && r.sheetApprovalSync.at) && !(r.sheetSync && r.sheetSync.at && !r.sheetSync.error)).map((r) => r.id);
+          if (!ids.length) return;
+          bulk.disabled = true;
+          FF.auth.api('/api/tag-request-sheet/push-many', 'POST', { ids })
+            .then((out) => { U.toast(`📗 ${out.added || 0} rows added to the sheet (${out.requests || 0} requests)`, 'ok'); const at = new Date().toISOString(); state.requests.forEach((r) => { if (ids.includes(r.id)) r.sheetSync = { at, event: 'manual', tab: out.tab }; }); renderReqTable(); })
+            .catch((err) => { U.toast('Sheet entry failed: ' + ((err && err.message) || ''), 'err'); bulk.disabled = false; });
+        }
         else if (op === 'csv') exportCsv();
         else if (op === 'none') { state.sel.clear(); updateSelUi(); card.querySelectorAll('[data-tr-sel]').forEach((x) => { x.checked = false; }); }
         return;
