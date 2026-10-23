@@ -22,6 +22,12 @@ FF.pages = FF.pages || {};
     return 'Good evening';
   }
   // `plain` = card ki value ka saaf text (complex cards: Expected / Run Rate) — drawer ke "📌 card = …" line me wahi aata hai.
+  /** VC4 · VC20 · VC5+ split chips (bold counts) — Replacement / Chassis / Wrong VRN cards. */
+  const clsSplit = (by) => {
+    const o = by || {};
+    const n = (k) => Number(o[k]) || 0;
+    return `<div class="kpi-clsplit">${[['VC4', 'VC4'], ['VC20', 'VC20'], ['VC5+', 'VC5+']].map(([k, l]) => `<span class="${n(k) ? '' : 'zero'}">${l} <b>${U.fmt(n(k))}</b></span>`).join('')}</div>`;
+  };
   const kpi = (cls, title, icon, value, foot, spec, plain) => `<div class="kpi ${cls}"${spec ? ` data-kpi="${esc(spec)}"` : ''}${plain ? ` data-kpi-value="${esc(plain)}"` : ''} data-kpi-title="${esc(title)}" role="button" tabindex="0"><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
   const card = (title, body, right) => `<section class="card"><div class="card-head"><div><h3>${title}</h3></div>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
   const dayKey = (d) => U.dateKey(d);
@@ -439,9 +445,9 @@ FF.pages = FF.pages || {};
       kpi('g3', 'VC4', '🚗', U.fmt(live.vc4), live.total ? `${U.fmtPct(U.pctOf(live.vc4, live.total), 0)} share` : '—', `src=gv&scope=day&date=${tk}&f=vc4`),
       kpi('g8', 'VC20', '🛻', U.fmt(live.vc20), live.total ? `${U.fmtPct(U.pctOf(live.vc20, live.total), 0)} share` : '—', `src=gv&scope=day&date=${tk}&f=vc20`),
       kpi('g6', 'VC5+', '🚚', U.fmt(live.vc5p), live.total ? `${U.fmtPct(U.pctOf(live.vc5p, live.total), 0)} share` : '—', `src=gv&scope=day&date=${tk}&f=vc5p`),
-      kpi('g5', 'Replacement', '🔁', U.fmt(live.replacement), live.total ? `${U.fmtPct(U.pctOf(live.replacement, live.total), 0)} of today` : '—', `src=gv&scope=day&date=${tk}&f=repl`),
-      kpi('g7', 'Chassis', '🔧', U.fmt(live.chassis), live.total ? `${U.fmtPct(U.pctOf(live.chassis, live.total), 0)} of today` : '—', `src=gv&scope=day&date=${tk}&f=chassis`),
-      kpi('g-red', 'Wrong VRN', '⚠️', U.fmt(live.wrongVrn || 0), live.total ? `${U.fmtPct(U.pctOf(live.wrongVrn || 0, live.total), 0)} of today · VRN length rule` : 'VRN length rule', `src=gv&scope=day&date=${tk}&f=wrong`),
+      kpi('g5', 'Replacement', '🔁', U.fmt(live.replacement), `${live.total ? `${U.fmtPct(U.pctOf(live.replacement, live.total), 0)} of today` : '—'}${clsSplit(live.replacementBy)}`, `src=gv&scope=day&date=${tk}&f=repl`),
+      kpi('g7', 'Chassis', '🔧', U.fmt(live.chassis), `${live.total ? `${U.fmtPct(U.pctOf(live.chassis, live.total), 0)} of today` : '—'}${clsSplit(live.chassisBy)}`, `src=gv&scope=day&date=${tk}&f=chassis`),
+      kpi('g-red', 'Wrong VRN', '⚠️', U.fmt(live.wrongVrn || 0), live.total ? `${U.fmtPct(U.pctOf(live.wrongVrn || 0, live.total), 0)} of today${clsSplit(live.wrongVrnBy)}` : 'VRN length rule', `src=gv&scope=day&date=${tk}&f=wrong`),
       kpi('g2', 'Expected Today', '🎯', expected != null ? U.fmt(expected) : '—',
         live.weekdayNote ? esc(live.weekdayNote) : 'pichhle same-weekday ka average',
         expectedTodaySpec(), expected != null ? `Expected ${U.fmt(expected)}` : ''),
@@ -529,8 +535,8 @@ FF.pages = FF.pages || {};
       kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(curFf.vc20, curGv.vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20&eir=1`),
       kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(curFf.vc5p, curGv.vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p&eir=1`),
       kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(compareDay, U.daysInMonth(prevKey))} reported din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b> <span class="dim">(report till ${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'})</span>`, `src=both&scope=mtd&ym=${curKey}&f=comm&eir=1`),
-      kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(curFf.replacement, curGv.replacement)}`, `src=both&scope=mtd&ym=${curKey}&f=repl&eir=1`),
-      kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(curFf.chassis, curGv.chassis)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis&eir=1`),
+      kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(curFf.replacement, curGv.replacement)}${clsSplit(sc.replacementBy)}`, `src=both&scope=mtd&ym=${curKey}&f=repl&eir=1`),
+      kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(curFf.chassis, curGv.chassis)}${clsSplit(sc.chassisBy)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis&eir=1`),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯',
         `<div class="hm-expected-compare">${expectedClassRow('VC4', expectedByClass.vc4, lastFull.vc4)}${expectedClassRow('VC20', expectedByClass.vc20, lastFull.vc20)}${expectedClassRow('VC5+', expectedByClass.vc5p, lastFull.vc5p)}<div class="hm-expected-total"><span>Total Expected</span><b>${U.fmt(expected)}</b></div></div>`,
         `EIR forecast · ${observedDay}/${daysInMonth} reported days · today excluded<br><span class="dim">Report till <b>${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'}</b> · last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
@@ -1459,6 +1465,7 @@ FF.pages = FF.pages || {};
         replacement: Number(liveFromFeed.replacement) || 0,
         chassis: Number(liveFromFeed.chassis) || 0,
         wrongVrn: Number(liveFromFeed.wrongVrn) || 0,
+        replacementBy: liveFromFeed.replacementBy || null, chassisBy: liveFromFeed.chassisBy || null, wrongVrnBy: liveFromFeed.wrongVrnBy || null,
         expected: liveFromFeed.expected != null
           ? liveFromFeed.expected
           : expectedFromWeekdaySeries(liveFromFeed.series, todayK()),
@@ -1508,7 +1515,8 @@ FF.pages = FF.pages || {};
       liveState = useSnap ? {
         ...liveState,
         total: snap.total, vc4: snap.vc4, vc20: snap.vc20, vc5p: snap.vc5p,
-        replacement: snap.replacement, chassis: snap.chassis, wrongVrn: snap.wrongVrn || 0, highest: gvTodayHighest(snap.rows),
+        replacement: snap.replacement, chassis: snap.chassis, wrongVrn: snap.wrongVrn || 0,
+        replacementBy: snap.replacementBy, chassisBy: snap.chassisBy, wrongVrnBy: snap.wrongVrnBy, highest: gvTodayHighest(snap.rows),
         error: '', stale: false, source: 'master', liveToday: true
       } : { ...liveState, error: '', liveToday: true };
       if (ui.ready) {

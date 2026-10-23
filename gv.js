@@ -910,6 +910,8 @@ window.FF = window.FF || {};
     }
     return out;
   }
+  /** {VC4, VC20, 'VC5+'} counts of rows matching fn. */
+  const byGroup = (rs, fn) => rs.reduce((o, r) => { if (fn(r)) { const g = r.group === 'VC4' ? 'VC4' : r.group === 'VC20' ? 'VC20' : 'VC5+'; o[g] += 1; } return o; }, { VC4: 0, VC20: 0, 'VC5+': 0 });
   /** 🟩 Aaj ka GV snapshot (GV Master se) — Home card, chips aur drawers isi ko dikhate hain. */
   function gvToday() {
     const tk = todayKey();
@@ -931,7 +933,10 @@ window.FF = window.FF || {};
       vc5p: count((r) => r.group === 'VC5+'), comm: count((r) => r.group !== 'VC4'),
       replacement: count((r) => r.type === 'REPLACEMENT'),
       chassis: count((r) => /chassis/i.test(r.vrnType || r.tagType || '')),
-      wrongVrn: count((r) => /wrong/i.test(r.vrnType || ''))
+      wrongVrn: count((r) => /wrong/i.test(r.vrnType || '')),
+      replacementBy: byGroup(rs, (r) => r.type === 'REPLACEMENT'),
+      chassisBy: byGroup(rs, (r) => /chassis/i.test(r.vrnType || r.tagType || '')),
+      wrongVrnBy: byGroup(rs, (r) => /wrong/i.test(r.vrnType || ''))
     };
   }
   /** GV daily series: EIR history + AAJ ki rows GV Master se (master load hone par). */

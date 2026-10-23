@@ -1587,7 +1587,8 @@ async function gvTodayVrnCounts(settings, resolved, day, nextDay, cacheMs) {
   const vrnCol = String(resolved.vrn || cfg.vrn || 'E').toUpperCase();
   const tab = cfg.tab || 'GV Master';
   const id = String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
-  const sel = `select ${resolved.date}, ${vrnCol}, ${resolved.tagType || resolved.tagId}`;
+  const hasFb = !!resolved.vClass && String(resolved.vClass).toUpperCase() !== String(resolved.cls).toUpperCase();
+  const sel = `select ${resolved.date}, ${vrnCol}, ${resolved.tagType || resolved.tagId}, ${resolved.cls}${hasFb ? `, ${resolved.vClass}` : ''}`;
   const tries = [
     `${sel} where ${resolved.date} >= date '${day}' and ${resolved.date} < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`,
     `${sel} where toDate(${resolved.date}) >= date '${day}' and toDate(${resolved.date}) < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`
@@ -1597,15 +1598,16 @@ async function gvTodayVrnCounts(settings, resolved, day, nextDay, cacheMs) {
       const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id, sheet: tab, tq })), { maxAgeMs: cacheMs });
       const table = parseGvizServer(out.body);
       let wrong = 0, chassis = 0, checked = 0, typeChassis = 0;
+      const wrongBy = {}, chassisBy = {};
       for (const row of table.rows || []) {
         if (serverDateFromCell(row, 0) !== day) continue;
         const st = vrnLengthStatus(serverCell(row, 1), settings);
+        const cls = classBucket(serverCell(row, 3), hasFb ? serverCell(row, 4) : '', settings.gvClassCch);
         if (st) checked++;
-        if (st === 'wrong') wrong++;
-        else if (st === 'chassis') chassis++;
-        else if (!st && /chassis/i.test(String(serverCell(row, 2) || ''))) typeChassis++;   // no VRN → sheet tag type
+        if (st === 'wrong') { wrong++; wrongBy[cls] = (wrongBy[cls] || 0) + 1; }
+        else if (st === 'chassis' || (!st && /chassis/i.test(String(serverCell(row, 2) || '')))) { if (st) chassis++; else typeChassis++; chassisBy[cls] = (chassisBy[cls] || 0) + 1; }
       }
-      if (checked || tq === tries[tries.length - 1]) return { wrong, chassis: chassis + typeChassis, checked };
+      if (checked || tq === tries[tries.length - 1]) return { wrong, chassis: chassis + typeChassis, checked, wrongBy, chassisBy };
     } catch { /* next */ }
   }
   return null;
@@ -1665,11 +1667,13 @@ async function gvTodayFeed(force) {
         // the date predicate worked. For the bounded fallback, empty is also a valid zero snapshot.
         const classes = {};
         let replacement = 0, chassis = 0, wrongVrn = 0;
+        const replacementBy = {}, chassisBy = {}, wrongVrnBy = {};
+        const bump = (o, k) => { o[k] = (o[k] || 0) + 1; };
         for (const row of rows) {
           classes[row.cls] = (classes[row.cls] || 0) + 1;
-          if (/repl/i.test(String(row.status || ''))) replacement++;
-          if (row.vrnSt === 'chassis' || (!row.vrnSt && /chassis/i.test(String(row.type || '')))) chassis++;
-          if (row.vrnSt === 'wrong') wrongVrn++;
+          if (/repl/i.test(String(row.status || ''))) { replacement++; bump(replacementBy, row.cls); }
+          if (row.vrnSt === 'chassis' || (!row.vrnSt && /chassis/i.test(String(row.type || '')))) { chassis++; bump(chassisBy, row.cls); }
+          if (row.vrnSt === 'wrong') { wrongVrn++; bump(wrongVrnBy, row.cls); }
         }
         const result = {
           ok: true, date: day, at: new Date().toISOString(),
@@ -1677,7 +1681,7 @@ async function gvTodayFeed(force) {
             source: 'GV Master', live: true, total: rows.length,
             vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
             comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
-            replacement, chassis, wrongVrn, classes,
+            replacement, chassis, wrongVrn, replacementBy, chassisBy, wrongVrnBy, classes,
             classMapVersion,
             cached: !!out.cached, stale: !!out.stale, query: attempt.kind
           }
@@ -1833,6 +1837,9 @@ async function todayFeed(force) {
         vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
         comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
         replacement: replaced, chassis: vrnCounts && vrnCounts.checked ? vrnCounts.chassis : chassis, wrongVrn: vrnCounts ? vrnCounts.wrong : 0,
+        replacementBy: dToday.reduce((acc, r) => { if (/repl/i.test(String(r.status || ''))) acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {}),
+        chassisBy: vrnCounts && vrnCounts.checked ? vrnCounts.chassisBy : dToday.reduce((acc, r) => { if (/chassis/i.test(String(r.type || ''))) acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {}),
+        wrongVrnBy: vrnCounts ? vrnCounts.wrongBy : {},
         classes, classMapVersion, expected: weekdayAvg, lastDay: prevDay ? series[prevDay] : null, lastDayDate: prevDay || '',
         series,
         cached: !!out.cached, stale: !!out.stale, query: out.via,

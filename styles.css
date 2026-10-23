@@ -6902,3 +6902,10 @@ html[data-theme="dark"] .tr-colmap.on{background:#1e1b4b;border-color:#6366f1}
 /* ⚠️ Wrong VRN KPI — always red */
 html body .kpi.g-red, html body .kpi-grid .kpi.g-red { background: linear-gradient(135deg, #dc2626, #991b1b) !important; color: #fff !important; }
 html body .kpi.g-red.kpi-zero { background: linear-gradient(135deg, #f87171, #dc2626) !important; }
+/* VC4 · VC20 · VC5+ split inside Replacement / Chassis / Wrong VRN cards */
+.kpi .kpi-clsplit { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 6px; }
+.kpi .kpi-clsplit span { background: rgba(255, 255, 255, .22); border: 1px solid rgba(255, 255, 255, .35); border-radius: 999px; padding: 1px 8px; font-size: 11.5px; font-weight: 600; line-height: 1.5; white-space: nowrap; }
+.kpi .kpi-clsplit span b { font-size: 13.5px; font-weight: 800; margin-left: 2px; }
+.kpi .kpi-clsplit span.zero { opacity: .6; }
+html.mobile-ui .kpi .kpi-clsplit span { font-size: 10.5px; padding: 1px 6px; }
+html.mobile-ui .kpi .kpi-clsplit span b { font-size: 12px; }

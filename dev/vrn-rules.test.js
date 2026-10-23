@@ -44,3 +44,13 @@ test('VRN rules: drill-down rows (Load all rows) use the same length rule as the
   assert.match(kd, /channel === 'GV Partner' && FF\.config\.vrnStatus\(D\.cellText\(r\[2\]\)\)/, 'EIR fallback GV rows');
   assert.match(kd, /FF\.gv\.need\('master'\)/, 'waits for GV Master (today rows live only there)');
 });
+
+test('Replacement / Chassis / Wrong VRN cards show the VC4 · VC20 · VC5+ split (live + month)', async () => {
+  const read = (f) => fs.readFile(new URL(`../${f}`, import.meta.url), 'utf8');
+  const [home, model, gv, server] = await Promise.all([read('home.js'), read('model.js'), read('gv.js'), read('server.js')]);
+  assert.match(home, /clsSplit\(live\.replacementBy\)/); assert.match(home, /clsSplit\(live\.chassisBy\)/); assert.match(home, /clsSplit\(live\.wrongVrnBy\)/);
+  assert.match(home, /clsSplit\(sc\.replacementBy\)/); assert.match(home, /clsSplit\(sc\.chassisBy\)/);
+  assert.match(model, /s\.chassisBy\[grp\] \+= r\.n/);
+  assert.match(gv, /chassisBy: byGroup\(rs/);
+  assert.match(server, /replacementBy: dToday\.reduce/); assert.match(server, /replacementBy, chassisBy, wrongVrnBy, classes/);
+});
