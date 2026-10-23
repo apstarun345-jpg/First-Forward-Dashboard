@@ -6909,3 +6909,6 @@ html body .kpi.g-red.kpi-zero { background: linear-gradient(135deg, #f87171, #dc
 .kpi .kpi-clsplit span.zero { opacity: .6; }
 html.mobile-ui .kpi .kpi-clsplit span { font-size: 10.5px; padding: 1px 6px; }
 html.mobile-ui .kpi .kpi-clsplit span b { font-size: 12px; }
+
+/* v299: metric titles never run under the corner icon */
+.ins-metric > small { display: block; padding-right: 40px; overflow-wrap: normal; }
