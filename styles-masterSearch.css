@@ -73,3 +73,8 @@
 .ms-chips { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 79; display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 4px; }
 .ms-chips[hidden] { display: none; }
 .ms-chip { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(15, 23, 42, .12); }
+
+.msp-hero-act { position: relative; }
+.msp-rep-menu { position: absolute; z-index: 40; top: 100%; right: 0; margin-top: 6px; min-width: 270px; display: flex; flex-direction: column; background: var(--card, #fff); border: 1px solid rgba(100,116,139,.35); border-radius: 12px; box-shadow: 0 12px 30px rgba(0,0,0,.2); padding: 4px; }
+.msp-rep-menu button { text-align: left; background: transparent; border: 0; padding: 9px 12px; border-radius: 8px; cursor: pointer; color: inherit; font: inherit; }
+.msp-rep-menu button:hover { background: rgba(99,102,241,.12); }

@@ -1741,7 +1741,7 @@ FF.pages = FF.pages || {};
         <div class="msp-hero">
           <span class="ms-avatar ${viewGroup.gv ? 'gv' : 'ff'}">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
           <div class="msp-hero-id"><b>${esc(g.name)}</b><div class="msp-pills">${bits || '<span class="msp-pill">Report</span>'}</div></div>
-          ${person ? `<div class="msp-hero-act">${FF.auth && FF.auth.can && FF.auth.can('export') ? '<button class="btn small primary" data-msp-report title="Stock pivot + Issuance pivot + Ageing + tag rows — ek Excel me">⬇ Full report</button>' : ''}<button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
+          ${person ? `<div class="msp-hero-act">${FF.auth && FF.auth.can && FF.auth.can('export') ? '<button class="btn small primary" data-msp-report title="Choose: Full report / Stock + pivot (ageing auto) / Current month / Last month — Excel">⬇ Full report</button>' : ''}<button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
         <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => viewGroup[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
         <div id="msp-rank"></div>
@@ -2061,7 +2061,8 @@ FF.pages = FF.pages || {};
     const go = () => { if (FF.kpiDetail && FF.stockAge) reportData(ch, pr).catch(() => {}); else if (FF.lazy && FF.lazy.shellNeed) FF.lazy.shellNeed(['kpiDetail', 'stockAge']).then(() => reportData(ch, pr)).catch(() => {}); };
     (window.requestIdleCallback || ((f) => setTimeout(f, 1200)))(go, { timeout: 4000 });
   }
-  async function downloadFullReport(btn) {
+  async function downloadFullReport(btn, parts) {
+    const want = (k) => !parts || parts.includes(k);   // parts: 'stock' | 'cur' | 'last' (undefined = everything)
     const chans = ['ff', 'gv'].filter((c) => REPORT_CTX.prs[c]);
     if (!chans.length) { U.toast('Profile abhi load ho raha hai — 2 sec baad try karo', 'warn'); return; }
     const old = btn ? btn.textContent : '';
@@ -2086,10 +2087,10 @@ FF.pages = FF.pages || {};
         const ageCols = [...AGE_BUCKETS.map((b) => b.label), 'Date nahi'];
         const ap = pivot(d.stock, (x) => x.agent || '—', (x) => (bucketOfAge(x.age) || { label: 'Date nahi' }).label, ageCols);
         const ageMap = new Map(ap.rows.map((r) => [r[0], r.slice(1, 1 + ageCols.length)]));
-        sheets.push({ name: `Stock pivot${sfx(ch)}`, header: ['Agent', ...sp.cols, 'Total', ...ageCols.map((c) => `Age · ${c}`)], rows: sp.rows.map((r) => [...r, ...(ageMap.get(r[0]) || ageCols.map(() => 0))]) });
-        sheets.push({ name: `Stock${sfx(ch)}`, header: AGE_HEAD, rows: d.stock.map(ageRowCells) });
+        if (want('stock')) sheets.push({ name: `Stock pivot${sfx(ch)}`, header: ['Agent', ...sp.cols, 'Total', ...ageCols.map((c) => `Age · ${c}`)], rows: sp.rows.map((r) => [...r, ...(ageMap.get(r[0]) || ageCols.map(() => 0))]) });
+        if (want('stock')) sheets.push({ name: `Stock${sfx(ch)}`, header: AGE_HEAD, rows: d.stock.map(ageRowCells) });
         // 2) Current month issuance + pivot, 3) Last month issuance + pivot
-        [[d.cur, 'Current'], [d.last, 'Last']].forEach(([ym, lbl]) => {
+        [[d.cur, 'Current', 'cur'], [d.last, 'Last', 'last']].filter((x) => want(x[2])).forEach(([ym, lbl]) => {
           const rows = d.issue.filter((r) => ymOf(r[0]) === ym);
           const ip = pivot(rows, (r) => r[7] || '—', (r) => r[3] || 'NA');
           sheets.push({ name: `${lbl} issuance pivot${sfx(ch)}`.slice(0, 31), header: [`Agent · ${L(ym)}`, ...ip.cols, 'Total'], rows: ip.rows });
@@ -2097,8 +2098,8 @@ FF.pages = FF.pages || {};
         });
       });
       sheets.unshift({ name: 'Summary', header: ['Field', 'Value'], rows: summary });
-      FF.xlsx.download(`${U.slug(REPORT_CTX.name)}-full-report-${U.stamp()}.xlsx`, sheets);
-      U.toast('✅ Full report download ho gayi', 'ok');
+      FF.xlsx.download(`${U.slug(REPORT_CTX.name)}-${!parts ? 'full-report' : parts.join('-')}-${U.stamp()}.xlsx`, sheets);
+      U.toast(parts ? '✅ Report download ho gayi' : '✅ Full report download ho gayi', 'ok');
     } catch (err) {
       U.toast('Report nahi bani: ' + ((err && err.message) || err), 'err');
     } finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
@@ -2169,7 +2170,24 @@ FF.pages = FF.pages || {};
     const t = e.target;
     if (!t || !t.closest) return;
     const rep = t.closest('[data-msp-report]');
-    if (rep) { e.preventDefault(); downloadFullReport(rep); return; }
+    const pick = t.closest('[data-msp-rep-part]');
+    if (pick) {
+      e.preventDefault();
+      const menu = pick.closest('.msp-rep-menu'); const btn = menu && menu.previousElementSibling; if (menu) menu.remove();
+      const v = pick.dataset.mspRepPart; downloadFullReport(btn && btn.matches('[data-msp-report]') ? btn : null, v === 'all' ? null : v.split(','));
+      return;
+    }
+    if (rep) {
+      e.preventDefault();
+      const open = rep.nextElementSibling && rep.nextElementSibling.classList.contains('msp-rep-menu');
+      document.querySelectorAll('.msp-rep-menu').forEach((m) => m.remove());
+      if (open) return;
+      const m = document.createElement('div'); m.className = 'msp-rep-menu';
+      m.innerHTML = '<button type="button" data-msp-rep-part="all">📦 Full report (sab kuch)</button><button type="button" data-msp-rep-part="stock">📊 Stock + pivot (ageing auto)</button><button type="button" data-msp-rep-part="cur">📅 Current month issuance + pivot</button><button type="button" data-msp-rep-part="last">📆 Last month issuance + pivot</button><button type="button" data-msp-rep-part="stock,cur">📊📅 Stock + Current month</button>';
+      rep.insertAdjacentElement('afterend', m);
+      return;
+    }
+    if (!t.closest('.msp-rep-menu')) document.querySelectorAll('.msp-rep-menu').forEach((m) => m.remove());
     const dl = t.closest('[data-msp-age-dl]');
     if (dl) { e.preventDefault(); e.stopPropagation(); const box = dl.closest('[data-msp-age]'); if (box) downloadAgeAll(box).catch((err) => U.toast(String((err && err.message) || err), 'err')); return; }
     const row = t.closest('[data-msp-age-b]');
