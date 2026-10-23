@@ -6548,6 +6548,13 @@ async function handleApi(req, res, url) {
     return String(1000 + Math.floor(Math.random() * 9000));
   }
   /** Drafts → requests (ek batch): store + persist + 📗 sheet (EK appendrows call, order bana rahe). */
+  // ⚡ Status-only changes answer right after the in-memory update; the storage save runs in the background (one retry).
+  const persistBackground = (kind) => {
+    persist(kind).catch((err) => {
+      console.warn(`persist(${kind}) failed — retrying:`, (err && err.message) || err);
+      setTimeout(() => persist(kind).catch((e) => console.error(`persist(${kind}) retry failed:`, (e && e.message) || e)), 2500);
+    });
+  };
   async function createTagBatch(drafts, ctx) {
     const submissionId = /^[A-Za-z0-9_-]{16,100}$/.test(String(ctx.submissionId || '')) ? String(ctx.submissionId) : '';
     const submissionFingerprint = submissionId ? crypto.createHash('sha256').update(JSON.stringify({
@@ -6591,7 +6598,7 @@ async function handleApi(req, res, url) {
       rememberAddressBook(addressEntries);
       addressBookRuntime.map = null; addressBookRuntime.at = 0;
     }
-    await persist('notify');
+    persistBackground('notify');
     if (addressEntries.length) {
       syncAddressBookToSheet(created).then(() => persist('notify').catch(() => {})).catch((err) => console.warn('tag request address sync:', err && err.message));
     }
@@ -7033,11 +7040,15 @@ async function handleApi(req, res, url) {
     // karta hai). Link khaali ho to purana behaviour: script jis sheet se bandha hai usi me.
     if (positions) {
       // Column-letter mode needs Code.gs v3.74+ — an older script would map by heading names and shuffle columns.
-      let ver = '';
-      try { const pong = await store.call('ping'); ver = String((pong && pong.version) || ''); } catch { /* handled below */ }
+      let ver = store.__okVer || '', pingErr = '';
+      if (!ver) {
+        try { const pong = await store.call('ping'); ver = String((pong && pong.version) || ''); if (/3\.(7[4-9]|[89]\d)|^([4-9]|\d{2,})\./.test(ver)) store.__okVer = ver; } catch (e) { pingErr = String((e && e.message) || e); }
+      }
       const vn = (ver.match(/(\d+)\.(\d+)/) || []).slice(1).map(Number);
-      if (!vn.length || vn[0] < 3 || (vn[0] === 3 && vn[1] < 74)) {
-        const msg = 'Column-letter entry needs the new google-apps-script/Code.gs (v3.74) — deploy it (Manage deployments → New version), then retry.';
+      if (pingErr || !vn.length || vn[0] < 3 || (vn[0] === 3 && vn[1] < 74)) {
+        const msg = pingErr
+          ? `Google Apps Script did not answer (${pingErr.slice(0, 60)}) — the script is slow or busy. Try again in a minute; the request is safe.`
+          : `Apps Script is still on ${ver || 'an old version'} — deploy the new google-apps-script/Code.gs (v3.74) (Manage deployments → Edit → New version), then retry.`;
         const at0 = new Date().toISOString();
         reqs.forEach((r) => { r.sheetSync = { at: at0, event, error: msg.slice(0, 160), tab: String(cfg.tab || '') }; });
         if (throwOnFail) throw new HttpError(502, msg);
@@ -7122,9 +7133,8 @@ async function handleApi(req, res, url) {
       rows, tls: tagRequestTls(body.tls), total, updatedAt: now, updatedBy: user.username
     };
     storeTagRequests([row]);
-    await persist('notify');
        rememberAddressBook([addressEntryFromRequest(row)].filter(Boolean));
-       await persist('notify').catch(() => {});
+    persistBackground('notify'); // reply instantly; the Google Sheet save runs in the background (with retry)
        syncAddressBookToSheet([row]).then(() => persist('notify').catch(() => {})).catch(() => {});
     // v5: Pending submission sirf dashboard me save hoti hai; Google Sheet entry Approved par hogi.
     // Admin ko notification (routed: Settings → notification routes se off ho sakta hai) + requester ko confirmation.
@@ -7144,13 +7154,6 @@ async function handleApi(req, res, url) {
     logAudit(user, 'tag_request_created', { target: row.id, note: `${rows.length} rows · ${total} tags`, ip: clientIp(req) });
     return sendJson(res, 201, { ok: true, request: row });
   }
-  // ⚡ Status-only changes answer right after the in-memory update; the storage save runs in the background (one retry).
-  const persistBackground = (kind) => {
-    persist(kind).catch((err) => {
-      console.warn(`persist(${kind}) failed — retrying:`, (err && err.message) || err);
-      setTimeout(() => persist(kind).catch((e) => console.error(`persist(${kind}) retry failed:`, (e && e.message) || e)), 2500);
-    });
-  };
   // ⚡ Bulk status: ek call me kai requests, ek hi storage save (pehle har request ka alag save → 20 requests ≈ 1 minute).
   if (p === '/api/tag-requests/bulk-status' && method === 'POST') {
     if (user.role !== 'admin') throw new HttpError(403, 'Status sirf admin badal sakta hai.');
