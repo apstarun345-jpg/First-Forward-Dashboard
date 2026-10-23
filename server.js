@@ -9653,6 +9653,35 @@ async function personalTeamAgents(link) {
   return byAgent;
 }
 
+/** Agent name → agent ID for a team / group link (EIR; ID column = GV_ID for GV, agent ID for FF). Best effort — never blocks the page. */
+async function personalAgentIds(link) {
+  const out = new Map();
+  if (isComboLink(link)) {
+    const sp = await comboSplit(link);
+    for (const part of sp.tlParts) { try { for (const [k, v] of await personalAgentIds({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] })) if (!out.has(k)) out.set(k, v); } catch { /* ignore */ } }
+    for (const src of ['ff', 'gv']) if (sp.memBySrc[src].length) { try { for (const [k, v] of await personalAgentIds({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] })) if (!out.has(k)) out.set(k, v); } catch { /* ignore */ } }
+    return out;
+  }
+  const c = personalConfig(link);
+  const e = db.settings.eir || {};
+  const idCol = c.source === 'gv' ? (e.gvId || 'AW') : (e.agentId || 'J');
+  const { start, today } = personalWindow();
+  const tq = `select ${c.agentCol}, ${idCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${idCol}, ${c.masterCol}`;
+  const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+  const res = await fetchUpstreamCached(upstreamUrl(params));
+  if (res.status < 200 || res.status >= 300) throw new Error(`sheet ${res.status}`);
+  const table = parseGvizServer(res.body);
+  for (const row of table.rows || []) {
+    const name = serverCell(row, 0).trim();
+    const id = serverCell(row, 1).trim().replace(/\.0+$/, '');
+    const gvRow = isGvPersonalRow(serverCell(row, 2));
+    if (!name || !id || (c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
+    const k = plNormName(name);
+    if (!out.has(k)) out.set(k, id);
+  }
+  return out;
+}
+
 /** 🧑‍💼 Agent personal link par uska TL (EIR ke recent rows me sabse zyada wala TL naam).
     v3.31 fix: ye function call ho raha tha par define nahi tha → har agent /p/ link 500 deta tha. */
 async function personalAgentTl(link) {
@@ -9900,6 +9929,16 @@ async function servePersonalPage(req, res, rawToken) {
     const prevYm = (() => { const dd = new Date(`${dateKeyNow()}T00:00:00Z`); dd.setUTCDate(1); dd.setUTCMonth(dd.getUTCMonth() - 1); return `${dd.getUTCFullYear()}-${pad2(dd.getUTCMonth() + 1)}`; })();
     const lastMonthTotal = rows.reduce((a, r) => a + (String(r.date).startsWith(prevYm) ? r.n : 0), 0);
     const stockInfo = await stockPromise;
+    // 🆔 agent ID next to every agent name (team / group links): StockDataa nodes first, then EIR (3s budget, best effort)
+    const agentIdBy = new Map();
+    if (stockInfo && Array.isArray(stockInfo.agents)) stockInfo.agents.forEach((x) => { if (x && x.n && x.id) agentIdBy.set(plNormName(x.n), String(x.id).trim()); });
+    if (isTeamLink(link) && hasSec('insights') || isTeamLink(link) && hasSec('issuance') || isTeamLink(link) && hasSec('performance')) {
+      try {
+        const ids = await Promise.race([personalAgentIds(link), new Promise((resolve) => { const t = setTimeout(() => resolve(new Map()), 3000); if (t.unref) t.unref(); })]);
+        for (const [k, v] of ids) if (!agentIdBy.has(k) || !/^[A-Za-z]{2,5}\d/.test(agentIdBy.get(k))) agentIdBy.set(k, v);
+      } catch { /* IDs are optional */ }
+    }
+    const pAg = (name) => { const id = agentIdBy.get(plNormName(name)); return `<b>${escHtml(name)}</b>${id ? ` <small class="pb-aid">${escHtml(id)}</small>` : ''}`; };
     const stCore = stockInfo ? stockInfo.t[0] : 0, stComm = stockInfo ? stockInfo.t[1] : 0;
     const stTotal = stCore + stComm;
     const expBtns = (tblId, label) => canExport ? `<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="${escHtml(tblId)}" data-pl-title="${escHtml(label)}">⬇ CSV</button><button type="button" class="pb-btn pb-btn-pdf" data-pl-pdf="${escHtml(tblId)}" data-pl-title="${escHtml(label)}">📄 PDF</button></div>` : '';
@@ -9969,7 +10008,7 @@ async function servePersonalPage(req, res, rawToken) {
       </div>
       <div class="pb-scroll"><table class="pb-tbl pb-date-matrix" id="pl-tbl-date-matrix">
         <thead><tr><th>Agent Name</th>${matrixDates.map((date) => `<th title="${escHtml(date)}">${escHtml(date.slice(8, 10) + '-' + date.slice(5, 7))}</th>`).join('')}<th>MTD Total</th></tr></thead>
-        <tbody>${matrixRows.length ? matrixRows.map((r) => `<tr><td><b>${escHtml(r.name)}</b></td>${r.counts.map((n, i) => `<td class="${n > 0 ? 'pb-cell-active' : ''}" title="${escHtml(matrixDates[i])}">${nf(n)}</td>`).join('')}<td><b>${nf(r.total)}</b></td></tr>`).join('') : `<tr><td colspan="${matrixDates.length + 2}" class="dim">No issuance record found for the current month through yesterday.</td></tr>`}
+        <tbody>${matrixRows.length ? matrixRows.map((r) => `<tr><td>${pAg(r.name)}</td>${r.counts.map((n, i) => `<td class="${n > 0 ? 'pb-cell-active' : ''}" title="${escHtml(matrixDates[i])}">${nf(n)}</td>`).join('')}<td><b>${nf(r.total)}</b></td></tr>`).join('') : `<tr><td colspan="${matrixDates.length + 2}" class="dim">No issuance record found for the current month through yesterday.</td></tr>`}
         </tbody>
       </table></div>
     </section>`;
@@ -9987,7 +10026,7 @@ async function servePersonalPage(req, res, rawToken) {
       const ag3m = agList.reduce((a, x) => a + x.c[0][1] + x.c[1][1], 0);
       const ag5m = agList.reduce((a, x) => a + x.c[0][2] + x.c[1][2], 0);
       const ag6m = agList.reduce((a, x) => a + x.c[0][3] + x.c[1][3], 0);
-      agentAgeTable = `<section class="pb-card"><div class="pb-card-head"><h3>👥 Agent-wise Stock Ageing (${agList.length} agents)</h3>${expBtns('pl-tbl-ag-age', `${link.name} - Agent Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ag-age"><thead><tr><th>Agent</th><th>Total Stock</th><th>VC4 + VC20</th><th>Comm</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th></tr></thead><tbody>${agList.map((a) => `<tr><td>${escHtml(a.n)}</td><td><b>${nf(a.t[0] + a.t[1])}</b></td><td>${nf(a.t[0])}</td><td>${nf(a.t[1])}</td><td>${nf(a.c[0][0] + a.c[1][0])}</td><td class="${a.c[0][1] + a.c[1][1] ? 'pb-warn' : ''}">${nf(a.c[0][1] + a.c[1][1])}</td><td class="${a.c[0][2] + a.c[1][2] ? 'pb-hot' : ''}">${nf(a.c[0][2] + a.c[1][2])}</td><td class="${a.c[0][3] + a.c[1][3] ? 'pb-hot' : ''}">${nf(a.c[0][3] + a.c[1][3])}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(agTot)}</td><td>${nf(agList.reduce((a, x) => a + x.t[0], 0))}</td><td>${nf(agList.reduce((a, x) => a + x.t[1], 0))}</td><td>${nf(ag1m)}</td><td>${nf(ag3m)}</td><td>${nf(ag5m)}</td><td>${nf(ag6m)}</td></tr></tfoot></table></div></section>`;
+      agentAgeTable = `<section class="pb-card"><div class="pb-card-head"><h3>👥 Agent-wise Stock Ageing (${agList.length} agents)</h3>${expBtns('pl-tbl-ag-age', `${link.name} - Agent Stock Ageing`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-ag-age"><thead><tr><th>Agent</th><th>Total Stock</th><th>VC4 + VC20</th><th>Comm</th><th>≥1M</th><th>≥3M</th><th>≥5M</th><th>≥6M</th></tr></thead><tbody>${agList.map((a) => `<tr><td>${pAg(a.n)}</td><td><b>${nf(a.t[0] + a.t[1])}</b></td><td>${nf(a.t[0])}</td><td>${nf(a.t[1])}</td><td>${nf(a.c[0][0] + a.c[1][0])}</td><td class="${a.c[0][1] + a.c[1][1] ? 'pb-warn' : ''}">${nf(a.c[0][1] + a.c[1][1])}</td><td class="${a.c[0][2] + a.c[1][2] ? 'pb-hot' : ''}">${nf(a.c[0][2] + a.c[1][2])}</td><td class="${a.c[0][3] + a.c[1][3] ? 'pb-hot' : ''}">${nf(a.c[0][3] + a.c[1][3])}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(agTot)}</td><td>${nf(agList.reduce((a, x) => a + x.t[0], 0))}</td><td>${nf(agList.reduce((a, x) => a + x.t[1], 0))}</td><td>${nf(ag1m)}</td><td>${nf(ag3m)}</td><td>${nf(ag5m)}</td><td>${nf(ag6m)}</td></tr></tfoot></table></div></section>`;
     }
 
     // 4. 👥 TL Agent-wise Issuance — inventory fields live only in the stock section.
@@ -10001,9 +10040,9 @@ async function servePersonalPage(req, res, rawToken) {
       }
       const list = agentRows.sort((a, b) => b.mtd - a.mtd || b.last - a.last).slice(0, 80);
       const sum = (k) => list.reduce((a, r) => a + r[k], 0);
-      teamTable = list.length ? `<section class="pb-card"><div class="pb-card-head"><h3>👥 Team · agent-wise issuance (${list.length} agents)</h3>${expBtns('pl-tbl-team', `${link.name} - Team Agent-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-team"><thead><tr><th>Agent</th><th>Last Month Issued</th><th>MTD Issued</th><th>Combined</th></tr></thead><tbody>${list.map((r) => `<tr><td>${escHtml(r.name)}</td><td>${nf(r.last)}</td><td><b>${nf(r.mtd)}</b></td><td>${nf(r.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(sum('last'))}</td><td>${nf(sum('mtd'))}</td><td>${nf(sum('total'))}</td></tr></tfoot></table></div></section>` : '';
+      teamTable = list.length ? `<section class="pb-card"><div class="pb-card-head"><h3>👥 Team · agent-wise issuance (${list.length} agents)</h3>${expBtns('pl-tbl-team', `${link.name} - Team Agent-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-team"><thead><tr><th>Agent</th><th>Last Month Issued</th><th>MTD Issued</th><th>Combined</th></tr></thead><tbody>${list.map((r) => `<tr><td>${pAg(r.name)}</td><td>${nf(r.last)}</td><td><b>${nf(r.mtd)}</b></td><td>${nf(r.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(sum('last'))}</td><td>${nf(sum('mtd'))}</td><td>${nf(sum('total'))}</td></tr></tfoot></table></div></section>` : '';
     }
-    const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (this month)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${escHtml(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
+    const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (this month)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${pAg(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
 
     // 5. 🏆 Performance Scorecard Table
     // Growth rule (same as main site): pichle mahine ke SAME din (1..kal) vs is mahine 1..kal.
@@ -10106,15 +10145,15 @@ async function servePersonalPage(req, res, rawToken) {
       const proj = dayNo ? Math.round((totMtd / dayNo) * daysInMonth) : 0;
       const tile = (cls, label, val, sub) => `<div class="pb-kpi ${cls}"><small>${label}</small><b>${val}</b><span>${sub}</span></div>`;
       const tbl = (id, title, heads, body, empty) => `${(insNav.push([id, title.replace(/<[^>]+>/g, '').trim()]), '')}<section class="pb-card" data-ins-sec="${id}"><div class="pb-card-head"><h3>${title}</h3>${expBtns(id, `${link.name} - ${title.replace(/<[^>]+>/g, '').replace(/[^\w\s-]/g, '').trim()}`)}</div>${body ? `<div class="pb-scroll"><table class="pb-tbl" id="${id}"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>` : `<p class="dim" style="padding:8px 4px">${empty}</p>`}</section>`;
-      const inactiveBody = inactive.map((a) => `<tr data-gap="${a.gap === null ? 999 : a.gap}"><td><b>${escHtml(a.name)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td><td>${nf(a.mtd)}</td><td class="${a.stock ? 'pb-warn' : ''}">${stockInfo ? nf(a.stock) : '—'}</td></tr>`).join('');
-      const growthBody = (arr) => arr.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td>${nf(a.prevSame)}</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(a.growth)}</td><td>${lastLbl(a)}</td></tr>`).join('');
+      const inactiveBody = inactive.map((a) => `<tr data-gap="${a.gap === null ? 999 : a.gap}"><td>${pAg(a.name)}</td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td><td>${nf(a.mtd)}</td><td class="${a.stock ? 'pb-warn' : ''}">${stockInfo ? nf(a.stock) : '—'}</td></tr>`).join('');
+      const growthBody = (arr) => arr.map((a) => `<tr><td>${pAg(a.name)}</td><td>${nf(a.prevSame)}</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(a.growth)}</td><td>${lastLbl(a)}</td></tr>`).join('');
       const inactMonth = list.filter((a) => a.mtd === 0).sort((a, b) => b.prevTot - a.prevTot || b.stock - a.stock);
       const inact2 = list.filter((a) => a.mtd === 0 && a.prevTot === 0).sort((a, b) => b.stock - a.stock);
       const highG = list.filter((a) => a.growth !== null && a.growth >= 50).sort((a, b) => b.growth - a.growth || b.mtd - a.mtd);
       const highD = list.filter((a) => a.growth !== null && a.growth <= -50).sort((a, b) => a.growth - b.growth || b.prevSame - a.prevSame);
-      const inactRows = (arr) => arr.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td><td>${nf(a.mtd)}</td><td class="${a.stock ? 'pb-warn' : ''}">${stockInfo ? nf(a.stock) : '—'}</td></tr>`).join('');
+      const inactRows = (arr) => arr.map((a) => `<tr><td>${pAg(a.name)}</td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td><td>${nf(a.mtd)}</td><td class="${a.stock ? 'pb-warn' : ''}">${stockInfo ? nf(a.stock) : '—'}</td></tr>`).join('');
       const inactMonthBody = inactRows(inactMonth), inact2Body = inactRows(inact2);
-      const freshBody = fresh.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td>0</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(null)}</td><td>${lastLbl(a)}</td></tr>`).join('');
+      const freshBody = fresh.map((a) => `<tr><td>${pAg(a.name)}</td><td>0</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(null)}</td><td>${lastLbl(a)}</td></tr>`).join('');
       const gHeads = ['Agent', `Last month (1–${dayNo || 1})`, 'MTD', 'Growth', 'Last active'];
       const isT = isTeamLink(link);
       insightsHtml = `<section class="pb-kpis">
@@ -10133,8 +10172,8 @@ async function servePersonalPage(req, res, rawToken) {
       ${isT ? tbl('pl-tbl-high', `🚀 High growth <small class="dim">(above the same days last month)</small>`, gHeads, growthBody(high), 'No agent is growing right now.') : ''}
       ${isT && fresh.length ? tbl('pl-tbl-new', '🆕 Newly active <small class="dim">(0 in the same period last month, issuing now)</small>', gHeads, freshBody, '') : ''}
       ${isT ? tbl('pl-tbl-down', `📉 De-growth <small class="dim">(below the same days last month)</small>`, gHeads, growthBody(down), '✅ No agent is in de-growth.') : ''}
-      ${isT ? tbl('pl-tbl-top', '🥇 Top performers (MTD)', ['#', 'Agent', 'MTD', 'Share', 'Last active'], top.map((a, i) => `<tr><td>${i + 1}</td><td><b>${escHtml(a.name)}</b></td><td><b>${nf(a.mtd)}</b></td><td>${pct(a.mtd, totMtd)}%</td><td>${lastLbl(a)}</td></tr>`).join(''), 'No issuance yet this month.') : `<section class="pb-card"><h3>📈 Growth</h3><div class="pb-kv"><span>Last month same period (1–${dayNo || 1})</span><b>${nf(list[0] ? list[0].prevSame : 0)}</b></div><div class="pb-kv"><span>MTD</span><b>${nf(totMtd)}</b></div><div class="pb-kv"><span>Growth</span><b>${list[0] ? growthLbl(list[0].growth) : '—'}</b></div></section>`}
-      ${isT && stockInfo ? tbl('pl-tbl-dead', '📦 Stock but no issuance <small class="dim">(0 this month)</small>', ['Agent', 'Stock', 'Last active', 'Last month'], dead.map((a) => `<tr><td><b>${escHtml(a.name)}</b></td><td class="pb-warn"><b>${nf(a.stock)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td></tr>`).join(''), '✅ Every agent holding stock has issued this month.') : ''}`;
+      ${isT ? tbl('pl-tbl-top', '🥇 Top performers (MTD)', ['#', 'Agent', 'MTD', 'Share', 'Last active'], top.map((a, i) => `<tr><td>${i + 1}</td><td>${pAg(a.name)}</td><td><b>${nf(a.mtd)}</b></td><td>${pct(a.mtd, totMtd)}%</td><td>${lastLbl(a)}</td></tr>`).join(''), 'No issuance yet this month.') : `<section class="pb-card"><h3>📈 Growth</h3><div class="pb-kv"><span>Last month same period (1–${dayNo || 1})</span><b>${nf(list[0] ? list[0].prevSame : 0)}</b></div><div class="pb-kv"><span>MTD</span><b>${nf(totMtd)}</b></div><div class="pb-kv"><span>Growth</span><b>${list[0] ? growthLbl(list[0].growth) : '—'}</b></div></section>`}
+      ${isT && stockInfo ? tbl('pl-tbl-dead', '📦 Stock but no issuance <small class="dim">(0 this month)</small>', ['Agent', 'Stock', 'Last active', 'Last month'], dead.map((a) => `<tr><td>${pAg(a.name)}</td><td class="pb-warn"><b>${nf(a.stock)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td></tr>`).join(''), '✅ Every agent holding stock has issued this month.') : ''}`;
     }
 
     // 🟢 Today Live + 🍩 donut charts
@@ -10167,7 +10206,7 @@ async function servePersonalPage(req, res, rawToken) {
         const isT2 = isTeamLink(link);
         const chan = (src) => (src === 'gv' ? '<span class="pb-chan gv">GV</span>' : '<span class="pb-chan ff">FF</span>');
         const both = live.agents.some((a) => a.src === 'gv') && live.agents.some((a) => a.src === 'ff');
-        const liveRows = live.agents.map((a, i) => { const c3 = grp3(a.cls); return `<tr><td>${i + 1}</td><td><b>${escHtml(a.name)}</b> ${both || link.source === 'both' ? chan(a.src) : ''}</td><td>${nf(c3.VC4)}</td><td>${nf(c3.VC20)}</td><td>${nf(c3['VC5+'])}</td><td><b>${nf(a.total)}</b></td><td>${pct(a.total, live.total)}%</td></tr>`; }).join('');
+        const liveRows = live.agents.map((a, i) => { const c3 = grp3(a.cls); return `<tr><td>${i + 1}</td><td>${pAg(a.name)} ${both || link.source === 'both' ? chan(a.src) : ''}</td><td>${nf(c3.VC4)}</td><td>${nf(c3.VC20)}</td><td>${nf(c3['VC5+'])}</td><td><b>${nf(a.total)}</b></td><td>${pct(a.total, live.total)}%</td></tr>`; }).join('');
         const tiles = [
           tile('issuance', '🟢', 'Issued today', nf(live.total), escHtml(live.date)),
           tile('previous', '🚗', 'VC4', nf(g3.VC4), `${pct(g3.VC4, live.total)}% of today`),
@@ -10377,7 +10416,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .pb-kv{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed #eef2f9;font-size:13.5px}
 .pb-kv:last-child{border:0}.pb-kv i{color:#94a3b8;font-style:normal;font-size:12px}
 .pb-rank{display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px dashed #eef2f9;font-size:14px}
-.pb-rank:last-child{border:0}.pb-pos{width:26px;text-align:center}.pb-name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-rank:last-child{border:0}.pb-pos{width:26px;text-align:center}.pb-aid{font:600 11px ui-monospace,Menlo,monospace;color:#64748b;margin-left:4px}.pb-name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pb-goal-top{display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:6px}
 .pb-track{height:10px;background:#eef0f8;border-radius:99px;overflow:hidden}.pb-fill{height:100%;background:var(--a);border-radius:99px}
 .pb-foot{text-align:center;color:#94a3b8;font-size:11.5px;margin-top:16px}
