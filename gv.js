@@ -710,6 +710,8 @@ window.FF = window.FF || {};
   const masterTlIds = (r) => [...new Set([r && r.tlId, r && r.supervisorId, r && r.gvTlId].map(identityId).filter(Boolean))];
   const masterTlId = (r) => identityId(r && (r.tlId || r.supervisorId || r.gvTlId));
 
+  /** VRN type: Settings ke VRN length rules (11–15 wrong · 16–20 chassis · 21+ wrong) — VRN na ho to sheet ka tag type. */
+  const gvVrnType = (r) => FF.config.vrnStatus(r && r.vrn) || (r && r.tagType) || '';
   /** GV Master ki ek tag row ko issuance views ke shared shape me rakho. */
   function masterIssuanceRow(r) {
     if (!r || !r.date) return null;
@@ -721,7 +723,7 @@ window.FF = window.FF || {};
       date, d: date, key: U.dateKey(date), ym: r.ym || U.ymKey(date), day: r.day || date.getDate(),
       cls: r.cls || normClass(''), group: r.group || classGroup(r.cls),
       type: replacement ? 'REPLACEMENT' : 'ISSUANCE', status: r.status || 'Issuance',
-      tagType: r.tagType || 'Other', vrnType: r.tagType || '', channel: 'GV Partner',
+      tagType: r.tagType || 'Other', vrnType: gvVrnType(r), vrnRule: !!FF.config.vrnStatus(r.vrn), channel: 'GV Partner',
       agentId: r.agentId || '', agentName: r.agentName || '', tlId,
       gvTlId: U.clean(r.gvTlId), tlName: r.tlName || (tlId ? `TL ${tlId}` : 'Direct'),
       tagId: r.tagId || '', vrn: r.vrn || '', serial: r.serial || '',
@@ -898,7 +900,7 @@ window.FF = window.FF || {};
         date: r.date, d: r.date, key: tk, ym: r.ym, day: r.day,
         cls: r.cls, group: r.group,
         type: replacement ? 'REPLACEMENT' : 'ISSUANCE', status: r.status,
-        tagType: r.tagType, vrnType: r.tagType || '',
+        tagType: r.tagType, vrnType: gvVrnType(r), vrnRule: !!FF.config.vrnStatus(r.vrn),
         channel: 'GV Partner',
         agentId: r.agentId || '', agentName: r.agentName || '', tlId: r.tlId || r.supervisorId || r.gvTlId || '', supervisorId: r.supervisorId || '', gvTlId: r.gvTlId || '', tlName: r.tlName || '',
         tagId: r.tagId || '', serial: r.serial || '', vrn: r.vrn || '',
@@ -928,7 +930,8 @@ window.FF = window.FF || {};
       total: rs.length, vc4: count((r) => r.group === 'VC4'), vc20: count((r) => r.group === 'VC20'),
       vc5p: count((r) => r.group === 'VC5+'), comm: count((r) => r.group !== 'VC4'),
       replacement: count((r) => r.type === 'REPLACEMENT'),
-      chassis: count((r) => /chassis/i.test(r.vrnType || r.tagType || ''))
+      chassis: count((r) => /chassis/i.test(r.vrnType || r.tagType || '')),
+      wrongVrn: count((r) => /wrong/i.test(r.vrnType || ''))
     };
   }
   /** GV daily series: EIR history + AAJ ki rows GV Master se (master load hone par). */

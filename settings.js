@@ -754,9 +754,21 @@ FF.pages = FF.pages || {};
         ${[['VC4', 'Car / Jeep / Van'], ['VC5', 'Light Commercial'], ['VC6', 'Three Axle Commercial'], ['VC7', 'Bus / Truck'], ['VC12', '4 to 6 axle'], ['VC16', 'Heavy Construction'], ['VC20', 'Light Goods']].map(([c, n]) => field(`${c} · ${n} — minimum Office stock`, numI(`stockMapAlert.limits.${c}`, ((settings.stockMapAlert || {}).limits || {})[c], 'min="0" placeholder="no alert"'))).join('')}
       </div>${saveBar('stockMapAlert')}`);
   }
+  function vrnRulesSection() {
+    const vr = settings.vrnRules || {};
+    const bands = Array.isArray(vr.bands) && vr.bands.length ? vr.bands : [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }];
+    const rows = [0, 1, 2, 3, 4].map((i) => {
+      const b = bands[i] || {};
+      const opt = (v, l) => `<option value="${v}" ${(b.status || (i < bands.length ? 'wrong' : '')) === v ? 'selected' : ''}>${l}</option>`;
+      return `<tr><td>${numI(`vrnRules.bands.${i}.min`, b.min, 'min="1" max="999" placeholder="—" style="width:90px"')}</td><td>${numI(`vrnRules.bands.${i}.max`, b.max, 'min="1" max="999" placeholder="—" style="width:90px"')}</td><td><select class="input" data-path="vrnRules.bands.${i}.status">${opt('wrong', '⚠️ Wrong VRN')}${opt('chassis', '🔧 Chassis')}${opt('valid', '✅ Valid VRN')}</select></td></tr>`;
+    }).join('');
+    return section('🔢 VRN length rules · GV live', `<p class="dim small">VRN ki length (sirf letters + numbers; space / - nahi gine jaate) se status. Home → <b>GV · Today live</b> ke <b>Chassis</b> aur red <b>Wrong VRN</b> card yahi rule use karte hain. Jo length kisi range me nahi = valid VRN. Range khaali chhodo to wo row ignore.</p>
+      ${check('vrnRules.enabled', vr.enabled !== false, '<b>VRN length rules ON</b>')}
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Length from</th><th>Length to</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>${saveBar('vrnRules')}`);
+  }
   function rulesTab() {
     const t = settings.thresholds || {};
-    return section('📐 Thresholds & display', `<div class="form-grid">${field('Stock cover 🔴 red below (days)', numI('thresholds.coverRed', t.coverRed, 'min="0"'))}${field('Stock cover 🟠 orange below (days)', numI('thresholds.coverOrange', t.coverOrange, 'min="0"'))}${field('Stock cover 🟡 amber below (days)', numI('thresholds.coverAmber', t.coverAmber, 'min="0"'), '🟢 green above this')}${field('"Went quiet" after (inactive days)', numI('thresholds.inactiveDays', t.inactiveDays, 'min="1"'))}${field('Top N in rankings', numI('thresholds.topN', t.topN, 'min="3" max="50"'))}${field('Default rows per page', numI('pageSize', settings.pageSize, 'min="10" max="500"'))}</div>${check('allowSignup', settings.allowSignup !== false, 'Login page par "Sign up" allow karo (naye account admin approval ke baad hi chalte hain)')}${saveBar('rules')}`) + stockMapAlertSection();
+    return section('📐 Thresholds & display', `<div class="form-grid">${field('Stock cover 🔴 red below (days)', numI('thresholds.coverRed', t.coverRed, 'min="0"'))}${field('Stock cover 🟠 orange below (days)', numI('thresholds.coverOrange', t.coverOrange, 'min="0"'))}${field('Stock cover 🟡 amber below (days)', numI('thresholds.coverAmber', t.coverAmber, 'min="0"'), '🟢 green above this')}${field('"Went quiet" after (inactive days)', numI('thresholds.inactiveDays', t.inactiveDays, 'min="1"'))}${field('Top N in rankings', numI('thresholds.topN', t.topN, 'min="3" max="50"'))}${field('Default rows per page', numI('pageSize', settings.pageSize, 'min="10" max="500"'))}</div>${check('allowSignup', settings.allowSignup !== false, 'Login page par "Sign up" allow karo (naye account admin approval ke baad hi chalte hain)')}${saveBar('rules')}`) + stockMapAlertSection() + vrnRulesSection();
   }
   // ---- 🔊 Sound & voice (Office Bell + Voice Announcer) — v3.18 ----------------------------------
   /** Naye tags ki awaaz yahan se test / configure hoti hai (topbar 🔊 menu ka hi doosra darwaza). */

@@ -441,6 +441,7 @@ FF.pages = FF.pages || {};
       kpi('g6', 'VC5+', '🚚', U.fmt(live.vc5p), live.total ? `${U.fmtPct(U.pctOf(live.vc5p, live.total), 0)} share` : '—', `src=gv&scope=day&date=${tk}&f=vc5p`),
       kpi('g5', 'Replacement', '🔁', U.fmt(live.replacement), live.total ? `${U.fmtPct(U.pctOf(live.replacement, live.total), 0)} of today` : '—', `src=gv&scope=day&date=${tk}&f=repl`),
       kpi('g7', 'Chassis', '🔧', U.fmt(live.chassis), live.total ? `${U.fmtPct(U.pctOf(live.chassis, live.total), 0)} of today` : '—', `src=gv&scope=day&date=${tk}&f=chassis`),
+      kpi('g-red', 'Wrong VRN', '⚠️', U.fmt(live.wrongVrn || 0), live.total ? `${U.fmtPct(U.pctOf(live.wrongVrn || 0, live.total), 0)} of today · VRN length rule` : 'VRN length rule', `src=gv&scope=day&date=${tk}&f=wrong`),
       kpi('g2', 'Expected Today', '🎯', expected != null ? U.fmt(expected) : '—',
         live.weekdayNote ? esc(live.weekdayNote) : 'pichhle same-weekday ka average',
         expectedTodaySpec(), expected != null ? `Expected ${U.fmt(expected)}` : ''),
@@ -1295,7 +1296,7 @@ FF.pages = FF.pages || {};
     let liveSourceReady = false;
 
     let liveState = {
-      total: 0, vc4: 0, vc20: 0, vc5p: 0, replacement: 0, chassis: 0, highest: null,
+      total: 0, vc4: 0, vc20: 0, vc5p: 0, replacement: 0, chassis: 0, wrongVrn: 0, highest: null,
       expected: null, pace: null, cached: false, stale: false,
       error: canGv ? 'GV aaj ka live data aa raha hai…' : '',
       source: 'feed', liveToday: false
@@ -1457,6 +1458,7 @@ FF.pages = FF.pages || {};
         vc5p: Number(liveFromFeed.vc5p) || 0,
         replacement: Number(liveFromFeed.replacement) || 0,
         chassis: Number(liveFromFeed.chassis) || 0,
+        wrongVrn: Number(liveFromFeed.wrongVrn) || 0,
         expected: liveFromFeed.expected != null
           ? liveFromFeed.expected
           : expectedFromWeekdaySeries(liveFromFeed.series, todayK()),
@@ -1506,7 +1508,7 @@ FF.pages = FF.pages || {};
       liveState = useSnap ? {
         ...liveState,
         total: snap.total, vc4: snap.vc4, vc20: snap.vc20, vc5p: snap.vc5p,
-        replacement: snap.replacement, chassis: snap.chassis, highest: gvTodayHighest(snap.rows),
+        replacement: snap.replacement, chassis: snap.chassis, wrongVrn: snap.wrongVrn || 0, highest: gvTodayHighest(snap.rows),
         error: '', stale: false, source: 'master', liveToday: true
       } : { ...liveState, error: '', liveToday: true };
       if (ui.ready) {

@@ -6899,3 +6899,6 @@ button.smap-cell.smap-total { min-width: 64px; }
 .tr-prev-warn{color:#b91c1c;font-weight:700;font-size:12px}
 html[data-theme="dark"] .tr-colmap{background:#111827;border-color:#334155;color:#e2e8f0}
 html[data-theme="dark"] .tr-colmap.on{background:#1e1b4b;border-color:#6366f1}
+/* ⚠️ Wrong VRN KPI — always red */
+html body .kpi.g-red, html body .kpi-grid .kpi.g-red { background: linear-gradient(135deg, #dc2626, #991b1b) !important; color: #fff !important; }
+html body .kpi.g-red.kpi-zero { background: linear-gradient(135deg, #f87171, #dc2626) !important; }

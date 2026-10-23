@@ -237,6 +237,7 @@ const DEFAULT_SETTINGS = {
   agentRegistry: { // 🆕 Agent master (Sheet4): col A = New Agent ID (EIR J se match). EIR me jo ID yahan nahi → "New IDs" page
     enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E'
   },
+  vrnRules: { enabled: true, bands: [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }] }, // GV live: VRN length → status
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
   // all other classes wait for an admin-entered official rate. Empty is unresolved, never zero.
@@ -1566,9 +1567,49 @@ function liveFeedSettingsDiffer(before, after) {
     || JSON.stringify(a.eir || {}) !== JSON.stringify(b.eir || {})
     || a.gvSheetId !== b.gvSheetId
     || JSON.stringify((a.gv && a.gv.master) || {}) !== JSON.stringify((b.gv && b.gv.master) || {})
-    || JSON.stringify(a.gvClassCch || {}) !== JSON.stringify(b.gvClassCch || {});
+    || JSON.stringify(a.gvClassCch || {}) !== JSON.stringify(b.gvClassCch || {})
+    || JSON.stringify(a.vrnRules || {}) !== JSON.stringify(b.vrnRules || {});
 }
 
+/** 🔢 VRN length → 'chassis' | 'wrong' | 'valid' | '' (Settings → VRN length rules). */
+function vrnLengthStatus(vrn, settings) {
+  const r = (settings && settings.vrnRules) || {};
+  if (r.enabled === false) return '';
+  const len = String(vrn == null ? '' : vrn).toUpperCase().replace(/[^A-Z0-9]/g, '').length;
+  if (!len) return '';
+  const bands = Array.isArray(r.bands) && r.bands.length ? r.bands : [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }];
+  const band = bands.find((b) => len >= Number(b.min) && len <= Number(b.max));
+  return band ? band.status : 'valid';
+}
+/** Aaj ki GV Master VRNs → wrong / chassis counts (length rule). null = VRN column padh nahi paaye. */
+async function gvTodayVrnCounts(settings, resolved, day, nextDay, cacheMs) {
+  const cfg = (settings.gv && settings.gv.master) || {};
+  const vrnCol = String(resolved.vrn || cfg.vrn || 'E').toUpperCase();
+  const tab = cfg.tab || 'GV Master';
+  const id = String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const sel = `select ${resolved.date}, ${vrnCol}, ${resolved.tagType || resolved.tagId}`;
+  const tries = [
+    `${sel} where ${resolved.date} >= date '${day}' and ${resolved.date} < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`,
+    `${sel} where toDate(${resolved.date}) >= date '${day}' and toDate(${resolved.date}) < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`
+  ];
+  for (const tq of tries) {
+    try {
+      const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id, sheet: tab, tq })), { maxAgeMs: cacheMs });
+      const table = parseGvizServer(out.body);
+      let wrong = 0, chassis = 0, checked = 0, typeChassis = 0;
+      for (const row of table.rows || []) {
+        if (serverDateFromCell(row, 0) !== day) continue;
+        const st = vrnLengthStatus(serverCell(row, 1), settings);
+        if (st) checked++;
+        if (st === 'wrong') wrong++;
+        else if (st === 'chassis') chassis++;
+        else if (!st && /chassis/i.test(String(serverCell(row, 2) || ''))) typeChassis++;   // no VRN → sheet tag type
+      }
+      if (checked || tq === tries[tries.length - 1]) return { wrong, chassis: chassis + typeChassis, checked };
+    } catch { /* next */ }
+  }
+  return null;
+}
 async function gvTodayFeed(force) {
   const ttl = 30e3; // live today: short cache, but never scan the full 30-day history
   if (!force && gvTodayFeedCache.body && Date.now() - gvTodayFeedCache.at < ttl) return { ...gvTodayFeedCache.body, cached: true };
@@ -1590,7 +1631,8 @@ async function gvTodayFeed(force) {
     const tab = (settings.gv && settings.gv.master && settings.gv.master.tab) || 'GV Master';
     const id = String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
     const hasFallbackClass = !!resolved.vClass && String(resolved.vClass).toUpperCase() !== String(resolved.cls).toUpperCase();
-    const select = [resolved.date, resolved.cls, ...(hasFallbackClass ? [resolved.vClass] : []), resolved.tagId, resolved.status, resolved.tagType].filter(Boolean).join(', ');
+    const vrnCol = String(resolved.vrn || ((settings.gv && settings.gv.master) || {}).vrn || 'E').toUpperCase();
+    const select = [resolved.date, resolved.cls, ...(hasFallbackClass ? [resolved.vClass] : []), resolved.tagId, resolved.status, resolved.tagType || resolved.tagId, vrnCol].join(', ');
     const attempts = [
       { tq: `select ${select} where ${resolved.date} >= date '${day}' and ${resolved.date} < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`, kind: 'today-date' },
       { tq: `select ${select} where toDate(${resolved.date}) >= date '${day}' and toDate(${resolved.date}) < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`, kind: 'today-toDate' },
@@ -1615,17 +1657,19 @@ async function gvTodayFeed(force) {
           rows.push({
             cls: classBucket(serverCell(row, 1), classFallbackIndex === null ? '' : serverCell(row, classFallbackIndex), settings.gvClassCch),
             status: serverCell(row, statusIndex),
-            type: serverCell(row, typeIndex)
+            type: serverCell(row, typeIndex),
+            vrnSt: vrnLengthStatus(serverCell(row, typeIndex + 1), settings)
           });
         }
         // A successful filtered query with no rows means "no today's data" only after we know
         // the date predicate worked. For the bounded fallback, empty is also a valid zero snapshot.
         const classes = {};
-        let replacement = 0, chassis = 0;
+        let replacement = 0, chassis = 0, wrongVrn = 0;
         for (const row of rows) {
           classes[row.cls] = (classes[row.cls] || 0) + 1;
           if (/repl/i.test(String(row.status || ''))) replacement++;
-          if (/chassis/i.test(String(row.type || ''))) chassis++;
+          if (row.vrnSt === 'chassis' || (!row.vrnSt && /chassis/i.test(String(row.type || '')))) chassis++;
+          if (row.vrnSt === 'wrong') wrongVrn++;
         }
         const result = {
           ok: true, date: day, at: new Date().toISOString(),
@@ -1633,7 +1677,7 @@ async function gvTodayFeed(force) {
             source: 'GV Master', live: true, total: rows.length,
             vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
             comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
-            replacement, chassis, classes,
+            replacement, chassis, wrongVrn, classes,
             classMapVersion,
             cached: !!out.cached, stale: !!out.stale, query: attempt.kind
           }
@@ -1767,6 +1811,11 @@ async function todayFeed(force) {
       const replaced = dToday.length ? dToday.reduce((n, r) => n + (/repl/i.test(String(r.status || '')) ? r.n : 0), 0) : Number(rawFallback && rawFallback.replacement) || 0;
       const chassis = dToday.length ? dToday.reduce((n, r) => n + (/chassis/i.test(String(r.type || '')) ? r.n : 0), 0) : Number(rawFallback && rawFallback.chassis) || 0;
       const detailTotal = dToday.reduce((n, r) => n + r.n, 0);
+      let vrnCounts = null;
+      try {
+        const nx = new Date(`${day}T00:00:00Z`); nx.setUTCDate(nx.getUTCDate() + 1);
+        vrnCounts = await gvTodayVrnCounts(settings, resolved, day, `${nx.getUTCFullYear()}-${pad2(nx.getUTCMonth() + 1)}-${pad2(nx.getUTCDate())}`, liveQueryCacheMs);
+      } catch { vrnCounts = null; }
       const classes = Object.keys(detailClasses).length ? detailClasses : today.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {});
       const total = detailTotal || sum(today);
       // 🎯 Expected today = pichhle 4 same-weekday ka average (pichhla mahina bhi shaamil), aaj se pehle wale din.
@@ -1783,7 +1832,7 @@ async function todayFeed(force) {
         source: 'GV Master', live: true, total,
         vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
         comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
-        replacement: replaced, chassis,
+        replacement: replaced, chassis: vrnCounts && vrnCounts.checked ? vrnCounts.chassis : chassis, wrongVrn: vrnCounts ? vrnCounts.wrong : 0,
         classes, classMapVersion, expected: weekdayAvg, lastDay: prevDay ? series[prevDay] : null, lastDayDate: prevDay || '',
         series,
         cached: !!out.cached, stale: !!out.stale, query: out.via,
@@ -1835,7 +1884,8 @@ const GV_SERVER_HEADER_SYNS = {
   vClass: ['VCLASS','VEHICLE_CLASS','CLASS','TAG_CLASS'],
   tagId: ['TAG_ID_NUMBER','TAG_ID','TAGID','TAG ID NUMBER','TAG ID'],
   status: ['STATUS','TAG_STATUS','TAG STATUS'],
-  tagType: ['TAG_TYPE','TYPE','TAG TYPE']
+  tagType: ['TAG_TYPE','TYPE','TAG TYPE'],
+  vrn: ['VRN','VNO','VEHICLE_NUMBER','VEHICLE_NO','VEHICLE NUMBER']
 };
 const gvServerHeaderCache = new Map();
 function normalizeServerHeading(v) {
@@ -1867,7 +1917,7 @@ async function resolveGvServerColumns(settings, force) {
   const tab = cfg.tab || 'GV Master';
   const fallback = {
     date: cfg.date || 'P', cls: cfg.cch || cfg.vClass || 'G', vClass: cfg.vClass || '',
-    tagId: cfg.tagId || 'I', status: cfg.status || 'N', tagType: cfg.tagType || 'U'
+    tagId: cfg.tagId || 'I', status: cfg.status || 'N', tagType: cfg.tagType || 'U', vrn: cfg.vrn || 'E'
   };
   const cacheKey = `${settings.gvSheetId || ''}|${tab}`;
   const hit = gvServerHeaderCache.get(cacheKey);
@@ -1923,7 +1973,8 @@ async function resolveGvServerColumns(settings, force) {
       vClass: vClassColFallback && vClassColFallback !== classCol ? vClassColFallback : '',
       tagId: resolveCol('tagId', cfg.tagId) || fallback.tagId,
       status: resolveCol('status', cfg.status) || fallback.status,
-      tagType: resolveCol('tagType', cfg.tagType) || fallback.tagType
+      tagType: resolveCol('tagType', cfg.tagType) || fallback.tagType,
+      vrn: resolveCol('vrn', cfg.vrn) || fallback.vrn
     };
     gvServerHeaderCache.set(cacheKey, { at: Date.now(), cols });
     return { ...fallback, ...cols, via: 'header' };
@@ -8823,6 +8874,26 @@ async function handleApi(req, res, url) {
       if (ar.gid !== undefined) { ar.gid = String(ar.gid).trim(); if (!/^\d{1,12}$/.test(ar.gid)) throw new HttpError(400, 'Agent master: gid sirf number hota hai (URL me gid=...).'); }
       for (const k of ['idCol', 'legacyCol', 'nameCol', 'tlIdCol', 'tlNameCol']) if (ar[k] !== undefined) { ar[k] = String(ar[k]).trim().toUpperCase(); if (ar[k] !== '' && !/^[A-Z]{1,3}$/.test(ar[k])) throw new HttpError(400, `Agent master: ${k} column letter hona chahiye (jaise A).`); }
       if (ar.label !== undefined) ar.label = String(ar.label).slice(0, 60);
+    }
+    if (patch.vrnRules !== undefined) {
+      const vr = patch.vrnRules;
+      if (!vr || typeof vr !== 'object' || Array.isArray(vr)) throw new HttpError(400, 'vrnRules object hona chahiye.');
+      if (vr.enabled !== undefined) vr.enabled = vr.enabled === true || vr.enabled === 'true';
+      if (vr.bands !== undefined) {
+        const list = Array.isArray(vr.bands) ? vr.bands : (vr.bands && typeof vr.bands === 'object' ? Object.keys(vr.bands).sort((x, y) => Number(x) - Number(y)).map((k) => vr.bands[k]) : null);
+        if (!list) throw new HttpError(400, 'vrnRules.bands list hona chahiye.');
+        const clean = [];
+        for (const band of list) {
+          if (!band || band.min === '' || band.min === null || band.min === undefined) continue;
+          const min = Number(band.min), max = band.max === '' || band.max === null || band.max === undefined ? 999 : Number(band.max);
+          if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min || max > 999) throw new HttpError(400, `VRN length ${band.min}–${band.max}: 1 se 999 ke beech, aur "from" ≤ "to" hona chahiye.`);
+          const status = ['wrong', 'chassis', 'valid'].includes(band.status) ? band.status : 'wrong';
+          clean.push({ min, max, status });
+        }
+        clean.sort((x, y) => x.min - y.min);
+        for (let i = 1; i < clean.length; i++) if (clean[i].min <= clean[i - 1].max) throw new HttpError(400, `VRN length ranges overlap: ${clean[i - 1].min}–${clean[i - 1].max} aur ${clean[i].min}–${clean[i].max}.`);
+        vr.bands = clean.slice(0, 10);
+      }
     }
     if (patch.stockMapAlert !== undefined) {
       const sm = patch.stockMapAlert;

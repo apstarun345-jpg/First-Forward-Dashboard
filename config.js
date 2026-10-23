@@ -249,6 +249,22 @@ FF.config = {
   },
   /** Direct-agent rules (Settings → 🧍 Direct Agents). */
   directRules() { return this.direct || {}; },
+  /** 🔢 VRN length rules (Settings → VRN length rules). Length = letters + digits only (spaces / - removed). */
+  vrnRules() {
+    const r = this.vrnRuleSet || {};
+    const bands = Array.isArray(r.bands) && r.bands.length ? r.bands : [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }];
+    return { enabled: r.enabled !== false, bands };
+  },
+  /** 'Chassis' | 'Wrong VRN' | 'VRN' (valid) | '' (no VRN / rules off) — from the VRN length only. */
+  vrnStatus(vrn) {
+    const rules = this.vrnRules();
+    if (!rules.enabled) return '';
+    const len = String(vrn == null ? '' : vrn).toUpperCase().replace(/[^A-Z0-9]/g, '').length;
+    if (!len) return '';
+    const band = rules.bands.find((b) => len >= Number(b.min) && len <= Number(b.max));
+    if (!band) return 'VRN';
+    return band.status === 'chassis' ? 'Chassis' : band.status === 'wrong' ? 'Wrong VRN' : 'VRN';
+  },
   /** FF direct TL names — `direct.ffTlNames` + legacy `excludeTls` (jaise APS). */
   directTlNames() {
     const d = this.directRules();
@@ -347,6 +363,7 @@ FF.config = {
     ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'loginAnimation', 'sheetId', 'gvSheetId', 'excludeTls', 'pageSize', 'allowSignup', 'directPlaceholderTls'].forEach(pick);
     if (s.gvClassCch) this.gvClassCch = { ...this.gvClassCch, ...s.gvClassCch, groups: { ...(this.gvClassCch && this.gvClassCch.groups), ...(s.gvClassCch.groups || {}) } };
     if (s.direct) this.direct = { ...this.direct, ...s.direct };
+    if (s.vrnRules) this.vrnRuleSet = s.vrnRules;
     if (s.theme) this.theme = { ...this.theme, ...s.theme };
     if (s.thresholds) this.thresholds = { ...this.thresholds, ...s.thresholds };
     if (s.features) {

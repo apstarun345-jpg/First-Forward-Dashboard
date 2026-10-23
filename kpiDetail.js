@@ -37,7 +37,7 @@ window.FF = window.FF || {};
     vc5p: { label: 'VC5+', fn: (r) => r.group === 'VC5+' },
     repl: { label: 'Replacement', fn: (r) => r.type === 'REPLACEMENT' },
     chassis: { label: 'Chassis', fn: (r) => /chassis/i.test(r.vrnType) },
-    wrong: { label: 'Wrong / Invalid VRN', fn: (r) => /wrong/i.test(r.vrnType) || malformedVrn(r) },
+    wrong: { label: 'Wrong / Invalid VRN', fn: (r) => /wrong/i.test(r.vrnType) || (!r.vrnRule && malformedVrn(r)) },
     gv: { label: 'GV Partner', fn: (r) => r.channel === 'GV Partner' },
     ff: { label: 'First Forward', fn: (r) => r.channel !== 'GV Partner' }
   };
