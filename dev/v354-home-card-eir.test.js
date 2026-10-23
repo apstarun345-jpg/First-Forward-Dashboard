@@ -39,7 +39,7 @@ test('Home month cards: FF + GV split under each card adds up to the card, forec
   const ffN = Number((mtd.match(/🟦 FF <b>([\d,]+)<\/b>/) || [])[1].replace(/,/g, '')), gvN = Number((mtd.match(/🟩 GV <b>([\d,]+)<\/b>/) || [])[1].replace(/,/g, ''));
   assert.equal(ffN + gvN, sc.total, 'FF + GV footer = card ka total (aaj ke live GV samet)');
   const specs = [...html.matchAll(/data-kpi="([^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
-  assert.equal(specs.length, 10, 'month cards');
+  assert.equal(specs.length, 11, 'month cards (incl. Wrong VRN)');
   specs.forEach((sp) => assert.match(sp, /(^|&)eir=1(&|$)/, `EIR-only drawer: ${sp}`));
   assert.ok(!/GV Master/i.test(html), 'card header GV Master ka naam nahi (EIR only)');
   const exp = cardOf('Expected in');

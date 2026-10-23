@@ -37,7 +37,7 @@ window.FF = window.FF || {};
     vc5p: { label: 'VC5+', fn: (r) => r.group === 'VC5+' },
     repl: { label: 'Replacement', fn: (r) => r.type === 'REPLACEMENT' },
     chassis: { label: 'Chassis', fn: (r) => /chassis/i.test(r.vrnType) },
-    wrong: { label: 'Wrong / Invalid VRN', fn: (r) => /wrong/i.test(r.vrnType) || (!r.vrnRule && malformedVrn(r)) },
+    wrong: { label: 'Wrong / Invalid VRN', fn: (r) => r.ruleWrong !== undefined ? r.ruleWrong : /wrong/i.test(r.vrnType) || (!r.vrnRule && malformedVrn(r)) },
     gv: { label: 'GV Partner', fn: (r) => r.channel === 'GV Partner' },
     ff: { label: 'First Forward', fn: (r) => r.channel !== 'GV Partner' }
   };
@@ -458,7 +458,10 @@ window.FF = window.FF || {};
     for (const [k, v] of byGroup.entries()) byClass.set(k, v);
   }
   async function issuanceDetail(spec) {
-    const all = await issuanceRows(spec.src, spec);
+    let all;
+    const wrongRule = String(spec.f || '').split(',').map((x) => x.trim()).includes('wrong') && !spec.agent && !spec.agentId && !spec.tl && !spec.tlId && spec.scope === 'mtd' && String(spec.eir) === '1' && FF.model.loadWrongVrn && FF.config.vrnRules().enabled;
+    if (wrongRule) { try { all = await FF.model.loadDaily({ wrongVrn: true }); } catch { all = null; } }
+    if (!all) all = await issuanceRows(spec.src, spec);
     const p = period(spec, all);
     const pp = previousPeriod(p);
     const filt = filterOf(spec.f);
@@ -790,6 +793,7 @@ window.FF = window.FF || {};
         const wanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
         if (wanted.length && ![agentName, agentId].map(personKey).some((key) => wanted.includes(key))) continue;
         const row = { key: d ? U.dateKey(d) : '', tagId: D.cellText(r[1]), cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: (channel === 'GV Partner' && FF.config.vrnStatus(D.cellText(r[2]))) || D.cellText(r[5]), vrnRule: channel === 'GV Partner' && !!FF.config.vrnStatus(D.cellText(r[2])), channel, agentName, agentId, tlName: D.cellText(r[9]), n: 1, barcode: '' };
+        { const vs = FF.config.vrnStatus(D.cellText(r[2])); if (vs) row.ruleWrong = vs === 'Wrong VRN'; } // Wrong VRN = VRN length rule, FF + GV both
         if (filt && !filt.fn(row)) continue;
         if (!rowMatchesSpec(row, spec)) continue;
         out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), agentName, agentId, D.cellText(r[9]), channel, '']);

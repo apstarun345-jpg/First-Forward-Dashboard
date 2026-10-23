@@ -476,7 +476,7 @@ FF.pages = FF.pages || {};
       `<a class="btn small" href="#/gvDashboard">🚀 GV Dashboard →</a>`);
   }
 
-  function monthKpiHtml(ctx, sf, sg, sc, lastRows) {
+  function monthKpiHtml(ctx, sf, sg, sc, lastRows, wrong) {
     const { curKey, prevKey, observedDay, compareDay, daysInMonth } = ctx;
     const reportDay = Math.max(0, observedDay);
     const lastSum = M.summary(lastRows, prevKey, compareDay, '');
@@ -524,6 +524,17 @@ FF.pages = FF.pages || {};
     const yGv = sumN(sf.gv.filter((r) => r.key === yKey));
     const monthLabel = U.labelYM(curKey, true);
     const prevLabel = U.labelYM(prevKey, true);
+    // ⚠️ Wrong VRN = VRN length rules (same as GV today live) on EIR VRN column — FF + GV, class-wise. wrong = {cur, last} | 'loading' | null
+    const wrongVrnCard = (() => {
+      if (wrong && wrong.cur) {
+        const c = wrong.cur, l = wrong.last;
+        const tot = c.ff.total + c.gv.total, lt = l ? l.ff.total + l.gv.total : 0;
+        const by = { VC4: c.ff.by.VC4 + c.gv.by.VC4, VC20: c.ff.by.VC20 + c.gv.by.VC20, 'VC5+': c.ff.by['VC5+'] + c.gv.by['VC5+'] };
+        const chCls = (lab, o) => `<div class="kpi-chrow"><b>${lab}</b> VC4 <b>${U.fmt(o.by.VC4)}</b> · VC20 <b>${U.fmt(o.by.VC20)}</b> · VC5+ <b>${U.fmt(o.by['VC5+'])}</b></div>`;
+        return { value: U.fmt(tot), plain: `${U.fmt(tot)} · FF ${U.fmt(c.ff.total)} · GV ${U.fmt(c.gv.total)} · VC4 ${U.fmt(by.VC4)} · VC20 ${U.fmt(by.VC20)} · VC5+ ${U.fmt(by['VC5+'])}`, foot: `${l ? momChip(tot, lt, `${prevLabel} ${observedDay} din`) : ''}<br>${splitFoot(c.ff.total, c.gv.total)}${clsSplit(by)}${chCls('🟦 FF', c.ff)}${chCls('🟩 GV', c.gv)}` };
+      }
+      return { value: wrong === 'loading' ? '…' : '—', foot: wrong === 'loading' ? 'Calculating from VRN length rules…' : 'VRN length rule off / data not available' };
+    })();
     const cards = [
       kpi('g9', `Last day · ${U.labelDate(y)}`, '🗓️', U.fmt(lastDayNow),
         `${momChip(lastDayNow, lastDayPrev, `${prevLabel} ${Math.min(yDay, U.daysInMonth(prevKey))}`)}<br>${splitFoot(yFf, yGv)}`,
@@ -537,6 +548,7 @@ FF.pages = FF.pages || {};
       kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(compareDay, U.daysInMonth(prevKey))} reported din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b> <span class="dim">(report till ${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'})</span>`, `src=both&scope=mtd&ym=${curKey}&f=comm&eir=1`),
       kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(curFf.replacement, curGv.replacement)}${clsSplit(sc.replacementBy)}`, `src=both&scope=mtd&ym=${curKey}&f=repl&eir=1`),
       kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(curFf.chassis, curGv.chassis)}${clsSplit(sc.chassisBy)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis&eir=1`),
+      kpi('g-red', 'Wrong VRN', '⚠️', wrongVrnCard.value, wrongVrnCard.foot, `src=both&scope=mtd&ym=${curKey}&f=wrong&eir=1`, wrongVrnCard.plain),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯',
         `<div class="hm-expected-compare">${expectedClassRow('VC4', expectedByClass.vc4, lastFull.vc4)}${expectedClassRow('VC20', expectedByClass.vc20, lastFull.vc20)}${expectedClassRow('VC5+', expectedByClass.vc5p, lastFull.vc5p)}<div class="hm-expected-total"><span>Total Expected</span><b>${U.fmt(expected)}</b></div></div>`,
         `EIR forecast · ${observedDay}/${daysInMonth} reported days · today excluded<br><span class="dim">Report till <b>${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'}</b> · last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
@@ -1366,7 +1378,13 @@ FF.pages = FF.pages || {};
       // 📅 Month KPI cards = sirf EIR (GV = master ID 5845036 wali rows). GV Master / live rows card me plus nahi hote (double count).
       const eir = ui.daily || [];
       const eirSf = { rows: eir, ff: eir.filter((r) => r.channel !== 'GV Partner'), gv: eir.filter((r) => r.channel === 'GV Partner') };
-      monthMount.innerHTML = monthKpiHtml(ui.ctx, eirSf, { liveToday: false }, M.summary(eir, ui.ctx.curKey), eir);
+      if (ui.wrong === undefined && !ui.wrongReq) {
+        ui.wrongReq = true;
+        const cx = ui.ctx, day = Math.max(1, cx.observedDay);
+        Promise.all([M.loadWrongVrn(cx.curKey, day), M.loadWrongVrn(cx.prevKey, Math.min(day, U.daysInMonth(cx.prevKey)))])
+          .then(([cur, last]) => { ui.wrong = cur ? { cur, last } : null; }).catch(() => { ui.wrong = null; }).then(() => paintMonth());
+      }
+      monthMount.innerHTML = monthKpiHtml(ui.ctx, eirSf, { liveToday: false }, M.summary(eir, ui.ctx.curKey), eir, ui.wrong === undefined ? 'loading' : ui.wrong);
     }
     function paintTargetAchievement() {
       if (!targetAchievementMount || !targetAchievementMount.isConnected) return;

@@ -56,7 +56,7 @@ for (let back = 75; back >= FF_LAG; back--) {
     for (let k = 0; k < n; k++) {
       const cls = pick(CLASSES);
       EIR.rows.push(eirRow({
-        tagId: `34161FA82032${tagSeq++}`, vrn: `RJ14${Math.floor(rnd() * 9000 + 1000)}`, cls, type: TYPES[cls],
+        tagId: `34161FA82032${tagSeq++}`, vrn: `RJ14${Math.floor(rnd() * 9000 + 1000)}${tagSeq % 17 === 0 ? "123456" : ""}`, cls, type: TYPES[cls],
         status: rnd() < 0.96 ? 'ACTIVE' : 'PENDING', date: dstr(d), agentId: a.id, agentName: a.name,
         masterId: a.gv ? '5845036' : '', tlId: a.tlId, gvId: a.gv ? 'GV001' : '', gvName: a.gv ? 'GV PARTNER LTD' : '',
         gvTl: a.gv ? 'ApnaPayment Pvt. Ltd.' : '', tlName: a.tlName,

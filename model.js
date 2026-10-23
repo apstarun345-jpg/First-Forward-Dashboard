@@ -32,17 +32,49 @@ window.FF = window.FF || {};
     return (rows || []).filter((r) => !wanted || channelName(r.channel) === wanted);
   };
 
+  /** gviz condition for rows whose VRN length falls in a "wrong" band of Settings → VRN length rules ('' when off). */
+  function wrongVrnCond() {
+    const rules = FF.config.vrnRules();
+    const bands = rules.enabled ? rules.bands.filter((b) => b.status === 'wrong') : [];
+    // length = letters + digits only: separators (space, -) may sit anywhere and are ignored.
+    const pat = (b) => `[^A-Za-z0-9]*([A-Za-z0-9][^A-Za-z0-9]*){${Math.max(1, Number(b.min) || 1)},${Math.min(999, Number(b.max) || 999)}}`;
+    return bands.length ? `(${bands.map((b) => `${FF.config.eir.vrn} matches '${pat(b)}'`).join(' or ')})` : '';
+  }
+
   function whereClause(filter) {
     const e = FF.config.eir;
     const parts = [`${e.date} is not null`];
     if (filter && filter.tl) parts.push(`${e.tlName} = ${lit(filter.tl)}`);
     if (filter && filter.agent) parts.push(`(${e.agentName} = ${lit(filter.agent)} or ${e.gvName} = ${lit(filter.agent)})`);
+    if (filter && filter.wrongVrn) { const w = wrongVrnCond(); if (w) parts.push(w); }
     const gvId = U.clean(e.gvMasterId || '5845036').replace(/\.0+$/, '');
     const gvTl = U.clean(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.');
     const gvWhere = `(${e.masterId} = ${lit(gvId)} or (${e.masterId} is null and ${e.tlName} = ${lit(gvTl)}))`;
     if (filter && filter.channel === 'GV Partner') parts.push(gvWhere);
     if (filter && filter.channel === 'First Forward') parts.push(`not ${gvWhere}`);
     return parts.join(' and ');
+  }
+
+  /** ⚠️ Wrong VRN count (month, day 1..upToDay) — VRN length rules (Settings) on EIR column B, FF and GV both.
+   *  Returns { ff:{total,by}, gv:{total,by} } or null when rules are off / no wrong band. */
+  async function loadWrongVrn(ym, upToDay, opts) {
+    const cond = wrongVrnCond();
+    if (!cond || !/^\d{4}-\d{2}$/.test(String(ym || ''))) return null;
+    const e = FF.config.eir;
+    const last = Math.min(Math.max(1, Number(upToDay) || 1), U.daysInMonth(ym));
+    const from = `${ym}-01`, to = `${ym}-${String(last).padStart(2, '0')}`;
+    const tq = `select ${e.masterId}, ${e.tlName}, ${e.cls}, count(${e.tagId}) where ${e.date} >= date '${from}' and ${e.date} <= date '${to}' and ${cond} group by ${e.masterId}, ${e.tlName}, ${e.cls}`;
+    const t = await D.query(e.sheet, tq, opts);
+    const mk = () => ({ total: 0, by: { VC4: 0, VC20: 0, 'VC5+': 0 } });
+    const out = { ff: mk(), gv: mk() };
+    for (const r of t.rows) {
+      const n = D.cellNumber(r[3]);
+      if (!n) continue;
+      const o = channelOf(D.cellText(r[0]), D.cellText(r[1])) === 'GV Partner' ? out.gv : out.ff;
+      o.total += n;
+      o.by[classGroup(D.cellText(r[2]))] += n;
+    }
+    return out;
   }
 
   /** Daily rows: [{ key, d, ym, day, cls, group, type, vrnType, channel, n }] */
@@ -72,6 +104,7 @@ window.FF = window.FF || {};
         channel, masterId: U.clean(D.cellText(r[4])), agentId, agentName, tlId: U.clean(D.cellText(r[11])), tlName: U.clean(D.cellText(r[5])), n
       });
     }
+    if (filter && filter.wrongVrn) { rows.forEach((r) => { r.ruleWrong = true; }); return rows; } // wrong-VRN drilldown: EIR only
     return applyGvLiveToday(rows);
   }
 
@@ -477,5 +510,5 @@ window.FF = window.FF || {};
     return map;
   }
 
-  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);
