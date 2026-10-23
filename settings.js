@@ -754,6 +754,17 @@ FF.pages = FF.pages || {};
         ${[['VC4', 'Car / Jeep / Van'], ['VC5', 'Light Commercial'], ['VC6', 'Three Axle Commercial'], ['VC7', 'Bus / Truck'], ['VC12', '4 to 6 axle'], ['VC16', 'Heavy Construction'], ['VC20', 'Light Goods']].map(([c, n]) => field(`${c} · ${n} — minimum Office stock`, numI(`stockMapAlert.limits.${c}`, ((settings.stockMapAlert || {}).limits || {})[c], 'min="0" placeholder="no alert"'))).join('')}
       </div>${saveBar('stockMapAlert')}`);
   }
+  const KPI_COLOR_CARDS = [['g1', 'Month total (MTD)', '#6366f1', '#8b5cf6'], ['g9', 'Last day', '#14b8a6', '#22c55e'], ['g3', 'VC4', '#0ea5e9', '#6366f1'], ['g8', 'VC20', '#06b6d4', '#3b82f6'], ['g6', 'VC5+', '#8b5cf6', '#d946ef'], ['g12', 'All Commercial', '#22c55e', '#84cc16'], ['g5', 'Replacement', '#10b981', '#14b8a6'], ['g7', 'Chassis', '#f97316', '#ef4444'], ['g-red', 'Wrong VRN', '#dc2626', '#991b1b'], ['g2', 'Expected in month', '#ec4899', '#f43f5e'], ['g13', 'Run Rate · Per Day', '#f59e0b', '#f97316'], ['g4', 'Other card (g4)', '#f59e0b', '#f97316'], ['g10', 'Other card (g10)', '#a855f7', '#ec4899'], ['g11', 'Other card (g11)', '#3b82f6', '#06b6d4']];
+  function kpiColorsSection() {
+    const kc = settings.kpiColors || {};
+    const rows = KPI_COLOR_CARDS.map(([k, label, a, b]) => {
+      const cur = kc[k] && kc[k].a && kc[k].b ? kc[k] : { a, b };
+      return `<tr data-kc="${k}" data-da="${a}" data-db="${b}"><td><b>${esc(label)}</b></td><td><input type="color" data-kc-a value="${cur.a}"></td><td><input type="color" data-kc-b value="${cur.b}"></td><td><span class="kc-prev" style="display:inline-block;width:120px;height:26px;border-radius:8px;background:linear-gradient(135deg,${cur.a},${cur.b})"></span></td><td><button class="btn small" data-kc-def>↺ Default</button></td></tr>`;
+    }).join('');
+    return section('🎨 KPI card colours (admin)', `<p class="dim small">Har KPI card ke liye 2 colours (gradient) chuno. <b>Save</b> karte hi ye sabhi users ke liye default ban jata hai. "↺ Default" = original colour.</p>
+      <div class="table-wrap"><table class="tbl compact" id="kc-tbl"><thead><tr><th>Card</th><th>From</th><th>To</th><th>Preview</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="save-bar"><button class="btn primary" id="kc-save">💾 Save colours</button><button class="btn" id="kc-reset">↺ Reset all to original</button><span class="dim small" id="kc-msg"></span></div>`);
+  }
   function vrnRulesSection() {
     const vr = settings.vrnRules || {};
     const bands = Array.isArray(vr.bands) && vr.bands.length ? vr.bands : [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }];
@@ -768,7 +779,7 @@ FF.pages = FF.pages || {};
   }
   function rulesTab() {
     const t = settings.thresholds || {};
-    return section('📐 Thresholds & display', `<div class="form-grid">${field('Stock cover 🔴 red below (days)', numI('thresholds.coverRed', t.coverRed, 'min="0"'))}${field('Stock cover 🟠 orange below (days)', numI('thresholds.coverOrange', t.coverOrange, 'min="0"'))}${field('Stock cover 🟡 amber below (days)', numI('thresholds.coverAmber', t.coverAmber, 'min="0"'), '🟢 green above this')}${field('"Went quiet" after (inactive days)', numI('thresholds.inactiveDays', t.inactiveDays, 'min="1"'))}${field('Top N in rankings', numI('thresholds.topN', t.topN, 'min="3" max="50"'))}${field('Default rows per page', numI('pageSize', settings.pageSize, 'min="10" max="500"'))}</div>${check('allowSignup', settings.allowSignup !== false, 'Login page par "Sign up" allow karo (naye account admin approval ke baad hi chalte hain)')}${saveBar('rules')}`) + stockMapAlertSection() + vrnRulesSection();
+    return section('📐 Thresholds & display', `<div class="form-grid">${field('Stock cover 🔴 red below (days)', numI('thresholds.coverRed', t.coverRed, 'min="0"'))}${field('Stock cover 🟠 orange below (days)', numI('thresholds.coverOrange', t.coverOrange, 'min="0"'))}${field('Stock cover 🟡 amber below (days)', numI('thresholds.coverAmber', t.coverAmber, 'min="0"'), '🟢 green above this')}${field('"Went quiet" after (inactive days)', numI('thresholds.inactiveDays', t.inactiveDays, 'min="1"'))}${field('Top N in rankings', numI('thresholds.topN', t.topN, 'min="3" max="50"'))}${field('Default rows per page', numI('pageSize', settings.pageSize, 'min="10" max="500"'))}</div>${check('allowSignup', settings.allowSignup !== false, 'Login page par "Sign up" allow karo (naye account admin approval ke baad hi chalte hain)')}${saveBar('rules')}`) + stockMapAlertSection() + vrnRulesSection() + kpiColorsSection();
   }
   // ---- 🔊 Sound & voice (Office Bell + Voice Announcer) — v3.18 ----------------------------------
   /** Naye tags ki awaaz yahan se test / configure hoti hai (topbar 🔊 menu ka hi doosra darwaza). */
@@ -2670,6 +2681,26 @@ FF.pages = FF.pages || {};
           catch (err) { U.toast(err.message, 'err'); }
         }, 'Updating…');
       });
+      // 🎨 KPI card colours
+      const kcTbl = U.$('#kc-tbl', body);
+      if (kcTbl) {
+        const prev = (tr) => { const p = U.$('.kc-prev', tr); if (p) p.style.background = `linear-gradient(135deg,${U.$('[data-kc-a]', tr).value},${U.$('[data-kc-b]', tr).value})`; };
+        U.$$('tr[data-kc]', kcTbl).forEach((tr) => {
+          U.$$('input[type=color]', tr).forEach((i) => i.addEventListener('input', () => prev(tr)));
+          U.$('[data-kc-def]', tr).addEventListener('click', () => { U.$('[data-kc-a]', tr).value = tr.dataset.da; U.$('[data-kc-b]', tr).value = tr.dataset.db; prev(tr); });
+        });
+        const send = async (btn, reset) => {
+          const out = {};
+          U.$$('tr[data-kc]', kcTbl).forEach((tr) => {
+            const a = U.$('[data-kc-a]', tr).value, b = U.$('[data-kc-b]', tr).value;
+            out[tr.dataset.kc] = !reset && (a !== tr.dataset.da || b !== tr.dataset.db) ? { a, b } : '';
+          });
+          await U.withButtonBusy(btn, () => save({ kpiColors: out }, U.$('#kc-msg', body)), 'Saving…');
+          if (reset) draw();
+        };
+        U.$('#kc-save', body).addEventListener('click', (e) => send(e.currentTarget, false));
+        U.$('#kc-reset', body).addEventListener('click', (e) => send(e.currentTarget, true));
+      }
       // generic save buttons
       U.$$('[data-save]', body).forEach((btn) => btn.addEventListener('click', () => {
         const card = btn.closest('.card');

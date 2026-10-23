@@ -238,6 +238,7 @@ const DEFAULT_SETTINGS = {
     enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E'
   },
   vrnRules: { enabled: true, bands: [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }] }, // GV live: VRN length → status
+  kpiColors: {}, // Admin KPI card colours: { g1: {a:'#6366f1', b:'#8b5cf6'}, ... } — empty = built-in default
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
   // all other classes wait for an admin-entered official rate. Empty is unresolved, never zero.
@@ -8935,6 +8936,19 @@ async function handleApi(req, res, url) {
         for (let i = 1; i < clean.length; i++) if (clean[i].min <= clean[i - 1].max) throw new HttpError(400, `VRN length ranges overlap: ${clean[i - 1].min}–${clean[i - 1].max} aur ${clean[i].min}–${clean[i].max}.`);
         vr.bands = clean.slice(0, 10);
       }
+    }
+    if (patch.kpiColors !== undefined) {
+      const kc = patch.kpiColors;
+      if (!kc || typeof kc !== 'object' || Array.isArray(kc)) throw new HttpError(400, 'kpiColors object hona chahiye.');
+      const hex = (v) => /^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? String(v).toLowerCase() : '';
+      const clean = {};
+      for (const key of Object.keys(kc)) {
+        if (!/^g(\d{1,2}|-red)$/.test(key)) continue;
+        const c = kc[key];
+        const a = c && typeof c === 'object' ? hex(c.a) : '', b = c && typeof c === 'object' ? hex(c.b) : '';
+        clean[key] = a && b ? { a, b } : '';   // '' = back to built-in default (deepMerge keeps the key)
+      }
+      patch.kpiColors = clean;
     }
     if (patch.stockMapAlert !== undefined) {
       const sm = patch.stockMapAlert;

@@ -247,6 +247,17 @@ FF.config = {
     this.sheets = this.groupTabs('First Forward', true);
     this.gvSheets = this.groupTabs('GV Partner', true);
   },
+  /** 🎨 Admin-chosen KPI card gradients → one <style> appended last (wins over built-in defaults). */
+  applyKpiColors() {
+    if (typeof document === 'undefined') return;
+    const kc = this.kpiColors || {};
+    const css = Object.keys(kc).filter((k) => /^g(\d{1,2}|-red)$/.test(k) && kc[k] && /^#[0-9a-f]{6}$/i.test(kc[k].a) && /^#[0-9a-f]{6}$/i.test(kc[k].b))
+      .map((k) => { const g = `linear-gradient(135deg, ${kc[k].a}, ${kc[k].b}) !important`; return `html body .kpi.${k}, html body .kpi-grid .kpi.${k}, html body .page-home .kpi.${k}, html body .kpi-grid .kpi.${k}.kpi-zero { background: ${g}; color: #fff !important; }`; }).join('\n');
+    let el = document.getElementById('ff-kpi-colors');
+    if (!el) { el = document.createElement('style'); el.id = 'ff-kpi-colors'; }
+    el.textContent = css;
+    if (document.head && el !== document.head.lastElementChild) document.head.appendChild(el);
+  },
   /** Direct-agent rules (Settings → 🧍 Direct Agents). */
   directRules() { return this.direct || {}; },
   /** 🔢 VRN length rules (Settings → VRN length rules). Length = letters + digits only (spaces / - removed). */
@@ -364,6 +375,7 @@ FF.config = {
     if (s.gvClassCch) this.gvClassCch = { ...this.gvClassCch, ...s.gvClassCch, groups: { ...(this.gvClassCch && this.gvClassCch.groups), ...(s.gvClassCch.groups || {}) } };
     if (s.direct) this.direct = { ...this.direct, ...s.direct };
     if (s.vrnRules) this.vrnRuleSet = s.vrnRules;
+    if (s.kpiColors) { this.kpiColors = s.kpiColors; this.applyKpiColors(); }
     if (s.theme) this.theme = { ...this.theme, ...s.theme };
     if (s.thresholds) this.thresholds = { ...this.thresholds, ...s.thresholds };
     if (s.features) {
