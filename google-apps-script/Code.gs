@@ -75,7 +75,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.74';
+const CODE_VERSION = 'v3.75';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -339,6 +339,13 @@ function doPost(e) {
     }
   }
 
+  // v3.75 — 'ping' is read-only: answer BEFORE taking the lock, so a slow storage save never makes the
+  // dashboard think the script is down (it used to wait up to ~23s behind a settings/users save).
+  if (body.action === 'ping') {
+    var apTitle = '', apUrl = '';
+    try { apTitle = SpreadsheetApp.getActive().getName(); apUrl = SpreadsheetApp.getActive().getUrl(); } catch (e) {}
+    return json_({ ok: true, version: CODE_VERSION, tab: TAB, spreadsheet: apTitle, url: apUrl });
+  }
   const lock = LockService.getScriptLock();
   // v3.58 — lock busy ho to turant give-up mat karo: thoda ruk kar ek aur koshish (total ~26s).
   if (!lock.tryLock(18000)) {
