@@ -192,11 +192,11 @@ FF.pages = FF.pages || {};
     const ofTotal = k.key === 'total' ? null : U.pctOf(sum, m.ff.total + m.gv.total);
     const ffD = dirOf(ffV, ffP), gvD = dirOf(gvV, gvP), sumD = dirOf(sum, sumP);
     const row = (cls, name, v, share, prev, d, na, src) => `<div class="tix-row ${cls}" data-kpi="${esc(specFor(m, src, k.f))}" data-kpi-title="${esc(`${name} · ${k.short}`)}" role="button" tabindex="0" title="Click karo — ${esc(name)} ki rows">
-        <span class="tix-dot"></span><span class="tix-name">${name}</span><b class="tix-num">${U.fmt(v)}</b><span class="tix-pct">${sum ? U.fmtPct(share, 0) : '—'}</span><span class="tix-gr">${growthBadge(v, prev, na)}</span>
+        <span class="tix-dot"></span><span class="tix-name">${name}</span><b class="tix-num">${U.fmt(v)}</b><span class="tix-pct">${sum ? U.fmtPct(share, 0) : '—'}</span><span class="tix-gr">${na ? growthBadge(v, prev, na) : drvBadge(growthBadge(v, prev, na), src, k.key, dirOf(v, prev))}</span>
         <span class="tix-prev">prev ${na ? '—' : U.fmt(prev)}</span></div>`;
     return `<div class="tix-card ${d2(sumD)}" style="--accent:${k.accent}" data-kpi="${esc(specFor(m, 'both', k.f))}" data-kpi-title="${esc(`${k.label} · ${rangeLabel(m.from, m.to)}`)}" role="button" tabindex="0" title="Click karo — is number ki rows">
       <div class="tix-card-top"><span class="tix-title"><span class="tix-ico">${k.icon}</span>${esc(k.label)}${k.sub ? `<small>${esc(k.sub)}</small>` : ''}</span>${ofTotal === null ? '' : `<span class="tix-chip" title="Total issuance me is class ka hissa">${U.fmtPct(ofTotal, 0)} of total</span>`}</div>
-      <div class="tix-big"><span class="tix-big-n">${U.fmt(sum)}</span><span class="tix-big-g">${growthBadge(sum, sumP)}</span></div>
+      <div class="tix-big"><span class="tix-big-n">${U.fmt(sum)}</span><span class="tix-big-g">${drvBadge(growthBadge(sum, sumP), 'all', k.key, sumD)}</span></div>
       <div class="tix-bigsub">FF + GV combined · prev ${U.fmt(sumP)}</div>
       <div class="tix-split" title="FF vs GV share">${sum ? `<i class="ff" style="width:${ffShare.toFixed(1)}%"></i><i class="gv" style="width:${gvShare.toFixed(1)}%"></i>` : ''}</div>
       ${row('ff', 'First Forward', ffV, ffShare, ffP, ffD, ffNA, 'ff')}
@@ -402,6 +402,150 @@ FF.pages = FF.pages || {};
       ${card('🏢 Top GV teams / supervisors', C.hbars({ valueLabel: 'Tags', items: U.topEntries(gvTlMap, rankCount).map(([name, n], i) => ({ label: name, value: n, color: C.PALETTE[(i + 5) % C.PALETTE.length] })) }))}`;
   }
 
+
+  // ---------------------------------------------------------------- growth drivers (who pushed it up / dragged it down)
+  const DRV = { ch: 'all', level: 'agents', scope: 'all', dir: 'down', cls: 'total', status: 'dw', cache: new Map(), lastRows: [] };
+  const CLS_LABEL = { total: 'All classes', vc4: 'VC4', vc20: 'VC20', vc5p: 'VC5+', comm: 'Commercial (VC20 + VC5+)' };
+  const inCls = (r, k) => k === 'total' || (k === 'vc4' && r.group === 'VC4') || (k === 'vc20' && r.group === 'VC20')
+    || (k === 'vc5p' && r.group !== 'VC4' && r.group !== 'VC20') || (k === 'comm' && r.group !== 'VC4');
+  const isDirectRow = (r) => {
+    if (r.tlName === 'Direct') return true;
+    try { return !!FF.config.isDirectAgent({ tlName: r.tlName, tlId: r.tlId, agentName: r.name, agentId: r.id }, r.channel === 'GV Partner' ? 'gv' : 'ff'); } catch (e) { return false; }
+  };
+  const within = (key, a, b) => !!a && key >= a && key <= b;
+
+  function loadDriverRows(m) {
+    const starts = [m.from, m.prevGvRange && m.prevGvRange[0], m.prevFfRange && m.prevFfRange[0]].filter(Boolean).sort();
+    const from = starts[0], to = m.to, ck = `${from}|${to}`;
+    if (!DRV.cache.has(ck) || DRV.cache.get(ck).failed) {
+      const pr = M.loadRangePeople(from, to).then((rows) => ({ rows })).catch((err) => ({ rows: [], failed: true, err }));
+      DRV.cache.set(ck, pr);
+      pr.then((v) => { if (v.failed) DRV.cache.delete(ck); });
+    }
+    return DRV.cache.get(ck);
+  }
+
+  /** rows → one record per agent (or per TL) with current + previous period numbers (like-for-like, same as the KPI cards). */
+  function aggregateDrivers(rows, m) {
+    const per = {
+      ff: { cur: [m.from, m.ffTo], prev: m.prevFfRange },
+      gv: { cur: [m.from, m.gvTo], prev: m.prevGvRange }
+    };
+    const out = new Map();
+    for (const r of rows) {
+      const chKey = r.channel === 'GV Partner' ? 'gv' : 'ff';
+      if (DRV.ch !== 'all' && DRV.ch !== chKey) continue;
+      if (!inCls(r, DRV.cls)) continue;
+      const pp = per[chKey];
+      const inCur = within(r.dateKey, pp.cur[0], pp.cur[1]);
+      const inPrev = pp.prev && within(r.dateKey, pp.prev[0], pp.prev[1]);
+      if (!inCur && !inPrev) continue;
+      const direct = isDirectRow(r);
+      let key, name, id, tl;
+      if (DRV.level === 'tls') {
+        key = `${chKey}|${direct ? '__direct__' : r.tlName}`;
+        name = direct ? FF.config.directLabel(r, chKey) : r.tlName; id = direct ? '' : (r.tlId || ''); tl = '';
+      } else {
+        key = `${chKey}|${r.id || r.name}`; name = r.name; id = r.id || ''; tl = direct ? FF.config.directLabel(r, chKey) : r.tlName;
+      }
+      const o = out.get(key) || { key, name, id, tl, ch: chKey, direct, cur: 0, prev: 0, agents: new Set() };
+      if (inCur) o.cur += r.n; if (inPrev) o.prev += r.n;
+      o.agents.add(r.id || r.name);
+      out.set(key, o);
+    }
+    return [...out.values()].map((o) => ({ ...o, delta: o.cur - o.prev, growth: U.growth(o.cur, o.prev), agents: o.agents.size }));
+  }
+  const drvStatus = (o) => {
+    if (!o.prev && o.cur) return 'new';
+    if (!o.delta) return 'same';
+    const g = (o.delta / o.prev) * 100; // within ±2% counts as "same"
+    return g > 2 ? 'up' : g < -2 ? 'down' : 'same';
+  };
+  const typeLabel = (o) => (DRV.level === 'tls' ? (o.direct ? 'Direct agents' : 'TL team') : (o.direct ? 'Direct agent' : 'Agent under TL'));
+
+  function drvBadge(html, ch, key, dir) {
+    return `<span class="tix-drvlink" data-drv="${ch}" data-drvcls="${key}" data-drvdir="${dir}" role="button" tabindex="0" title="Click — who caused this change (agents / TLs)">${html}</span>`;
+  }
+  const dsign = (n) => `${n > 0 ? '+' : ''}${U.fmt(n)}`;
+  const gtxt = (g) => (g === null ? '—' : `${g > 0 ? '+' : ''}${U.fmtPct(g, 0)}`);
+  const tone = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : 'flat');
+
+  function driversShell(m, preset) {
+    const pr = m.prevGvRange || m.prevFfRange;
+    const prevL = pr ? rangeLabel(pr[0], pr[1], true) : '—';
+    const isMonth = preset === 'thisMonth';
+    const head = isMonth ? 'Last month vs This month' : 'Previous period vs Now';
+    return `<section class="card tix-drv" id="ti-drv"><div class="card-head"><h3>📊 ${head} · who drove the change</h3>
+      <div class="card-right"><span class="badge gray">${esc(prevL)}</span> → <span class="badge indigo">${esc(rangeLabel(m.from, m.to, true))}</span></div></div>
+      <div class="card-body" id="ti-drv-body">${U.spinner('Agent / TL data load ho raha hai…')}</div></section>`;
+  }
+
+  function driversHtml(m, rows) {
+    const all = aggregateDrivers(rows, m);
+    // scope filter (Direct agents / TL agents / All)
+    const list = all.filter((o) => DRV.scope === 'all' || (DRV.scope === 'direct' ? o.direct : !o.direct));
+    const sum = (arr, k) => arr.reduce((n, o) => n + o[k], 0);
+    // breakdown matrix: channel × (Direct / TL) — "kiska hai: GV ya FF, direct agents ya TLs"
+    const cell = (arr, ch, dir) => {
+      const a = arr.filter((o) => (ch === 'all' || o.ch === ch) && (dir === 'all' || (dir === 'direct' ? o.direct : !o.direct)));
+      const prev = sum(a, 'prev'), cur = sum(a, 'cur'), d = cur - prev;
+      return `<td class="num tix-mx ${tone(d)}" data-mx-ch="${ch}" data-mx-scope="${dir}" role="button" tabindex="0" title="Click — filter by this"><b>${dsign(d)}</b><small>${U.fmt(prev)} → ${U.fmt(cur)} · ${gtxt(U.growth(cur, prev))}</small></td>`;
+    };
+    const base = all; // matrix ignores the scope filter but respects channel + class
+    const mxRow = (label, ch) => `<tr><th>${label}</th>${cell(base, ch, 'direct')}${cell(base, ch, 'tl')}${cell(base, ch, 'all')}</tr>`;
+    const chPick = (id, label) => `<button type="button" class="tix-chipbtn ${DRV.ch === id ? 'active' : ''}" data-drv-set="ch:${id}">${label}</button>`;
+    const sc = (id, label) => `<button type="button" class="tix-chipbtn ${DRV.scope === id ? 'active' : ''}" data-drv-set="scope:${id}">${label}</button>`;
+    const lv = (id, label) => `<button type="button" class="tix-chipbtn ${DRV.level === id ? 'active' : ''}" data-drv-set="level:${id}">${label}</button>`;
+    const tb = (id, label) => `<button type="button" class="tix-chipbtn ${DRV.dir === id ? 'active' : ''}" data-drv-set="dir:${id}">${label}</button>`;
+    const clsSel = `<select class="input" data-drv-cls aria-label="Class">${Object.entries(CLS_LABEL).map(([k, l]) => `<option value="${k}" ${DRV.cls === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+
+    let view, title;
+    if (DRV.dir === 'down') { view = list.filter((o) => o.delta < 0).sort((a, b) => a.delta - b.delta); title = '🔻 Biggest drops — who dragged it down'; }
+    else if (DRV.dir === 'up') { view = list.filter((o) => o.delta > 0).sort((a, b) => b.delta - a.delta); title = '🔺 Biggest gains — who pushed it up'; }
+    else if (DRV.dir === 'last') {
+      view = list.filter((o) => o.prev > 0).sort((a, b) => b.prev - a.prev).slice(0, 15);
+      if (DRV.status === 'dw') view = view.filter((o) => ['down', 'same'].includes(drvStatus(o)));
+      title = '🏅 Top 15 of the previous period — how are they now?';
+    } else { view = list.filter((o) => o.cur > 0).sort((a, b) => b.cur - a.cur); title = '🏆 Top 15 now — and how they moved'; }
+    view = view.slice(0, 15);
+    DRV.lastRows = view;
+    const tot = { prev: sum(list, 'prev'), cur: sum(list, 'cur') };
+    const stBadge = (o) => { const s = drvStatus(o); return `<span class="badge ${s === 'up' || s === 'new' ? 'green' : s === 'down' ? 'red' : 'gray'}">${s === 'up' ? '▲ Up' : s === 'new' ? '★ New' : s === 'down' ? '▼ Down' : '• Same'}</span>`; };
+    const trs = view.map((o, i) => `<tr class="${o.direct && DRV.level === 'tls' ? '' : 'clickable'}" data-drv-open="${esc(o.name)}" data-drv-ch="${o.ch}" ${o.direct && DRV.level === 'tls' ? 'data-nolink="1"' : ''}>
+      <td>${i + 1}</td><td><b>${esc(o.name)}</b>${o.id ? ` <small class="mono dim">${esc(o.id)}</small>` : ''}${DRV.level === 'tls' && !o.direct ? ` <small class="dim">${U.fmt(o.agents)} agents</small>` : ''}</td>
+      <td><span class="badge ${o.ch === 'gv' ? 'teal' : 'indigo'}">${o.ch === 'gv' ? 'GV' : 'FF'}</span></td>
+      <td>${esc(typeLabel(o))}</td><td>${esc(o.tl || '—')}</td>
+      <td class="num">${U.fmt(o.prev)}</td><td class="num"><b>${U.fmt(o.cur)}</b></td>
+      <td class="num tix-d ${tone(o.delta)}"><b>${dsign(o.delta)}</b></td><td class="num">${gtxt(o.growth)}</td><td>${stBadge(o)}</td></tr>`).join('');
+    const statusChips = DRV.dir === 'last' ? `<span class="tix-drv-sep"></span>${[['dw', 'Down + same'], ['all', 'All 15']].map(([id, l]) => `<button type="button" class="tix-chipbtn ${DRV.status === id ? 'active' : ''}" data-drv-set="status:${id}">${l}</button>`).join('')}` : '';
+    return `<div class="tix-drv-bar">
+        <div class="tix-drv-group"><span class="dim small">Channel</span>${chPick('all', 'GV + FF')}${chPick('gv', 'GV')}${chPick('ff', 'FF')}</div>
+        <div class="tix-drv-group"><span class="dim small">Level</span>${lv('agents', 'Agents')}${lv('tls', 'TLs')}</div>
+        <div class="tix-drv-group"><span class="dim small">Show</span>${sc('all', 'All')}${sc('direct', 'Direct agents')}${sc('tl', DRV.level === 'tls' ? 'All TLs' : 'TL agents')}</div>
+        <div class="tix-drv-group"><span class="dim small">Class</span>${clsSel}</div>
+      </div>
+      <div class="tix-drv-sum"><span>${esc(CLS_LABEL[DRV.cls])}</span><b>${U.fmt(tot.prev)} → ${U.fmt(tot.cur)}</b><span class="tix-d ${tone(tot.cur - tot.prev)}"><b>${dsign(tot.cur - tot.prev)}</b> (${gtxt(U.growth(tot.cur, tot.prev))})</span></div>
+      <div class="table-wrap"><table class="tbl compact tix-mxtbl"><thead><tr><th>Change</th><th class="num">Direct agents</th><th class="num">TL teams</th><th class="num">Total</th></tr></thead>
+        <tbody>${mxRow('GV Partner', 'gv')}${mxRow('First Forward', 'ff')}${mxRow('GV + FF', 'all')}</tbody></table></div>
+      <div class="tix-drv-tabs">${tb('down', '🔻 Down')}${tb('up', '🔺 Up')}${tb('last', '🏅 Last period top 15')}${tb('now', '🏆 Now top 15')}${statusChips}
+        <button class="btn small" type="button" data-drv-csv style="margin-left:auto">⬇ CSV</button></div>
+      <h4 class="tix-drv-title">${title}</h4>
+      ${view.length ? `<div class="table-wrap"><table class="tbl compact tix-drvtbl"><thead><tr><th>#</th><th>${DRV.level === 'tls' ? 'TL / team' : 'Agent'}</th><th>Ch</th><th>Type</th><th>TL</th><th class="num">Last</th><th class="num">Now</th><th class="num">Change</th><th class="num">%</th><th>Status</th></tr></thead><tbody>${trs}</tbody></table></div>`
+        : '<div class="empty">Nothing to show for this filter.</div>'}
+      <small class="dim">Source: EIR sheet (same as the KPI cards, like-for-like days). Click a name to open the full summary.</small>`;
+  }
+
+  async function paintDrivers(root, m, preset) {
+    const host = root.querySelector('#ti-drv-body');
+    if (!host) return;
+    const v = await loadDriverRows(m);
+    const again = root.querySelector('#ti-drv-body');
+    if (!again) return;
+    if (v.failed) { again.innerHTML = `<div class="empty">Could not load agent data (${esc((v.err && v.err.message) || 'error')}). <button class="btn small" type="button" data-drv-retry>Retry</button></div>`; return; }
+    DRV.model = m; DRV.rows = v.rows;
+    again.innerHTML = driversHtml(m, v.rows);
+  }
+
   // ---------------------------------------------------------------- page
   const store = {
     get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } },
@@ -463,6 +607,7 @@ FF.pages = FF.pages || {};
         ${healthStrip(rows)}
         <div class="tix-grid">${KPIS.map((k) => kpiCard(k, m)).join('')}</div>
         ${card(`⚔️ Head-to-head · FF vs GV · ${esc(rangeLabel(from, to, true))}`, h2hTable(m), `<span class="badge indigo">${U.fmt(total)} tags</span> <span class="dim small">prev ${U.fmt(totalP)}</span> <button class="btn small" data-action="export" data-name="tag-issued-${esc(from)}-${esc(to)}">⬇ CSV</button>`)}
+        ${driversShell(m, preset)}
         ${chartsHtml(m, rows)}
         <div class="grid g-2">
           ${card('💡 Insights · data ko dekh kar', insightsHtml(m, rows, preset))}
@@ -472,6 +617,7 @@ FF.pages = FF.pages || {};
         <details class="tix-people" open><summary>👥 Agents & Teams</summary>${peopleHtml(m, rows)}</details>
         <p class="foot-note">Source: EIR sheet (FF + GV = master ID 5845036, T+1) · Top agents: GV Master · ${esc(rangeLabel(from, to, true))} · Data ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())} · ↻ se fresh data</p>`;
       C.mount(body);
+      paintDrivers(body, m, preset);
 
       const newHash = `#/tagIssued?from=${from}&to=${to}&date=${to}`;
       if (location.hash !== newHash) { try { history.replaceState(null, '', newHash); } catch (e) { /* ignore */ } }
@@ -507,6 +653,35 @@ FF.pages = FF.pages || {};
       store.set('ti_preset', id);
       draw();
     });
+
+    // growth-driver interactions (capture phase so the KPI card's own click handler does not also fire)
+    const drvJump = (ch, cls, dir) => {
+      DRV.ch = ch; DRV.cls = cls; DRV.dir = dir === 'up' ? 'up' : dir === 'down' ? 'down' : DRV.dir;
+      if (dir === 'flat' || dir === 'none' || dir === 'new') DRV.dir = 'now';
+      const m = DRV.model; if (m) { const h = body.querySelector('#ti-drv-body'); if (h) h.innerHTML = driversHtml(m, DRV.rows || []); }
+      const sec = body.querySelector('#ti-drv'); if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    const redraw = () => { const m = DRV.model; const h = body.querySelector('#ti-drv-body'); if (m && h && DRV.rows) h.innerHTML = driversHtml(m, DRV.rows); };
+    body.addEventListener('click', (e) => {
+      const link = e.target.closest && e.target.closest('[data-drv]');
+      if (link) { e.stopPropagation(); e.preventDefault(); drvJump(link.dataset.drv, link.dataset.drvcls || 'total', link.dataset.drvdir); return; }
+      const inDrv = e.target.closest && e.target.closest('#ti-drv');
+      if (!inDrv) return;
+      const set = e.target.closest('[data-drv-set]');
+      if (set) { const [k, v] = set.dataset.drvSet.split(':'); DRV[k] = v; if (k === 'level' && v === 'tls' && DRV.scope === 'tl') DRV.scope = 'tl'; redraw(); return; }
+      const mx = e.target.closest('[data-mx-ch]');
+      if (mx) { DRV.ch = mx.dataset.mxCh; DRV.scope = mx.dataset.mxScope === 'direct' ? 'direct' : mx.dataset.mxScope === 'tl' ? 'tl' : 'all'; redraw(); return; }
+      if (e.target.closest('[data-drv-retry]')) { DRV.cache.clear(); const m = DRV.model; if (m) paintDrivers(body, m, preset); return; }
+      if (e.target.closest('[data-drv-csv]')) {
+        const rowsOut = (DRV.lastRows || []).map((o, i) => [i + 1, o.name, o.id, o.ch === 'gv' ? 'GV' : 'FF', typeLabel(o), o.tl || '', o.prev, o.cur, o.delta, o.growth === null ? '' : Math.round(o.growth * 10) / 10, drvStatus(o)]);
+        U.downloadCsv(`growth-drivers-${DRV.dir}-${from}-${to}.csv`, ['#', 'Name', 'ID', 'Channel', 'Type', 'TL', 'Last', 'Now', 'Change', 'Growth %', 'Status'], rowsOut);
+        return;
+      }
+      const tr = e.target.closest('[data-drv-open]');
+      if (tr && !tr.dataset.nolink && FF.app && FF.app.navigate) FF.app.navigate(`${tr.dataset.drvCh === 'gv' ? 'gv' : 'ff'}AgentSummary`, { name: tr.dataset.drvOpen });
+    }, true);
+    body.addEventListener('change', (e) => { const sel = e.target.closest && e.target.closest('[data-drv-cls]'); if (sel) { DRV.cls = sel.value; redraw(); } }, true);
+
     fromInput.addEventListener('change', applyCustom);
     toInput.addEventListener('change', applyCustom);
     U.$('#ti-apply', root).addEventListener('click', applyCustom);
