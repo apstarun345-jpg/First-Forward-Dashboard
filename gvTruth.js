@@ -25,6 +25,8 @@ window.FF = window.FF || {};
 
   const G = () => FF.gv;
   const todayKey = () => (G() && G().todayKey ? G().todayKey() : U.dateKey(new Date()));
+  // GV Master raw rows have no `key` (only `date`) — derive it so 'today' counts are never silently 0.
+  const rowKey = (r) => (r && r.key) || (r && r.date ? U.dateKey(r.date) : '');
   const curYm = () => U.ymKey(new Date());
   const prevYmOf = (ym) => U.prevMonthKey(ym || curYm());
   const daysIn = (ym) => (U.daysInMonth ? U.daysInMonth(ym) : 30);
@@ -232,9 +234,13 @@ window.FF = window.FF || {};
   function agentStock(spec) {
     const ix = index();
     const tlId = clean(spec.tlId || spec.supervisorId || '');
-    const inTlScope = (r) => !tlId || idKey(r && r.tlId) === idKey(tlId);
-    const rows = preferredRows(ix.stock.byAgentId, ix.stock.byAgentName, spec.id, spec.name, 'agentId').filter(inTlScope);
-    const cls = preferredRows(ix.stock.classByAgentId, ix.stock.classByAgent, spec.id, spec.name, 'agentId').filter(inTlScope);
+    // TL scope only disambiguates a NAME match. An exact agent-ID match is final — Tag Assignment often has a
+    // blank supervisor (direct agent) while GV Master shows the agent as its own TL (self-supervised).
+    const inTlScope = (r) => !tlId || !clean(r && r.tlId) || idKey(r && r.tlId) === idKey(tlId) || idKey(r && r.tlId) === idKey(spec.id);
+    const byIdOnly = (map) => (spec.id ? lookup(map, [idKey(spec.id)]) : []);
+    const pickRows = (byId, byName) => { const exact = byIdOnly(byId); return exact.length ? exact : preferredRows(byId, byName, spec.id, spec.name, 'agentId').filter(inTlScope); };
+    const rows = pickRows(ix.stock.byAgentId, ix.stock.byAgentName);
+    const cls = pickRows(ix.stock.classByAgentId, ix.stock.classByAgent);
     const total = rows.length ? sum(rows, (r) => r.n) : sum(cls, (r) => r.n);
     const split = fitClassSplit(classSplit(cls.length ? cls : rows), total);
     const byStatus = {};
@@ -437,7 +443,7 @@ window.FF = window.FF || {};
         const n = Number(r.n) || 1;
         if (r.ym === curYm()) a.cur += n;
         else if (r.ym === prevYmOf(curYm())) a.last += n;
-        if (r.key === todayKey()) a.today += n;
+        if (rowKey(r) === todayKey()) a.today += n;
       }
       const tlId = clean(r.tlId || r.supervisorId || r.gvTlId);
       const tlName = clean(r.tlName) || (tlId ? `TL ${tlId}` : '');
@@ -447,7 +453,7 @@ window.FF = window.FF || {};
           const n = Number(r.n) || 1;
           if (r.ym === curYm()) t.cur += n;
           else if (r.ym === prevYmOf(curYm())) t.last += n;
-          if (r.key === todayKey()) t.today += n;
+          if (rowKey(r) === todayKey()) t.today += n;
           [r.tlId, r.supervisorId, r.gvTlId].forEach((id) => { if (id) t.altIds.add(clean(id)); });
         }
       }
@@ -506,7 +512,7 @@ window.FF = window.FF || {};
       const n = Number(r.n) || 1;
       if (r.ym === ym) e.cur += n;
       else if (r.ym === prevYmOf(ym)) e.last += n;
-      if ((r.key || '') === todayKey()) e.today += n;
+      if (rowKey(r) === todayKey()) e.today += n;
       const cls = U.clean(r.cls) || 'NA';
       e.classes[cls] = (e.classes[cls] || 0) + n;
     }

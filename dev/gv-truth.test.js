@@ -351,3 +351,13 @@ test('gvTruth.people: placeholder TL (Unassigned/Direct) list ke aakhir me, defa
   assert.ok(list.length >= 3, 'asli agent + TL bhi list me');
   assert.equal(list[0].isPlaceholder, false, 'pehla banda asli hai');
 });
+
+test('gvTruth: exact agent-ID stock is never dropped by a different TL (self-supervised / direct agent) · today counts from date', async () => {
+  await boot();
+  const T = FF.gvTruth;
+  // GV Master can show the agent as its own supervisor while Tag Assignment has another / blank TL.
+  assert.equal(T.stockFor({ kind: 'gv-agent', id: A1.id, name: A1.name, tlId: A1.id }).total, 2, 'self-supervised spec still finds the ID stock');
+  assert.equal(T.stockFor({ kind: 'gv-agent', id: A1.id, name: A1.name, tlId: 'APS_OTHER' }).total, 2, 'exact ID wins over TL scope');
+  const agent = T.people().find((p) => p.kind === 'gv-agent' && p.id === A1.id);
+  assert.equal(agent.today, ym === TODAY.slice(0, 7) ? 1 : 0, 'today from raw GV Master rows (no `key` field)');
+});

@@ -1262,17 +1262,26 @@ const MEM_SOFT_MB = Number(process.env.MEM_SOFT_MB) || 400;
 const MEM_HARD_MB = Number(process.env.MEM_HARD_MB) || 470;
 const memGuard = { lastSoftAt: 0, softCount: 0, peakMB: 0 };
 function rssMB() { return Math.round(process.memoryUsage().rss / 1048576); }
+const MEM_HEAP_SOFT_MB = Number(process.env.MEM_HEAP_SOFT_MB) || 290;
+function heapMB() { return Math.round(process.memoryUsage().heapUsed / 1048576); }
+/** Soft trim = purani AADHI gviz cache entries hatao (poora cache nahi) + chhote page caches. Pehle har 30s poora cache
+ *  khali hota tha jabki RSS (V8 freed memory OS ko turant wapas nahi deta) 400 se upar hi rehta — nateeja: har request
+ *  Google tak jaati thi (8–24 s) aur site par stock / issuance der se ya khaali dikhte the. */
+function softTrim() {
+  try { let drop = Math.ceil(cache.size / 2); for (const k of [...cache.keys()]) { if (drop-- <= 0) break; cache.delete(k); } } catch { /* ignore */ }
+  try { if (typeof plPageCache !== 'undefined' && plPageCache.clear) plPageCache.clear(); } catch { /* ignore */ }
+  try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ }
+}
 const memTimer = setInterval(() => {
-  const mb = rssMB();
+  const mb = rssMB(), heap = heapMB();
   if (mb > memGuard.peakMB) memGuard.peakMB = mb;
   if (mb >= MEM_HARD_MB) {
-    console.error(`🛡️ memory guard: RSS ${mb} MB ≥ ${MEM_HARD_MB} MB — clean restart (OOM / 502 se bachne ke liye). Data durable storage me hai.`);
+    console.error(`🛡️ memory guard: RSS ${mb} MB (heap ${heap} MB) ≥ ${MEM_HARD_MB} MB — clean restart (OOM / 502 se bachne ke liye). Data durable storage me hai.`);
     setTimeout(() => process.exit(1), 50);
-  } else if (mb >= MEM_SOFT_MB && Date.now() - memGuard.lastSoftAt > 30000) {
+  } else if ((heap >= MEM_HEAP_SOFT_MB || mb >= MEM_SOFT_MB + 40) && Date.now() - memGuard.lastSoftAt > 120000) {
     memGuard.lastSoftAt = Date.now(); memGuard.softCount++;
-    try { cache.clear(); } catch { /* ignore */ }
-    try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ }
-    console.warn(`🛡️ memory guard: RSS ${mb} MB ≥ ${MEM_SOFT_MB} MB — gviz cache khali kiya.`);
+    softTrim();
+    console.warn(`🛡️ memory guard: RSS ${mb} MB · heap ${heap} MB — half of the gviz cache trimmed (${cache.size} entries left).`);
   }
 }, 10000);
 if (memTimer.unref) memTimer.unref();
@@ -1799,6 +1808,8 @@ async function todayFeed(force) {
         }
       }
       const series = rows.filter((r) => r.date >= from30).reduce((acc, r) => { acc[r.date] = (acc[r.date] || 0) + r.n; return acc; }, {});
+      // VRN-length counts run in parallel with the detail query (not one after the other).
+      const vrnCountsP = (() => { const nx = new Date(`${day}T00:00:00Z`); nx.setUTCDate(nx.getUTCDate() + 1); return gvTodayVrnCounts(settings, resolved, day, `${nx.getUTCFullYear()}-${pad2(nx.getUTCMonth() + 1)}-${pad2(nx.getUTCDate())}`, liveQueryCacheMs).catch(() => null); })();
       // Aaj ka detail (class × status × tag type) — replacement/chassis/class split ek hi chhoti query se.
       // Fail ho jaye to bhi feed chalta rahe (total/classes upar wali query se aa jaate hain).
       let detail = null;
@@ -1815,11 +1826,7 @@ async function todayFeed(force) {
       const replaced = dToday.length ? dToday.reduce((n, r) => n + (/repl/i.test(String(r.status || '')) ? r.n : 0), 0) : Number(rawFallback && rawFallback.replacement) || 0;
       const chassis = dToday.length ? dToday.reduce((n, r) => n + (/chassis/i.test(String(r.type || '')) ? r.n : 0), 0) : Number(rawFallback && rawFallback.chassis) || 0;
       const detailTotal = dToday.reduce((n, r) => n + r.n, 0);
-      let vrnCounts = null;
-      try {
-        const nx = new Date(`${day}T00:00:00Z`); nx.setUTCDate(nx.getUTCDate() + 1);
-        vrnCounts = await gvTodayVrnCounts(settings, resolved, day, `${nx.getUTCFullYear()}-${pad2(nx.getUTCMonth() + 1)}-${pad2(nx.getUTCDate())}`, liveQueryCacheMs);
-      } catch { vrnCounts = null; }
+      const vrnCounts = await vrnCountsP;
       const classes = Object.keys(detailClasses).length ? detailClasses : today.reduce((acc, r) => { acc[r.cls] = (acc[r.cls] || 0) + r.n; return acc; }, {});
       const total = detailTotal || sum(today);
       // 🎯 Expected today = pichhle 4 same-weekday ka average (pichhla mahina bhi shaamil), aaj se pehle wale din.
@@ -5378,7 +5385,7 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
-    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: APP_VERSION, storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, memoryMB: rssMB(), memoryPeakMB: memGuard.peakMB, memorySoftTrims: memGuard.softCount, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length, tagRequestRecovery: tagReqRecoveryInfo } : {}) });
+    return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: APP_VERSION, storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheMB: Math.round(cache.bytes / 1048576), memory: (() => { const m = process.memoryUsage(); const r = (x) => Math.round(x / 1048576); return { rss: r(m.rss), heapUsed: r(m.heapUsed), heapTotal: r(m.heapTotal), external: r(m.external), arrayBuffers: r(m.arrayBuffers) }; })(), memoryMB: rssMB(), memoryPeakMB: memGuard.peakMB, memorySoftTrims: memGuard.softCount, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length, tagRequestRecovery: tagReqRecoveryInfo } : {}) });
   }
   // 📊 Admin-only: exact reason of slowness (Google query timings, cache hit rate, warm queries).
   if (p === '/api/perf' && method === 'GET') {
