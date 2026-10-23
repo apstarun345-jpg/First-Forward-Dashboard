@@ -530,8 +530,8 @@ FF.pages = FF.pages || {};
         const c = wrong.cur, l = wrong.last;
         const tot = c.ff.total + c.gv.total, lt = l ? l.ff.total + l.gv.total : 0;
         const by = { VC4: c.ff.by.VC4 + c.gv.by.VC4, VC20: c.ff.by.VC20 + c.gv.by.VC20, 'VC5+': c.ff.by['VC5+'] + c.gv.by['VC5+'] };
-        const chCls = (lab, o) => `<div class="kpi-chrow"><b>${lab}</b> VC4 <b>${U.fmt(o.by.VC4)}</b> · VC20 <b>${U.fmt(o.by.VC20)}</b> · VC5+ <b>${U.fmt(o.by['VC5+'])}</b></div>`;
-        return { value: U.fmt(tot), plain: `${U.fmt(tot)} · FF ${U.fmt(c.ff.total)} · GV ${U.fmt(c.gv.total)} · VC4 ${U.fmt(by.VC4)} · VC20 ${U.fmt(by.VC20)} · VC5+ ${U.fmt(by['VC5+'])}`, foot: `${l ? momChip(tot, lt, `${prevLabel} ${observedDay} din`) : ''}<br>${splitFoot(c.ff.total, c.gv.total)}${clsSplit(by)}${chCls('🟦 FF', c.ff)}${chCls('🟩 GV', c.gv)}` };
+        const chCls = (lab, o) => `<div class="kpi-chrow"><b>${lab}</b> · VC4 <b>${U.fmt(o.by.VC4)}</b> · VC20 <b>${U.fmt(o.by.VC20)}</b> · VC5+ <b>${U.fmt(o.by['VC5+'])}</b></div>`;
+        return { value: U.fmt(tot), plain: `${U.fmt(tot)} · FF ${U.fmt(c.ff.total)} · GV ${U.fmt(c.gv.total)} · VC4 ${U.fmt(by.VC4)} · VC20 ${U.fmt(by.VC20)} · VC5+ ${U.fmt(by['VC5+'])}`, foot: `${l ? momChip(tot, lt, `Last month (${new Date(`${prevKey}-01T00:00:00`).toLocaleString('en', { month: 'short' })} 1–${observedDay})`) : ''}<br>${splitFoot(c.ff.total, c.gv.total)}${clsSplit(by)}${chCls('FF', c.ff)}${chCls('GV', c.gv)}` };
       }
       return { value: wrong === 'loading' ? '…' : '—', foot: wrong === 'loading' ? 'Calculating from VRN length rules…' : 'VRN length rule off / data not available' };
     })();
