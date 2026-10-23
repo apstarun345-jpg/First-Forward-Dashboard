@@ -2542,7 +2542,7 @@ FF.pages = FF.pages || {};
     if (!canTab(tab)) tab = 'account';
     const settingsAccess = admin || visibleTabs.some(([k]) => GRANTABLE.includes(k));
     root.innerHTML = `<div class="page-head"><div><h1>⚙️ Settings</h1><p class="sub">${admin ? 'Har cheez yahin se modify karo — branding, images, colours, sheet mapping, thresholds, contacts, users & access' : 'Profile, site diagnostics, password aur aapka access'}</p></div></div>
-      <div class="card controls"><div class="set-groups" id="set-tabs">${TAB_GROUPS.map(([label, keys]) => { const list = visibleTabs.filter(([k]) => keys.includes(k)); return list.length ? `<div class="set-group"><small>${label}</small><div class="seg">${list.map(([k, l]) => `<button class="seg-btn ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div></div>` : ''; }).join('')}</div></div>
+      <div class="card controls"><div class="set-search"><input class="input" id="set-search" type="search" placeholder="🔍 Search settings… (e.g. colour, VRN, stock, logo, email)" autocomplete="off"><div id="set-search-res" class="set-search-res" hidden></div></div><div class="set-groups" id="set-tabs">${TAB_GROUPS.map(([label, keys]) => { const list = visibleTabs.filter(([k]) => keys.includes(k)); return list.length ? `<div class="set-group"><small>${label}</small><div class="seg">${list.map(([k, l]) => `<button class="seg-btn ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div></div>` : ''; }).join('')}</div></div>
       <div id="set-body">${U.spinner('Settings load ho rahi hain…')}</div>`;
     const body = U.$('#set-body', root);
     try { if (settingsAccess) await loadSettings(); } catch (err) { body.innerHTML = U.errorBox(err); return; }
@@ -3234,6 +3234,48 @@ FF.pages = FF.pages || {};
       if (cc) cc.addEventListener('click', async () => { try { await A.api('/api/cache/clear', 'POST', {}); U.toast('Server cache cleared ✓ — ab ↻ dabao', 'ok'); } catch (err) { U.toast(err.message, 'err'); } });
       const rs = U.$('#bk-reset', body);
       if (rs) rs.addEventListener('click', async () => { if (!confirm('Sab settings default par reset karni hain? (users delete nahi honge)')) return; try { const out = await A.api('/api/settings', 'PUT', { reset: true }); settings = out.settings; A.applySettings(out.settings); FF.app.renderSidebar(); U.toast('Reset ✓', 'ok'); draw(); } catch (err) { U.toast(err.message, 'err'); } });
+    }
+    // 🔍 Settings search — tabs + section titles + field text; click = jump to that section.
+    let setIndex = null;
+    const buildSetIndex = () => {
+      if (setIndex) return setIndex;
+      const fns = { account: accountTab, brand: brandTab, sources: sourcesTab, data: dataTab, direct: directTab, rules: rulesTab, features: featuresTab, contacts: contactsTab, backup: backupTab };
+      const out = [];
+      visibleTabs.forEach(([k, label]) => {
+        out.push({ tab: k, tabLabel: label, title: '', text: label.toLowerCase() });
+        if (!fns[k]) return;
+        try {
+          const doc = new DOMParser().parseFromString(`<div>${fns[k]()}</div>`, 'text/html');
+          doc.querySelectorAll('.card').forEach((c) => {
+            const h = c.querySelector('h3');
+            const title = h ? h.textContent.replace(/\s+/g, ' ').trim() : '';
+            if (title) out.push({ tab: k, tabLabel: label, title, text: `${label} ${c.textContent}`.replace(/\s+/g, ' ').toLowerCase() });
+          });
+        } catch { /* tab needs live data — tab label still searchable */ }
+      });
+      setIndex = out;
+      return out;
+    };
+    const setSearchBox = U.$('#set-search', root), setSearchRes = U.$('#set-search-res', root);
+    const jumpTo = async (hit) => {
+      tab = hit.tab; setSearchRes.hidden = true; setSearchBox.value = '';
+      await draw();
+      if (!hit.title) return;
+      const card = [...body.querySelectorAll('.card')].find((c) => { const h = c.querySelector('h3'); return h && h.textContent.replace(/\s+/g, ' ').trim() === hit.title; });
+      if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); card.style.outline = '3px solid #6366f1'; card.style.outlineOffset = '2px'; setTimeout(() => { card.style.outline = ''; }, 2500); }
+    };
+    if (setSearchBox) {
+      let hits = [];
+      setSearchBox.addEventListener('input', () => {
+        const q = setSearchBox.value.trim().toLowerCase();
+        if (q.length < 2) { setSearchRes.hidden = true; return; }
+        const words = q.split(/\s+/);
+        hits = buildSetIndex().filter((x) => words.every((w) => x.text.includes(w))).sort((a, b) => (b.title.toLowerCase().includes(q) ? 1 : 0) - (a.title.toLowerCase().includes(q) ? 1 : 0)).slice(0, 12);
+        setSearchRes.innerHTML = hits.length ? hits.map((h, i) => `<button type="button" class="set-hit" data-i="${i}"><small>${esc(h.tabLabel)}</small> ${h.title ? `› <b>${esc(h.title)}</b>` : ''}</button>`).join('') : '<div class="dim small" style="padding:8px">Kuch nahi mila</div>';
+        setSearchRes.hidden = false;
+      });
+      setSearchBox.addEventListener('keydown', (e) => { if (e.key === 'Enter' && hits[0]) jumpTo(hits[0]); if (e.key === 'Escape') setSearchRes.hidden = true; });
+      setSearchRes.addEventListener('click', (e) => { const b = e.target.closest('.set-hit'); if (b) jumpTo(hits[Number(b.dataset.i)]); });
     }
     root.addEventListener('click', (e) => { const t = e.target.closest('#set-tabs .seg-btn'); if (t) { tab = t.dataset.tab; draw(); } });
     await draw();

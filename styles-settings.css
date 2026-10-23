@@ -152,3 +152,10 @@
 .set-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .acc-card .acc-sum { white-space: normal !important; text-overflow: clip !important; overflow: visible !important; line-height: 1.3; }
 .rcc-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+
+.set-search { position: relative; margin-bottom: 10px; }
+.set-search input { width: 100%; }
+.set-search-res { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin-top: 4px; background: var(--card, #fff); border: 1px solid rgba(100,116,139,.35); border-radius: 12px; box-shadow: 0 12px 30px rgba(0,0,0,.18); max-height: 340px; overflow: auto; padding: 4px; }
+.set-hit { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: inherit; font: inherit; }
+.set-hit:hover { background: rgba(99,102,241,.12); }
+.set-hit small { color: #64748b; }
