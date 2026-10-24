@@ -113,7 +113,6 @@ window.FF = window.FF || {};
     { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStockReport', group: 'GV Partner' },
     { id: 'fastagMapping', icon: '🔗', label: 'FASTag Mapping', desc: 'StockDataa lookup · barcode range / tag ID / agent mapping · CSV', perm: 'fastagMapping', group: 'GV Partner', adminOnly: true },
     { id: 'dualChannel', icon: '🔗', label: 'Dual-channel Agents', desc: 'Verified GV + FF overlap · separate & combined', perm: 'dualChannel', group: 'Cross Channel' },
-    { id: 'compare', icon: '⚖️', label: 'GV vs First Forward', desc: 'Dono ka side-by-side comparison', perm: 'compare', group: 'Cross Channel' },
     { id: 'dataQuality', icon: '🕵️', label: 'Anomaly Detective', desc: 'Issuance drops · zero-activity agents · duplicate IDs · data mismatches', perm: 'dataQuality', group: 'Cross Channel' },
     { id: 'dispatchPlan', icon: '🚚', label: 'Dispatch Planner', desc: 'Auto box plan · printable pick-list · WhatsApp', perm: 'dispatchPlan', group: 'Cross Channel' },
     { id: 'directAgents', icon: '🧍', label: 'Direct Agents & TLs', desc: 'FF: TL Name APS · GV: TL ID + Name blank — ek hi rule poore site par', perm: 'directAgents', group: 'Cross Channel' },
@@ -137,7 +136,9 @@ window.FF = window.FF || {};
     arena: 'home', fame: 'home', warRoom: 'home', activity: 'home', network: 'home',
     radar: 'home', reportCards: 'home', sprints: 'home',
     // v242 — site halki: ye pages / sheet tabs sidebar se hata diye (purana link khule to Home)
-    rangeReport: 'home', teamMap: 'home', masterStock: 'home', newAgents: 'home'
+    rangeReport: 'home', teamMap: 'home', masterStock: 'home', newAgents: 'home',
+    // v3.80 — GV vs First Forward page hata diya (purana link khule to Dashboard)
+    compare: 'dashboard'
   };
   const HIDDEN_SHEETS = new Set(['StockDataa', 'REPORT', 'GV Master', 'GV REPORT', 'Tag Assignment']);
   const retiredTarget = (id) => (Object.prototype.hasOwnProperty.call(RETIRED_PAGES, id) ? RETIRED_PAGES[id] : '');
@@ -472,7 +473,7 @@ window.FF = window.FF || {};
   // par chup-chaap Home par bhej deta tha, aur uske baad wahi link dobara click karne par hash
   // same hone se kuch hota hi nahi tha ("panel ke option khulte hi nahi"). Ab PAGES registry
   // (app.js ka pageDef) bhi valid maana jaata hai — module aage se load ho jayega (lazy.ensure).
-  const PAGE_ALIAS = { gvPartner: 'gvDashboard', comparison: 'compare', gvd: 'gvDashboard', 'gv-ff': 'tagIssued' };
+  const PAGE_ALIAS = { gvPartner: 'gvDashboard', gvd: 'gvDashboard', 'gv-ff': 'tagIssued' };
   function pageKnown(id) {
     if (!id) return false;
     if (id === 'sheet' || id === 'settings') return true;

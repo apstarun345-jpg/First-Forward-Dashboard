@@ -77,7 +77,6 @@ window.FF = window.FF || {};
     fastagMapping: ['fastagMapping', 'masterSearch'],
     gvPerformance: ['perfWatch', 'gvpages'],
     dualChannel: [...INSIGHT_DEPS],
-    compare: [...INSIGHT_DEPS, 'map', 'compare'],
     dataQuality: [...INSIGHT_DEPS],
     fastagChampions: [...INSIGHT_DEPS],
     dispatchPlan: [...PROFILE_DEPS, 'dispatchPlanner'],

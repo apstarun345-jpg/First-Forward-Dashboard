@@ -103,7 +103,7 @@ test('resolvePage — 🧹 v3.62 me hata di gayi pages apne safe page par jaati 
 
 test('resolvePage — aliases map hote hain; unknown id par first-allowed fallback', () => {
   assert.equal(FF.app.resolvePage('gvPartner'), 'gvDashboard');
-  assert.equal(FF.app.resolvePage('comparison'), 'compare');
+  assert.equal(FF.app.resolvePage('comparison'), 'home');   // v3.80: compare page retired
   assert.equal(FF.app.resolvePage('gvd'), 'gvDashboard');
   assert.equal(FF.app.resolvePage('gv-ff'), 'tagIssued');
   assert.equal(FF.app.resolvePage('nonsense-page-xyz'), 'home'); // auth.can stub true → home
@@ -136,7 +136,7 @@ test('parseHash — sheet deep-link + settings params + alias hash', () => {
   assert.equal(r.params.tab, 'account');
 
   globalThis.location.hash = '#/comparison';
-  assert.equal(FF.app.parseHash().page, 'compare');
+  assert.equal(FF.app.parseHash().page, 'home');
 });
 
 // ================= 2) Panel clicks instant — prefetch + same-link re-click =================

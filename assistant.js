@@ -160,7 +160,6 @@ window.FF = window.FF || {};
         { keys: ['DATA QUALITY'], page: 'dataQuality', label: 'Data Quality Center' },
         { keys: ['DISPATCH'], page: 'dispatchPlan', label: 'Dispatch Planner' },
         { keys: ['CHAMPION'], page: 'fastagChampions', label: 'FASTag Champions' },
-        { keys: ['COMPARE'], page: 'compare', label: 'GV vs First Forward' },
         { keys: ['GV DASHBOARD'], page: 'gvDashboard', label: 'GV Partner Dashboard' },
         { keys: ['GV STOCK REPORT'], page: 'gvStockReport', label: 'GV Stock Report' },
         { keys: ['GV STOCK'], page: 'gvStock', label: 'GV Stock' },

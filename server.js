@@ -152,7 +152,6 @@ export const PAGE_PERMISSIONS = [
   { key: 'dualChannel', label: 'Cross-channel · Identity & combined analysis', group: 'Cross Channel' },
   { key: 'fastagChampions', label: 'Cross-channel · FASTag Champions (top agents/TLs)', group: 'Cross Channel' },
   { key: 'dispatchPlan', label: 'Cross-channel · Dispatch planner (auto box plan)', group: 'Cross Channel' },
-  { key: 'compare', label: 'GV vs First Forward (comparison)', group: 'Cross Channel' },
   { key: 'export', label: 'Download CSV / Excel', group: 'Actions' },
   { key: 'share', label: 'WhatsApp / Email share', group: 'Actions' },
   { key: 'refresh', label: 'Force refresh from Google', group: 'Actions' },
@@ -196,7 +195,7 @@ export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
 // 🧹 v3.62 — naye users ko sirf wahi pages milte hain jo app me bache hain (retired pages ke perms
 // ki zaroorat nahi). Purane users ke saved perms waise hi rehte hain; wo bas kisi page se bind nahi
 // hote, isliye kuch bhi tootta nahi.
-const DEFAULT_USER_PERMS = ['home', 'dataQuality', 'tagIssued', 'masterSearch', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'dualChannel', 'compare',
+const DEFAULT_USER_PERMS = ['home', 'dataQuality', 'tagIssued', 'masterSearch', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'dualChannel',
   'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export', 'dispatchPlan', 'voiceAssistant', 'directAgents', 'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary', 'agentSummary'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
@@ -714,7 +713,7 @@ function permissionDiff(before, after) {
 }
 const activityLast = new Map();
 // Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
-const CLIENT_PAGES = new Set(['home', 'tagIssued', 'tagRequest', 'targets', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'compare', 'charts', 'dispatchPlan', 'tlScorecard']);
+const CLIENT_PAGES = new Set(['home', 'tagIssued', 'tagRequest', 'targets', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'charts', 'dispatchPlan', 'tlScorecard']);
 /** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
 function pageLinkFor(option, query) {
   const t = String(option || '').trim();
@@ -2942,10 +2941,10 @@ function maybeMonthlyReport() {
     recordNotification({
       type: 'monthly',
       title: `📅 Monthly report ready · ${MON[prevM - 1]} ${prevY}`,
-      body: `${MON[prevM - 1]} ${prevY} FF vs GV comparison is ready. Open the Compare page to see both months side by side.`,
+      body: `${MON[prevM - 1]} ${prevY} FF vs GV comparison is ready. Open the Dashboard to review it.`,
       target: 'broadcast',
       routeKey: 'monthlyReport',
-      meta: { monthlyReport: prev, link: `#/compare?monthA=${prev}&monthB=${prevPrev}` }
+      meta: { monthlyReport: prev, link: '#/dashboard' }
     });
     console.log(`monthly report notification sent for ${prev}`);
   } catch (err) { console.warn('monthly report:', err.message); }

@@ -38,7 +38,7 @@ FF.pages = FF.pages || {};
   // ================================================================================================
   async function renderDashboard(root, params, ctx) {
     const fresh = !!(ctx && ctx.fresh);
-    root.innerHTML = head('🚀', 'GV Partner Dashboard', 'GV Master issuance · Tag Assignment stock · GV REPORT performance — alag GV section', `<a class="btn" href="#/compare">⚖️ GV vs First Forward</a>`)
+    root.innerHTML = head('🚀', 'GV Partner Dashboard', 'GV Master issuance · Tag Assignment stock · GV REPORT performance — alag GV section', '')
       + `<div id="gvd-body">${U.spinner('GV data load ho raha hai… (GV Master + Tag Assignment + GV REPORT)')}</div>`;
     const body = U.$('#gvd-body', root);
     const [eirR, masterR, reportR, agentClassR] = await Promise.allSettled([S.need('daily'), G.need('master'), G.need('report'), S.need('agentClass')]);
@@ -748,7 +748,7 @@ FF.pages = FF.pages || {};
     if (p.growth !== undefined) perf.growth = p.growth;
     if (p.stock !== undefined) perf.stock = p.stock;
     if (p.view && ['overview', 'agents', 'tls', 'alerts'].includes(p.view)) perf.view = p.view;
-    const reportActions = `<a class="btn" href="#/gvStockReport">📋 GV Stock Report</a>${FF.auth.can('share') ? '<button class="btn" data-gvp-action="wa">🟢 WhatsApp report</button><button class="btn" data-gvp-action="mail">✉️ Email</button>' : ''}${FF.auth.can('export') ? '<button class="btn" data-gvp-action="xlsx">⬇ Excel</button><button class="btn" data-gvp-action="csv">CSV</button>' : ''}<a class="btn" href="#/compare">⚖️ Compare</a>`;
+    const reportActions = `<a class="btn" href="#/gvStockReport">📋 GV Stock Report</a>${FF.auth.can('share') ? '<button class="btn" data-gvp-action="wa">🟢 WhatsApp report</button><button class="btn" data-gvp-action="mail">✉️ Email</button>' : ''}${FF.auth.can('export') ? '<button class="btn" data-gvp-action="xlsx">⬇ Excel</button><button class="btn" data-gvp-action="csv">CSV</button>' : ''}`;
     root.innerHTML = head('🏆', 'GV Performance', 'GV REPORT — GV partner agents & TLs (stock · last month · current month · runrate)', reportActions)
       + `<div id="gvp-body">${U.spinner('GV REPORT load ho raha hai…')}</div>`;
     const body = U.$('#gvp-body', root);
