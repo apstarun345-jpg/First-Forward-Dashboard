@@ -56,3 +56,8 @@
   html body .kpi-grid.kpi-grid.kpi-grid { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; gap: 12px !important; }
   html body .kpi-grid.kpi-grid.kpi-grid > .kpi { min-width: 0; }
 }
+
+/* v3.83 — kpiFit.js: same-size cards per row; tall cards' content auto-zoomed to fit (>=768px). */
+@media (min-width: 768px) {
+  html body .kpi-grid.kpi-fit > .kpi { height: 100%; min-height: 0; }
+}
