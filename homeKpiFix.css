@@ -48,11 +48,11 @@
 .page-home .hm-expected-total{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid rgba(255,255,255,.55);padding-top:5px;margin-top:1px;font-size:21px;line-height:1.1;font-weight:950}
 @media(max-width:600px){.page-home .hm-expected-row{gap:5px}.page-home .hm-expected-current>strong{font-size:21px}.page-home .hm-expected-current>b{font-size:17px}.page-home .hm-expected-change{font-size:10px}.page-home .hm-expected-previous b{font-size:15px}.page-home .hm-expected-total{font-size:19px}}
 
-/* v3.81 — Home: 5 KPI cards in one row on desktop (text size / alignment unchanged).
-   Tablet and phone keep the existing 3 / 2 / 1 column layouts from styles.css. */
+/* v3.82 — EVERY KPI grid on the site: 5 cards per row on desktop (>=1201px).
+   Text size / alignment unchanged. Specificity (0,3,2) + !important beats all older per-grid rules
+   (gv-aaj-grid, hm-month-grid, hm-stock-grid, hm-target-grid, .six, body[data-cc] …).
+   Tablet / phone layouts are untouched. */
 @media (min-width: 1201px) {
-  .page-home .kpi-grid:not(.mini):not(.six),
-  .page-dashboard .kpi-grid:not(.mini):not(.six) { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-  .page-home .kpi-grid:not(.mini):not(.six) .kpi,
-  .page-dashboard .kpi-grid:not(.mini):not(.six) .kpi { min-width: 0; }
+  html body .kpi-grid.kpi-grid.kpi-grid { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; gap: 12px !important; }
+  html body .kpi-grid.kpi-grid.kpi-grid > .kpi { min-width: 0; }
 }
