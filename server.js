@@ -801,14 +801,44 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
       });
     } catch { /* tab nahi hai — optional */ }
   }));
+  // 📥 v3.78 — DATA_ARRIVAL_LOG (markDataArrived(): Tab | Last data arrived) + SHEET_UPDATE_LOG (tracker: "Last change detected")
+  //    IMPORT_LOG na ho / usme tab na ho to inme se exact time lete hain. Dono optional.
+  const arrivals = {}, trackerLog = {};
+  const arrivalP = Promise.all(['ff', 'gv'].map(async (src) => {
+    const id = idOf(src) || (src === 'ff' ? DEFAULT_SHEET_ID : '');
+    if (!id || !items.some((i) => i.source === src)) return;
+    try {
+      const r = await gvizPageServer(new URLSearchParams({ id, sheet: 'DATA_ARRIVAL_LOG', range: 'A1:B', tq: 'select A, B where A is not null' }), 'DATA_ARRIVAL_LOG');
+      (r.rows || []).forEach((row) => {
+        const c = row.c || [];
+        const tab = String((c[0] && c[0].v) || '').trim().toLowerCase();
+        const v = c[1] && (c[1].v != null ? String(c[1].v) : '');
+        if (tab && v && /\d{4}/.test(v)) arrivals[`${src}|${tab}`] = v;
+      });
+    } catch { /* tab nahi hai — optional */ }
+    try {
+      const r = await gvizPageServer(new URLSearchParams({ id, sheet: 'SHEET_UPDATE_LOG', range: 'A1:F', tq: 'select B, F where B is not null' }), 'SHEET_UPDATE_LOG');
+      (r.rows || []).forEach((row) => {
+        const c = row.c || [];
+        const tab = String((c[0] && c[0].v) || '').trim().toLowerCase();
+        const v = c[1] && (c[1].v != null ? String(c[1].v) : '');
+        // "Tracking since ..." = abhi koi change nahi mila → skip
+        if (tab && v && /\d{4}/.test(v) && !/^tracking/i.test(v)) trackerLog[tab] = v;
+      });
+    } catch { /* tab nahi hai — optional */ }
+  }));
   const counts0 = counts;
-  counts = Promise.all([counts0, importP]).then(() => {
-    items.forEach((it) => { it.importAt = imports[`${it.source}|${it.tab.toLowerCase()}`] || ''; });
+  counts = Promise.all([counts0, importP, arrivalP]).then(() => {
+    items.forEach((it) => {
+      const k = it.tab.toLowerCase();
+      it.importAt = imports[`${it.source}|${k}`] || arrivals[`${it.source}|${k}`] || trackerLog[k] || '';
+      it.importFrom = imports[`${it.source}|${k}`] ? 'IMPORT_LOG' : (arrivals[`${it.source}|${k}`] ? 'DATA_ARRIVAL_LOG' : (trackerLog[k] ? 'SHEET_UPDATE_LOG' : ''));
+    });
   });
   if (!url0 || !secret0) {
     await counts;
     out.unavailableAS = 'Apps Script connect nahi hai';
-    items.forEach((it) => { out.tabs[it.key] = { tab: it.tab, changedMs: it.gvizMs || 0, gvizOnly: true, importAt: it.importAt || '' }; });
+    items.forEach((it) => { out.tabs[it.key] = { tab: it.tab, changedMs: it.gvizMs || 0, gvizOnly: true, importAt: it.importAt || '', importFrom: it.importFrom || '' }; });
     return out;
   }
   const store = new AppsScriptStore({ url: url0, secret: secret0 });
@@ -834,6 +864,7 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
     if (it.gvizMs && it.gvizMs > (t.changedMs || 0)) t.changedMs = it.gvizMs;
     else if (t.changedMs == null) t.changedMs = it.gvizMs || 0;
     t.importAt = it.importAt || '';
+    t.importFrom = it.importFrom || '';
   });
   return out;
 }

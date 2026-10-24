@@ -834,7 +834,7 @@ FF.pages = FF.pages || {};
         const changed = tracked || (t.changedMs ? { d: new Date(t.changedMs), hasTime: true, col: 'new rows' } : (t.changedMs === 0 && !t.trackBaseline && t.trackedMs === undefined ? file.updated : null));
         // 📥 v211 — IMPORT_LOG (import script ka asli run time) mile to wahi final
         const imp = t.importAt ? parseText(t.importAt) : null;
-        if (plausible(imp)) { const x = { ...imp, hasTime: true, col: 'import log', imported: true }; return { key, icon, title, tab: tabName, exact: true, value: x, rowTime: x, importAt: x, file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' }; }
+        if (plausible(imp)) { const x = { ...imp, hasTime: true, col: String(t.importFrom || 'import log').toLowerCase().replace(/_/g, ' '), imported: true }; return { key, icon, title, tab: tabName, exact: true, value: x, rowTime: x, importAt: x, file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' }; }
         const value = later(rowTime, changed) || (tracking ? null : file.updated) || null;
         return { key, icon, title, tab: tabName, exact: true, value, tracking, rowTime: later(rowTime, changed), file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' };
       });
