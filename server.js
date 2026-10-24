@@ -1373,6 +1373,18 @@ async function fetchUpstreamCached(url, options) {
   // shorter per-query age so a long CACHE_SECONDS value never freezes GV's "today" number.
   const maxAgeMs = options && options.maxAgeMs !== undefined ? Math.max(0, Number(options.maxAgeMs) || 0) : cacheMs();
   if (hit && Date.now() - hit.at < maxAgeMs) return { status: hit.status || 200, body: hit.body, cached: true };
+  // ⚡ v3.79 — stale-while-revalidate (personal /p/ pages): purana data turant do, naya background me lao.
+  if (hit && options && options.staleMs && Date.now() - hit.at < options.staleMs) {
+    if (!inflight.has(url) && !gvizCooldownActive()) {
+      const bg = fetchUpstream(url).finally(() => inflight.delete(url));
+      inflight.set(url, bg);
+      bg.then((out) => {
+        const ok = out && !out.rateLimited && out.status >= 200 && out.status < 300 && out.body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(out.body);
+        if (ok) cache.set(url, { at: Date.now(), body: out.body, status: out.status });
+      }).catch(() => {});
+    }
+    return { status: hit.status || 200, body: hit.body, cached: true, stale: true };
+  }
   // Rate-limit cooldown me Google ke paas jaana hi nahi — jo cache me hai wahi sahi.
   if (hit && gvizCooldownActive()) return { status: hit.status || 200, body: hit.body, cached: true, stale: true };
   try {
@@ -1395,6 +1407,9 @@ async function fetchUpstreamCached(url, options) {
     throw err;
   }
 }
+
+const PL_STALE_MS = 6 * 3600e3;   // personal pages: 6 ghante tak purana data turant, refresh peeche se
+const fetchPersonalCached = (url, options) => fetchUpstreamCached(url, { staleMs: PL_STALE_MS, ...(options || {}) });
 
 // The watcher uses grouped EIR counts for FF and the same short-cache GV Master feed as Home;
 // it never downloads raw tabs. GV daily-history backfill is separately grouped and cached for 5 minutes.
@@ -9451,7 +9466,7 @@ async function personalAgentClassRows(link) {
   const run = async (from, to, which) => {
     const tq = `select ${c.agentCol}, ${c.clsCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${from}' and ${c.dateCol} <= date '${to}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${c.clsCol}, ${c.masterCol} limit 20000`;
     const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
-    const res = await fetchUpstreamCached(upstreamUrl(params));
+    const res = await fetchPersonalCached(upstreamUrl(params));
     if (res.status < 200 || res.status >= 300) throw new Error(`sheet ${res.status}`);
     const table = parseGvizServer(res.body);
     let n = 0;
@@ -9610,7 +9625,7 @@ async function personalGvMasterRows(link, win) {
     try {
       // Live (today-only) window: short cache so "Issued today" matches the site (30s), not the 10-min default.
       const liveWin = !!win && win.start === win.today;
-      const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: m.tab || 'GV Master', tq })), liveWin ? { maxAgeMs: 30e3 } : undefined);
+      const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: m.tab || 'GV Master', tq })), liveWin ? { maxAgeMs: 30e3 } : { staleMs: PL_STALE_MS });
       if (out.status < 200 || out.status >= 300) continue;
       const table = parseGvizServer(out.body);
       const rows = [];
@@ -9634,7 +9649,7 @@ async function personalDailyRows(link) {
   const extra = `, ${c.masterCol}, ${c.tlCol}`;
   const tq = `select ${c.dateCol}, ${c.clsCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.dateCol}, ${c.clsCol}${extra} order by ${c.dateCol} desc limit 5000`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
-  const out = await fetchUpstreamCached(upstreamUrl(params));
+  const out = await fetchPersonalCached(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
   const table = parseGvizServer(out.body);
   // Legacy GV link adapters may not expose the EIR master column in their response schema.
@@ -9646,7 +9661,7 @@ async function personalDailyRows(link) {
     const legacyDate = m.date || 'P', legacyClass = m.cch || m.vClass || 'G', legacyTag = m.tagId || 'I', legacyName = link.kind === 'tl' ? (m.tlName || 'D') : (m.agentName || 'B');
     const legacyTq = `select ${legacyDate}, ${legacyClass}, count(${legacyTag}) where ${legacyTag} is not null and ${legacyDate} >= date '${start}' and ${legacyDate} <= date '${today}' and ${legacyName} = ${gvizLiteral(link.name)} group by ${legacyDate}, ${legacyClass} order by ${legacyDate} desc limit 5000`;
     const legacyParams = new URLSearchParams({ id: String(db.settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: m.tab || 'GV Master', tq: legacyTq });
-    const legacyOut = await fetchUpstreamCached(upstreamUrl(legacyParams));
+    const legacyOut = await fetchPersonalCached(upstreamUrl(legacyParams));
     if (legacyOut.status < 200 || legacyOut.status >= 300) throw new Error(`GV legacy personal query responded ${legacyOut.status}`);
     const legacyTable = parseGvizServer(legacyOut.body);
     return (legacyTable.rows || []).map((row) => ({ date: serverDate(serverCell(row, 0)), cls: classBucket(serverCell(row, 1)), n: serverNumber(serverCell(row, 2)) })).filter((row) => row.date);
@@ -9675,7 +9690,7 @@ async function personalTeamAgents(link) {
   const extra = `, ${c.masterCol}, ${c.tlCol}`;
   const tq = `select ${c.agentCol}, ${c.dateCol}${extra}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${c.dateCol}${extra} order by ${c.dateCol} desc limit 5000`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
-  const out = await fetchUpstreamCached(upstreamUrl(params));
+  const out = await fetchPersonalCached(upstreamUrl(params));
   if (out.status < 200 || out.status >= 300) throw new Error(`sheet ${out.status}`);
   const table = parseGvizServer(out.body);
   const byAgent = new Map();
@@ -9715,7 +9730,7 @@ async function personalAgentIds(link) {
   const { start, today } = personalWindow();
   const tq = `select ${c.agentCol}, ${idCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${idCol}, ${c.masterCol}`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
-  const res = await fetchUpstreamCached(upstreamUrl(params));
+  const res = await fetchPersonalCached(upstreamUrl(params));
   if (res.status < 200 || res.status >= 300) throw new Error(`sheet ${res.status}`);
   const table = parseGvizServer(res.body);
   for (const row of table.rows || []) {
@@ -9737,7 +9752,7 @@ async function personalAgentTl(link) {
     const { start, today } = personalWindow();
     const tq = `select ${c.tlCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.tlCol}, ${c.masterCol}`;
     const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
-    const out = await fetchUpstreamCached(upstreamUrl(params));
+    const out = await fetchPersonalCached(upstreamUrl(params));
     if (out.status < 200 || out.status >= 300) return '';
     const table = parseGvizServer(out.body);
     let best = '', bestN = -1;
@@ -9819,6 +9834,25 @@ function personalRequestsHtml(link) {
 const PORTAL_LOGIN_JS = "(function(){var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');\n      function go(extra){e.hidden=true;b.disabled=true;b.textContent='\u23f3 Logging in\u2026';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;\n      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){\n        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}\n        if(x.j.url){location.href=x.j.url;return;}\n        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'\ud83d\udfe9 ':'\ud83d\udfe6 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='\ud83d\udd13 Login';}\n      }).catch(function(err){e.textContent='\u26a0\ufe0f '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='\ud83d\udd13 Login';});}\n      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();";
 
 // ⚡ short-lived rendered-page cache (per link + channel view) so tab/channel switches and reloads are instant
+
+// ⚡ v3.79 — personal /p/ links ka data pehle se garam rakho: pehla khulna bhi instant (Google ka wait nahi).
+let plWarmRunning = false;
+async function warmPersonalLinks() {
+  if (plWarmRunning || gvizCooldownActive()) return;
+  plWarmRunning = true;
+  try {
+    const links = (db.settings.personalLinks || []).filter((l) => l && l.enabled !== false && l.kind).slice(0, 40);
+    for (const link of links) {
+      if (gvizCooldownActive()) break;
+      try {
+        await personalDailyRows(link);
+        if (link.kind === 'agent') await personalAgentTl(link); else await personalTeamAgents(link);
+        if (link.kind !== 'agent') await personalAgentClassRows(link).catch(() => null);
+      } catch { /* ek link fail ho to baaki chalte rahein */ }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  } finally { plWarmRunning = false; }
+}
 const plPageCache = new Map();
 const PL_CACHE_MS = 45e3;
 function plCachePut(key, val) {
@@ -11562,6 +11596,8 @@ async function start() {
     // GV Master is a live source: check every 15s (its shared feed cache caps Google reads at 30s).
     // FF remains at 150s, so the faster GV alert cadence does not multiply EIR queries.
     setInterval(() => checkReports(false).catch(() => {}), 30e3).unref();
+    setTimeout(() => warmPersonalLinks().catch(() => {}), 20000).unref?.();
+    setInterval(() => warmPersonalLinks().catch(() => {}), 5 * 60e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🕒 v209 — har 15 min sheet row-count check (home khule na khule), taaki "data kab aaya" ka time sahi rahe
