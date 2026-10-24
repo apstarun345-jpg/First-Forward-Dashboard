@@ -1365,6 +1365,9 @@ async function fetchUpstream(url) {
     return { status: response.status, body };
   } finally { clearTimeout(timer); gvizRelease(); }
 }
+const PL_STALE_MS = 6 * 3600e3;   // personal pages: 6 ghante tak purana data turant, refresh peeche se
+const fetchPersonalCached = (url, options) => fetchUpstreamCached(url, { staleMs: PL_STALE_MS, ...(options || {}) });
+
 /** Reuse the gviz proxy cache for server-rendered personal pages (and stale data if Google blips). */
 async function fetchUpstreamCached(url, options) {
   const hit = cache.get(url);
@@ -1406,9 +1409,6 @@ async function fetchUpstreamCached(url, options) {
     throw err;
   }
 }
-
-const PL_STALE_MS = 6 * 3600e3;   // personal pages: 6 ghante tak purana data turant, refresh peeche se
-const fetchPersonalCached = (url, options) => fetchUpstreamCached(url, { staleMs: PL_STALE_MS, ...(options || {}) });
 
 // The watcher uses grouped EIR counts for FF and the same short-cache GV Master feed as Home;
 // it never downloads raw tabs. GV daily-history backfill is separately grouped and cached for 5 minutes.
