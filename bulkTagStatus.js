@@ -726,13 +726,14 @@ window.FF = window.FF || {};
     }
     return { ids, truncated };
   }
-  async function runBlankIssuerAudit(root) {
+  async function runBlankIssuerAudit(root, opts) {
+    const auto = !!(opts && opts.auto);   // page khulte hi background scan: cache use, toast nahi
     const audit = state.audit;
     if (audit.loading) return;
     const generation = ++audit.generation;
     audit.loading = true; audit.loaded = false; audit.error = ''; audit.warnings = [];
     audit.groups = []; audit.detailRows = []; audit.detailHeaders = []; audit.expandedDate = ''; audit.detailPage = 0;
-    audit.fresh = !!(root.querySelector('#bts-fresh') || {}).checked;
+    audit.fresh = auto ? false : !!(root.querySelector('#bts-fresh') || {}).checked;
     audit.truncatedEir = false; audit.truncatedGv = false;
     renderAudit(root);
     const button = root.querySelector('#bts-audit-scan');
@@ -786,13 +787,13 @@ window.FF = window.FF || {};
       audit.checkedAt = new Date().toISOString();
       paintAuditProgress(root, 'Scan complete · ' + audit.groups.reduce((n, g) => n + g.count, 0).toLocaleString('en-IN') + ' eligible unique tags', 100);
       renderAudit(root);
-      showToast('✅ Date-wise EIR audit complete: ' + audit.groups.reduce((n, g) => n + g.count, 0).toLocaleString('en-IN') + ' unique tags.', 'ok');
+      if (!auto) showToast('✅ Date-wise EIR audit complete: ' + audit.groups.reduce((n, g) => n + g.count, 0).toLocaleString('en-IN') + ' unique tags.', 'ok');
     } catch (err) {
       if (generation === audit.generation) {
         audit.error = clean(err && err.message || err);
         audit.loaded = false;
         renderAudit(root);
-        showToast('EIR blank-issuer audit fail: ' + audit.error, 'err');
+        if (!auto) showToast('EIR blank-issuer audit fail: ' + audit.error, 'err');
       }
     } finally {
       if (generation === audit.generation) {
@@ -1041,6 +1042,11 @@ window.FF = window.FF || {};
     bind(root);
     renderResults(root);
     renderAudit(root);
+    // 🔄 Page khulte / refresh hote hi audit apne aap background me chalta hai (pehle har baar button dabana padta tha).
+    // Purana result 10 min se naya ho to dobara scan nahi; manual button se fresh scan pehle jaisa chalta rahega.
+    const a = state.audit;
+    const stale = !a.checkedAt || (Date.now() - new Date(a.checkedAt).getTime()) > 10 * 60e3;
+    if (!a.loading && (!a.loaded || stale) && !a.error) setTimeout(() => { if (state.root === root && !state.audit.loading) runBlankIssuerAudit(root, { auto: true }); }, 400);
   }
   function bind(root) {
     const check = root.querySelector('#bts-check');
