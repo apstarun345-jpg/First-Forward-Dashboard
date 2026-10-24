@@ -652,7 +652,36 @@ function doPost(e) {
         var row = shM.getRange(lastFilled, 1, 1, width).getValues()[0];
         var cells = [];
         for (var c = 0; c < width; c++) { var cv = fmtM(row[c]); if (cv !== '') cells.push({ h: fmtM(headers[c]), v: cv, col: c + 1 }); }
-        return { tab: name, lastRow: lastFilled, totalRows: lastAny, cells: cells };
+        var resM = { tab: name, lastRow: lastFilled, totalRows: lastAny, cells: cells };
+        // 🕒 v3.77 — jis tab me date/time column nahi (jaise Tag Assignment): key + sigCols columns ka fingerprint (MD5) yaad rakho.
+        // Fingerprint badla = content badla → us waqt ka time "trackedMs". Pehli baar dekhne par sirf baseline banta hai (trackBaseline).
+        var sigIdx = (Array.isArray(t && t.sigCols) ? t.sigCols : []).map(function (c) { return colIndex_(c); }).filter(function (n) { return n > 0; }).slice(0, 3);
+        if (sigIdx.length) {
+          try {
+            var props = PropertiesService.getScriptProperties();
+            var pk = ('FP|' + ssM.getId() + '|' + name).slice(0, 120);
+            var prev = null; try { prev = JSON.parse(props.getProperty(pk) || 'null'); } catch (eP) { prev = null; }
+            var nowMs = Date.now();
+            var rec;
+            if (prev && prev.fp && prev.chk && nowMs - prev.chk < 120000) { rec = prev; }   // 2 min ke andar dobara bhaari padhna nahi
+            else {
+              var parts = [String(lastAny), String(lastFilled)];
+              [keyIdx].concat(sigIdx).forEach(function (ci) {
+                var vals = shM.getRange(1, ci, lastAny, 1).getValues();
+                var joined = vals.map(function (r) { return r[0]; }).join('\u0001');
+                parts.push(Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, joined)));
+              });
+              var fp = parts.join('|');
+              if (!prev || !prev.fp) rec = { fp: fp, ms: 0, chk: nowMs };
+              else if (prev.fp !== fp) rec = { fp: fp, ms: nowMs, chk: nowMs };
+              else rec = { fp: prev.fp, ms: prev.ms || 0, chk: nowMs };
+              props.setProperty(pk, JSON.stringify(rec));
+            }
+            resM.trackedMs = rec.ms || 0;
+            resM.trackBaseline = !rec.ms;
+          } catch (eT) { resM.trackError = String(eT && eT.message || eT).slice(0, 120); }
+        }
+        return resM;
       });
       return json_({ ok: true, file: fileM, tabs: tabsM, tz: tz, spreadsheet: ssM.getName() });
     }

@@ -77,3 +77,13 @@ test('wiring: Home template me alert slot, server freshness parallel', () => {
   const server = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
   assert.match(server, /const metaP = Promise\.all\(\['ff', 'gv'\]\.map\(async \(src\)/);
 });
+
+test('v3.77 — Tag Assignment: change-tracking time dikhta hai, baseline par saaf message, file-level time nahi', () => {
+  const ok = F.mergeList([{ key: 'gv-assign', tab: 'Tag Assignment', title: 'GV Partner', icon: '🟩', value: at(2), rowTime: at(2), lastRow: 500 }], [], '').find((r) => r.key === 'gv-assign');
+  assert.ok(ok.value && ok.value.d, 'tracked time value ban kar aata hai');
+  const base = F.mergeList([{ key: 'gv-assign', tab: 'Tag Assignment', title: 'GV Partner', icon: '🟩', value: null, tracking: true }], [{ key: 'gv-assign', tab: 'Tag Assignment', noCol: true }], '').find((r) => r.key === 'gv-assign');
+  assert.equal(base.value, null);
+  assert.equal(base.tracking, true);
+  assert.match(F.html([base], false), /Change tracking started/);
+  assert.doesNotMatch(F.html([base], false), /Could not read this sheet/);
+});

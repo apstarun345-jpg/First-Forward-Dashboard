@@ -815,7 +815,9 @@ FF.pages = FF.pages || {};
         { key: 'ff-eir', source: 'ff', tab: tabOf(cfgE.sheet), keyCol: cfgE.tagId || 'A' },
         { key: 'ff-stock', source: 'ff', tab: tabOf(cfgS.sheet), keyCol: cfgS.tagId || 'C' },
         { key: 'gv-master', source: 'gv', tab: tabOf('GV Master'), keyCol: (gvc.master && gvc.master.tagId) || 'I' },
-        { key: 'gv-assign', source: 'gv', tab: tabOf('Tag Assignment'), keyCol: (gvc.assignment && gvc.assignment.tagId) || 'B' }
+        // Tag Assignment me date/time column hai hi nahi → Apps Script har check par tag/status/agent columns ka fingerprint
+        // mila kar "content kab badla" yaad rakhta hai (file-level edit time GV Master ke saath shared hota hai, isliye wo galat padta).
+        { key: 'gv-assign', source: 'gv', tab: tabOf('Tag Assignment'), keyCol: (gvc.assignment && gvc.assignment.tagId) || 'B', sigCols: [(gvc.assignment && gvc.assignment.status) || 'D', (gvc.assignment && gvc.assignment.agentId) || 'E'] }
       ];
       const res = await fetch('/api/sheet-freshness', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ items }) });
       let json = {}; try { json = await res.json(); } catch { /* ignore */ }
@@ -827,12 +829,14 @@ FF.pages = FF.pages || {};
         const file = parseFile((json.files || {})[src]);
         const rowTime = t.cells ? rowTimeOf(t.cells) : null;
         // 🕒 v209 — nayi rows aayi (purani date ki ho tab bhi) = server ka row-count change time; pehli baar → file ka last edit
-        const changed = t.changedMs ? { d: new Date(t.changedMs), hasTime: true, col: 'new rows' } : (t.changedMs === 0 ? file.updated : null);
+        const tracked = t.trackedMs ? { d: new Date(t.trackedMs), hasTime: true, col: 'change tracking', tracked: true } : null;
+        const tracking = !!(t.trackBaseline && !tracked);   // pehli baar dekha: asli time agle badlav par dikhega
+        const changed = tracked || (t.changedMs ? { d: new Date(t.changedMs), hasTime: true, col: 'new rows' } : (t.changedMs === 0 && !t.trackBaseline && t.trackedMs === undefined ? file.updated : null));
         // 📥 v211 — IMPORT_LOG (import script ka asli run time) mile to wahi final
         const imp = t.importAt ? parseText(t.importAt) : null;
         if (plausible(imp)) { const x = { ...imp, hasTime: true, col: 'import log', imported: true }; return { key, icon, title, tab: tabName, exact: true, value: x, rowTime: x, importAt: x, file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' }; }
-        const value = later(rowTime, changed) || file.updated || null;
-        return { key, icon, title, tab: tabName, exact: true, value, rowTime: later(rowTime, changed), file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' };
+        const value = later(rowTime, changed) || (tracking ? null : file.updated) || null;
+        return { key, icon, title, tab: tabName, exact: true, value, tracking, rowTime: later(rowTime, changed), file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' };
       });
     }
     async function gvizCompute() {
@@ -916,11 +920,17 @@ FF.pages = FF.pages || {};
       if (!x.hasTime) { const n = dayDiff(x.d); return n <= 1 ? 'ok' : n <= 3 ? 'warn' : 'bad'; }
       const h = (Date.now() - x.d.getTime()) / 3600000; return h <= 6 ? 'ok' : h <= 30 ? 'warn' : 'bad';
     }
-    const fmtDT = (x) => x.d.toLocaleString('en-IN', x.hasTime ? { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true } : { day: '2-digit', month: 'short', year: 'numeric' });
+    const fmtDT = (x) => x.d.toLocaleString('en-IN', x.hasTime ? { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true } : { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+    /** Time kahan se aaya — saaf English line (card par dikhta hai, tooltip me nahi chhupta). */
+    function sourceLine(r) {
+      const v = r.value; if (!v) return '';
+      const how = v.imported ? 'Import log time' : v.tracked ? 'Detected by change tracking (checked about every 15 min)' : v.col === 'new rows' ? 'Detected when new rows arrived' : v.col ? `From column: ${v.col}` : 'From the latest row';
+      return `${how}${r.lastRow ? ` · last row #${U.fmt(r.lastRow)}` : ''}`;
+    }
     function html(list, loading) {
       const rows = list.map((r) => {
         let val;
-        if (!r.value) val = r.noCol ? '<span class="dim">No date/time column in this sheet</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'checking…' : (r.err ? 'could not read' : '—')}</span>`;
+        if (!r.value) val = r.tracking ? '<span class="dim">Change tracking started — exact time appears after the next update</span>' : r.noCol ? '<span class="dim">No date/time column in this sheet</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'checking…' : (r.err ? 'could not read' : '—')}</span>`;
         else val = `<b>${esc(fmtDT(r.value))}</b>${r.value.hasTime ? '' : ' <small class="dim">(date only)</small>'}`;
         const pill = r.value ? `<span class="fresh-pill ${tone(r.value)}">${esc(ago(r.value))}</span>` : '';
         // 🟢 v228 — tech notes ki jagah ek saaf status line; poori detail row ke tooltip me
@@ -930,11 +940,12 @@ FF.pages = FF.pages || {};
         if (r.file && r.file.updated) tips.push(`Sheet file last edit: ${fmtDT(r.file.updated)}${r.file.by ? ` · ${r.file.by}` : ''}`);
         if (r.value && r.value.imported) tips.push('Source: import log');
         const tn = r.value ? tone(r.value) : '';
-        const status = !r.value ? (loading ? '' : (r.noCol ? '' : '<span class="fresh-status bad">✕ Could not read this sheet</span>'))
+        const status = !r.value ? (loading ? '' : ((r.noCol || r.tracking) ? '' : '<span class="fresh-status bad">✕ Could not read this sheet</span>'))
           : tn === 'ok' ? `<span class="fresh-status ok">✓ Up to date — ${esc(ago(r.value))}</span>`
             : tn === 'warn' ? `<span class="fresh-status warn">⚠ A bit old — ${esc(ago(r.value))}</span>`
               : `<span class="fresh-status bad">⚠ Old data — ${esc(ago(r.value))}. Check the import.</span>`;
-        const extra = status ? `<div class="fresh-extra">${status}</div>` : '';
+        const srcTxt = sourceLine(r);
+        const extra = (status || srcTxt) ? `<div class="fresh-extra">${srcTxt ? `<small class="dim fresh-how">${esc(srcTxt)}</small>` : ''}${status}</div>` : '';
         const titleAttr = tips.length ? ` title="${esc(tips.join('\n'))}"` : '';
         return `<div class="fresh-row"${titleAttr}><div class="fresh-src"><span class="fresh-ic">${r.icon}</span><div><b>${esc(r.tab)}</b><small class="dim">${esc(r.title)}${r.note ? ' · ' + esc(r.note) : ''}</small></div></div><div class="fresh-val">${val}${pill}</div>${extra}</div>`;
       }).join('');
@@ -976,7 +987,7 @@ FF.pages = FF.pages || {};
       if (!inflight) inflight = compute((partial) => { if (!memo || force) paint(partial, true, false); }).finally(() => { inflight = null; });
       try { memo = await inflight; memoAt = Date.now(); paint(memo, false, true); } catch { paint(memo || skeleton, false, false); }
     }
-    return { mount, dismiss, parseText, timeOfDay, mergeList, isStaleVal, alertHtml };
+    return { mount, dismiss, parseText, timeOfDay, mergeList, isStaleVal, alertHtml, html };
   })();
   FF.homeFreshness = freshness;
 

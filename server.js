@@ -819,7 +819,7 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
     const id = idOf(src);
     if (!mine.length || !id) return;
     try {
-      const r = await store.call('sheetmeta', { spreadsheetId: id, tabs: mine.map((i) => ({ tab: i.tab, keyCol: i.keyCol })) });
+      const r = await store.call('sheetmeta', { spreadsheetId: id, tabs: mine.map((i) => ({ tab: i.tab, keyCol: i.keyCol, sigCols: i.sigCols || [] })) });
       out.files[src] = r.file || {};
       (r.tabs || []).forEach((t) => { const it = mine.find((i) => i.tab === t.tab); if (it) { if (!t.error) t.changedMs = trackSheetRows(`${src}|${t.tab}`, t); out.tabs[it.key] = t; } });
     } catch (err) {
@@ -8385,7 +8385,9 @@ async function handleApi(req, res, url) {
       key: String((i && i.key) || '').slice(0, 30),
       source: i && i.source === 'gv' ? 'gv' : 'ff',
       tab: String((i && i.tab) || '').trim().slice(0, 80),
-      keyCol: /^[A-Za-z]{1,3}$/.test(String((i && i.keyCol) || '')) ? String(i.keyCol).toUpperCase() : 'A'
+      keyCol: /^[A-Za-z]{1,3}$/.test(String((i && i.keyCol) || '')) ? String(i.keyCol).toUpperCase() : 'A',
+      // date column na ho to in columns ka fingerprint Apps Script me yaad rakha jaata hai ("content kab badla")
+      sigCols: (Array.isArray(i && i.sigCols) ? i.sigCols : []).map((c) => String(c || '').toUpperCase()).filter((c) => /^[A-Z]{1,3}$/.test(c)).slice(0, 3)
     })).filter((i) => i.tab);
     if (!items.length) throw new HttpError(400, 'items required');
     const idOf = (src) => String((src === 'gv' ? db.settings.gvSheetId : db.settings.sheetId) || '').replace(/[^A-Za-z0-9_-]/g, '');
