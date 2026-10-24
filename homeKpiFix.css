@@ -56,3 +56,34 @@
   html body .kpi-grid.kpi-grid.kpi-grid { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; gap: 12px !important; }
   html body .kpi-grid.kpi-grid.kpi-grid > .kpi { min-width: 0; }
 }
+
+/* v3.84 — compact, readable KPI cards for the 5-per-row desktop layout (>=1201px).
+   No auto-zoom: fixed, legible sizes (value ≥20px, foot ≥11px) and tighter padding so cards stay short.
+   Complex cards (Expected / Run Rate / Highest Issued) use smaller inner type so one row stays compact. */
+@media (min-width: 1201px) {
+  html body .kpi-grid.kpi-grid.kpi-grid > .kpi:not(.ua-kpi-card) { padding: 12px 14px !important; min-height: 108px !important; }
+  html body .kpi-grid.kpi-grid.kpi-grid > .kpi:not(.ua-kpi-card)::after { width: 100px; height: 100px; right: -26px; top: -26px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .kpi-title { font-size: 11.5px !important; letter-spacing: .01em; line-height: 1.25; }
+  html body .kpi-grid.kpi-grid.kpi-grid .kpi-icon { width: 28px; height: 28px; font-size: 15px; border-radius: 9px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .kpi-value { font-size: clamp(20px, 1.55vw, 26px) !important; margin: auto 0 !important; padding: 4px 0; letter-spacing: -.5px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .kpi-value small { font-size: 13px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .kpi-foot { font-size: 11.5px !important; line-height: 1.35; }
+  html body .kpi-grid.kpi-grid.kpi-grid .kpi-clsplit span,
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-split span { font-size: 10.5px; }
+  /* Run Rate */
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-runrate-list > div { font-size: 15px !important; gap: 8px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-runrate-list > div.is-total { margin-top: 2px; padding-top: 3px; }
+  /* Expected in month — class row = one line (label + value) + change line; 'last month' on the right */
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-expected-compare { gap: 2px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-expected-row { padding-bottom: 2px; gap: 6px; align-items: flex-start; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-expected-current { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 7px; row-gap: 0; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-expected-current > b { font-size: 13px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-expected-current > strong { font-size: 17px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-expected-change { font-size: 10px; margin-top: 0; flex-basis: 100%; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-expected-previous small { font-size: 9.5px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-expected-previous b { font-size: 14px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-expected-total { font-size: 16px; padding-top: 3px; }
+  /* Today Highest Issued */
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-highest-list { font-size: 12px !important; gap: 3px; }
+  html body .kpi-grid.kpi-grid.kpi-grid .hm-highest-list > div { grid-template-columns: 34px minmax(0, 1fr) auto; padding-bottom: 3px; }
+}
