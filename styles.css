@@ -247,6 +247,12 @@ html[data-theme="dark"] .pct.neg { color: #f87171; }
 .bcc-tools .input { flex: 1 1 260px; max-width: 420px; }
 .bcc-agents summary { cursor: pointer; padding: 4px 0; }
 .bcc-agents tr.on td { background: rgba(99,102,241,.1); }
+.bcc-cell { cursor: copy; }
+.bcc-cell:hover { background: rgba(99,102,241,.12); }
+.bcc-cp { width: 30px; padding: 2px 4px !important; }
+.bcc-rowcopy { border: 0; background: transparent; cursor: pointer; font-size: 14px; opacity: .55; padding: 2px 4px; border-radius: 6px; }
+.bcc-rowcopy:hover { opacity: 1; background: rgba(99,102,241,.15); }
+.bcc-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .bcc-tbl tr.bcc-nf td { background: rgba(239,68,68,.05); }
 html[data-theme="dark"] .sug-result.gross > small { color: #5eead4; }
 .g1 { background: linear-gradient(135deg, #6366f1, #8b5cf6); }

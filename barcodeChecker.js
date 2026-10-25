@@ -75,8 +75,18 @@ FF.pages = FF.pages || {};
     bc: { label: '🏢 Master / BC stock', tone: 'gray' },
     nf: { label: '❓ Not found', tone: 'red' }
   };
-  const HEAD = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Allocated / Issue date', 'VRN', 'Note', 'Dispatch date', 'Dispatched to'];
-  const cells = (r) => [r.barcode, STATUS[r.k].label, r.tagId, r.cls, r.agent, r.agentId, r.tl, r.date, r.vrn, r.note, r.dDate || '', r.dName || ''];
+  const HEAD = ['Barcode', 'Tag ID', 'Status', 'Class', 'Agent', 'Agent ID', 'TL', 'Allocated / Issue date', 'VRN', 'Note', 'Dispatch date', 'Dispatched to'];
+  const cells = (r) => [r.barcode, r.tagId, STATUS[r.k].label, r.cls, r.agent, r.agentId, r.tl, r.date, r.vrn, r.note, r.dDate || '', r.dName || ''];
+  // 🔎 v3.85 — search haystack ek baar banta hai (lowercase + barcode ke sirf digits) → har key-press par bas includes().
+  const hay = (r) => r._h || (r._h = `${cells(r).join(' ').toLowerCase()} ${bcDigits(r.barcode)}`);
+  const statusPlain = (r) => STATUS[r.k].label.replace(/^[^A-Za-z]+/, '').trim();
+  /** Copy text: 'both' = Barcode<TAB>Tag ID<TAB>Status (Sheets/Excel me seedha columns me paste), 'bc' = sirf barcode, 'tag' = sirf tag id. */
+  const copyText = (rows, mode) => rows.map((r) => (mode === 'bc' ? r.barcode : mode === 'tag' ? (r.tagId || '') : [r.barcode, r.tagId || '', statusPlain(r)].join('\t'))).filter((x) => x !== '').join('\n');
+  async function copyOut(text, what) {
+    const ok = U.copyText ? await U.copyText(text) : false;
+    if (U.toast) U.toast(ok ? `📋 ${what} copy ho gaya` : 'Copy nahi hua — browser permission check karein', ok ? 'ok' : 'error');
+    return ok;
+  }
   const dLabel = (iso) => (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) && U.labelDateKey ? U.labelDateKey(iso, true) : (iso || ''));
   /** 📒 Dispatch ledger (IDFC Stock Sheet / GV Stock Sheet First–Last ranges) → har barcode ki dispatch date + naam. */
   async function attachDispatch(rows, started) {
@@ -144,8 +154,14 @@ FF.pages = FF.pages || {};
 
   // ---- 🖼️ render ----------------------------------------------------------------------------------------
   function visible() {
-    const q = state.q.trim().toLowerCase();
-    return (state.rows || []).filter((r) => (state.filter === 'all' || r.k === state.filter) && (!state.agent || r.agent === state.agent) && (!q || cells(r).join(' ').toLowerCase().includes(q)));
+    const terms = state.q.trim().toLowerCase().split(/\s+/).filter(Boolean).map((t) => ({ t, d: /^[\d-]+$/.test(t) && t.replace(/\D/g, '').length >= 3 ? t.replace(/\D/g, '') : '' }));
+    return (state.rows || []).filter((r) => {
+      if (state.filter !== 'all' && r.k !== state.filter) return false;
+      if (state.agent && r.agent !== state.agent) return false;
+      if (!terms.length) return true;
+      const h = hay(r);
+      return terms.every((x) => h.includes(x.t) || (x.d && h.includes(x.d)));   // dashed / bina dash dono barcode chalte hain
+    });
   }
   function dispNote() {
     const m = state.dispMeta;
@@ -156,6 +172,8 @@ FF.pages = FF.pages || {};
     if (!errs.length && src) return `<p class="dim small">📒 Dispatch ledger: ${src}</p>`;
     return errs.length ? `<p class="dim small">⚠️ Dispatch ledger — ${src ? src + ' · ' : ''}${errs.map(([, v]) => esc(v)).join(' · ')}</p>` : '';
   }
+  const rowsHtml = (show) => show.map((r) => `<tr class="bcc-${r.k}" data-bcc-i="${r._i}"><td class="bcc-cp"><button type="button" class="bcc-rowcopy" data-bcc-row title="Copy Barcode + Tag ID + Status">📋</button></td>${cells(r).map((v, i) => `<td${i === 0 || i === 1 ? ` class="mono bcc-cell" data-bcc-cell="${i === 0 ? 'bc' : 'tag'}" title="Click = copy"` : ''}>${i === 2 ? `<span class="badge ${STATUS[r.k].tone}">${esc(v)}</span>` : esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${HEAD.length + 1}" class="empty">Is filter me kuch nahi</td></tr>`;
+  const noteHtml = (vis, show) => `${U.fmt(vis.length)} rows${vis.length > show.length ? ` · pehli ${U.fmt(show.length)} dikh rahi — sab ke liye Copy / Excel` : ''}`;
   function resultsHtml() {
     const rows = state.rows;
     if (!rows) return '';
@@ -170,13 +188,23 @@ FF.pages = FF.pages || {};
     return `<div class="bcc-chips">${chip('all', '🔢 Sab', rows.length, '')}${Object.entries(STATUS).map(([k, v]) => chip(k, v.label, cnt(k), v.tone)).join('')}</div>
       <div class="bcc-tools"><input class="input" data-bcc-q placeholder="🔎 Barcode / tag / agent / TL / VRN…" value="${esc(state.q)}">
         ${state.agent ? `<button type="button" class="chip on" data-bcc-agent="">🧑‍💼 ${esc(state.agent)} ✕</button>` : ''}
-        ${canX ? `<button type="button" class="btn small" data-bcc-xlsx="vis">⬇ Excel (filtered ${U.fmt(vis.length)})</button><button type="button" class="btn small" data-bcc-xlsx="all">⬇ Excel (sab)</button>` : ''}</div>
+        <button type="button" class="btn small primary" data-bcc-copy="both" title="Barcode + Tag ID + Status (tab-separated — Sheets/Excel me seedha paste)">📋 Copy Barcode + Tag ID + Status (<span data-bcc-n>${U.fmt(vis.length)}</span>)</button><button type="button" class="btn small" data-bcc-copy="bc">📋 Barcodes</button><button type="button" class="btn small" data-bcc-copy="tag">📋 Tag IDs</button>
+        ${canX ? `<button type="button" class="btn small" data-bcc-xlsx="vis">⬇ Excel (filtered <span data-bcc-n>${U.fmt(vis.length)}</span>)</button><button type="button" class="btn small" data-bcc-xlsx="all">⬇ Excel (sab)</button>` : ''}</div>
       ${agents.length ? `<details class="bcc-agents" ${agents.length <= 12 ? 'open' : ''}><summary><b>🧑‍💼 Agent-wise · ${U.fmt(agents.length)}</b> <span class="dim small">(naam par click = filter)</span></summary>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th>TL</th><th class="num">📦 Stock</th><th class="num">✅ Issued</th><th class="num">Total</th></tr></thead><tbody>${agents.slice(0, 300).map(([k, o]) => `<tr class="clickable${state.agent === k ? ' on' : ''}" data-bcc-agent="${esc(k)}"><td><b>${esc(k)}</b></td><td>${esc(o.tl || '')}</td><td class="num">${U.fmt(o.st)}</td><td class="num">${U.fmt(o.iss)}</td><td class="num"><b>${U.fmt(o.st + o.iss)}</b></td></tr>`).join('')}</tbody></table></div></details>` : ''}
       ${dispNote()}
-      <p class="dim small">${U.fmt(vis.length)} rows${vis.length > show.length ? ` · pehli ${U.fmt(show.length)} dikh rahi — sab ke liye Excel` : ''}</p>
-      <div class="table-wrap"><table class="tbl compact bcc-tbl"><thead><tr>${HEAD.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
-      <tbody>${show.map((r) => `<tr class="bcc-${r.k}">${cells(r).map((v, i) => `<td${i === 0 || i === 2 ? ' class="mono"' : ''}>${i === 1 ? `<span class="badge ${STATUS[r.k].tone}">${esc(v)}</span>` : esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${HEAD.length}" class="empty">Is filter me kuch nahi</td></tr>`}</tbody></table></div>`;
+      <p class="dim small" data-bcc-note>${noteHtml(vis, show)}</p>
+      <div class="table-wrap"><table class="tbl compact bcc-tbl"><thead><tr><th></th>${HEAD.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+      <tbody data-bcc-tbody>${rowsHtml(show)}</tbody></table></div>`;
+  }
+  /** Sirf table body + counts dobara — search type karte waqt chips / agent table / input ko chhedta nahi (instant). */
+  function paintTable() {
+    const root = state.root, body = root && root.querySelector('[data-bcc-tbody]');
+    if (!body) return paintResults();
+    const vis = visible(), show = vis.slice(0, 1500);
+    body.innerHTML = rowsHtml(show);
+    const note = root.querySelector('[data-bcc-note]'); if (note) note.textContent = noteHtml(vis, show);
+    root.querySelectorAll('[data-bcc-n]').forEach((n) => { n.textContent = U.fmt(vis.length); });
   }
   function paintResults() {
     const el = state.root && state.root.querySelector('[data-bcc-out]');
@@ -240,6 +268,7 @@ FF.pages = FF.pages || {};
         title = `${list.length}-barcodes`; state.lastKey = key;
       }
       if (seq !== state.busy) return;
+      rows.forEach((r, i) => { r._i = i; });
       state.rows = rows; state.title = title; state.filter = 'all'; state.agent = ''; state.q = '';
       state.dispMeta = null;
       rows.forEach((r) => { r.dDate = SEARCHING; r.dName = SEARCHING; });
@@ -251,7 +280,7 @@ FF.pages = FF.pages || {};
     }
   }
   function bind(root) {
-    let t = 0;
+    let t = 0, qRaf = 0;
     const auto = (kind, ms) => { clearTimeout(t); t = setTimeout(() => run(kind), ms); };
     root.addEventListener('submit', (e) => { const f = e.target.closest('[data-bcc-form]'); if (!f) return; e.preventDefault(); state.lastKey = ''; run(f.dataset.bccForm); });
     root.addEventListener('input', (e) => {
@@ -265,7 +294,7 @@ FF.pages = FF.pages || {};
         const c = root.querySelector('[data-bcc-count]'); if (c) c.textContent = n ? `${U.fmt(n)} barcodes` : '';
         if (e.inputType === 'insertFromPaste' && n) auto('multi', 300);
       }
-      if (e.target.matches('[data-bcc-q]')) { state.q = e.target.value; clearTimeout(t); t = setTimeout(() => { const pos = e.target.selectionStart; paintResults(); const q = root.querySelector('[data-bcc-q]'); if (q) { q.focus(); try { q.setSelectionRange(pos, pos); } catch { /* ignore */ } } }, 250); }
+      if (e.target.matches('[data-bcc-q]')) { state.q = e.target.value; if (!qRaf) qRaf = requestAnimationFrame(() => { qRaf = 0; paintTable(); }); }
     });
     root.addEventListener('click', (e) => {
       const tab = e.target.closest('[data-bcc-tab]');
@@ -279,6 +308,15 @@ FF.pages = FF.pages || {};
       if (fl) { state.filter = fl.dataset.bccFilter; paintResults(); return; }
       const ag = e.target.closest('[data-bcc-agent]');
       if (ag) { const a = ag.dataset.bccAgent; state.agent = state.agent === a ? '' : a; paintResults(); return; }
+      const cp = e.target.closest('[data-bcc-copy]');
+      if (cp && state.rows) { const rows = visible(); const m = cp.dataset.bccCopy; copyOut(copyText(rows, m), `${U.fmt(rows.length)} ${m === 'bc' ? 'barcodes' : m === 'tag' ? 'tag IDs' : 'rows (Barcode + Tag ID + Status)'}`); return; }
+      const rowTr = e.target.closest('tr[data-bcc-i]');
+      if (rowTr && state.rows) {
+        const r = state.rows[+rowTr.dataset.bccI];
+        const cell = e.target.closest('[data-bcc-cell]');
+        if (r && cell) { copyOut(copyText([r], cell.dataset.bccCell), cell.dataset.bccCell === 'bc' ? r.barcode : (r.tagId || 'Tag ID')); return; }
+        if (r && e.target.closest('[data-bcc-row]')) { copyOut(copyText([r], 'both'), 'Barcode + Tag ID + Status'); return; }
+      }
       const x = e.target.closest('[data-bcc-xlsx]');
       if (x && state.rows) {
         const rows = x.dataset.bccXlsx === 'all' ? state.rows : visible();
@@ -288,6 +326,6 @@ FF.pages = FF.pages || {};
     });
   }
 
-  FF.barcodeChecker = { expandRange, tagInfer, parseMulti, makeRow, _state: state };
+  FF.barcodeChecker = { expandRange, tagInfer, parseMulti, makeRow, paintResults, visible, copyText, _state: state };
   FF.pages.barcodeChecker = { title: 'Barcode Checker', render };
 })(window.FF);
