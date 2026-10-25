@@ -6953,3 +6953,15 @@ html[data-theme="dark"] .gvc-chip { color: #fde68a; background: #3b2a08; border-
 @media (max-width: 700px) { .msp-donuts { grid-template-columns: 1fr; } }
 .msp-donuts .donut-leg { cursor: pointer; }
 .msp-donuts .donut-leg:hover { background: rgba(99, 102, 241, .08); border-radius: 8px; }
+
+/* v3.92 — Master search summary chips: halka rang */
+.msp-kpi.k1 { background: color-mix(in srgb, #6366f1 7%, var(--card)); }
+.msp-kpi.k2 { background: color-mix(in srgb, #06b6d4 7%, var(--card)); }
+.msp-kpi.k6 { background: color-mix(in srgb, #8b5cf6 7%, var(--card)); }
+.msp-kpi.k8 { background: color-mix(in srgb, #64748b 7%, var(--card)); }
+.msp-kpi.k3 { background: color-mix(in srgb, #f59e0b 7%, var(--card)); }
+.msp-kpi.k4 { background: color-mix(in srgb, #10b981 7%, var(--card)); }
+.msp-kpi.k0 { background: color-mix(in srgb, #ec4899 6%, var(--card)); }
+.msp-kpi.k10 { background: color-mix(in srgb, #3b82f6 7%, var(--card)); }
+.msp-kpi.k11 { background: color-mix(in srgb, #84cc16 7%, var(--card)); }
+.msp-kpi-card .card-head .gvc-chip { margin-left: 4px; }

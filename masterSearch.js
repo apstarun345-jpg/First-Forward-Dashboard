@@ -1750,16 +1750,27 @@ FF.pages = FF.pages || {};
         if (!C || !C.donut || !rows.length) return '';
         const mm = pr.months || {};
         const spec2 = (scope, ym, cls) => `src=${ch}&scope=${scope}${ym ? `&ym=${encodeURIComponent(ym)}` : ''}&${who}&cls=${encodeURIComponent(cls)}`;
-        const mk = (key, scope, ym, title) => rows.map((c) => ({
-          label: c.cls || 'NA', value: Number(c[key]) || 0,
-          attr: `data-kpi="${esc(spec2(scope, ym, c.cls || 'NA'))}" data-kpi-title="${esc(`${title} · ${c.cls || 'NA'}`)}" title="Click = rows + CSV" style="cursor:pointer"`
-        })).filter((x) => x.value > 0).sort((x, y) => y.value - x.value);
+        const nk = (v) => String(v || '').toUpperCase().replace(/\s+/g, '');
+        const grps = (FF.config.tvcGroups || []).map((g) => ({ lab: `VC${g.tvc}`, set: new Set([...(g.cch || []).map(nk), `VC${g.tvc}`]) }));
+        const bucketOf = (cls) => { const g = grps.find((x) => x.set.has(nk(cls))); return g ? g.lab : (cls || 'NA'); };
+        const mk = (key, scope, ym, title) => {
+          const m = new Map();
+          rows.forEach((c) => {
+            const v = Number(c[key]) || 0; if (v <= 0) return;
+            const b = bucketOf(c.cls), o = m.get(b) || { label: b, value: 0, cls: [] };
+            o.value += v; if (c.cls && !o.cls.includes(c.cls)) o.cls.push(c.cls); m.set(b, o);
+          });
+          return [...m.values()].sort((x, y) => y.value - x.value).map((o) => ({
+            label: o.label, value: o.value,
+            attr: `data-kpi="${esc(spec2(scope, ym, o.cls.join(',') || o.label))}" data-kpi-title="${esc(`${title} · ${o.label}`)}" title="${esc(o.label + (o.cls.length ? ' = ' + o.cls.join(' + ') : '') + ' · click = rows')}" style="cursor:pointer"`
+          }));
+        };
         const one = (title, items, sub) => `<section class="card gs-card"><div class="card-head"><h3>${title}</h3><span class="dim small">click = rows</span></div><div class="card-body">${items.length ? C.donut({ items, size: 150, subtitle: sub }) : '<div class="empty">No data</div>'}</div></section>`;
         return `<div class="gs-grid3 msp-donuts">${one(`📅 Last month${mm.last ? ` · ${esc(mm.last)}` : ''}`, mk('last', 'month', mm.last, 'Last month'), 'tags')}${one(`🏷️ This month${mm.cur ? ` · ${esc(mm.cur)}` : ''}`, mk('cur', 'mtd', mm.cur, 'This month'), 'tags')}${one('📦 Stock in hand', mk('stock', 'stock', '', 'Stock in hand'), 'in stock')}</div>`;
       })();
       return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
           <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL summary' : 'Agent summary'}</h3>
-          <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
+          <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${ch === 'gv' ? GVC.chip({ kind: isTl ? 'gv_tl' : 'gv_agent', sub: pr.id, id: pr.id, channel: 'gv' }) : ''}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
           <div class="card-right">${prioChip(worst === 'None' ? prioEff : worst)}</div></div>
         <div class="card-body"><div class="mp-kpis msp-kpis">
           ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}${c.cover != null ? ` · run-rate ${U.fmt(c.rate, true)}/day → stock ~${U.fmt(Math.round(c.cover))} din chalega` : ''}`, spec('stock'))}

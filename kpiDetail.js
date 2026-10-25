@@ -270,7 +270,7 @@ window.FF = window.FF || {};
     const wantedGroup = String(spec.group || '').trim().toUpperCase();
     if (wantedGroup === 'VC4' && r.group !== 'VC4') return false;
     if (/^(COMM|COMMERCIAL|NVC4)$/.test(wantedGroup) && r.group === 'VC4') return false;
-    if (spec.cls && classKey(r.cls) !== classKey(spec.cls)) return false;
+    if (spec.cls && !String(spec.cls).split(',').some((c) => classKey(r.cls) === classKey(c))) return false;
     if (spec.type === 'REPLACEMENT' && r.type !== 'REPLACEMENT') return false;
     if (spec.type === 'NOT_REPLACEMENT' && r.type === 'REPLACEMENT') return false;
     if (spec.vrnBucket && vrnBucket(r.vrnType) !== spec.vrnBucket) return false;
