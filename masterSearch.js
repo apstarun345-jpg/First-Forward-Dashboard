@@ -2418,6 +2418,7 @@ FF.pages = FF.pages || {};
   FF.masterSearch = {
     buildLight, buildFull, warmFull, barcodeSuggest, invalidate, search, preferNameMatches, suggestItems, resultsHtml, openPanel, closePanel,
     mountTopbar, openSearchPage, onIndexReady, personByKey, linkedTlFor, teamPeopleFor, _limits: LIMITS,
+    gvc: GVC,
     reloadCommission() { GVC.data = null; GVC.failAt = 0; return GVC.load(true); },
     get ready() { return !!(state.light); }, get heavyReady() { return !!(state.full && state.full.fullLoaded); },
     get topbarMounted() { return mountedTopbar; },

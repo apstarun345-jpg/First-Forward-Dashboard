@@ -41,7 +41,7 @@ window.FF = window.FF || {};
     return `<div class="gs-kpis">${v.cards.map((k) => `
       <button type="button" class="gs-kpi ${k.tone || ''}" data-gs-kpi="${esc(k.key)}" title="${esc(k.explain || 'Click = neeche ki rows')}">
         <span class="gs-kpi-top"><span class="gs-kpi-label">${k.icon || ''} ${esc(k.label)}</span><span class="gs-kpi-tap">rows ▸</span></span>
-        <span class="gs-kpi-value">${k.valueText !== undefined ? k.valueText : (typeof k.value === 'string' ? esc(k.value) : fmt(k.value))}${k.unit ? ` <small>${esc(k.unit)}</small>` : ''}</span>
+        <span class="gs-kpi-value">${k.valueHtml !== undefined ? k.valueHtml : k.valueText !== undefined ? k.valueText : (typeof k.value === 'string' ? esc(k.value) : fmt(k.value))}${k.unit ? ` <small>${esc(k.unit)}</small>` : ''}</span>
         <span class="gs-kpi-sub">${k.sub || ''}</span>
         ${k.check ? `<span class="gs-kpi-x">${crossChip(k.check)}</span>` : ''}
         <span class="gs-kpi-why">${esc(k.why || '')}</span>
@@ -280,11 +280,21 @@ window.FF = window.FF || {};
         sub: `Chassis <b>${fmt(lt.cur.chassis)}</b> · VRN <b>${fmt(lt.cur.vrn)}</b>`,
         why: 'GV Master status / tag type se', explain: 'Replacement status wali rows alag gini gayi hain.',
         drill: { scope: 'repl', title: `🔁 Replacement ${fmt(lt.cur.replacement)} · Chassis ${fmt(lt.cur.chassis)} (sirf yehi rows)` } }),
+      (() => {
+        const G = FF.masterSearch && FF.masterSearch.gvc;
+        if (!G) return null;
+        if (G.load) G.load();
+        const key = `${String(t.id || '').trim().toUpperCase()}|${isTl ? 1 : 0}`;
+        return card({ key: 'comm', icon: '💸', tone: 'g4', label: 'Commission', value: 0,
+          valueHtml: `<span data-gvc="${esc(key)}" data-gvc-mode="val">${G.inner(t.id, isTl, 'val')}</span>`,
+          sub: `<span data-gvc="${esc(key)}" data-gvc-mode="sub">${G.inner(t.id, isTl, 'sub')}</span>`,
+          why: 'GV Master · product ID ka latest commission', explain: 'GV Master (settings wali product ID) ka latest commission.' });
+      })(),
       card({ key: 'sheet', icon: '📑', tone: 'g12', label: 'GV REPORT sheet', value: sh.cur !== null && sh.cur !== undefined ? sh.cur : '—', unit: 'tags',
         sub: sh.found ? `Stock <b>${sh.stockAvailable ? fmt(sh.stock) : '—'}</b> · Last <b>${sh.lastAvailable ? fmt(sh.last) : '—'}</b>` : 'sheet me row nahi mili',
         why: 'Sirf cross-check (final nahi)', explain: sh.found ? `Sheet me is (${sh.agentId || t.id}) ke liye current month ${sh.curAvailable ? fmt(sh.cur) : 'blank'} hai.` : 'Is person ka row GV REPORT me nahi mila.',
         drill: { scope: 'sheet', title: '📑 GV REPORT sheet vs GV Master ledger' } })
-    ];
+    ].filter(Boolean);
     const m = { y: 0 };
     return {
       ch: 'gv', kind: t.kind, name: t.name, id: t.id, tlName: t.tlName, tlId: t.tlId, mobile: t.mobile || person.mobile || '',
@@ -832,6 +842,7 @@ window.FF = window.FF || {};
         const sw = e.target.closest('[data-gs-switch]');
         if (sw && FF.app && FF.app.navigate) { FF.app.navigate(`${sw.dataset.gsSwitch}AgentSummary`, { name: S.person ? S.person.name : '' }); return; }
         const kpi = e.target.closest('[data-gs-kpi]');
+        if (kpi && kpi.dataset.gsKpi === 'comm') return;
         if (kpi && S.view) { const k = S.view.cards.find((c) => c.key === kpi.dataset.gsKpi); if (k) openDrill(k.drill || { scope: k.key === 'stock' ? 'stock' : k.key === 'last' ? 'last' : k.key === 'today' ? 'today' : 'cur' }); return; }
         const dn = e.target.closest('[data-gs-dscope]');
         if (dn && S.view) { const sc = dn.dataset.gsDscope, dc = dn.dataset.gsDcls; const ym = sc === 'last' ? S.view.lastYm : sc === 'stock' ? 'stock' : S.view.ym; openDrill({ scope: sc, cls: dc, fromDonut: true, title: `${dc} · ${ym} · ${S.view.name}` }); return; }
