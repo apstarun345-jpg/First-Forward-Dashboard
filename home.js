@@ -28,7 +28,31 @@ FF.pages = FF.pages || {};
     const n = (k) => Number(o[k]) || 0;
     return `<div class="kpi-clsplit">${[['VC4', 'VC4'], ['VC20', 'VC20'], ['VC5+', 'VC5+']].map(([k, l]) => `<span class="${n(k) ? '' : 'zero'}">${l} <b>${U.fmt(n(k))}</b></span>`).join('')}</div>`;
   };
-  const kpi = (cls, title, icon, value, foot, spec, plain) => `<div class="kpi ${cls}"${spec ? ` data-kpi="${esc(spec)}"` : ''}${plain ? ` data-kpi-value="${esc(plain)}"` : ''} data-kpi-title="${esc(title)}" role="button" tabindex="0"><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
+  const kpi = (cls, title, icon, value, foot, spec, plain, spark) => `<div class="kpi ${cls}"${spec ? ` data-kpi="${esc(spec)}"` : ''}${plain ? ` data-kpi-value="${esc(plain)}"` : ''} data-kpi-title="${esc(title)}" role="button" tabindex="0"><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div>${spark || ''}<div class="kpi-foot">${foot || ''}</div></div>`;
+  /** 📈 v3.88 — din-wise sparkline (current month, report wale din tak). rows = daily rows (ym, day, n, group, type, vrnType). */
+  const dailySeries = (rows, ym, upTo, pick) => {
+    const out = Array(Math.max(0, upTo | 0)).fill(0);
+    (rows || []).forEach((r) => { if (r.ym !== ym || r.day < 1 || r.day > out.length) return; out[r.day - 1] += pick ? pick(r) : (Number(r.n) || 0); });
+    return out;
+  };
+  /** Har din par hover → tooltip me us din ka exact number (rect hit-area + <title>). */
+  const sparkSvg = (vals, tone, ym) => {
+    if (!vals.length || vals.every((v) => !v)) return '';
+    const w = 100, h = 20, max = Math.max(1, ...vals);
+    const step = vals.length > 1 ? w / (vals.length - 1) : w;
+    const pts = vals.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`).join(' ');
+    const hit = vals.map((v, i) => {
+      const dk = `${ym}-${String(i + 1).padStart(2, '0')}`;
+      return `<rect x="${(i * step - step / 2).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${h}"><title>${esc(`${U.labelDateKey(dk)}: ${U.fmt(v)}`)}</title></rect>`;
+    }).join('');
+    return `<svg class="kpi-spark ${tone || ''}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}"/>${hit}</svg>`;
+  };
+  /** Actual vs expected progress bar (card ke andar). */
+  const progBar = (actual, exp) => {
+    if (!exp || exp <= 0) return '';
+    const p = Math.max(0, Math.round(((actual || 0) / exp) * 100));
+    return `<div class="kpi-prog" title="Actual ${U.fmt(actual || 0)} / Expected ${U.fmt(exp)} · ${p}%"><span style="width:${Math.min(100, p)}%"></span><em>${p}%</em></div>`;
+  };
   const card = (title, body, right) => `<section class="card"><div class="card-head"><div><h3>${title}</h3></div>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
   const dayKey = (d) => U.dateKey(d);
   const TODAY = () => new Date();
@@ -535,20 +559,28 @@ FF.pages = FF.pages || {};
       }
       return { value: wrong === 'loading' ? '…' : '—', foot: wrong === 'loading' ? 'Calculating from VRN length rules…' : 'VRN length rule off / data not available' };
     })();
+    const spk = (pick, tone) => sparkSvg(dailySeries(sf.rows, curKey, observedDay, pick), tone, curKey);
+    const notCore = (r) => r.group !== 'VC4' && r.group !== 'VC20';
+    const sparkFor = {
+      g1: spk(null, 'tone-total') + progBar(sc.total, expected), g3: spk((r) => (r.group === 'VC4' ? r.n : 0), 'tone-vc4') + progBar(sc.vc4, expectedByClass.vc4), g8: spk((r) => (r.group === 'VC20' ? r.n : 0), 'tone-vc20') + progBar(sc.vc20, expectedByClass.vc20),
+      g6: spk((r) => (notCore(r) ? r.n : 0), 'tone-vc5p') + progBar(sc.vc5p, expectedByClass.vc5p), g12: spk((r) => (r.group !== 'VC4' ? r.n : 0), 'tone-comm'),
+      g5: spk((r) => (r.type === 'REPLACEMENT' ? r.n : 0), 'tone-repl'), g7: spk((r) => (/chassis/i.test(r.vrnType) ? r.n : 0), 'tone-chassis'),
+      'g-red': spk((r) => (/wrong/i.test(r.vrnType) ? r.n : 0), 'tone-wrong')
+    };
     const cards = [
       kpi('g9', `Last day · ${U.labelDate(y)}`, '🗓️', U.fmt(lastDayNow),
         `${momChip(lastDayNow, lastDayPrev, `${prevLabel} ${Math.min(yDay, U.daysInMonth(prevKey))}`)}<br>${splitFoot(yFf, yGv)}`,
         `src=both&scope=day&date=${yKey}&eir=1`),
       kpi('g1', `${monthLabel} total (MTD)`, '🏷️', U.fmt(sc.total),
         `${momChip(sc.total, lastSum.total, `${prevLabel} ${observedDay} din`)}<br>${splitFoot(curFf.total, curGv.total)}`,
-        `src=both&scope=mtd&ym=${curKey}&eir=1`),
-      kpi('g3', 'VC4', '🚗', U.fmt(sc.vc4), `${momChip(sc.vc4, lastSum.vc4)}<br>${splitFoot(curFf.vc4, curGv.vc4)}`, `src=both&scope=mtd&ym=${curKey}&f=vc4&eir=1`),
-      kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(curFf.vc20, curGv.vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20&eir=1`),
-      kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(curFf.vc5p, curGv.vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p&eir=1`),
-      kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(compareDay, U.daysInMonth(prevKey))} reported din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b> <span class="dim">(report till ${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'})</span>`, `src=both&scope=mtd&ym=${curKey}&f=comm&eir=1`),
-      kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(curFf.replacement, curGv.replacement)}${clsSplit(sc.replacementBy)}`, `src=both&scope=mtd&ym=${curKey}&f=repl&eir=1`),
-      kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(curFf.chassis, curGv.chassis)}${clsSplit(sc.chassisBy)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis&eir=1`),
-      kpi('g-red', 'Wrong VRN', '⚠️', wrongVrnCard.value, wrongVrnCard.foot, `src=both&scope=mtd&ym=${curKey}&f=wrong&eir=1`, wrongVrnCard.plain),
+        `src=both&scope=mtd&ym=${curKey}&eir=1`, undefined, sparkFor.g1),
+      kpi('g3', 'VC4', '🚗', U.fmt(sc.vc4), `${momChip(sc.vc4, lastSum.vc4)}<br>${splitFoot(curFf.vc4, curGv.vc4)}`, `src=both&scope=mtd&ym=${curKey}&f=vc4&eir=1`, undefined, sparkFor.g3),
+      kpi('g8', 'VC20', '🛻', U.fmt(sc.vc20), `${momChip(sc.vc20, lastSum.vc20)}<br>${splitFoot(curFf.vc20, curGv.vc20)}`, `src=both&scope=mtd&ym=${curKey}&f=vc20&eir=1`, undefined, sparkFor.g8),
+      kpi('g6', 'VC5+', '🚚', U.fmt(sc.vc5p), `${momChip(sc.vc5p, lastSum.vc5p)}<br>${splitFoot(curFf.vc5p, curGv.vc5p)}`, `src=both&scope=mtd&ym=${curKey}&f=vc5p&eir=1`, undefined, sparkFor.g6),
+      kpi('g12', 'All Commercial · VC20 + VC5+', '🚛', U.fmt(sc.comm), `${momChip(sc.comm, lastSum.comm, `${prevLabel} · same ${Math.min(compareDay, U.daysInMonth(prevKey))} reported din`)}<br>Last month full <b>${U.fmt(lastFull.comm)}</b> · Expected this month <b>${U.fmt(expectedCommercial)}</b> <span class="dim">(report till ${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'})</span>`, `src=both&scope=mtd&ym=${curKey}&f=comm&eir=1`, undefined, sparkFor.g12),
+      kpi('g5', 'Replacement', '🔁', U.fmt(sc.replacement), `${momChip(sc.replacement, lastSum.replacement)}<br>${splitFoot(curFf.replacement, curGv.replacement)}${clsSplit(sc.replacementBy)}`, `src=both&scope=mtd&ym=${curKey}&f=repl&eir=1`, undefined, sparkFor.g5),
+      kpi('g7', 'Chassis', '🔧', U.fmt(sc.chassis), `${momChip(sc.chassis, lastSum.chassis)}<br>${splitFoot(curFf.chassis, curGv.chassis)}${clsSplit(sc.chassisBy)}`, `src=both&scope=mtd&ym=${curKey}&f=chassis&eir=1`, undefined, sparkFor.g7),
+      kpi('g-red', 'Wrong VRN', '⚠️', wrongVrnCard.value, wrongVrnCard.foot, `src=both&scope=mtd&ym=${curKey}&f=wrong&eir=1`, wrongVrnCard.plain, sparkFor['g-red']),
       kpi('g2', `Expected in ${U.labelYM(curKey)}`, '🎯',
         `<div class="hm-expected-compare">${expectedClassRow('VC4', expectedByClass.vc4, lastFull.vc4)}${expectedClassRow('VC20', expectedByClass.vc20, lastFull.vc20)}${expectedClassRow('VC5+', expectedByClass.vc5p, lastFull.vc5p)}<div class="hm-expected-total"><span>Total Expected</span><b>${U.fmt(expected)}</b></div></div>`,
         `EIR forecast · ${observedDay}/${daysInMonth} reported days · today excluded<br><span class="dim">Report till <b>${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2,'0')}`)) : '—'}</b> · last month full <b>${U.fmt(lastTotalFull)}</b> · expected <b>${U.fmt(lastExpected)}</b></span>`,
@@ -558,8 +590,10 @@ FF.pages = FF.pages || {};
         `Daily average · EIR till ${esc(ctx.receivedDate ? U.labelDate(ctx.receivedDate, true) : '—')} · 1 day lag`,
         fcSpec('runrate'), `${U.fmt(rate, true)} / day`)
     ];
+    // 📸 Snapshot strip — last report day + MTD + expected + run-rate ek line me.
+    const snapHtml = `<div class="hm-snap" aria-label="Snapshot"><span class="hm-snap-i">🗓️ Last report <b>${esc(U.labelDate(y, true))}</b> · <b>${U.fmt(lastDayNow)}</b> <small class="dim">(FF ${U.fmt(yFf)} · GV ${U.fmt(yGv)})</small></span><span class="hm-snap-i">🏷️ MTD <b>${U.fmt(sc.total)}</b></span><span class="hm-snap-i">🎯 Expected <b>${U.fmt(expected)}</b></span><span class="hm-snap-i">⚡ Run rate <b>${U.fmt(rate, true)}</b>/din</span><span class="hm-snap-i">📅 Report till <b>${observedDay ? esc(U.labelDateKey(`${curKey}-${String(observedDay).padStart(2, '0')}`)) : '—'}</b></span></div>`;
     return card(`📅 ${esc(monthLabel)} · KPI cards <span class="dim">· issuance from the EIR sheet only (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')} rows, everything else FF) · last month vs this month + %</span>`,
-      `<div class="kpi-grid mini hm-month-grid">${cards.join('')}</div>`,
+      `${snapHtml}<div class="kpi-grid mini hm-month-grid">${cards.join('')}</div>`,
       `<a class="btn small" href="#/tagIssued?period=month">🏷️ Tag Issued →</a><a class="btn small" href="#/trend">📈 Trend →</a>`);
   }
 

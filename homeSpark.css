@@ -1,0 +1,43 @@
+/* v3.88 — KPI card din-wise sparkline (current month). Compact: card ki height na badhe. */
+html body .kpi .kpi-spark {
+  display: block; width: 100%; height: 18px; margin: 2px 0 0; overflow: visible;
+  color: #6d28d9;
+}
+html body .kpi .kpi-spark rect { fill: transparent; pointer-events: all; cursor: crosshair; }
+html body .kpi .kpi-spark rect:hover { fill: currentColor; fill-opacity: .08; }
+
+/* 🎯 Actual vs expected progress bar */
+html body .kpi .kpi-prog {
+  position: relative; height: 12px; margin: 3px 0 0; border-radius: 999px; overflow: hidden;
+  background: rgba(100, 116, 139, .14);
+}
+html body .kpi .kpi-prog span {
+  position: absolute; inset: 0 auto 0 0; border-radius: 999px;
+  background: linear-gradient(90deg, #6366f1, #22c55e);
+}
+html body .kpi .kpi-prog em {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font: 700 9px/1 system-ui, sans-serif; font-style: normal; color: #0f172a; text-shadow: 0 0 3px rgba(255,255,255,.8);
+}
+
+/* 📸 Snapshot strip (Home · KPI cards ke upar) */
+html body .hm-snap {
+  display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center;
+  padding: 8px 12px; margin: 0 0 10px; border-radius: 10px;
+  background: rgba(99, 102, 241, .07); border: 1px solid rgba(99, 102, 241, .18);
+  font-size: 12.5px;
+}
+html body .hm-snap .hm-snap-i { white-space: nowrap; }
+html body .hm-snap b { font-variant-numeric: tabular-nums; }
+html body .kpi .kpi-spark polyline {
+  fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round;
+  vector-effect: non-scaling-stroke; opacity: .85;
+}
+html body .kpi .kpi-spark.tone-total { color: #7c3aed; }
+html body .kpi .kpi-spark.tone-vc4 { color: #0369a1; }
+html body .kpi .kpi-spark.tone-vc20 { color: #0f766e; }
+html body .kpi .kpi-spark.tone-vc5p { color: #7e22ce; }
+html body .kpi .kpi-spark.tone-comm { color: #c2410c; }
+html body .kpi .kpi-spark.tone-repl { color: #b45309; }
+html body .kpi .kpi-spark.tone-chassis { color: #4338ca; }
+html body .kpi .kpi-spark.tone-wrong { color: #b91c1c; }
