@@ -1743,6 +1743,20 @@ FF.pages = FF.pages || {};
       const growthHtml = (growthNum === null || growthNum === undefined || !Number.isFinite(Number(growthNum))) ? '<span class="dim">—</span>' : U.pctHtml(growthNum, { decimals: 0 });
       const notFound = pr.found === false
         ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — stock / priority sheet se nahi aa paaye (naam ki spelling check karo); issuance tag-ledger (EIR) se hai.</p>` : '';
+      // 🍩 v3.91 — class-wise donuts (last month · this month · stock) summary ke niche; har legend/segment clickable → kpi drill (rows + CSV).
+      const donutBlock = (() => {
+        const rows = Array.isArray(pr.classes) ? pr.classes : [];
+        const C = FF.charts;
+        if (!C || !C.donut || !rows.length) return '';
+        const mm = pr.months || {};
+        const spec2 = (scope, ym, cls) => `src=${ch}&scope=${scope}${ym ? `&ym=${encodeURIComponent(ym)}` : ''}&${who}&cls=${encodeURIComponent(cls)}`;
+        const mk = (key, scope, ym, title) => rows.map((c) => ({
+          label: c.cls || 'NA', value: Number(c[key]) || 0,
+          attr: `data-kpi="${esc(spec2(scope, ym, c.cls || 'NA'))}" data-kpi-title="${esc(`${title} · ${c.cls || 'NA'}`)}" title="Click = rows + CSV" style="cursor:pointer"`
+        })).filter((x) => x.value > 0).sort((x, y) => y.value - x.value);
+        const one = (title, items, sub) => `<section class="card gs-card"><div class="card-head"><h3>${title}</h3><span class="dim small">click = rows</span></div><div class="card-body">${items.length ? C.donut({ items, size: 150, subtitle: sub }) : '<div class="empty">No data</div>'}</div></section>`;
+        return `<div class="gs-grid3 msp-donuts">${one(`📅 Last month${mm.last ? ` · ${esc(mm.last)}` : ''}`, mk('last', 'month', mm.last, 'Last month'), 'tags')}${one(`🏷️ This month${mm.cur ? ` · ${esc(mm.cur)}` : ''}`, mk('cur', 'mtd', mm.cur, 'This month'), 'tags')}${one('📦 Stock in hand', mk('stock', 'stock', '', 'Stock in hand'), 'in stock')}</div>`;
+      })();
       return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
           <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL summary' : 'Agent summary'}</h3>
           <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
@@ -1760,7 +1774,7 @@ FF.pages = FF.pages || {};
           ${box('k10', '🎯 Expected this month · Run-rate', U.fmt((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0)), `Current pace ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days · report cutoff: previous day`, spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
           ${ch === 'gv' ? GVC.boxHtml(pr, isTl) : ''}
-        </div>${notFound}</div></section>`;
+        </div>${notFound}</div></section>${donutBlock}`;
     }
     const kpiLoadingHtml = (name, ch) => `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-body">${U.spinner(`${esc(name)} ka ${ch === 'gv' ? '🟩 GV' : '🟦 FF'} stock · issuance · priority · suggested load ho raha hai…`)}</div></section>`;
     /** Group (FF + GV) ke har channel ka KPI card — pehle quick (memory wala data), phir poora profile aate hi upgrade. */

@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
 const grab = (start, end) => { const a = src.indexOf(start); assert.ok(a >= 0, `missing ${start}`); const b = src.indexOf(end, a); assert.ok(b > a, `missing ${end}`); return src.slice(a, b); };
-const mk = (a, r, c, l, m, d) => ({ c: [{ v: a }, { v: r }, { v: c }, { v: l }, { v: m }, { v: d }] });
+const mk = (a, r, c, l, m, d) => ({ c: [{ v: a }, { v: r }, { v: c }, { v: l }, { v: m }, { v: d }, { v: 'N-' + a }, { v: 'TN-' + r }, { v: 'VC4' }] });
 
 function loadBuilder(rows, seen) {
   const code = [
@@ -22,7 +22,7 @@ function loadBuilder(rows, seen) {
     `${code}\nreturn { build: buildGvAgentCommission, sheetId: gvcSheetId };`)(
     async (url) => { seen.push(url); return { body: 'x' }; }, (p) => p.get('tq'), () => ({ rows }));
 }
-const CFG = { agentCol: 'A', tlCol: 'R', tlFallbackCol: 'C', productCol: 'L', commissionCol: 'M', dateCol: 'P', productId: '100000007832', tab: 'GV Master', label: 'VC4', suffix: '/tag', currency: '₹' };
+const CFG = { agentCol: 'A', tlCol: 'R', tlFallbackCol: 'C', productCol: 'L', commissionCol: 'M', dateCol: 'P', agentNameCol: 'B', tlNameCol: 'D', classCol: 'G', classFallbackCol: 'F', productId: '100000007832', tab: 'GV Master', label: 'VC4', suffix: '/tag', currency: '₹' };
 
 test('latest commission per agent (by date), zero ignored, TL max via fallback column', async () => {
   const seen = [];
@@ -39,7 +39,7 @@ test('latest commission per agent (by date), zero ignored, TL max via fallback c
   assert.equal(out.agents.APS2.a, 147);
   assert.equal(out.agents.APS3, undefined);
   assert.deepEqual(out.tls.TL1, { max: 147, min: 130, n: 2 });
-  assert.match(seen[0], /select A, R, C, L, M, P where L = '100000007832'/);
+  assert.match(seen[0], /select A, R, C, L, M, P, B, D, G, F where L = '100000007832'/);
 });
 
 test('sheet link / ID parsing and columns come from settings', () => {

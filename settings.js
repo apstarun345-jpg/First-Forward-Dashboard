@@ -1144,6 +1144,10 @@ FF.pages = FF.pages || {};
           ${field('Date column (latest ke liye)', `<input class="input mono" data-path="gvAgentCommission.dateCol" value="${esc(settings.gvAgentCommission?.dateCol || 'P')}" maxlength="3" placeholder="P">`, 'Default P · sabse nayi date ki row = latest')}
           ${field('TL ID column', `<input class="input mono" data-path="gvAgentCommission.tlCol" value="${esc(settings.gvAgentCommission?.tlCol || 'R')}" maxlength="3" placeholder="R">`, 'TL ke agents ka max nikalne ke liye · default R')}
           ${field('TL ID fallback column', `<input class="input mono" data-path="gvAgentCommission.tlFallbackCol" value="${esc(settings.gvAgentCommission?.tlFallbackCol ?? 'C')}" maxlength="3" placeholder="C">`, 'TL ID (R) khaali ho to · default C')}
+          ${field('Agent name column', `<input class="input mono" data-path="gvAgentCommission.agentNameCol" value="${esc(settings.gvAgentCommission?.agentNameCol ?? 'B')}" maxlength="3" placeholder="B">`, 'Commission Payout page: agent ka naam')}
+          ${field('TL name column', `<input class="input mono" data-path="gvAgentCommission.tlNameCol" value="${esc(settings.gvAgentCommission?.tlNameCol ?? 'D')}" maxlength="3" placeholder="D">`, 'Commission Payout page: TL ka naam')}
+          ${field('Class column', `<input class="input mono" data-path="gvAgentCommission.classCol" value="${esc(settings.gvAgentCommission?.classCol ?? 'G')}" maxlength="3" placeholder="G">`, 'Agent ki class')}
+          ${field('Class fallback column', `<input class="input mono" data-path="gvAgentCommission.classFallbackCol" value="${esc(settings.gvAgentCommission?.classFallbackCol ?? 'F')}" maxlength="3" placeholder="F">`, 'Class khaali ho to ye column (khaali chhod sakte ho)')}
           ${field('Currency', `<input class="input" data-path="gvAgentCommission.currency" value="${esc(settings.gvAgentCommission?.currency ?? '₹')}" maxlength="3" placeholder="₹">`, '')}
           ${field('Suffix', `<input class="input" data-path="gvAgentCommission.suffix" value="${esc(settings.gvAgentCommission?.suffix ?? '/tag')}" maxlength="12" placeholder="/tag">`, 'Amount ke baad (jaise /tag)')}
         </div>

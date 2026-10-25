@@ -141,6 +141,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvPerformance', label: 'GV Partner · Performance', group: 'GV Partner' },
   { key: 'gvStock', label: 'GV Partner · Stock', group: 'GV Partner' },
   { key: 'gvStockReport', label: 'GV Partner · GV Stock Report (GV REPORT-wise)', group: 'GV Partner' },
+  { key: 'gvPayout', label: 'GV Partner · Commission Payout (agent / TL commission + tags issued)', group: 'GV Partner' },
   { key: 'fastagMapping', label: 'GV Partner · FASTag Mapping (admin-only API mapping)', group: 'GV Partner' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
   { key: 'aiAnalyst', label: 'Management · AI Business Analyst (GV + FF review)', group: 'Management' },
@@ -260,7 +261,7 @@ const DEFAULT_SETTINGS = {
   gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],   // v3.87 — TVC → CCH classes (Tag Request class grid)
   // v3.90 — GV agent / TL commission box (Master search + profile): sheet link, tab, columns sab Settings se badal sakte ho.
-  gvAgentCommission: { enabled: true, sheetLink: '', tab: 'GV Master', agentCol: 'A', tlCol: 'R', tlFallbackCol: 'C', productCol: 'L', commissionCol: 'M', dateCol: 'P', productId: '100000007832', label: 'VC4', suffix: '/tag', currency: '₹' },
+  gvAgentCommission: { enabled: true, sheetLink: '', tab: 'GV Master', agentCol: 'A', tlCol: 'R', tlFallbackCol: 'C', productCol: 'L', commissionCol: 'M', dateCol: 'P', agentNameCol: 'B', tlNameCol: 'D', classCol: 'G', classFallbackCol: 'F', productId: '100000007832', label: 'VC4', suffix: '/tag', currency: '₹' },
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
     assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M', allocatedAt: '' },
@@ -716,7 +717,7 @@ function permissionDiff(before, after) {
 }
 const activityLast = new Map();
 // Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
-const CLIENT_PAGES = new Set(['home', 'tagIssued', 'tagRequest', 'targets', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'charts', 'dispatchPlan', 'tlScorecard']);
+const CLIENT_PAGES = new Set(['gvPayout', 'home', 'tagIssued', 'tagRequest', 'targets', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'charts', 'dispatchPlan', 'tlScorecard']);
 /** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
 function pageLinkFor(option, query) {
   const t = String(option || '').trim();
@@ -8893,7 +8894,7 @@ async function handleApi(req, res, url) {
       const D = DEFAULT_SETTINGS.gvAgentCommission;
       const col = (k) => {
         const raw = String(cfg[k] === undefined ? D[k] : cfg[k]).trim().toUpperCase();
-        if (k === 'tlFallbackCol' && !raw) return '';
+        if ((k === 'tlFallbackCol' || k === 'classFallbackCol') && !raw) return '';
         if (!/^[A-Z]{1,3}$/.test(raw)) throw new HttpError(400, `${k}: column letter chahiye (jaise A, L, M).`);
         return raw;
       };
@@ -8903,6 +8904,7 @@ async function handleApi(req, res, url) {
         sheetLink: txt('sheetLink', 400), tab: txt('tab', 80) || D.tab,
         agentCol: col('agentCol'), tlCol: col('tlCol'), tlFallbackCol: col('tlFallbackCol'),
         productCol: col('productCol'), commissionCol: col('commissionCol'), dateCol: col('dateCol'),
+        agentNameCol: col('agentNameCol'), tlNameCol: col('tlNameCol'), classCol: col('classCol'), classFallbackCol: col('classFallbackCol'),
         productId: txt('productId', 40).replace(/[^A-Za-z0-9_-]/g, '') || D.productId,
         label: txt('label', 20) || D.label, suffix: txt('suffix', 12), currency: txt('currency', 3)
       };
@@ -9889,7 +9891,7 @@ function gvcSheetId(cfg, settings) {
   return String((settings && settings.gvSheetId) || '').replace(/[^A-Za-z0-9_-]/g, '');
 }
 async function buildGvAgentCommission(cfg, id) {
-  const wanted = [cfg.agentCol, cfg.tlCol, cfg.tlFallbackCol, cfg.productCol, cfg.commissionCol, cfg.dateCol].filter(Boolean);
+  const wanted = [cfg.agentCol, cfg.tlCol, cfg.tlFallbackCol, cfg.productCol, cfg.commissionCol, cfg.dateCol, cfg.agentNameCol, cfg.tlNameCol, cfg.classCol, cfg.classFallbackCol].filter(Boolean);
   const cols = [...new Set(wanted)];
   const ix = (c) => (c ? cols.indexOf(c) : -1);
   const select = `select ${cols.join(', ')}`;
@@ -9919,7 +9921,11 @@ async function buildGvAgentCommission(cfg, id) {
     const prev = agents[agent];
     if (prev && prev.d && d && d < prev.d) continue;        // purani date wali row latest ko nahi hataati
     if (prev && prev.d && !d) continue;
-    agents[agent] = { a: amount, d, tl: normId(serverCell(row, ix(cfg.tlCol))) || normId(serverCell(row, ix(cfg.tlFallbackCol))) };
+    const txtCell = (c) => (ix(c) >= 0 ? String(serverCell(row, ix(c)) || '').trim() : '');
+    agents[agent] = {
+      a: amount, d, tl: normId(serverCell(row, ix(cfg.tlCol))) || normId(serverCell(row, ix(cfg.tlFallbackCol))),
+      n: txtCell(cfg.agentNameCol), tn: txtCell(cfg.tlNameCol), c: txtCell(cfg.classCol) || txtCell(cfg.classFallbackCol)
+    };
   }
   const tls = {};
   Object.entries(agents).forEach(([, v]) => {
@@ -9929,7 +9935,7 @@ async function buildGvAgentCommission(cfg, id) {
   });
   Object.values(tls).forEach((t) => { if (!Number.isFinite(t.min)) t.min = 0; });
   const slim = {};
-  Object.entries(agents).forEach(([k, v]) => { slim[k] = { a: v.a, d: v.d }; });
+  Object.entries(agents).forEach(([k, v]) => { slim[k] = { a: v.a, d: v.d, n: v.n, tid: v.tl, tn: v.tn, c: v.c }; });
   return {
     ok: true, enabled: true, productId: pid, label: cfg.label, suffix: cfg.suffix, currency: cfg.currency,
     updatedAt: new Date().toISOString(), count: Object.keys(slim).length, agents: slim, tls

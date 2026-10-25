@@ -6946,3 +6946,10 @@ html[data-theme="dark"] .gvc-chip { color: #fde68a; background: #3b2a08; border-
 .msp-tot { margin-top: 6px; padding-top: 6px; border-top: 1px dashed color-mix(in srgb, currentColor 22%, transparent); }
 .msp-cls-line.msp-tot-line { grid-template-columns: 112px 78px 104px; font-weight: 800; }
 .msp-cls-line.msp-tot-line .c1 { white-space: nowrap; }
+
+/* v3.91 — Master search: class-wise donuts below the summary */
+.msp-donuts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+@media (max-width: 1100px) { .msp-donuts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .msp-donuts { grid-template-columns: 1fr; } }
+.msp-donuts .donut-leg { cursor: pointer; }
+.msp-donuts .donut-leg:hover { background: rgba(99, 102, 241, .08); border-radius: 8px; }
