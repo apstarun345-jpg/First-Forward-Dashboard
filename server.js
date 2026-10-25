@@ -259,6 +259,8 @@ const DEFAULT_SETTINGS = {
   },
   gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],   // v3.87 — TVC → CCH classes (Tag Request class grid)
+  // v3.90 — GV agent / TL commission box (Master search + profile): sheet link, tab, columns sab Settings se badal sakte ho.
+  gvAgentCommission: { enabled: true, sheetLink: '', tab: 'GV Master', agentCol: 'A', tlCol: 'R', tlFallbackCol: 'C', productCol: 'L', commissionCol: 'M', dateCol: 'P', productId: '100000007832', label: 'VC4', suffix: '/tag', currency: '₹' },
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
     assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M', allocatedAt: '' },
@@ -5440,6 +5442,14 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, perf: perfReport() });
   }
   // ⚡ GV ONLY AAJ — Home ka first paint isi fast endpoint se aata hai; history /api/today se alag.
+  if (p === '/api/gv-agent-commission' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    try {
+      return sendJson(res, 200, await gvAgentCommission(url.searchParams.get('fresh') === '1' && user.role === 'admin'));
+    } catch (err) {
+      return sendJson(res, 200, { ok: false, error: String((err && err.message) || err).slice(0, 200) });
+    }
+  }
   if (p === '/api/gv-today' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
     const force = url.searchParams.get('fresh') === '1' && user.role === 'admin';
@@ -8877,6 +8887,28 @@ async function handleApi(req, res, url) {
     }
     // 👤 GV personal commission — exact agent ID + class settings. Blank manual rate is allowed
     // (it keeps the row unresolved instead of silently changing the payout).
+    if (patch.gvAgentCommission !== undefined) {
+      const cfg = patch.gvAgentCommission;
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new HttpError(400, 'gvAgentCommission object hona chahiye.');
+      const D = DEFAULT_SETTINGS.gvAgentCommission;
+      const col = (k) => {
+        const raw = String(cfg[k] === undefined ? D[k] : cfg[k]).trim().toUpperCase();
+        if (k === 'tlFallbackCol' && !raw) return '';
+        if (!/^[A-Z]{1,3}$/.test(raw)) throw new HttpError(400, `${k}: column letter chahiye (jaise A, L, M).`);
+        return raw;
+      };
+      const txt = (k, max) => String(cfg[k] === undefined ? D[k] : cfg[k]).trim().slice(0, max);
+      const out = {
+        enabled: cfg.enabled !== false && cfg.enabled !== 'false',
+        sheetLink: txt('sheetLink', 400), tab: txt('tab', 80) || D.tab,
+        agentCol: col('agentCol'), tlCol: col('tlCol'), tlFallbackCol: col('tlFallbackCol'),
+        productCol: col('productCol'), commissionCol: col('commissionCol'), dateCol: col('dateCol'),
+        productId: txt('productId', 40).replace(/[^A-Za-z0-9_-]/g, '') || D.productId,
+        label: txt('label', 20) || D.label, suffix: txt('suffix', 12), currency: txt('currency', 3)
+      };
+      Object.keys(cfg).forEach((k) => delete cfg[k]);
+      Object.assign(cfg, out);
+    }
     if (patch.tvcGroups !== undefined) {
       if (!Array.isArray(patch.tvcGroups)) throw new HttpError(400, 'tvcGroups list hona chahiye.');
       const seen = new Set();
@@ -9845,6 +9877,84 @@ function personalRequestsHtml(link) {
 const PORTAL_LOGIN_JS = "(function(){var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');\n      function go(extra){e.hidden=true;b.disabled=true;b.textContent='\u23f3 Logging in\u2026';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;\n      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){\n        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}\n        if(x.j.url){location.href=x.j.url;return;}\n        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'\ud83d\udfe9 ':'\ud83d\udfe6 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='\ud83d\udd13 Login';}\n      }).catch(function(err){e.textContent='\u26a0\ufe0f '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='\ud83d\udd13 Login';});}\n      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();";
 
 // ⚡ short-lived rendered-page cache (per link + channel view) so tab/channel switches and reloads are instant
+
+// 💸 v3.90 — GV agent / TL ka latest commission (GV Master: product_id L → commission M, latest row by date).
+// Poora map server par ek baar banta hai (10 min cache, stale-while-revalidate) — client ko ek chhota JSON milta hai, search turant.
+const gvcCache = { at: 0, key: '', body: null, promise: null };
+function gvcSheetId(cfg, settings) {
+  const link = String(cfg.sheetLink || '').trim();
+  const m = /\/spreadsheets\/d\/([A-Za-z0-9_-]+)/.exec(link);
+  if (m) return m[1];
+  if (/^[A-Za-z0-9_-]{20,}$/.test(link)) return link;
+  return String((settings && settings.gvSheetId) || '').replace(/[^A-Za-z0-9_-]/g, '');
+}
+async function buildGvAgentCommission(cfg, id) {
+  const wanted = [cfg.agentCol, cfg.tlCol, cfg.tlFallbackCol, cfg.productCol, cfg.commissionCol, cfg.dateCol].filter(Boolean);
+  const cols = [...new Set(wanted)];
+  const ix = (c) => (c ? cols.indexOf(c) : -1);
+  const select = `select ${cols.join(', ')}`;
+  const pid = String(cfg.productId);
+  const tries = [
+    `${select} where ${cfg.productCol} = '${pid}' limit 100000`,
+    `${select} where ${cfg.productCol} = ${/^\d+$/.test(pid) ? pid : `'${pid}'`} limit 100000`,
+    `${select} where ${cfg.productCol} is not null limit 100000`
+  ];
+  let table = null, usedLast = false;
+  for (let i = 0; i < tries.length; i++) {
+    try {
+      const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id, sheet: cfg.tab, tq: tries[i] })), { maxAgeMs: 5 * 60e3 });
+      const t = parseGvizServer(out.body);
+      if ((t.rows || []).length || i === tries.length - 1) { table = t; usedLast = i === tries.length - 1; break; }
+    } catch (err) { if (i === tries.length - 1) throw err; }
+  }
+  const agents = {};
+  const normId = (v) => String(v || '').trim().toUpperCase();
+  for (const row of (table && table.rows) || []) {
+    if (usedLast && String(serverCell(row, ix(cfg.productCol))).replace(/\.0+$/, '').trim() !== pid) continue;
+    const agent = normId(serverCell(row, ix(cfg.agentCol)));
+    if (!agent || agent === 'UNIQUE_ID') continue;
+    const amount = Number(String(serverCell(row, ix(cfg.commissionCol))).replace(/[^0-9.\-]/g, ''));
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const d = ix(cfg.dateCol) >= 0 ? serverDateFromCell(row, ix(cfg.dateCol)) : '';
+    const prev = agents[agent];
+    if (prev && prev.d && d && d < prev.d) continue;        // purani date wali row latest ko nahi hataati
+    if (prev && prev.d && !d) continue;
+    agents[agent] = { a: amount, d, tl: normId(serverCell(row, ix(cfg.tlCol))) || normId(serverCell(row, ix(cfg.tlFallbackCol))) };
+  }
+  const tls = {};
+  Object.entries(agents).forEach(([, v]) => {
+    if (!v.tl) return;
+    const t = tls[v.tl] || (tls[v.tl] = { max: 0, min: Infinity, n: 0 });
+    t.max = Math.max(t.max, v.a); t.min = Math.min(t.min, v.a); t.n++;
+  });
+  Object.values(tls).forEach((t) => { if (!Number.isFinite(t.min)) t.min = 0; });
+  const slim = {};
+  Object.entries(agents).forEach(([k, v]) => { slim[k] = { a: v.a, d: v.d }; });
+  return {
+    ok: true, enabled: true, productId: pid, label: cfg.label, suffix: cfg.suffix, currency: cfg.currency,
+    updatedAt: new Date().toISOString(), count: Object.keys(slim).length, agents: slim, tls
+  };
+}
+async function gvAgentCommission(force) {
+  const settings = db.settings || {};
+  const cfg = { ...DEFAULT_SETTINGS.gvAgentCommission, ...(settings.gvAgentCommission || {}) };
+  if (cfg.enabled === false) return { ok: true, enabled: false };
+  const id = gvcSheetId(cfg, settings);
+  if (!id) return { ok: false, error: 'GV sheet link / ID set nahi hai.' };
+  const key = JSON.stringify([id, cfg]);
+  const ttl = 10 * 60e3;
+  const same = gvcCache.key === key && gvcCache.body;
+  const run = () => {
+    if (!gvcCache.promise) {
+      gvcCache.promise = buildGvAgentCommission(cfg, id).then((b) => { gvcCache.body = b; gvcCache.at = Date.now(); gvcCache.key = key; return b; })
+        .finally(() => { gvcCache.promise = null; });
+    }
+    return gvcCache.promise;
+  };
+  if (!force && same && Date.now() - gvcCache.at < ttl) return gvcCache.body;
+  if (!force && same && Date.now() - gvcCache.at < 6 * 3600e3) { run().catch(() => {}); return gvcCache.body; }   // stale turant, naya background me
+  return run();
+}
 
 // ⚡ v3.79 — personal /p/ links ka data pehle se garam rakho: pehla khulna bhi instant (Google ka wait nahi).
 let plWarmRunning = false;
@@ -11607,6 +11717,8 @@ async function start() {
     // GV Master is a live source: check every 15s (its shared feed cache caps Google reads at 30s).
     // FF remains at 150s, so the faster GV alert cadence does not multiply EIR queries.
     setInterval(() => checkReports(false).catch(() => {}), 30e3).unref();
+    setTimeout(() => gvAgentCommission().catch(() => {}), 25000).unref?.();
+    setInterval(() => gvAgentCommission().catch(() => {}), 10 * 60e3).unref();
     setTimeout(() => warmPersonalLinks().catch(() => {}), 20000).unref?.();
     setInterval(() => warmPersonalLinks().catch(() => {}), 5 * 60e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);

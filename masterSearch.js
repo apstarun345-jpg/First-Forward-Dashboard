@@ -429,6 +429,7 @@ FF.pages = FF.pages || {};
   }
   /** Kick the heavy layer off in the background (non-blocking) — suggestions upgrade automatically. */
   function warmFull() {
+    GVC.load();
     // 🏷️ Barcode register ke liye insights.js chahiye — wo ab lazy module hai, isliye pehle background
     // me load karo (topbar search khulte hi register bhi taiyaar ho jata hai).
     const ready = (name) => (typeof FF[name] !== 'undefined' ? Promise.resolve() : (FF.lazy && FF.lazy.inject ? FF.lazy.inject(name) : Promise.resolve()));
@@ -445,6 +446,74 @@ FF.pages = FF.pages || {};
     });
   }
   const MP = () => (FF.masterProfile && FF.masterProfile.supports ? FF.masterProfile : null);
+
+  // 💸 v3.90 — GV agent / TL ka latest commission (Settings → "GV agent commission box"). Server ek chhota map deta hai
+  // (agent ID → latest commission, TL ID → max/min); ek baar load, phir har jagah sync + instant (dropdown, kundli, profile box).
+  const GVC = {
+    data: null, promise: null, failAt: 0,
+    load(force) {
+      if (!force && this.data) return Promise.resolve(this.data);
+      if (this.promise) return this.promise;
+      if (!force && this.failAt && Date.now() - this.failAt < 60e3) return Promise.resolve(null);
+      if (!FF.auth || !FF.auth.api || !FF.auth.user) return Promise.resolve(null);
+      this.promise = FF.auth.api('/api/gv-agent-commission' + (force ? '?fresh=1' : '')).then((d) => {
+        this.data = d && d.ok && d.enabled !== false ? d : null;
+        if (!this.data) this.failAt = Date.now();
+        this.fill(document);
+        return this.data;
+      }).catch(() => { this.failAt = Date.now(); return null; }).finally(() => { this.promise = null; });
+      return this.promise;
+    },
+    isGv: (p) => /^gv/.test(String((p && p.kind) || '')),
+    idOf: (id) => String(id || '').trim().toUpperCase(),
+    entry(id, isTl) {
+      const d = this.data, k = this.idOf(id);
+      if (!d || !k) return null;
+      const a = d.agents && d.agents[k], t = isTl && d.tls && d.tls[k];
+      if (!a && !t) return null;
+      const amount = Math.max(a ? a.a : 0, t ? t.max : 0);
+      return { amount, date: a ? a.d : '', min: t ? t.min : (a ? a.a : 0), n: t ? t.n : 0, own: !!a };
+    },
+    money(v) { const d = this.data || {}; return `${d.currency === undefined ? '₹' : d.currency}${U.fmt(v)}${d.suffix === undefined ? '/tag' : d.suffix}`; },
+    text(id, isTl) {
+      const d = this.data, e = this.entry(id, isTl);
+      if (!d) return '';
+      return `${d.label || 'VC4'} max ${e ? this.money(e.amount) : '—'}`;
+    },
+    subText(p) { return this.isGv(p) && this.data ? (this.entry(p.sub || p.id, /tl$/.test(String(p.kind || ''))) ? `💸 ${this.text(p.sub || p.id, /tl$/.test(String(p.kind || '')))}` : '') : ''; },
+    inner(id, isTl, mode) {
+      if (!this.data) return mode === 'val' ? '…' : mode === 'sub' ? 'load ho raha hai…' : '💸 …';
+      const e = this.entry(id, isTl), d = this.data;
+      if (mode === 'val') return e ? this.money(e.amount) : '<span class="dim">—</span>';
+      if (mode === 'sub') {
+        if (!e) return `${esc(d.label || 'VC4')} · is ID ka commission record nahi mila`;
+        const bits = [`${esc(d.label || 'VC4')} max · latest commission`];
+        if (isTl && e.n) bits.push(`${U.fmt(e.n)} agents · ${this.money(e.min)} – ${this.money(e.amount)}`);
+        if (e.date) bits.push(`as of ${esc(e.date)}`);
+        return bits.join(' · ');
+      }
+      return `💸 ${esc(this.text(id, isTl))}`;
+    },
+    chip(p) {
+      if (!this.isGv(p)) return '';
+      const id = p.sub || p.id || '', isTl = /tl$/.test(String(p.kind || ''));
+      if (!id) return '';
+      return ` <span class="gvc-chip" data-gvc="${esc(this.idOf(id))}|${isTl ? 1 : 0}" data-gvc-mode="chip" title="GV Master · latest commission (product ID se)">${this.inner(id, isTl, 'chip')}</span>`;
+    },
+    boxHtml(pr, isTl) {
+      const id = pr && pr.id;
+      if (!id) return '';
+      const key = `${esc(this.idOf(id))}|${isTl ? 1 : 0}`;
+      return `<div class="mp-kpi msp-kpi k12 gvc-box" title="GV Master · product ID ka latest commission"><small>💸 Commission</small><b class="gvc-val" data-gvc="${key}" data-gvc-mode="val">${this.inner(id, isTl, 'val')}</b><em class="gvc-sub" data-gvc="${key}" data-gvc-mode="sub">${this.inner(id, isTl, 'sub')}</em></div>`;
+    },
+    fill(root) {
+      if (!root || !root.querySelectorAll) return;
+      root.querySelectorAll('[data-gvc]').forEach((el) => {
+        const [id, tl] = String(el.dataset.gvc || '').split('|');
+        el.innerHTML = this.inner(id, tl === '1', el.dataset.gvcMode || 'chip');
+      });
+    }
+  };
   const allPeople = () => [...((state.full || state.light || {}).people || new Map()).values()];
   const personByKey = (key) => ((state.full || state.light || {}).people || new Map()).get(key) || null;
   const personKey = (p) => `${p.kind}|${normName(p.name)}|${normId(p.sub || p.id || [...(p.ids || [])][0] || '')}`;
@@ -680,7 +749,7 @@ FF.pages = FF.pages || {};
         kind: p.kind.startsWith('gv') ? 'gv' : 'ff',
         kindLabel: KIND_LABEL[p.kind] || p.kind,
         label: p.name,
-        sub: [p.sub ? `ID ${p.sub}` : '', tl ? `TL ${p.direct ? (p.directLabel || tl) : tl}` : '', ...extra, !q1 && (p.issuanceN || p.bars.size || p.n) ? `${U.fmt(p.issuanceN || p.bars.size || p.n)} tags` : ''].filter(Boolean).join(' · '),
+        sub: [p.sub ? `ID ${p.sub}` : '', GVC.subText(p), tl ? `TL ${p.direct ? (p.directLabel || tl) : tl}` : '', ...extra, !q1 && (p.issuanceN || p.bars.size || p.n) ? `${U.fmt(p.issuanceN || p.bars.size || p.n)} tags` : ''].filter(Boolean).join(' · '),
         badge: q1 && q1.priority ? q1.priority : ((p.issuanceN || p.bars.size) ? `${U.fmt(p.issuanceN || p.bars.size)}` : ''),
         keywords: `${p.sub} ${tl} ${[...(p.classMap || new Map()).keys()].join(' ')}`,
         value: p.name,
@@ -853,7 +922,7 @@ FF.pages = FF.pages || {};
         <span class="ms-avatar ${p.kind.startsWith('gv') ? 'gv' : 'ff'}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
         <div class="ms-kundli-id">
           <b>${esc(p.name)}</b>
-          <small><span class="badge ${p.kind.startsWith('gv') ? 'green' : 'blue'}">${p.kind.startsWith('gv') ? '🟩 GV Partner' : '🟦 First Forward'}</span> <span class="badge ${/tl$/.test(p.kind) ? 'purple' : 'blue'}">${esc(KIND_LABEL[p.kind] || p.kind)}</span>${p.sub ? ` · ID <b class="mono">${esc(p.sub)}</b>` : ''}</small>
+          <small><span class="badge ${p.kind.startsWith('gv') ? 'green' : 'blue'}">${p.kind.startsWith('gv') ? '🟩 GV Partner' : '🟦 First Forward'}</span> <span class="badge ${/tl$/.test(p.kind) ? 'purple' : 'blue'}">${esc(KIND_LABEL[p.kind] || p.kind)}</span>${p.sub ? ` · ID <b class="mono">${esc(p.sub)}</b>` : ''}${GVC.chip(p)}</small>
         </div>
       </div>
       ${strip}
@@ -1656,6 +1725,7 @@ FF.pages = FF.pages || {};
           ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
           ${box('k10', '🎯 Expected this month · Run-rate', U.fmt((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0)), `Current pace ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days · report cutoff: previous day`, spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
+          ${ch === 'gv' ? GVC.boxHtml(pr, isTl) : ''}
         </div>${notFound}</div></section>`;
     }
     const kpiLoadingHtml = (name, ch) => `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-body">${U.spinner(`${esc(name)} ka ${ch === 'gv' ? '🟩 GV' : '🟦 FF'} stock · issuance · priority · suggested load ho raha hai…`)}</div></section>`;
@@ -2289,6 +2359,7 @@ FF.pages = FF.pages || {};
   FF.masterSearch = {
     buildLight, buildFull, warmFull, barcodeSuggest, invalidate, search, preferNameMatches, suggestItems, resultsHtml, openPanel, closePanel,
     mountTopbar, openSearchPage, onIndexReady, personByKey, linkedTlFor, teamPeopleFor, _limits: LIMITS,
+    reloadCommission() { GVC.data = null; GVC.failAt = 0; return GVC.load(true); },
     get ready() { return !!(state.light); }, get heavyReady() { return !!(state.full && state.full.fullLoaded); },
     get topbarMounted() { return mountedTopbar; },
     label: KIND_LABEL

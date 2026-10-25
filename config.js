@@ -129,6 +129,7 @@ FF.config = {
   // 🧭 Admin CCH → class mapping for GV Master.
   // Empty lists keep existing VCLASS/CLASS fallback.
   gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
+  gvAgentCommission: { enabled: true, label: 'VC4', suffix: '/tag', currency: '₹' },
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],
   gv: {
     master: {
@@ -374,6 +375,7 @@ FF.config = {
     const pick = (k) => { if (s[k] !== undefined && s[k] !== null) this[k] = s[k]; };
     ['appName', 'brand', 'tagline', 'logo', 'loginImage', 'loginAnimation', 'sheetId', 'gvSheetId', 'excludeTls', 'pageSize', 'allowSignup', 'directPlaceholderTls'].forEach(pick);
     if (s.gvClassCch) this.gvClassCch = { ...this.gvClassCch, ...s.gvClassCch, groups: { ...(this.gvClassCch && this.gvClassCch.groups), ...(s.gvClassCch.groups || {}) } };
+    if (s.gvAgentCommission) this.gvAgentCommission = { ...this.gvAgentCommission, ...s.gvAgentCommission };
     if (Array.isArray(s.tvcGroups) && s.tvcGroups.length) this.tvcGroups = s.tvcGroups;
     if (s.direct) this.direct = { ...this.direct, ...s.direct };
     if (s.vrnRules) this.vrnRuleSet = s.vrnRules;

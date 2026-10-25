@@ -1130,6 +1130,25 @@ FF.pages = FF.pages || {};
         </div>
         <div class="chip-row"><span class="chip on">Source: GV Master · Column G (CCH)</span><span class="chip">Fallback: VCLASS / CLASS</span><span class="chip">Admin controlled</span></div>
         <div class="save-bar"><button class="btn primary" data-save="gvClassCch">💾 Save CCH mapping</button><span class="dim small" id="save-msg-gvClassCch"></span></div>`)}
+      ${section('💸 GV agent commission box <span class="dim">(Master search + TL / agent profile)</span>', `
+        <p class="dim small">GV Master me <b>agent ID (A)</b> ke against <b>product ID (L)</b> ka <b>latest commission (M)</b> yahan se dikhta hai — profile me ek chhota box aur search dropdown me <b>"VC4 max ₹130/tag"</b>. Sheet, tab, column ya product badle to bas yahan change karke Save karo.</p>
+        <div class="form-grid">
+          ${check('gvAgentCommission.enabled', settings.gvAgentCommission?.enabled !== false, 'Commission box ON')}
+          ${field('Sheet link / ID', `<input class="input mono" data-path="gvAgentCommission.sheetLink" value="${esc(settings.gvAgentCommission?.sheetLink || '')}" placeholder="khaali = GV sheet (Settings me set wali)">`, 'Google Sheet ka poora link ya sirf ID')}
+          ${field('Tab name', `<input class="input" data-path="gvAgentCommission.tab" value="${esc(settings.gvAgentCommission?.tab || 'GV Master')}" placeholder="GV Master">`, 'Jis tab me commission hai')}
+          ${field('Product ID', `<input class="input mono" data-path="gvAgentCommission.productId" value="${esc(settings.gvAgentCommission?.productId || '100000007832')}" placeholder="100000007832">`, 'Sirf isi product ka commission aayega')}
+          ${field('Label', `<input class="input" data-path="gvAgentCommission.label" value="${esc(settings.gvAgentCommission?.label || 'VC4')}" placeholder="VC4">`, 'Dikhne wala naam (jaise VC4)')}
+          ${field('Agent ID column', `<input class="input mono" data-path="gvAgentCommission.agentCol" value="${esc(settings.gvAgentCommission?.agentCol || 'A')}" maxlength="3" placeholder="A">`, 'Default A')}
+          ${field('Product ID column', `<input class="input mono" data-path="gvAgentCommission.productCol" value="${esc(settings.gvAgentCommission?.productCol || 'L')}" maxlength="3" placeholder="L">`, 'Default L')}
+          ${field('Commission column', `<input class="input mono" data-path="gvAgentCommission.commissionCol" value="${esc(settings.gvAgentCommission?.commissionCol || 'M')}" maxlength="3" placeholder="M">`, 'Default M')}
+          ${field('Date column (latest ke liye)', `<input class="input mono" data-path="gvAgentCommission.dateCol" value="${esc(settings.gvAgentCommission?.dateCol || 'P')}" maxlength="3" placeholder="P">`, 'Default P · sabse nayi date ki row = latest')}
+          ${field('TL ID column', `<input class="input mono" data-path="gvAgentCommission.tlCol" value="${esc(settings.gvAgentCommission?.tlCol || 'R')}" maxlength="3" placeholder="R">`, 'TL ke agents ka max nikalne ke liye · default R')}
+          ${field('TL ID fallback column', `<input class="input mono" data-path="gvAgentCommission.tlFallbackCol" value="${esc(settings.gvAgentCommission?.tlFallbackCol ?? 'C')}" maxlength="3" placeholder="C">`, 'TL ID (R) khaali ho to · default C')}
+          ${field('Currency', `<input class="input" data-path="gvAgentCommission.currency" value="${esc(settings.gvAgentCommission?.currency ?? '₹')}" maxlength="3" placeholder="₹">`, '')}
+          ${field('Suffix', `<input class="input" data-path="gvAgentCommission.suffix" value="${esc(settings.gvAgentCommission?.suffix ?? '/tag')}" maxlength="12" placeholder="/tag">`, 'Amount ke baad (jaise /tag)')}
+        </div>
+        <div class="chip-row"><span class="chip on">Latest = sabse nayi date ki row</span><span class="chip">TL = TL + uske agents ka max</span><span class="chip">Server par 10 min cache · search instant</span></div>
+        <div class="save-bar"><button class="btn primary" data-save="gvAgentCommission">💾 Save commission box</button><span class="dim small" id="save-msg-gvAgentCommission"></span></div>`)}
       ${section('🧮 TVC → CCH classes <span class="dim">(Tag Request class-wise grid)</span>', `
         <p class="dim small">Har line: <b>TVC : CCH classes</b> (comma separated). Tag Request ke class-wise grid me count <b>TVC ke hisaab se</b> dikhega, aur us TVC ke saare CCH ka count usi me judega. Jo CCH yahan nahi hai wo "Other" me jayega.</p>
         <textarea class="input mono" id="tvc-groups-text" rows="7" placeholder="4 : VC4, VC20">${esc(((settings.tvcGroups && settings.tvcGroups.length) ? settings.tvcGroups : FF.config.tvcGroups || []).map((g) => g.tvc + ' : ' + (g.cch || []).join(', ')).join('\n'))}</textarea>
@@ -2711,7 +2730,10 @@ FF.pages = FF.pages || {};
         const patch = collect(card, {});
         const msg = U.$(`#save-msg-${btn.dataset.save}`, body);
         const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout', 'gvCommissionRates', 'gvClassCch'].includes(btn.dataset.save);
-        U.withButtonBusy(btn, () => save(patch, msg, { reload }), 'Saving…');
+        U.withButtonBusy(btn, async () => {
+          await save(patch, msg, { reload });
+          if (btn.dataset.save === 'gvAgentCommission' && FF.masterSearch && FF.masterSearch.reloadCommission) FF.masterSearch.reloadCommission().catch(() => {});
+        }, 'Saving…');
       }));
       const tvcBtn = U.$('#tvc-groups-save', body);
       if (tvcBtn) tvcBtn.addEventListener('click', () => {
