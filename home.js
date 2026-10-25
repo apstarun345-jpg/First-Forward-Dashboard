@@ -1285,7 +1285,8 @@ FF.pages = FF.pages || {};
         if (FF.auth.can('stock')) items.push(link('#/stock', '📦', 'Check low-stock agents', null));
         if (FF.auth.can('performance')) items.push(link('#/performance', '🏁', 'Agent performance', null));
         if (FF.auth.can('fastagMapping')) items.push(link('#/fastagMapping', '🔗', 'FASTag Mapping — map & report', null));
-        todoMount.innerHTML = items.length ? `<section class="card todo-card"><div class="card-head"><h3>✅ Today's work</h3></div><div class="todo-row">${items.join('')}</div></section>` : '';
+        todoMount.innerHTML = (items.length || FF.smartCenter) ? `<section class="card todo-card"><div class="card-head"><h3>✅ Today's work</h3></div>${FF.smartCenter ? '<div id="home-smart"></div>' : ''}<div class="todo-row">${items.join('')}</div></section>` : '';
+        if (FF.smartCenter) { const sm = todoMount.querySelector('#home-smart'); if (sm) FF.smartCenter.mount(sm); }
       };
       const summarize = (list) => {
         const now = Date.now(), DAY = 24 * 3600e3;
