@@ -426,7 +426,7 @@ FF.pages = FF.pages || {};
         ? FF.gv.need('stockAgentClass').then(() => (FF.gv.get('stockAgentClass') || [])).catch(() => []) : Promise.resolve([])
     ]).then(([ff, gv]) => {
       const m = new Map();
-      const add = (key, row) => { const e = m.get(key) || { core: 0, comm: 0 }; e[groupOf(row.cls, row.group)] += num(row.n); m.set(key, e); };
+      const add = (key, row) => { const e = m.get(key) || { core: 0, comm: 0, cls: {} }; e[groupOf(row.cls, row.group)] += num(row.n); const k = String(row.cls || '').toUpperCase(); if (k) e.cls[k] = num(e.cls[k]) + num(row.n); m.set(key, e); };
       (Array.isArray(ff) ? ff : []).forEach((r) => {
         if (digits(r.agentId)) add(`ff|id:${digits(r.agentId)}`, r);
         if (r.agentName && r.agentName !== '—') add(`ff|n:${norm(r.agentName)}`, r);
@@ -2703,8 +2703,10 @@ body.colorful .from-hdr { color: #166534; }
       }
       return out.sort((a, b) => b[1] - a[1]);
     };
-    /** v3.87 — class value (CLASS_LIST = REPORT/EIR; baaki CCH = EIR/extras). */
+    const exactRec = () => (!isPublic() && state.exact && rec ? (state.exact.get(`${rec.channel}|id:${rec.agentId}`) || state.exact.get(`${rec.channel}|n:${norm(rec.name)}`)) : null);
+    /** v3.87 — class value (CLASS_LIST = REPORT/EIR; baaki CCH = EIR/extras; stock = exact StockDataa per class). */
     const cchVal = (c, field) => {
+      if (field === 'stock') { const ex = exactRec(); if (ex && ex.cls && Object.keys(ex.cls).length) return num(ex.cls[c]); }
       if (rec) {
         if (CLASS_LIST.includes(c)) return num(classData(rec, c)[field]);
         const src = (field === 'stock' ? rec.stock : field === 'last' ? rec.last : rec.cur) || {};
@@ -2714,19 +2716,26 @@ body.colorful .from-hdr { color: #166534; }
       const x = dr.rows.find((r) => String(r.cls || '').toUpperCase() === c);
       return x ? num(x[field]) : 0;
     };
-    const tvcGroups = () => (FF.config.tvcGroups || []).map((g) => ({ tvc: String(g.tvc), cch: (g.cch || []).map((v) => String(v).toUpperCase()) }));
+    /** TVC group rows: {tvc,label,cch,stock,last,cur} — tvc 4 (VC4+VC20) = core numbers. */
+    const tvcRows = () => (FF.config.tvcGroups || []).map((g) => {
+      const cch = (g.cch || []).map((v) => String(v).toUpperCase());
+      const isCore = cch.length > 0 && cch.every((c) => c === 'VC4' || c === 'VC20');
+      const o = { tvc: String(g.tvc), cch, isCore, label: isCore && String(g.tvc) === '4' ? 'VC4/VC20' : 'VC' + g.tvc };
+      ['stock', 'last', 'cur'].forEach((f) => { o[f] = isCore ? num(n.core[f]) : cch.reduce((a, c) => a + cchVal(c, f), 0); });
+      o.parts = (f) => cch.map((c) => [c, cchVal(c, f)]).filter(([, v]) => v > 0);
+      return o;
+    });
     const classLineHtml = (field) => {
       const tot = field === 'stock' ? num(n.total.stock) : field === 'last' ? num(n.total.last) : field === 'cur' ? num(n.total.cur) : 0;
+      const rows = tvcRows();
       const used = new Set();
       let sum = 0;
-      const list = tvcGroups().map((g) => {
-        const isCore = g.cch.length && g.cch.every((c) => c === 'VC4' || c === 'VC20');
-        const parts = g.cch.map((c) => { used.add(c); return [c, isCore ? 0 : cchVal(c, field)]; });
-        const val = isCore ? num(n.core[field]) : parts.reduce((a, [, v]) => a + v, 0);
+      const list = rows.map((g) => {
+        g.cch.forEach((c) => used.add(c));
+        const val = g[field];
         sum += val;
-        const label = isCore && g.tvc === '4' ? 'VC4/VC20' : 'VC' + g.tvc;
-        const tip = `TVC ${g.tvc} = ${g.cch.join(' + ')}${isCore ? '' : ' · ' + parts.filter(([, v]) => v > 0).map(([c, v]) => `${c} ${fmt(v)}`).join(' · ')}`;
-        return `<span title="${esc(tip)}"><b>${esc(label)}</b> <strong>${fmt(val)}</strong></span>`;
+        const tip = `TVC ${g.tvc} = ${g.cch.join(' + ')}${g.isCore ? '' : ' · ' + g.parts(field).map(([c, v]) => `${c} ${fmt(v)}`).join(' · ')}`;
+        return `<span title="${esc(tip)}"><b>${esc(g.label)}</b> <strong>${fmt(val)}</strong></span>`;
       });
       const other = Math.max(0, tot - sum);
       let html = list.join('');
@@ -2735,6 +2744,13 @@ body.colorful .from-hdr { color: #166534; }
         html += `<span title="${esc(left ? `TVC mapping me nahi: ${left}` : 'Jo CCH Settings → TVC mapping me nahi hai')}"><b>Other</b> <strong>${fmt(other)}</strong></span>`;
       }
       return html;
+    };
+    /** 🎯 TVC-wise dispatch table: class · stock · MTD · kitne bhejne (after stock). */
+    const suggestTableHtml = () => {
+      const rows = tvcRows().map((g) => ({ g, p: U.suggestPair(g.cur / n.days, g.stock) })).filter(({ g, p }) => g.stock > 0 || g.cur > 0 || p.net > 0);
+      if (!rows.length) return '';
+      const body = rows.map(({ g, p }) => `<tr${p.net > 0 ? ' class="need"' : ''} title="${esc(`${g.label}: stock ${fmt(g.stock)} · MTD ${fmt(g.cur)} · bina stock deduction ${fmt(p.gross)}`)}"><td>${esc(g.label)}</td><td>${fmt(g.stock)}</td><td>${fmt(g.cur)}</td><td><b>${p.net > 0 ? fmt(p.net) : '—'}</b></td></tr>`).join('');
+      return `<table class="tr-sug-tbl"><thead><tr><th>TVC</th><th>Stock</th><th>MTD</th><th>Send</th></tr></thead><tbody>${body}</tbody></table>`;
     };
     const keys = ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth'];
     if (isAdmin()) keys.push('suggest');
@@ -2763,7 +2779,7 @@ body.colorful .from-hdr { color: #166534; }
     ];
     if (isAdmin()) cells.push(`<td class="num tr-m tr-c-suggest" data-tr-m="suggest" title="The no-deduction quantity does not subtract current stock.">
       <div class="tr-suggest-pair"><span class="tr-suggest-net"><small>After stock</small><b>${fmt(n.total.suggest.net)}</b></span><span class="tr-suggest-gross"><small>Without stock deduction</small><b>${fmt(n.total.suggest.gross)}</b></span></div>
-      ${grpLines([['VC4+VC20', `${fmt(n.core.suggest.net)}/${fmt(n.core.suggest.gross)}`], ['VC5+', `${fmt(n.comm.suggest.net)}/${fmt(n.comm.suggest.gross)}`]])}
+      ${suggestTableHtml()}
     </td>`);
     return cells.join('');
   }
