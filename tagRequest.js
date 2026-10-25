@@ -275,6 +275,11 @@ FF.pages = FF.pages || {};
     if (ym === mo.cur) { rec.eirG.cur[g] += num(row.n); rec.eirG.hasCur = true; }
     if (ym === mo.last) { rec.eirG.last[g] += num(row.n); rec.eirG.hasLast = true; }
     map.set(key, rec);
+    if (cls) {   // v3.87 — har CCH class (VC9, VC13 …) ka count, TVC grouping ke liye
+      rec.cchCur = rec.cchCur || {}; rec.cchLast = rec.cchLast || {};
+      if (ym === mo.cur) rec.cchCur[cls] = num(rec.cchCur[cls]) + num(row.n);
+      if (ym === mo.last) rec.cchLast[cls] = num(rec.cchLast[cls]) + num(row.n);
+    }
     if (!CLASS_LIST.includes(cls)) return rec;
     if (ym === mo.cur) rec.eirCur[cls] = num(rec.eirCur[cls]) + num(row.n);
     if (ym === mo.last) rec.eirLast[cls] = num(rec.eirLast[cls]) + num(row.n);
@@ -2698,21 +2703,38 @@ body.colorful .from-hdr { color: #166534; }
       }
       return out.sort((a, b) => b[1] - a[1]);
     };
+    /** v3.87 — class value (CLASS_LIST = REPORT/EIR; baaki CCH = EIR/extras). */
+    const cchVal = (c, field) => {
+      if (rec) {
+        if (CLASS_LIST.includes(c)) return num(classData(rec, c)[field]);
+        const src = (field === 'stock' ? rec.stock : field === 'last' ? rec.last : rec.cur) || {};
+        const eir = (field === 'last' ? rec.cchLast : field === 'cur' ? rec.cchCur : null) || {};
+        return num(src[c]) || num(eir[c]);
+      }
+      const x = dr.rows.find((r) => String(r.cls || '').toUpperCase() === c);
+      return x ? num(x[field]) : 0;
+    };
+    const tvcGroups = () => (FF.config.tvcGroups || []).map((g) => ({ tvc: String(g.tvc), cch: (g.cch || []).map((v) => String(v).toUpperCase()) }));
     const classLineHtml = (field) => {
       const tot = field === 'stock' ? num(n.total.stock) : field === 'last' ? num(n.total.last) : field === 'cur' ? num(n.total.cur) : 0;
-      const core = num(n.core[field]);                       // VC4 + VC20 — ek hi jagah
-      const list = [['VC4/VC20', core], ...classMetrics(field)];
-      const sum = list.reduce((a, [, v]) => a + v, 0);
-      const extra = extraClasses(field);
-      const named = extra.slice(0, 2);                       // sabse bade 2 extra class naam se
-      const rest = extra.slice(2).reduce((a, [, v]) => a + v, 0);
-      named.forEach(([c, v]) => list.push([c, v]));
-      const left = tot - sum - named.reduce((a, [, v]) => a + v, 0);   // jod hamesha total ke barabar dikhe
-      const otherVal = Math.max(0, left);
-      const html = list.map(([cls, val]) => `<span><b>${esc(cls)}</b> <strong>${fmt(val)}</strong></span>`).join('');
-      if (otherVal <= 0 && !rest) return html;
-      const names = extra.slice(2).map(([c, v]) => `${c} ${fmt(v)}`).join(' · ');
-      return `${html}<span title="${esc(names ? `Baaki classes: ${names}` : 'Baaki commercial classes (VC5+ ke andar)')}"><b>Other</b> <strong>${fmt(otherVal)}</strong></span>`;
+      const used = new Set();
+      let sum = 0;
+      const list = tvcGroups().map((g) => {
+        const isCore = g.cch.length && g.cch.every((c) => c === 'VC4' || c === 'VC20');
+        const parts = g.cch.map((c) => { used.add(c); return [c, isCore ? 0 : cchVal(c, field)]; });
+        const val = isCore ? num(n.core[field]) : parts.reduce((a, [, v]) => a + v, 0);
+        sum += val;
+        const label = isCore && g.tvc === '4' ? 'VC4/VC20' : 'VC' + g.tvc;
+        const tip = `TVC ${g.tvc} = ${g.cch.join(' + ')}${isCore ? '' : ' · ' + parts.filter(([, v]) => v > 0).map(([c, v]) => `${c} ${fmt(v)}`).join(' · ')}`;
+        return `<span title="${esc(tip)}"><b>${esc(label)}</b> <strong>${fmt(val)}</strong></span>`;
+      });
+      const other = Math.max(0, tot - sum);
+      let html = list.join('');
+      if (other > 0) {
+        const left = extraClasses(field).filter(([c]) => !used.has(c)).map(([c, v]) => `${c} ${fmt(v)}`).join(' · ');
+        html += `<span title="${esc(left ? `TVC mapping me nahi: ${left}` : 'Jo CCH Settings → TVC mapping me nahi hai')}"><b>Other</b> <strong>${fmt(other)}</strong></span>`;
+      }
+      return html;
     };
     const keys = ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth'];
     if (isAdmin()) keys.push('suggest');

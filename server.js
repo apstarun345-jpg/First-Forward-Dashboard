@@ -258,6 +258,7 @@ const DEFAULT_SETTINGS = {
     }
   },
   gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
+  tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],   // v3.87 — TVC → CCH classes (Tag Request class grid)
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
     assignment: { tab: 'Tag Assignment', gid: '', cls: 'A', tagId: 'B', serial: 'C', status: 'D', agentId: 'E', agentName: 'F', tlId: 'G', tlName: 'H', gvUniqueId: 'L', gvUniqueName: 'M', allocatedAt: '' },
@@ -8876,6 +8877,17 @@ async function handleApi(req, res, url) {
     }
     // 👤 GV personal commission — exact agent ID + class settings. Blank manual rate is allowed
     // (it keeps the row unresolved instead of silently changing the payout).
+    if (patch.tvcGroups !== undefined) {
+      if (!Array.isArray(patch.tvcGroups)) throw new HttpError(400, 'tvcGroups list hona chahiye.');
+      const seen = new Set();
+      patch.tvcGroups = patch.tvcGroups.slice(0, 40).map((g) => {
+        const tvc = String((g && g.tvc) || '').replace(/\D/g, '').slice(0, 3);
+        const raw = g && g.cch;
+        const list = Array.isArray(raw) ? raw : String(raw || '').split(/[,\s]+/);
+        const cch = [...new Set(list.map((v) => String(v || '').trim().toUpperCase()).filter(Boolean).map((v) => (/^\d+$/.test(v) ? 'VC' + v : v)))].slice(0, 30);
+        return { tvc, cch };
+      }).filter((g) => g.tvc && g.cch.length && !seen.has(g.tvc) && seen.add(g.tvc));
+    }
     if (patch.gvClassCch !== undefined) {
       const cfg = patch.gvClassCch;
       if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new HttpError(400, 'gvClassCch object hona chahiye.');

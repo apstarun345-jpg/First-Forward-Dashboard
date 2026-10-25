@@ -1130,6 +1130,10 @@ FF.pages = FF.pages || {};
         </div>
         <div class="chip-row"><span class="chip on">Source: GV Master · Column G (CCH)</span><span class="chip">Fallback: VCLASS / CLASS</span><span class="chip">Admin controlled</span></div>
         <div class="save-bar"><button class="btn primary" data-save="gvClassCch">💾 Save CCH mapping</button><span class="dim small" id="save-msg-gvClassCch"></span></div>`)}
+      ${section('🧮 TVC → CCH classes <span class="dim">(Tag Request class-wise grid)</span>', `
+        <p class="dim small">Har line: <b>TVC : CCH classes</b> (comma separated). Tag Request ke class-wise grid me count <b>TVC ke hisaab se</b> dikhega, aur us TVC ke saare CCH ka count usi me judega. Jo CCH yahan nahi hai wo "Other" me jayega.</p>
+        <textarea class="input mono" id="tvc-groups-text" rows="7" placeholder="4 : VC4, VC20">${esc(((settings.tvcGroups && settings.tvcGroups.length) ? settings.tvcGroups : FF.config.tvcGroups || []).map((g) => g.tvc + ' : ' + (g.cch || []).join(', ')).join('\n'))}</textarea>
+        <div class="save-bar"><button class="btn primary" id="tvc-groups-save">💾 Save TVC mapping</button><span class="dim small" id="save-msg-tvcGroups"></span></div>`)}
       ${section('➕ Naya tab jodo <span class="dim">(optional)</span>', `
         <p class="dim small">Dono Google Sheets me koi naya tab ho to yahan add karke user ko access de sakte ho.</p>
         <div class="form-grid"><label class="fld"><span>Tab id (permission key)</span><input class="input" id="nt-id" placeholder="e.g. GV Tag Status"></label>
@@ -2709,6 +2713,14 @@ FF.pages = FF.pages || {};
         const reload = ['data', 'eir', 'stock', 'stockMovement', 'ffPayout', 'gvCommissionRates', 'gvClassCch'].includes(btn.dataset.save);
         U.withButtonBusy(btn, () => save(patch, msg, { reload }), 'Saving…');
       }));
+      const tvcBtn = U.$('#tvc-groups-save', body);
+      if (tvcBtn) tvcBtn.addEventListener('click', () => {
+        const rows = String(U.$('#tvc-groups-text', body).value || '').split(/\n/).map((ln) => {
+          const [a, b] = ln.split(':');
+          return { tvc: String(a || '').replace(/\D/g, ''), cch: String(b || '').split(/[,\s]+/).map((v) => v.trim().toUpperCase()).filter(Boolean).map((v) => (/^\d+$/.test(v) ? 'VC' + v : v)) };
+        }).filter((g) => g.tvc && g.cch.length);
+        U.withButtonBusy(tvcBtn, () => save({ tvcGroups: rows }, U.$('#save-msg-tvcGroups', body), { reload: true }), 'Saving…');
+      });
       const ldgBtn = U.$('#ldg-test', body);
       if (ldgBtn) ldgBtn.addEventListener('click', () => U.withButtonBusy(ldgBtn, async () => {
         const o = U.$('#ldg-test-out', body);
