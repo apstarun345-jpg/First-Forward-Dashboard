@@ -1681,8 +1681,42 @@ FF.pages = FF.pages || {};
       const chipOf = (p) => (p === 'None' ? '<span class="badge">No issuance</span>' : prioChip(p));
       const prioBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2">${chipOf(x.prio)}</span><span class="c3">${x.cover != null ? `<span class="msp-hl ${x.cover < redD ? 'red' : x.cover < orgD ? 'amber' : 'green'}">cover ${U.fmt(x.cover, true)} d</span>` : '<span class="dim">no run-rate</span>'}</span></div>`).join('');
       const prioSub = plan.map((x) => `${esc(x.k)}: stock ${U.fmt(x.stock)} ÷ ${U.fmt(x.rate, true)}/day`).join(' · ');
-      const planBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2"><span class="msp-hl ${x.prio === 'None' || !x.net ? 'green' : x.prio === 'High' ? 'red' : 'amber'}">need ${x.prio === 'None' ? '0' : U.fmt(x.net)}</span></span><span class="c3"><span class="msp-hl blue">w/o stock ${U.fmt(x.gross)}</span></span></div>`).join('');
-      const planSub = plan.map((x) => `${esc(x.k)}: ${U.fmt(x.rate, true)}/day × ${U.fmt(days)} − stock ${U.fmt(x.stock)}${x.basis ? ` (${x.basis} rate)` : ''}`).join(' · ');
+      // v3.90 — class-wise dispatch: VC4/VC20 ek jagah, baaki TVC-wise (Settings → TVC mapping); neeche VC4/VC20 aur VC5+ totals.
+      const calcRow = (label, stock, cur, last) => {
+        let rate = cur / elapsed, basis = '';
+        if (!cur && last) { rate = last / lastDays; basis = 'last month'; }
+        const cover = rate > 0 ? stock / rate : null;
+        const prio = rate <= 0 ? 'None' : cover < redD ? 'High' : cover < orgD ? 'Medium' : 'Low';
+        const gross = Math.ceil(rate * days), net = Math.max(0, gross - stock);
+        return { k: label, stock, cur, last, rate, basis, cover, prio, gross, net };
+      };
+      const tvcPlan = (() => {
+        const list = Array.isArray(pr.classes) ? pr.classes : [];
+        const hasClassData = list.some((x) => num(x.stock) || num(x.cur) || num(x.last));
+        if (!hasClassData) return { rows: plan, totals: false };
+        const normK = (v) => String(v || '').toUpperCase().replace(/\s+/g, '');
+        const groups = (FF.config.tvcGroups || []).map((g) => ({ tvc: String(g.tvc), cch: new Set([...(g.cch || []).map(normK), `VC${g.tvc}`]) }));
+        const isCoreGroup = (g) => [...g.cch].every((c) => c === 'VC4' || c === 'VC20' || c === `VC${g.tvc}`) && g.tvc === '4';
+        const rows = [plan[0]];
+        let sumS = 0, sumC = 0, sumL = 0;
+        groups.filter((g) => !isCoreGroup(g)).forEach((g) => {
+          let s = 0, cu1 = 0, la1 = 0;
+          list.forEach((x) => { if (g.cch.has(normK(x.cls))) { s += Math.max(0, num(x.stock)); cu1 += Math.max(0, num(x.cur)); la1 += Math.max(0, num(x.last)); } });
+          sumS += s; sumC += cu1; sumL += la1;
+          if (s || cu1 || la1) rows.push(calcRow(`VC${g.tvc}`, s, cu1, la1));
+        });
+        const rs = Math.max(0, stk.B - sumS), rc = Math.max(0, cu.B - sumC), rl = Math.max(0, la.B - sumL);
+        if (rs || rc || rl) rows.push(calcRow('Other', rs, rc, rl));
+        return { rows, totals: rows.length > 2 };
+      })();
+      const needCls = (x) => (x.prio === 'None' || !x.net ? 'green' : x.prio === 'High' ? 'red' : 'amber');
+      const planLine = (x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2"><span class="msp-hl ${needCls(x)}">need ${x.prio === 'None' ? '0' : U.fmt(x.net)}</span></span><span class="c3"><span class="msp-hl blue">w/o stock ${U.fmt(x.gross)}</span></span></div>`;
+      const commRows = tvcPlan.rows.slice(1);
+      const commNet = commRows.reduce((a, x) => a + (x.prio === 'None' ? 0 : x.net), 0), commGross = commRows.reduce((a, x) => a + x.gross, 0);
+      const totLine = (label, net, gross) => `<div class="msp-cls-line msp-tot-line"><span class="c1">${label}</span><span class="c2"><span class="msp-hl ${net ? 'amber' : 'green'}">need ${U.fmt(net)}</span></span><span class="c3"><span class="msp-hl blue">w/o stock ${U.fmt(gross)}</span></span></div>`;
+      const planBody = tvcPlan.rows.map(planLine).join('') + (tvcPlan.totals
+        ? `<div class="msp-tot">${totLine('Total VC4/VC20', tvcPlan.rows[0].prio === 'None' ? 0 : tvcPlan.rows[0].net, tvcPlan.rows[0].gross)}${totLine('Total VC5+', commNet, commGross)}</div>` : '');
+      const planSub = tvcPlan.rows.map((x) => `${esc(x.k)}: ${U.fmt(x.rate, true)}/day × ${U.fmt(days)} − stock ${U.fmt(x.stock)}${x.basis ? ` (${x.basis} rate)` : ''}`).join(' · ');
       const wd = workedDays(pr, isTl, ch, m.cur);
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
       const tlName = (pr.tl && pr.tl.name) || '';

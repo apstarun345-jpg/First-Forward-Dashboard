@@ -6941,3 +6941,8 @@ html.mobile-ui .kpi .kpi-chrow { font-size: 10.5px; }
   font-size: 11.5px; font-weight: 800; color: #92400e; background: #fef3c7; border: 1px solid #fde68a; white-space: nowrap;
 }
 html[data-theme="dark"] .gvc-chip { color: #fde68a; background: #3b2a08; border-color: #6b4e0f; }
+
+/* v3.90 — Dispatch need box: class-wise (TVC) rows + totals */
+.msp-tot { margin-top: 6px; padding-top: 6px; border-top: 1px dashed color-mix(in srgb, currentColor 22%, transparent); }
+.msp-cls-line.msp-tot-line { grid-template-columns: 112px 78px 104px; font-weight: 800; }
+.msp-cls-line.msp-tot-line .c1 { white-space: nowrap; }
