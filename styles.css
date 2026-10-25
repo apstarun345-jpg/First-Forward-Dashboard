@@ -6991,3 +6991,16 @@ html[data-theme="dark"] body .gs-kpi.gs-kpi[class*="g"] { background: color-mix(
 html[data-theme="dark"] body .gs-kpi .gs-kpi-label, html[data-theme="dark"] body .gs-kpi .gs-kpi-value, html[data-theme="dark"] body .gs-kpi .gs-kpi-sub b { color: color-mix(in srgb, var(--ga) 55%, #ffffff); }
 html[data-theme="dark"] body .gs-kpi .gs-kpi-sub { color: #cbd5e1; }
 html[data-theme="dark"] body .gs-kpi .gs-kpi-why { color: #94a3b8; }
+
+/* v3.93.1 — Master search chips: class-wise lines fluid (phone par bahar nahi nikalte) */
+.msp-cls-line, .msp-cls-line.msp-tot-line { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, 1.5fr); width: 100%; max-width: 100%; box-sizing: border-box; }
+.msp-cls-line.msp-tot-line { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.5fr); }
+.msp-cls-line > span { min-width: 0; text-align: center; overflow-wrap: anywhere; }
+.msp-cls-line .c1 { text-align: left; }
+.msp-kpi { min-width: 0; overflow: hidden; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .msp-kpi.k3, .msp-kpi.k4 { grid-column: 1 / -1; }
+  .msp-cls-line { font-size: 12.5px; gap: 8px; }
+  .msp-cls-line .c3 { white-space: normal; }
+  .msp-hl { padding: 1px 7px; font-size: 11px; }
+}
