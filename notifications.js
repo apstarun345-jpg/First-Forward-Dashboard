@@ -493,16 +493,16 @@ window.FF = window.FF || {};
     const on = state.prefs.enabled !== false;
     const st = state.pushStatus || {};
     const isAdmin = FF.auth.user && FF.auth.user.role === 'admin';
-    if (!on) return `<div class="notify-line muted">🔕 Notifications OFF — koi alert nahi aayega. List phir bhi andar padh sakte ho.</div>`;
-    if (isAdmin && st.configError) return `<div class="notify-line warn">⚠️ Push service delivery reject kar rahi hai (status ${U.esc(String(st.configError.status || '?'))}) — Settings → 👤 My account → Push diagnostics dekho.</div>`;
-    if (permission === 'denied') return `<div class="notify-line warn">🚫 Browser ne notifications block kar rakhe hain — address bar ke 🔒 icon se Allow karo, phir switch OFF-ON karo.</div>`;
+    if (!on) return `<div class="notify-line muted"><span>🔕</span>Notifications are off. You can still browse the list below.</div>`;
+    if (isAdmin && st.configError) return `<div class="notify-line warn"><span>⚠️</span>Push delivery is being rejected (status ${U.esc(String(st.configError.status || '?'))}). Check Settings → My account → Push diagnostics.</div>`;
+    if (permission === 'denied') return `<div class="notify-line warn"><span>🚫</span>Your browser has blocked notifications. Allow them from the 🔒 icon in the address bar, then toggle the switch off and on.</div>`;
     if (!browser || !canPush) {
       // iOS par web push sirf installed PWA me chalta hai — ye ek line zaroori hai, warna panel chup-chaap silent rehta hai.
-      if (isIOS() && !isInstalledPWA()) return `<div class="notify-line">📱 iOS par panel push sirf installed app me chalta hai — Safari → Share → “Add to Home Screen”, phir app kholo.</div>`;
-      return `<div class="notify-line muted">ℹ️ Is browser me sirf in-app alerts milenge. Phone panel ke liye Chrome / Edge / Samsung Internet (Android) ya iOS 16.4+ (installed app) chahiye.</div>`;
+      if (isIOS() && !isInstalledPWA()) return `<div class="notify-line"><span>📱</span>On iOS, phone alerts work only in the installed app. Use Safari → Share → “Add to Home Screen”, then open the app.</div>`;
+      return `<div class="notify-line muted"><span>ℹ️</span>This browser supports in-app alerts only. For phone alerts, use Chrome, Edge, Samsung Internet (Android) or iOS 16.4+ (installed app).</div>`;
     }
-    if (permission !== 'granted') return `<div class="notify-line">🔔 Phone / desktop panel alerts ke liye switch OFF karke wapas ON karo aur “Allow” dabao.</div>`;
-    if (!state.pushOn) return `<div class="notify-line">📲 Push subscription ban rahi hai… app band ho tab bhi alerts milenge.</div>`;
+    if (permission !== 'granted') return `<div class="notify-line"><span>🔔</span>To receive phone and desktop alerts, turn the switch off and on again, then choose “Allow”.</div>`;
+    if (!state.pushOn) return `<div class="notify-line"><span>📲</span>Setting up push subscription… alerts will arrive even when the app is closed.</div>`;
     return '';
   }
   function render(force) {
@@ -523,10 +523,10 @@ window.FF = window.FF || {};
     const isAdmin = FF.auth.user && FF.auth.user.role === 'admin';
 
     const voice = state.prefs.voice !== false;
-    const switches = `<div class="notify-switches">
-      ${switchRow({ id: 'master', label: '🔔 Notifications', note: on ? 'ON — app ke andar + phone / desktop panel par' : 'OFF — koi alert nahi aayega', on })}
-      ${switchRow({ id: 'voice', label: '🔊 Alert voice (band ho tab bhi)', note: voice ? 'Alert bol kar sunata hai — app khula ho to turant, band tha to khulte hi catch-up' : 'Sirf beep / vibration, koi awaaz nahi', on: voice, disabled: !on })}
-      ${switchRow({ id: 'monthly', label: '📅 Monthly report', note: 'Har mahine ki 1–5 tarikh ko pichhle mahine ka FF vs GV compare', on: monthly, disabled: !on })}
+    const switches = `<div class="np-switches">
+      ${switchRow({ id: 'master', label: 'Notifications', note: on ? 'Show alerts in the app and on your phone or desktop' : 'Alerts are paused', on })}
+      ${switchRow({ id: 'voice', label: 'Alert voice', note: voice ? 'Reads alerts aloud. Plays right away if the app is open, or when it is opened again' : 'Beep and vibration only, no voice', on: voice, disabled: !on })}
+      ${switchRow({ id: 'monthly', label: 'Monthly report', note: 'FF vs GV comparison, sent on the 1st–5th of every month', on: monthly, disabled: !on })}
     </div>`;
 
     const typeOptions = [{ key: 'all', label: 'All types' }, ...NOTIFY_TYPES.filter((t) => t.admin || t.user).map((t) => ({ key: t.key, label: t.label }))];
@@ -553,12 +553,31 @@ window.FF = window.FF || {};
       <span class="notification-icon">${icon(item)}</span><div><b>${U.esc(item.title)}</b><p>${U.esc(item.body)}</p><small>${unread ? '<strong>NEW</strong> · ' : ''}${U.esc(U.timeLabel(new Date(item.createdAt).getTime()))} · <u>${open ? 'band karo ↑' : 'data dekho ↓'}</u></small></div></button>${open ? detailHtml(item) : ''}</div>`;
     }).join('');
     const presence = isAdmin ? `<section class="presence-panel"><div class="presence-title">🟢 User activity <small>Admin only · live / last seen</small></div>${state.people.length ? state.people.map((p) => `<div class="presence-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || p.username)}</b><small>${p.active ? `Active now · ${U.esc(p.page)}` : `Last active ${U.esc(U.timeLabel(p.lastSeen))} · last page: ${U.esc(p.page)}`}</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? 'LIVE' : p.online ? 'IDLE' : 'AWAY'}</span><button class="btn small" data-live-watch="${U.esc(p.username)}">👁 Live view</button> <button class="btn small" data-la-request="${U.esc(p.username)}" title="User ki marzi se live awaaz/video session shuru karo">🎙 Assist</button></span></div>`).join('') : '<div class="notification-empty">Logged-in users will appear after they open the dashboard.</div>'}<div class="presence-title" style="margin-top:14px">🏷️ Employee link activity <small>Link-open alerts and page preview · detailed interaction sharing only after opt-in</small></div>${state.publicPeople.length ? state.publicPeople.map((p) => `<div class="presence-row public-live-row"><span class="presence-dot ${p.active ? 'is-live' : ''}"></span><div><b>${U.esc(p.name || 'Employee link visitor')}</b><small>${p.sharing ? (p.active ? 'Live sharing ON' : `Last seen ${U.esc(U.timeLabel(p.lastSeen))}`) : (p.active ? 'Link open · preview only' : `Last seen ${U.esc(U.timeLabel(p.lastSeen))}`)} · Tag Request page</small>${p.lastEvent ? `<small>Last action: ${U.esc(p.lastEvent.label || p.lastEvent.kind)}</small>` : ''}${p.requestIds && p.requestIds.length ? `<small>Request IDs: ${U.esc(p.requestIds.slice(0, 3).join(', '))}</small>` : ''}</div><span class="presence-side"><span class="presence-state">${p.online && p.active ? (p.sharing ? 'LIVE SHARE' : 'LINK OPEN') : p.online ? 'IDLE' : 'AWAY'}</span><button class="btn small primary" data-live-public-watch="${U.esc(p.sessionId)}">${p.sharing ? '👁 Live View' : '👁 Page Preview'}</button></span></div>`).join('') : '<div class="notification-empty">No employee-link visits yet. Link-open notification and page preview appear automatically.</div>'}</section>` : '';
-    pop.innerHTML = `<div class="notification-head"><div><b>Notifications</b><small>${state.unread ? `${state.unread} unread` : 'Sab updated hai'} · ${filtered.length} shown</small></div><div style="display:flex;gap:6px"><button class="btn small primary" data-notify-center>📬 Full Center</button><button class="btn small" data-notify-read ${state.unread ? '' : 'disabled'}>✓ Mark all read</button></div></div>
-      <div class="notify-filter-bar"><label>Type <select data-notify-filter="type">${typeOptions.map((t) => `<option value="${U.esc(t.key)}" ${state.filterType === t.key ? 'selected' : ''}>${U.esc(t.label)}</option>`).join('')}</select></label><button type="button" class="btn small ${state.filterUnread ? 'primary' : ''}" data-notify-filter="unread">${state.filterUnread ? '✓ Unread only' : 'Unread only'}</button></div>
+    const unreadN = state.unread || 0;
+    const typeSelect = typeOptions.map((t) => `<option value="${U.esc(t.key)}" ${state.filterType === t.key ? 'selected' : ''}>${U.esc(t.label)}</option>`).join('');
+    pop.innerHTML = `
+      <header class="np-head">
+        <div class="np-title">
+          <span class="np-bell" aria-hidden="true">🔔</span>
+          <div><h3>Notifications</h3><p>${unreadN ? `<b>${unreadN}</b> unread` : 'All caught up'} · ${filtered.length} shown</p></div>
+        </div>
+        <div class="np-actions">
+          <button type="button" class="btn small" data-notify-center>Open center</button>
+          <button type="button" class="btn small primary" data-notify-read ${unreadN ? '' : 'disabled'}>Mark all read</button>
+        </div>
+      </header>
+      <div class="np-toolbar">
+        <div class="np-seg" role="group" aria-label="Show">
+          <button type="button" class="np-seg-btn ${state.filterUnread ? '' : 'on'}" aria-pressed="${state.filterUnread ? 'false' : 'true'}" data-notify-filter="all">All</button>
+          <button type="button" class="np-seg-btn ${state.filterUnread ? 'on' : ''}" aria-pressed="${state.filterUnread ? 'true' : 'false'}" data-notify-filter="unread">Unread${unreadN ? ` <i>${unreadN}</i>` : ''}</button>
+        </div>
+        <label class="np-select"><span>Type</span><select data-notify-filter="type">${typeSelect}</select></label>
+      </div>
       ${groupChips}
-      <div class="notification-list">${rows || `<div class="notification-empty">${state.filterUnread ? 'No unread notifications in this view.' : 'No notifications yet. Logins, page opens, report updates and shared locations will appear here.'}</div>`}</div>
+      <div class="notification-list np-list">${rows || `<div class="notification-empty">${state.filterUnread ? 'No unread notifications in this view.' : 'No notifications yet. Logins, page opens, report updates and shared locations will appear here.'}</div>`}</div>
       ${hintLine()}
-      <details class="notify-more"${state.moreOpen ? ' open' : ''}><summary>⚙️ Alert settings${isAdmin ? ' · 🟢 user activity' : ''}</summary>${presence}${switches}</details>`;
+      <details class="notify-more np-settings"${state.moreOpen ? ' open' : ''}><summary><span>Alert settings</span>${isAdmin ? '<em class="np-admin-tag">Admin · user activity</em>' : ''}</summary>${presence}${switches}</details>`;
+
   }
 
   // ---- 📬 Notification Center 2.0 ----------------------------------------------------------------
@@ -1119,8 +1138,8 @@ window.FF = window.FF || {};
       const grp = e.target.closest('[data-notify-type]');
       if (grp) { e.preventDefault(); e.stopPropagation(); state.filterType = grp.dataset.notifyType || 'all'; render(true); return; }
       const filter = e.target.closest('[data-notify-filter]');
-      if (filter && filter.dataset.notifyFilter === 'unread') {
-        e.preventDefault(); e.stopPropagation(); state.filterUnread = !state.filterUnread; render(); return;
+      if (filter && (filter.dataset.notifyFilter === 'unread' || filter.dataset.notifyFilter === 'all')) {
+        e.preventDefault(); e.stopPropagation(); state.filterUnread = filter.dataset.notifyFilter === 'unread'; render(true); return;
       }
       const read = e.target.closest('[data-notify-read]');
       if (read) { e.preventDefault(); markAllRead(); }

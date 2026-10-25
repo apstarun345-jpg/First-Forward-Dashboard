@@ -462,7 +462,7 @@ test('bell panel me sirf Notifications ON/OFF + monthly switch hai — panel tes
   f.FF.notifications.state.prefs.enabled = false;
   f.FF.notifications.render();
   assert.match(pop6.innerHTML, /class="ff-switch " role="switch" aria-checked="false"/, 'master switch OFF dikhe');
-  assert.match(pop6.innerHTML, /OFF — koi alert nahi/);
+  assert.match(pop6.innerHTML, /Alerts are paused/);
   assert.match(pop6.innerHTML, /disabled[^>]*data-notify-switch="monthly"/, 'master OFF me monthly switch disabled');
 });
 
