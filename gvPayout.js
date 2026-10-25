@@ -8,7 +8,7 @@ FF.pages = FF.pages || {};
   const esc = U.esc;
   const GROUPS = ['VC4', 'VC20', 'VC5+'];
   const PAGE = 100;
-  const st = { q: '', who: 'all', tl: '', cls: '', sort: 'comm', shown: PAGE, rows: [], meta: null, cm: '', lm: '' };
+  const st = { q: '', who: 'all', tl: '', cls: '', sort: 'comm', compact: true, shown: PAGE, rows: [], meta: null, cm: '', lm: '' };
 
   const CSS = `
   .gvp-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
@@ -36,6 +36,8 @@ FF.pages = FF.pages || {};
   table.gvp tbody tr:hover td{filter:brightness(.97)}
   .gvp-cls{display:inline-block;padding:2px 8px;border-radius:999px;background:#e0e7ff;color:#3730a3;font-weight:700;font-size:11.5px}
   .gvp-dir{display:inline-block;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-weight:700;font-size:11.5px}
+  table.gvp.cmp th,table.gvp.cmp td{padding:4px 6px;font-size:12px}
+  table.gvp th.gvp-s{cursor:pointer;user-select:none}table.gvp th.gvp-s:hover{filter:brightness(1.15)}
   .gvp-more{text-align:center;margin:12px 0}
   `;
   function css() {
@@ -90,10 +92,12 @@ FF.pages = FF.pages || {};
       if (q && !(`${x.id} ${x.name} ${x.tlId} ${x.tlName}`.toLowerCase().includes(q))) return false;
       return true;
     });
-    const by = {
-      comm: (a, b) => b.comm - a.comm, ct: (a, b) => b.ct - a.ct, lt: (a, b) => b.lt - a.lt,
-      name: (a, b) => (a.name || a.id).localeCompare(b.name || b.id), tl: (a, b) => (a.tlName || 'zzz').localeCompare(b.tlName || 'zzz')
-    }[st.sort] || ((a, b) => b.comm - a.comm);
+    const val = {
+      id: (x) => x.id, name: (x) => x.name || '', tl: (x) => (x.direct ? '' : x.tlName || ''), tlId: (x) => x.tlId || '', cls: (x) => x.cls || '',
+      comm: (x) => x.comm, lt: (x) => x.lt, ct: (x) => x.ct,
+      l4: (x) => x.l['VC4'], l20: (x) => x.l['VC20'], l5: (x) => x.l['VC5+'], c4: (x) => x.c['VC4'], c20: (x) => x.c['VC20'], c5: (x) => x.c['VC5+']
+    }[st.sort] || ((x) => x.comm);
+    const by = (a, b) => { const p = val(a), q = val(b); return (typeof p === 'number' ? p - q : String(p).localeCompare(String(q), undefined, { numeric: true })) * st.dir; };
     return r.slice().sort(by);
   }
 
@@ -105,16 +109,19 @@ FF.pages = FF.pages || {};
       <td class="ta n">${i + 1}</td>
       <td class="ta"><b>${esc(x.id)}</b></td>
       <td class="ta">${esc(x.name || '—')}</td>
-      <td class="ta">${x.direct ? '<span class="gvp-dir">🚫 Direct</span>' : esc(x.tlName || '—')}</td>
-      <td class="ta">${esc(x.tlId || '—')}</td>
+      <td class="ta">${x.direct ? '<span class="gvp-dir">🚫 Direct</span>' : esc(x.tlName || '—')}${st.compact && x.tlId ? `<br><small class="dim">${esc(x.tlId)}</small>` : ''}</td>
+      ${st.compact ? '' : `<td class="ta">${esc(x.tlId || '—')}</td>`}
       <td class="ta">${x.cls ? `<span class="gvp-cls">${esc(x.cls)}</span>` : '—'}</td>
-      <td class="ta">${esc(meta.productId || '')}</td>
+      ${st.compact ? '' : `<td class="ta">${esc(meta.productId || '')}</td>`}
       <td class="tb n">${money(x.comm, cur)}${esc(meta.suffix || '')}<br><small style="font-weight:500;color:#9a3412">${esc(x.date || '')}</small></td>
       ${GROUPS.map((g) => num(x.l[g], 'tc')).join('')}${num(x.lt, 'tc tot')}
       ${GROUPS.map((g) => num(x.c[g], 'td')).join('')}${num(x.ct, 'td tot')}
     </tr>`;
   }
 
+  const th = (k, label, cls) => k
+    ? `<th class="${cls} gvp-s" data-gvp-sort="${k}" title="Sort">${esc(label)} ${st.sort === k ? (st.dir > 0 ? '▲' : '▼') : '<span style="opacity:.5">⇅</span>'}</th>`
+    : `<th class="${cls}">${esc(label)}</th>`;
   function paint(root) {
     const list = filtered();
     const meta = st.meta || {};
@@ -127,10 +134,10 @@ FF.pages = FF.pages || {};
       <div class="gvp-chip c3">${esc(lmL)}<b>${sum('lt').toLocaleString('en-IN')}</b>VC4 ${sum('l', 'VC4')} · VC20 ${sum('l', 'VC20')} · VC5+ ${sum('l', 'VC5+')}</div>
       <div class="gvp-chip c4">${esc(cmL)}<b>${sum('ct').toLocaleString('en-IN')}</b>VC4 ${sum('c', 'VC4')} · VC20 ${sum('c', 'VC20')} · VC5+ ${sum('c', 'VC5+')}</div>`;
     const shown = list.slice(0, st.shown);
-    U.$('#gvp-table', root).innerHTML = list.length ? `<div class="gvp-wrap"><table class="gvp"><thead>
-      <tr><th class="ga" colspan="7">👤 Agent &amp; TL</th><th class="gb">💸 Commission</th><th class="gc" colspan="4">📅 ${esc(lmL)} · tags issued</th><th class="gd" colspan="4">📅 ${esc(cmL)} · tags issued</th></tr>
-      <tr class="g2"><th class="ga2">#</th><th class="ga2">Agent ID</th><th class="ga2">Agent name</th><th class="ga2">TL name</th><th class="ga2">TL ID</th><th class="ga2">Class</th><th class="ga2">Product ID</th>
-      <th class="gb2">Latest${esc(meta.suffix || '')}</th>${['VC4', 'VC20', 'VC5+', 'Total'].map((h) => `<th class="gc2">${h}</th>`).join('')}${['VC4', 'VC20', 'VC5+', 'Total'].map((h) => `<th class="gd2">${h}</th>`).join('')}</tr>
+    U.$('#gvp-table', root).innerHTML = list.length ? `<div class="gvp-wrap"><table class="gvp${st.compact ? ' cmp' : ''}"><thead>
+      <tr><th class="ga" colspan="${st.compact ? 5 : 7}">👤 Agent &amp; TL</th><th class="gb">💸 Commission</th><th class="gc" colspan="4">📅 ${esc(lmL)}${st.compact ? '' : ' · tags issued'}</th><th class="gd" colspan="4">📅 ${esc(cmL)}${st.compact ? '' : ' · tags issued'}</th></tr>
+      <tr class="g2">${th('', '#', 'ga2')}${th('id', 'Agent ID', 'ga2')}${th('name', 'Agent name', 'ga2')}${th('tl', 'TL name', 'ga2')}${th('tlId', 'TL ID', 'ga2')}${th('cls', 'Class', 'ga2')}${th('', 'Product ID', 'ga2')}
+      ${th('comm', 'Latest' + (meta.suffix || ''), 'gb2')}${th('l4', 'VC4', 'gc2')}${th('l20', 'VC20', 'gc2')}${th('l5', 'VC5+', 'gc2')}${th('lt', 'Total', 'gc2')}${th('c4', 'VC4', 'gd2')}${th('c20', 'VC20', 'gd2')}${th('c5', 'VC5+', 'gd2')}${th('ct', 'Total', 'gd2')}</tr>
       </thead><tbody>${shown.map((x, i) => rowHtml(x, i, meta)).join('')}</tbody></table></div>
       ${list.length > shown.length ? `<div class="gvp-more"><button class="btn" data-gvp="more">⬇ Aur dikhao (${shown.length}/${list.length})</button></div>` : `<p class="dim small">${list.length} agents</p>`}`
       : '<div class="empty">Koi agent nahi mila — filter badal ke dekho.</div>';
@@ -167,6 +174,7 @@ FF.pages = FF.pages || {};
         <span class="gvp-seg">${[['all', 'All'], ['tl', 'TL agents'], ['direct', 'Direct']].map(([k, l]) => `<button data-gvp-who="${k}" class="${st.who === k ? 'on' : ''}">${l}</button>`).join('')}</span>
         <select class="input" id="gvp-tl"><option value="">All TLs</option>${tlOpts.map(([id, n]) => `<option value="${esc(id)}" ${st.tl === id ? 'selected' : ''}>${esc(n)} (${esc(id)})</option>`).join('')}</select>
         <select class="input" id="gvp-cls"><option value="">All classes</option>${clsOpts.map((c) => `<option ${st.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <button class="btn small" data-gvp="compact" id="gvp-cmp">${st.compact ? '↔ Full table' : '↕ Short table'}</button>
         <select class="input" id="gvp-sort">${[['comm', 'Commission ↓'], ['ct', 'Current month tags ↓'], ['lt', 'Last month tags ↓'], ['name', 'Agent name'], ['tl', 'TL name']].map(([k, l]) => `<option value="${k}" ${st.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       </div>
       <div id="gvp-table"></div>
@@ -175,12 +183,15 @@ FF.pages = FF.pages || {};
     U.$('#gvp-q', root).addEventListener('input', U.debounce ? U.debounce((e) => { st.q = e.target.value; redo(); }, 150) : (e) => { st.q = e.target.value; redo(); });
     U.$('#gvp-tl', root).addEventListener('change', (e) => { st.tl = e.target.value; redo(); });
     U.$('#gvp-cls', root).addEventListener('change', (e) => { st.cls = e.target.value; redo(); });
-    U.$('#gvp-sort', root).addEventListener('change', (e) => { st.sort = e.target.value; redo(); });
+    U.$('#gvp-sort', root).addEventListener('change', (e) => { st.sort = e.target.value; st.dir = e.target.value === 'name' || e.target.value === 'tl' ? 1 : -1; redo(); });
     root.onclick = (e) => {
       const w = e.target.closest('[data-gvp-who]');
       if (w) { st.who = w.dataset.gvpWho; root.querySelectorAll('[data-gvp-who]').forEach((b) => b.classList.toggle('on', b === w)); redo(); return; }
+      const so = e.target.closest('[data-gvp-sort]');
+      if (so) { const k = so.dataset.gvpSort; if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = /^(id|name|tl|tlId|cls)$/.test(k) ? 1 : -1; } const dd = U.$('#gvp-sort', root); if (dd && [...dd.options].some((o) => o.value === k)) dd.value = k; paint(root); return; }
       const a = e.target.closest('[data-gvp]'); if (!a) return;
       if (a.dataset.gvp === 'more') { st.shown += PAGE; paint(root); }
+      else if (a.dataset.gvp === 'compact') { st.compact = !st.compact; a.textContent = st.compact ? '↔ Full table' : '↕ Short table'; paint(root); }
       else if (a.dataset.gvp === 'csv') exportCsv();
     };
     paint(root);
