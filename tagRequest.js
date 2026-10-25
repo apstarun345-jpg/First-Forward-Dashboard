@@ -2718,7 +2718,8 @@ body.colorful .from-hdr { color: #166534; }
     };
     /** TVC group rows: {tvc,label,cch,stock,last,cur} — tvc 4 (VC4+VC20) = core numbers. */
     const tvcRows = () => (FF.config.tvcGroups || []).map((g) => {
-      const cch = (g.cch || []).map((v) => String(v).toUpperCase());
+      // StockDataa me TAG_CLASS = TVC code (4/5/6/…) — TVC ki apni class (VC6 …) hamesha group me judti hai.
+      const cch = [...new Set([...(g.cch || []).map((v) => String(v).toUpperCase()), 'VC' + g.tvc])];
       const isCore = cch.length > 0 && cch.every((c) => c === 'VC4' || c === 'VC20');
       const o = { tvc: String(g.tvc), cch, isCore, label: isCore && String(g.tvc) === '4' ? 'VC4/VC20' : 'VC' + g.tvc };
       ['stock', 'last', 'cur'].forEach((f) => { o[f] = isCore ? num(n.core[f]) : cch.reduce((a, c) => a + cchVal(c, f), 0); });
