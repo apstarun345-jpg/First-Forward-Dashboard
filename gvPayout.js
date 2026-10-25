@@ -8,7 +8,7 @@ FF.pages = FF.pages || {};
   const esc = U.esc;
   const GROUPS = ['VC4', 'VC20', 'VC5+'];
   const PAGE = 100;
-  const st = { q: '', who: 'all', tl: '', cls: '', sort: 'comm', compact: true, shown: PAGE, rows: [], meta: null, cm: '', lm: '' };
+  const st = { q: '', who: 'all', tl: '', cls: '', sort: 'comm', dir: -1, compact: true, view: 'both', ymSel: '', shown: PAGE, rows: [], meta: null, cm: '', lm: '' };
 
   const CSS = `
   .gvp-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
@@ -36,7 +36,7 @@ FF.pages = FF.pages || {};
   table.gvp tbody tr:hover td{filter:brightness(.97)}
   .gvp-cls{display:inline-block;padding:2px 8px;border-radius:999px;background:#e0e7ff;color:#3730a3;font-weight:700;font-size:11.5px}
   .gvp-dir{display:inline-block;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-weight:700;font-size:11.5px}
-  table.gvp.cmp th,table.gvp.cmp td{padding:4px 6px;font-size:12px}
+  table.gvp.cmp th,table.gvp.cmp td{padding:4px 6px;font-size:12px}table.gvp.cmp thead tr.g2 th{top:26px}
   table.gvp th.gvp-s{cursor:pointer;user-select:none}table.gvp th.gvp-s:hover{filter:brightness(1.15)}
   .gvp-more{text-align:center;margin:12px 0}
   `;
@@ -51,7 +51,7 @@ FF.pages = FF.pages || {};
   /** Commission map + issuance rows → ek row per agent. */
   function build(map) {
     const latest = G.latestDate && G.latestDate();
-    const cm = U.ymKey(latest instanceof Date && !isNaN(latest) ? latest : new Date());
+    const cm = st.ymSel || U.ymKey(latest instanceof Date && !isNaN(latest) ? latest : new Date());
     const [y, m] = cm.split('-').map(Number);
     const lm = U.ymKey(new Date(y, m - 2, 1));
     st.cm = cm; st.lm = lm;
@@ -114,8 +114,8 @@ FF.pages = FF.pages || {};
       <td class="ta">${x.cls ? `<span class="gvp-cls">${esc(x.cls)}</span>` : '—'}</td>
       ${st.compact ? '' : `<td class="ta">${esc(meta.productId || '')}</td>`}
       <td class="tb n">${money(x.comm, cur)}${esc(meta.suffix || '')}<br><small style="font-weight:500;color:#9a3412">${esc(x.date || '')}</small></td>
-      ${GROUPS.map((g) => num(x.l[g], 'tc')).join('')}${num(x.lt, 'tc tot')}
-      ${GROUPS.map((g) => num(x.c[g], 'td')).join('')}${num(x.ct, 'td tot')}
+      ${st.view !== 'c' ? GROUPS.map((g) => num(x.l[g], 'tc')).join('') + num(x.lt, 'tc tot') : ''}
+      ${st.view !== 'l' ? GROUPS.map((g) => num(x.c[g], 'td')).join('') + num(x.ct, 'td tot') : ''}
     </tr>`;
   }
 
@@ -131,13 +131,13 @@ FF.pages = FF.pages || {};
     U.$('#gvp-chips', root).innerHTML = `
       <div class="gvp-chip c1">Agents<b>${list.length.toLocaleString('en-IN')}</b>${tls.size} TLs · ${list.filter((x) => x.direct).length} direct</div>
       <div class="gvp-chip c2">Avg commission<b>${list.length ? money(list.reduce((n, x) => n + x.comm, 0) / list.length, meta.currency || '₹') : '–'}</b>max ${list.length ? money(Math.max(...list.map((x) => x.comm)), meta.currency || '₹') : '–'}</div>
-      <div class="gvp-chip c3">${esc(lmL)}<b>${sum('lt').toLocaleString('en-IN')}</b>VC4 ${sum('l', 'VC4')} · VC20 ${sum('l', 'VC20')} · VC5+ ${sum('l', 'VC5+')}</div>
-      <div class="gvp-chip c4">${esc(cmL)}<b>${sum('ct').toLocaleString('en-IN')}</b>VC4 ${sum('c', 'VC4')} · VC20 ${sum('c', 'VC20')} · VC5+ ${sum('c', 'VC5+')}</div>`;
+      ${st.view !== 'c' ? `<div class="gvp-chip c3">${esc(lmL)}<b>${sum('lt').toLocaleString('en-IN')}</b>VC4 ${sum('l', 'VC4')} · VC20 ${sum('l', 'VC20')} · VC5+ ${sum('l', 'VC5+')}</div>` : ''}
+      ${st.view !== 'l' ? `<div class="gvp-chip c4">${esc(cmL)}<b>${sum('ct').toLocaleString('en-IN')}</b>VC4 ${sum('c', 'VC4')} · VC20 ${sum('c', 'VC20')} · VC5+ ${sum('c', 'VC5+')}</div>` : ''}`;
     const shown = list.slice(0, st.shown);
     U.$('#gvp-table', root).innerHTML = list.length ? `<div class="gvp-wrap"><table class="gvp${st.compact ? ' cmp' : ''}"><thead>
-      <tr><th class="ga" colspan="${st.compact ? 5 : 7}">👤 Agent &amp; TL</th><th class="gb">💸 Commission</th><th class="gc" colspan="4">📅 ${esc(lmL)}${st.compact ? '' : ' · tags issued'}</th><th class="gd" colspan="4">📅 ${esc(cmL)}${st.compact ? '' : ' · tags issued'}</th></tr>
-      <tr class="g2">${th('', '#', 'ga2')}${th('id', 'Agent ID', 'ga2')}${th('name', 'Agent name', 'ga2')}${th('tl', 'TL name', 'ga2')}${th('tlId', 'TL ID', 'ga2')}${th('cls', 'Class', 'ga2')}${th('', 'Product ID', 'ga2')}
-      ${th('comm', 'Latest' + (meta.suffix || ''), 'gb2')}${th('l4', 'VC4', 'gc2')}${th('l20', 'VC20', 'gc2')}${th('l5', 'VC5+', 'gc2')}${th('lt', 'Total', 'gc2')}${th('c4', 'VC4', 'gd2')}${th('c20', 'VC20', 'gd2')}${th('c5', 'VC5+', 'gd2')}${th('ct', 'Total', 'gd2')}</tr>
+      <tr><th class="ga" colspan="${st.compact ? 5 : 7}">👤 Agent &amp; TL</th><th class="gb">💸</th>${st.view !== 'c' ? `<th class="gc" colspan="4">📅 ${esc(lmL)}</th>` : ''}${st.view !== 'l' ? `<th class="gd" colspan="4">📅 ${esc(cmL)}</th>` : ''}</tr>
+      <tr class="g2">${th('', '#', 'ga2')}${th('id', 'Agent ID', 'ga2')}${th('name', 'Agent name', 'ga2')}${th('tl', st.compact ? 'TL (name / ID)' : 'TL name', 'ga2')}${st.compact ? '' : th('tlId', 'TL ID', 'ga2')}${th('cls', 'Class', 'ga2')}${st.compact ? '' : th('', 'Product ID', 'ga2')}
+      ${th('comm', 'Latest' + (meta.suffix || ''), 'gb2')}${st.view !== 'c' ? th('l4', 'VC4', 'gc2') + th('l20', 'VC20', 'gc2') + th('l5', 'VC5+', 'gc2') + th('lt', 'Total', 'gc2') : ''}${st.view !== 'l' ? th('c4', 'VC4', 'gd2') + th('c20', 'VC20', 'gd2') + th('c5', 'VC5+', 'gd2') + th('ct', 'Total', 'gd2') : ''}</tr>
       </thead><tbody>${shown.map((x, i) => rowHtml(x, i, meta)).join('')}</tbody></table></div>
       ${list.length > shown.length ? `<div class="gvp-more"><button class="btn" data-gvp="more">⬇ Aur dikhao (${shown.length}/${list.length})</button></div>` : `<p class="dim small">${list.length} agents</p>`}`
       : '<div class="empty">Koi agent nahi mila — filter badal ke dekho.</div>';
@@ -167,6 +167,8 @@ FF.pages = FF.pages || {};
     if (!map || map.enabled === false) { body.innerHTML = '<div class="empty">Commission box Settings me OFF hai.</div>'; return; }
     st.meta = map; st.rows = build(map); st.shown = PAGE;
     const tlOpts = [...new Map(st.rows.filter((x) => x.tlId).map((x) => [x.tlId, x.tlName || x.tlId])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    const months = [...new Set((G.issuanceRows() || []).map((r) => r.ym).filter(Boolean))].sort().reverse().slice(0, 12);
+    if (!months.includes(st.cm)) months.unshift(st.cm);
     const clsOpts = [...new Set(st.rows.map((x) => x.cls).filter(Boolean))].sort();
     body.innerHTML = `<div id="gvp-chips" class="gvp-chips"></div>
       <div class="gvp-bar">
@@ -174,11 +176,16 @@ FF.pages = FF.pages || {};
         <span class="gvp-seg">${[['all', 'All'], ['tl', 'TL agents'], ['direct', 'Direct']].map(([k, l]) => `<button data-gvp-who="${k}" class="${st.who === k ? 'on' : ''}">${l}</button>`).join('')}</span>
         <select class="input" id="gvp-tl"><option value="">All TLs</option>${tlOpts.map(([id, n]) => `<option value="${esc(id)}" ${st.tl === id ? 'selected' : ''}>${esc(n)} (${esc(id)})</option>`).join('')}</select>
         <select class="input" id="gvp-cls"><option value="">All classes</option>${clsOpts.map((c) => `<option ${st.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <select class="input" id="gvp-ym" title="Month">${months.map((m) => `<option value="${m}" ${m === st.cm ? 'selected' : ''}>${esc(U.labelYM ? U.labelYM(m) : m)}</option>`).join('')}</select>
+        <select class="input" id="gvp-view"><option value="both">Dono month</option><option value="l">Sirf pichhla month</option><option value="c">Sirf current month</option></select>
         <button class="btn small" data-gvp="compact" id="gvp-cmp">${st.compact ? '↔ Full table' : '↕ Short table'}</button>
         <select class="input" id="gvp-sort">${[['comm', 'Commission ↓'], ['ct', 'Current month tags ↓'], ['lt', 'Last month tags ↓'], ['name', 'Agent name'], ['tl', 'TL name']].map(([k, l]) => `<option value="${k}" ${st.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       </div>
       <div id="gvp-table"></div>
       <p class="dim small">Commission = GV Master ka latest (date column se) · product ${esc(map.productId || '')} (${esc(map.label || '')}). Tags = FF dashboard ke issuance data se.</p>`;
+    U.$('#gvp-view', root).value = st.view;
+    U.$('#gvp-view', root).addEventListener('change', (e) => { st.view = e.target.value; paint(root); });
+    U.$('#gvp-ym', root).addEventListener('change', (e) => { st.ymSel = e.target.value; st.rows = build(st.meta); paint(root); });
     const redo = () => { st.shown = PAGE; paint(root); };
     U.$('#gvp-q', root).addEventListener('input', U.debounce ? U.debounce((e) => { st.q = e.target.value; redo(); }, 150) : (e) => { st.q = e.target.value; redo(); });
     U.$('#gvp-tl', root).addEventListener('change', (e) => { st.tl = e.target.value; redo(); });
