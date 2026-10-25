@@ -5664,6 +5664,7 @@ html[data-theme="dark"] .home-exp-stat { background: color-mix(in srgb, var(--br
   line-height: 1.05 !important;
 }
 .tr-req-tbl .tr-class-grid > span { overflow: hidden; }
+.tr-req-tbl .tr-class-grid > span:first-child { grid-column: 1 / -1; }   /* VC4/VC20 — poori row */
 .tr-req-tbl .tr-class-grid > span b {
   flex: 0 0 auto;
   font-size: 9.5px !important;

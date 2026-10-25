@@ -2673,7 +2673,8 @@ body.colorful .from-hdr { color: #166534; }
   const growthHtml = (g) => (g === null ? '<span class="delta up">🆕 new</span>' : `<span class="delta ${g > 0.05 ? 'up' : g < -0.05 ? 'down' : 'flat'}">${g > 0.05 ? '▲ +' : g < -0.05 ? '▼ ' : ''}${fmt(g, 1)}%</span>`);
   const growthSmall = (g) => (g === null ? 'new' : `${g > 0 ? '+' : ''}${fmt(g, 0)}%`);
   /** Metric cells — admin rows also show both stock-adjusted and no-stock-deduction suggestions. */
-  const CLASS_DETAIL_LIST = ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16'];   // v233 — VC6 chhoot raha tha (jod total se kam aata tha)
+  const CLASS_DETAIL_LIST = ['VC5', 'VC6', 'VC7', 'VC12', 'VC16'];   // v233 — VC6 chhoot raha tha · v3.86 — VC4 + VC20 ab ek hi chip (VC4/VC20)
+  const CLASS_SHOWN = new Set(['VC4', 'VC20', ...CLASS_DETAIL_LIST]);
   function metricCellsHtml(dr) {
     const m = metricsFor(dr);
     const n = metricNumbers(m);
@@ -2686,12 +2687,32 @@ body.colorful .from-hdr { color: #166534; }
       const x = dr.rows.find((r) => String(r.cls || '').toUpperCase() === c);
       return [c, x ? num(x[field]) : 0];
     });
+    /** Baaki classes (VC8, VC9 …) ke naam + count — "Other" me ab pata chalta hai konsi class hai. */
+    const extraClasses = (field) => {
+      const out = [];
+      if (rec) {
+        const src = (field === 'stock' ? rec.stock : field === 'last' ? rec.last : rec.cur) || {};
+        Object.keys(src).forEach((c) => { const k = String(c).toUpperCase(); if (/^VC\d+/.test(k) && !CLASS_SHOWN.has(k) && num(src[c]) > 0) out.push([k, num(src[c])]); });
+      } else {
+        dr.rows.forEach((r) => { const k = String(r.cls || '').toUpperCase(); if (/^VC\d+/.test(k) && !CLASS_SHOWN.has(k) && num(r[field]) > 0) out.push([k, num(r[field])]); });
+      }
+      return out.sort((a, b) => b[1] - a[1]);
+    };
     const classLineHtml = (field) => {
-      const list = classMetrics(field);
       const tot = field === 'stock' ? num(n.total.stock) : field === 'last' ? num(n.total.last) : field === 'cur' ? num(n.total.cur) : 0;
+      const core = num(n.core[field]);                       // VC4 + VC20 — ek hi jagah
+      const list = [['VC4/VC20', core], ...classMetrics(field)];
       const sum = list.reduce((a, [, v]) => a + v, 0);
-      if (tot > sum) list.push(['Other', tot - sum]);   // jod hamesha total ke barabar dikhe
-      return list.map(([cls, val]) => `<span><b>${esc(cls)}</b> <strong>${fmt(val)}</strong></span>`).join('');
+      const extra = extraClasses(field);
+      const named = extra.slice(0, 2);                       // sabse bade 2 extra class naam se
+      const rest = extra.slice(2).reduce((a, [, v]) => a + v, 0);
+      named.forEach(([c, v]) => list.push([c, v]));
+      const left = tot - sum - named.reduce((a, [, v]) => a + v, 0);   // jod hamesha total ke barabar dikhe
+      const otherVal = Math.max(0, left);
+      const html = list.map(([cls, val]) => `<span><b>${esc(cls)}</b> <strong>${fmt(val)}</strong></span>`).join('');
+      if (otherVal <= 0 && !rest) return html;
+      const names = extra.slice(2).map(([c, v]) => `${c} ${fmt(v)}`).join(' · ');
+      return `${html}<span title="${esc(names ? `Baaki classes: ${names}` : 'Baaki commercial classes (VC5+ ke andar)')}"><b>Other</b> <strong>${fmt(otherVal)}</strong></span>`;
     };
     const keys = ['stock', 'core', 'comm', 'last', 'cur', 'rate', 'exp', 'growth'];
     if (isAdmin()) keys.push('suggest');
