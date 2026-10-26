@@ -106,9 +106,13 @@ window.FF = window.FF || {};
     const isTl = /tl$/.test(String(spec.kind || ''));
     const ids = [], names = [];
     if (spec.id) ids.push(idKey(spec.id));
-    if (spec.tlId) ids.push(idKey(spec.tlId));
-    (spec.tlIds || []).forEach((x) => ids.push(idKey(x)));
-    (spec.altIds || []).forEach((x) => ids.push(idKey(x)));
+    // ⚠️ v3.97 — agent ki identity me uske TL ka ID NAHI jodte: pehle agent profile me TL ki khud ki
+    // issued rows bhi jud jaati thi (Vishal 177 + TL Suraj ki rows = 387). TL ID sirf TL identity ka hissa hai.
+    if (isTl) {
+      if (spec.tlId) ids.push(idKey(spec.tlId));
+      (spec.tlIds || []).forEach((x) => ids.push(idKey(x)));
+    }
+    if (isTl) (spec.altIds || []).forEach((x) => ids.push(idKey(x)));
     if (spec.name) names.push(nameKey(spec.name));
     return { isTl, ids: [...new Set(ids.filter(Boolean))], names: [...new Set(names.filter(Boolean))] };
   }
@@ -136,7 +140,9 @@ window.FF = window.FF || {};
       }
       return [];
     }
-    return mergeLookups(lookup(ix.ledger.byAgentId, id.ids), lookup(ix.ledger.byAgentName, id.names));
+    // ID mile to sirf ID wali rows (same naam ke doosre agent ki rows nahi judti); ID na mile tab naam se.
+    const byId = lookup(ix.ledger.byAgentId, id.ids);
+    return byId.length ? byId : lookup(ix.ledger.byAgentName, id.names);
   }
 
   // ---- stats ---------------------------------------------------------------------------------------
@@ -408,9 +414,26 @@ window.FF = window.FF || {};
       { metric: 'Stock in hand (live)', final: stock.total, others: [
         sheet && sheet.stockAvailable ? { label: 'GV REPORT sheet', value: sheet.stock } : null] }
     ].map((c) => ({ ...c, others: c.others.filter(Boolean).map((o) => ({ ...o, diff: c.final - (Number(o.value) || 0) })) }));
+    // GV Master (final) ka supervisor — agent ka TL yahin se (GV REPORT / Tag Assignment me aksar blank hota hai).
+    const ledgerTl = (() => {
+      if (isTl) return null;
+      const cnt = new Map();
+      all.forEach((r) => {
+        const tid = clean(r.tlId || r.supervisorId || r.gvTlId), tn = clean(r.tlName);
+        if (!tid && !tn) return;
+        if (tid && id.ids.includes(idKey(tid))) return;        // khud ka supervisor = koi TL nahi
+        const k = `${tid}|${tn}`; cnt.set(k, (cnt.get(k) || 0) + 1);
+      });
+      const best = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (!best) return null;
+      const [tid, tn] = best[0].split('|');
+      return { id: tid, name: tn || tid };
+    })();
     return {
       ch: 'gv', kind: isTl ? 'tl' : 'agent', name: spec.name, id: spec.id || (sheet && sheet.agentId) || '', mobile: spec.mobile || '',
-      direct: !!spec.direct, tlName: spec.tlName || (sheet && !isTl ? sheet.tlName : '') || stock.tlName || '', tlId: spec.tlId || (sheet && sheet.tlId) || stock.tlId || '',
+      direct: ledgerTl ? false : !!spec.direct, ledgerTl,
+      tlName: spec.tlName || (ledgerTl && ledgerTl.name) || (sheet && !isTl ? sheet.tlName : '') || stock.tlName || '',
+      tlId: spec.tlId || (ledgerTl && ledgerTl.id) || (sheet && sheet.tlId) || stock.tlId || '',
       ym, lastYm: prevYmOf(ym), ledger, sheet, stock, eir, checks, warnings, source: 'GV Master (final) · Tag Assignment (stock) · GV REPORT (cross-check)',
       generatedAt: Date.now()
     };

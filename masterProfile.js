@@ -1540,10 +1540,12 @@ window.FF = window.FF || {};
     const out = { kind: 'gv-agent', channel: 'GV Partner', ch: 'gv', name: p.name, id: (r && r.agentId) || p.sub || '', found: !!r };
     if (r) {
       const avgVc4 = gvDaily(r, r.curVc4), avgComm = gvDaily(r, r.curComm);
-      const direct = safeCall(() => FF.config.isDirectAgent(r, 'gv'), false);
+      // GV Master (final) me supervisor mila to wahi TL — GV REPORT ka blank TL "Direct" nahi banata.
+      const lTl = truth && truth.ledgerTl;
+      const direct = lTl ? false : safeCall(() => FF.config.isDirectAgent(r, 'gv'), false);
       const given = num(r.suggestedDispatch);
       Object.assign(out, {
-        mobile: mobileFor(r.agentName, r.agentId, r.mobile), tl: { name: direct ? '' : r.tlName, id: r.tlId, mobile: '' }, status: r.agentStatus || '', lastActive: '', priority: prioOf(r.priority), growth: r.growth != null ? `${r.growth}%` : '',
+        mobile: mobileFor(r.agentName, r.agentId, r.mobile), tl: { name: direct ? '' : ((lTl && lTl.name) || r.tlName), id: (lTl && lTl.id) || r.tlId, mobile: '' }, status: r.agentStatus || '', lastActive: '', priority: prioOf(r.priority), growth: r.growth != null ? `${r.growth}%` : '',
         direct, directLabel: direct ? FF.config.directLabel(r, 'gv') : '',
         stock: { vc4: num(r.stockVc4), comm: num(r.stockComm), total: num(r.stockTotal) || num(r.stockVc4) + num(r.stockComm) },
         tlStock: { vc4: num(r.tlStockVc4), comm: num(r.tlStockComm), total: num(r.tlStockTotal), has: !direct && (r.tlStockTotal != null) },

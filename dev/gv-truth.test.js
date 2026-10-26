@@ -361,3 +361,17 @@ test('gvTruth: exact agent-ID stock is never dropped by a different TL (self-sup
   const agent = T.people().find((p) => p.kind === 'gv-agent' && p.id === A1.id);
   assert.equal(agent.today, ym === TODAY.slice(0, 7) ? 1 : 0, 'today from raw GV Master rows (no `key` field)');
 });
+
+test('v3.97 — agent profile never adds the TL\'s own issued rows (tlId / altIds are not agent identity) · TL from GV Master', async () => {
+  await boot();
+  const T = FF.gvTruth;
+  const base = T.person({ kind: 'gv-agent', name: A1.name, id: A1.id });
+  // A2 issues tags too — earlier passing it as tlId/altIds added A2's rows to A1 (Vishal 177 + Suraj = 387 bug).
+  const withTl = T.person({ kind: 'gv-agent', name: A1.name, id: A1.id, tlId: A2.id, altIds: [A2.id] });
+  assert.equal(withTl.ledger.cur.total, base.ledger.cur.total, 'current month = sirf agent ki rows');
+  assert.equal(withTl.ledger.last.total, base.ledger.last.total, 'last month = sirf agent ki rows');
+  assert.equal(withTl.ledger.today.total, base.ledger.today.total, 'today = sirf agent ki rows');
+  assert.equal(base.ledgerTl && base.ledgerTl.id, TL.id, 'TL GV Master ke supervisor column se');
+  assert.equal(base.direct, false, 'GV Master me supervisor hai to Direct nahi');
+  assert.equal(base.tlName, TL.name);
+});

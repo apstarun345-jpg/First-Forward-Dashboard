@@ -1732,7 +1732,9 @@ FF.pages = FF.pages || {};
       const dayChip = (() => {
         try {
           const nk = normName(pr.name), pid = normName(pr.id || '');
-          const same = (r) => (isTl ? (normName(r.tlName) === nk || (pid && normName(r.tlId) === pid)) : (normName(r.agentName) === nk || (pid && normName(r.agentId) === pid)));
+          const same = (r) => (isTl
+            ? ((pid && r.tlId) ? normName(r.tlId) === pid : normName(r.tlName) === nk)
+            : ((pid && r.agentId) ? normName(r.agentId) === pid : normName(r.agentName) === nk));   // ID ho to ID hi decide kare
           let rows, key, label, icon, tail;
           if (ch === 'gv') {
             rows = (FF.gv && FF.gv.issuanceRows && FF.gv.issuanceRows()) || [];
