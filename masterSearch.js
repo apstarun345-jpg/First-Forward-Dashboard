@@ -527,6 +527,8 @@ FF.pages = FF.pages || {};
    */
   function canonicalPerson(p, idx) {
     if (!p || !idx) return p;
+    // A GV person that is both agent and TL keeps its own kind (separate suggestion rows).
+    if (/^gv-(agent|tl)$/.test(String(p.kind || ''))) return p;
     const ids = new Set([p.sub, ...(p.ids || []), ...(p.alias || [])].map(normId).filter((x) => x && x.length >= 4));
     for (const id of ids) {
       const canonical = idx.ids && idx.ids.get(id);

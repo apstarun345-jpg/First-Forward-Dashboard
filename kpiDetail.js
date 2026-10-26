@@ -321,6 +321,36 @@ window.FF = window.FF || {};
       ${rk.map((r) => { const vals = ck.map((c) => cell.get(`${r}\u0001${c}`) || 0); const drill = opts.drillRow && opts.drillRow(r); return `<tr${drill ? ` class="clickable" data-kd-spec='${specAttr(drill)}' title="Click to open ${esc(r)} details"` : ''}><td><b>${esc(r)}</b></td>${vals.map((v, i) => { const cellDrill = opts.drillCell && opts.drillCell(r, ck[i]); return `<td class="num"${cellDrill ? ` data-kd-spec='${specAttr(cellDrill)}' title="Click to open this breakdown"` : ''}>${v ? U.fmt(v) : '<span class="dim">0</span>'}</td>`; }).join('')}<td class="num"><b>${U.fmt(vals.reduce((a, b) => a + b, 0))}</b></td></tr>`; }).join('')}
       <tr class="kd-total"><td>Total</td>${colTot.map((v) => `<td class="num">${U.fmt(v)}</td>`).join('')}<td class="num">${U.fmt(colTot.reduce((a, b) => a + b, 0))}</td></tr></tbody></table></div></section>`;
   }
+  /** 👥 TL team stock — TL name header, TL's own row first, every agent: name, ID, class-wise counts, grand total. */
+  function teamStockTable(rows, spec, ch) {
+    const tlName = U.clean(spec.tl || spec.tlName), tlId = personKey(spec.tlId);
+    const list = (rows || []).filter((r) => Number(r.n) > 0 || r.n === 0);
+    if (!list.length) return '';
+    const classes = [...new Set(list.map((r) => U.clean(r.cls) || '—'))].sort((a, b) => clsNum(a) - clsNum(b));
+    const people = new Map();
+    list.forEach((r) => {
+      const key = personKey(r.agentId) ? `#${personKey(r.agentId)}` : personKey(r.agentName);
+      const v = people.get(key) || { name: U.clean(r.agentName), id: U.clean(r.agentId), by: new Map(), n: 0 };
+      const c = U.clean(r.cls) || '—', n = Number(r.n) || 0;
+      v.by.set(c, (v.by.get(c) || 0) + n); v.n += n;
+      if (!v.id && r.agentId) v.id = U.clean(r.agentId);
+      people.set(key, v);
+    });
+    const isSelf = (v) => (!!tlId && personKey(v.id) === tlId) || (!!tlName && personKey(v.name) === personKey(tlName));
+    const all = [...people.values()].sort((a, b) => Number(isSelf(b)) - Number(isSelf(a)) || b.n - a.n);
+    const colTot = classes.map((c) => all.reduce((a, v) => a + (v.by.get(c) || 0), 0));
+    const grand = all.reduce((a, v) => a + v.n, 0);
+    const cls = (c) => /^VC4$/i.test(c) ? 'c4' : /^VC20$/i.test(c) ? 'c20' : /5/.test(c) ? 'c5' : 'cx';
+    const head = classes.map((c) => `<th class="num tm-${cls(c)}">${esc(c)}</th>`).join('');
+    const body = all.map((v, i) => {
+      const self = isSelf(v);
+      const go = v.name ? ` class="tm-name" data-tm-go="${esc(v.name)}" data-id="${esc(v.id)}" data-ch="${esc(ch)}" role="button" tabindex="0" title="Open in Master Search"` : ' class="tm-name"';
+      return `<tr class="${self ? 'tm-self' : ''}"><td>${self ? '👑' : i}</td><td><span${go}>${esc(v.name || '—')}</span>${self ? ' <span class="tm-tag">TL own</span>' : ''}</td><td class="tm-id">${esc(v.id || '—')}</td>${classes.map((c) => `<td class="num tm-${cls(c)}">${v.by.get(c) ? U.fmt(v.by.get(c)) : '<span class="dim">·</span>'}</td>`).join('')}<td class="num tm-tot">${U.fmt(v.n)}</td></tr>`;
+    }).join('');
+    return `<section class="kd-sec tm-sec"><div class="tm-head"><span class="tm-title">👥 ${esc(tlName || spec.tlId || 'TL')} · team stock</span><span class="tm-sub">${U.fmt(all.length)} people · <b>${U.fmt(grand)}</b> in stock</span></div>
+      <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl tm-tbl"><thead><tr><th>#</th><th>Name</th><th>ID</th>${head}<th class="num">Total</th></tr></thead><tbody>${body}
+      <tr class="kd-total tm-grand"><td></td><td>Total</td><td></td>${colTot.map((v) => `<td class="num">${U.fmt(v)}</td>`).join('')}<td class="num tm-tot">${U.fmt(grand)}</td></tr></tbody></table></div></section>`;
+  }
   /** data-kd-spec ke liye safe JSON (single quote escape) — drawer ke andar se filter badalne ke liye. */
   const specAttr = (obj) => esc(JSON.stringify(obj)).replace(/'/g, '&#39;');
   const stat = (label, value, sub, cls, drill) => `<div class="kd-stat ${cls || ''}${drill ? ' clickable kpi-clickable' : ''}"${drill ? ` data-kd-spec='${specAttr(drill)}' title="Click to open ${esc(label)} details"` : ''}><span>${esc(label)}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
@@ -870,6 +900,7 @@ window.FF = window.FF || {};
       if (isSelf) return false;
       try { return !(FF.config && FF.config.isDirectAgent && FF.config.isDirectAgent(r, chKey)); } catch { return true; }
     };
+    const teamOn = !!(tlWanted || tlIdWanted) && !hasAgentScope && !part && !cf && !spec.holders;
     const partLabel = part === 'own' ? ' · TL ke paas (own)' : part === 'team' ? ' · agents ke paas' : '';
     const holdersTable = (title, map, unit) => {
       const list = [...map.entries()].sort((a, b) => b[1].n - a[1].n);
@@ -902,7 +933,7 @@ window.FF = window.FF || {};
         });
         holders = holdersTable(spec.holders === 'tls' ? '👥 TLs jinke paas stock hai' : '🧑‍💼 Agents jinke paas stock hai', map, spec.holders === 'tls' ? 'TL' : 'Agent');
       }
-      parts.push(`<h3 class="kd-h">🟦 First Forward stock (StockDataa)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : tlWanted ? ` · TL ${esc(spec.tl || spec.tlName)}${partLabel}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}
+      parts.push(`<h3 class="kd-h">🟦 First Forward stock (StockDataa)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : tlWanted ? ` · TL ${esc(spec.tl || spec.tlName)}${partLabel}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}${teamOn ? teamStockTable(agentRows, spec, 'ff') : ''}
         <div class="kd-grid">${breakdownTable('Class-wise', tally(rows, (r) => r.cls), null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ cls: key, f: '', title: `${spec.title || 'Stock'} · ${key}` }) })}${byType.size && !hasAgentScope && !tlWanted && !tlIdWanted ? breakdownTable('Tag type', byType, null, total([...byType.values()].map((n) => ({ n }))), { head: 'Tag type' }) : ''}</div>
         ${breakdownTable('TL-wise stock', tally(rows, (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName)), null, tot, { head: 'TL', drill: (key) => ({ tl: key, src: 'ff', scope: 'stock', title: `TL ${key} · FF Stock` }) })}
         ${hasAgentScope ? '' : matrix('TL × class', rows, (r) => (FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : r.tlName), (r) => r.cls, { head: 'TL', drillRow: (tl) => ({ tl, src: 'ff', scope: 'stock', title: `TL ${tl} · FF Stock` }), drillCell: (tl, cls) => ({ tl, cls, src: 'ff', scope: 'stock', title: `TL ${tl} · ${cls} Stock` }) })}
@@ -985,7 +1016,7 @@ window.FF = window.FF || {};
         });
         holders = holdersTable('👥 GV TLs jinke paas stock hai', map, 'TL');
       }
-      parts.push(`<h3 class="kd-h">🟩 GV Partner stock (Tag Assignment)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : (tlWanted || tlIdWanted) ? ` · TL ${esc(spec.tl || spec.tlName || spec.tlId)}${partLabel}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}
+      parts.push(`<h3 class="kd-h">🟩 GV Partner stock (Tag Assignment)${cf ? ` · ${esc(cf.label)}` : ''}${spec.agent ? ` · ${esc(spec.agent)}` : (tlWanted || tlIdWanted) ? ` · TL ${esc(spec.tl || spec.tlName || spec.tlId)}${partLabel}` : ''} · <b>${U.fmt(tot)}</b></h3>${holders}${teamOn ? teamStockTable(filteredAgentCls, spec, 'gv') : ''}
         <div class="kd-grid">${breakdownTable('Class-wise', tally(clsRows, (r) => r.cls), null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ ...spec, cls: key, f: '', title: `${spec.title || 'Stock'} · ${key}` }) })}${useAgentRows || useTlClassRows ? '' : breakdownTable('TL-wise', tally(tls || [], (r) => (r.directAgent === true || !FF.config.isRealTl(r.tlName) ? FF.config.directLabel({ tlName: r.tlName, channel: 'GV Partner' }, 'gv') : r.tlName)), null, total(tls || []), { head: 'TL', drill: (key) => { const t = (tls || []).find((r) => personKey(r.tlName) === personKey(key)); return { tl: key, ...(t && t.tlId ? { tlId: t.tlId } : {}), src: 'gv', scope: 'stock', title: `TL ${key} · GV Stock` }; } })}</div>
         ${breakdownTable('Top 30 agents (stock)', new Map([...agentTotals.values()].sort((a, b) => b.n - a.n).slice(0, 30).map((a) => [`${a.name} · ${a.tl || '—'}`, a.n])), null, tot, { head: 'Agent · TL', drill: (key) => { const ag = [...agentTotals.values()].find((a) => `${a.name} · ${a.tl || '—'}` === String(key)); return { agent: ag ? ag.name : String(key).split(' · ')[0], ...(ag && ag.id ? { agentId: ag.id } : {}), ...(ag && ag.tlId ? { tlId: ag.tlId, tl: ag.tl } : {}), src: 'gv', channel: 'gv', scope: 'stock', title: `${ag ? ag.name : key} · GV Stock` }; } })}
         ${hasAgentScope || !gvTlClsRows.length ? '' : matrix('TL × class', gvTlClsRows, (r) => r.tlName, (r) => r.cls, { head: 'TL', drillRow: (tl) => { const t = gvTlClsRows.find((r) => r.tlName === tl); return { tl, ...(t && t.tlId ? { tlId: t.tlId } : {}), src: 'gv', scope: 'stock', title: `TL ${tl} · GV Stock` }; }, drillCell: (tl, cls) => { const t = gvTlClsRows.find((r) => r.tlName === tl); return { tl, ...(t && t.tlId ? { tlId: t.tlId } : {}), cls, src: 'gv', scope: 'stock', title: `TL ${tl} · ${cls} Stock` }; } })}`);
@@ -1308,6 +1339,13 @@ window.FF = window.FF || {};
   }
 
   document.addEventListener('click', async (e) => {
+    const tmGo = e.target.closest('[data-tm-go]');
+    if (tmGo) {
+      const name = tmGo.getAttribute('data-tm-go'), id = tmGo.getAttribute('data-id') || '', ch = tmGo.getAttribute('data-ch') || '';
+      try { if (FF.app && FF.app.closeDrawer) FF.app.closeDrawer(); } catch { /* ignore */ }
+      try { FF.masterSearch.openSearchPage(name, { name, id, kind: ch ? `${ch}-agent` : '' }); } catch { location.hash = `#/masterSearch?q=${encodeURIComponent(name)}${id ? `&id=${encodeURIComponent(id)}` : ''}${ch ? `&ch=${ch}` : ''}`; }
+      return;
+    }
     if (e.target.closest('[data-kd-retry]')) {
       if (state.spec) open({ ...state.spec }, { nested: state.history.length > 0, fromHistory: true });
       return;

@@ -7097,3 +7097,22 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 .tbl th[data-tg-sort]:hover { color: var(--brand, #4f46e5); }
 .tbl th[data-tg-sort].sorted { color: var(--brand, #4f46e5); }
 .tbl th[data-tg-sort] i { font-style: normal; margin-left: 4px; font-size: 10px; }
+
+/* 👥 TL team stock table (Stock chip drill) */
+.tm-sec { border: 1.5px solid #c7d2fe; background: linear-gradient(180deg, #f5f3ff, #fff 60%); }
+.tm-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 8px; padding: 8px 12px; border-radius: 12px; background: linear-gradient(90deg, #4f46e5, #7c3aed); color: #fff; }
+.tm-title { font-size: 15px; font-weight: 900; }
+.tm-sub { font-size: 12px; opacity: .95; }
+.tm-tbl thead th { background: #eef2ff; color: #3730a3; }
+.tm-tbl th.tm-c4, .tm-tbl td.tm-c4 { background: #ecfdf5; color: #047857; font-weight: 800; }
+.tm-tbl th.tm-c20, .tm-tbl td.tm-c20 { background: #eff6ff; color: #1d4ed8; font-weight: 800; }
+.tm-tbl th.tm-c5, .tm-tbl td.tm-c5 { background: #fff7ed; color: #c2410c; font-weight: 800; }
+.tm-tbl th.tm-cx, .tm-tbl td.tm-cx { background: #faf5ff; color: #7e22ce; font-weight: 700; }
+.tm-tbl td.tm-tot { background: #fef9c3; color: #854d0e; font-weight: 900; }
+.tm-tbl tr.tm-self td { background: #fdf2f8; font-weight: 800; }
+.tm-tbl tr.tm-self td.tm-tot { background: #fde68a; }
+.tm-tbl tr.tm-grand td { background: #e0e7ff; color: #312e81; font-weight: 900; border-top: 2px solid #6366f1; }
+.tm-name { cursor: pointer; color: #4338ca; font-weight: 700; text-decoration: underline dotted; }
+.tm-name:hover { color: #7c3aed; }
+.tm-tag { font-size: 10px; font-weight: 800; color: #be185d; background: #fce7f3; border-radius: 999px; padding: 1px 7px; }
+.tm-id { font-family: ui-monospace, monospace; font-size: 11.5px; color: #475569; }
