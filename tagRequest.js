@@ -127,6 +127,23 @@ FF.pages = FF.pages || {};
       try { if (FF.masterSearch && FF.masterSearch.openSearchPage) FF.masterSearch.openSearchPage(name); else location.hash = `#/masterSearch?q=${encodeURIComponent(name)}`; } catch { /* ignore */ }
     }, true);
   }
+  /** 🧑 Agent name → clickable; opens Master Search with that agent's data (ID-first). */
+  function agentGoAttrs(name, id, ch) {
+    return `data-tr-agentgo="${esc(name)}" data-id="${esc(id || '')}" data-ch="${esc(ch || '')}"`;
+  }
+  if (typeof window !== 'undefined' && typeof document !== 'undefined' && !window.__trAgentLinkBound) {
+    window.__trAgentLinkBound = true;
+    document.addEventListener('click', (e) => {
+      const a = e.target && e.target.closest ? e.target.closest('[data-tr-agentgo]') : null;
+      if (!a) return;
+      e.preventDefault(); e.stopPropagation();
+      const name = a.getAttribute('data-tr-agentgo'), id = a.getAttribute('data-id') || '', ch = a.getAttribute('data-ch') || '';
+      try {
+        if (FF.masterSearch && FF.masterSearch.openSearchPage) FF.masterSearch.openSearchPage(name, { name, id, kind: ch ? `${ch}-agent` : '' });
+        else location.hash = `#/masterSearch?q=${encodeURIComponent(name)}${id ? `&id=${encodeURIComponent(id)}` : ''}${ch ? `&ch=${ch}` : ''}`;
+      } catch { /* ignore */ }
+    }, true);
+  }
   function newRow(patch) { return { id: rid(), agentId: '', name: '', tl: '', channel: '', tlFilter: '', isTl: false, dispatchName: '', q: emptyQty(), mobile: '', address: '', pincode: '', firstBarcode: '', lastBarcode: '', mapName: '', mapId: '', ...(patch || {}) }; }
   if (!state.rows.length) state.rows = [newRow()];
 
@@ -2846,6 +2863,28 @@ body.colorful .from-hdr { color: #166534; }
       ${canDeleteReq(r) ? `<button class="btn small" data-tr-op="del" data-key="${k}" title="Request delete">🗑</button>` : ''}
     </div>`;
   }
+  /** Agent ka ID — request me na ho to sheet data se EXACT naam match (galat agent na aaye). */
+  function resolvedAgentId(ag) {
+    if (ag.kind === 'tl') return '';
+    if (ag.agentId) return String(ag.agentId);
+    try { const r = exactAgent({ name: ag.name, channel: ag.channel }); return r && !r.isTl ? String(r.agentId || '') : ''; } catch { return ''; }
+  }
+  function agentNameHtml(ag) {
+    if (!ag.name || ag.name === '—') return esc(ag.name || '—');
+    if (ag.kind === 'tl') return tlLink(ag.name);
+    return `<a href="#" class="tr-agent-link" ${agentGoAttrs(ag.name, resolvedAgentId(ag), ag.channel)} title="Open ${esc(ag.name)} in Master Search">${esc(ag.name)}</a>`;
+  }
+  /** Naam ke baad: copy-name button + NEW Agent tag (data aane par bharta hai). */
+  function agentActsHtml(ag) {
+    if (!ag.name || ag.name === '—') return '';
+    const nw = ag.kind === 'tl' ? '' : `<span class="new-agent-slot" data-new-agent="${esc(ag.channel)}|${esc(resolvedAgentId(ag))}|${esc(String(ag.name).replace(/\|/g, ' '))}">${FF.newAgentTag ? FF.newAgentTag.html(ag.channel, resolvedAgentId(ag), ag.name) : ''}</span>`;
+    return ` <button type="button" class="cp-btn" data-copy="${esc(ag.name)}" title="Copy agent name" aria-label="Copy agent name">📋</button>${nw}`;
+  }
+  function agentIdLineHtml(ag) {
+    const id = resolvedAgentId(ag);
+    const idHtml = ag.kind === 'tl' ? '' : id ? `ID <b class="tr-agent-id">${esc(id)}</b> <button type="button" class="cp-btn" data-copy="${esc(id)}" title="Copy agent ID" aria-label="Copy agent ID">📋</button>` : '<span title="ID sheet se match nahi hua">ID —</span>';
+    return `<small class="dim">${idHtml}${ag.tl ? `${idHtml ? ' · ' : ''}TL ${tlLink(ag.tl)}` : ''}</small>`;
+  }
   function reqRowHtml(dr) {
     const r = dr.req;
     const e = r.employee || {};
@@ -2859,7 +2898,7 @@ body.colorful .from-hdr { color: #166534; }
       <td class="tr-c-sel"><input type="checkbox" data-tr-sel="${esc(dr.key)}" ${sel ? 'checked' : ''} aria-label="Select"></td>
       <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="${esc(r.id)}">#${esc(String(r.id || '').slice(-6))}</small></td>
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
-      <td class="tr-c-agent"><b>${esc(dr.agent.name)}</b>${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}${dr.agent.mapName || dr.agent.mapId ? `<small class="dim" title="FASTag Mapping — sheet me yahi naam/ID jata hai"> 🔗 ${esc(dr.agent.mapName || '')}${dr.agent.mapId ? ` #${esc(dr.agent.mapId)}` : ''}</small>` : ''}<small class="dim">${dr.agent.agentId ? `#${esc(dr.agent.agentId)} <button type="button" class="cp-btn" data-copy="${esc(dr.agent.agentId)}" title="Copy agent ID" aria-label="Copy agent ID">📋</button>` : ''}${dr.agent.tl ? `${dr.agent.agentId ? ' · ' : ''}TL ${tlLink(dr.agent.tl)}` : ''}</small>
+      <td class="tr-c-agent"><b>${agentNameHtml(dr.agent)}</b>${agentActsHtml(dr.agent)}${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}${dr.agent.mapName || dr.agent.mapId ? `<small class="dim" title="FASTag Mapping — sheet me yahi naam/ID jata hai"> 🔗 ${esc(dr.agent.mapName || '')}${dr.agent.mapId ? ` #${esc(dr.agent.mapId)}` : ''}</small>` : ''}${agentIdLineHtml(dr.agent)}
         <span class="tr-tags"><span class="badge ${statusOf(r).tone} tr-st-inline" title="Status">${statusOf(r).label}</span><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
       <td class="tr-c-addr">${c.who === 'employee' && (c.mobile || c.address) ? '<small class="dim">employee ka address:</small>' : ''}${c.mobile ? `<a class="tr-mob" href="tel:${esc(String(c.mobile).replace(/[^\d+]/g, ''))}">☏ ${esc(c.mobile)}</a> <button type="button" class="cp-btn" data-copy="${esc(c.mobile)}" title="Copy mobile" aria-label="Copy mobile">📋</button><a class="cp-btn" target="_blank" rel="noopener" href="${esc(U.waLink('', c.mobile))}" title="WhatsApp" aria-label="WhatsApp">💬</a>` : ''}${c.address ? `<div class="tr-addr">${esc(c.address)} <button type="button" class="cp-btn" data-copy="${esc([c.address, c.pincode].filter(Boolean).join(', '))}" title="Copy address" aria-label="Copy address">📋</button></div>` : ''}${c.pincode ? `<b class="tr-pin">📮 ${esc(c.pincode)}</b>` : ''}${!c.mobile && !c.address && !c.pincode ? '<span class="dim small">—</span>' : ''}</td>
       ${isAdmin() ? `<td class="tr-c-courier"><span class="badge ${r.courier ? 'blue' : 'gray'}">🚚 ${esc(r.courier || '—')}</span></td><td class="tr-c-item-name"><div class="tr-item-chips sm" data-tr-item-name data-key="${esc(dr.key)}" role="group" aria-label="Items">${ITEM_NAME_OPTIONS.map((name) => `<label class="tr-item-chip ${hasItem(name, r.itemName) ? 'on' : ''}" title="${esc(ITEM_LABEL[name])}"><input type="checkbox" data-tr-item-cell="${esc(name)}" data-key="${esc(dr.key)}" ${hasItem(name, r.itemName) ? 'checked' : ''}> ${ITEM_ICON[name]} ${esc(ITEM_LABEL[name])}</label>`).join('')}</div>${r.serialNumber ? `<small class="dim">Serial: ${esc(r.serialNumber)}</small>` : ''}${r.deviceName ? `<small class="dim">Device: ${esc(r.deviceName)}</small>` : ''}${r.materialDescription ? `<small class="dim">Material: ${esc(r.materialDescription)}</small>` : ''} </td>` : ''}
@@ -3170,7 +3209,7 @@ body.colorful .from-hdr { color: #166534; }
       if (state.reqError && !state.requests.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">⚠️ Requests load nahi hui: ${esc(state.reqError)} <button class="btn small" data-tr-act="req-refresh">↻ Retry</button></td></tr>`;
       else if (!all.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">Abhi koi tag request nahi hai. 📝 Form bharo → 📤 submit.<br><small class="dim">Employee link se aayi requests bhi yahin dikhengi (🌐 badge ke saath).</small></td></tr>`;
       else if (!shown.length) tbody.innerHTML = `<tr><td colspan="${requestColumnCount()}" class="empty">🔎 Is filter / search me koi request nahi. <button type="button" class="btn small" data-tr-chip="all">Sab dikhao</button></td></tr>`;
-      else tbody.innerHTML = shown.map(reqRowHtml).join('');
+      else { tbody.innerHTML = shown.map(reqRowHtml).join(''); try { if (FF.newAgentTag) FF.newAgentTag.paint(tbody); } catch { /* ignore */ } }
     }
     const channels = card.querySelector('.tr-channel-filter');
     if (channels) channels.outerHTML = channelFilterHtml(all);

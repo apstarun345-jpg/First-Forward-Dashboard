@@ -112,5 +112,60 @@
   function boot() { dashNode(document.body); applyDensity(density()); mountDensityButton(); if (typeof navigator !== 'undefined' && navigator.onLine === false) goOffline(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
   window.addEventListener('ff:data-loaded', mountDensityButton, { once: true });
+
+  // ---- 🆕 NEW Agent tag (v3.98) — Tag Request + Master Search + Agent Summary me ek hi logic ------------
+  // "New" = New Agents page wali definition (pehli issuance is + pichhle month me). Data lazy load hota hai.
+  const NewAgent = (function () {
+    let idx = null, loading = null;
+    const alnum = (v) => String(v == null ? '' : v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const digs = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+    const nm = (v) => String(v == null ? '' : v).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+    function build(data) {
+      const set = new Set();
+      ['ff', 'gv'].forEach((ch) => {
+        const part = data && data[ch];
+        ((part && part.rows) || []).forEach((r) => {
+          if (!r.isNew) return;
+          if (r.id) { set.add(`${ch}|i:${alnum(r.id)}`); const d = digs(r.id); if (d.length >= 4) set.add(`${ch}|d:${d}`); }
+          if (r.name) set.add(`${ch}|n:${nm(r.name)}`);
+        });
+      });
+      idx = set;
+    }
+    /** Data ready karo (ek baar). Resolve → true jab index bana. */
+    function ready() {
+      if (idx) return Promise.resolve(true);
+      if (loading) return loading;
+      loading = Promise.resolve()
+        .then(() => (FF.newAgents ? null : (FF.lazy && FF.lazy.need ? FF.lazy.need('newAgents') : null)))
+        .then(() => (FF.newAgents && FF.newAgents.collect ? FF.newAgents.collect(2) : null))
+        .then((d) => { if (d) build(d); return !!idx; })
+        .catch(() => false)
+        .then((ok) => { loading = null; return ok; });
+      return loading;
+    }
+    /** Sync check — ready() se pehle false. ch '' ho to dono channel dekhta hai. */
+    function isNew(ch, id, name) {
+      if (!idx) return false;
+      const chs = ch === 'gv' || ch === 'ff' ? [ch] : ['ff', 'gv'];
+      const a = alnum(id), d = digs(id);
+      return chs.some((c) => (a && idx.has(`${c}|i:${a}`)) || (d.length >= 4 && idx.has(`${c}|d:${d}`)) || (!a && name && idx.has(`${c}|n:${nm(name)}`)));
+    }
+    const tag = () => '<span class="new-agent-tag" title="Naya agent — pehli issuance haal hi me shuru hui">NEW Agent</span>';
+    /** HTML tag (ya '') — sirf agents ke liye. */
+    function html(ch, id, name) { return isNew(ch, id, name) ? tag() : ''; }
+    /** root ke andar [data-new-agent="ch|id|name"] slots me tag bharo (ready hone ke baad). */
+    function paint(root) {
+      return ready().then((ok) => {
+        if (!ok || !root || !root.querySelectorAll) return;
+        root.querySelectorAll('[data-new-agent]').forEach((el) => {
+          const [ch, id, name] = String(el.getAttribute('data-new-agent') || '').split('|');
+          el.innerHTML = html(ch, id, name);
+        });
+      });
+    }
+    return { ready, isNew, html, paint };
+  })();
+  FF.newAgentTag = NewAgent;
   FF.uiPlus = { density, applyDensity, copy, goOffline, goOnline };
 })(window.FF = window.FF || {});

@@ -1895,7 +1895,9 @@ FF.pages = FF.pages || {};
       const person = viewGroup.ff || viewGroup.gv;
       if (trendEl) trendEl.hidden = true;     // the person's own day-wise chart + table now live inside the profile (no 2nd copy)
       const linkedTeams = teamPeopleFor(viewGroup);
-      const pill = (p, cls, label) => (p ? `<span class="msp-pill ${cls}">${label} ${isTlP(p) ? 'TL' : 'Agent'}${p.sub ? ` <b>${esc(p.sub)}</b>` : ''}</span>` : '');
+      const pill = (p, cls, label) => (p ? `<span class="msp-pill ${cls}">${label} ${isTlP(p) ? 'TL' : 'Agent'}${p.sub ? ` <b>${esc(p.sub)}</b> <button type="button" class="cp-btn" data-copy="${esc(p.sub)}" title="Copy ID" aria-label="Copy ID">📋</button>` : ''}</span>` : '');
+      // 🆕 NEW Agent tag — sirf agents (TL nahi); data aane par bharta hai
+      const heroNewTags = (vg) => ['ff', 'gv'].map((c) => { const p = vg[c]; return p && !isTlP(p) ? `<span class="new-agent-slot" data-new-agent="${c}|${esc(p.sub || '')}|${esc(String(p.name || '').replace(/\|/g, ' '))}">${FF.newAgentTag ? FF.newAgentTag.html(c, p.sub, p.name) : ''}</span>` : ''; }).join('');
       const bits = `${pill(viewGroup.ff, 'ff', '🟦 First Forward')}${pill(viewGroup.gv, 'gv', '🟩 GV Partner')}`;
       const chips = groups.length > 1
         ? `<div class="msp-matches"><span class="dim small">${U.fmt(groups.length)} log mile — click karo:</span>${groups.slice(0, 12).map((gp, i) => `<button type="button" class="msp-chip${gp === g ? ' on' : ''}" data-msp-g="${i}">${esc(gp.name)}${gp.ff && gp.gv ? ' ⚖' : gp.gv ? ' 🟩' : ' 🟦'}</button>`).join('')}</div>`
@@ -1908,7 +1910,7 @@ FF.pages = FF.pages || {};
       out.innerHTML = `${channelChoiceHtml(g, selected)}${chips}
         <div class="msp-hero">
           <span class="ms-avatar ${viewGroup.gv ? 'gv' : 'ff'}">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
-          <div class="msp-hero-id"><b>${esc(g.name)}</b><div class="msp-pills">${bits || '<span class="msp-pill">Report</span>'}</div></div>
+          <div class="msp-hero-id"><b>${esc(g.name)}</b> <button type="button" class="cp-btn" data-copy="${esc(g.name)}" title="Copy name" aria-label="Copy name">📋</button>${heroNewTags(viewGroup)}<div class="msp-pills">${bits || '<span class="msp-pill">Report</span>'}</div></div>
           ${person ? `<div class="msp-hero-act">${FF.auth && FF.auth.can && FF.auth.can('export') ? '<button class="btn small primary" data-msp-report title="Choose: Full report / Stock + pivot (ageing auto) / Current month / Last month — Excel">⬇ Full report</button>' : ''}<button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
         <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => viewGroup[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
@@ -1916,6 +1918,7 @@ FF.pages = FF.pages || {};
         ${gvStripHtml(viewGroup.gv)}${ffStripHtml(viewGroup.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
       paintKpis(viewGroup, U.$('#msp-kpis', out)).catch(() => {});
+      try { if (FF.newAgentTag) FF.newAgentTag.paint(out); } catch { /* ignore */ }
       const host = U.$('#msp-report', out);
       const sr = SR();
       if (sr && host) sr.render(host, viewGroup);

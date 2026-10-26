@@ -63,7 +63,7 @@ window.FF = window.FF || {};
           ${srcChip(isGv ? '🧾 GV Master final' : '🧾 EIR ledger', 'ledger')}
           ${srcChip(isGv ? '📑 GV REPORT cross-check' : '📑 REPORT sheet', 'sheet')}
         </div>
-        <h2>${esc(v.name)}</h2>
+        <h2>${esc(v.name)} <button type="button" class="cp-btn" data-copy="${esc(v.name)}" title="Copy name" aria-label="Copy name">📋</button>${v.kind === 'tl' ? '' : `<span class="new-agent-slot" data-new-agent="${esc(v.ch || '')}|${esc(v.id || '')}|${esc(String(v.name || '').replace(/\|/g, ' '))}">${FF.newAgentTag ? FF.newAgentTag.html(v.ch, v.id, v.name) : ''}</span>`}</h2>
         <p class="gs-hero-line">${v.id ? `<span>ID <b>${esc(v.id)}</b> <button type="button" class="cp-btn" data-copy="${esc(v.id)}" title="Copy ID" aria-label="Copy ID">📋</button></span>` : ''}
           ${v.tlName && v.kind !== 'tl' ? `<span>TL <b>${esc(v.tlName)}</b>${v.tlId ? ` (${esc(v.tlId)})` : ''}</span>` : ''}
           ${v.kind === 'tl' ? `<span>Team <b>${fmt(v.team ? v.team.length : 0)}</b> agents</span>` : ''}
@@ -773,7 +773,7 @@ window.FF = window.FF || {};
             // ⚡ GV: jo abhi memory me hai usse TURANT report (stock + issuance last/current + today),
             // heavy datasets (master/report/stock*) background me load hote hain aur numbers sync kar dete hain.
             const spec = personSpec(person, 'gv');
-            const paintGv = (v, age) => { S.view = v; state.view = v; body.innerHTML = reportHtml(v); paintExtras(v, age); };
+            const paintGv = (v, age) => { S.view = v; state.view = v; body.innerHTML = reportHtml(v); try { if (FF.newAgentTag) FF.newAgentTag.paint(body); } catch { /* ignore */ } paintExtras(v, age); };
             const now = FF.gvTruth.person(spec);
             const hasNow = !!(now.ledger.rows.all.length || now.stock.total || (now.sheet && now.sheet.found));
             const heavy = ensureGv(person).catch(() => {});
@@ -801,6 +801,7 @@ window.FF = window.FF || {};
         if (seq !== pickSeq || !body.isConnected) return;   // user ne beech me dusra naam khol diya — purana result na likho
         S.view = view; state.view = view;
         body.innerHTML = reportHtml(view);
+        try { if (FF.newAgentTag) FF.newAgentTag.paint(body); } catch { /* ignore */ }
         paintExtras(view, true);
       }
       async function loadAgeing(view) {
