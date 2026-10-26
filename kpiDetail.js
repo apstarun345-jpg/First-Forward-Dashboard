@@ -326,12 +326,12 @@ window.FF = window.FF || {};
     const tlName = U.clean(spec.tl || spec.tlName), tlId = personKey(spec.tlId);
     const list = (rows || []).filter((r) => Number(r.n) > 0 || r.n === 0);
     if (!list.length) return '';
-    const classes = [...new Set(list.map((r) => U.clean(r.cls) || '—'))].sort((a, b) => clsNum(a) - clsNum(b));
+    const classes = [...new Set(list.map((r) => classKey(r.cls) || '—'))].sort((a, b) => clsNum(a) - clsNum(b));
     const people = new Map();
     list.forEach((r) => {
       const key = personKey(r.agentId) ? `#${personKey(r.agentId)}` : personKey(r.agentName);
       const v = people.get(key) || { name: U.clean(r.agentName), id: U.clean(r.agentId), by: new Map(), n: 0 };
-      const c = U.clean(r.cls) || '—', n = Number(r.n) || 0;
+      const c = classKey(r.cls) || '—', n = Number(r.n) || 0;
       v.by.set(c, (v.by.get(c) || 0) + n); v.n += n;
       if (!v.id && r.agentId) v.id = U.clean(r.agentId);
       people.set(key, v);
@@ -340,7 +340,7 @@ window.FF = window.FF || {};
     const all = [...people.values()].sort((a, b) => Number(isSelf(b)) - Number(isSelf(a)) || b.n - a.n);
     const colTot = classes.map((c) => all.reduce((a, v) => a + (v.by.get(c) || 0), 0));
     const grand = all.reduce((a, v) => a + v.n, 0);
-    const cls = (c) => /^VC4$/i.test(c) ? 'c4' : /^VC20$/i.test(c) ? 'c20' : /5/.test(c) ? 'c5' : 'cx';
+    const cls = (c) => `p${classes.indexOf(c) % 8}`;
     const head = classes.map((c) => `<th class="num tm-${cls(c)}">${esc(c)}</th>`).join('');
     const body = all.map((v, i) => {
       const self = isSelf(v);
