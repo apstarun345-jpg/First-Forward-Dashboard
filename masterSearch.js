@@ -1644,10 +1644,12 @@ FF.pages = FF.pages || {};
       const prioEff = c.cover != null ? (c.cover < (th.coverRed || 7) ? 'High' : c.cover < (th.coverOrange || 15) ? 'Medium' : 'Low') : (pr.priority || '');
       let bins = {};
       try { bins = (MP() && MP().groupBinsFor && MP().groupBinsFor(pr)) || {}; } catch { bins = {}; }
-      const mix = (b) => (b && (num(b.VC4) || num(b.VC20) || num(b['VC5+'])) ? `VC4 ${U.fmt(b.VC4)} · VC20 ${U.fmt(b.VC20)} · VC5+ ${U.fmt(b['VC5+'])}` : '');
-      const stockMix = mix(bins.stock) || `VC4 ${U.fmt(s.vc4)} · Comm ${U.fmt(s.comm)}`;
-      const curMix = mix(bins.cur) || `VC4 ${U.fmt(t.curVc4)} · Comm ${U.fmt(t.curComm)}`;
-      const lastMix = mix(bins.last) || `VC4 ${U.fmt(t.lastVc4)} · Comm ${U.fmt(t.lastComm)}`;
+      // v3.100 — VC4 / VC20 / VC5+ = bold coloured tiles (ek line me), total optional
+      const vcTiles = (v, total) => `<div class="msp-vcs">${[['VC4', 'v4'], ['VC20', 'v20'], ['VC5+', 'v5']].map(([k, c]) => `<span class="vc ${c}"><i>${k}</i><b>${U.fmt((v && v[k]) || 0)}</b></span>`).join('')}${total != null ? `<span class="vc tt"><i>Total</i><b>${U.fmt(total)}</b></span>` : ''}</div>`;
+      const mix = (b) => (b && (num(b.VC4) || num(b.VC20) || num(b['VC5+'])) ? vcTiles(b) : '');
+      const stockMix = mix(bins.stock) || vcTiles({ VC4: s.vc4, 'VC5+': s.comm });
+      const curMix = mix(bins.cur) || vcTiles({ VC4: t.curVc4, 'VC5+': t.curComm });
+      const lastMix = mix(bins.last) || vcTiles({ VC4: t.lastVc4, 'VC5+': t.lastComm });
       const who = isTl ? `tl=${encodeURIComponent(pr.name)}${pr.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.id)}` : ''}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
       const spec = (scope, ym) => `src=${ch}&scope=${scope}${ym ? `&ym=${encodeURIComponent(ym)}` : ''}&${who}`;
       const peopleSpec = `src=${ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`;
@@ -1715,11 +1717,11 @@ FF.pages = FF.pages || {};
       const commRows = tvcPlan.rows.slice(1);
       const commNet = commRows.reduce((a, x) => a + (x.prio === 'None' ? 0 : x.net), 0), commGross = commRows.reduce((a, x) => a + x.gross, 0);
       const totLine = (label, net, gross) => `<div class="msp-cls-line msp-tot-line"><span class="c1">${label}</span><span class="c2"><span class="msp-hl ${net ? 'amber' : 'green'}">need ${U.fmt(net)}</span></span><span class="c3"><span class="msp-hl blue">w/o stock ${U.fmt(gross)}</span></span></div>`;
-      const planBody = tvcPlan.rows.map(planLine).join('') + (tvcPlan.totals
+      const planBody = `<div class="msp-plan">${tvcPlan.rows.map(planLine).join('')}</div>` + (tvcPlan.totals
         ? `<div class="msp-tot">${totLine('Total VC4/VC20', tvcPlan.rows[0].prio === 'None' ? 0 : tvcPlan.rows[0].net, tvcPlan.rows[0].gross)}${totLine('Total VC5+', commNet, commGross)}</div>` : '');
       const planSub = tvcPlan.rows.map((x) => `${esc(x.k)}: ${U.fmt(x.rate, true)}/day × ${U.fmt(days)} − stock ${U.fmt(x.stock)}${x.basis ? ` (${x.basis} rate)` : ''}`).join(' · ');
       // ---- v3.96 — simple mini tables: VC4 / VC20 / VC5+ + Total
-      const miniHtml = (vals, total, tail) => `<div class="msp-mini">${['VC4', 'VC20', 'VC5+'].map((k) => `<div><span>${k}</span><b>${U.fmt(vals[k] || 0)}</b></div>`).join('')}<div class="tot"><span>Total</span><b>${U.fmt(total)}</b></div></div>${tail ? `<span class="msp-mini-tail">${tail}</span>` : ''}`;
+      const miniHtml = (vals, total, tail) => `${vcTiles(vals, total)}${tail ? `<span class="msp-mini-tail">${tail}</span>` : ''}`;
       const curBins = (bins.cur && (num(bins.cur.VC4) || num(bins.cur.VC20) || num(bins.cur['VC5+']))) ? { VC4: num(bins.cur.VC4), VC20: num(bins.cur.VC20), 'VC5+': num(bins.cur['VC5+']) } : { VC4: num(t.curVc4), VC20: 0, 'VC5+': num(t.curComm) };
       const expTotal = Math.round((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0));
       const expSplit = (() => {
@@ -1812,12 +1814,12 @@ FF.pages = FF.pages || {};
           <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
           <div class="card-right">${ch === 'gv' ? GVC.chip({ kind: isTl ? 'gv_tl' : 'gv_agent', sub: pr.id, id: pr.id, channel: 'gv' }) : ''}${prioChip(worst === 'None' ? prioEff : worst)}</div></div>
         <div class="card-body"><div class="mp-kpis msp-kpis">
-          ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${isTl && ownAgents ? `${ownAgents} · ` : ''}${stockMix}${c.cover != null ? ` · run-rate ${U.fmt(c.rate, true)}/day → stock ~${U.fmt(Math.round(c.cover))} din chalega` : ''}`, spec('stock'))}
+          ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${stockMix}${(isTl && ownAgents) || c.cover != null ? `<span class="msp-mini-tail">${isTl && ownAgents ? `${ownAgents}` : ''}${isTl && ownAgents && c.cover != null ? ' · ' : ''}${c.cover != null ? `run-rate ${U.fmt(c.rate, true)}/day` : ''}</span>` : ''}`, spec('stock'))}
           ${isTl
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
     : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}` : '')}
           ${dayChip}
-          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${curMix}<br>🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span>`, spec('mtd', m.cur))}
+          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${curMix}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span></span>`, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
