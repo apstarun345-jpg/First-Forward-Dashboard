@@ -1149,15 +1149,16 @@ window.FF = window.FF || {};
       if (/replacement/i.test(type || '')) o.replacement += n;
     };
     const usableClasses = classes.filter((r) => !lk.isChannelTl(r.name));
+    let usedDailyRows = false;   // daily rows (aaj ki live rows samet) pehle hi jud gayi to aaj ki rows dobara nahi judti
     if (usableClasses.length) usableClasses.forEach((r) => put(r, Number(r.n) || 0, r.group, r.type));
-    else if (dailyRowsForYm.length) dailyRowsForYm.forEach((r) => put(r, Number(r.n) || 1, r.group, r.type));
+    else if (dailyRowsForYm.length) { usedDailyRows = true; dailyRowsForYm.forEach((r) => put(r, Number(r.n) || 1, r.group, r.type)); }
     else eirAgents().filter((r) => r.channel === 'GV Partner' && (!ym || r.ym === ym)).forEach((r) => put({ ...r, agentName: r.name, group: 'VC5+' }, Number(r.n) || 0, 'VC5+', 'ISSUANCE'));
 
     // 🔴 AAJ LIVE: EIR monthly rollup usually covers yesterday/T+1 only. Merge GV Master
     // today's rows even when the agent already exists in the EIR monthly map, otherwise Home/GV
     // Performance/TL rollups silently miss today's issuance for existing agents.
     const liveTodayRows = dailyRowsForYm.filter((r) => r.key === todayKey());
-    if (liveTodayRows.length) {
+    if (liveTodayRows.length && !usedDailyRows) {
       liveTodayRows.forEach((r) => put(r, Number(r.n) || 1, r.group, r.type));
     }
 

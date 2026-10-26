@@ -375,3 +375,32 @@ test('v3.97 — agent profile never adds the TL\'s own issued rows (tlId / altId
   assert.equal(base.direct, false, 'GV Master me supervisor hai to Direct nahi');
   assert.equal(base.tlName, TL.name);
 });
+
+test('v3.97 — cross-view consistency: gvTruth agent/TL totals == GV rollups == raw ledger rows (cur + last)', async () => {
+  await boot();
+  const T = FF.gvTruth, G = FF.gv;
+  const raw = G.rows();
+  for (const who of [A1, A2]) {
+    const t = T.person({ kind: 'gv-agent', name: who.name, id: who.id, tlId: TL.id });
+    const mine = raw.filter((r) => String(r.agentId).toUpperCase() === who.id.toUpperCase());
+    assert.equal(t.ledger.cur.total, mine.filter((r) => r.ym === ym).length, `${who.name} cur == raw`);
+    assert.equal(t.ledger.last.total, mine.filter((r) => r.ym === lastYm).length, `${who.name} last == raw`);
+    const roll = (G.agentRollup(ym) || []).find((a) => String(a.agentId).toUpperCase() === who.id.toUpperCase());
+    assert.equal(roll ? roll.total : 0, t.ledger.cur.total, `${who.name} rollup == truth`);
+  }
+  const tl = T.person({ kind: 'gv-tl', name: TL.name, id: TL.id });
+  assert.equal(tl.ledger.cur.total, raw.filter((r) => r.ym === ym).length, 'TL cur == all team rows');
+  const tlRoll = (G.tlRollup(ym) || []).find((x) => String(x.tlId).toUpperCase() === TL.id.toUpperCase());
+  assert.equal(tlRoll ? tlRoll.total : 0, tl.ledger.cur.total, 'TL rollup == truth');
+});
+
+test('v3.97 — GV month summary == sum of agent rollup == raw rows (no double-counted live today)', async () => {
+  await boot();
+  const G = FF.gv, raw = G.rows();
+  for (const m of [ym, lastYm]) {
+    const rawN = raw.filter((r) => r.ym === m).length;
+    const rollN = (G.agentRollup(m) || []).reduce((n, a) => n + a.total, 0);
+    assert.equal(rollN, rawN, `${m}: agent rollup == raw`);
+    assert.equal(G.summary(m).total, rawN, `${m}: summary == raw`);
+  }
+});
