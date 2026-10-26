@@ -149,9 +149,9 @@ window.FF = window.FF || {};
     const top = list.slice(0, MAX_ALERTS);
     const collapsed = (() => { try { return localStorage.getItem('ff_sc_alerts_collapsed') === '1'; } catch { return false; } })();
     const row = (x) => {
-      const page = x.ch === 'gv' ? 'gvPerformance' : 'performance';
+      const href = `#/masterSearch?q=${encodeURIComponent(x.name)}${x.id ? `&id=${encodeURIComponent(x.id)}` : ''}&ch=${x.ch === 'gv' ? 'gv' : 'ff'}`;
       const chn = x.ch === 'gv' ? '🟩 GV' : '🟦 FF';
-      return `<a class="sc-al" href="#/${page}?q=${encodeURIComponent(x.name)}" title="${esc(x.name)} · profile kholo">
+      return `<a class="sc-al" href="${href}" title="${esc(x.name)} · Master Search me kholo">
         <span class="ic">${x.kind === 'tl' ? '🏬' : '🧑‍💼'}</span>
         <div><b>${x.kind === 'tl' ? 'TL ' : ''}${esc(x.name)}</b><p>${chn} · pichhle ${BASE} din avg ${x.baseAvg.toFixed(1)}/din → last ${RECENT} din ${x.recAvg.toFixed(1)}/din · ~${x.lost} tags kam${x.kind === 'agent' && x.tl ? ` · TL ${esc(x.tl)}` : ''}</p></div>
         <span class="pc">▼ ${x.drop}%</span></a>`;
