@@ -626,10 +626,12 @@ FF.pages = FF.pages || {};
   }
   /** 🆕 Agent master (Sheet4) — New IDs page isse EIR ke agents compare karta hai. */
   function agentRegistrySection() {
-    const ar = Object.assign({ enabled: true, idCol: 'A', legacyCol: 'B' }, settings.agentRegistry || {});
-    return section('🆕 Agent master (Sheet4) · New IDs', `<p class="dim small"><b>Management → New IDs</b> page EIR ki Agent ID (col J) ko is sheet ke ID column se match karta hai; jo EIR me hai par yahan nahi wo "new agent" dikhte hain (aur Home ke Today's work me count). Sheet "Anyone with the link: Viewer" honi chahiye. Link / tab badalne par naya <b>link</b> + <b>gid</b> daalo → Save.</p>
-      <div class="form-grid">${field('Sheet link / ID', txt('agentRegistry.sheetId', ar.sheetId || '', 'class="input mono" placeholder="Sheet link ya ID"'))}${field('Tab gid', txt('agentRegistry.gid', ar.gid || '', 'class="input mono" placeholder="gid"'))}${field('Agent ID column', txt('agentRegistry.idCol', ar.idCol || 'A', 'class="input mono" maxlength="3"'), 'New Agent ID (default A)')}${field('Name column', txt('agentRegistry.nameCol', ar.nameCol || 'C', 'class="input mono" maxlength="3"'))}${field('TL ID column', txt('agentRegistry.tlIdCol', ar.tlIdCol || 'D', 'class="input mono" maxlength="3"'))}${field('TL Name column', txt('agentRegistry.tlNameCol', ar.tlNameCol || 'E', 'class="input mono" maxlength="3"'))}${field('Legacy ID column (optional)', txt('agentRegistry.legacyCol', ar.legacyCol || '', 'class="input mono" maxlength="3" placeholder="B"'), 'Purani ID (EIR col K se match)')}</div>
-      <label class="check"><input type="checkbox" data-path="agentRegistry.enabled" ${ar.enabled !== false ? 'checked' : ''}> New IDs tracking ON</label>${saveBar('agentRegistry')}`);
+    const ar = Object.assign({ enabled: true, idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E', assistCol: 'M' }, settings.agentRegistry || {});
+    const col = (path, v, ph) => txt(path, v || '', `class="input mono" maxlength="3" placeholder="${ph}"`);
+    return section('🆕 Agent master (Sheet4) · New IDs · ID aliases', `<p class="dim small">This sheet drives two things: <b>Management → New IDs</b> (EIR agents missing from the sheet) and <b>ID aliases</b> — type an <b>Assistant ID</b> or <b>Agent ID</b> in any search box and the site opens that agent's data (converted to the New Agent ID). The sheet must be "Anyone with the link: Viewer". Pick the sheet, the tab (gid <i>or</i> tab name) and the columns below, then Save → Sync now.</p>
+      <div class="form-grid">${field('Sheet link / ID', txt('agentRegistry.sheetId', ar.sheetId || '', 'class="input mono" placeholder="Sheet link or ID"'))}${field('Tab gid', txt('agentRegistry.gid', ar.gid || '', 'class="input mono" placeholder="gid"'), 'From the URL: gid=…')}${field('Tab name (optional)', txt('agentRegistry.tab', ar.tab || '', 'class="input" placeholder="e.g. Sheet4"'), 'Used only when gid is empty')}${field('New Agent ID column', col('agentRegistry.idCol', ar.idCol || 'A', 'A'), 'Matched with EIR col J (default A)')}${field('Agent ID column', col('agentRegistry.legacyCol', ar.legacyCol, 'B'), 'Searchable alias (default B)')}${field('Assistant ID column', col('agentRegistry.assistCol', ar.assistCol || 'M', 'M'), 'Searchable alias (default M)')}${field('Name column', col('agentRegistry.nameCol', ar.nameCol || 'C', 'C'))}${field('TL ID column', col('agentRegistry.tlIdCol', ar.tlIdCol || 'D', 'D'))}${field('TL Name column', col('agentRegistry.tlNameCol', ar.tlNameCol || 'E', 'E'))}</div>
+      <label class="check"><input type="checkbox" data-path="agentRegistry.enabled" ${ar.enabled !== false ? 'checked' : ''}> New IDs tracking ON</label>${saveBar('agentRegistry')}
+      <div class="btn-row" style="margin-top:8px"><button class="btn small" id="ar-sync" type="button">🔄 Sync now (read sheet)</button></div><div id="ar-sync-out" class="small" style="margin-top:6px"></div>`);
   }
   function dataTab() {
     const s = settings, fc = s.ffCommission || {}, sm = s.stockMovement || {}, cs = s.commissionSlabs || defaults.commissionSlabs || {};
@@ -2747,6 +2749,16 @@ FF.pages = FF.pages || {};
         }).filter((g) => g.tvc && g.cch.length);
         U.withButtonBusy(tvcBtn, () => save({ tvcGroups: rows }, U.$('#save-msg-tvcGroups', body), { reload: true }), 'Saving…');
       });
+      const arBtn = U.$('#ar-sync', body);
+      if (arBtn) arBtn.addEventListener('click', () => U.withButtonBusy(arBtn, async () => {
+        const o = U.$('#ar-sync-out', body);
+        try {
+          const r = await FF.auth.api('/api/agent-aliases?fresh=1');
+          if (FF.aliases && FF.aliases._build) FF.aliases._build(r.rows || []);
+          const ex = (r.rows || []).filter((x) => x.m).slice(0, 3).map((x) => `${esc(x.m)} → ${esc(x.n || x.a)} (${esc(x.a || x.b)})`).join(' · ');
+          o.innerHTML = `✅ ${U.fmt(r.total)} rows read · <b>${U.fmt(r.assistants)}</b> with Assistant ID${ex ? `<br><span class="dim">Sample: ${ex}</span>` : ''}${r.assistants ? '' : '<br>⚠️ No Assistant IDs found — check the Assistant ID column letter.'}`;
+        } catch (err) { o.innerHTML = `❌ ${esc(String((err && err.message) || err))}`; }
+      }, 'Syncing…'));
       const ldgBtn = U.$('#ldg-test', body);
       if (ldgBtn) ldgBtn.addEventListener('click', () => U.withButtonBusy(ldgBtn, async () => {
         const o = U.$('#ldg-test-out', body);

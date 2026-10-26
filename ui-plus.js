@@ -151,7 +151,7 @@
       const a = alnum(id), d = digs(id);
       return chs.some((c) => (a && idx.has(`${c}|i:${a}`)) || (d.length >= 4 && idx.has(`${c}|d:${d}`)) || (!a && name && idx.has(`${c}|n:${nm(name)}`)));
     }
-    const tag = () => '<span class="new-agent-tag" title="Naya agent — pehli issuance haal hi me shuru hui">NEW Agent</span>';
+    const tag = () => '<span class="new-agent-tag" title="New agent — first issuance started recently">NEW Agent</span>';
     /** HTML tag (ya '') — sirf agents ke liye. */
     function html(ch, id, name) { return isNew(ch, id, name) ? tag() : ''; }
     /** root ke andar [data-new-agent="ch|id|name"] slots me tag bharo (ready hone ke baad). */
@@ -166,6 +166,99 @@
     }
     return { ready, isNew, html, paint };
   })();
+
+  // ---- 🔗 Agent ID aliases (v3.99) — Sheet4: New ID (A) · Agent ID (B) · Assistant ID (M) ---------------------
+  // Search box me Assistant ID / Agent ID likhte hi site us agent ki canonical (New) ID me badal deti hai,
+  // taaki Master Search, Tag Request, Dispatch, Performance… sab jagah wahi agent ka data khule.
+  const Aliases = (function () {
+    let list = null, loading = null, alt = null, byA = null, aSet = null;
+    const norm = (v) => String(v == null ? '' : v).replace(/\.0+$/, '').replace(/\s+/g, '').toUpperCase();
+    const esc = (v) => (FF.util && FF.util.esc ? FF.util.esc(v) : String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
+    function build(rows) {
+      list = rows || []; alt = new Map(); byA = new Map(); aSet = new Set();
+      list.forEach((r) => {
+        const a = norm(r.a), b = norm(r.b), m = norm(r.m);
+        if (a) { aSet.add(a); if (!byA.has(a)) byA.set(a, r); }
+        [[b, 'b'], [m, 'm']].forEach(([v, k]) => { if (v && v !== a) { const arr = alt.get(v) || []; if (!arr.some((x) => x.r === r)) arr.push({ r, k }); alt.set(v, arr); } });
+      });
+    }
+    function load(fresh) {
+      if (list && !fresh) return Promise.resolve(list);
+      if (loading) return loading;
+      const api = FF.auth && FF.auth.api;
+      if (!api) return Promise.resolve([]);
+      loading = Promise.resolve(api(`/api/agent-aliases${fresh ? '?fresh=1' : ''}`)).then((d) => { build((d && d.rows) || []); return list; }).catch(() => { if (!list) build([]); return list; }).then((v) => { loading = null; return v; });
+      return loading;
+    }
+    /** value → { to, row, kind } jab value kisi agent ki Assistant/Agent ID ho (unique) aur khud New ID na ho; warna null. */
+    function resolve(value) {
+      if (!alt) return null;
+      const v = norm(value);
+      if (v.length < 4 || aSet.has(v) || !alt.has(v)) return null;
+      const hits = alt.get(v);
+      const agents = new Set(hits.map((h) => norm(h.r.a || h.r.b)));
+      if (agents.size !== 1) return null;
+      const h = hits[0], to = String(h.r.a || h.r.b || '').trim();
+      return to ? { to, row: h.r, kind: h.k === 'm' ? 'Assistant ID' : 'Agent ID' } : null;
+    }
+    /** Query string ko (agar alias ho to) canonical ID me badlo; warna jaisa tha waisa. */
+    const map = (q) => { const r = resolve(q); return r ? r.to : q; };
+    /** Agent ki aliases (canonical New ID se). */
+    function of(id) {
+      if (!byA) return null;
+      const r = byA.get(norm(id)); if (!r) return null;
+      return { assist: String(r.m || '').split(/[,;\s]+/).filter(Boolean), agentId: r.b && norm(r.b) !== norm(r.a) ? String(r.b) : '', row: r };
+    }
+    function chipsHtml(id) {
+      const o = of(id); if (!o) return '';
+      const chip = (label, val) => `<span class="msp-pill alias">${label} <b>${esc(val)}</b> <button type="button" class="cp-btn" data-copy="${esc(val)}" title="Copy ${esc(label)}" aria-label="Copy ${esc(label)}">📋</button></span>`;
+      return [o.agentId ? chip('Agent ID', o.agentId) : '', ...o.assist.map((m) => chip('🤝 Assistant ID', m))].join('');
+    }
+    /** root ke [data-alias-of="ID"] slots bharo. */
+    function paint(root) {
+      return load().then(() => { if (!root || !root.querySelectorAll) return; root.querySelectorAll('[data-alias-of]').forEach((el) => { el.innerHTML = chipsHtml(el.getAttribute('data-alias-of')); }); });
+    }
+    // --- global search-box hook ---
+    let timer = null;
+    const eligible = (el) => {
+      if (!el || el.tagName !== 'INPUT') return false;
+      const t = String(el.type || 'text').toLowerCase();
+      if (t !== 'search' && t !== 'text') return false;
+      if (/^#\/(settings|fastagMapping)/.test(location.hash || '')) return false;
+      if (el.closest && el.closest('[data-path],[data-nid-q],[data-no-alias],.fm-pane')) return false;
+      if (t === 'search') return true;
+      const hint = `${el.placeholder || ''} ${el.getAttribute('aria-label') || ''}`;
+      return /search|find|filter|lookup|agent|\bID\b/i.test(hint) && !/password|otp|mobile|email|request id/i.test(hint);
+    };
+    function apply(el) {
+      const r = resolve(el.value);
+      if (!r) return;
+      const from = el.value.trim();
+      el.value = r.to;
+      el.__aliasFrom = from;
+      try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch { /* ignore */ }
+      toast(`🔗 ${r.kind} ${from} → ${r.row.n || 'Agent'} (ID ${r.to})`, 'ok');
+    }
+    document.addEventListener('input', (e) => {
+      const el = e.target;
+      if (!alt) { load().catch(() => {}); return; }
+      if (!eligible(el)) return;
+      if (el.__aliasFrom && el.value.trim() === el.__aliasFrom) { /* user ne wahi ID dobara type ki */ }
+      clearTimeout(timer);
+      if (!resolve(el.value)) return;
+      timer = setTimeout(() => { if (document.activeElement === el || el.isConnected) apply(el); }, 450);
+    }, true);
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const el = e.target;
+      if (!alt || !eligible(el) || !resolve(el.value)) return;
+      clearTimeout(timer); apply(el);
+    }, true);
+    // data login ke baad lazily load (idle)
+    window.addEventListener('ff:data-loaded', () => { setTimeout(() => { load().catch(() => {}); }, 2500); }, { once: true });
+    return { load, resolve, map, of, chipsHtml, paint, _build: build };
+  })();
+  FF.aliases = Aliases;
   FF.newAgentTag = NewAgent;
   FF.uiPlus = { density, applyDensity, copy, goOffline, goOnline };
 })(window.FF = window.FF || {});

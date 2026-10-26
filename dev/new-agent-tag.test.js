@@ -33,3 +33,24 @@ test('NEW Agent tag: ID / digits / name match, per channel, TL-safe', async () =
   assert.match(T.html('ff', '123456', ''), /NEW Agent/);
   assert.equal(T.html('ff', '999999', ''), '');
 });
+
+test('ID aliases (Sheet4): Assistant / Agent ID → New Agent ID; ambiguous or real New IDs untouched', () => {
+  const A = FF.aliases;
+  A._build([
+    { a: '1000001', b: '555001', m: '777001', n: 'Agent One', tid: 'T1', tn: 'TL One' },
+    { a: '1000002', b: '', m: '777002', n: 'Agent Two' },
+    { a: '1000003', b: '', m: '777002', n: 'Agent Three' },          // same assistant under two agents → ambiguous
+    { a: '1000004', b: '555004', m: '1000001', n: 'Agent Four' }     // assistant id equals another agent's New ID
+  ]);
+  assert.equal(A.resolve('777001').to, '1000001');
+  assert.equal(A.resolve('777001').kind, 'Assistant ID');
+  assert.equal(A.resolve(' 555001 ').kind, 'Agent ID');
+  assert.equal(A.map('777001'), '1000001');
+  assert.equal(A.map('777002'), '777002', 'ambiguous assistant → rewrite nahi');
+  assert.equal(A.map('1000001'), '1000001', 'real New ID par rewrite nahi');
+  assert.equal(A.map('Agent One'), 'Agent One', 'naam par rewrite nahi');
+  assert.equal(A.map('123'), '123', 'chhota text nahi');
+  assert.deepEqual(A.of('1000001').assist, ['777001']);
+  assert.equal(A.of('1000001').agentId, '555001');
+  assert.match(A.chipsHtml('1000001'), /Assistant ID[\s\S]*777001/);
+});

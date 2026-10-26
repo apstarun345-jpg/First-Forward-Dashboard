@@ -235,7 +235,7 @@ const DEFAULT_SETTINGS = {
     gv3: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
   },
   agentRegistry: { // 🆕 Agent master (Sheet4): col A = New Agent ID (EIR J se match). EIR me jo ID yahan nahi → "New IDs" page
-    enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E'
+    enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E', assistCol: 'M', tab: ''
   },
   vrnRules: { enabled: true, bands: [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }] }, // GV live: VRN length → status
   kpiColors: {}, // Admin KPI card colours: { g1: {a:'#6366f1', b:'#8b5cf6'}, ... } — empty = built-in default
@@ -3044,12 +3044,14 @@ const idCellText = (row, i) => {
   if (typeof c.v === 'number') return c.f ? String(c.f).replace(/[^\d]/g, '') || String(c.v) : (Number.isInteger(c.v) ? c.v.toFixed(0) : String(c.v));   // 18-digit ID double me bigad na jaye
   return String(c.v).trim();
 };
+const registryTabOk = (ar) => !!(ar && ar.sheetId && (/^\d+$/.test(String(ar.gid ?? '')) || String(ar.tab || '').trim()));
+const registryTabParams = (ar) => (/^\d+$/.test(String(ar.gid ?? '')) ? { gid: String(ar.gid) } : { sheet: String(ar.tab || '').trim() });
 const idNorm = (v) => String(v === null || v === undefined ? '' : v).replace(/\.0+$/, '').replace(/\s+/g, '').toUpperCase();
 async function buildNewIds() {
   const s = db.settings || {}, e = s.eir || {}, ar = s.agentRegistry || {};
-  if (!ar.sheetId || !/^\d+$/.test(String(ar.gid ?? ''))) throw new Error('Settings → Agent master (Sheet4) ka link / gid set karo.');
+  if (!registryTabOk(ar)) throw new Error('Settings → Agent master (Sheet4) ka link / gid (ya tab name) set karo.');
   const idCol = colLetter(ar.idCol, 'A'), legacyCol = colLetter(ar.legacyCol, ''), cols = [...new Set([idCol, legacyCol].filter(Boolean))];
-  const regQ = new URLSearchParams({ id: ar.sheetId, gid: String(ar.gid), headers: '1', tq: `select ${cols.join(', ')} limit 60000` });
+  const regQ = new URLSearchParams({ id: ar.sheetId, ...registryTabParams(ar), headers: '1', tq: `select ${cols.join(', ')} limit 60000` });
   const eirSheet = s.eirSheet || e.sheet || 'EIR';
   const L = { id: colLetter(e.agentId, 'J'), leg: colLetter(e.agentLegacyId, 'K'), name: colLetter(e.agentName, 'L'), aid: colLetter(e.assistId, 'M'), aleg: colLetter(e.assistLegacyId, 'N'), aname: colLetter(e.assistName, 'O'), date: colLetter(e.date, 'AA'), tag: colLetter(e.tagId, 'A') };
   const sel = [L.id, L.leg, L.name, L.aid, L.aleg, L.aname];
@@ -3103,27 +3105,29 @@ function parseCsvText(text) {
 const colIndex = (l) => String(l || '').toUpperCase().split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
 /** Sheet4 ko CSV export se padho — gviz mixed (text+number) column ki minority values null kar deta hai (Agent ID / TL ID blank aate the). */
 async function registryRowsViaCsv(ar, L) {
+  if (!/^\d+$/.test(String(ar.gid ?? ''))) throw new Error('gid nahi — tab name se gviz');
   const url = `${GVIZ_BASE}/spreadsheets/d/${String(ar.sheetId).replace(/[^A-Za-z0-9_-]/g, '')}/export?format=csv&gid=${encodeURIComponent(String(ar.gid))}`;
   const out = await fetchUpstream(url);
   if (out.status < 200 || out.status >= 300 || /^\s*<(!doctype|html)/i.test(out.body)) throw new Error(`CSV export HTTP ${out.status}`);
   const t = parseCsvText(out.body).slice(1);   // header row hatao
   const ix = L.map(colIndex), cell = (r, k) => String((ix[k] >= 0 && r[ix[k]]) || '').trim();
-  return t.map((r) => ({ newId: cell(r, 0), id: cell(r, 1), name: cell(r, 2), tlId: cell(r, 3), tlName: cell(r, 4) })).filter((x) => x.newId || x.id || x.name);
+  return t.map((r) => ({ newId: cell(r, 0), id: cell(r, 1), name: cell(r, 2), tlId: cell(r, 3), tlName: cell(r, 4), assistId: cell(r, 5) })).filter((x) => x.newId || x.id || x.name || x.assistId);
 }
 async function loadRegistryFull(fresh) {
   const ar = (db.settings || {}).agentRegistry || {};
-  if (!ar.sheetId || !/^\d+$/.test(String(ar.gid ?? ''))) throw new Error('Settings → Agent master (Sheet4) ka link / gid set karo.');
-  const L = [colLetter(ar.idCol, 'A'), colLetter(ar.legacyCol, 'B'), colLetter(ar.nameCol, 'C'), colLetter(ar.tlIdCol, 'D'), colLetter(ar.tlNameCol, 'E')];
-  const key = JSON.stringify([ar.sheetId, ar.gid, L]);
+  if (!registryTabOk(ar)) throw new Error('Settings → Agent master (Sheet4) ka link / gid (ya tab name) set karo.');
+  const L = [colLetter(ar.idCol, 'A'), colLetter(ar.legacyCol, 'B'), colLetter(ar.nameCol, 'C'), colLetter(ar.tlIdCol, 'D'), colLetter(ar.tlNameCol, 'E'), colLetter(ar.assistCol, 'M')];
+  const key = JSON.stringify([ar.sheetId, ar.gid, ar.tab, L]);
   if (!fresh && regFullState.rows && regFullState.key === key && Date.now() - regFullState.at < 10 * 60e3) return regFullState.rows;
   if (!regFullState.promise) {
     regFullState.promise = (async () => {
       let rows = null;
       try { rows = await registryRowsViaCsv(ar, L); } catch (err) { console.log(`Sheet4 CSV export fail (${String((err && err.message) || err).slice(0, 80)}) — gviz fallback`); }
       if (!rows) {
-      const q = new URLSearchParams({ id: ar.sheetId, gid: String(ar.gid), headers: '1', tq: `select ${L.join(', ')} limit 60000` });
-      const r = await gvizPageServer(q, `gid:${ar.gid}`);
-      rows = r.rows.map((x) => ({ newId: idCellText(x, 0), id: idCellText(x, 1), name: idCellText(x, 2), tlId: idCellText(x, 3), tlName: idCellText(x, 4) })).filter((x) => x.newId || x.id || x.name);
+      const sel = [...new Set(L.filter(Boolean))], ix = L.map((l) => (l ? sel.indexOf(l) : -1)), at = (x, k) => (ix[k] >= 0 ? idCellText(x, ix[k]) : '');
+      const q = new URLSearchParams({ id: ar.sheetId, ...registryTabParams(ar), headers: '1', tq: `select ${sel.join(', ')} limit 60000` });
+      const r = await gvizPageServer(q, `gid:${ar.gid || ar.tab}`);
+      rows = r.rows.map((x) => ({ newId: at(x, 0), id: at(x, 1), name: at(x, 2), tlId: at(x, 3), tlName: at(x, 4), assistId: at(x, 5) })).filter((x) => x.newId || x.id || x.name || x.assistId);
       }
       regFullState.rows = rows; regFullState.key = key; regFullState.at = Date.now();
       return rows;
@@ -3137,14 +3141,14 @@ function searchRegistry(rows, terms) {
   for (const t of terms) {
     const raw = String(t).trim(); if (!raw) continue;
     const n = idNorm(raw), low = raw.toLowerCase(), isId = /^[A-Za-z]*\d[\dA-Za-z]*$/.test(raw.replace(/\s+/g, ''));
-    const hits = rows.filter((x) => (isId && (idNorm(x.newId) === n || idNorm(x.id) === n || idNorm(x.tlId) === n)) || (!isId && String(x.name).toLowerCase().includes(low)));
+    const hits = rows.filter((x) => (isId && (idNorm(x.newId) === n || idNorm(x.id) === n || idNorm(x.tlId) === n || idNorm(x.assistId) === n)) || (!isId && String(x.name).toLowerCase().includes(low)));
     out.push({ term: raw, matches: hits.slice(0, 50), more: Math.max(0, hits.length - 50) });
   }
   return out;
 }
 function newIdsData(fresh) {
   const s = db.settings || {}, ar = s.agentRegistry || {};
-  const key = JSON.stringify([ar.sheetId, ar.gid, ar.idCol, ar.legacyCol, s.sheetId, s.eirSheet]);
+  const key = JSON.stringify([ar.sheetId, ar.gid, ar.tab, ar.idCol, ar.legacyCol, s.sheetId, s.eirSheet]);
   const have = newIdsState.data && newIdsState.key === key ? newIdsState.data : null;
   const stale = have && Date.now() - newIdsState.at > 15 * 60e3;
   if (have && !fresh && !stale) return Promise.resolve(have);
@@ -5668,6 +5672,14 @@ async function handleApi(req, res, url) {
     if (!data) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
     if (url.searchParams.get('summary') === '1') return sendJson(res, 200, { ok: true, summary: data.summary, at: data.at }, { 'Cache-Control': 'no-store' });
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ...data }), { 'Cache-Control': 'no-store' });
+  }
+  // 🔗 Agent ID aliases (Sheet4): New ID (A) · Agent ID (B) · Assistant ID (M) → site search me kisi bhi ID se wahi agent khule.
+  if (p === '/api/agent-aliases' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const fresh = url.searchParams.get('fresh') === '1';
+    let rows; try { rows = await loadRegistryFull(fresh); } catch (err) { throw new HttpError(502, `Sheet4 load nahi hua: ${String((err && err.message) || err).slice(0, 200)}`); }
+    const list = rows.filter((r) => r.assistId || r.id || r.newId).map((r) => ({ a: r.newId, b: r.id, m: r.assistId, n: r.name, tid: r.tlId, tn: r.tlName }));
+    return sendJson(res, 200, { ok: true, at: new Date(regFullState.at || Date.now()).toISOString(), total: rows.length, assistants: rows.filter((r) => r.assistId).length, rows: list }, { 'Cache-Control': 'private, max-age=120' });
   }
   if (p === '/api/agent-master-search' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -9006,8 +9018,9 @@ async function handleApi(req, res, url) {
       if (!ar || typeof ar !== 'object' || Array.isArray(ar)) throw new HttpError(400, 'agentRegistry object hona chahiye.');
       if (ar.enabled !== undefined) ar.enabled = ar.enabled === true || ar.enabled === 'true';
       if (ar.sheetId !== undefined) { ar.sheetId = sheetIdFromLink(ar.sheetId) || String(ar.sheetId).trim(); if (ar.sheetId && !/^[A-Za-z0-9_-]{20,}$/.test(ar.sheetId)) throw new HttpError(400, 'Agent master: Google Sheet ka valid link / ID dein.'); }
-      if (ar.gid !== undefined) { ar.gid = String(ar.gid).trim(); if (!/^\d{1,12}$/.test(ar.gid)) throw new HttpError(400, 'Agent master: gid sirf number hota hai (URL me gid=...).'); }
-      for (const k of ['idCol', 'legacyCol', 'nameCol', 'tlIdCol', 'tlNameCol']) if (ar[k] !== undefined) { ar[k] = String(ar[k]).trim().toUpperCase(); if (ar[k] !== '' && !/^[A-Z]{1,3}$/.test(ar[k])) throw new HttpError(400, `Agent master: ${k} column letter hona chahiye (jaise A).`); }
+      if (ar.tab !== undefined) ar.tab = String(ar.tab).trim().slice(0, 100);
+      if (ar.gid !== undefined) { ar.gid = String(ar.gid).trim(); if (!(ar.gid === '' && ar.tab) && !/^\d{1,12}$/.test(ar.gid)) throw new HttpError(400, 'Agent master: gid sirf number hota hai (URL me gid=...) — ya Tab name daalo.'); }
+      for (const k of ['idCol', 'legacyCol', 'nameCol', 'tlIdCol', 'tlNameCol', 'assistCol']) if (ar[k] !== undefined) { ar[k] = String(ar[k]).trim().toUpperCase(); if (ar[k] !== '' && !/^[A-Z]{1,3}$/.test(ar[k])) throw new HttpError(400, `Agent master: ${k} column letter hona chahiye (jaise A).`); }
       if (ar.label !== undefined) ar.label = String(ar.label).slice(0, 60);
     }
     if (patch.vrnRules !== undefined) {

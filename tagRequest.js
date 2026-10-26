@@ -458,7 +458,7 @@ FF.pages = FF.pages || {};
   function findAgent(q, channel) {
     const idx = state.index;
     if (!idx) return null;
-    const text = String(q || '').trim();
+    const text = String(FF.aliases ? FF.aliases.map(String(q || '').trim()) : q || '').trim();   // Assistant / Agent ID → New ID (Sheet4)
     if (!text) return null;
     const d = digits(text);
     if (d.length >= 4) {

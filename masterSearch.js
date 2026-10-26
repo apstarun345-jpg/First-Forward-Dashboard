@@ -1133,6 +1133,7 @@ FF.pages = FF.pages || {};
    *  jahan click karte hi uska poora related data (FF + GV) khul jaata hai — koi results list / modal box nahi.
    *  Barcode / tag-ID searches purane panel (tag-level rows) me hi jaate hain. */
   function openSearchPage(q, person) {
+    if (!person && FF.aliases) q = FF.aliases.map(q);   // Assistant / Agent ID (Sheet4) → New ID
     const p = person || {};
     // A selected suggestion is authoritative: route using the selected person's canonical name,
     // not the stale/free-typed query text. This prevents URL q=one-name + id=another-person mismatches.
@@ -1910,7 +1911,7 @@ FF.pages = FF.pages || {};
       out.innerHTML = `${channelChoiceHtml(g, selected)}${chips}
         <div class="msp-hero">
           <span class="ms-avatar ${viewGroup.gv ? 'gv' : 'ff'}">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
-          <div class="msp-hero-id"><b>${esc(g.name)}</b> <button type="button" class="cp-btn" data-copy="${esc(g.name)}" title="Copy name" aria-label="Copy name">📋</button>${heroNewTags(viewGroup)}<div class="msp-pills">${bits || '<span class="msp-pill">Report</span>'}</div></div>
+          <div class="msp-hero-id"><b>${esc(g.name)}</b> <button type="button" class="cp-btn" data-copy="${esc(g.name)}" title="Copy name" aria-label="Copy name">📋</button>${heroNewTags(viewGroup)}<div class="msp-pills">${bits || '<span class="msp-pill">Report</span>'}${viewGroup.ff && !isTlP(viewGroup.ff) ? `<span data-alias-of="${esc(viewGroup.ff.sub || '')}"></span>` : ''}</div></div>
           ${person ? `<div class="msp-hero-act">${FF.auth && FF.auth.can && FF.auth.can('export') ? '<button class="btn small primary" data-msp-report title="Choose: Full report / Stock + pivot (ageing auto) / Current month / Last month — Excel">⬇ Full report</button>' : ''}<button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
         <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => viewGroup[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
@@ -1918,7 +1919,7 @@ FF.pages = FF.pages || {};
         ${gvStripHtml(viewGroup.gv)}${ffStripHtml(viewGroup.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
       paintKpis(viewGroup, U.$('#msp-kpis', out)).catch(() => {});
-      try { if (FF.newAgentTag) FF.newAgentTag.paint(out); } catch { /* ignore */ }
+      try { if (FF.newAgentTag) FF.newAgentTag.paint(out); if (FF.aliases) FF.aliases.paint(out); } catch { /* ignore */ }
       const host = U.$('#msp-report', out);
       const sr = SR();
       if (sr && host) sr.render(host, viewGroup);

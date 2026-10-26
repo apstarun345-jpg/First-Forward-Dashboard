@@ -7035,3 +7035,7 @@ a.tr-agent-link:hover { color: #4338ca; }
 .tr-c-agent .tr-agent-id { color: #111827; letter-spacing: .02em; }
 .msp-hero-id .cp-btn, .gs-hero-who h2 .cp-btn { font-size: 11px; }
 .msp-hero-id .new-agent-tag { font-size: 11.5px; }
+
+/* v3.99 — Sheet4 alias chips (Agent ID / Assistant ID) in Master Search hero */
+.msp-pill.alias { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+.msp-pill.alias .cp-btn { margin-left: 2px; }
