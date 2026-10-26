@@ -2111,7 +2111,7 @@ window.FF = window.FF || {};
     const rows = (pr.agents || []).slice();
     const selfA = pr.selfAgent || null;
     if (!rows.length && !selfA) return '';
-    const tlSpec = `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.name)}`;
+    const tlSpec = `src=${pr.ch}&scope=stock&tl=${encodeURIComponent(pr.name)}${pr.ch === 'gv' && pr.id ? `&tlId=${encodeURIComponent(pr.id)}` : ''}`;
     const sum = (k, list) => U.sum(list || rows, (a) => num(a[k]));
     const own = ts.own || { vc4: 0, comm: 0, total: 0 }, ag = ts.agents || { vc4: 0, comm: 0, total: 0 };
     // v3.41 — har number (stock · last month · this month, VC4 / Comm / Total) apni drawer kholta hai:
