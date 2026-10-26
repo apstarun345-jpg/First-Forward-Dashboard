@@ -26,7 +26,7 @@ FF.pages = FF.pages || {};
   const norm = (s) => U.clean(s).toUpperCase().replace(/\s+/g, ' ');
   const keyOf = (source, name) => `${source}|${norm(name)}`;
 
-  const view = { ym: '', source: 'all', sort: 'cur', q: '', onlyWithTarget: false, tab: 'targets', tlSort: 'cur', seg: 'all', hg: 25 };
+  const view = { ym: '', source: 'all', sort: 'cur', q: '', onlyWithTarget: false, tab: 'targets', tlSort: 'cur', seg: 'all', hg: 25, tl: '', dir: 'desc' };
   let list = [];            // unified agent rows
   let selected = new Set(); // keys
   let targetDrafts = new Map(); // legacy overall target per agent (unsaved)
@@ -150,7 +150,8 @@ FF.pages = FF.pages || {};
   }
 
   // ---- short-lists -------------------------------------------------------------------------------
-  function filteredRows() {
+  /** Rows after source / segment / search (TL filter NOT applied) — TL dropdown options isse bante hain. */
+  function baseRows() {
     let r = list;
     if (view.source !== 'all') r = r.filter((x) => x.source === view.source);
     if (view.onlyWithTarget) r = r.filter((x) => hasAnyTarget(x.key));
@@ -158,21 +159,33 @@ FF.pages = FF.pages || {};
     if (view.seg !== 'all' && watch.ready) { const keys = segKeys(view.seg); r = r.filter((x) => keys.has(x.key)); }
     else if (!q) r = r.filter((x) => !x.extra);   // zero-issuance agents (watchlist se) sirf chip / search par dikhte hain
     if (q) r = r.filter((x) => norm(x.name).includes(q) || norm(x.tl).includes(q));
-    const sorters = {
-      cur: (a, b) => b.cur - a.cur,
-      last: (a, b) => b.last - a.last,
-      growth: (a, b) => (b.growth === null ? -999 : b.growth) - (a.growth === null ? -999 : a.growth),
-      vc4: (a, b) => b.vc4 - a.vc4,
-      vc20: (a, b) => b.vc20 - a.vc20,
-      vc5p: (a, b) => b.vc5p - a.vc5p,
-      comm: (a, b) => b.comm - a.comm,
-      name: (a, b) => a.name.localeCompare(b.name)
-    };
-    return [...r].sort(sorters[view.sort] || sorters.cur);
+    return r;
+  }
+  const isDirectTl = (x) => !x.tl || x.tl === '—' || /^direct/i.test(x.tl);
+  const tlOptions = () => [...new Set(baseRows().filter((x) => !isDirectTl(x)).map((x) => x.tl))].sort((a, b) => a.localeCompare(b));
+  const progressOf = (r) => { const t = targetDrafts.get(r.key) || 0; return t ? (r.cur / t) * 100 : -1; };
+  const SORTERS = {
+    cur: (a, b) => a.cur - b.cur,
+    last: (a, b) => a.last - b.last,
+    growth: (a, b) => (a.growth === null ? -999 : a.growth) - (b.growth === null ? -999 : b.growth),
+    vc4: (a, b) => a.vc4 - b.vc4,
+    vc20: (a, b) => a.vc20 - b.vc20,
+    vc5p: (a, b) => a.vc5p - b.vc5p,
+    comm: (a, b) => a.comm - b.comm,
+    target: (a, b) => (targetDrafts.get(a.key) || 0) - (targetDrafts.get(b.key) || 0),
+    progress: (a, b) => progressOf(a) - progressOf(b),
+    name: (a, b) => a.name.localeCompare(b.name)
+  };
+  function filteredRows() {
+    let r = baseRows();
+    if (view.tl === '__direct__') r = r.filter(isDirectTl);
+    else if (view.tl) r = r.filter((x) => !isDirectTl(x) && norm(x.tl) === norm(view.tl));
+    const cmp = SORTERS[view.sort] || SORTERS.cur, dir = view.dir === 'asc' ? 1 : -1;
+    return [...r].sort((a, b) => cmp(a, b) * dir || b.cur - a.cur || a.name.localeCompare(b.name));
   }
   function quickList(kind) {
     const r = filteredRows().filter((x) => x.cur > 0 || x.last > 0);
-    if (kind === 'top') return r.slice(0, 10);
+    if (kind === 'top') return [...r].sort((a, b) => b.cur - a.cur).slice(0, 10);
     if (kind === 'low') return [...r].sort((a, b) => a.cur - b.cur).filter((x) => x.last > 0).slice(0, 15);
     if (kind === 'vc4') return [...r].filter((x) => x.vc4 > 0).sort((a, b) => b.vc4 - a.vc4).slice(0, 15);
     if (kind === 'comm') return [...r].filter((x) => x.comm > 0).sort((a, b) => b.comm - a.comm).slice(0, 15);
@@ -313,7 +326,6 @@ FF.pages = FF.pages || {};
         <div class="finder-row">
           <label>📅 Month <select class="input" id="tg-ym"></select></label>
           <div class="seg" id="tg-source"><button class="seg-btn ${view.source === 'all' ? 'on' : ''}" data-src="all">All</button><button class="seg-btn ${view.source === 'ff' ? 'on' : ''}" data-src="ff">🟦 First Forward</button><button class="seg-btn ${view.source === 'gv' ? 'on' : ''}" data-src="gv">🟩 GV Partner</button></div>
-          <label>Sort <select class="input" id="tg-sort"><option value="cur">Issuance (high → low)</option><option value="last">Last month</option><option value="growth">Growth %</option><option value="vc4">VC4 tags</option><option value="vc20">VC20 tags</option><option value="vc5p">VC5+ tags</option><option value="comm">All Comm tags</option><option value="name">Name (A-Z)</option></select></label>
           <div class="finder-input"><span class="finder-ico">🔎</span><input class="input" id="tg-q" placeholder="Agent ya TL search…" value="${esc(view.q)}"><button class="btn mic-btn" id="tg-mic" title="🗣 Bol ke search karo" type="button">🎤</button></div>
         </div>
         <div class="chip-row" id="tg-quick"><span class="dim small">Quick select:</span>
@@ -370,6 +382,15 @@ FF.pages = FF.pages || {};
       const chipsBlock = !isCurMonth ? '' : stats
         ? `<section class="card"><div class="pw-head"><h3>🔎 Performance segments <span class="dim small">· ${esc(srcLbl)} · click a chip → agents list below, set targets right there</span></h3><div class="btn-row"><label class="small dim">High / de-growth <select data-tg-hg>${[25, 50, 100].map((v) => `<option value="${v}" ${view.hg === v ? 'selected' : ''}>±${v}%</option>`).join('')}</select></label>${view.seg !== 'all' ? '<button class="btn small" data-pw-clear>✕ Show all</button>' : ''}</div></div><div class="card-body">${FF.perfWatch.chipsHtml(stats.counts, stats.sums, view.seg, view.hg)}</div></section>`
         : `<section class="card"><div class="card-body">${U.spinner('Performance chips load ho rahe hain…')}</div></section>`;
+      const tlList = tlOptions();
+      if (view.tl && view.tl !== '__direct__' && !tlList.some((t) => norm(t) === norm(view.tl))) view.tl = '';
+      const hasDirect = baseRows().some(isDirectTl);
+      const SORT_OPTS = [['cur', `${U.labelYM(view.ym)} issuance`], ['last', 'Last month'], ['growth', 'Growth %'], ['vc4', 'VC4 tags'], ['vc20', 'VC20 tags'], ['vc5p', 'VC5+ tags'], ['comm', 'All Comm tags'], ['target', 'Overall target'], ['progress', 'Progress %'], ['name', 'Name A–Z']];
+      const ctlRow = `<div class="pw-ctl tg-ctl"><label>TL <select data-tg-tl><option value="">All TLs</option>${hasDirect ? `<option value="__direct__" ${view.tl === '__direct__' ? 'selected' : ''}>🚫 Direct agents</option>` : ''}${tlList.map((t) => `<option value="${esc(t)}" ${norm(t) === norm(view.tl) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+        <label>Sort by <select data-tg-sortsel>${SORT_OPTS.map(([k, l]) => `<option value="${k}" ${view.sort === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label>Order <select data-tg-dir><option value="desc" ${view.dir === 'desc' ? 'selected' : ''}>High → Low</option><option value="asc" ${view.dir === 'asc' ? 'selected' : ''}>Low → High</option></select></label>
+        ${view.tl || view.seg !== 'all' || view.q ? '<button class="btn small" data-tg-reset>✕ Clear filters</button>' : ''}</div>`;
+      const sth = (k, label, cls, title) => `<th class="${cls || ''} sortable ${view.sort === k ? 'sorted' : ''}" data-tg-sort="${k}" title="${esc(title || 'Sort')}">${label}${view.sort === k ? `<i>${view.dir === 'asc' ? '▲' : '▼'}</i>` : ''}</th>`;
       const rowHtml = (r) => {
         const t = targetDrafts.get(r.key) || 0;
         const ct = classTargetsFor(r.key);
@@ -402,7 +423,7 @@ FF.pages = FF.pages || {};
       inner.innerHTML = `${kpis}
         ${chipsBlock}
         ${card(`🎯 Target table <span class="dim">· ${U.fmt(rows.length)} agents · ${esc(srcLbl)} · ${esc(U.labelYM(view.ym))}${isCurMonth ? ' (MTD)' : ''}</span>`,
-        rows.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th><label class="check"><input type="checkbox" id="tg-all" ${rows.length && rows.every((r) => selected.has(r.key)) ? 'checked' : ''}></label></th><th>Agent / TL</th><th>Source</th><th class="num">Last month</th><th class="num">${esc(U.labelYM(view.ym))}</th><th class="num">VC4</th><th class="num">VC20</th><th class="num">VC5+</th><th class="num" title="All Commercial = VC20 + VC5+ (NVC4)">All Comm</th><th class="num">Growth</th><th class="num">Overall target</th><th class="num">VC4 target</th><th class="num">VC20 target</th><th class="num">VC5+ target</th><th>Progress</th><th>Goal · Save</th></tr></thead><tbody>${rows.slice(0, 400).map(rowHtml).join('')}</tbody></table></div>${rows.length > 400 ? '<p class="dim small">Pehle 400 rows — filter/search se list chhoti karo.</p>' : ''}` : '<div class="empty-state">Koi agent match nahi hua — filter badlo.</div>',
+        rows.length ? `${ctlRow}<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th><label class="check"><input type="checkbox" id="tg-all" ${rows.length && rows.every((r) => selected.has(r.key)) ? 'checked' : ''}></label></th>${sth('name', 'Agent / TL')}<th>Source</th>${sth('last', 'Last month', 'num')}${sth('cur', esc(U.labelYM(view.ym)), 'num')}${sth('vc4', 'VC4', 'num')}${sth('vc20', 'VC20', 'num')}${sth('vc5p', 'VC5+', 'num')}${sth('comm', 'All Comm', 'num', 'All Commercial = VC20 + VC5+ (NVC4)')}${sth('growth', 'Growth', 'num')}${sth('target', 'Overall target', 'num')}<th class="num">VC4 target</th><th class="num">VC20 target</th><th class="num">VC5+ target</th>${sth('progress', 'Progress')}<th>Goal · Save</th></tr></thead><tbody>${rows.slice(0, 400).map(rowHtml).join('')}</tbody></table></div>${rows.length > 400 ? '<p class="dim small">Pehle 400 rows — filter/search se list chhoti karo.</p>' : ''}` : `${ctlRow}<div class="empty-state">Koi agent match nahi hua — filter badlo.</div>`,
         `<button class="btn small" id="tg-select-page">☑ Visible select</button><button class="btn small" id="tg-clear-sel">✕ Selection clear</button><button class="btn small primary" id="tg-save" ${FF.auth.isAdmin() ? '' : 'disabled title="Admin only"'}>💾 Save targets</button><button class="btn small" id="tg-xlsx">⬇ Excel</button>`)}
         <p class="dim small"><b>VC4</b> = 4-wheeler (payable) · <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b>. Overall aur class-wise targets month <b>${esc(U.labelYM(view.ym, true))}</b> ke liye settings me save hote hain (Google Sheet storage backup ke saath). Existing progress bar overall target use karta hai; Home par VC4 / VC20 / VC5+ achievement inke separate targets se niklega. ${FF.auth.isAdmin() ? '' : '<b>Save sirf admin kar sakta hai.</b>'}</p>`;
       const cnt = U.$('#tg-sel-count', body);
@@ -420,8 +441,6 @@ FF.pages = FF.pages || {};
 
     // ---- events ----
     ymSel.addEventListener('change', () => { view.ym = ymSel.value; selected.clear(); FF.app.navigate('targets', { month: view.ym, tab: view.tab }); });
-    U.$('#tg-sort', body).value = view.sort;
-    U.$('#tg-sort', body).addEventListener('change', (e) => { view.sort = e.target.value; draw(); });
     U.$('#tg-q', body).addEventListener('input', U.debounce((e) => { view.q = e.target.value; draw(); }, 220));
     const mic = U.$('#tg-mic', body);
     if (mic && U.voiceInput) mic.addEventListener('click', () => U.voiceInput((text) => { view.q = text; const q = U.$('#tg-q', body); if (q) q.value = text; draw(); }, 'Agent ya TL ka naam bolo…', { button: mic }));
@@ -440,6 +459,9 @@ FF.pages = FF.pages || {};
       if (e.target.closest('#tg-all')) { const on = e.target.closest('#tg-all').checked; filteredRows().forEach((r) => { if (on) selected.add(r.key); else selected.delete(r.key); }); draw(); return; }
       if (e.target.closest('#tg-select-page')) { filteredRows().forEach((r) => selected.add(r.key)); draw(); return; }
       if (e.target.closest('#tg-clear-sel')) { selected.clear(); draw(); return; }
+      const sortTh = e.target.closest('[data-tg-sort]');
+      if (sortTh) { const k = sortTh.dataset.tgSort; if (view.sort === k) view.dir = view.dir === 'asc' ? 'desc' : 'asc'; else { view.sort = k; view.dir = k === 'name' ? 'asc' : 'desc'; } draw(); return; }
+      if (e.target.closest('[data-tg-reset]')) { view.tl = ''; view.seg = 'all'; view.q = ''; const qi = U.$('#tg-q', body); if (qi) qi.value = ''; draw(); return; }
       const segBtn = e.target.closest('[data-pw-seg]');
       if (segBtn) { view.seg = segBtn.dataset.pwSeg; selected.clear(); draw(); return; }
       if (e.target.closest('[data-pw-clear]')) { view.seg = 'all'; draw(); return; }
@@ -508,6 +530,12 @@ FF.pages = FF.pages || {};
       }
     });
     body.addEventListener('change', (e) => {
+      const tlSel = e.target.closest('[data-tg-tl]');
+      if (tlSel) { view.tl = tlSel.value; draw(); return; }
+      const sortSel = e.target.closest('[data-tg-sortsel]');
+      if (sortSel) { view.sort = sortSel.value; view.dir = view.sort === 'name' ? 'asc' : 'desc'; draw(); return; }
+      const dirSel = e.target.closest('[data-tg-dir]');
+      if (dirSel) { view.dir = dirSel.value; draw(); return; }
       const hgSel = e.target.closest('[data-tg-hg]');
       if (hgSel) { view.hg = Number(hgSel.value) || 25; draw(); return; }
       const inp = e.target.closest('[data-target]');
