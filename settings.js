@@ -870,6 +870,25 @@ FF.pages = FF.pages || {};
     return section('📲 Contacts & sharing', `<div class="form-grid">${field('Team WhatsApp number', txt('contacts.teamWhatsapp', c.teamWhatsapp, 'inputmode="tel" placeholder="91xxxxxxxxxx"'), 'WhatsApp buttons is number par khulenge (blank = number choose karo)')}${field('Team email', txt('contacts.teamEmail', c.teamEmail, 'type="email"'), 'Email buttons ka default "To"')}${field('WhatsApp group link', txt('contacts.teamGroupLink', c.teamGroupLink, 'placeholder="https://chat.whatsapp.com/…"'))}${field('Message signature', txt('contacts.signature', c.signature))}</div><p class="dim small">Agent / TL profile me "WhatsApp TL" button REPORT sheet ke TL mobile par jaata hai (permission "See mobile numbers" chahiye).</p>${saveBar('contacts')}`)
       + section('🖨️ Dispatch label — FROM (company ka address)', `<div class="form-grid">${field('Company / dispatch naam', txt('contacts.fromName', c.fromName, 'placeholder="Apna Payment Pvt Ltd"'), 'Label par FROM ke saath dikhega (blank = app brand ka naam)')}${field('Company ka poora address', `<textarea class="input" data-path="contacts.fromAddress" rows="3" placeholder="Plot 12, RIICO Industrial Area, Jaipur, Rajasthan — 302006" maxlength="400">${esc(c.fromAddress || '')}</textarea>`, 'Tag request ke 🖨️ dispatch label / A4 print par FROM block — employee ka address TO me, company ka FROM me dikhta hai.')}${field('Company phone (optional)', txt('contacts.fromPhone', c.fromPhone, 'inputmode="tel" placeholder="Your dispatch office number"'))}</div><p class="dim small">Use: 🏷️ Tag Requests → koi bhi request khanchno (jarur hai ki employee link se aayi ho, address ke saath) → 🖨️ <b>Dispatch label</b> section → Print / 📄 PDF / Share. Label A4 page par left+right dono taraf repeat hota hai.</p>${saveBar('contacts')}`);
   }
+  // 📡 Personal link status cell: exact, server-side numbers (live session > last activity).
+  const plAgo = (ts) => { const sec = Math.max(0, Math.round((Date.now() - ts) / 1000)); return sec < 60 ? `${sec}s ago` : sec < 3600 ? `${Math.round(sec / 60)}m ago` : sec < 86400 ? `${Math.round(sec / 3600)}h ago` : `${Math.round(sec / 86400)}d ago`; };
+  const plStamp = (ts) => new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  function plStatusHtml(st, live) {
+    st = st || {};
+    const bits = [];
+    if (st.online) {
+      const st2 = (live && live.state) || {};
+      bits.push(`<span class="u-live on">● Viewing now${st2.tab ? ` · ${esc(st2.tab)}` : ''}${st2.ch && st2.ch !== 'all' ? ` · ${esc(String(st2.ch).toUpperCase())}` : ''}</span>${st2.q ? `<div class="small">🔍 ${esc(st2.q)}</div>` : ''}`);
+    } else if (st.lastSeen && Date.now() - st.lastSeen < 90e3) bits.push(`<span class="u-live idle">◐ Idle · ${plAgo(st.lastSeen)}</span>`);
+    else if (st.lastActivity) bits.push(`<span class="u-live off" title="${esc(plStamp(st.lastActivity))}">○ ${plAgo(st.lastActivity)}</span>`);
+    else bits.push('<span class="u-live off">○ never opened</span>');
+    if (st.lastActivity) bits.push(`<div class="dim small" title="Last activity (exact)">${esc(plStamp(st.lastActivity))}</div>`);
+    const nums = [];
+    if (st.logins) nums.push(`🔐 ${st.logins}`); if (st.opens) nums.push(`📄 ${st.opens}`); if (st.searches) nums.push(`🔍 ${st.searches}`); if (st.exports) nums.push(`⬇️ ${st.exports}`); if (st.failed) nums.push(`⚠️ ${st.failed}`);
+    if (nums.length) bits.push(`<div class="dim small" title="logins · report opens · searches · exports · failed logins">${nums.join(' · ')}</div>`);
+    if (st.lastIp) bits.push(`<div class="dim small mono" title="Last IP${st.lastUa ? ' · ' + esc(st.lastUa) : ''}">${esc(st.lastIp)}${st.lastUa ? ` · ${esc(st.lastUa)}` : ''}</div>`);
+    return bits.join('');
+  }
   async function usersTab(root) {
     const out = await A.api('/api/users');
     usersCache = out.users; permsCache = out.permissions;
@@ -1649,6 +1668,7 @@ FF.pages = FF.pages || {};
         </div>
         <p class="dim small" style="margin-top:8px">Tap <b>📡</b> on a link to see its live activity and watch the visitor's screen live. Audience can be changed in Features → Notification audience.</p>
       </div>
+      <div class="u-live-strip" id="pl-live-strip"><span class="dim small">📡 Live status load ho raha hai…</span></div>
       ${links.length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Source</th><th>Kind</th><th>Naam</th><th>🔐 Auth (ID · Mobile)</th><th>🎛️ Allowed Sections</th><th>Link</th><th>Status</th><th>Actions</th></tr></thead><tbody>
       ${links.map((l) => {
         const secs = Array.isArray(l.sections) ? l.sections : defSecs;
@@ -1663,9 +1683,9 @@ FF.pages = FF.pages || {};
         <td>${authBadge}</td>
         <td><div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:center">${secBadges}</div></td>
         <td class="mono small"><a href="/p/${esc(l.token)}" target="_blank" rel="noopener">${esc(origin)}/p/${esc(String(l.token).slice(0, 10))}…</a></td>
-        <td>${l.enabled !== false ? '<span class="badge green">✅ ON</span>' : '<span class="badge red">⛔ OFF</span>'}${l.activity && l.activity.online ? ' <span class="badge green" title="Viewing right now">● Live</span>' : (l.activity && l.activity.lastActivity ? `<div class="dim small" title="Last activity">${esc(new Date(l.activity.lastActivity).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }))}</div>` : '')}</td>
+        <td>${l.enabled !== false ? '<span class="badge green">✅ ON</span>' : '<span class="badge red">⛔ OFF</span>'}<div class="pl-st" data-pl-st="${esc(l.id)}">${plStatusHtml(l.activity)}</div></td>
         <td class="num" style="white-space:nowrap">
-          <button class="btn small pl-act" data-id="${esc(l.id)}" data-name="${esc(l.name)}" title="Activity feed + live view">📡</button>
+          <button class="btn small pl-act" data-id="${esc(l.id)}" data-name="${esc(l.name)}" title="Activity feed + live view">📡 Live</button>
           <button class="btn small pl-edit" data-id="${esc(l.id)}" title="Access, ID/Mobile aur (Team link me) agents / TL naam edit karo">⚙️ ${l.kind === 'group' ? 'Edit' : 'Access'}</button>
           <button class="btn small pl-copy" data-token="${esc(l.token)}" title="Poora URL copy karo">📋</button>
           <button class="btn small pl-wa" data-token="${esc(l.token)}" data-name="${esc(l.name)}" data-id="${esc(l.personId || '')}" title="WhatsApp par bhejo">💬</button>
@@ -1907,6 +1927,27 @@ FF.pages = FF.pages || {};
       }, 'Saving…'));
     }));
 
+    // 📡 Live status poll — ek hi request poore tab ke liye (8s), tab band hote hi ruk jata hai.
+    const plLiveOpen = (sid) => { const go = () => { if (FF.liveView && FF.liveView.watchPublic) FF.liveView.watchPublic(sid); else U.toast('Live view is not available', 'err'); }; if (FF.liveView) go(); else if (FF.lazy && FF.lazy.shellNeed) FF.lazy.shellNeed(['liveView']).then(go).catch(go); else go(); };
+    const plStrip = U.$('#pl-live-strip', body);
+    let plTimer = null;
+    const plPaint = async () => {
+      if (!body.isConnected) { clearInterval(plTimer); return; }
+      if (document.hidden) return;
+      let res; try { res = await A.api('/api/personal-links/live'); } catch { return; }
+      const liveBy = new Map();
+      (res.sessions || []).forEach((x) => { if (x.online && !liveBy.has(x.linkId)) liveBy.set(x.linkId, x); });
+      U.$$('[data-pl-st]', body).forEach((el) => { el.innerHTML = plStatusHtml((res.status || {})[el.dataset.plSt], liveBy.get(el.dataset.plSt)); });
+      const on = (res.sessions || []).filter((x) => x.online);
+      if (plStrip) {
+        plStrip.innerHTML = on.length
+          ? `<b>📡 Viewing now (${on.length})</b> ${on.map((x) => `<button type="button" class="u-live-chip" data-pl-watch-now="${esc(x.sessionId)}" title="${esc([x.ip, x.ua].filter(Boolean).join(' · '))}">● ${esc(x.name || 'Link')} <small>${esc((x.state || {}).tab || 'overview')}${(x.state || {}).q ? ` · 🔍 ${esc(x.state.q)}` : ''} · since ${esc(plAgo(x.startedAt))}</small></button>`).join('')}`
+          : '<span class="dim small">📡 Abhi kisi personal link par koi nahi — jaise hi koi kholega yahan live dikhega (login, search, tab sab).</span>';
+        plStrip.querySelectorAll('[data-pl-watch-now]').forEach((b) => b.addEventListener('click', () => plLiveOpen(b.dataset.plWatchNow)));
+      }
+    };
+    plPaint();
+    plTimer = setInterval(plPaint, 8000);
     U.$$('input[data-pl-alert]', body).forEach((cb) => cb.addEventListener('change', async () => {
       const chip = cb.closest('.chip'); if (chip) chip.classList.toggle('on', cb.checked);
       try { await A.api('/api/personal-links/alerts', 'PUT', { [cb.dataset.plAlert]: cb.checked }); U.toast('Alert setting saved ✓', 'ok'); }
@@ -1919,20 +1960,33 @@ FF.pages = FF.pages || {};
         let out; try { out = await A.api(`/api/personal-links/activity?linkId=${encodeURIComponent(b.dataset.id)}&limit=100`); } catch (err) { host.innerHTML = U.errorBox(err); return; }
         const live = (out.live || []).filter((x) => x.online);
         const st = out.stats || {};
+        const dur = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m < 1 ? '<1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${m % 60}m`; };
+        const chName = (c) => (c === 'gv' ? 'GV Partner' : (c === 'ff' ? 'First Forward' : 'All'));
+        const visitors = out.visitors || [];
+        const liveCards = live.map((x) => `<div class="pl-live-card"><div><span class="u-live on">● Viewing now</span> <b>${esc(chName((x.state || {}).ch))}</b> · tab <b>${esc((x.state || {}).tab || 'overview')}</b>${(x.state || {}).q ? ` · 🔍 <b>${esc(x.state.q)}</b>` : ''}</div>
+            <div class="dim small">Since ${esc(plStamp(x.startedAt))} · on page ${esc(dur(Date.now() - x.startedAt))} · last signal ${esc(plAgo(x.updatedAt || x.lastSeen))} · ${x.eventCount || 0} actions${x.ip ? ` · IP ${esc(x.ip)}` : ''}${x.ua ? ` · ${esc(x.ua)}` : ''}</div>
+            ${x.lastEvent ? `<div class="small">Last: ${esc(x.lastEvent.label || '')} <span class="dim">(${esc(plStamp(x.lastEvent.at))})</span></div>` : ''}
+            <button class="btn small primary" data-pl-watch="${esc(x.sessionId)}">👁 Watch live screen</button></div>`).join('');
+        const visRows = visitors.map((v) => `<tr><td class="small">${esc(plStamp(v.first))}</td><td class="small">${esc(plStamp(v.last))} <span class="dim">(${esc(plAgo(v.last))})</span></td><td class="small">${esc(dur(v.last - v.first))}</td><td class="small mono">${esc(v.ip || '—')}</td><td class="small">${esc(v.ua || '—')}</td><td class="num small">${v.logins}</td><td class="num small">${v.searches}</td><td class="num small">${v.exports}</td><td class="num small">${v.failed ? `<b style="color:#b91c1c">${v.failed}</b>` : 0}</td><td class="num small">${v.events}</td></tr>`).join('');
         host.innerHTML = `<div class="kd-sec">
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-            <span class="badge ${live.length ? 'green' : ''}">${live.length ? '● Viewing now' : '○ Not viewing'}</span>
+            <span class="badge ${live.length ? 'green' : ''}">${live.length ? `● Viewing now (${live.length})` : '○ Not viewing'}</span>
             <span class="badge blue">🔐 ${st.logins || 0} logins</span><span class="badge blue">📄 ${st.opens || 0} report opens</span>
+            <span class="badge blue">🔍 ${st.searches || 0} searches</span><span class="badge blue">⬇️ ${st.exports || 0} exports</span><span class="badge blue">🪟 ${st.tabs || 0} tab / filter switches</span>
+            ${st.failed ? `<span class="badge red">⚠️ ${st.failed} failed logins</span>` : ''}<span class="badge">👥 ${st.visitors || 0} visitor${(st.visitors || 0) === 1 ? '' : 's'}</span>
           </div>
-          ${live.map((x) => `<div class="check" style="margin-bottom:8px">👁 <b>${esc((x.state || {}).ch === 'gv' ? 'GV Partner' : ((x.state || {}).ch === 'ff' ? 'First Forward' : 'All'))}</b> · tab <b>${esc((x.state || {}).tab || 'overview')}</b>${(x.state || {}).q ? ` · search <b>${esc(x.state.q)}</b>` : ''} <button class="btn small primary" data-pl-watch="${esc(x.sessionId)}" style="margin-left:8px">▶ Watch live</button></div>`).join('')}
-          ${(out.events || []).length ? `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Time</th><th>Action</th><th>Where</th><th>IP</th></tr></thead><tbody>${out.events.map((e) => `<tr><td class="small">${esc(new Date(e.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</td><td style="text-align:left">${icons[e.kind] || '•'} ${esc(e.label)}</td><td class="small">${esc((e.ch || '').toUpperCase())} ${esc(e.tab || '')}</td><td class="small dim">${esc(e.ip || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="dim">No activity yet — it appears here as soon as someone opens this link.</p>'}
-          <div class="btn-row" style="margin-top:12px"><button class="btn" id="pl-act-refresh">🔄 Refresh</button></div>
+          <p class="dim small">${st.firstActivity ? `First activity <b>${esc(plStamp(st.firstActivity))}</b> · ` : ''}${st.lastActivity ? `last activity <b>${esc(plStamp(st.lastActivity))}</b> (${esc(plAgo(st.lastActivity))})` : 'Abhi tak koi activity nahi'}${(st.ips || []).length ? ` · IPs: ${esc(st.ips.join(', '))}` : ''}. Feed restart ke baad bhi bacha rehta hai (last 500 events).</p>
+          ${liveCards}
+          ${visRows ? `<h4 class="kd-h" style="margin-top:10px">👥 Visitors (session / IP wise)</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>First seen</th><th>Last seen</th><th>Duration</th><th>IP</th><th>Device</th><th class="num">🔐</th><th class="num">🔍</th><th class="num">⬇️</th><th class="num">⚠️</th><th class="num">Actions</th></tr></thead><tbody>${visRows}</tbody></table></div>` : ''}
+          ${(out.events || []).length ? `<h4 class="kd-h" style="margin-top:10px">🧾 Every action (latest first)</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Time</th><th>Action</th><th>Where</th><th>IP</th><th>Device</th></tr></thead><tbody>${out.events.map((e) => `<tr><td class="small">${esc(plStamp(e.at))}</td><td style="text-align:left">${icons[e.kind] || '•'} ${esc(e.label)}</td><td class="small">${esc((e.ch || '').toUpperCase())} ${esc(e.tab || '')}</td><td class="small dim mono">${esc(e.ip || '')}</td><td class="small dim">${esc(e.ua || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="dim">No activity yet — it appears here as soon as someone opens this link.</p>'}
+          <div class="btn-row" style="margin-top:12px"><button class="btn" id="pl-act-refresh">🔄 Refresh</button><span class="dim small">auto-refresh 6s</span></div>
         </div>`;
         const rf = host.querySelector('#pl-act-refresh'); if (rf) rf.addEventListener('click', paint);
         host.querySelectorAll('[data-pl-watch]').forEach((w) => w.addEventListener('click', () => { const go = () => { if (FF.liveView && FF.liveView.watchPublic) FF.liveView.watchPublic(w.dataset.plWatch); else U.toast('Live view is not available', 'err'); }; if (FF.liveView) go(); else if (FF.lazy && FF.lazy.shellNeed) FF.lazy.shellNeed(['liveView']).then(go).catch(go); else go(); }));
       };
       FF.app.openDrawer({ kicker: '📡 Link activity', title: b.dataset.name || 'Personal link', sub: 'Logins, searches, pages opened and downloads — plus a live view of the visitor\'s screen', body: '<div id="pl-act-body"><p class="dim">Loading…</p></div>' });
       await paint();
+      const autoT = setInterval(() => { if (!document.getElementById('pl-act-body')) { clearInterval(autoT); return; } if (!document.hidden) paint(); }, 6000);
     }));
     U.$$('.pl-copy', body).forEach((b) => b.addEventListener('click', () => {
       const url = `${origin}/p/${b.dataset.token}`;

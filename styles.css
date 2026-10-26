@@ -7130,3 +7130,6 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 .u-live-chip { border: 1px solid #86efac; background: #fff; color: #15803d; font-weight: 800; font-size: 12px; border-radius: 999px; padding: 4px 11px; cursor: pointer; }
 .u-live-chip small { color: #64748b; font-weight: 600; margin-left: 4px; }
 .u-live-chip:hover { background: #dcfce7; }
+
+.pl-live-card { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 10px 12px; margin-bottom: 8px; border-radius: 12px; background: linear-gradient(90deg, #ecfdf5, #f0f9ff); border: 1px solid #bbf7d0; }
+.pl-st { margin-top: 4px; line-height: 1.35; }

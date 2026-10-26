@@ -922,7 +922,7 @@ function publicLiveSummary(entry, now = Date.now(), includeEvents = false) {
   };
   if (entry.kind === 'personal') {
     const st = entry.state || {};
-    Object.assign(out, { mode: 'visit', sharing: false, kind: 'personal', page: 'personal', title: `Personal link · ${entry.name || ''}`, mirror: entry.mirror || '', state: { ch: st.ch || 'all', tab: st.tab || 'overview', q: st.q || '' }, pointer: null, viewport: null, scroll: null, linkId: entry.linkId || '', ip: entry.ip || '' });
+    Object.assign(out, { mode: 'visit', sharing: false, kind: 'personal', page: 'personal', title: `Personal link · ${entry.name || ''}`, mirror: entry.mirror || '', state: { ch: st.ch || 'all', tab: st.tab || 'overview', q: st.q || '' }, pointer: null, viewport: null, scroll: null, linkId: entry.linkId || '', ip: entry.ip || '', ua: entry.ua || '', eventCount: Array.isArray(entry.events) ? entry.events.length : 0 });
   }
   if (includeEvents) out.events = Array.isArray(entry.events) ? entry.events.slice(-80) : [];
   return out;
@@ -1025,14 +1025,44 @@ function plAlertCfg() {
 }
 const plCleanText = (v, max = 120) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 const plCleanSid = (v) => { const x = String(v || '').trim(); return /^[A-Za-z0-9_-]{16,64}$/.test(x) ? x : ''; };
+/** Short, human device label from the User-Agent header (e.g. "Chrome · Android · Mobile"). */
+function plDeviceLabel(req) {
+  const ua = String((req && req.headers && req.headers['user-agent']) || '');
+  if (!ua) return '';
+  const os = /Windows/i.test(ua) ? 'Windows' : /Android/i.test(ua) ? 'Android' : /iPhone|iPad|iPod/i.test(ua) ? 'iOS' : /Mac OS X|Macintosh/i.test(ua) ? 'macOS' : /Linux/i.test(ua) ? 'Linux' : '';
+  const br = /Edg\//i.test(ua) ? 'Edge' : /OPR\/|Opera/i.test(ua) ? 'Opera' : /SamsungBrowser/i.test(ua) ? 'Samsung Internet' : /Firefox\//i.test(ua) ? 'Firefox' : /Chrome\//i.test(ua) ? 'Chrome' : /Safari\//i.test(ua) ? 'Safari' : /WhatsApp/i.test(ua) ? 'WhatsApp' : '';
+  const kind = /Mobile|iPhone|Android.*Mobile/i.test(ua) ? 'Mobile' : /iPad|Tablet/i.test(ua) ? 'Tablet' : 'Desktop';
+  return [br, os, kind].filter(Boolean).join(' · ').slice(0, 60);
+}
+// Durable copy of the personal-link activity feed (survives restarts / deploys): hydrated once, flushed with a short debounce.
+let plLogLoaded = false, plFlushTimer = null;
+function plLogLoad() {
+  if (plLogLoaded) return;
+  plLogLoaded = true;
+  try {
+    const saved = db.notify && Array.isArray(db.notify.plLog) ? db.notify.plLog : [];
+    if (saved.length) plActivityLog.unshift(...saved.filter((e) => e && e.linkId && e.at));
+    if (plActivityLog.length > 600) plActivityLog.splice(0, plActivityLog.length - 500);
+  } catch { /* in-memory only */ }
+}
+function plLogFlushSoon() {
+  if (plFlushTimer) return;
+  plFlushTimer = setTimeout(() => {
+    plFlushTimer = null;
+    try { db.notify.plLog = plActivityLog.slice(-500); persist('notify').catch(() => {}); } catch { /* best effort */ }
+  }, Number(process.env.PL_LOG_FLUSH_MS) || 15e3);
+  if (plFlushTimer.unref) plFlushTimer.unref();
+}
 function plRecordActivity(link, req, kind, label, meta = {}, sid = '') {
   try {
     if (!link || !PL_KIND_META[kind]) return null;
+    plLogLoad();
     const now = Date.now();
     const ip = clientIp(req);
-    const ev = { at: now, linkId: link.id, linkName: link.name || 'Link', kind, label: plCleanText(label, 160) || PL_KIND_META[kind][1], ip, sid: sid || '', ch: plCleanText(meta.ch, 4), tab: plCleanText(meta.tab, 24) };
+    const ev = { at: now, linkId: link.id, linkName: link.name || 'Link', kind, label: plCleanText(label, 160) || PL_KIND_META[kind][1], ip, ua: plDeviceLabel(req), sid: sid || '', ch: plCleanText(meta.ch, 4), tab: plCleanText(meta.tab, 24) };
     plActivityLog.push(ev);
     if (plActivityLog.length > 600) plActivityLog.splice(0, plActivityLog.length - 500);
+    plLogFlushSoon();
     // live-preview feed of this visitor
     const live = sid ? publicLiveSessions.get(sid) : null;
     if (live && live.kind === 'personal') {
@@ -1068,27 +1098,54 @@ function plLiveEntry(link, req, body, now = Date.now()) {
   const q = plCleanText(body.q, 60);
   const mirror = `/p/${encodeURIComponent(link.token)}?embed=live${ch !== 'all' ? `&ch=${ch}` : ''}${q ? `&q=${encodeURIComponent(q)}` : ''}#${tab}`;
   if (!entry || entry.kind !== 'personal' || entry.linkId !== link.id) {
-    entry = { sessionId: sid, mode: 'visit', kind: 'personal', linkId: link.id, name: link.name || 'Personal link', startedAt: now, lastSeen: now, updatedAt: now, visible: true, engaged: true, pointer: null, viewport: null, scroll: null, events: [], ip: clientIp(req) };
+    entry = { sessionId: sid, mode: 'visit', kind: 'personal', linkId: link.id, name: link.name || 'Personal link', startedAt: now, lastSeen: now, updatedAt: now, visible: true, engaged: true, pointer: null, viewport: null, scroll: null, events: [], ip: clientIp(req), ua: plDeviceLabel(req), pings: 0 };
     publicLiveSessions.set(sid, entry);
   }
   entry.name = link.name || entry.name;
   entry.mirror = mirror; entry.state = { ch, tab, q };
   entry.visible = body.visible !== false; entry.engaged = entry.visible;
-  entry.lastSeen = now; entry.updatedAt = now;
+  entry.lastSeen = now; entry.updatedAt = now; entry.pings = (entry.pings || 0) + 1;
   return entry;
 }
 function plLinkStats(linkId) {
-  let last = 0, opens = 0, logins = 0;
+  plLogLoad();
+  let last = 0, first = 0, opens = 0, logins = 0, failed = 0, searches = 0, exportsN = 0, tabs = 0, lastIp = '', lastUa = '';
+  const ips = new Set(), sids = new Set();
   for (const ev of plActivityLog) {
     if (ev.linkId !== linkId) continue;
-    if (ev.at > last) last = ev.at;
+    if (!first || ev.at < first) first = ev.at;
+    if (ev.at > last) { last = ev.at; lastIp = ev.ip || lastIp; lastUa = ev.ua || lastUa; }
+    if (ev.ip) ips.add(ev.ip);
+    if (ev.sid) sids.add(ev.sid);
     if (ev.kind === 'page_open') opens++;
-    if (ev.kind === 'login') logins++;
+    else if (ev.kind === 'login') logins++;
+    else if (ev.kind === 'login_failed') failed++;
+    else if (ev.kind === 'search' || ev.kind === 'search_open') searches++;
+    else if (ev.kind === 'export') exportsN++;
+    else if (ev.kind === 'tab' || ev.kind === 'channel' || ev.kind === 'dispatch_filter') tabs++;
   }
   const now = Date.now();
-  let online = false, sessionId = '';
-  for (const e of publicLiveSessions.values()) if (e.kind === 'personal' && e.linkId === linkId && now - Number(e.lastSeen || 0) < 45e3 && e.visible !== false) { online = true; sessionId = e.sessionId; break; }
-  return { lastActivity: last || null, opens, logins, online, sessionId };
+  let online = false, sessionId = '', lastSeen = 0;
+  for (const e of publicLiveSessions.values()) {
+    if (e.kind !== 'personal' || e.linkId !== linkId) continue;
+    lastSeen = Math.max(lastSeen, Number(e.lastSeen || 0));
+    if (!online && now - Number(e.lastSeen || 0) < 45e3 && e.visible !== false) { online = true; sessionId = e.sessionId; }
+  }
+  return { lastActivity: last || null, firstActivity: first || null, opens, logins, failed, searches, exports: exportsN, tabs, visitors: Math.max(sids.size, ips.size), ips: [...ips].slice(0, 8), lastIp, lastUa, online, sessionId, lastSeen: lastSeen || null };
+}
+/** Per-visitor roll-up of the activity feed (session id, else IP): first/last seen, device, counts. */
+function plVisitors(linkId) {
+  plLogLoad();
+  const m = new Map();
+  for (const ev of plActivityLog) {
+    if (linkId && ev.linkId !== linkId) continue;
+    const key = `${ev.linkId}|${ev.sid || ev.ip || '?'}`;
+    const v = m.get(key) || { linkId: ev.linkId, linkName: ev.linkName, sid: ev.sid || '', ip: ev.ip || '', ua: ev.ua || '', first: ev.at, last: ev.at, events: 0, logins: 0, searches: 0, exports: 0, failed: 0 };
+    v.events++; if (ev.at < v.first) v.first = ev.at; if (ev.at >= v.last) { v.last = ev.at; v.ua = ev.ua || v.ua; }
+    if (ev.kind === 'login') v.logins++; else if (ev.kind === 'login_failed') v.failed++; else if (ev.kind === 'search' || ev.kind === 'search_open') v.searches++; else if (ev.kind === 'export') v.exports++;
+    m.set(key, v);
+  }
+  return [...m.values()].sort((a, b) => b.last - a.last).slice(0, 40);
 }
 
 function sessionUser(req) {
@@ -5906,14 +5963,27 @@ async function handleApi(req, res, url) {
     }
     return sendJson(res, 200, { ok: true, alerts: plAlertCfg(), route: notificationRoutes().personalLink });
   }
+  // 📡 One cheap poll for the whole Personal Links tab: live sessions + per-link status.
+  if (p === '/api/personal-links/live' && method === 'GET') {
+    requireAdmin(user);
+    plLogLoad();
+    const now = Date.now();
+    prunePublicLiveSessions(now);
+    const links = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []);
+    const sessions = [...publicLiveSessions.values()].filter((e) => e.kind === 'personal').sort((a, b) => Number(b.lastSeen || 0) - Number(a.lastSeen || 0)).map((e) => publicLiveSummary(e, now, false));
+    const status = {};
+    for (const l of links) status[l.id] = plLinkStats(l.id);
+    return sendJson(res, 200, { ok: true, sessions, status, checkAt: new Date(now).toISOString() }, { 'Cache-Control': 'no-store' });
+  }
   if (p === '/api/personal-links/activity' && method === 'GET') {
     requireAdmin(user);
     const linkId = String(url.searchParams.get('linkId') || '').slice(0, 80);
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 80));
+    plLogLoad();
     const events = plActivityLog.filter((e) => !linkId || e.linkId === linkId).slice(-limit).reverse();
     const now = Date.now();
-    const live = [...publicLiveSessions.values()].filter((e) => e.kind === 'personal' && (!linkId || e.linkId === linkId)).sort((a, b) => Number(b.lastSeen || 0) - Number(a.lastSeen || 0)).slice(0, 10).map((e) => publicLiveSummary(e, now, false));
-    return sendJson(res, 200, { ok: true, events, live, stats: linkId ? plLinkStats(linkId) : null });
+    const live = [...publicLiveSessions.values()].filter((e) => e.kind === 'personal' && (!linkId || e.linkId === linkId)).sort((a, b) => Number(b.lastSeen || 0) - Number(a.lastSeen || 0)).slice(0, 10).map((e) => publicLiveSummary(e, now, true));
+    return sendJson(res, 200, { ok: true, events, live, stats: linkId ? plLinkStats(linkId) : null, visitors: plVisitors(linkId), now });
   }
   if (p === '/api/personal-links' && method === 'GET') {
     requireAdmin(user);
@@ -11699,7 +11769,7 @@ async function start() {
   const storedNotify = stored.notify && typeof stored.notify === 'object' ? stored.notify : {};
   // `vapid` + `pushLog` bhi durable hain — inke bina har restart par nayi VAPID key banti thi aur
   // phone ke notification panel me push aana band ho jaata tha (subscriptions 403 par reject hoti thin).
-  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null, workspace: storedNotify.workspace && typeof storedNotify.workspace === 'object' ? storedNotify.workspace : { views: [], notes: [] } };
+  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null, workspace: storedNotify.workspace && typeof storedNotify.workspace === 'object' ? storedNotify.workspace : { views: [], notes: [] }, plLog: Array.isArray(storedNotify.plLog) ? storedNotify.plLog.slice(-500) : [] };
   if (stored.__autoRecoveredHistoryAt) {
     console.warn('🛟 AUTO_RECOVER_HISTORY applied:', stored.__autoRecoveredHistoryAt);
     await Promise.all(['users', 'settings', 'resets', 'notify'].map((kind) => persist(kind)));
@@ -11786,6 +11856,8 @@ bootPromise.catch((err) => {
 });
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
+    // Personal-link activity feed: write the pending tail before the process goes away (deploys).
+    try { if (plFlushTimer) { clearTimeout(plFlushTimer); plFlushTimer = null; db.notify.plLog = plActivityLog.slice(-500); persist('notify').catch(() => {}); } } catch { /* best effort */ }
     if (sheetsStore && sheetsStore.drain) sheetsStore.drain().catch(() => {});
     server.close(async () => {
       await Promise.allSettled([...writeQueue.values()]);
