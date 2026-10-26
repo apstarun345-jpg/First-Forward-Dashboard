@@ -7934,3 +7934,13 @@ button.smap-cell.smap-total { min-width: 64px; }
 .tm-name:hover { color: #7c3aed; }
 .tm-tag { font-size: 10px; font-weight: 800; color: #be185d; background: #fce7f3; border-radius: 999px; padding: 1px 7px; }
 .tm-id { font-family: ui-monospace, monospace; font-size: 11.5px; color: #475569; }
+
+/* 📡 Users tab — live status */
+.u-live { display: inline-block; font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
+.u-live.on { background: #dcfce7; color: #15803d; }
+.u-live.idle { background: #fef9c3; color: #a16207; }
+.u-live.off { background: #f1f5f9; color: #64748b; }
+.u-live-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; margin-bottom: 12px; border-radius: 12px; background: linear-gradient(90deg, #ecfdf5, #f0f9ff); border: 1px solid #bbf7d0; }
+.u-live-chip { border: 1px solid #86efac; background: #fff; color: #15803d; font-weight: 800; font-size: 12px; border-radius: 999px; padding: 4px 11px; cursor: pointer; }
+.u-live-chip small { color: #64748b; font-weight: 600; margin-left: 4px; }
+.u-live-chip:hover { background: #dcfce7; }

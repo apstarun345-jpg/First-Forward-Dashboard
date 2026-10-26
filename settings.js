@@ -876,14 +876,14 @@ FF.pages = FF.pages || {};
     const groups = [...new Set(permsCache.map((p) => p.group))];
     const permBoxes = (u) => groups.map((g) => `<div class="perm-group"><small class="dim">${esc(g)}</small>${permsCache.filter((p) => p.group === g).map((p) => `<label class="check"><input type="checkbox" data-perm="${esc(p.key)}" ${u.role === 'admin' || u.permissions.includes(p.key) ? 'checked' : ''} ${u.role === 'admin' ? 'disabled' : ''}> ${esc(p.label)}</label>`).join('')}</div>`).join('');
     const rows = usersCache.map((u) => `<div class="user-card ${u.approved ? '' : 'pending'}" data-user="${esc(u.username)}">
-        <div class="user-head">${A.avatarHtml(u, 'lg')}<div class="user-meta"><b>${esc(u.name)}</b> <code>${esc(u.username)}</code>${u.username === A.user.username ? ' <span class="tag">you</span>' : ''}<small class="dim">${esc(u.email || '')}${u.mobile ? ` · ${esc(u.mobile || '')}` : ''} · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'} · last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : 'never'}${u.lastLocation ? ` · <a href="https://www.google.com/maps?q=${encodeURIComponent(`${u.lastLocation.latitude},${u.lastLocation.longitude}`)}" target="_blank" rel="noopener">📍 last location</a>` : ''}</small></div>
+        <div class="user-head">${A.avatarHtml(u, 'lg')}<div class="user-meta"><b>${esc(u.name)}</b> <code>${esc(u.username)}</code>${u.role === 'admin' ? '' : ` <span class="u-live off" data-u-live="${esc(u.username)}" title="Live status">○ …</span>`}${u.username === A.user.username ? ' <span class="tag">you</span>' : ''}<small class="dim">${esc(u.email || '')}${u.mobile ? ` · ${esc(u.mobile || '')}` : ''} · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'} · last login ${u.lastLoginAt ? U.timeLabel(new Date(u.lastLoginAt).getTime()) : 'never'}${u.lastLocation ? ` · <a href="https://www.google.com/maps?q=${encodeURIComponent(`${u.lastLocation.latitude},${u.lastLocation.longitude}`)}" target="_blank" rel="noopener">📍 last location</a>` : ''}</small></div>
           <div class="user-controls"><label class="check"><input type="checkbox" data-field="approved" ${u.approved ? 'checked' : ''}> ${u.approved ? 'Active' : '<b class="pend">Pending approval</b>'}</label><select data-field="role"><option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option></select></div></div>
         <details class="user-perms" ${u.approved ? '' : 'open'}><summary>Permissions (${u.role === 'admin' ? 'all — admin' : `${u.permissions.length}/${permsCache.length}`})</summary><div class="perm-boxes">${permBoxes(u)}</div><div class="btn-row"><button class="btn small" data-perm-all>Select all</button><button class="btn small" data-perm-none>Clear</button><button class="btn small" data-perm-default>Default set</button></div></details>
         ${u.loginHistory && u.loginHistory.length ? `<details class="user-perms"><summary>🕘 Login history (${u.loginHistory.length})</summary><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Kab</th><th>Login ID se</th><th>IP</th></tr></thead><tbody>${u.loginHistory.slice().reverse().map((l) => `<tr><td>${esc(U.timeLabel(new Date(l.at).getTime()))}</td><td>${esc(l.id || '—')}</td><td class="mono">${esc(l.ip || '—')}</td></tr>`).join('')}</tbody></table></div><p class="dim small" style="margin-top:4px">Last ${u.loginHistory.length} logins (max 20 store hote hain).</p></details>` : ''}
         <div class="user-notify-prefs">
           <label class="check"><input type="checkbox" data-field="notifyAccess" ${u.role === 'admin' || u.notifyAccess !== false ? 'checked' : ''} ${u.role === 'admin' ? 'disabled' : ''}> 🔔 Notifications access <small class="dim">(in-app bell, browser alerts, mobile push — sab band ho jayega off karne par)</small></label>
         </div>
-        <div class="btn-row user-actions"><button class="btn small primary" data-user-save>💾 Save</button><button class="btn small" data-user-pw>🔑 Reset password</button>${u.username !== A.user.username ? `<button class="btn small" data-user-viewas title="Is user ke rights se poora dashboard dekho — sirf view preview, kuch save nahi hoga">👁 Preview</button><button class="btn small danger" data-user-del>🗑 Delete</button>` : ''}<span class="dim small" data-user-msg></span></div>
+        <div class="btn-row user-actions"><button class="btn small primary" data-user-save>💾 Save</button><button class="btn small" data-user-pw>🔑 Reset password</button>${u.username !== A.user.username ? `${u.role !== 'admin' && u.username !== A.user.username ? `<button class="btn small" data-user-live title="User ki screen abhi live dekho — page, scroll, cursor, clicks">📡 Live screen</button>` : ''}<button class="btn small" data-user-viewas title="Is user ke rights se poora dashboard dekho — sirf view preview, kuch save nahi hoga">👁 Preview</button><button class="btn small danger" data-user-del>🗑 Delete</button>` : ''}<span class="dim small" data-user-msg></span></div>
       </div>`).join('');
     root.innerHTML = `${section(`🔐 Users <span class="dim">(${usersCache.length} · ${usersCache.filter((u) => !u.approved).length} pending)</span>`, `<p class="dim small">Naya user sign up karta hai → yahan "Pending" dikhega → Active tick karo, permissions choose karo, Save. Admin ke paas sab access hota hai. <b>🔔 Notifications access</b> off karne se user ko koi notification nahi dikhega / nahi milega — saari activity admin ko hi aayegi.</p><div class="user-list">${rows}</div>`)}
       ${section('➕ Add user directly', `<div class="form-grid"><label class="fld"><span>Username</span><input class="input" id="nu-username" autocapitalize="none"></label><label class="fld"><span>Full name</span><input class="input" id="nu-name"></label><label class="fld"><span>Password</span><input class="input" id="nu-password" type="text" value="${Math.random().toString(36).slice(2, 10)}"></label><label class="fld"><span>Role</span><select id="nu-role"><option value="user">User</option><option value="admin">Admin</option></select></label><label class="fld"><span>Mobile</span><input class="input" id="nu-mobile"></label><label class="fld"><span>Email</span><input class="input" id="nu-email"></label></div><div class="save-bar"><button class="btn primary" id="nu-add">➕ Create user</button><span class="dim small">Default permissions milengi; baad me edit karo. Password user ko bata do (pehle login par badalne ko kaha jaayega).</span></div>`)}`;
@@ -929,6 +929,38 @@ FF.pages = FF.pages || {};
         }
       });
     });
+    // 📡 Live screen — har user ka online status (ek hi request, 8s poll) + direct Live view button.
+    const openLive = (username) => {
+      const go = () => { if (FF.liveView && FF.liveView.watch) FF.liveView.watch(username); else U.toast('Live view is not available', 'err'); };
+      if (FF.liveView) go(); else if (FF.lazy && FF.lazy.shellNeed) FF.lazy.shellNeed(['liveView']).then(go).catch(go); else go();
+    };
+    root.querySelectorAll('[data-user-live]').forEach((btn) => btn.addEventListener('click', () => openLive(btn.closest('.user-card').dataset.user)));
+    const ago = (ts) => { const sec = Math.max(0, Math.round((Date.now() - ts) / 1000)); return sec < 60 ? `${sec}s ago` : sec < 3600 ? `${Math.round(sec / 60)}m ago` : sec < 86400 ? `${Math.round(sec / 3600)}h ago` : `${Math.round(sec / 86400)}d ago`; };
+    const pageLabel = (p) => String(p.title || p.page || 'dashboard').replace(/^#?\/?/, '').slice(0, 40);
+    let liveStrip = root.querySelector('#u-live-strip');
+    if (!liveStrip) { liveStrip = U.h('<div class="u-live-strip" id="u-live-strip"></div>'); const first = root.querySelector('.user-card'); if (first && first.parentNode) first.parentNode.insertBefore(liveStrip, first); }
+    let liveTimer = null;
+    const paintLive = async () => {
+      if (!root.isConnected) { clearInterval(liveTimer); return; }
+      if (document.hidden) return;
+      let res; try { res = await A.api('/api/presence'); } catch { return; }
+      const by = new Map((res.people || []).map((x) => [x.username, x]));
+      root.querySelectorAll('[data-u-live]').forEach((el) => {
+        const x = by.get(el.dataset.uLive);
+        if (!x) { el.className = 'u-live off'; el.textContent = '○ never seen'; return; }
+        const last = x.updatedAt || x.lastSeen;
+        if (x.online) { el.className = 'u-live on'; el.textContent = `● Online · ${pageLabel(x)}`; }
+        else if (x.active) { el.className = 'u-live idle'; el.textContent = `◐ Idle · ${ago(last)}`; }
+        else { el.className = 'u-live off'; el.textContent = `○ ${ago(last)}`; }
+      });
+      const on = (res.people || []).filter((x) => x.online);
+      liveStrip.innerHTML = on.length
+        ? `<b>📡 Online now (${on.length})</b> ${on.map((x) => `<button type="button" class="u-live-chip" data-u-watch="${esc(x.username)}" title="Live screen kholo">● ${esc(x.name || x.username)} <small>${esc(pageLabel(x))}</small></button>`).join('')}`
+        : '<span class="dim small">📡 Abhi koi user online nahi — online hote hi yahan dikhega.</span>';
+      liveStrip.querySelectorAll('[data-u-watch]').forEach((b) => b.addEventListener('click', () => openLive(b.dataset.uWatch)));
+    };
+    paintLive();
+    liveTimer = setInterval(paintLive, 8000);
     const addUser = U.$('#nu-add', root);
     addUser.addEventListener('click', () => U.withButtonBusy(addUser, async () => {
       const body = { username: U.$('#nu-username', root).value, name: U.$('#nu-name', root).value, password: U.$('#nu-password', root).value, role: U.$('#nu-role', root).value, mobile: U.$('#nu-mobile', root).value, email: U.$('#nu-email', root).value };
