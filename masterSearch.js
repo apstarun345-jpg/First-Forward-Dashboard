@@ -1717,6 +1717,42 @@ FF.pages = FF.pages || {};
       const planBody = tvcPlan.rows.map(planLine).join('') + (tvcPlan.totals
         ? `<div class="msp-tot">${totLine('Total VC4/VC20', tvcPlan.rows[0].prio === 'None' ? 0 : tvcPlan.rows[0].net, tvcPlan.rows[0].gross)}${totLine('Total VC5+', commNet, commGross)}</div>` : '');
       const planSub = tvcPlan.rows.map((x) => `${esc(x.k)}: ${U.fmt(x.rate, true)}/day × ${U.fmt(days)} − stock ${U.fmt(x.stock)}${x.basis ? ` (${x.basis} rate)` : ''}`).join(' · ');
+      // ---- v3.96 — simple mini tables: VC4 / VC20 / VC5+ + Total
+      const miniHtml = (vals, total, tail) => `<div class="msp-mini">${['VC4', 'VC20', 'VC5+'].map((k) => `<div><span>${k}</span><b>${U.fmt(vals[k] || 0)}</b></div>`).join('')}<div class="tot"><span>Total</span><b>${U.fmt(total)}</b></div></div>${tail ? `<span class="msp-mini-tail">${tail}</span>` : ''}`;
+      const curBins = (bins.cur && (num(bins.cur.VC4) || num(bins.cur.VC20) || num(bins.cur['VC5+']))) ? { VC4: num(bins.cur.VC4), VC20: num(bins.cur.VC20), 'VC5+': num(bins.cur['VC5+']) } : { VC4: num(t.curVc4), VC20: 0, 'VC5+': num(t.curComm) };
+      const expTotal = Math.round((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0));
+      const expSplit = (() => {
+        const sum = curBins.VC4 + curBins.VC20 + curBins['VC5+'];
+        if (!sum || !expTotal) return { VC4: 0, VC20: 0, 'VC5+': 0 };
+        const o = {}; let used = 0, big = 'VC4';
+        ['VC4', 'VC20', 'VC5+'].forEach((k) => { o[k] = Math.round(expTotal * curBins[k] / sum); used += o[k]; if (curBins[k] > curBins[big]) big = k; });
+        o[big] += expTotal - used;   // total hamesha match
+        return o;
+      })();
+      const dayChip = (() => {
+        try {
+          const nk = normName(pr.name), pid = normName(pr.id || '');
+          const same = (r) => (isTl ? (normName(r.tlName) === nk || (pid && normName(r.tlId) === pid)) : (normName(r.agentName) === nk || (pid && normName(r.agentId) === pid)));
+          let rows, key, label, icon, tail;
+          if (ch === 'gv') {
+            rows = (FF.gv && FF.gv.issuanceRows && FF.gv.issuanceRows()) || [];
+            key = (FF.gv && FF.gv.todayKey) ? FF.gv.todayKey() : U.dateKey(new Date());
+            label = 'Today · live'; icon = '⚡'; tail = 'GV Master live';
+          } else {
+            rows = ((FF.store && FF.store.get && FF.store.get('daily')) || []).filter((r) => r.channel !== 'GV Partner');
+            const yd = new Date(); yd.setDate(yd.getDate() - 1); key = U.dateKey(yd);
+            label = 'Yesterday'; icon = '🕘'; tail = 'FF EIR data';
+          }
+          const vals = { VC4: 0, VC20: 0, 'VC5+': 0 }; let total = 0;
+          rows.forEach((r) => {
+            const k = String(r.key || U.dateKey(r.date || r.d || new Date(0)));
+            if (k !== key || !same(r)) return;
+            const n = Number(r.n) || 0; total += n;
+            vals[r.group === 'VC4' ? 'VC4' : r.group === 'VC20' ? 'VC20' : 'VC5+'] += n;
+          });
+          return box('k13', `${icon} ${label} · ${esc(U.labelDateKey ? U.labelDateKey(key) : key)}`, miniHtml(vals, total, tail), '', `${spec('day', '')}&date=${encodeURIComponent(key)}`);
+        } catch { return ''; }
+      })();
       const wd = workedDays(pr, isTl, ch, m.cur);
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
       const tlName = (pr.tl && pr.tl.name) || '';
@@ -1726,7 +1762,7 @@ FF.pages = FF.pages || {};
       } else if (pr.direct) {
         sug = box('k4', '🎯 Suggested dispatch', '<span class="dim">No dispatch</span>', `🚫 ${esc(pr.directLabel || 'Direct agent')} · priority ${esc(pr.priority || 'Low')} — abhi tags ki zarurat nahi`);
       } else {
-        sug = box('k4', `🎯 Dispatch need · ${U.fmt(days)} days`, planBody, planSub, spec('mtd', m.cur));
+        sug = box('k4', `🎯 Dispatch need · ${U.fmt(days)} days`, planBody, '', spec('mtd', m.cur));
       }
     /** 📈 Growth tile ka neeche wala text: kya compare hua + run-rate + expected month-end vs last month. */
     const growthSub = (p1, m) => {
@@ -1777,12 +1813,13 @@ FF.pages = FF.pages || {};
           ${isTl
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
     : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}` : '')}
+          ${dayChip}
           ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${curMix}<br>🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span>`, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
           ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
-          ${box('k10', '🎯 Expected this month · Run-rate', U.fmt((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0)), `Current pace ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days · report cutoff: previous day`, spec('mtd', m.cur))}
+          ${box('k10', '🎯 Expected this month · Run-rate', miniHtml(expSplit, expTotal, `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days`), '', spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
           ${ch === 'gv' ? GVC.boxHtml(pr, isTl) : ''}
         </div>${notFound}</div></section>${donutBlock}`;

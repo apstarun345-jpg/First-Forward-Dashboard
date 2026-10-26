@@ -7004,3 +7004,25 @@ html[data-theme="dark"] body .gs-kpi .gs-kpi-why { color: #94a3b8; }
   .msp-cls-line .c3 { white-space: normal; }
   .msp-hl { padding: 1px 7px; font-size: 11px; }
 }
+
+/* v3.96 — Master search summary chips: ek jaisa size + simple mini tables */
+.mp-kpis.msp-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+@media (max-width: 1180px) { .mp-kpis.msp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 800px) { .mp-kpis.msp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 801px) { .msp-kpi.msp-age-box { grid-column: span 2; } }
+.msp-kpi { display: flex; flex-direction: column; justify-content: flex-start; padding: 12px 14px; min-height: 118px; text-align: center; }
+.msp-kpi > small { margin-bottom: 4px; }
+.msp-kpi > b { font-size: 24px; line-height: 1.15; }
+.msp-kpi > em { font-style: normal; font-size: 12px; color: var(--muted); margin-top: auto; padding-top: 6px; }
+.msp-kpi.k4 > b, .msp-kpi.k3 > b, .msp-kpi.k10 > b, .msp-kpi.k13 > b { font-size: inherit; font-weight: inherit; margin: 2px 0 0; }
+.msp-kpi.k13 { background: color-mix(in srgb, #14b8a6 8%, var(--card)); border-top-color: #14b8a6; }
+.msp-mini { display: grid; gap: 4px; text-align: left; margin-top: 4px; }
+.msp-mini > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 10px; border-radius: 8px; background: color-mix(in srgb, currentColor 5%, transparent); }
+.msp-mini > div span { font-size: 12px; font-weight: 700; color: var(--muted); }
+.msp-mini > div b { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.msp-mini > .tot { margin-top: 2px; background: color-mix(in srgb, var(--brand) 13%, transparent); }
+.msp-mini > .tot span { color: inherit; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
+.msp-mini > .tot b { font-size: 18px; }
+.msp-mini-tail { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); font-weight: 600; }
+.msp-kpi .msp-cls-line { gap: 8px; margin: 4px 0; font-size: 12.5px; }
+@media (max-width: 640px) { .msp-kpi { min-height: 0; padding: 10px 11px; } .msp-kpi > b { font-size: 20px; } }
