@@ -20,14 +20,18 @@ window.FF = window.FF || {};
   .sc-chip{display:flex;align-items:stretch;flex-wrap:wrap;border:1px solid rgba(245,158,11,.4);border-top:4px solid #f59e0b;border-radius:14px;background:color-mix(in srgb,#f59e0b 7%,var(--card,#fff));overflow:hidden}
   .sc-chip-t{display:flex;align-items:center;gap:8px;padding:12px 16px;font-weight:800;font-size:13px;color:#b45309;text-transform:uppercase;letter-spacing:.03em;flex:1 1 170px}
   .sc-seg{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 16px;border-left:1px solid rgba(245,158,11,.3);text-decoration:none;color:inherit;flex:2 1 260px;transition:background .15s}
-  a.sc-seg:hover{background:rgba(245,158,11,.1)}
+  .sc-grp{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .sc-grp em{font-style:normal;font-weight:800;font-size:11.5px;color:#64748b;text-transform:uppercase}
+  a.sc-pill{text-decoration:none;transition:transform .12s,box-shadow .12s}a.sc-pill:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(0,0,0,.15)}
+  .sc-pill i{font-style:normal;opacity:.7}
+  .sc-alerts-h{cursor:pointer;user-select:none}.sc-alerts-h .chev{margin-left:auto;transition:transform .2s;color:#b91c1c}
+  .sc-alerts.collapsed .sc-alerts-body{display:none}.sc-alerts.collapsed .sc-alerts-h{margin:0}.sc-alerts.collapsed .chev{transform:rotate(-90deg)}
   .sc-seg .ch{font-weight:800;font-size:13px;min-width:78px}
   .sc-seg.gv .ch{color:#15803d}.sc-seg.ff .ch{color:#1d4ed8}
   .sc-pill{display:inline-flex;align-items:baseline;gap:6px;padding:4px 11px;border-radius:999px;font-weight:700;font-size:12px}
-  .sc-pill b{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
+  .sc-pill b{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
   .sc-pill.hi{background:#fee2e2;color:#b91c1c}.sc-pill.md{background:#ffedd5;color:#c2410c}
-  .sc-seg .go{margin-left:auto;color:#b45309;font-weight:800}
-  .sc-alerts{border:1px solid rgba(239,68,68,.4);border-left:5px solid #ef4444;border-radius:14px;background:color-mix(in srgb,#ef4444 6%,var(--card,#fff));padding:10px 14px}
+    .sc-alerts{border:1px solid rgba(239,68,68,.4);border-left:5px solid #ef4444;border-radius:14px;background:color-mix(in srgb,#ef4444 6%,var(--card,#fff));padding:10px 14px}
   .sc-alerts-h{display:flex;align-items:center;gap:8px;font-weight:800;font-size:13px;color:#b91c1c;margin:0 0 8px}
   .sc-dot{width:9px;height:9px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 0 rgba(239,68,68,.6);animation:scPulse 1.6s infinite}
   @keyframes scPulse{70%{box-shadow:0 0 0 9px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}
@@ -71,8 +75,8 @@ window.FF = window.FF || {};
       const n = num(r.n) || 1;
       const id = norm(r.agentId) || norm(r.agentName); if (!id) return;
       const direct = !r.tlName || /^(direct|—)$/i.test(r.tlName);
-      acc(A, id, { id, name: r.agentName || id, tl: direct ? '' : r.tlName, kind: 'agent' }, k, n);
-      if (!direct) acc(T, norm(r.tlName), { id: r.tlId || '', name: r.tlName, kind: 'tl' }, k, n);
+      if (direct) acc(A, id, { id, name: r.agentName || id, tl: '', kind: 'agent' }, k, n);   // sirf Direct agents (TL ke agents nahi)
+      else acc(T, norm(r.tlName), { id: r.tlId || '', name: r.tlName, kind: 'tl' }, k, n);
     });
     const out = [];
     const judge = (x, minBase) => {
@@ -111,19 +115,31 @@ window.FF = window.FF || {};
       if (S && S.need) { jobs.push(S.need('daily')); jobs.push(S.need('agentClass')); }
       if (G && G.need) jobs.push(G.need('report'));
       await Promise.allSettled(jobs);
-      const rows = P.collectAgents().map((r) => P.withCalc(r, 'total'));
-      const c = { gv: { High: 0, Medium: 0 }, ff: { High: 0, Medium: 0 } };
-      rows.forEach((r) => { const k = r.ch === 'gv' ? 'gv' : 'ff'; if (c[k][r.priority] !== undefined) c[k][r.priority]++; });
+      // Sirf Direct agents + TLs (TL ke agents alag se nahi ginte)
+      const agents = P.collectAgents();
+      const direct = agents.filter((a) => a.direct).map((r) => P.withCalc(r, 'total'));
+      const tls = (P.collectTls ? P.collectTls(agents) : []).filter((t) => !t.direct).map((r) => P.withCalc(r, 'total'));
+      const z = () => ({ High: 0, Medium: 0 });
+      const c = { gv: { direct: z(), tl: z() }, ff: { direct: z(), tl: z() } };
+      const put = (list, kind) => list.forEach((r) => { const k = r.ch === 'gv' ? 'gv' : 'ff'; if (c[k][kind][r.priority] !== undefined) c[k][kind][r.priority]++; });
+      put(direct, 'direct'); put(tls, 'tl');
       return c;
     } catch { return null; }
   }
 
   function dispatchHtml(c) {
     const can = FF.auth && FF.auth.can && FF.auth.can('dispatchPlan');
+    const link = (ch, prio, kind, n, label) => {
+      const inner = `<b>${n}</b> ${label}`;
+      const cls = `sc-pill ${prio === 'High' ? 'hi' : 'md'}`;
+      if (!can) return `<span class="${cls}">${inner}</span>`;
+      const q = kind === 'direct' ? 'view=agents&type=direct' : 'view=tls&type=managed';
+      return `<a class="${cls}" href="#/dispatchPlan?channel=${ch}&${q}&priority=${prio}" title="Dispatch Planner · ${ch.toUpperCase()} · ${prio} · ${label}">${inner} <i>›</i></a>`;
+    };
     const seg = (ch, label, icon) => {
       const v = c[ch];
-      const inner = `<span class="ch">${icon} ${label}</span><span class="sc-pill hi">High <b>${v.High}</b></span><span class="sc-pill md">Medium <b>${v.Medium}</b></span>${can ? '<span class="go">→</span>' : ''}`;
-      return can ? `<a class="sc-seg ${ch}" href="#/dispatchPlan?channel=${ch}&priority=High,Medium" title="Dispatch Planner · ${label} · High + Medium">${inner}</a>` : `<div class="sc-seg ${ch}">${inner}</div>`;
+      const grp = (prio) => `<span class="sc-grp"><em>${prio}</em>${link(ch, prio, 'direct', v.direct[prio], 'Direct')}${link(ch, prio, 'tl', v.tl[prio], 'TLs')}</span>`;
+      return `<div class="sc-seg ${ch}"><span class="ch">${icon} ${label}</span>${grp('High')}${grp('Medium')}</div>`;
     };
     return `<div class="sc-chip"><div class="sc-chip-t">🎯 Dispatch priority</div>${seg('gv', 'GV', '🟩')}${seg('ff', 'FF', '🟦')}</div>`;
   }
@@ -131,6 +147,7 @@ window.FF = window.FF || {};
   function alertsHtml(list) {
     if (!list.length) return '<div class="sc-ok">✅ Koi agent / TL achanak down nahi hua</div>';
     const top = list.slice(0, MAX_ALERTS);
+    const collapsed = (() => { try { return localStorage.getItem('ff_sc_alerts_collapsed') === '1'; } catch { return false; } })();
     const row = (x) => {
       const page = x.ch === 'gv' ? 'gvPerformance' : 'performance';
       const chn = x.ch === 'gv' ? '🟩 GV' : '🟦 FF';
@@ -139,18 +156,28 @@ window.FF = window.FF || {};
         <div><b>${x.kind === 'tl' ? 'TL ' : ''}${esc(x.name)}</b><p>${chn} · pichhle ${BASE} din avg ${x.baseAvg.toFixed(1)}/din → last ${RECENT} din ${x.recAvg.toFixed(1)}/din · ~${x.lost} tags kam${x.kind === 'agent' && x.tl ? ` · TL ${esc(x.tl)}` : ''}</p></div>
         <span class="pc">▼ ${x.drop}%</span></a>`;
     };
-    return `<div class="sc-alerts"><div class="sc-alerts-h"><span class="sc-dot"></span>Sudden drop · ${list.length} ${list.length === 1 ? 'alert' : 'alerts'}</div>${top.map(row).join('')}${list.length > top.length ? `<div class="sc-more">+ ${list.length - top.length} aur — Anomaly Detective / Performance me dekho</div>` : ''}</div>`;
+    return `<div class="sc-alerts${collapsed ? ' collapsed' : ''}"><div class="sc-alerts-h" data-sc-toggle title="Collapse / expand"><span class="sc-dot"></span>Sudden drop · ${list.length} ${list.length === 1 ? 'alert' : 'alerts'} <small style="font-weight:600;color:#64748b">Direct agents + TLs</small><span class="chev">▾</span></div><div class="sc-alerts-body">${top.map(row).join('')}${list.length > top.length ? `<div class="sc-more">+ ${list.length - top.length} aur — Anomaly Detective / Performance me dekho</div>` : ''}</div></div>`;
   }
 
   function shell(dispHtml, alerts, note) {
     return `<div class="sc-wrap"><div class="sc-head"><b>🧠 Smart Notification Center</b><small>${esc(note || '')}</small></div>${dispHtml}${alerts}</div>`;
   }
 
+  const bound = new WeakSet();
   let cache = null;   // {at, html} — Home baar-baar paint kare to dobara calculate nahi
   /** Home ke #home-smart me mount (har paint par dobara safe). */
   async function mount(el) {
     if (!el) return;
     css();
+    if (!bound.has(el)) {
+      bound.add(el);
+      el.addEventListener('click', (e) => {
+        const h = e.target.closest('[data-sc-toggle]'); if (!h) return;
+        const box = h.closest('.sc-alerts'); const c = box.classList.toggle('collapsed');
+        try { localStorage.setItem('ff_sc_alerts_collapsed', c ? '1' : '0'); } catch { /* ignore */ }
+        cache = null;
+      });
+    }
     if (cache && Date.now() - cache.at < 60e3) { el.innerHTML = cache.html; return; }
     el.innerHTML = shell('<div class="sc-chip"><div class="sc-chip-t">🎯 Dispatch priority</div><div class="sc-seg"><span class="dim small">load ho raha hai…</span></div></div>', '', 'data load ho raha hai…');
     try { await Promise.allSettled([G && G.need && G.need('master'), S && S.need && S.need('daily')]); } catch { /* ignore */ }
