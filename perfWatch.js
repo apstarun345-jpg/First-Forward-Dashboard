@@ -113,23 +113,17 @@ window.FF = window.FF || {};
   };
   const growthHtml = (r) => (r.g === null ? (r.last <= 0 && r.cur > 0 ? '<span class="pw-pill blue">New</span>' : '<span class="dim">—</span>') : U.deltaHtml(r.g, { decimals: 0 }));
 
-  /**
-   * mount(host, { ch, rows, months:{cur,last}, recentLabel, onAgent(row), onTl(name), title })
-   */
-  function mount(host, opts) {
-    if (!host) return;
-    ensureCss();
-    const ch = opts.ch === 'gv' ? 'gv' : 'ff';
-    let basisDays = Number(opts.days) || 0;
-    if (!basisDays) { try { basisDays = Number(U.channelBasis(opts.ch === 'gv' ? 'gv' : 'ff').days) || 1; } catch (e) { basisDays = 1; } }
+  /** Raw rows → normalised watchlist rows (priority from stock cover, inactive days, growth…). Shared with Agent Targets. */
+  function prepRows(ch, rawRows, daysOpt) {
+    let basisDays = Number(daysOpt) || 0;
+    if (!basisDays) { try { basisDays = Number(U.channelBasis(ch === 'gv' ? 'gv' : 'ff').days) || 1; } catch (e) { basisDays = 1; } }
     const th = (FF.config && FF.config.thresholds) || { coverRed: 7, coverOrange: 15 };
-    // Priority = stock cover (stock ÷ daily run-rate) — same rule everywhere; sheet label only if no data.
     const coverPri = (cur, stock, fallback) => {
       const rate = cur > 0 ? cur / Math.max(1, basisDays) : 0;
       if (rate > 0) { const c = stock / rate; return c < (th.coverRed || 7) ? 'High' : c < (th.coverOrange || 15) ? 'Medium' : 'Low'; }
       return stock > 0 ? 'Low' : (fallback || '');
     };
-    const rows = (opts.rows || []).map((r) => ({
+    return (rawRows || []).map((r) => ({
       ...r,
       pri: coverPri(Number(r.cur) || 0, Number(r.stock) || 0, r.pri),
       last: Number(r.last) || 0, cur: Number(r.cur) || 0, stock: Number(r.stock) || 0, recent: Number(r.recent) || 0,
@@ -137,6 +131,21 @@ window.FF = window.FF || {};
       inact: r.inact === null || r.inact === undefined ? (Number(r.cur) > 0 ? 0 : 99) : Number(r.inact),
       run: Number(r.run) || 0, _k: norm(`${r.n} ${r.id} ${r.tl}`)
     }));
+  }
+  /** Segment chips (same cards as the Performance watchlist). counts / sums: { segId: n } */
+  function chipsHtml(counts, sums, activeId, hg) {
+    ensureCss();
+    return segments(hg || 25).map((g) => `<div class="pw-group">${esc(g.grp)}</div><div class="pw-seg">${g.items.map((x) => `<button type="button" class="pw-card ${x.id === activeId ? 'on' : ''}" style="--pw-c:${x.c}" data-pw-seg="${x.id}" title="${esc(x.hint || x.l)}"><small>${x.ic} ${esc(x.l)}</small><b>${nf(counts[x.id] || 0)}</b><span>${x.hint ? esc(x.hint) : `MTD ${nf((sums && sums[x.id]) || 0)}`}</span></button>`).join('')}</div>`).join('');
+  }
+
+  /**
+   * mount(host, { ch, rows, months:{cur,last}, recentLabel, onAgent(row), onTl(name), title })
+   */
+  function mount(host, opts) {
+    if (!host) return;
+    ensureCss();
+    const ch = opts.ch === 'gv' ? 'gv' : 'ff';
+    const rows = prepRows(ch, opts.rows, opts.days);
     const S = states[ch] || (states[ch] = { seg: 'all', q: '', tl: '', sort: 'cur', dir: 'desc', page: 1, hg: 25 });
     const pageSize = 50;
     const months = opts.months || { cur: 'MTD', last: 'Last month' };
@@ -260,5 +269,5 @@ window.FF = window.FF || {};
     draw();
   }
 
-  FF.perfWatch = { mount };
+  FF.perfWatch = { mount, segments, prepRows, chipsHtml, ensureCss };
 })(window.FF);

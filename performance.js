@@ -1488,7 +1488,12 @@ FF.pages = FF.pages || {};
       if (tlEl) { openTl(tlEl.dataset.tl); return; }
     });
   }
-  FF.pages.performance = { title: 'Performance', render, openAgent, openTl, reset, ensureLoaded, diagnostics, authoritativeIndex, agents: () => { if (S.get('agentClass') || S.get('daily')) reconcileIfStale(); return state.agents; }, daysElapsed: () => state.daysElapsed, dayLabels: () => state.dayLabels };
+  /** All FF agents as perfWatch rows (Agent Targets reuses the same segments). */
+  function watchRows() {
+    const pri = (a) => { const v = String(a.priority || a.agentPriority || ''); return /high/i.test(v) ? 'High' : /medium/i.test(v) ? 'Medium' : /low/i.test(v) ? 'Low' : ''; };
+    return state.agents.map((a) => ({ n: a.name, id: a.agentId || a.id, tl: tlLabel(a), direct: !!a.tlExcluded, last: a.lastTotal, cur: a.curTotal, g: a.growthNum, recent: a.weekTotal, stock: a.stockTotal, pri: pri(a), inact: a.inactiveDays, run: a.avgTotal, ref: a.__row }));
+  }
+  FF.pages.performance = { title: 'Performance', watchRows, render, openAgent, openTl, reset, ensureLoaded, diagnostics, authoritativeIndex, agents: () => { if (S.get('agentClass') || S.get('daily')) reconcileIfStale(); return state.agents; }, daysElapsed: () => state.daysElapsed, dayLabels: () => state.dayLabels };
   // Sidebar shortcut: First Forward → 📋 Stock Report opens the Performance page on the Stock Report view.
   FF.pages.stockReport = { title: 'Stock Report', render: (root, params) => { state.view = 'stock'; return render(root, { ...(params || {}), view: 'stock' }); } };
 })(window.FF);

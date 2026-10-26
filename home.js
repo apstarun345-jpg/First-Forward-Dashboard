@@ -1132,6 +1132,7 @@ FF.pages = FF.pages || {};
   }
   const homeLayout = (() => {
     const SECTIONS = [
+      ['home-target-alerts', '🎯 Target updates'],
       ['home-todo', "✅ Today's work"],
       ['home-gv-live', '🟩 GV live today'],
       ['home-month', '📅 Month KPI cards'],
@@ -1244,6 +1245,7 @@ FF.pages = FF.pages || {};
           <button class="btn" id="home-customize" title="Reorder or hide Home sections" aria-expanded="false">⚙ Customize</button>
         </div>
       </div>
+      <div id="home-target-alerts"></div>
       <div id="home-todo"></div>
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
       <div id="home-month">${U.spinner('Building month KPI cards from the EIR sheet…')}</div>
@@ -1266,6 +1268,7 @@ FF.pages = FF.pages || {};
     if (quick) quick.innerHTML = `<div class="chip-row"><span class="chip on">🟩 GV aaj · GV Master (live)</span><span class="chip">🧾 EIR: FF + GV history</span><span class="chip dim">📦 Stock: StockDataa + Tag Assignment</span></div>`;
 
     // ✅ v3.78 — "Today's work" card: pending Tag Requests + one-click shortcuts (cheap: one small API call).
+    try { if (FF.targetAlerts) FF.targetAlerts.mount(U.$('#home-target-alerts', root)); } catch { /* ignore */ }
     const todoMount = U.$('#home-todo', root);
     if (todoMount) {
       const canReq = FF.auth.can('tagRequest') || (u.role === 'admin');

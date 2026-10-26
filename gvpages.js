@@ -1092,5 +1092,11 @@ FF.pages = FF.pages || {};
     make('gvp.f.inactive', () => filtered().filter((r) => /inactive/i.test(r.agentStatus || '')), 'GV · Inactive (filtered)');
     make('gvp.f.direct', () => filtered().filter((r) => FF.config.isDirectAgent(r, 'gv')), 'GV · Direct agents (filtered)');
   }
-  FF.pages.gvPerformance = { title: 'GV Performance', render: renderPerformance, sourceRows: () => perf.sourceRows || null, _overlay: overlayGvReportWithEir };
+  /** All GV agents as perfWatch rows (Agent Targets reuses the same segments). */
+  function gvWatchRows() {
+    const inact = (r) => { const t = String(r.agentStatus || ''); const m = t.match(/(\d+)\s*days?\s*inactive/i); if (m) return Number(m[1]); if (/inactive/i.test(t)) return 99; if (/active/i.test(t)) return 0; return Number(r.curTotal) > 0 ? 0 : 99; };
+    const pri = (r) => (/high/i.test(r.priority || '') ? 'High' : /medium/i.test(r.priority || '') ? 'Medium' : /low/i.test(r.priority || '') ? 'Low' : '');
+    return overlayGvReportWithEir(G.get('report') || []).map((r) => ({ n: r.agentName, id: r.agentId, tl: r.tlName, direct: FF.config.isDirectAgent(r, 'gv'), last: r.lastTotal, cur: r.curTotal, g: r.growth, recent: r.todayIssued, stock: r.stockTotal, pri: pri(r), inact: inact(r), run: r.runrate, ref: r.agentName }));
+  }
+  FF.pages.gvPerformance = { title: 'GV Performance', watchRows: gvWatchRows, render: renderPerformance, sourceRows: () => perf.sourceRows || null, _overlay: overlayGvReportWithEir };
 })(window.FF);

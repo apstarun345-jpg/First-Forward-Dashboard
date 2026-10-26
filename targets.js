@@ -26,22 +26,24 @@ FF.pages = FF.pages || {};
   const norm = (s) => U.clean(s).toUpperCase().replace(/\s+/g, ' ');
   const keyOf = (source, name) => `${source}|${norm(name)}`;
 
-  const view = { ym: '', source: 'all', sort: 'cur', q: '', onlyWithTarget: false, tab: 'targets', tlSort: 'cur' };
+  const view = { ym: '', source: 'all', sort: 'cur', q: '', onlyWithTarget: false, tab: 'targets', tlSort: 'cur', seg: 'all', hg: 25 };
   let list = [];            // unified agent rows
   let selected = new Set(); // keys
   let targetDrafts = new Map(); // legacy overall target per agent (unsaved)
   let classTargetDrafts = new Map(); // key → { vc4, vc20, vc5p } (unsaved)
   let savedTargets = [];    // settings.targets (current month)
+  let goalDrafts = new Map(); // key → 'active' (goal: agent ko active karna — numeric target nahi)
+  const watch = { ready: false, loading: null, ff: [], gv: [], cur: '' };   // Performance-watchlist rows (segment chips)
   const CLASS_TARGETS = [{ key: 'vc4', label: 'VC4' }, { key: 'vc20', label: 'VC20' }, { key: 'vc5p', label: 'VC5+' }];
   const normalizedClassTargets = (value) => Object.fromEntries(CLASS_TARGETS.map((c) => [c.key, Math.max(0, Math.floor(Number(value && value[c.key]) || 0))]));
   const classTargetsFor = (key) => normalizedClassTargets(classTargetDrafts.get(key));
   const hasClassTargets = (key) => CLASS_TARGETS.some((c) => classTargetsFor(key)[c.key] > 0);
-  const hasAnyTarget = (key) => (Number(targetDrafts.get(key)) || 0) > 0 || hasClassTargets(key);
+  const hasAnyTarget = (key) => (Number(targetDrafts.get(key)) || 0) > 0 || hasClassTargets(key) || goalDrafts.get(key) === 'active';
 
   const card = (title, body, right) => `<section class="card"><div class="card-head"><h3>${title}</h3>${right ? `<div class="card-right">${right}</div>` : ''}</div><div class="card-body">${body}</div></section>`;
   const pct = (a, b) => (b ? (a / b) * 100 : null);
   const allSavedTargets = () => ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym && t.key && Number(t.target) > 0);
-  const allSavedTargetEntries = () => ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym && t.key && ((Number(t.target) || 0) > 0 || CLASS_TARGETS.some((c) => Number(t.classTargets && t.classTargets[c.key]) > 0)));
+  const allSavedTargetEntries = () => ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym && t.key && ((Number(t.target) || 0) > 0 || t.goal === 'active' || CLASS_TARGETS.some((c) => Number(t.classTargets && t.classTargets[c.key]) > 0)));
 
   // ---- data prep ---------------------------------------------------------------------------------
   async function prep() {
@@ -95,7 +97,56 @@ FF.pages = FF.pages || {};
     savedTargets = allSavedTargetEntries().filter((t) => t.ym === view.ym);
     targetDrafts = new Map(savedTargets.map((t) => [t.key, Number(t.target) || 0]));
     classTargetDrafts = new Map(savedTargets.map((t) => [t.key, normalizedClassTargets(t.classTargets)]));
+    goalDrafts = new Map(savedTargets.filter((t) => t.goal === 'active').map((t) => [t.key, 'active']));
     return { rows, months, cur, last, latest, gvOk: masterR.status === 'fulfilled' };
+  }
+
+  // ---- 🔎 performance-watchlist segments (same chips as Performance page) --------------------------
+  const wKey = (src, n) => keyOf(src, n);
+  const watchRowsAll = () => [...watch.ff.map((r) => ({ ...r, _src: 'ff' })), ...watch.gv.map((r) => ({ ...r, _src: 'gv' }))].filter((r) => view.source === 'all' || r._src === view.source);
+  const segItems = () => FF.perfWatch.segments(view.hg).flatMap((g) => g.items);
+  function segKeys(id) {
+    const it = segItems().find((x) => x.id === id);
+    const out = new Set();
+    if (!it) return out;
+    watchRowsAll().forEach((r) => { if (it.t(r)) out.add(wKey(r._src, r.n)); });
+    return out;
+  }
+  function segStats() {
+    const items = segItems(), counts = {}, sums = {};
+    items.forEach((x) => { counts[x.id] = 0; sums[x.id] = 0; });
+    watchRowsAll().forEach((r) => items.forEach((x) => { if (x.t(r)) { counts[x.id]++; sums[x.id] += r.cur; } }));
+    return { counts, sums };
+  }
+  /** Performance rows (FF + GV) load karo, aur jo agents target list me nahi (0 issuance) unhe `extra` rows banao. */
+  function loadWatch() {
+    if (watch.loading) return watch.loading;
+    watch.loading = (async () => {
+      try {
+        await FF.lazy.ensure('performance');
+        await FF.pages.performance.ensureLoaded();
+        if (FF.pages.performance.agents) FF.pages.performance.agents();
+        watch.ff = FF.perfWatch.prepRows('ff', FF.pages.performance.watchRows());
+      } catch (err) { console.warn('targets watch (FF):', err && err.message); watch.ff = []; }
+      try {
+        if (G.enabled()) {
+          await FF.lazy.ensure('gvPerformance');
+          await G.need('report');
+          watch.gv = FF.perfWatch.prepRows('gv', FF.pages.gvPerformance.watchRows());
+        } else watch.gv = [];
+      } catch (err) { console.warn('targets watch (GV):', err && err.message); watch.gv = []; }
+      watch.ready = true;
+    })().finally(() => { watch.loading = null; });
+    return watch.loading;
+  }
+  function mergeExtras() {
+    const have = new Set(list.map((r) => r.key));
+    [['ff', watch.ff], ['gv', watch.gv]].forEach(([src, rows]) => rows.forEach((w) => {
+      const key = wKey(src, w.n);
+      if (have.has(key)) return;
+      have.add(key);
+      list.push({ key, source: src, name: norm(w.n), tl: w.direct ? 'Direct' : (w.tl || '—'), cur: w.cur || 0, last: w.last || 0, vc4: 0, vc20: 0, vc5p: 0, comm: 0, growth: U.growth(w.cur || 0, w.last || 0), extra: true });
+    }));
   }
 
   // ---- short-lists -------------------------------------------------------------------------------
@@ -104,6 +155,8 @@ FF.pages = FF.pages || {};
     if (view.source !== 'all') r = r.filter((x) => x.source === view.source);
     if (view.onlyWithTarget) r = r.filter((x) => hasAnyTarget(x.key));
     const q = norm(view.q);
+    if (view.seg !== 'all' && watch.ready) { const keys = segKeys(view.seg); r = r.filter((x) => keys.has(x.key)); }
+    else if (!q) r = r.filter((x) => !x.extra);   // zero-issuance agents (watchlist se) sirf chip / search par dikhte hain
     if (q) r = r.filter((x) => norm(x.name).includes(q) || norm(x.tl).includes(q));
     const sorters = {
       cur: (a, b) => b.cur - a.cur,
@@ -159,37 +212,62 @@ FF.pages = FF.pages || {};
   }
 
   // ---- save ---------------------------------------------------------------------------------------
-  async function saveTargets() {
-    if (!FF.auth.isAdmin()) { U.toast('Targets sirf admin save kar sakta hai', 'err'); return; }
+  /** Given agent keys ke targets (overall + class + Active goal) save karo — baaki sab untouched. Returns true on success. */
+  async function persistKeys(keys, quiet) {
+    if (!FF.auth.isAdmin()) { U.toast('Targets sirf admin save kar sakta hai', 'err'); return false; }
     const allBefore = allSavedTargetEntries();
     const byKey = new Map(savedTargets.map((t) => [t.key, t]));
     const rowsByKey = new Map(list.map((r) => [r.key, r]));
-    const editedKeys = new Set([...targetDrafts.keys(), ...classTargetDrafts.keys()]);
-    for (const key of editedKeys) {
+    const now = new Date().toISOString();
+    for (const key of keys) {
+      const goal = goalDrafts.get(key) === 'active' ? 'active' : '';
       const target = Math.max(0, Math.floor(Number(targetDrafts.get(key)) || 0));
       const classTargets = classTargetsFor(key);
       const hasClass = CLASS_TARGETS.some((c) => classTargets[c.key] > 0);
-      if (!target && !hasClass) { byKey.delete(key); continue; }
+      if (!target && !hasClass && !goal) { byKey.delete(key); continue; }
       const row = rowsByKey.get(key), prev = byKey.get(key) || {};
-      byKey.set(key, {
+      const changed = !prev.key || (Number(prev.target) || 0) !== target || (prev.goal || '') !== goal || CLASS_TARGETS.some((c) => (Number(prev.classTargets && prev.classTargets[c.key]) || 0) !== classTargets[c.key]);
+      const entry = {
         ...prev, key, ym: view.ym,
         source: row ? row.source : prev.source || (key.split('|')[0] === 'gv' ? 'gv' : 'ff'),
         agent: row ? row.name : prev.agent || key.split('|')[1],
         tl: row ? row.tl : prev.tl || '',
         target, classTargets,
-        by: FF.auth.user.username, at: new Date().toISOString()
-      });
+        by: changed ? FF.auth.user.username : (prev.by || FF.auth.user.username),
+        at: changed ? now : (prev.at || now)
+      };
+      if (goal) entry.goal = goal; else delete entry.goal;
+      if (changed) entry.baseCur = row ? Number(row.cur) || 0 : 0;   // progress "set karne ke baad" isi se naapte hain
+      byKey.set(key, entry);
     }
     const others = allBefore.filter((t) => t.ym !== view.ym);
     try {
       const out = await FF.auth.api('/api/settings', 'PUT', { settings: { targets: [...others, ...byKey.values()] } });
       FF.auth.applySettings(out.settings);
-      U.toast('Targets save ho gaye ✓ (overall + VC4 / VC20 / VC5+ · Google Sheet backup ke saath)', 'ok');
       savedTargets = allSavedTargetEntries().filter((t) => t.ym === view.ym);
       targetDrafts = new Map(savedTargets.map((t) => [t.key, Number(t.target) || 0]));
       classTargetDrafts = new Map(savedTargets.map((t) => [t.key, normalizedClassTargets(t.classTargets)]));
-      draw();
-    } catch (err) { U.toast(err.message, 'err'); }
+      goalDrafts = new Map(savedTargets.filter((t) => t.goal === 'active').map((t) => [t.key, 'active']));
+      try { if (FF.targetAlerts && FF.targetAlerts.invalidate) FF.targetAlerts.invalidate(); } catch { /* ignore */ }
+      if (!quiet) U.toast('Targets save ho gaye ✓ (overall + VC4 / VC20 / VC5+ · Active goals · Google Sheet backup ke saath)', 'ok');
+      return true;
+    } catch (err) { U.toast(err.message, 'err'); return false; }
+  }
+  async function saveTargets() {
+    const keys = new Set([...targetDrafts.keys(), ...classTargetDrafts.keys(), ...goalDrafts.keys(), ...savedTargets.map((t) => t.key)]);
+    if (await persistKeys(keys)) draw();
+  }
+  /** ⚡ Instant save — sirf is agent ka target (row ke inputs padh kar). */
+  async function saveOne(key, body) {
+    const tr = body && [...body.querySelectorAll('tr[data-key]')].find((x) => x.dataset.key === key);
+    if (tr) {
+      const ov = tr.querySelector('[data-target]');
+      if (ov) targetDrafts.set(key, Math.max(0, Math.floor(Number(ov.value) || 0)));
+      const ct = classTargetsFor(key);
+      tr.querySelectorAll('[data-class-target]').forEach((i) => { ct[i.dataset.classTarget] = Math.max(0, Math.floor(Number(i.value) || 0)); });
+      classTargetDrafts.set(key, ct);
+    }
+    return persistKeys([key], true);
   }
 
   // ---- render -------------------------------------------------------------------------------------
@@ -247,6 +325,7 @@ FF.pages = FF.pages || {};
           <button class="btn small" id="tg-bulk-all">Poori list par apply</button>
           <label class="check" style="margin-left:auto"><input type="checkbox" id="tg-only" ${view.onlyWithTarget ? 'checked' : ''}> Sirf target wale</label>
         </div>
+        <div class="finder-row"><b class="small">⚡ Active goal:</b><button class="btn small" data-active-bulk="sel">Selected (inactive only)</button><button class="btn small" data-active-bulk="all">Whole filtered list (inactive only)</button><small class="dim">Inactive agents (0 issuance this month) ka goal = "Active ho jao" · turant save hota hai</small></div>
         <div class="finder-row tg-class-bulk">
           <b class="small">Class-wise bulk:</b>
           <input class="input tgt-input" type="number" min="0" id="tg-bulk-vc4" placeholder="VC4 target">
@@ -268,6 +347,7 @@ FF.pages = FF.pages || {};
     const ymSel = U.$('#tg-ym', root);
     ymSel.innerHTML = P.months.slice().reverse().map((m) => `<option value="${m}" ${m === view.ym ? 'selected' : ''}>${U.labelYM(m, true)}</option>`).join('');
 
+    let rowRender = null;
     draw = () => {
       const rows = filteredRows();
       const srcLbl = view.source === 'ff' ? 'First Forward' : view.source === 'gv' ? 'GV Partner' : 'FF + GV';
@@ -285,11 +365,21 @@ FF.pages = FF.pages || {};
         <div class="kpi g6" data-kpi="scope=list&list=tg.with&src=both"><div class="kpi-top"><span class="kpi-title">Issuance (with target)</span><span class="kpi-icon">🏷️</span></div><div class="kpi-value">${U.fmt(totalCur)}</div><div class="kpi-foot">${totalTarget ? `<b>${U.fmtPct((totalCur / totalTarget) * 100, 0)}</b> of target · ${isCurMonth ? 'MTD' : 'full month'}` : 'Target set karo'}</div></div>
         <div class="kpi g5" data-kpi="scope=list&list=tg.achieved&src=both"><div class="kpi-top"><span class="kpi-title">Achieved</span><span class="kpi-icon">✅</span></div><div class="kpi-value">${U.fmt(achieved)}</div><div class="kpi-foot">${withT.length ? `${U.fmtPct(U.pctOf(achieved, withT.length), 0)} of targets` : '—'}</div></div>
       </div>`;
+      const stats = watch.ready && isCurMonth ? segStats() : null;
+      if (stats) FF.perfWatch.ensureCss();
+      const chipsBlock = !isCurMonth ? '' : stats
+        ? `<section class="card"><div class="pw-head"><h3>🔎 Performance segments <span class="dim small">· ${esc(srcLbl)} · click a chip → agents list below, set targets right there</span></h3><div class="btn-row"><label class="small dim">High / de-growth <select data-tg-hg>${[25, 50, 100].map((v) => `<option value="${v}" ${view.hg === v ? 'selected' : ''}>±${v}%</option>`).join('')}</select></label>${view.seg !== 'all' ? '<button class="btn small" data-pw-clear>✕ Show all</button>' : ''}</div></div><div class="card-body">${FF.perfWatch.chipsHtml(stats.counts, stats.sums, view.seg, view.hg)}</div></section>`
+        : `<section class="card"><div class="card-body">${U.spinner('Performance chips load ho rahe hain…')}</div></section>`;
       const rowHtml = (r) => {
         const t = targetDrafts.get(r.key) || 0;
         const ct = classTargetsFor(r.key);
         const p = t ? Math.min(150, Math.round((r.cur / t) * 100)) : 0;
-        const bar = t ? `<div class="tgt-track"><div class="tgt-fill ${p >= 100 ? 'ok' : p >= 60 ? 'mid' : 'low'}" style="width:${Math.min(100, p)}%"></div></div><small class="dim">${p}%</small>` : '<span class="dim">—</span>';
+        const isActive = goalDrafts.get(r.key) === 'active';
+        const saved = savedTargets.some((x) => x.key === r.key);
+        const bar = isActive && !t
+          ? `<span class="badge ${r.cur > 0 ? 'green' : 'amber'}" title="Goal: agent ko is month active karna">⚡ ${r.cur > 0 ? 'Active ✓' : 'Activate'}</span>`
+          : t ? `<div class="tgt-track"><div class="tgt-fill ${p >= 100 ? 'ok' : p >= 60 ? 'mid' : 'low'}" style="width:${Math.min(100, p)}%"></div></div><small class="dim">${p}%</small>${isActive ? ' <span class="badge amber" title="Active goal bhi set hai">⚡</span>' : ''}` : '<span class="dim">—</span>';
+        const actCell = `<td class="tg-act" style="white-space:nowrap">${r.cur <= 0 || isActive ? `<button type="button" class="btn small tg-active${isActive ? ' on' : ''}" data-active="${esc(r.key)}" title="${isActive ? 'Active goal hatao' : 'Goal: is agent ko active karna (is month issuance shuru)'}">⚡ Active${isActive ? ' ✓' : ''}</button> ` : ''}<button type="button" class="btn small primary tg-save1${saved ? ' saved' : ''}" data-save1="${esc(r.key)}" title="Is agent ka target abhi save karo" ${FF.auth.isAdmin() ? '' : 'disabled'}>${saved ? '✓ 💾' : '💾 Save'}</button></td>`;
         const g = r.growth === null ? '<span class="dim">new</span>' : U.deltaHtml(r.growth, { decimals: 0 });
         return `<tr data-key="${esc(r.key)}">
           <td><label class="check"><input type="checkbox" data-pick ${selected.has(r.key) ? 'checked' : ''}></label></td>
@@ -306,17 +396,27 @@ FF.pages = FF.pages || {};
           <td class="num"><input class="input tgt-input" type="number" min="0" data-class-target="vc4" data-class-target-key="${esc(r.key)}" value="${ct.vc4 || ''}" placeholder="0" aria-label="VC4 target for ${esc(r.name)}"></td>
           <td class="num"><input class="input tgt-input" type="number" min="0" data-class-target="vc20" data-class-target-key="${esc(r.key)}" value="${ct.vc20 || ''}" placeholder="0" aria-label="VC20 target for ${esc(r.name)}"></td>
           <td class="num"><input class="input tgt-input" type="number" min="0" data-class-target="vc5p" data-class-target-key="${esc(r.key)}" value="${ct.vc5p || ''}" placeholder="0" aria-label="VC5+ target for ${esc(r.name)}"></td>
-          <td style="min-width:110px">${bar}</td></tr>`;
+          <td style="min-width:110px">${bar}</td>${actCell}</tr>`;
       };
+      rowRender = rowHtml;
       inner.innerHTML = `${kpis}
+        ${chipsBlock}
         ${card(`🎯 Target table <span class="dim">· ${U.fmt(rows.length)} agents · ${esc(srcLbl)} · ${esc(U.labelYM(view.ym))}${isCurMonth ? ' (MTD)' : ''}</span>`,
-        rows.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th><label class="check"><input type="checkbox" id="tg-all" ${rows.length && rows.every((r) => selected.has(r.key)) ? 'checked' : ''}></label></th><th>Agent / TL</th><th>Source</th><th class="num">Last month</th><th class="num">${esc(U.labelYM(view.ym))}</th><th class="num">VC4</th><th class="num">VC20</th><th class="num">VC5+</th><th class="num" title="All Commercial = VC20 + VC5+ (NVC4)">All Comm</th><th class="num">Growth</th><th class="num">Overall target</th><th class="num">VC4 target</th><th class="num">VC20 target</th><th class="num">VC5+ target</th><th>Progress</th></tr></thead><tbody>${rows.slice(0, 400).map(rowHtml).join('')}</tbody></table></div>${rows.length > 400 ? '<p class="dim small">Pehle 400 rows — filter/search se list chhoti karo.</p>' : ''}` : '<div class="empty-state">Koi agent match nahi hua — filter badlo.</div>',
+        rows.length ? `<div class="table-wrap tall"><table class="tbl sticky-first"><thead><tr><th><label class="check"><input type="checkbox" id="tg-all" ${rows.length && rows.every((r) => selected.has(r.key)) ? 'checked' : ''}></label></th><th>Agent / TL</th><th>Source</th><th class="num">Last month</th><th class="num">${esc(U.labelYM(view.ym))}</th><th class="num">VC4</th><th class="num">VC20</th><th class="num">VC5+</th><th class="num" title="All Commercial = VC20 + VC5+ (NVC4)">All Comm</th><th class="num">Growth</th><th class="num">Overall target</th><th class="num">VC4 target</th><th class="num">VC20 target</th><th class="num">VC5+ target</th><th>Progress</th><th>Goal · Save</th></tr></thead><tbody>${rows.slice(0, 400).map(rowHtml).join('')}</tbody></table></div>${rows.length > 400 ? '<p class="dim small">Pehle 400 rows — filter/search se list chhoti karo.</p>' : ''}` : '<div class="empty-state">Koi agent match nahi hua — filter badlo.</div>',
         `<button class="btn small" id="tg-select-page">☑ Visible select</button><button class="btn small" id="tg-clear-sel">✕ Selection clear</button><button class="btn small primary" id="tg-save" ${FF.auth.isAdmin() ? '' : 'disabled title="Admin only"'}>💾 Save targets</button><button class="btn small" id="tg-xlsx">⬇ Excel</button>`)}
         <p class="dim small"><b>VC4</b> = 4-wheeler (payable) · <b>VC20</b> / <b>VC5+</b> = bade commercial vehicles · <b>All Comm = VC20 + VC5+ (NVC4)</b>. Overall aur class-wise targets month <b>${esc(U.labelYM(view.ym, true))}</b> ke liye settings me save hote hain (Google Sheet storage backup ke saath). Existing progress bar overall target use karta hai; Home par VC4 / VC20 / VC5+ achievement inke separate targets se niklega. ${FF.auth.isAdmin() ? '' : '<b>Save sirf admin kar sakta hai.</b>'}</p>`;
       const cnt = U.$('#tg-sel-count', body);
       if (cnt) cnt.textContent = selected.size ? `${selected.size} selected` : '';
     };
     draw();
+    if (view.ym === P.cur) loadWatch().then(() => { if (!root.isConnected) return; mergeExtras(); draw(); });
+    const redrawRow = (key) => {
+      const r = list.find((x) => x.key === key); const tr = [...body.querySelectorAll('tr[data-key]')].find((x) => x.dataset.key === key);
+      if (!r || !tr || !rowRender) return draw();
+      const chk = tr.querySelector('[data-pick]'); const was = chk && chk.checked;
+      tr.outerHTML = rowRender(r);
+      const nt = [...body.querySelectorAll('tr[data-key]')].find((x) => x.dataset.key === key); const nc = nt && nt.querySelector('[data-pick]'); if (nc && was) nc.checked = true;
+    };
 
     // ---- events ----
     ymSel.addEventListener('change', () => { view.ym = ymSel.value; selected.clear(); FF.app.navigate('targets', { month: view.ym, tab: view.tab }); });
@@ -340,6 +440,30 @@ FF.pages = FF.pages || {};
       if (e.target.closest('#tg-all')) { const on = e.target.closest('#tg-all').checked; filteredRows().forEach((r) => { if (on) selected.add(r.key); else selected.delete(r.key); }); draw(); return; }
       if (e.target.closest('#tg-select-page')) { filteredRows().forEach((r) => selected.add(r.key)); draw(); return; }
       if (e.target.closest('#tg-clear-sel')) { selected.clear(); draw(); return; }
+      const segBtn = e.target.closest('[data-pw-seg]');
+      if (segBtn) { view.seg = segBtn.dataset.pwSeg; selected.clear(); draw(); return; }
+      if (e.target.closest('[data-pw-clear]')) { view.seg = 'all'; draw(); return; }
+      const actBtn = e.target.closest('[data-active]');
+      if (actBtn) {
+        const k = actBtn.dataset.active;
+        if (goalDrafts.get(k) === 'active') goalDrafts.delete(k); else goalDrafts.set(k, 'active');
+        redrawRow(k); return;
+      }
+      const one = e.target.closest('[data-save1]');
+      if (one) {
+        const k = one.dataset.save1;
+        U.withButtonBusy(one, async () => { const ok = await saveOne(k, body); if (ok) { U.toast('✓ Target save ho gaya', 'ok'); } redrawRow(k); }, 'Saving…');
+        return;
+      }
+      const activeBulk = e.target.closest('[data-active-bulk]');
+      if (activeBulk) {
+        const rows = activeBulk.dataset.activeBulk === 'sel' ? list.filter((r) => selected.has(r.key)) : filteredRows();
+        const inactive = rows.filter((r) => r.cur <= 0);
+        if (!inactive.length) return U.toast('Is list me koi inactive (0 issuance) agent nahi', 'err');
+        inactive.forEach((r) => goalDrafts.set(r.key, 'active'));
+        U.withButtonBusy(activeBulk, async () => { const ok = await persistKeys(inactive.map((r) => r.key), true); if (ok) { U.toast(`⚡ ${inactive.length} agents ka Active goal save ho gaya`, 'ok'); draw(); } }, 'Saving…');
+        return;
+      }
       const saveBtn = e.target.closest('#tg-save');
       if (saveBtn) { U.withButtonBusy(saveBtn, saveTargets, 'Saving targets…'); return; }
       if (e.target.closest('#tg-xlsx')) { exportExcel(); return; }
@@ -384,6 +508,8 @@ FF.pages = FF.pages || {};
       }
     });
     body.addEventListener('change', (e) => {
+      const hgSel = e.target.closest('[data-tg-hg]');
+      if (hgSel) { view.hg = Number(hgSel.value) || 25; draw(); return; }
       const inp = e.target.closest('[data-target]');
       if (inp) { const v = Math.max(0, Math.floor(Number(inp.value) || 0)); targetDrafts.set(inp.dataset.target, v); return; }
       const classInp = e.target.closest('[data-class-target]');
