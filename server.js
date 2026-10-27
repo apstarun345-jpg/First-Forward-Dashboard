@@ -9613,6 +9613,47 @@ async function personalAgentClassRows(link) {
   }
   return out;
 }
+/** Per-agent DAILY class issuance for the current month: Map(normName → { name, d: { 'YYYY-MM-DD': { VC4, VC20, 'VC5+' } } }). */
+async function personalAgentDailyRows(link) {
+  const out = new Map();
+  const bucket = (cls) => { const k = plCls(cls); return k === 'VC4' || k === 'VC20' ? k : 'VC5+'; };
+  const add = (name, date, cls, n) => {
+    const k = plNormName(name); if (!k || !n || !date) return;
+    let o = out.get(k); if (!o) { o = { name: String(name).trim(), d: {} }; out.set(k, o); }
+    const day = o.d[date] || (o.d[date] = { VC4: 0, VC20: 0, 'VC5+': 0 });
+    day[bucket(cls)] += n;
+  };
+  if (isComboLink(link)) {
+    const sp = await comboSplit(link);
+    const parts = [...sp.tlParts.map((p) => ({ kind: 'tl', source: p.source, name: p.name, personId: p.personId, members: [] }))];
+    ['ff', 'gv'].forEach((src) => { if (sp.memBySrc[src].length) parts.push({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] }); });
+    for (const part of parts) {
+      try { for (const [k, v] of await personalAgentDailyRows(part)) { const o = out.get(k) || { name: v.name, d: {} }; out.set(k, o); for (const [dt, c] of Object.entries(v.d)) { const t = o.d[dt] || (o.d[dt] = { VC4: 0, VC20: 0, 'VC5+': 0 }); for (const b of Object.keys(c)) t[b] = Math.max(t[b], c[b]); } } } catch { /* part failed */ }
+    }
+    return out;
+  }
+  const c = personalConfig(link);
+  const { today } = personalWindow();
+  const curStart = `${dateKeyNow().slice(0, 7)}-01`;
+  if (curStart > today) return out;
+  const tq = `select ${c.agentCol}, ${c.dateCol}, ${c.clsCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${curStart}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${c.dateCol}, ${c.clsCol}, ${c.masterCol} limit 20000`;
+  const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+  const res = await fetchPersonalCached(upstreamUrl(params));
+  if (res.status < 200 || res.status >= 300) throw new Error(`sheet ${res.status}`);
+  const table = parseGvizServer(res.body);
+  let n = 0;
+  for (const row of table.rows || []) {
+    const gvRow = isGvPersonalRow(serverCell(row, 3));
+    if ((c.source === 'gv' && !gvRow) || (c.source === 'ff' && gvRow)) continue;
+    const cells = (row && row.c) || [];
+    const agent = serverCell(row, 0).trim(); if (!agent) continue;
+    add(agent, serverDate(serverCell(row, 1)), serverCell(row, 2), serverNumber(serverCell(row, Math.max(0, cells.length - 1)))); n++;
+  }
+  if (!n && c.source === 'gv') {
+    for (const r of await personalGvMasterRows(link)) { const d = String(r.date); if (d >= curStart && d <= today) add(r.agent || '', d, r.cls, r.n); }
+  }
+  return out;
+}
 /** GV vs FF split of a combined link (TLs / agents / MTD / last month / stock). */
 async function personalChannelSplit(baseLink, sidx, ym, prevYm) {
   const out = [];
@@ -10132,6 +10173,8 @@ async function servePersonalPage(req, res, rawToken) {
     const rowsPromise = needsIssuance ? personalDailyRows(link) : Promise.resolve([]);
     const classRowsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance'))
       ? personalAgentClassRows(link).catch(() => new Map()) : Promise.resolve(new Map());
+    const dailyClsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance'))
+      ? personalAgentDailyRows(link).catch(() => new Map()) : Promise.resolve(new Map());
     const livePromise = hasSec('overview')
       ? Promise.race([personalLiveToday(link), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 5000); if (t.unref) t.unref(); })]).catch(() => null)
       : Promise.resolve(null);
@@ -10589,6 +10632,9 @@ async function servePersonalPage(req, res, rawToken) {
         if (cr) { p.l = sumK(0); p.m = sumK(1); }
         if (sc) p.st = sumK(2);
       }
+      const dailyCls = await dailyClsPromise;
+      const dayCompact = (dm) => { const o = {}; for (const [dt, c] of Object.entries(dm)) { const t = [c.VC4 || 0, c['VC20'] || 0, c['VC5+'] || 0]; if (t[0] + t[1] + t[2]) o[Number(dt.slice(8, 10))] = t; } return o; };
+      for (const [k7, p] of peopleMap) { const dr = dailyCls.get(k7); if (dr) { const dd = dayCompact(dr.d); if (Object.keys(dd).length) p.dd = dd; } }
       const items = [...peopleMap.values()];
       tlGroups.forEach((g) => {
         const ags = g.agents.map((n) => peopleMap.get(nk(n))).filter(Boolean);
@@ -10600,9 +10646,11 @@ async function servePersonalPage(req, res, rawToken) {
         try {
           if (stockIdxRef.v) { const sr = personalStock(stockIdxRef.v, g.src, 'tl', g.name); if (sr && sr.byCls) { Object.keys(tlC).forEach((b) => { tlC[b][2] = 0; }); Object.entries(sr.byCls).forEach(([k6, v6]) => { const ck = plCls(k6); const t = tlC[ck] = tlC[ck] || [0, 0, 0, 0]; t[2] += v6.t || 0; classSet.add(ck); }); } }
         } catch { /* keep agent sums */ }
-        items.push({ k: 't', n: g.name, s: g.src, ag: ags.length, m: sum('m'), l: sum('l'), d: sum('d'), st: tlStock, c: tlC, members: ags.map((x) => x.n) });
+        const tlDd = {};
+        ags.forEach((x) => { if (x.dd) Object.keys(x.dd).forEach((dy) => { const t = tlDd[dy] = tlDd[dy] || [0, 0, 0]; for (let i = 0; i < 3; i++) t[i] += x.dd[dy][i]; }); });
+        items.push({ k: 't', n: g.name, s: g.src, dd: Object.keys(tlDd).length ? tlDd : undefined, ag: ags.length, m: sum('m'), l: sum('l'), d: sum('d'), st: tlStock, c: tlC, members: ags.map((x) => x.n) });
       });
-      const dataJson = JSON.stringify({ classes: [...classSet].sort((a, b) => plClsRank(a) - plClsRank(b)), items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
+      const dataJson = JSON.stringify({ classes: [...classSet].sort((a, b) => plClsRank(a) - plClsRank(b)), items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, td: Number(dateKeyNow().slice(8, 10)), both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
       dispatchOk = issueOk && stockOk && items.some((x) => x.k === 'a' && x.c);
       searchHtml = `<section class="pb-card pl-search" id="pl-search"><div class="pl-search-row"><span class="pl-search-ico">🔎</span><input id="pl-search-q" type="search" placeholder="Search a TL or agent in this link…" autocomplete="off" aria-label="Search TL or agent"><div id="pl-search-drop" class="pl-search-drop" hidden></div></div><div id="pl-search-res"></div><script type="application/json" id="pl-search-data">${dataJson}</script></section>`;
     }
@@ -10816,7 +10864,7 @@ body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);fon
 .pb-split{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:16px;align-items:center}
 @media(max-width:900px){.pb-split{grid-template-columns:1fr}}
 .pl-pr{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:800;color:#fff;background:#16a34a}
-.pb-wrap .pb-kpi .pl-pr{color:#fff;font-size:13px;padding:2px 14px}.pl-dngrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}.pl-dngrid .pb-card{margin:0}
+.pb-wrap .pb-kpi .pl-pr{color:#fff;font-size:13px;padding:2px 14px}.pl-dngrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}.pl-dngrid .pb-card{margin:0}.pl-dd{margin-bottom:12px}.pl-dd-wrap{position:relative;padding-top:2px}.pl-dd-svg{width:100%;height:auto;display:block}.pl-dd-tot{font-size:11px;font-weight:800;fill:#334155}.pl-dd-day{font-size:10px;fill:#94a3b8}.pl-dd-bar:hover rect:not([fill=transparent]){opacity:.8}.pl-dd-tip{position:absolute;z-index:5;background:#0f172a;color:#fff;font-size:12px;line-height:1.6;padding:6px 10px;border-radius:8px;pointer-events:none;white-space:nowrap;box-shadow:0 6px 18px rgba(15,23,42,.25)}.pl-dd-tip i,.pl-dd-leg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px}.pl-dd-tip span{margin-right:10px}.pl-dd-leg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:#64748b;margin-top:6px}.pl-dd-leg b{margin-left:auto;color:#0f172a}
 .pl-pr.high{background:#dc2626}.pl-pr.medium{background:#f59e0b}.pl-pr.low{background:#16a34a}
 .pb-kpi.pl-hi{border-top-color:#dc2626!important}.pb-kpi.pl-md{border-top-color:#f59e0b!important}
 .pl-prf{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
@@ -11150,6 +11198,44 @@ const PERSONAL_PORTAL_JS = `(function () {
       stk.unshift({ l: 'VC4/VC20', v: s48 });
       return '<div class="pl-dngrid">' + (D.issue ? donut('📈 Issuance · MTD by class', mtd, tm, 'MTD') + donut('🗓️ Issuance · last month by class', last, tl, 'Last month') : '') + (D.stock ? donut('📦 Stock by class <small class="dim">(VC4 + VC20 together)</small>', stk, ts, 'In stock') : '') + '</div>';
     }
+    // ---- daily issuance chart: stacked bars per day (VC4 / VC20 / VC5+), total on top, class counts on hover ----
+    var DCOL = ['#6366f1', '#06b6d4', '#f59e0b'], DCLS = ['VC4', 'VC20', 'VC5+'], MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function dailyChart(it) {
+      if (!D.issue) return '';
+      var dd = it.dd || {}, td = Number(D.td) || 1, mon = MON[(Number(String(D.ym).slice(5, 7)) || 1) - 1];
+      var vals = [], max = 0, sum = 0;
+      for (var d = 1; d <= td; d++) { var a = dd[d] || [0, 0, 0], t = a[0] + a[1] + a[2]; vals.push({ d: d, a: a, t: t }); if (t > max) max = t; sum += t; }
+      var head = '<div class="pb-card pl-dd"><div class="pb-card-head"><h3>📅 Daily issuance · ' + mon + ' ' + String(D.ym).slice(0, 4) + ' <small class="dim">— hover a bar for class split</small></h3></div>';
+      if (!sum) return head + '<p class="dim" style="text-align:center;padding:26px 0">No issuance this month yet</p></div>';
+      var W = Math.max(320, td * 30 + 30), H = 200, pt = 24, pb = 26, pl = 6, ch = H - pt - pb, bw = (W - pl * 2) / td;
+      var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="pl-dd-svg" role="img" aria-label="Daily issuance">';
+      svg += '<line x1="' + pl + '" y1="' + (H - pb) + '" x2="' + (W - pl) + '" y2="' + (H - pb) + '" stroke="#e2e8f0"/>';
+      vals.forEach(function (v, i) {
+        var x = pl + i * bw + bw * 0.16, w = bw * 0.68, y = H - pb, g = '<g class="pl-dd-bar" data-i="' + i + '">';
+        g += '<rect x="' + (pl + i * bw) + '" y="' + pt + '" width="' + bw + '" height="' + (H - pb - pt) + '" fill="transparent"/>';
+        for (var k = 0; k < 3; k++) { var hh = max ? v.a[k] / max * ch : 0; if (hh > 0) { y -= hh; g += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hh.toFixed(1) + '" rx="2" fill="' + DCOL[k] + '"/>'; } }
+        g += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (y - 5).toFixed(1) + '" text-anchor="middle" class="pl-dd-tot">' + (v.t ? v.t : '') + '</text>';
+        g += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 9) + '" text-anchor="middle" class="pl-dd-day">' + v.d + '</text></g>';
+        svg += g;
+      });
+      svg += '</svg>';
+      var leg = DCLS.map(function (c, k) { return '<span><i style="background:' + DCOL[k] + '"></i>' + c + '</span>'; }).join('');
+      return head + '<div class="pl-dd-wrap" data-pl-dd><div class="pl-dd-tip" hidden></div>' + svg + '</div><div class="pl-dd-leg">' + leg + '<b>Total ' + nf(sum) + '</b></div></div>';
+    }
+    function bindDaily(root) {
+      var wrap = root.querySelector('[data-pl-dd]'); if (!wrap) return;
+      var tip = wrap.querySelector('.pl-dd-tip'), it = wrap._it;
+      function show(e) {
+        var g = e.target.closest && e.target.closest('.pl-dd-bar'); if (!g) { tip.hidden = true; return; }
+        var i = Number(g.getAttribute('data-i')), a = (it.dd && it.dd[i + 1]) || [0, 0, 0], t = a[0] + a[1] + a[2];
+        tip.innerHTML = '<b>' + (i + 1) + ' ' + MON[(Number(String(D.ym).slice(5, 7)) || 1) - 1] + '</b> · Total <b>' + nf(t) + '</b><br>' + DCLS.map(function (c, k) { return '<span><i style="background:' + DCOL[k] + '"></i>' + c + ' <b>' + nf(a[k]) + '</b></span>'; }).join('');
+        tip.hidden = false;
+        var r = wrap.getBoundingClientRect(), x = e.clientX - r.left, tw = tip.offsetWidth;
+        tip.style.left = Math.max(0, Math.min(r.width - tw, x - tw / 2)) + 'px'; tip.style.top = '0px';
+      }
+      wrap.addEventListener('mousemove', show); wrap.addEventListener('click', show);
+      wrap.addEventListener('mouseleave', function () { tip.hidden = true; });
+    }
     // ---- class-wise table (VC4 / VC20 group, VC5+ group, total) ----
     function classTable(it) {
       if (!it.c) return '<p class="dim small">Class-wise data is not available for this ' + (it.k === 't' ? 'TL' : 'agent') + ' yet.</p>';
@@ -11240,9 +11326,10 @@ const PERSONAL_PORTAL_JS = `(function () {
       qEl.value = it.n; state.q = it.n; drop.hidden = true; tlFilter = D.issue && D.stock ? 'all' : 'all';
       var h = '<div class="pl-res-head"><div><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b> ' + chBadge(it) +
         (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + '</div><button type="button" class="pb-btn" id="pl-search-clear">✕ Close</button></div>' + tiles(it) +
-        donuts(it) + '<div class="pb-card-head"><h3>🎯 Class-wise issuance · stock · priority</h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-class" data-pl-title="' + esc(it.n) + ' - class wise">⬇ CSV</button></div>' : '') + '</div>' + classTable(it);
+        donuts(it) + dailyChart(it) + '<div class="pb-card-head"><h3>🎯 Class-wise issuance · stock · priority</h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-class" data-pl-title="' + esc(it.n) + ' - class wise">⬇ CSV</button></div>' : '') + '</div>' + classTable(it);
       if (it.k === 't') h += '<div class="pb-card-head" style="margin-top:14px"><h3>🧑‍💼 Agents under ' + esc(it.n) + ' <small class="dim">— who needs tags</small></h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-res-agents" data-pl-title="' + esc(it.n) + ' - agents">⬇ CSV</button></div>' : '') + '</div><div id="pl-res-agents"></div>';
       res.innerHTML = '<div class="pl-res">' + h + '</div>';
+      var ddw = res.querySelector('[data-pl-dd]'); if (ddw) { ddw._it = it; bindDaily(res); }
       var cl = document.getElementById('pl-search-clear'); if (cl) cl.addEventListener('click', function () { res.innerHTML = ''; qEl.value = ''; state.q = ''; schedulePing(); });
       if (it.k === 't') paintTlAgents(it);
       if (!quiet || true) track('search_open', 'Opened ' + (it.k === 't' ? 'TL ' : 'agent ') + it.n + (D.both ? ' (' + it.s.toUpperCase() + ')' : ''), { name: it.n, kind: it.k });
