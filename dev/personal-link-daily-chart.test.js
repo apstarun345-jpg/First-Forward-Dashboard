@@ -39,3 +39,10 @@ test('server embeds per-agent daily class data (dd) and wires the chart into the
   assert.match(src, /donuts\(it\) \+ dailyChart\(it\)/);
   assert.match(src, /td: Number\(dateKeyNow\(\)\.slice\(8, 10\)\)/);
 });
+
+test('personal link search matches agent ID too and shows the ID next to the name', () => {
+  assert.match(src, /it\._s = norm\(it\.n \+ ' ' \+ \(it\.i \|\| ''\)\)/);
+  assert.match(src, /it\._s\.indexOf\(t\)/);
+  assert.match(src, /for \(const \[k8, p\] of peopleMap\)/);
+  assert.match(src, /by name or agent ID/);
+});

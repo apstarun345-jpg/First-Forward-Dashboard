@@ -10266,7 +10266,7 @@ async function servePersonalPage(req, res, rawToken) {
     // 🆔 agent ID next to every agent name (team / group links): StockDataa nodes first, then EIR (3s budget, best effort)
     const agentIdBy = new Map();
     if (stockInfo && Array.isArray(stockInfo.agents)) stockInfo.agents.forEach((x) => { if (x && x.n && x.id) agentIdBy.set(plNormName(x.n), String(x.id).trim()); });
-    if (isTeamLink(link) && hasSec('insights') || isTeamLink(link) && hasSec('issuance') || isTeamLink(link) && hasSec('performance')) {
+    if (isTeamLink(link) && (hasSec('insights') || hasSec('issuance') || hasSec('performance') || hasSec('overview') || hasSec('stock'))) {
       try {
         const ids = await Promise.race([personalAgentIds(link), new Promise((resolve) => { const t = setTimeout(() => resolve(new Map()), 3000); if (t.unref) t.unref(); })]);
         for (const [k, v] of ids) if (!agentIdBy.has(k) || !/^[A-Za-z]{2,5}\d/.test(agentIdBy.get(k))) agentIdBy.set(k, v);
@@ -10632,6 +10632,8 @@ async function servePersonalPage(req, res, rawToken) {
         if (cr) { p.l = sumK(0); p.m = sumK(1); }
         if (sc) p.st = sumK(2);
       }
+      const memberId = new Map(); (Array.isArray(link.members) ? link.members : []).forEach((m) => { if (m && m.name && m.id) memberId.set(nk(m.name), String(m.id).trim().replace(/\.0+$/, '')); });
+      for (const [k8, p] of peopleMap) { const idv = agentIdBy.get(k8) || memberId.get(k8); if (idv) p.i = idv; }
       const dailyCls = await dailyClsPromise;
       const dayCompact = (dm) => { const o = {}; for (const [dt, c] of Object.entries(dm)) { const t = [c.VC4 || 0, c['VC20'] || 0, c['VC5+'] || 0]; if (t[0] + t[1] + t[2]) o[Number(dt.slice(8, 10))] = t; } return o; };
       for (const [k7, p] of peopleMap) { const dr = dailyCls.get(k7); if (dr) { const dd = dayCompact(dr.d); if (Object.keys(dd).length) p.dd = dd; } }
@@ -10652,7 +10654,7 @@ async function servePersonalPage(req, res, rawToken) {
       });
       const dataJson = JSON.stringify({ classes: [...classSet].sort((a, b) => plClsRank(a) - plClsRank(b)), items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, td: Number(dateKeyNow().slice(8, 10)), both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
       dispatchOk = issueOk && stockOk && items.some((x) => x.k === 'a' && x.c);
-      searchHtml = `<section class="pb-card pl-search" id="pl-search"><div class="pl-search-row"><span class="pl-search-ico">🔎</span><input id="pl-search-q" type="search" placeholder="Search a TL or agent in this link…" autocomplete="off" aria-label="Search TL or agent"><div id="pl-search-drop" class="pl-search-drop" hidden></div></div><div id="pl-search-res"></div><script type="application/json" id="pl-search-data">${dataJson}</script></section>`;
+      searchHtml = `<section class="pb-card pl-search" id="pl-search"><div class="pl-search-row"><span class="pl-search-ico">🔎</span><input id="pl-search-q" type="search" placeholder="Search a TL or agent — by name or agent ID…" autocomplete="off" aria-label="Search TL or agent"><div id="pl-search-drop" class="pl-search-drop" hidden></div></div><div id="pl-search-res"></div><script type="application/json" id="pl-search-data">${dataJson}</script></section>`;
     }
 
     // Build only tabs that the admin granted; an "All" view can expose only emitted sections.
@@ -11154,7 +11156,8 @@ const PERSONAL_PORTAL_JS = `(function () {
     function nf(n) { return Number(n || 0).toLocaleString('en-IN'); }
     function f1(n) { return Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 }); }
     function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
-    items.forEach(function (it) { it._k = norm(it.n); });
+    items.forEach(function (it) { it._k = norm(it.n); it._s = norm(it.n + ' ' + (it.i || '')); });
+    function aid(it) { return it.i ? ' <small class="pb-aid">' + esc(it.i) + '</small>' : ''; }
     function chBadge(it) { return D.both ? '<span class="pb-chan ' + it.s + '">' + it.s.toUpperCase() + '</span>' : ''; }
     // ---- numbers: v = [last month, MTD, stock, today] ----
     function sumC(it, names) { var r = [0, 0, 0, 0]; names.forEach(function (n) { var a = (it.c && it.c[n]) || [0, 0, 0, 0]; for (var i = 0; i < 4; i++) r[i] += a[i]; }); return r; }
@@ -11258,7 +11261,7 @@ const PERSONAL_PORTAL_JS = `(function () {
     function agentRows(list, opts) {
       return list.map(function (a, i) {
         var o = overall(a);
-        return '<tr class="pl-res-row" data-name="' + esc(a.n) + '"><td>' + (i + 1) + '</td><td><b>' + esc(a.n) + '</b> ' + chBadge(a) + (opts && opts.tl && a.tl ? ' <small class="dim">· ' + esc(a.tl) + '</small>' : '') + '</td>' +
+        return '<tr class="pl-res-row" data-name="' + esc(a.n) + '"><td>' + (i + 1) + '</td><td><b>' + esc(a.n) + '</b>' + aid(a) + ' ' + chBadge(a) + (opts && opts.tl && a.tl ? ' <small class="dim">· ' + esc(a.tl) + '</small>' : '') + '</td>' +
           '<td>' + nf(sumC(a, G1)[2]) + '</td><td>' + nf(sumC(a, G1)[1]) + '</td><td>' + coverTxt(o.g1.cover) + '</td><td><b>' + nf(o.g1.need) + '</b></td>' +
           '<td>' + nf(sumC(a, G2)[2]) + '</td><td>' + nf(sumC(a, G2)[1]) + '</td><td>' + coverTxt(o.g2.cover) + '</td><td><b>' + nf(o.g2.need) + '</b></td>' +
           '<td>' + prBadge(o.pr) + '</td><td><b>' + nf(o.need) + '</b></td></tr>';
@@ -11279,7 +11282,7 @@ const PERSONAL_PORTAL_JS = `(function () {
     function find(q) {
       var toks = norm(q).split(' ').filter(Boolean);
       if (!toks.length) return [];
-      var hits = items.filter(function (it) { return toks.every(function (t) { return it._k.indexOf(t) >= 0; }); });
+      var hits = items.filter(function (it) { return toks.every(function (t) { return it._s.indexOf(t) >= 0; }); });
       hits.sort(function (a, b) { return (a.k === b.k ? 0 : (a.k === 't' ? -1 : 1)) || (b.m - a.m) || a.n.localeCompare(b.n); });
       return hits.slice(0, 14);
     }
@@ -11289,7 +11292,7 @@ const PERSONAL_PORTAL_JS = `(function () {
       if (!qEl.value.trim()) { drop.hidden = true; return; }
       drop.innerHTML = shown.length ? shown.map(function (it, i) {
         var o = D.issue && D.stock && it.c ? overall(it) : null;
-        return '<button type="button" class="pl-search-opt" data-i="' + i + '"><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b> ' + chBadge(it) +
+        return '<button type="button" class="pl-search-opt" data-i="' + i + '"><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b>' + aid(it) + ' ' + chBadge(it) +
           (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + (it.k === 't' ? ' <small class="dim">· ' + nf(it.ag) + ' agents</small>' : '') + (o ? ' ' + prBadge(o.pr) : '') + '</button>';
       }).join('') : '<div class="pl-search-none">No TL / agent with this name in this link.</div>';
       drop.hidden = false;
@@ -11324,7 +11327,7 @@ const PERSONAL_PORTAL_JS = `(function () {
     }
     function openItem(it, quiet) {
       qEl.value = it.n; state.q = it.n; drop.hidden = true; tlFilter = D.issue && D.stock ? 'all' : 'all';
-      var h = '<div class="pl-res-head"><div><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b> ' + chBadge(it) +
+      var h = '<div class="pl-res-head"><div><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b>' + aid(it) + ' ' + chBadge(it) +
         (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + '</div><button type="button" class="pb-btn" id="pl-search-clear">✕ Close</button></div>' + tiles(it) +
         donuts(it) + dailyChart(it) + '<div class="pb-card-head"><h3>🎯 Class-wise issuance · stock · priority</h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-class" data-pl-title="' + esc(it.n) + ' - class wise">⬇ CSV</button></div>' : '') + '</div>' + classTable(it);
       if (it.k === 't') h += '<div class="pb-card-head" style="margin-top:14px"><h3>🧑‍💼 Agents under ' + esc(it.n) + ' <small class="dim">— who needs tags</small></h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-res-agents" data-pl-title="' + esc(it.n) + ' - agents">⬇ CSV</button></div>' : '') + '</div><div id="pl-res-agents"></div>';
