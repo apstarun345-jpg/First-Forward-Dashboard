@@ -37,7 +37,7 @@ test('agent report: pivot, TL vs direct split, sort, performance %', () => {
   assert.equal(sheets[2].rows.length, 2, 'one direct agent + total row');
   assert.equal(sheets[0].rows.at(-1)[9], 17, 'pivot grand total');
   const csv = t.reportCsv(both);
-  assert.equal(csv.head[5], 'Type'); assert.equal(csv.rows.length, 3); assert.equal(csv.rows[2][5], 'Direct agent');
+  assert.equal(csv.head[6], 'Type'); assert.equal(csv.head[3], 'Mobile'); assert.equal(csv.rows.length, 3); assert.equal(csv.rows[2][6], 'Direct agent');
   assert.ok(['Agent ID', 'Agent Name', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total'].every((h) => csv.head.includes(h)));
 });
 

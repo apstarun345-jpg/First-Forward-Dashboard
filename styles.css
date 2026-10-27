@@ -7136,9 +7136,10 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 
 /* 📥 Tag Issued — agent / TL report dropdown */
 .tix-report { position: relative; margin-left: auto; }
-.tix-report-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 290px; background: var(--card, #fff); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 14px 36px rgba(31,41,55,.2); padding: 8px; }
+.tix-report-menu { position: fixed; z-index: 2000; min-width: 260px; background: var(--card, #fff); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 14px 36px rgba(31,41,55,.2); padding: 8px; }
 .tix-report-menu[hidden] { display: none; }
-.tix-report-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 10px; }
+.tix-report-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border-radius: 10px; font-size: 13.5px; }
+.tix-report-item b { white-space: nowrap; }
 .tix-report-item:hover { background: #eef2ff; }
 .tix-report-item span { display: inline-flex; gap: 6px; }
 .tix-report-menu p { margin: 6px 10px 2px; }

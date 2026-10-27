@@ -565,7 +565,8 @@ FF.pages = FF.pages || {};
   const r1 = (v) => Math.round(v * 10) / 10;
   /** Rows (EIR agent rows; GV today = GV Master live, same as the KPI cards) → per-agent records for the chosen channel(s). */
   function buildAgentReport(rows, m, which) {
-    const per = { ff: { cur: [m.from, m.ffTo], prev: m.prevFfRange }, gv: { cur: [m.from, m.gvTo], prev: m.prevGvRange } };
+    // Same windows as the Total Issued card: scan(rows, from, to) for both channels, prev = like-for-like range.
+    const per = { ff: { cur: [m.from, m.to], prev: m.prevFfRange }, gv: { cur: [m.from, m.to], prev: m.prevGvRange } };
     const out = new Map(), chTot = { ff: 0, gv: 0 };
     for (const r of rows) {
       const ch = r.channel === 'GV Partner' ? 'gv' : 'ff';
@@ -592,11 +593,11 @@ FF.pages = FF.pages || {};
     return { list, grandTotal, chTot };
   }
   const perfTxt = (o) => (o.perf === null ? (o.total ? 'New' : '—') : o.perf);
-  const AGENT_HEAD = ['Rank', 'Agent ID', 'Agent Name', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance % (vs prev)', 'Share %'];
-  const agentRow = (o, i) => [i + 1, o.id, o.name, o.tlName, o.tlId, o.ch === 'gv' ? 'GV' : 'FF', o.vc4, o.vc20, o.vc5, o.total, o.prev, o.change, perfTxt(o), o.share];
+  const AGENT_HEAD = ['Rank', 'Agent ID', 'Agent Name', 'Mobile', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance % (vs prev)', 'Share %'];
+  const agentRow = (o, i) => [i + 1, o.id, o.name, o.mobile || '', o.tlName, o.tlId, o.ch === 'gv' ? 'GV' : 'FF', o.vc4, o.vc20, o.vc5, o.total, o.prev, o.change, perfTxt(o), o.share];
   const sumRow = (label, list, withPrev = true) => {
     const t = list.reduce((a, o) => ({ vc4: a.vc4 + o.vc4, vc20: a.vc20 + o.vc20, vc5: a.vc5 + o.vc5, total: a.total + o.total, prev: a.prev + o.prev }), { vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 });
-    return { t, row: ['', '', label, '', '', '', t.vc4, t.vc20, t.vc5, t.total, withPrev ? t.prev : '', withPrev ? t.total - t.prev : '', withPrev ? (t.prev ? r1(((t.total - t.prev) / t.prev) * 100) : (t.total ? 'New' : '—')) : '', ''] };
+    return { t, row: ['', '', label, '', '', '', '', t.vc4, t.vc20, t.vc5, t.total, withPrev ? t.prev : '', withPrev ? t.total - t.prev : '', withPrev ? (t.prev ? r1(((t.total - t.prev) / t.prev) * 100) : (t.total ? 'New' : '—')) : '', ''] };
   };
   /** One row per TL (and one "Direct agents" bucket per channel) — the pivot. */
   function tlPivot(list) {
@@ -617,7 +618,7 @@ FF.pages = FF.pages || {};
     const tot = sumRow('TOTAL', rep.list);
     const withTotal = (list, label) => { const rows = list.map(agentRow); if (list.length) rows.push(sumRow(label, list).row); return rows; };
     return [
-      { name: 'Pivot (TL wise)', header: ['Rank', 'TL / Group', 'TL ID', 'Channel', 'Type', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance % (vs prev)', 'Share %'], rows: [...pivRows, ['', 'TOTAL', '', '', '', piv.reduce((a, x) => a + x.agents, 0), tot.t.vc4, tot.t.vc20, tot.t.vc5, tot.t.total, tot.t.prev, tot.t.total - tot.t.prev, tot.row[12], '']] },
+      { name: 'Pivot (TL wise)', header: ['Rank', 'TL / Group', 'TL ID', 'Channel', 'Type', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance % (vs prev)', 'Share %'], rows: [...pivRows, ['', 'TOTAL', '', '', '', piv.reduce((a, x) => a + x.agents, 0), tot.t.vc4, tot.t.vc20, tot.t.vc5, tot.t.total, tot.t.prev, tot.t.total - tot.t.prev, tot.row[13], '']] },
       { name: 'TL Agents', header: AGENT_HEAD, rows: withTotal(tlAgents, 'TOTAL · agents under TLs') },
       { name: 'Direct Agents', header: AGENT_HEAD, rows: withTotal(direct, 'TOTAL · direct agents') },
       { name: 'Info', header: ['Item', 'Value'], rows: [
@@ -626,20 +627,48 @@ FF.pages = FF.pages || {};
         ['Previous period (FF)', m.prevFfRange ? `${m.prevFfRange[0]} to ${m.prevFfRange[1]}` : '—'], ['Previous period (GV)', m.prevGvRange ? `${m.prevGvRange[0]} to ${m.prevGvRange[1]}` : '—'],
         ['Performance %', 'Growth of the agent / TL total vs the previous period of the same length (New = nothing in previous period)'],
         ['Share %', 'Share of the report total'], ['Sorted', 'Highest to lowest total'],
-        ['Source', 'EIR sheet (Master ID 5845036 = GV) — same numbers as the cards on this page'], ['Generated', new Date().toLocaleString('en-IN')]] }
+        ['Source', 'Same rows as the Total Issued card (EIR; GV today = GV Master live) · Mobile from GV REPORT / FF REPORT'], ['Generated', new Date().toLocaleString('en-IN')]] }
     ];
   }
   /** Flat CSV: every agent row (TL agents + direct agents), highest → lowest. */
   function reportCsv(rep) {
-    return { head: [...AGENT_HEAD.slice(0, 5), 'Type', ...AGENT_HEAD.slice(5)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); return [...r.slice(0, 5), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(5)]; }) };
+    return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); return [...r.slice(0, 6), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6)]; }) };
   }
-  async function reportRows(m) {
-    const v = await loadDriverRows(m);
-    if (v.failed) throw v.err || new Error('Report data could not be loaded.');
-    // Same source as the KPI cards on this page: EIR rows (GV = Master ID 5845036). No GV Master override here.
-    const rows = v.rows || [];
-    return rows;
+  /** Exactly the rows behind the Total Issued card (EIR daily; today's GV = GV Master live, as loaded for the cards). */
+  function reportRows() {
+    return (channelRows().dailyRows || []).map((r) => {
+      const name = U.clean(r.agentName || r.name) || (r.agentId ? `Agent ${r.agentId}` : '(No agent in sheet)');
+      return { id: U.clean(r.agentId || r.id), name, tlId: U.clean(r.tlId), tlName: U.clean(r.tlName) || 'Direct', channel: r.channel, group: r.group, dateKey: r.key || (r.date ? U.dateKey(r.date) : ''), n: r.n === undefined ? 1 : (Number(r.n) || 0) };
+    });
   }
+  /** Mobile numbers: GV REPORT (GV) + Performance agents (FF REPORT). Best effort — never blocks the download for long. */
+  async function mobileBook() {
+    const book = { id: new Map(), name: new Map() };
+    const put = (id, name, mob) => {
+      const v = U.clean(mob); if (!v || /^na$/i.test(v)) return;
+      const k = U.clean(id).replace(/\.0+$/, '').toUpperCase(); if (k && !book.id.has(k)) book.id.set(k, v);
+      const n = U.clean(name).toUpperCase(); if (n && !book.name.has(n)) book.name.set(n, v);
+    };
+    const wait = (p, ms) => Promise.race([Promise.resolve(p).catch(() => null), new Promise((r) => setTimeout(r, ms))]);
+    try {
+      let gr = G && G.get && G.get('report');
+      if (!Array.isArray(gr) && G && G.need) gr = await wait(G.need('report'), 8000);
+      (Array.isArray(gr) ? gr : []).forEach((r) => { put(r.agentId, r.agentName, r.mobile); if (r.tlName && r.tlMobile) put(r.tlId, r.tlName, r.tlMobile); });
+    } catch (e) { /* no GV mobiles */ }
+    try {
+      if (FF.lazy && FF.lazy.ensure) await wait(FF.lazy.ensure('performance'), 8000);
+      const P = FF.pages.performance;
+      if (P && P.ensureLoaded) await wait(P.ensureLoaded(), 10000);
+      const ags = (P && P.agents && P.agents()) || [];
+      ags.forEach((a) => { put(a.agentId || a.id, a.name, a.mobile); if (a.tlName && a.tlMobile) put(a.tlId, a.tlName, a.tlMobile); });
+    } catch (e) { /* no FF mobiles */ }
+    return book;
+  }
+  function attachMobiles(rep, book) {
+    for (const o of rep.list) o.mobile = book.id.get(U.clean(o.id).replace(/\.0+$/, '').toUpperCase()) || book.name.get(U.clean(o.name).toUpperCase()) || '';
+    return rep;
+  }
+
   async function render(root, params) {
     params = params || {};
     const now = new Date();
@@ -780,8 +809,11 @@ FF.pages = FF.pages || {};
     // 📥 Report dropdown
     const repBtn = U.$('#ti-report-btn', root), repMenu = U.$('#ti-report-menu', root);
     const repClose = () => { repMenu.hidden = true; repBtn.setAttribute('aria-expanded', 'false'); };
-    repBtn.addEventListener('click', (e) => { e.stopPropagation(); repMenu.hidden = !repMenu.hidden; repBtn.setAttribute('aria-expanded', String(!repMenu.hidden)); });
-    document.addEventListener('click', (e) => { if (!root.isConnected) return; if (!e.target.closest || !e.target.closest('#ti-report')) repClose(); });
+    const repPlace = () => { const b = repBtn.getBoundingClientRect(); const w = Math.min(330, window.innerWidth - 16); repMenu.style.width = `${w}px`; repMenu.style.top = `${Math.round(b.bottom + 6)}px`; repMenu.style.left = `${Math.max(8, Math.round(Math.min(b.right - w, window.innerWidth - w - 8)))}px`; };
+    repBtn.addEventListener('click', (e) => { e.stopPropagation(); if (repMenu.parentNode !== document.body) { document.querySelectorAll('body > .tix-report-menu').forEach((x) => { if (x !== repMenu) x.remove(); }); document.body.appendChild(repMenu); } repMenu.hidden = !repMenu.hidden; if (!repMenu.hidden) repPlace(); repBtn.setAttribute('aria-expanded', String(!repMenu.hidden)); });
+    window.addEventListener('scroll', () => { if (!repMenu.hidden) repClose(); if (!root.isConnected) repMenu.remove(); }, { passive: true });
+    window.addEventListener('resize', () => { if (!repMenu.hidden) repPlace(); });
+    document.addEventListener('click', (e) => { if (!root.isConnected) { repMenu.remove(); return; } if (!e.target.closest || (!e.target.closest('#ti-report') && !repMenu.contains(e.target))) repClose(); });
     repMenu.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-rep]'); if (!b) return;
       const which = b.dataset.rep, fmt = b.dataset.fmt;
@@ -789,7 +821,7 @@ FF.pages = FF.pages || {};
       await U.withButtonBusy(repBtn, async () => {
         try {
           const m = buildModel(channelRows(), from, to);
-          const rep = buildAgentReport(await reportRows(m), m, which);
+          const rep = attachMobiles(buildAgentReport(reportRows(), m, which), await mobileBook());
           if (!rep.list.length) { U.toast('No agents found for this period.', 'err'); return; }
           const base = `${REPORTS[which][0].replace(/[^A-Za-z0-9+]+/g, '-')}_${from}_to_${to}`;
           if (fmt === 'csv') { const c = reportCsv(rep); U.downloadCsv(`${base}.csv`, c.head, c.rows); }
