@@ -7957,3 +7957,23 @@ button.smap-cell.smap-total { min-width: 64px; }
 .tix-report-item:hover { background: #eef2ff; }
 .tix-report-item span { display: inline-flex; gap: 6px; }
 .tix-report-menu p { margin: 6px 10px 2px; }
+
+/* 📊 Tag Issued — on-screen report */
+.tix-chipsep { flex: 0 0 1px; align-self: stretch; background: var(--line); margin: 4px 4px; }
+.tix-repchip { font-weight: 800; }
+.tix-repchip.gv { border-color: #86efac; color: #15803d; background: #f0fdf4; }
+.tix-repchip.ff { border-color: #93c5fd; color: #1d4ed8; background: #eff6ff; }
+.tix-repchip.both { border-color: #c4b5fd; color: #6d28d9; background: #f5f3ff; }
+.tix-rep-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.tix-rep-q { margin-left: auto; min-width: 220px; max-width: 320px; }
+.tix-rep-tabs { margin-bottom: 10px; }
+.tix-rep-tabs small { opacity: .75; font-weight: 700; }
+.tix-rep-wrap { max-height: 64vh; overflow: auto; }
+.tix-rep-tbl th { position: sticky; top: 0; background: #eef2ff; color: #3730a3; z-index: 1; }
+.tix-rep-tbl td.tix-tot { font-weight: 900; background: #fef9c3; color: #854d0e; }
+.tix-rep-tbl .tix-perf.up { color: #15803d; font-weight: 800; }
+.tix-rep-tbl .tix-perf.down { color: #b91c1c; font-weight: 800; }
+.tix-rep-tbl .tix-perf.flat { color: #64748b; }
+.tix-rep-tbl tr.tix-rep-total td { background: #e0e7ff; font-weight: 800; }
+.tix-rep-tbl tr.tix-rep-grand td { background: #c7d2fe; font-weight: 900; border-top: 2px solid #6366f1; }
+.tix-rep-tbl tr.tix-rep-gap td { background: transparent; border: 0; height: 8px; padding: 0; }

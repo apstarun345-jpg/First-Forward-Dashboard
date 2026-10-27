@@ -736,7 +736,7 @@ FF.pages = FF.pages || {};
     root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">GV Partner (EIR master ID 5845036) vs First Forward — VC4 · VC20 · VC5+ · Commercial, share %, up/down and graphs</p></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div class="card tix-toolbar">
-        <div class="tix-presets" id="ti-presets" role="group" aria-label="Date shortcuts">${PRESETS.map(([id, label]) => `<button type="button" class="tix-chipbtn" data-preset="${id}">${label}</button>`).join('')}<button type="button" class="tix-chipbtn" data-preset="custom">Custom</button></div>
+        <div class="tix-presets" id="ti-presets" role="group" aria-label="Date shortcuts">${PRESETS.map(([id, label]) => `<button type="button" class="tix-chipbtn" data-preset="${id}">${label}</button>`).join('')}<button type="button" class="tix-chipbtn" data-preset="custom">Custom</button><span class="tix-chipsep" aria-hidden="true"></span>${Object.entries(REPORTS).map(([k, [label]]) => `<button type="button" class="tix-chipbtn tix-repchip ${k}" data-rep-view="${k}" title="Show this report on screen for the selected dates">${k === 'gv' ? '🟩' : k === 'ff' ? '🟦' : '⚖️'} ${label}</button>`).join('')}</div>
         <div class="tix-dates">
           <label>📅 From <input type="date" class="input" id="ti-from" value="${esc(from)}" max="${todayKey()}"></label>
           <label>To <input type="date" class="input" id="ti-date" value="${esc(to)}" max="${todayKey()}"></label>
@@ -820,6 +820,8 @@ FF.pages = FF.pages || {};
     }
 
     presetBox.addEventListener('click', (e) => {
+      const rv = e.target.closest('[data-rep-view]');
+      if (rv) { openReportView(rv.dataset.repView); return; }
       const b = e.target.closest('[data-preset]');
       if (!b) return;
       const id = b.getAttribute('data-preset');
@@ -857,6 +859,59 @@ FF.pages = FF.pages || {};
     }, true);
     body.addEventListener('change', (e) => { const sel = e.target.closest && e.target.closest('[data-drv-cls]'); if (sel) { DRV.cls = sel.value; redraw(); } }, true);
 
+    // 📊 Report on screen (same data as the download)
+    async function makeReport(which) {
+      const rows0 = channelRows();
+      const m = buildModel(rows0, from, to);
+      return { m, rep: buildAgentReport(reportInputs(rows0, await reportDirectory()), m, which) };
+    }
+    const repCell = (v, k, head) => {
+      const h = head[k] || '';
+      if (h === 'Performance') { const cls = /Up|New/.test(v) ? 'up' : /Down|No issuance/.test(v) ? 'down' : 'flat'; return `<td class="tix-perf ${cls}">${esc(v)}</td>`; }
+      if (h === 'Performance %') return `<td class="num tix-perf ${v === '' ? 'flat' : v > 0 ? 'up' : v < 0 ? 'down' : 'flat'}">${v === '' ? '—' : `${v > 0 ? '+' : ''}${v}%`}</td>`;
+      if (h === 'Share %') return `<td class="num">${v === '' ? '' : `${v}%`}</td>`;
+      if (typeof v === 'number') return `<td class="num${h === 'Total' ? ' tix-tot' : ''}">${U.fmt(v)}</td>`;
+      return `<td>${esc(v == null ? '' : v)}</td>`;
+    };
+    const repTable = (sh) => `<div class="table-wrap tix-rep-wrap"><table class="tbl compact tix-rep-tbl"><thead><tr>${sh.header.map((h) => `<th${/VC|Total|Prev|Change|Perf.*%|Share|Rank|Agents/.test(h) ? ' class="num"' : ''}>${esc(h)}</th>`).join('')}</tr></thead><tbody>${sh.rows.map((r) => {
+      const label = String(r[2] || '');
+      const cls = /^GRAND TOTAL/.test(label) ? 'tix-rep-grand' : /^TOTAL/.test(label) ? 'tix-rep-total' : r.every((x) => x === '') ? 'tix-rep-gap' : '';
+      return `<tr class="${cls}">${r.map((v, k) => repCell(v, k, sh.header)).join('')}</tr>`;
+    }).join('')}</tbody></table></div>`;
+    async function openReportView(which) {
+      const title = `${REPORTS[which][0]} · ${rangeLabel(from, to, true)}`;
+      FF.app.openDrawer({ kicker: '📊 Report', title, sub: 'Preparing…', body: U.spinner('Building the report…'), wide: true, loading: true });
+      let m, rep;
+      try { ({ m, rep } = await makeReport(which)); } catch (err) { FF.app.openDrawer({ kicker: '📊 Report', title, body: U.errorBox(err), wide: true, replace: true }); return; }
+      const sheets = reportSheets(rep, m, which);
+      const tabs = sheets.map((sh, i) => `<button type="button" class="tix-chipbtn${i === 0 ? ' active' : ''}" data-rep-tab="${i}">${esc(sh.name)}${sh.name === 'Info' ? '' : ` <small>${U.fmt(sh.rows.filter((r) => typeof r[0] === 'number').length)}</small>`}</button>`).join('');
+      const ch = (k) => (which === 'both' || which === k ? `<span class="badge ${k === 'gv' ? 'green' : 'blue'}">${k === 'gv' ? '🟩 GV' : '🟦 FF'} ${U.fmt(rep.chTot[k])}</span>` : '');
+      const body = `<div class="tix-rep" id="tix-rep">
+        <div class="tix-rep-top">${ch('ff')}${ch('gv')}<span class="badge indigo">Total ${U.fmt(rep.grandTotal)}</span><span class="badge">${U.fmt(rep.list.length)} agents</span>
+          <input type="search" class="input tix-rep-q" placeholder="Filter: agent, TL, ID, mobile…" aria-label="Filter rows"></div>
+        <div class="tix-presets tix-rep-tabs">${tabs}</div>
+        ${sheets.map((sh, i) => `<div class="tix-rep-pane" data-rep-pane="${i}"${i ? ' hidden' : ''}>${repTable(sh)}</div>`).join('')}
+      </div>`;
+      const actions = `<button class="btn small" data-rep-dl="xlsx">⬇ Excel</button><button class="btn small" data-rep-dl="csv">⬇ CSV</button>`;
+      FF.app.openDrawer({ kicker: '📊 Report', title, sub: `${esc(rangeLabel(from, to, true))} · highest → lowest · performance vs ${m.prevGvRange ? esc(rangeLabel(m.prevGvRange[0], m.prevGvRange[1], true)) : 'previous period'}`, body, actions, wide: true, replace: true });
+      const host = document.getElementById('tix-rep'); if (!host) return;
+      host.addEventListener('click', (e) => {
+        const t = e.target.closest('[data-rep-tab]'); if (!t) return;
+        host.querySelectorAll('[data-rep-tab]').forEach((b) => b.classList.toggle('active', b === t));
+        host.querySelectorAll('[data-rep-pane]').forEach((p) => { p.hidden = p.dataset.repPane !== t.dataset.repTab; });
+      });
+      const q = host.querySelector('.tix-rep-q');
+      q.addEventListener('input', () => {
+        const v = q.value.trim().toLowerCase();
+        host.querySelectorAll('.tix-rep-tbl tbody tr').forEach((tr) => { if (tr.classList.contains('tix-rep-total') || tr.classList.contains('tix-rep-grand') || tr.classList.contains('tix-rep-gap')) return; tr.hidden = !!v && !tr.textContent.toLowerCase().includes(v); });
+      });
+      const acts = document.getElementById('drawer-actions');
+      if (acts) acts.querySelectorAll('[data-rep-dl]').forEach((b) => b.addEventListener('click', () => {
+        const base = `${REPORTS[which][0].replace(/[^A-Za-z0-9+]+/g, '-')}_${from}_to_${to}`;
+        if (b.dataset.repDl === 'csv') { const c = reportCsv(rep); U.downloadCsv(`${base}.csv`, c.head, c.rows); } else FF.xlsx.download(`${base}.xlsx`, sheets);
+      }));
+    }
+
     // 📥 Report dropdown
     const repBtn = U.$('#ti-report-btn', root), repMenu = U.$('#ti-report-menu', root);
     const repClose = () => { repMenu.hidden = true; repBtn.setAttribute('aria-expanded', 'false'); };
@@ -871,9 +926,7 @@ FF.pages = FF.pages || {};
       repClose();
       await U.withButtonBusy(repBtn, async () => {
         try {
-          const rows0 = channelRows();
-          const m = buildModel(rows0, from, to);
-          const rep = buildAgentReport(reportInputs(rows0, await reportDirectory()), m, which);
+          const { m, rep } = await makeReport(which);
           if (!rep.list.length) { U.toast('No agents found for this period.', 'err'); return; }
           const base = `${REPORTS[which][0].replace(/[^A-Za-z0-9+]+/g, '-')}_${from}_to_${to}`;
           if (fmt === 'csv') { const c = reportCsv(rep); U.downloadCsv(`${base}.csv`, c.head, c.rows); }

@@ -55,3 +55,10 @@ test('Tag Issued toolbar has the Report dropdown with GV / FF / GV+FF', () => {
   assert.match(src, /id="ti-report-btn"/);
   for (const label of ['GV Report', 'First Forward Report', 'GV + FF Report']) assert.ok(src.includes(label), label);
 });
+
+test('Report chips after Custom open the same report on screen', () => {
+  assert.match(src, /data-rep-view="\$\{k\}"/);
+  assert.match(src, /function openReportView\(which\)/);
+  assert.match(src, /if \(rv\) \{ openReportView\(rv\.dataset\.repView\); return; \}/);
+  assert.match(src, /async function makeReport\(which\)/);
+});
