@@ -9633,10 +9633,9 @@ async function personalAgentDailyRows(link) {
     return out;
   }
   const c = personalConfig(link);
-  const { today } = personalWindow();
-  const curStart = `${dateKeyNow().slice(0, 7)}-01`;
-  if (curStart > today) return out;
-  const tq = `select ${c.agentCol}, ${c.dateCol}, ${c.clsCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${curStart}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${c.dateCol}, ${c.clsCol}, ${c.masterCol} limit 20000`;
+  const { start, today } = personalWindow();
+  const curStart = start;
+  const tq = `select ${c.agentCol}, ${c.dateCol}, ${c.clsCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${curStart}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${c.dateCol}, ${c.clsCol}, ${c.masterCol} limit 40000`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
   const res = await fetchPersonalCached(upstreamUrl(params));
   if (res.status < 200 || res.status >= 300) throw new Error(`sheet ${res.status}`);
@@ -10635,8 +10634,19 @@ async function servePersonalPage(req, res, rawToken) {
       const memberId = new Map(); (Array.isArray(link.members) ? link.members : []).forEach((m) => { if (m && m.name && m.id) memberId.set(nk(m.name), String(m.id).trim().replace(/\.0+$/, '')); });
       for (const [k8, p] of peopleMap) { const idv = agentIdBy.get(k8) || memberId.get(k8); if (idv) p.i = idv; }
       const dailyCls = await dailyClsPromise;
-      const dayCompact = (dm) => { const o = {}; for (const [dt, c] of Object.entries(dm)) { const t = [c.VC4 || 0, c['VC20'] || 0, c['VC5+'] || 0]; if (t[0] + t[1] + t[2]) o[Number(dt.slice(8, 10))] = t; } return o; };
-      for (const [k7, p] of peopleMap) { const dr = dailyCls.get(k7); if (dr) { const dd = dayCompact(dr.d); if (Object.keys(dd).length) p.dd = dd; } }
+      const todayKeyNow = dateKeyNow(), domNow = Number(todayKeyNow.slice(8, 10));
+      const dayCompact = (dm) => {
+        const o = {}; let la = '', lp = 0;
+        for (const [dt, c] of Object.entries(dm)) {
+          const t = [c.VC4 || 0, c['VC20'] || 0, c['VC5+'] || 0], tot = t[0] + t[1] + t[2];
+          if (!tot) continue;
+          if (dt > la) la = dt;
+          if (dt.startsWith(ym)) o[Number(dt.slice(8, 10))] = t;
+          else if (dt.startsWith(prevYm) && Number(dt.slice(8, 10)) <= domNow) lp += tot;
+        }
+        return { o, la, lp };
+      };
+      for (const [k7, p] of peopleMap) { const dr = dailyCls.get(k7); if (dr) { const r7 = dayCompact(dr.d); if (Object.keys(r7.o).length) p.dd = r7.o; if (r7.la) p.la = r7.la; p.lp = r7.lp; } }
       const items = [...peopleMap.values()];
       tlGroups.forEach((g) => {
         const ags = g.agents.map((n) => peopleMap.get(nk(n))).filter(Boolean);
@@ -10648,11 +10658,11 @@ async function servePersonalPage(req, res, rawToken) {
         try {
           if (stockIdxRef.v) { const sr = personalStock(stockIdxRef.v, g.src, 'tl', g.name); if (sr && sr.byCls) { Object.keys(tlC).forEach((b) => { tlC[b][2] = 0; }); Object.entries(sr.byCls).forEach(([k6, v6]) => { const ck = plCls(k6); const t = tlC[ck] = tlC[ck] || [0, 0, 0, 0]; t[2] += v6.t || 0; classSet.add(ck); }); } }
         } catch { /* keep agent sums */ }
-        const tlDd = {};
-        ags.forEach((x) => { if (x.dd) Object.keys(x.dd).forEach((dy) => { const t = tlDd[dy] = tlDd[dy] || [0, 0, 0]; for (let i = 0; i < 3; i++) t[i] += x.dd[dy][i]; }); });
-        items.push({ k: 't', n: g.name, s: g.src, dd: Object.keys(tlDd).length ? tlDd : undefined, ag: ags.length, m: sum('m'), l: sum('l'), d: sum('d'), st: tlStock, c: tlC, members: ags.map((x) => x.n) });
+        const tlDd = {}; let tlLa = '', tlLp = 0;
+        ags.forEach((x) => { if (x.la && x.la > tlLa) tlLa = x.la; tlLp += x.lp || 0; if (x.dd) Object.keys(x.dd).forEach((dy) => { const t = tlDd[dy] = tlDd[dy] || [0, 0, 0]; for (let i = 0; i < 3; i++) t[i] += x.dd[dy][i]; }); });
+        items.push({ k: 't', n: g.name, s: g.src, dd: Object.keys(tlDd).length ? tlDd : undefined, la: tlLa || undefined, lp: tlLp, ag: ags.length, m: sum('m'), l: sum('l'), d: sum('d'), st: tlStock, c: tlC, members: ags.map((x) => x.n) });
       });
-      const dataJson = JSON.stringify({ classes: [...classSet].sort((a, b) => plClsRank(a) - plClsRank(b)), items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, td: Number(dateKeyNow().slice(8, 10)), both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
+      const dataJson = JSON.stringify({ classes: [...classSet].sort((a, b) => plClsRank(a) - plClsRank(b)), items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, td: Number(dateKeyNow().slice(8, 10)), today: dateKeyNow(), both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
       dispatchOk = issueOk && stockOk && items.some((x) => x.k === 'a' && x.c);
       searchHtml = `<section class="pb-card pl-search" id="pl-search"><div class="pl-search-row"><span class="pl-search-ico">🔎</span><input id="pl-search-q" type="search" placeholder="Search a TL or agent — by name or agent ID…" autocomplete="off" aria-label="Search TL or agent"><div id="pl-search-drop" class="pl-search-drop" hidden></div></div><div id="pl-search-res"></div><script type="application/json" id="pl-search-data">${dataJson}</script></section>`;
     }
@@ -10866,7 +10876,7 @@ body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);fon
 .pb-split{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:16px;align-items:center}
 @media(max-width:900px){.pb-split{grid-template-columns:1fr}}
 .pl-pr{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:800;color:#fff;background:#16a34a}
-.pb-wrap .pb-kpi .pl-pr{color:#fff;font-size:13px;padding:2px 14px}.pl-dngrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}.pl-dngrid .pb-card{margin:0}.pl-dd{margin-bottom:12px}.pl-dd-wrap{position:relative;padding-top:2px}.pl-dd-svg{width:100%;height:auto;display:block}.pl-dd-tot{font-size:11px;font-weight:800;fill:#334155}.pl-dd-day{font-size:10px;fill:#94a3b8}.pl-dd-bar:hover rect:not([fill=transparent]){opacity:.8}.pl-dd-tip{position:absolute;z-index:5;background:#0f172a;color:#fff;font-size:12px;line-height:1.6;padding:6px 10px;border-radius:8px;pointer-events:none;white-space:nowrap;box-shadow:0 6px 18px rgba(15,23,42,.25)}.pl-dd-tip i,.pl-dd-leg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px}.pl-dd-tip span{margin-right:10px}.pl-dd-leg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:#64748b;margin-top:6px}.pl-dd-leg b{margin-left:auto;color:#0f172a}
+.pb-wrap .pb-kpi .pl-pr{color:#fff;font-size:13px;padding:2px 14px}.pl-dngrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}.pl-dngrid .pb-card{margin:0}.pl-team td,.pl-team th{white-space:nowrap}.pl-team tfoot td{border-top:2px solid #e2e8f0;background:#f8fafc}.pl-la{font-weight:700;font-size:12px}.pl-la.ok{color:#16a34a}.pl-la.mid{color:#d97706}.pl-la.bad{color:#dc2626}.pl-gr{font-weight:800;font-size:12px}.pl-gr.up{color:#16a34a}.pl-gr.dn{color:#dc2626}.pl-gr.eq{color:#64748b}.pl-dd{margin-bottom:12px}.pl-dd-wrap{position:relative;padding-top:2px}.pl-dd-svg{width:100%;height:auto;display:block}.pl-dd-tot{font-size:11px;font-weight:800;fill:#334155}.pl-dd-day{font-size:10px;fill:#94a3b8}.pl-dd-bar:hover rect:not([fill=transparent]){opacity:.8}.pl-dd-tip{position:absolute;z-index:5;background:#0f172a;color:#fff;font-size:12px;line-height:1.6;padding:6px 10px;border-radius:8px;pointer-events:none;white-space:nowrap;box-shadow:0 6px 18px rgba(15,23,42,.25)}.pl-dd-tip i,.pl-dd-leg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px}.pl-dd-tip span{margin-right:10px}.pl-dd-leg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:#64748b;margin-top:6px}.pl-dd-leg b{margin-left:auto;color:#0f172a}
 .pl-pr.high{background:#dc2626}.pl-pr.medium{background:#f59e0b}.pl-pr.low{background:#16a34a}
 .pb-kpi.pl-hi{border-top-color:#dc2626!important}.pb-kpi.pl-md{border-top-color:#f59e0b!important}
 .pl-prf{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
@@ -11283,6 +11293,7 @@ const PERSONAL_PORTAL_JS = `(function () {
       var toks = norm(q).split(' ').filter(Boolean);
       if (!toks.length) return [];
       var hits = items.filter(function (it) { return toks.every(function (t) { return it._s.indexOf(t) >= 0; }); });
+      if (items.filter(function (x) { return x.k === 't'; }).length > 1 && hits.some(function (x) { return x.k === 't'; })) hits = hits.filter(function (x) { return x.k === 't'; });
       hits.sort(function (a, b) { return (a.k === b.k ? 0 : (a.k === 't' ? -1 : 1)) || (b.m - a.m) || a.n.localeCompare(b.n); });
       return hits.slice(0, 14);
     }
@@ -11309,13 +11320,41 @@ const PERSONAL_PORTAL_JS = `(function () {
       return '<section class="pb-kpis">' + t + '</section>';
     }
     var tlFilter = 'all';
+    // ---- TL → agents team table: ID, name, class stock, last month, this month, last active, growth ----
+    var TCLS = [['VC4/VC20', ['VC4', 'VC20']], ['VC5', ['VC5']], ['VC6', ['VC6']], ['VC7', ['VC7']], ['VC12', ['VC12']]];
+    function lastActive(a) {
+      var la = a.la || ''; if (a.d > 0) la = D.today;
+      if (!la) return '<span class="dim">—</span>';
+      var ms = Date.parse(D.today + 'T00:00:00Z') - Date.parse(la + 'T00:00:00Z'), n = Math.round(ms / 864e5);
+      var lbl = n <= 0 ? 'Today' : (n === 1 ? 'Yesterday' : n + ' days ago'), dt = Number(la.slice(8, 10)) + ' ' + MON[Number(la.slice(5, 7)) - 1];
+      return '<span class="pl-la ' + (n <= 1 ? 'ok' : (n <= 3 ? 'mid' : 'bad')) + '">' + lbl + '</span> <small class="dim">' + dt + '</small>';
+    }
+    function growthCell(a) {
+      var lp = a.lp || 0, m = a.m || 0;
+      if (!lp) return m ? '<span class="pl-gr up">New</span>' : '<span class="dim">—</span>';
+      var g = Math.round((m - lp) / lp * 100);
+      return '<span class="pl-gr ' + (g > 0 ? 'up' : (g < 0 ? 'dn' : 'eq')) + '">' + (g > 0 ? '▲ +' : (g < 0 ? '▼ ' : '')) + g + '%</span>';
+    }
+    function teamTable(id, list) {
+      var head = '<thead><tr><th>#</th><th>Agent ID</th><th>Agent</th>' + TCLS.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '<th>Stock</th><th>Last month</th><th>This month</th><th>Last active</th><th>Growth %</th></tr></thead>';
+      var tot = { st: 0, l: 0, m: 0, lp: 0, c: TCLS.map(function () { return 0; }) };
+      var body = list.map(function (a, i) {
+        tot.st += a.st || 0; tot.l += a.l || 0; tot.m += a.m || 0; tot.lp += a.lp || 0;
+        var cells = TCLS.map(function (c, k) { var v = sumC(a, c[1])[2]; tot.c[k] += v; return '<td>' + (v ? nf(v) : '<span class="dim">0</span>') + '</td>'; }).join('');
+        return '<tr class="pl-res-row" data-name="' + esc(a.n) + '"><td>' + (i + 1) + '</td><td>' + (a.i ? '<span class="pb-aid">' + esc(a.i) + '</span>' : '<span class="dim">—</span>') + '</td><td><b>' + esc(a.n) + '</b> ' + chBadge(a) + '</td>' + cells +
+          '<td><b>' + nf(a.st) + '</b></td><td>' + nf(a.l) + '</td><td><b>' + nf(a.m) + '</b></td><td>' + lastActive(a) + '</td><td>' + growthCell(a) + '</td></tr>';
+      }).join('');
+      var foot = list.length ? '<tfoot><tr><td></td><td></td><td><b>Total</b></td>' + tot.c.map(function (v) { return '<td><b>' + nf(v) + '</b></td>'; }).join('') + '<td><b>' + nf(tot.st) + '</b></td><td><b>' + nf(tot.l) + '</b></td><td><b>' + nf(tot.m) + '</b></td><td></td><td>' + growthCell({ m: tot.m, lp: tot.lp }) + '</td></tr></tfoot>' : '';
+      return '<div class="pb-scroll"><table class="pb-tbl pl-team" id="' + id + '">' + head + '<tbody>' + (list.length ? body : '<tr><td colspan="' + (TCLS.length + 8) + '" class="dim">No agents found.</td></tr>') + '</tbody>' + foot + '</table></div>' +
+        '<p class="dim small" style="margin-top:6px">Growth % = this month so far vs the same days of last month. Stock columns are class-wise stock in hand.</p>';
+    }
     function paintTlAgents(it) {
       var names = {}; (it.members || []).forEach(function (n) { names[norm(n)] = 1; });
       var all = items.filter(function (x) { return x.k === 'a' && names[x._k]; });
       var box = document.getElementById('pl-res-agents'); if (!box) return;
-      var list = sortAgents(filterPr(all, tlFilter));
+      var list = filterPr(all, tlFilter).sort(function (a, b) { return (b.m - a.m) || (b.l - a.l) || a.n.localeCompare(b.n); });
       var counts = countPr(all);
-      box.innerHTML = (D.issue && D.stock ? prFilterHtml('pl-res-prf', counts, tlFilter) : '') + agentTable('pl-tbl-res-agents', list, 'No agents match this filter.');
+      box.innerHTML = (D.issue && D.stock ? prFilterHtml('pl-res-prf', counts, tlFilter) : '') + teamTable('pl-tbl-res-agents', list);
       var prf = document.getElementById('pl-res-prf');
       if (prf) prf.addEventListener('click', function (e) { var b = e.target.closest ? e.target.closest('[data-prf]') : null; if (b) { tlFilter = b.getAttribute('data-prf'); paintTlAgents(it); } });
       bindRows(box);
@@ -11328,9 +11367,10 @@ const PERSONAL_PORTAL_JS = `(function () {
     function openItem(it, quiet) {
       qEl.value = it.n; state.q = it.n; drop.hidden = true; tlFilter = D.issue && D.stock ? 'all' : 'all';
       var h = '<div class="pl-res-head"><div><span class="pl-tag ' + it.k + '">' + (it.k === 't' ? 'TL' : 'Agent') + '</span> <b>' + esc(it.n) + '</b>' + aid(it) + ' ' + chBadge(it) +
-        (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + '</div><button type="button" class="pb-btn" id="pl-search-clear">✕ Close</button></div>' + tiles(it) +
-        donuts(it) + dailyChart(it) + '<div class="pb-card-head"><h3>🎯 Class-wise issuance · stock · priority</h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-class" data-pl-title="' + esc(it.n) + ' - class wise">⬇ CSV</button></div>' : '') + '</div>' + classTable(it);
-      if (it.k === 't') h += '<div class="pb-card-head" style="margin-top:14px"><h3>🧑‍💼 Agents under ' + esc(it.n) + ' <small class="dim">— who needs tags</small></h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-res-agents" data-pl-title="' + esc(it.n) + ' - agents">⬇ CSV</button></div>' : '') + '</div><div id="pl-res-agents"></div>';
+        (it.k === 'a' && it.tl ? ' <small class="dim">· TL ' + esc(it.tl) + '</small>' : '') + '</div><button type="button" class="pb-btn" id="pl-search-clear">✕ Close</button></div>' + tiles(it);
+      var rest = donuts(it) + dailyChart(it) + '<div class="pb-card-head"><h3>🎯 Class-wise issuance · stock · priority</h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-class" data-pl-title="' + esc(it.n) + ' - class wise">⬇ CSV</button></div>' : '') + '</div>' + classTable(it);
+      if (it.k === 't') h += '<div class="pb-card-head" style="margin-top:14px"><h3>🧑‍💼 Agents under ' + esc(it.n) + ' <small class="dim">— ' + nf(it.ag) + ' agents · stock · issuance · last active</small></h3>' + (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-res-agents" data-pl-title="' + esc(it.n) + ' - agents">⬇ CSV</button></div>' : '') + '</div><div id="pl-res-agents"></div>';
+      h += rest;
       res.innerHTML = '<div class="pl-res">' + h + '</div>';
       var ddw = res.querySelector('[data-pl-dd]'); if (ddw) { ddw._it = it; bindDaily(res); }
       var cl = document.getElementById('pl-search-clear'); if (cl) cl.addEventListener('click', function () { res.innerHTML = ''; qEl.value = ''; state.q = ''; schedulePing(); });

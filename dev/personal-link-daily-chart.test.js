@@ -35,8 +35,8 @@ test('daily chart shows an empty state and hides when issuance is off', () => {
 
 test('server embeds per-agent daily class data (dd) and wires the chart into the search result', () => {
   assert.match(src, /async function personalAgentDailyRows/);
-  assert.match(src, /p\.dd = dd/);
-  assert.match(src, /donuts\(it\) \+ dailyChart\(it\)/);
+  assert.match(src, /p\.dd = r7\.o/);
+  assert.match(src, /var rest = donuts\(it\) \+ dailyChart\(it\)/);
   assert.match(src, /td: Number\(dateKeyNow\(\)\.slice\(8, 10\)\)/);
 });
 
@@ -45,4 +45,23 @@ test('personal link search matches agent ID too and shows the ID next to the nam
   assert.match(src, /it\._s\.indexOf\(t\)/);
   assert.match(src, /for \(const \[k8, p\] of peopleMap\)/);
   assert.match(src, /by name or agent ID/);
+});
+
+test('TL result lists agents: ID, name, class stock, last/this month, last active, growth %', () => {
+  const a = src.indexOf('var TCLS = ');
+  const b = src.indexOf('function paintTlAgents');
+  assert.ok(a > 0 && b > a);
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const sumC = (it, names) => { const r = [0, 0, 0, 0]; names.forEach((n) => { const x = (it.c && it.c[n]) || [0, 0, 0, 0]; for (let i = 0; i < 4; i++) r[i] += x[i]; }); return r; };
+  // eslint-disable-next-line no-new-func
+  const teamTable = new Function('D', 'MON', 'sumC', 'nf', 'esc', 'chBadge', src.slice(a, b) + '; return teamTable;')({ today: '2026-10-27' }, MON, sumC, (n) => String(n || 0), (x) => String(x), () => '');
+  const html = teamTable('t', [
+    { n: 'Sumit Dixit', i: 'APS016090', c: { VC4: [0, 0, 40, 0], VC20: [0, 0, 15, 0], VC5: [0, 0, 16, 0], VC12: [0, 0, 13, 0] }, st: 116, l: 32, m: 12, lp: 8, la: '2026-10-26', d: 0 },
+    { n: 'Old Agent', i: 'APS000001', c: {}, st: 0, l: 5, m: 0, lp: 5, la: '2026-10-20', d: 0 }
+  ]);
+  assert.match(html, /APS016090/); assert.match(html, /Sumit Dixit/);
+  assert.match(html, /Yesterday/); assert.match(html, /7 days ago/);
+  assert.match(html, /▲ \+50%/); assert.match(html, /▼ -100%/);
+  assert.match(html, /<th>VC12<\/th>/); assert.match(html, /<th>Growth %<\/th>/);
+  assert.match(html, /<td><b>55<\/b><\/td>/); // VC4/VC20 stock combined
 });
