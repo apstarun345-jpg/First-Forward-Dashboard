@@ -559,6 +559,87 @@ FF.pages = FF.pages || {};
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
   };
 
+  // ---------------------------------------------------------------- 📥 agent / TL report (Excel + CSV)
+  const REPORTS = { gv: ['GV Report', 'GV'], ff: ['First Forward Report', 'FF'], both: ['GV + FF Report', 'GV + FF'] };
+  const g3 = (r) => (r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5');
+  const r1 = (v) => Math.round(v * 10) / 10;
+  /** Rows (EIR agent rows; GV today = GV Master live, same as the KPI cards) → per-agent records for the chosen channel(s). */
+  function buildAgentReport(rows, m, which) {
+    const per = { ff: { cur: [m.from, m.ffTo], prev: m.prevFfRange }, gv: { cur: [m.from, m.gvTo], prev: m.prevGvRange } };
+    const out = new Map(), chTot = { ff: 0, gv: 0 };
+    for (const r of rows) {
+      const ch = r.channel === 'GV Partner' ? 'gv' : 'ff';
+      if (which !== 'both' && which !== ch) continue;
+      const pp = per[ch];
+      const inCur = within(r.dateKey, pp.cur[0], pp.cur[1]);
+      const inPrev = !!pp.prev && within(r.dateKey, pp.prev[0], pp.prev[1]);
+      if (!inCur && !inPrev) continue;
+      const direct = isDirectRow(r);
+      const key = `${ch}|${r.id || r.name}`;
+      const o = out.get(key) || { ch, id: r.id || '', name: r.name, tlName: direct ? FF.config.directLabel({ tlName: r.tlName, agentName: r.name, agentId: r.id }, ch) : r.tlName, tlId: direct ? '' : (r.tlId || ''), direct, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 };
+      if (inCur) { o[g3(r)] += r.n; o.total += r.n; chTot[ch] += r.n; }
+      if (inPrev) o.prev += r.n;
+      out.set(key, o);
+    }
+    const list = [...out.values()];
+    const grandTotal = list.reduce((a, o) => a + o.total, 0);
+    for (const o of list) {
+      o.change = o.total - o.prev;
+      o.perf = o.prev ? r1(((o.total - o.prev) / o.prev) * 100) : null;      // growth vs previous period (like-for-like, same as the KPI cards)
+      o.share = grandTotal ? r1((o.total / grandTotal) * 100) : 0;
+    }
+    list.sort((a, b) => b.total - a.total || b.prev - a.prev || String(a.name).localeCompare(String(b.name)));
+    return { list, grandTotal, chTot };
+  }
+  const perfTxt = (o) => (o.perf === null ? (o.total ? 'New' : '—') : o.perf);
+  const AGENT_HEAD = ['Rank', 'Agent ID', 'Agent Name', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance % (vs prev)', 'Share %'];
+  const agentRow = (o, i) => [i + 1, o.id, o.name, o.tlName, o.tlId, o.ch === 'gv' ? 'GV' : 'FF', o.vc4, o.vc20, o.vc5, o.total, o.prev, o.change, perfTxt(o), o.share];
+  const sumRow = (label, list, withPrev = true) => {
+    const t = list.reduce((a, o) => ({ vc4: a.vc4 + o.vc4, vc20: a.vc20 + o.vc20, vc5: a.vc5 + o.vc5, total: a.total + o.total, prev: a.prev + o.prev }), { vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 });
+    return { t, row: ['', '', label, '', '', '', t.vc4, t.vc20, t.vc5, t.total, withPrev ? t.prev : '', withPrev ? t.total - t.prev : '', withPrev ? (t.prev ? r1(((t.total - t.prev) / t.prev) * 100) : (t.total ? 'New' : '—')) : '', ''] };
+  };
+  /** One row per TL (and one "Direct agents" bucket per channel) — the pivot. */
+  function tlPivot(list) {
+    const map = new Map();
+    for (const o of list) {
+      const key = o.direct ? `${o.ch}|__direct__` : `${o.ch}|${o.tlId || o.tlName}`;
+      const x = map.get(key) || { ch: o.ch, name: o.direct ? `Direct agents` : o.tlName, id: o.direct ? '' : o.tlId, direct: o.direct, agents: 0, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 };
+      x.agents += o.total > 0 ? 1 : 0; x.vc4 += o.vc4; x.vc20 += o.vc20; x.vc5 += o.vc5; x.total += o.total; x.prev += o.prev;
+      map.set(key, x);
+    }
+    const grand = [...map.values()].reduce((a, x) => a + x.total, 0);
+    return [...map.values()].map((x) => ({ ...x, perf: x.prev ? r1(((x.total - x.prev) / x.prev) * 100) : null, share: grand ? r1((x.total / grand) * 100) : 0 })).sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name)));
+  }
+  function reportSheets(rep, m, which) {
+    const tlAgents = rep.list.filter((o) => !o.direct), direct = rep.list.filter((o) => o.direct);
+    const piv = tlPivot(rep.list);
+    const pivRows = piv.map((x, i) => [i + 1, x.name, x.id, x.ch === 'gv' ? 'GV' : 'FF', x.direct ? 'Direct agents' : 'TL team', x.agents, x.vc4, x.vc20, x.vc5, x.total, x.prev, x.total - x.prev, x.perf === null ? (x.total ? 'New' : '—') : x.perf, x.share]);
+    const tot = sumRow('TOTAL', rep.list);
+    const withTotal = (list, label) => { const rows = list.map(agentRow); if (list.length) rows.push(sumRow(label, list).row); return rows; };
+    return [
+      { name: 'Pivot (TL wise)', header: ['Rank', 'TL / Group', 'TL ID', 'Channel', 'Type', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance % (vs prev)', 'Share %'], rows: [...pivRows, ['', 'TOTAL', '', '', '', piv.reduce((a, x) => a + x.agents, 0), tot.t.vc4, tot.t.vc20, tot.t.vc5, tot.t.total, tot.t.prev, tot.t.total - tot.t.prev, tot.row[12], '']] },
+      { name: 'TL Agents', header: AGENT_HEAD, rows: withTotal(tlAgents, 'TOTAL · agents under TLs') },
+      { name: 'Direct Agents', header: AGENT_HEAD, rows: withTotal(direct, 'TOTAL · direct agents') },
+      { name: 'Info', header: ['Item', 'Value'], rows: [
+        ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to}`],
+        ['FF counted through', m.ffTo], ['GV counted through', m.gvTo],
+        ['Previous period (FF)', m.prevFfRange ? `${m.prevFfRange[0]} to ${m.prevFfRange[1]}` : '—'], ['Previous period (GV)', m.prevGvRange ? `${m.prevGvRange[0]} to ${m.prevGvRange[1]}` : '—'],
+        ['Performance %', 'Growth of the agent / TL total vs the previous period of the same length (New = nothing in previous period)'],
+        ['Share %', 'Share of the report total'], ['Sorted', 'Highest to lowest total'],
+        ['Source', 'EIR sheet (Master ID 5845036 = GV) — same numbers as the cards on this page'], ['Generated', new Date().toLocaleString('en-IN')]] }
+    ];
+  }
+  /** Flat CSV: every agent row (TL agents + direct agents), highest → lowest. */
+  function reportCsv(rep) {
+    return { head: [...AGENT_HEAD.slice(0, 5), 'Type', ...AGENT_HEAD.slice(5)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); return [...r.slice(0, 5), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(5)]; }) };
+  }
+  async function reportRows(m) {
+    const v = await loadDriverRows(m);
+    if (v.failed) throw v.err || new Error('Report data could not be loaded.');
+    // Same source as the KPI cards on this page: EIR rows (GV = Master ID 5845036). No GV Master override here.
+    const rows = v.rows || [];
+    return rows;
+  }
   async function render(root, params) {
     params = params || {};
     const now = new Date();
@@ -580,6 +661,13 @@ FF.pages = FF.pages || {};
           <label>📅 From <input type="date" class="input" id="ti-from" value="${esc(from)}" max="${todayKey()}"></label>
           <label>To <input type="date" class="input" id="ti-date" value="${esc(to)}" max="${todayKey()}"></label>
           <button class="btn small" type="button" id="ti-apply">Apply</button>
+          <div class="tix-report" id="ti-report">
+            <button class="btn primary" type="button" id="ti-report-btn" aria-haspopup="true" aria-expanded="false">📥 Report ▾</button>
+            <div class="tix-report-menu" id="ti-report-menu" hidden role="menu">
+              ${Object.entries(REPORTS).map(([k, [label]]) => `<div class="tix-report-item"><b>${k === 'gv' ? '🟩' : k === 'ff' ? '🟦' : '⚖️'} ${label}</b><span><button type="button" class="btn small" data-rep="${k}" data-fmt="xlsx">Excel</button><button type="button" class="btn small" data-rep="${k}" data-fmt="csv">CSV</button></span></div>`).join('')}
+              <p class="dim small">Uses the dates selected above · TL agents and direct agents on separate sheets · highest → lowest.</p>
+            </div>
+          </div>
         </div>
         <div class="tix-rangeinfo" id="ti-info"></div>
       </div>
@@ -689,6 +777,28 @@ FF.pages = FF.pages || {};
     }, true);
     body.addEventListener('change', (e) => { const sel = e.target.closest && e.target.closest('[data-drv-cls]'); if (sel) { DRV.cls = sel.value; redraw(); } }, true);
 
+    // 📥 Report dropdown
+    const repBtn = U.$('#ti-report-btn', root), repMenu = U.$('#ti-report-menu', root);
+    const repClose = () => { repMenu.hidden = true; repBtn.setAttribute('aria-expanded', 'false'); };
+    repBtn.addEventListener('click', (e) => { e.stopPropagation(); repMenu.hidden = !repMenu.hidden; repBtn.setAttribute('aria-expanded', String(!repMenu.hidden)); });
+    document.addEventListener('click', (e) => { if (!root.isConnected) return; if (!e.target.closest || !e.target.closest('#ti-report')) repClose(); });
+    repMenu.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-rep]'); if (!b) return;
+      const which = b.dataset.rep, fmt = b.dataset.fmt;
+      repClose();
+      await U.withButtonBusy(repBtn, async () => {
+        try {
+          const m = buildModel(channelRows(), from, to);
+          const rep = buildAgentReport(await reportRows(m), m, which);
+          if (!rep.list.length) { U.toast('No agents found for this period.', 'err'); return; }
+          const base = `${REPORTS[which][0].replace(/[^A-Za-z0-9+]+/g, '-')}_${from}_to_${to}`;
+          if (fmt === 'csv') { const c = reportCsv(rep); U.downloadCsv(`${base}.csv`, c.head, c.rows); }
+          else FF.xlsx.download(`${base}.xlsx`, reportSheets(rep, m, which));
+          U.toast(`📥 ${REPORTS[which][0]} · ${U.fmt(rep.list.length)} agents · ${U.fmt(rep.grandTotal)} tags`, 'ok');
+        } catch (err) { U.toast(err.message || 'Report failed', 'err'); }
+      }, 'Preparing…');
+    });
+
     fromInput.addEventListener('change', applyCustom);
     toInput.addEventListener('change', applyCustom);
     U.$('#ti-apply', root).addEventListener('click', applyCustom);
@@ -697,5 +807,5 @@ FF.pages = FF.pages || {};
   }
 
   FF.pages.tagIssued = { title: 'GV & FF Tag Issued', render };
-  FF.pages.tagIssued._test = { presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey, reconHtml, healthStrip };
+  FF.pages.tagIssued._test = { buildAgentReport, reportSheets, reportCsv, tlPivot, presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey, reconHtml, healthStrip };
 })(window.FF);
