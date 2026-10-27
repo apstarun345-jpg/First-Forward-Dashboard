@@ -563,112 +563,163 @@ FF.pages = FF.pages || {};
   const REPORTS = { gv: ['GV Report', 'GV'], ff: ['First Forward Report', 'FF'], both: ['GV + FF Report', 'GV + FF'] };
   const g3 = (r) => (r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5');
   const r1 = (v) => Math.round(v * 10) / 10;
-  /** Rows (EIR agent rows; GV today = GV Master live, same as the KPI cards) → per-agent records for the chosen channel(s). */
-  function buildAgentReport(rows, m, which) {
-    // Same windows as the Total Issued card: scan(rows, from, to) for both channels, prev = like-for-like range.
+  const nid = (v) => String(v == null ? '' : v).replace(/\.0+$/, '').replace(/\s+/g, '').toUpperCase();
+  const nname = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().toUpperCase();
+  const perfPct = (cur, prev) => (prev ? r1(((cur - prev) / prev) * 100) : null);
+  /** Plain-words performance next to the % (vs the previous period of the same length). */
+  const perfStatus = (cur, prev) => (!prev && !cur ? '—' : !prev ? '★ New' : !cur ? '✖ No issuance now' : cur > prev ? '▲ Up' : cur < prev ? '▼ Down' : '= Same');
+  const perfCell = (cur, prev) => { const p = perfPct(cur, prev); return p === null ? '' : p; };
+
+  /**
+   * Agent-level rows for the report, in one shape: { ch, id, name, tlName, tlId, direct, mobile, group, dateKey, n }.
+   * GV  → GV Master (row per tag, with agent + supervisor) — the EIR GV rows carry no agent / TL.
+   * FF  → EIR (same rows as the card); TL / mobile from the FF REPORT agent list (ID, Sheet4 aliases, then name).
+   */
+  function reportInputs(rows, dir) {
+    const out = [];
+    for (const r of rows.dailyRows || []) {
+      if (r.channel === 'GV Partner') continue;
+      const id = U.clean(r.agentId || r.id), name0 = U.clean(r.agentName || r.name);
+      const hit = dir.ff(id, name0);
+      const name = name0 || (hit && hit.name) || (id ? `Agent ${id}` : '(No agent in EIR)');
+      const tlName = hit ? U.clean(hit.tlName) : '', tlId = hit ? U.clean(hit.tlId) : '';
+      let direct = !tlName;
+      if (!direct) { try { direct = !!FF.config.isDirectAgent({ tlName, tlId, agentName: name, agentId: id }, 'ff'); } catch (e) { /* keep */ } }
+      out.push({ ch: 'ff', id, name, tlName: direct ? (hit ? FF.config.directLabel({ tlName, agentName: name, agentId: id }, 'ff') : 'No TL (not in REPORT)') : tlName, tlId: direct ? '' : tlId, direct, mobile: (hit && hit.mobile) || '', group: r.group, dateKey: r.key || (r.date ? U.dateKey(r.date) : ''), n: r.n === undefined ? 1 : (Number(r.n) || 0) });
+    }
+    const rawGv = rows.rawGvMaster || ((G && typeof G.masterRows === 'function' ? G.masterRows() : null) || []);
+    for (const r of rawGv) {
+      if (!r || !r.date) continue;
+      let direct = false;
+      try { direct = !!FF.config.isDirectAgent(r, 'gv'); } catch (e) { /* keep */ }
+      const tlName = U.clean(r.tlName);
+      if (!tlName) direct = true;
+      const name = U.clean(r.agentName) || (r.agentId ? `Agent ${r.agentId}` : '(No agent in GV Master)');
+      out.push({ ch: 'gv', id: U.clean(r.agentId), name, tlName: direct ? FF.config.directLabel(r, 'gv') : tlName, tlId: direct ? '' : U.clean(r.tlId || r.supervisorId || r.gvTlId || ''), direct, mobile: dir.gv(r.agentId, r.agentName), group: r.group || (M.classGroup ? M.classGroup(r.cls) : 'VC4'), dateKey: U.dateKey(r.date), n: 1 });
+    }
+    return out;
+  }
+
+  /** Per-agent records (current period = the card's dates; previous = like-for-like range). */
+  function buildAgentReport(inputs, m, which) {
     const per = { ff: { cur: [m.from, m.to], prev: m.prevFfRange }, gv: { cur: [m.from, m.to], prev: m.prevGvRange } };
-    const out = new Map(), chTot = { ff: 0, gv: 0 };
-    for (const r of rows) {
-      const ch = r.channel === 'GV Partner' ? 'gv' : 'ff';
-      if (which !== 'both' && which !== ch) continue;
-      const pp = per[ch];
+    const out = new Map();
+    for (const r of inputs) {
+      if (which !== 'both' && which !== r.ch) continue;
+      const pp = per[r.ch];
       const inCur = within(r.dateKey, pp.cur[0], pp.cur[1]);
       const inPrev = !!pp.prev && within(r.dateKey, pp.prev[0], pp.prev[1]);
       if (!inCur && !inPrev) continue;
-      const direct = isDirectRow(r);
-      const key = `${ch}|${r.id || r.name}`;
-      const o = out.get(key) || { ch, id: r.id || '', name: r.name, tlName: direct ? FF.config.directLabel({ tlName: r.tlName, agentName: r.name, agentId: r.id }, ch) : r.tlName, tlId: direct ? '' : (r.tlId || ''), direct, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 };
-      if (inCur) { o[g3(r)] += r.n; o.total += r.n; chTot[ch] += r.n; }
+      const key = `${r.ch}|${nid(r.id) || nname(r.name)}`;
+      const o = out.get(key) || { ch: r.ch, id: r.id, name: r.name, tlName: r.tlName, tlId: r.tlId, direct: r.direct, mobile: r.mobile || '', vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 };
+      if (!o.mobile && r.mobile) o.mobile = r.mobile;
+      if (inCur) { o[g3(r)] += r.n; o.total += r.n; }
       if (inPrev) o.prev += r.n;
       out.set(key, o);
     }
     const list = [...out.values()];
     const grandTotal = list.reduce((a, o) => a + o.total, 0);
-    for (const o of list) {
-      o.change = o.total - o.prev;
-      o.perf = o.prev ? r1(((o.total - o.prev) / o.prev) * 100) : null;      // growth vs previous period (like-for-like, same as the KPI cards)
-      o.share = grandTotal ? r1((o.total / grandTotal) * 100) : 0;
-    }
+    for (const o of list) { o.change = o.total - o.prev; o.perf = perfPct(o.total, o.prev); o.status = perfStatus(o.total, o.prev); o.share = grandTotal ? r1((o.total / grandTotal) * 100) : 0; }
     list.sort((a, b) => b.total - a.total || b.prev - a.prev || String(a.name).localeCompare(String(b.name)));
+    const chTot = { ff: 0, gv: 0 }; list.forEach((o) => { chTot[o.ch] += o.total; });
     return { list, grandTotal, chTot };
   }
-  const perfTxt = (o) => (o.perf === null ? (o.total ? 'New' : '—') : o.perf);
-  const AGENT_HEAD = ['Rank', 'Agent ID', 'Agent Name', 'Mobile', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance % (vs prev)', 'Share %'];
-  const agentRow = (o, i) => [i + 1, o.id, o.name, o.mobile || '', o.tlName, o.tlId, o.ch === 'gv' ? 'GV' : 'FF', o.vc4, o.vc20, o.vc5, o.total, o.prev, o.change, perfTxt(o), o.share];
-  const sumRow = (label, list, withPrev = true) => {
-    const t = list.reduce((a, o) => ({ vc4: a.vc4 + o.vc4, vc20: a.vc20 + o.vc20, vc5: a.vc5 + o.vc5, total: a.total + o.total, prev: a.prev + o.prev }), { vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 });
-    return { t, row: ['', '', label, '', '', '', '', t.vc4, t.vc20, t.vc5, t.total, withPrev ? t.prev : '', withPrev ? t.total - t.prev : '', withPrev ? (t.prev ? r1(((t.total - t.prev) / t.prev) * 100) : (t.total ? 'New' : '—')) : '', ''] };
-  };
-  /** One row per TL (and one "Direct agents" bucket per channel) — the pivot. */
+
+  /** One row per real TL (both channels together), highest → lowest. */
   function tlPivot(list) {
     const map = new Map();
     for (const o of list) {
-      const key = o.direct ? `${o.ch}|__direct__` : `${o.ch}|${o.tlId || o.tlName}`;
-      const x = map.get(key) || { ch: o.ch, name: o.direct ? `Direct agents` : o.tlName, id: o.direct ? '' : o.tlId, direct: o.direct, agents: 0, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 };
+      if (o.direct) continue;
+      const key = `${o.ch}|${nid(o.tlId) || nname(o.tlName)}`;
+      const x = map.get(key) || { ch: o.ch, name: o.tlName, id: o.tlId, agents: 0, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 };
+      if (!x.id && o.tlId) x.id = o.tlId;
       x.agents += o.total > 0 ? 1 : 0; x.vc4 += o.vc4; x.vc20 += o.vc20; x.vc5 += o.vc5; x.total += o.total; x.prev += o.prev;
       map.set(key, x);
     }
-    const grand = [...map.values()].reduce((a, x) => a + x.total, 0);
-    return [...map.values()].map((x) => ({ ...x, perf: x.prev ? r1(((x.total - x.prev) / x.prev) * 100) : null, share: grand ? r1((x.total / grand) * 100) : 0 })).sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name)));
+    const grand = list.reduce((a, o) => a + o.total, 0);
+    return [...map.values()].map((x) => ({ ...x, perf: perfPct(x.total, x.prev), status: perfStatus(x.total, x.prev), share: grand ? r1((x.total / grand) * 100) : 0 }))
+      .sort((a, b) => b.total - a.total || b.prev - a.prev || String(a.name).localeCompare(String(b.name)));
   }
+  const chName = (ch) => (ch === 'gv' ? 'GV' : 'FF');
+  const AGENT_HEAD = ['Rank', 'Agent ID', 'Agent Name', 'Mobile', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance %', 'Performance', 'Share %'];
+  const agentRow = (o, i) => [i + 1, o.id, o.name, o.mobile || '', o.tlName, o.tlId, chName(o.ch), o.vc4, o.vc20, o.vc5, o.total, o.prev, o.change, perfCell(o.total, o.prev), o.status, o.share];
+  const sumOf = (list) => list.reduce((a, o) => ({ vc4: a.vc4 + o.vc4, vc20: a.vc20 + o.vc20, vc5: a.vc5 + o.vc5, total: a.total + o.total, prev: a.prev + o.prev }), { vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 });
+  const totalRow = (label, list, width) => {
+    const t = sumOf(list);
+    const tail = [t.vc4, t.vc20, t.vc5, t.total, t.prev, t.total - t.prev, perfCell(t.total, t.prev), perfStatus(t.total, t.prev), ''];
+    return [...Array(width - tail.length).fill(''), ...tail].map((v, k) => (k === 2 ? label : v));
+  };
   function reportSheets(rep, m, which) {
     const tlAgents = rep.list.filter((o) => !o.direct), direct = rep.list.filter((o) => o.direct);
     const piv = tlPivot(rep.list);
-    const pivRows = piv.map((x, i) => [i + 1, x.name, x.id, x.ch === 'gv' ? 'GV' : 'FF', x.direct ? 'Direct agents' : 'TL team', x.agents, x.vc4, x.vc20, x.vc5, x.total, x.prev, x.total - x.prev, x.perf === null ? (x.total ? 'New' : '—') : x.perf, x.share]);
-    const tot = sumRow('TOTAL', rep.list);
-    const withTotal = (list, label) => { const rows = list.map(agentRow); if (list.length) rows.push(sumRow(label, list).row); return rows; };
+    const TL_HEAD = ['Rank', 'TL ID', 'TL Name', 'Channel', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance %', 'Performance', 'Share %'];
+    const tlRows = piv.map((x, i) => [i + 1, x.id, x.name, chName(x.ch), x.agents, x.vc4, x.vc20, x.vc5, x.total, x.prev, x.total - x.prev, perfCell(x.total, x.prev), x.status, x.share]);
+    const line = (label, list, agentsN) => { const t = sumOf(list); return ['', '', label, '', agentsN, t.vc4, t.vc20, t.vc5, t.total, t.prev, t.total - t.prev, perfCell(t.total, t.prev), perfStatus(t.total, t.prev), rep.grandTotal ? r1((t.total / rep.grandTotal) * 100) : 0]; };
+    const active = (l) => l.filter((o) => o.total > 0).length;
+    const blank = Array(TL_HEAD.length).fill('');
+    const tlSheetRows = [...tlRows, blank,
+      line('TOTAL · all TLs (agents under TLs)', tlAgents, active(tlAgents)),
+      line('TOTAL · direct agents', direct, active(direct)),
+      line('GRAND TOTAL', rep.list, active(rep.list))];
+    const withTotal = (list, label) => { const rows = list.map(agentRow); if (list.length) rows.push(totalRow(label, list, AGENT_HEAD.length)); return rows; };
+    const both = which === 'both';
     return [
-      { name: 'Pivot (TL wise)', header: ['Rank', 'TL / Group', 'TL ID', 'Channel', 'Type', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance % (vs prev)', 'Share %'], rows: [...pivRows, ['', 'TOTAL', '', '', '', piv.reduce((a, x) => a + x.agents, 0), tot.t.vc4, tot.t.vc20, tot.t.vc5, tot.t.total, tot.t.prev, tot.t.total - tot.t.prev, tot.row[13], '']] },
-      { name: 'TL Agents', header: AGENT_HEAD, rows: withTotal(tlAgents, 'TOTAL · agents under TLs') },
-      { name: 'Direct Agents', header: AGENT_HEAD, rows: withTotal(direct, 'TOTAL · direct agents') },
+      { name: both ? 'TLs (GV + FF)' : `TLs (${REPORTS[which][1]})`, header: TL_HEAD, rows: tlSheetRows },
+      { name: both ? 'Direct Agents (GV + FF)' : `Direct Agents (${REPORTS[which][1]})`, header: AGENT_HEAD, rows: withTotal(direct, 'TOTAL · direct agents') },
+      { name: both ? 'Agents under TLs (GV + FF)' : `Agents under TLs (${REPORTS[which][1]})`, header: AGENT_HEAD, rows: withTotal(tlAgents, 'TOTAL · agents under TLs') },
       { name: 'Info', header: ['Item', 'Value'], rows: [
         ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to}`],
-        ['FF counted through', m.ffTo], ['GV counted through', m.gvTo],
         ['Previous period (FF)', m.prevFfRange ? `${m.prevFfRange[0]} to ${m.prevFfRange[1]}` : '—'], ['Previous period (GV)', m.prevGvRange ? `${m.prevGvRange[0]} to ${m.prevGvRange[1]}` : '—'],
-        ['Performance %', 'Growth of the agent / TL total vs the previous period of the same length (New = nothing in previous period)'],
-        ['Share %', 'Share of the report total'], ['Sorted', 'Highest to lowest total'],
-        ['Source', 'Same rows as the Total Issued card (EIR; GV today = GV Master live) · Mobile from GV REPORT / FF REPORT'], ['Generated', new Date().toLocaleString('en-IN')]] }
+        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total]] : []),
+        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total]] : []),
+        ['Performance %', '(Total − Prev total) ÷ Prev total × 100, previous period of the same length'],
+        ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in previous period) · ✖ No issuance now'],
+        ['Share %', 'Share of the report grand total'], ['Sorted', 'Highest to lowest total'],
+        ['Sources', 'FF: EIR (same rows as the card), TL + mobile from FF REPORT. GV: GV Master (agent + TL per tag), mobile from GV REPORT.'],
+        ['Generated', new Date().toLocaleString('en-IN')]] }
     ];
   }
-  /** Flat CSV: every agent row (TL agents + direct agents), highest → lowest. */
+  /** Flat CSV: every agent (TL agents + direct agents), highest → lowest. */
   function reportCsv(rep) {
     return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); return [...r.slice(0, 6), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6)]; }) };
   }
-  /** Exactly the rows behind the Total Issued card (EIR daily; today's GV = GV Master live, as loaded for the cards). */
-  function reportRows() {
-    return (channelRows().dailyRows || []).map((r) => {
-      const name = U.clean(r.agentName || r.name) || (r.agentId ? `Agent ${r.agentId}` : '(No agent in sheet)');
-      return { id: U.clean(r.agentId || r.id), name, tlId: U.clean(r.tlId), tlName: U.clean(r.tlName) || 'Direct', channel: r.channel, group: r.group, dateKey: r.key || (r.date ? U.dateKey(r.date) : ''), n: r.n === undefined ? 1 : (Number(r.n) || 0) };
-    });
-  }
-  /** Mobile numbers: GV REPORT (GV) + Performance agents (FF REPORT). Best effort — never blocks the download for long. */
-  async function mobileBook() {
-    const book = { id: new Map(), name: new Map() };
-    const put = (id, name, mob) => {
-      const v = U.clean(mob); if (!v || /^na$/i.test(v)) return;
-      const k = U.clean(id).replace(/\.0+$/, '').toUpperCase(); if (k && !book.id.has(k)) book.id.set(k, v);
-      const n = U.clean(name).toUpperCase(); if (n && !book.name.has(n)) book.name.set(n, v);
-    };
+  /** FF REPORT (TL / mobile by agent) + GV REPORT (mobile). Best effort, bounded wait. */
+  async function reportDirectory() {
     const wait = (p, ms) => Promise.race([Promise.resolve(p).catch(() => null), new Promise((r) => setTimeout(r, ms))]);
-    try {
-      let gr = G && G.get && G.get('report');
-      if (!Array.isArray(gr) && G && G.need) gr = await wait(G.need('report'), 8000);
-      (Array.isArray(gr) ? gr : []).forEach((r) => { put(r.agentId, r.agentName, r.mobile); if (r.tlName && r.tlMobile) put(r.tlId, r.tlName, r.tlMobile); });
-    } catch (e) { /* no GV mobiles */ }
+    const ffById = new Map(), ffByName = new Map(), gvMob = new Map(), gvMobName = new Map();
     try {
       if (FF.lazy && FF.lazy.ensure) await wait(FF.lazy.ensure('performance'), 8000);
       const P = FF.pages.performance;
-      if (P && P.ensureLoaded) await wait(P.ensureLoaded(), 10000);
+      if (P && P.ensureLoaded) await wait(P.ensureLoaded(), 12000);
+      if (FF.aliases && FF.aliases.load) await wait(FF.aliases.load(), 5000);
       const ags = (P && P.agents && P.agents()) || [];
-      ags.forEach((a) => { put(a.agentId || a.id, a.name, a.mobile); if (a.tlName && a.tlMobile) put(a.tlId, a.tlName, a.tlMobile); });
-    } catch (e) { /* no FF mobiles */ }
-    return book;
+      for (const a of ags) {
+        const rec = { name: a.name, tlName: a.tlExcluded ? '' : a.tlName, tlId: a.tlExcluded ? '' : a.tlId, mobile: /^na$/i.test(U.clean(a.mobile)) ? '' : U.clean(a.mobile) };
+        const ids = [a.agentId, a.id];
+        try { const al = FF.aliases && FF.aliases.of && FF.aliases.of(a.agentId || a.id); if (al) ids.push(al.agentId, ...(al.assist || [])); } catch (e) { /* no aliases */ }
+        ids.map(nid).filter(Boolean).forEach((k) => { if (!ffById.has(k)) ffById.set(k, rec); });
+        const n = nname(a.name); if (n && !ffByName.has(n)) ffByName.set(n, rec);
+      }
+    } catch (e) { /* FF directory unavailable */ }
+    try {
+      let gr = G && G.get && G.get('report');
+      if (!Array.isArray(gr) && G && G.need) gr = await wait(G.need('report'), 8000);
+      for (const r of (Array.isArray(gr) ? gr : [])) {
+        const v = U.clean(r.mobile); if (!v || /^na$/i.test(v)) continue;
+        if (nid(r.agentId) && !gvMob.has(nid(r.agentId))) gvMob.set(nid(r.agentId), v);
+        if (nname(r.agentName) && !gvMobName.has(nname(r.agentName))) gvMobName.set(nname(r.agentName), v);
+      }
+    } catch (e) { /* GV mobiles unavailable */ }
+    return {
+      ff(id, name) {
+        const k = nid(id);
+        let hit = k ? ffById.get(k) : null;
+        if (!hit && k && FF.aliases && FF.aliases.map) { const to = nid(FF.aliases.map(id)); if (to) hit = ffById.get(to); }
+        return hit || (name ? ffByName.get(nname(name)) : null) || null;
+      },
+      gv(id, name) { return gvMob.get(nid(id)) || gvMobName.get(nname(name)) || ''; }
+    };
   }
-  function attachMobiles(rep, book) {
-    for (const o of rep.list) o.mobile = book.id.get(U.clean(o.id).replace(/\.0+$/, '').toUpperCase()) || book.name.get(U.clean(o.name).toUpperCase()) || '';
-    return rep;
-  }
-
   async function render(root, params) {
     params = params || {};
     const now = new Date();
@@ -820,8 +871,9 @@ FF.pages = FF.pages || {};
       repClose();
       await U.withButtonBusy(repBtn, async () => {
         try {
-          const m = buildModel(channelRows(), from, to);
-          const rep = attachMobiles(buildAgentReport(reportRows(), m, which), await mobileBook());
+          const rows0 = channelRows();
+          const m = buildModel(rows0, from, to);
+          const rep = buildAgentReport(reportInputs(rows0, await reportDirectory()), m, which);
           if (!rep.list.length) { U.toast('No agents found for this period.', 'err'); return; }
           const base = `${REPORTS[which][0].replace(/[^A-Za-z0-9+]+/g, '-')}_${from}_to_${to}`;
           if (fmt === 'csv') { const c = reportCsv(rep); U.downloadCsv(`${base}.csv`, c.head, c.rows); }
@@ -839,5 +891,5 @@ FF.pages = FF.pages || {};
   }
 
   FF.pages.tagIssued = { title: 'GV & FF Tag Issued', render };
-  FF.pages.tagIssued._test = { buildAgentReport, reportSheets, reportCsv, tlPivot, presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey, reconHtml, healthStrip };
+  FF.pages.tagIssued._test = { buildAgentReport, reportInputs, reportSheets, reportCsv, tlPivot, presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey, reconHtml, healthStrip };
 })(window.FF);

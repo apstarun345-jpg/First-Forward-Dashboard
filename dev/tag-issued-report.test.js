@@ -13,32 +13,42 @@ function load() {
   return FF.pages.tagIssued._test;
 }
 
-test('agent report: pivot, TL vs direct split, sort, performance %', () => {
+test('agent report: GV from GV Master, FF TL from REPORT, TLs + direct sheets, performance', () => {
   const t = load();
-  const m = { from: '2026-10-26', to: '2026-10-26', ffTo: '2026-10-26', gvTo: '2026-10-26', prevFfRange: ['2026-10-25', '2026-10-25'], prevGvRange: ['2026-10-25', '2026-10-25'] };
-  const r = (o) => ({ n: 1, cls: 'VC4', group: 'VC4', ...o });
-  const rows = [
-    ...Array(5).fill(0).map(() => r({ channel: 'GV Partner', id: 'G1', name: 'Gv One', tlId: 'T1', tlName: 'TL A', dateKey: '2026-10-26' })),
-    ...Array(2).fill(0).map(() => r({ channel: 'GV Partner', id: 'G1', name: 'Gv One', tlId: 'T1', tlName: 'TL A', dateKey: '2026-10-25' })),
-    ...Array(3).fill(0).map(() => r({ channel: 'GV Partner', id: 'G2', name: 'Gv Two', tlId: '', tlName: 'Direct', dateKey: '2026-10-26', cls: 'VC20', group: 'VC20' })),
-    ...Array(9).fill(0).map(() => r({ channel: 'First Forward', id: 'F1', name: 'Ff One', tlId: 'T9', tlName: 'TL B', dateKey: '2026-10-26', cls: 'VC6', group: 'VC5+' })),
-    r({ channel: 'First Forward', id: 'F1', name: 'Ff One', tlId: 'T9', tlName: 'TL B', dateKey: '2026-10-20' })   // outside both periods
+  const m = { from: '2026-10-26', to: '2026-10-26', prevFfRange: ['2026-10-25', '2026-10-25'], prevGvRange: ['2026-10-25', '2026-10-25'], ff: { total: 10 }, gv: { total: 8 } };
+  const gvRow = (o) => ({ date: o.d, group: 'VC4', cls: 'VC4', agentId: o.id, agentName: o.name, tlName: o.tl || '', tlId: o.tlId || '' });
+  const rawGvMaster = [
+    ...Array(5).fill(0).map(() => gvRow({ d: '2026-10-26', id: 'G1', name: 'Gv One', tl: 'TL A', tlId: 'T1' })),
+    ...Array(2).fill(0).map(() => gvRow({ d: '2026-10-25', id: 'G1', name: 'Gv One', tl: 'TL A', tlId: 'T1' })),
+    ...Array(3).fill(0).map(() => ({ ...gvRow({ d: '2026-10-26', id: 'G2', name: 'Gv Two' }), group: 'VC20' }))
   ];
-  const gv = t.buildAgentReport(rows, m, 'gv');
-  assert.equal(gv.list.length, 2); assert.equal(gv.grandTotal, 8);
-  assert.equal(gv.list[0].name, 'Gv One'); assert.equal(gv.list[0].total, 5); assert.equal(gv.list[0].prev, 2); assert.equal(gv.list[0].perf, 150);
-  assert.equal(gv.list[1].direct, true); assert.equal(gv.list[1].vc20, 3); assert.equal(gv.list[1].perf, null);
-  const both = t.buildAgentReport(rows, m, 'both');
-  assert.equal(JSON.stringify(both.list.map((o) => o.name)), JSON.stringify(['Ff One', 'Gv One', 'Gv Two']), 'highest → lowest across channels');
-  assert.equal(both.list[0].vc5, 9); assert.equal(both.grandTotal, 17);
+  const dailyRows = [
+    { channel: 'First Forward', agentId: 'F1', agentName: 'Ff One', key: '2026-10-26', group: 'VC5+', n: 9 },
+    { channel: 'First Forward', agentId: 'F2', agentName: 'Ff Two', key: '2026-10-26', group: 'VC4', n: 1 },
+    { channel: 'First Forward', agentId: 'F2', agentName: 'Ff Two', key: '2026-10-25', group: 'VC4', n: 4 },
+    { channel: 'GV Partner', agentId: '', agentName: '', key: '2026-10-26', group: 'VC4', n: 8 }   // EIR GV rows are not used for agent detail
+  ];
+  const dir = { ff: (id) => (id === 'F1' ? { name: 'Ff One', tlName: 'TL B', tlId: 'T9', mobile: '9000000001' } : null), gv: (id) => (id === 'G1' ? '9000000002' : '') };
+  const inputs = t.reportInputs({ dailyRows, rawGvMaster }, dir);
+  const both = t.buildAgentReport(inputs, m, 'both');
+  assert.equal(JSON.stringify(both.list.map((o) => o.name)), JSON.stringify(['Ff One', 'Gv One', 'Gv Two', 'Ff Two']));
+  const f1 = both.list[0]; assert.equal(f1.tlName, 'TL B'); assert.equal(f1.direct, false); assert.equal(f1.mobile, '9000000001'); assert.equal(f1.vc5, 9);
+  const g1 = both.list[1]; assert.equal(g1.perf, 150); assert.equal(g1.status, '▲ Up'); assert.equal(g1.mobile, '9000000002');
+  assert.equal(both.list[2].direct, true); assert.equal(both.list[2].status, '★ New');
+  const f2 = both.list[3]; assert.equal(f2.direct, true); assert.equal(f2.perf, -75); assert.equal(f2.status, '▼ Down');
+  assert.equal(both.chTot.ff, 10); assert.equal(both.chTot.gv, 8);
   const sheets = t.reportSheets(both, m, 'both');
-  assert.equal(sheets.map((s) => s.name).join('|'), 'Pivot (TL wise)|TL Agents|Direct Agents|Info');
-  assert.equal(sheets[1].rows.length, 3, 'two TL agents + total row');
-  assert.equal(sheets[2].rows.length, 2, 'one direct agent + total row');
-  assert.equal(sheets[0].rows.at(-1)[9], 17, 'pivot grand total');
+  assert.equal(sheets.map((s) => s.name).join('|'), 'TLs (GV + FF)|Direct Agents (GV + FF)|Agents under TLs (GV + FF)|Info');
+  const tls = sheets[0].rows;
+  assert.equal(tls[0][2], 'TL B'); assert.equal(tls[0][8], 9); assert.equal(tls[1][2], 'TL A'); assert.equal(tls[1][3], 'GV');
+  assert.equal(tls.at(-1)[2], 'GRAND TOTAL'); assert.equal(tls.at(-1)[8], 18);
+  const direct = sheets[1].rows;
+  assert.equal(direct.length, 3, 'GV + FF direct agents combined + total');
+  assert.equal(direct[0][2], 'Gv Two'); assert.equal(direct[1][2], 'Ff Two'); assert.equal(direct[2][2], 'TOTAL · direct agents'); assert.equal(direct[2][10], 4);
+  const gvOnly = t.reportSheets(t.buildAgentReport(inputs, m, 'gv'), m, 'gv');
+  assert.equal(gvOnly[0].name, 'TLs (GV)'); assert.equal(gvOnly[0].rows[0][2], 'TL A');
   const csv = t.reportCsv(both);
-  assert.equal(csv.head[6], 'Type'); assert.equal(csv.head[3], 'Mobile'); assert.equal(csv.rows.length, 3); assert.equal(csv.rows[2][6], 'Direct agent');
-  assert.ok(['Agent ID', 'Agent Name', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total'].every((h) => csv.head.includes(h)));
+  assert.equal(csv.head[3], 'Mobile'); assert.equal(csv.head[6], 'Type'); assert.ok(csv.head.includes('Performance'));
 });
 
 test('Tag Issued toolbar has the Report dropdown with GV / FF / GV+FF', () => {
