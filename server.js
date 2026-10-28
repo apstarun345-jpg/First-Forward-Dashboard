@@ -10495,6 +10495,15 @@ async function servePersonalPage(req, res, rawToken) {
   const urlQ = (() => { try { return new URL(req.url, 'http://x').searchParams; } catch { return new URLSearchParams(); } })();
   // 👁 Admin live preview: the admin's own dashboard session may open the page inside the live-view mirror (read-only, never logged).
   const adminPreview = urlQ.get('embed') === 'live' && (() => { const u = sessionUser(req); return !!(u && u.role === 'admin'); })();
+  if (urlQ.get('logout') === '1') {
+    // 🚪 Logout — session cookie saaf + server-side revoke, phir seedha login screen par redirect.
+    try {
+      const value = parseCookies(req)[personalLinkCookieName(savedLink.token)];
+      if (value) { if (personalLinkSession(req, savedLink)) plRecordActivity(savedLink, req, 'logout', 'Logged out', {}); personalLinkSessions.delete(sha(value)); plLoggedOut.add(sha(value)); if (plLoggedOut.size > 5000) plLoggedOut.delete(plLoggedOut.values().next().value); }
+    } catch { /* best-effort */ }
+    res.writeHead(302, { Location: `/p/${encodeURIComponent(savedLink.token)}`, 'Set-Cookie': clearPersonalLinkCookie(req, savedLink), 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' });
+    return res.end();
+  }
   const hasSession = adminPreview || personalLinkSession(req, savedLink);
   if (!hasSession) {
     if (req.method !== 'HEAD') plRecordActivity(savedLink, req, 'link_open', 'Opened the link (login screen)');
@@ -11311,7 +11320,7 @@ body{padding:clamp(10px,1.6vw,26px)}
 </style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
 <header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(personName || db.settings.brand || 'FF').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
 <div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p id="pl-sub">${sub}</p>` : ''}</div></div>
-${requireAuth ? `<button type="button" class="pb-btn" id="pl-lock-btn" ${authorized ? '' : 'hidden'} title="Lock Personal Link">🔒 Lock</button>` : ''}</header>
+${requireAuth ? `<button type="button" class="pb-btn" id="pl-lock-btn" ${authorized ? '' : 'hidden'} title="Logout from this Personal Link">🚪 Logout</button>` : ''}</header>
 ${body || ''}
 </div>
 <script src="/i18n.js"></script><script src="/i18n-en.js"></script>
@@ -11400,6 +11409,16 @@ const PERSONAL_PORTAL_JS = `(function () {
   var root = document.getElementById('pl-root');
   if (!root) return;
   var token = root.getAttribute('data-token') || '';
+  // 🚪 Logout — fetch par depend nahi: server ka ?logout=1 route cookie clear karke login screen par bhejta hai.
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest ? e.target.closest('#pl-lock-btn') : null;
+    if (!t) return;
+    e.preventDefault();
+    t.disabled = true;
+    try { sessionStorage.removeItem('plSid'); } catch (er) {}
+    window.location.assign('/p/' + encodeURIComponent(token) + '?logout=1');
+  });
+
   var person = root.getAttribute('data-person') || 'Partner';
   var authorized = root.getAttribute('data-authorized') === '1';
   var embed = /[?&]embed=live/.test(location.search);
@@ -11431,14 +11450,6 @@ const PERSONAL_PORTAL_JS = `(function () {
     setInterval(function () { if (!document.hidden) ping(); }, 20000);
     document.addEventListener('visibilitychange', ping);
   }
-
-  if (lockBtn) lockBtn.addEventListener('click', function () {
-    lockBtn.disabled = true;
-    fetch('/api/public/personal-link/logout', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: token, sid: sid })
-    }).finally(function () { window.location.reload(); });
-  });
 
   if (form) {
     form.addEventListener('submit', function (e) {
