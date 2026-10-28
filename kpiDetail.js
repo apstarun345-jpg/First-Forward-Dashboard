@@ -274,6 +274,10 @@ window.FF = window.FF || {};
     if (spec.type === 'REPLACEMENT' && r.type !== 'REPLACEMENT') return false;
     if (spec.type === 'NOT_REPLACEMENT' && r.type === 'REPLACEMENT') return false;
     if (spec.vrnBucket && vrnBucket(r.vrnType) !== spec.vrnBucket) return false;
+    // vrnKind: same rules as the Chassis / New-VRN stat chips (so a chip's number == the rows it opens)
+    if (spec.vrnKind === 'chassis' && !/chassis/i.test(String(r.vrnType || ''))) return false;
+    if (spec.vrnKind === 'wrong' && !/wrong/i.test(String(r.vrnType || ''))) return false;
+    if (spec.vrnKind === 'new' && (/chassis/i.test(String(r.vrnType || '')) || /wrong/i.test(String(r.vrnType || '')))) return false;
     if ((spec.tl || spec.tlId) && !(spec.agent || spec.agentId)) {
       const wantTl = personKey(spec.tl);
       const wantId = personKey(spec.tlId);
@@ -422,11 +426,14 @@ window.FF = window.FF || {};
     const pFullComm = hasPrevSource ? (previousValues && previousValues.comm != null ? Number(previousValues.comm) : Number((prevBins && (prevBins.VC20 + prevBins['VC5+'])) ?? 0)) : null;
     const pFullTotal = hasPrevSource ? (previousValues && previousValues.total != null ? Number(previousValues.total) : Number((prevBins && prevBins.total) ?? 0)) : null;
 
-    const hasAttrFilter = !!(spec.type || spec.vrnBucket || spec.tagId || spec.vrn || ['repl', 'chassis', 'wrong'].includes(spec.f));
+    const hasAttrFilter = !!(spec.type || spec.vrnBucket || spec.vrnKind || spec.tagId || spec.vrn || ['repl', 'chassis', 'wrong'].includes(spec.f));
     const clsFilter = spec.cls ? classKey(spec.cls) : '';
     const grpFilter = String(spec.group || '').trim().toUpperCase();
     let headlineTotal = null, headlineVc4 = null, headlineComm = null, prevTotal = null, filterKind = '';
-    if (!hasAttrFilter) {
+    // a stat chip can narrow a class filter (e.g. filter VC5+ → "VC4" chip = 0): then use the real rows, not a headline card value
+    const classConflict = (grpFilter === 'VC4' && ['vc20', 'vc5p', 'comm'].includes(spec.f)) || (/^(COMM|COMMERCIAL|NVC4)$/.test(grpFilter) && spec.f === 'vc4')
+      || (grpFilter === 'VC4' && clsFilter && clsFilter !== 'VC4') || (/^(COMM|COMMERCIAL|NVC4)$/.test(grpFilter) && clsFilter === 'VC4');
+    if (!hasAttrFilter && !classConflict) {
       if (spec.f === 'vc4' || clsFilter === 'VC4' || (grpFilter === 'VC4' && !clsFilter)) {
         headlineTotal = fullVc4; headlineVc4 = fullVc4; headlineComm = 0; prevTotal = pFullVc4; filterKind = 'VC4';
       } else if (spec.f === 'vc20' || clsFilter === 'VC20') {
@@ -579,7 +586,7 @@ window.FF = window.FF || {};
     }
     const body = `<div class="kd-hero"><div><span class="kd-kicker">${esc(srcLabel)}</span><div class="kd-big">${U.fmt(tot)} <small>tags</small></div><div class="kd-sub">${esc(periodLabel)}${filt ? ` · filter: <b>${esc(filt.label)}</b>` : ''}</div>${formula}</div><div class="kd-vs">${U.deltaHtml(U.growth(tot, ptot), { decimals: 0 })}<small>vs ${esc(prevLabel)}: <b>${U.fmt(ptot)}</b></small></div></div>
       ${forecast}${reconciliationNote}
-      <div class="kd-stats">${stat('VC4 (payable)', U.fmt(vc4), pct(vc4, tot), 'blue', { f: 'vc4', cls: '', title: `${spec.title || 'Detail'} · VC4` })}${stat('Commercial', U.fmt(comm), pct(comm, tot), 'violet', { f: 'comm', cls: '', title: `${spec.title || 'Detail'} · Commercial` })}${stat('First Forward', U.fmt(ff), pct(ff, tot), 'indigo', { src: 'ff', channel: '', title: `${spec.title || 'Detail'} · First Forward` })}${stat('GV Partner', U.fmt(gv), pct(gv, tot), 'teal', { src: 'gv', channel: '', title: `${spec.title || 'Detail'} · GV Partner` })}${stat('New issuance', U.fmt(Math.max(0, tot - repl)), pct(Math.max(0, tot - repl), tot), 'green', { type: 'NOT_REPLACEMENT', title: `${spec.title || 'Detail'} · New issuance` })}${stat('Replacement', U.fmt(repl), pct(repl, tot), 'amber', { type: 'REPLACEMENT', title: `${spec.title || 'Detail'} · Replacement` })}${stat('Chassis', U.fmt(chassis), pct(chassis, tot), 'orange', { f: 'chassis', title: `${spec.title || 'Detail'} · Chassis` })}${stat('New / VRN', U.fmt(Math.max(0, newVrn)), pct(Math.max(0, newVrn), tot), 'sky', { vrnBucket: 'New / VRN (New)', title: `${spec.title || 'Detail'} · New / VRN` })}</div>
+      <div class="kd-stats">${stat('VC4 (payable)', U.fmt(vc4), pct(vc4, tot), 'blue', { group: 'VC4', title: `${spec.title || 'Detail'} · VC4` })}${stat('Commercial', U.fmt(comm), pct(comm, tot), 'violet', { group: 'COMM', title: `${spec.title || 'Detail'} · Commercial` })}${stat('First Forward', U.fmt(ff), pct(ff, tot), 'indigo', { src: 'ff', channel: '', title: `${spec.title || 'Detail'} · First Forward` })}${stat('GV Partner', U.fmt(gv), pct(gv, tot), 'teal', { src: 'gv', channel: '', title: `${spec.title || 'Detail'} · GV Partner` })}${stat('New issuance', U.fmt(Math.max(0, tot - repl)), pct(Math.max(0, tot - repl), tot), 'green', { type: 'NOT_REPLACEMENT', title: `${spec.title || 'Detail'} · New issuance` })}${stat('Replacement', U.fmt(repl), pct(repl, tot), 'amber', { type: 'REPLACEMENT', title: `${spec.title || 'Detail'} · Replacement` })}${stat('Chassis', U.fmt(chassis), pct(chassis, tot), 'orange', { vrnKind: 'chassis', title: `${spec.title || 'Detail'} · Chassis` })}${stat('New / VRN', U.fmt(Math.max(0, newVrn)), pct(Math.max(0, newVrn), tot), 'sky', { vrnKind: 'new', title: `${spec.title || 'Detail'} · New / VRN` })}</div>
       <div class="kd-chips">
         ${[['both', 'FF + GV'], ['ff', '🟦 First Forward only'], ['gv', '🟩 GV Partner only']].map(([s, label]) => `<button class="kd-chip ${spec.src === s ? 'green' : ''}" data-kd-spec='${specAttr({ src: s, f: '', agent: '', channel: '', title: `${spec.title || 'Detail'} · ${label}` })}'>${label}</button>`).join('')}
         ${[['vc4', 'VC4'], ['comm', 'Commercial'], ['vc20', 'VC20'], ['vc5p', 'VC5+'], ['repl', 'Replacement'], ['chassis', 'Chassis']].map(([fl, label]) => `<button class="kd-chip ${spec.f === fl ? 'green' : ''}" data-kd-spec='${specAttr({ f: fl, agent: '', channel: '', title: `${spec.title || 'Detail'} · ${label}` })}'>${label}</button>`).join('')}
