@@ -56,3 +56,18 @@
   .cmp-frow label { flex: 1 1 140px; }
   .cmp-bar-r { margin-left: 0; }
 }
+/* ⚙ settings + mail alerts panel */
+.cmp-panel { margin: 10px 0 14px; border: 2px solid #c7d2fe; }
+.cmp-panel h4 { margin: 14px 0 6px; }
+.cmp-fg { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 14px; align-items: end; }
+.cmp-fg label, .cmp-tpls label, .cmp-rule label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 600; color: #475569; }
+.cmp-fg label.check, .cmp-rule label.check { flex-direction: row; align-items: center; gap: 6px; font-weight: 600; }
+.cmp-wide { grid-column: 1 / -1; }
+.cmp-rules { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.cmp-rule { display: grid; grid-template-columns: auto minmax(150px, 190px) minmax(150px, 1fr) minmax(200px, 1.4fr) auto auto; gap: 8px 12px; align-items: end; padding: 10px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }
+.cmp-rule-ev { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.cmp-tpls { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.cmp-tpls textarea { font-family: inherit; min-height: 150px; }
+.cmp-testrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.cmp-testrow .input { min-width: 240px; }
+@media (max-width: 900px) { .cmp-rule { grid-template-columns: 1fr 1fr; } .cmp-rule-to, .cmp-rule-ev { grid-column: 1 / -1; } }

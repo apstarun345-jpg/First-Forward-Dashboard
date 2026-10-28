@@ -12,7 +12,7 @@ FF.pages = FF.pages || {};
   const monthStart = (d) => `${String(d).slice(0, 7)}-01`;
   const state = {
     root: null, data: null, busy: false, err: '', tab: 'list',
-    from: '', to: '', status: 'all', tl: '', agent: '', q: '', sort: 'date', dir: -1, timer: null, req: 0
+    from: '', to: '', status: 'all', tl: '', agent: '', q: '', sort: 'date', dir: -1, timer: null, req: 0, setOpen: false, draft: null, setMsg: ''
   };
   state.from = monthStart(today()); state.to = today();
 
@@ -132,6 +132,97 @@ FF.pages = FF.pages || {};
     return `<p class="dim small cmp-meta">${m.running ? '⏳ Syncing with Gmail… · ' : ''}Last Gmail sync <b>${esc(t)}</b> · auto-refresh every <b>${esc(c.refreshMin || 10)} min</b> · subjects: ${(c.subjects || []).map((s) => `<code>${esc(s)}</code>`).join(' ')}${m.account ? ` · mailbox ${esc(m.account)}` : ''}${c.enabled === false ? ' · <b>auto-refresh is OFF</b>' : ''} ${err}</p>`;
   }
 
+
+  // ---- ⚙ Settings + 📧 mail alerts (admin) -------------------------------------------------------------------------
+  const clone = (v) => JSON.parse(JSON.stringify(v || {}));
+  const TPL = [['newSubject', 'New complaint · subject', 1], ['newBody', 'New complaint · mail body', 0], ['deductSubject', 'Bank deducted · subject', 1], ['deductBody', 'Bank deducted · mail body', 0], ['remindSubject', 'Reminder · subject', 1], ['remindBody', 'Reminder · mail body', 0]];
+  function ruleRow(r) {
+    const tgt = r.target || 'all';
+    return `<div class="cmp-rule" data-rule="${esc(r.id)}" data-since="${esc(r.since || '')}">
+      <label class="check cmp-rule-on"><input type="checkbox" data-r="enabled" ${r.enabled !== false ? 'checked' : ''}> On</label>
+      <label>Send for <select class="input" data-r="target"><option value="all"${tgt === 'all' ? ' selected' : ''}>All complaints</option><option value="tl"${tgt === 'tl' ? ' selected' : ''}>A TL (name or ID)</option><option value="agent"${tgt === 'agent' ? ' selected' : ''}>An agent (name or ID)</option></select></label>
+      <label class="cmp-rule-val">${tgt === 'tl' ? 'TL name / ID' : tgt === 'agent' ? 'Agent name / ID' : 'Match'} <input class="input" data-r="value" ${tgt === 'all' ? 'disabled placeholder="everything"' : `list="cmp-dl-${tgt}" placeholder="pick or type"`} value="${esc(r.value || '')}"></label>
+      <label class="cmp-rule-to">Mail to <input class="input" data-r="to" placeholder="name@example.com, other@example.com" value="${esc(r.to || '')}"></label>
+      <div class="cmp-rule-ev"><label class="check"><input type="checkbox" data-r="onNew" ${r.onNew !== false ? 'checked' : ''}> New complaint</label><label class="check"><input type="checkbox" data-r="onDeduct" ${r.onDeduct !== false ? 'checked' : ''}> Bank deducted</label><label class="check"><input type="checkbox" data-r="remind" ${r.remind !== false ? 'checked' : ''}> Reminder</label></div>
+      <button type="button" class="btn small" data-cmp-rdel title="Remove rule">🗑</button></div>`;
+  }
+  function datalists() {
+    const rows = rowsAll();
+    const tl = [...new Set(rows.flatMap((r) => [r.tlName, r.tlId]).filter(Boolean))].sort();
+    const ag = [...new Set(rows.flatMap((r) => [r.agentName, r.agentId]).filter(Boolean))].sort();
+    return `<datalist id="cmp-dl-tl">${tl.map((v) => `<option value="${esc(v)}">`).join('')}</datalist><datalist id="cmp-dl-agent">${ag.map((v) => `<option value="${esc(v)}">`).join('')}</datalist>`;
+  }
+  function panelHtml() {
+    const d = state.draft; if (!d) return '';
+    const m = d.mail || {};
+    const log = (state.data.mailLog || []).map((l) => `<tr><td>${esc(when(l.at))}</td><td>${esc(l.kind)}</td><td>${esc(l.to)}</td><td>${esc(l.subject)}</td><td>${l.ok ? '✅ sent' : `<span class="cmp-err">❌ ${esc(l.error || 'failed')}</span>`}</td></tr>`).join('');
+    return `<div class="card cmp-panel" data-cmp-panel><div class="card-head"><h3>⚙ Settings · 📧 Mail alerts</h3><div class="card-right"><button type="button" class="btn small" data-cmp-setclose>✖ Close</button></div></div><div class="card-body">
+      <h4>Gmail fetch</h4>
+      <div class="form-grid cmp-fg">
+        <label class="check"><input type="checkbox" data-f="enabled" ${d.enabled !== false ? 'checked' : ''}> <b>Auto-refresh ON</b></label>
+        <label>Refresh every (minutes)<input class="input" type="number" min="2" max="1440" data-f="refreshMin" value="${esc(d.refreshMin ?? 10)}"></label>
+        <label>Your name (shown in “Solved by …”)<input class="input" data-f="ownerName" value="${esc(d.ownerName || '')}"></label>
+        <label>TAT (hours)<input class="input" type="number" min="1" max="720" data-f="tatHours" value="${esc(d.tatHours ?? 24)}"></label>
+        <label class="cmp-wide">Mail subjects to watch (one per line)<textarea class="input" rows="3" data-f="subjects" placeholder="POS Related-Request">${esc((d.subjects || []).join('\n'))}</textarea></label>
+      </div>
+      <h4>📧 Mail alerts</h4>
+      <p class="dim small">As soon as a new bank complaint is found (checked at every refresh), when the bank deducts the amount, and a reminder digest every few hours while complaints stay pending — mailed to whoever you set below. A new rule only mails complaints that arrive <b>after</b> it is saved.</p>
+      <div class="form-grid cmp-fg"><label class="check"><input type="checkbox" data-f="mailEnabled" ${m.enabled ? 'checked' : ''}> <b>Mail alerts ON</b></label><label>Reminder every (hours)<input class="input" type="number" min="1" max="72" step="0.5" data-f="remindHours" value="${esc(m.remindHours ?? 4)}"></label></div>
+      <div class="cmp-rules">${(m.rules || []).map(ruleRow).join('') || '<p class="dim small">No rules yet — add one below.</p>'}</div>
+      <div class="btn-row"><button type="button" class="btn small" data-cmp-radd>➕ Add rule</button></div>
+      ${datalists()}
+      <h4>✉️ Message</h4>
+      <p class="dim small">Placeholders: ${(state.data.placeholders || []).map((x) => `<code>${esc(x)}</code>`).join(' ')} · <code>{list}</code> / <code>{count}</code> are for the reminder only.</p>
+      <div class="cmp-tpls">${TPL.map(([k, l, one]) => `<label>${l}${one ? `<input class="input" data-t="${k}" value="${esc((m.templates || {})[k] || '')}">` : `<textarea class="input" rows="8" data-t="${k}">${esc((m.templates || {})[k] || '')}</textarea>`}</label>`).join('')}</div>
+      <div class="cmp-testrow"><input class="input" data-cmp-testto placeholder="Test recipient email"><button type="button" class="btn small" data-cmp-test="new">📨 Test “new”</button><button type="button" class="btn small" data-cmp-test="deduct">📨 Test “deducted”</button><button type="button" class="btn small" data-cmp-test="remind">📨 Test “reminder”</button></div>
+      <div class="save-bar"><button type="button" class="btn primary" data-cmp-save>💾 Save settings</button><span class="dim small">${esc(state.setMsg)}</span></div>
+      ${state.data.mailErr ? `<p class="cmp-err">Mail problem: ${esc(state.data.mailErr)}</p>` : ''}
+      ${log ? `<h4>Recent mails</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>When</th><th>Type</th><th>To</th><th>Subject</th><th>Result</th></tr></thead><tbody>${log}</tbody></table></div>` : ''}
+    </div></div>`;
+  }
+  function collectDraft() {
+    const p = state.root && state.root.querySelector('[data-cmp-panel]'); if (!p || !state.draft) return state.draft;
+    const d = state.draft, q = (sel) => p.querySelector(sel);
+    d.enabled = q('[data-f="enabled"]').checked;
+    d.refreshMin = Number(q('[data-f="refreshMin"]').value) || 10;
+    d.ownerName = q('[data-f="ownerName"]').value.trim();
+    d.tatHours = Number(q('[data-f="tatHours"]').value) || 24;
+    d.subjects = q('[data-f="subjects"]').value.split(/\n/).map((x) => x.trim()).filter(Boolean);
+    d.mail = d.mail || {};
+    d.mail.enabled = q('[data-f="mailEnabled"]').checked;
+    d.mail.remindHours = Number(q('[data-f="remindHours"]').value) || 4;
+    d.mail.rules = [...p.querySelectorAll('[data-rule]')].map((row) => {
+      const g = (k) => row.querySelector(`[data-r="${k}"]`);
+      return { id: row.dataset.rule, since: Number(row.dataset.since) || undefined, enabled: g('enabled').checked, target: g('target').value, value: g('value').value.trim(), to: g('to').value.trim(), onNew: g('onNew').checked, onDeduct: g('onDeduct').checked, remind: g('remind').checked };
+    });
+    d.mail.templates = d.mail.templates || {};
+    p.querySelectorAll('[data-t]').forEach((el) => { d.mail.templates[el.dataset.t] = el.value; });
+    return d;
+  }
+  async function saveSettings(btn) {
+    const d = collectDraft();
+    await U.withButtonBusy(btn, async () => {
+      try {
+        const out = await FF.auth.api('/api/settings', 'PUT', { settings: { complaints: d } });
+        if (FF.auth.applySettings && out && out.settings) FF.auth.applySettings(out.settings);
+        state.setMsg = `Saved ✓ ${U.timeLabel ? U.timeLabel(Date.now()) : ''}`;
+        U.toast('Complaints settings saved ✓', 'ok');
+        state.draft = clone(out && out.settings && out.settings.complaints ? out.settings.complaints : d);
+        await load();
+      } catch (e) { state.setMsg = ''; U.toast((e && e.message) || 'Could not save', 'err'); }
+    }, 'Saving…');
+  }
+  async function sendTest(btn) {
+    const d = collectDraft();
+    const to = (state.root.querySelector('[data-cmp-testto]') || {}).value || '';
+    await U.withButtonBusy(btn, async () => {
+      try {
+        const out = await FF.auth.api('/api/complaints/mail-test', 'POST', { to, kind: btn.dataset.cmpTest, mail: d.mail });
+        if (out && out.ok) U.toast('Test mail sent ✓', 'ok'); else U.toast((out && out.error) || 'Test mail failed', 'err');
+      } catch (e) { U.toast((e && e.message) || 'Test mail failed', 'err'); }
+    }, 'Sending…');
+  }
+
   function exportXlsx() {
     const rows = visible();
     const header = ['Date', 'Case Number', 'Vehicle Registration Number', 'Tag Id', 'Description', 'BC Name', 'Agent Name', 'Agent ID', 'TL Name', 'TL ID', 'Status', 'Replied at', 'Resolved at', 'Deducted (₹)', 'Bank note', 'TAT breached', 'Mail link'];
@@ -143,14 +234,15 @@ FF.pages = FF.pages || {};
   function paint() {
     const root = state.root; if (!root) return;
     const mount = root.querySelector('[data-cmp-body]'); if (!mount) return;
+    if (state.setOpen) collectDraft();
     const keepQ = root.querySelector('[data-cmp-q]');
     const hadFocus = keepQ && document.activeElement === keepQ; const pos = hadFocus ? keepQ.selectionStart : 0;
     const rows = visible();
     const tabs = `<div class="seg cmp-tabs"><button type="button" class="seg-btn${state.tab === 'list' ? ' on' : ''}" data-cmp-tab="list">📋 Complaints</button><button type="button" class="seg-btn${state.tab === 'agent' ? ' on' : ''}" data-cmp-tab="agent">👤 By agent</button><button type="button" class="seg-btn${state.tab === 'tl' ? ' on' : ''}" data-cmp-tab="tl">👥 By TL</button></div>`;
     const err = state.err ? `<div class="notice err">${esc(state.err)}</div>` : '';
     const loading = state.busy ? '<p class="dim small">⏳ Loading… (older months are read from Gmail, this can take up to a minute)</p>' : '';
-    mount.innerHTML = `${metaLine()}${err}${loading}${state.data ? tilesHtml() + filtersHtml() : ''}
-      ${state.data ? `<div class="cmp-bar">${tabs}<span class="dim small">${U.fmt(rows.length)} of ${U.fmt(rowsAll().length)} complaints</span><span class="cmp-bar-r"><button type="button" class="btn small" data-cmp-refresh>🔄 Sync Gmail now</button><button type="button" class="btn small primary" data-cmp-xlsx>⬇ Excel</button></span></div>
+    mount.innerHTML = `${metaLine()}${err}${loading}${state.data && state.setOpen && state.draft ? panelHtml() : ''}${state.data ? tilesHtml() + filtersHtml() : ''}
+      ${state.data ? `<div class="cmp-bar">${tabs}<span class="dim small">${U.fmt(rows.length)} of ${U.fmt(rowsAll().length)} complaints</span><span class="cmp-bar-r">${state.data.cfg ? '<button type="button" class="btn small" data-cmp-settings>⚙ Settings & Mail alerts</button>' : ''}<button type="button" class="btn small" data-cmp-refresh>🔄 Sync Gmail now</button><button type="button" class="btn small primary" data-cmp-xlsx>⬇ Excel</button></span></div>
       <div class="card"><div class="card-body cmp-card">${state.tab === 'list' ? listHtml(rows) : groupHtml(rows, state.tab)}</div></div>` : (state.busy ? U.spinner('Reading complaints…') : '')}`;
     if (hadFocus) { const q = root.querySelector('[data-cmp-q]'); if (q) { q.focus(); try { q.setSelectionRange(pos, pos); } catch { /* ignore */ } } }
   }
@@ -194,6 +286,7 @@ FF.pages = FF.pages || {};
       <div data-cmp-body></div></div>`;
     root.addEventListener('change', (e) => {
       const t = e.target;
+      if (t.matches('[data-r="target"]')) { collectDraft(); paint(); return; }
       if (t.matches('[data-cmp-from]')) { if (t.value) { state.from = t.value; if (state.to < state.from) state.to = state.from; load(); } return; }
       if (t.matches('[data-cmp-to]')) { if (t.value) { state.to = t.value; if (state.from > state.to) state.from = state.to; load(); } return; }
       if (t.matches('[data-cmp-statussel]')) { state.status = t.value; paint(); return; }
@@ -210,7 +303,13 @@ FF.pages = FF.pages || {};
       const pick = t.closest('[data-cmp-pick]'); if (pick) { if (pick.dataset.cmpPick === 'tl') { state.tl = pick.dataset.key; state.agent = ''; } else { state.agent = pick.dataset.key; } state.tab = 'list'; paint(); return; }
       if (t.closest('[data-cmp-clear]')) { state.status = 'all'; state.tl = ''; state.agent = ''; state.q = ''; paint(); return; }
       if (t.closest('[data-cmp-xlsx]')) { exportXlsx(); return; }
-      const rf = t.closest('[data-cmp-refresh]'); if (rf) syncNow(rf);
+      const rf = t.closest('[data-cmp-refresh]'); if (rf) { syncNow(rf); return; }
+      if (t.closest('[data-cmp-settings]')) { state.setOpen = !state.setOpen; if (state.setOpen && state.data && state.data.cfg) state.draft = clone(state.data.cfg); paint(); return; }
+      if (t.closest('[data-cmp-setclose]')) { state.setOpen = false; paint(); return; }
+      if (t.closest('[data-cmp-radd]')) { collectDraft(); state.draft.mail.rules = (state.draft.mail.rules || []).concat([{ id: `n${Date.now().toString(36)}`, enabled: true, target: 'all', value: '', to: '', onNew: true, onDeduct: true, remind: true }]); paint(); return; }
+      const rd = t.closest('[data-cmp-rdel]'); if (rd) { collectDraft(); const id = rd.closest('[data-rule]').dataset.rule; state.draft.mail.rules = state.draft.mail.rules.filter((x) => x.id !== id); paint(); return; }
+      const sv = t.closest('[data-cmp-save]'); if (sv) { saveSettings(sv); return; }
+      const ts = t.closest('[data-cmp-test]'); if (ts) sendTest(ts);
     });
     load();
     // background cache is refreshed by the server; the page just re-reads it quietly every minute
@@ -218,7 +317,8 @@ FF.pages = FF.pages || {};
     state.timer = setInterval(async () => {
       if (!state.root || !state.root.isConnected) { clearInterval(state.timer); return; }
       if (document.hidden || state.busy) return;
-      const ae = document.activeElement; if (ae && state.root.contains(ae) && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;   // user is typing / picking
+      const ae = document.activeElement; if (state.setOpen) return;
+      if (ae && state.root.contains(ae) && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;   // user is typing / picking
       try { const d = await FF.auth.api(`/api/complaints?from=${encodeURIComponent(state.from)}&to=${encodeURIComponent(state.to)}`); if (state.root.isConnected) { state.data = d; paint(); } } catch { /* keep last data */ }
     }, 60000);
   }

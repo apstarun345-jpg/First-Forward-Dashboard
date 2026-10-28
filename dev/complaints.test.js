@@ -89,7 +89,55 @@ test('complaints is wired: permission, nav, lazy module, blocked server file, Ap
   assert.match(read('lazy.js'), /complaints: \['complaints'\]/);
   assert.match(read('google-apps-script/Code.gs'), /body\.action === 'complaints'/);
   assert.match(read('google-apps-script/Code.gs'), /function authorizeComplaints\(\)/);
-  assert.match(read('settings.js'), /data-path="complaints\.enabled"/);
-  assert.match(read('settings.js'), /complaints\.subjects/);
+  assert.match(read('complaints.js'), /data-f="refreshMin"/);
+  assert.match(read('complaints.js'), /data-f="subjects"/);
+  assert.match(read('server.js'), /complaintsMailTick/);
   assert.ok(fs.existsSync(new URL('../styles-complaints.css', import.meta.url)));
+});
+
+import { normalizeMailCfg, ruleMatches, planMails, normalizeCfg as nc } from '../complaints-mail.js';
+const NOW2 = Date.UTC(2026, 9, 28, 9, 0);
+const mk = (o) => ({ key: `t:${o.caseNo}:x`, caseNo: o.caseNo, date: NOW2 - 2 * 3600e3, agentName: 'Ramdev', agentId: '15037228', tlName: 'RAMDEV SIYAG', tlId: 'APN2233', vrn: 'PB15Y5557', tagId: 'T1', description: 'd', bcName: 'B', status: 'Pending', deducted: 0, resolvedAt: 0, bankNote: '', tatBreached: false, link: 'https://mail.google.com/x', ...o });
+const cfgWith = (rules, extra = {}) => nc({ ownerName: 'Tarun', tatHours: 24, mail: { enabled: true, remindHours: 4, rules, ...extra } }, null, NOW2 - 3 * 3600e3);
+
+test('mail rule normalization: since is set once, invalid emails dropped, templates default', () => {
+  const m1 = normalizeMailCfg({ enabled: true, rules: [{ id: 'a', target: 'tl', value: 'X', to: 'ok@x.com, nope' }] }, null, 1000);
+  assert.equal(m1.rules[0].since, 1000); assert.equal(m1.rules[0].to, 'ok@x.com');
+  const m2 = normalizeMailCfg({ enabled: true, rules: [{ id: 'a', target: 'tl', value: 'X', to: 'ok@x.com' }, { id: 'b', target: 'all', to: 'z@x.com' }] }, m1, 5000);
+  assert.equal(m2.rules[0].since, 1000, 'existing enabled rule keeps its since'); assert.equal(m2.rules[1].since, 5000, 'new rule starts now');
+  const off = normalizeMailCfg({ rules: [{ id: 'a', enabled: false, to: 'ok@x.com' }] }, m1, 7000);
+  const on = normalizeMailCfg({ rules: [{ id: 'a', enabled: true, to: 'ok@x.com' }] }, off, 9000);
+  assert.equal(on.rules[0].since, 9000, 're-enabled rule restarts from now');
+  assert.match(m1.templates.newSubject, /\{case\}/); assert.equal(m1.remindHours, 4);
+});
+
+test('rule matching by TL / agent name or ID', () => {
+  const r = mk({ caseNo: '1' });
+  assert.equal(ruleMatches({ target: 'all' }, r), true);
+  assert.equal(ruleMatches({ target: 'tl', value: 'ramdev siyag' }, r), true);
+  assert.equal(ruleMatches({ target: 'tl', value: 'APN2233' }, r), true);
+  assert.equal(ruleMatches({ target: 'agent', value: '15037228' }, r), true);
+  assert.equal(ruleMatches({ target: 'agent', value: 'someone else' }, r), false);
+  assert.equal(ruleMatches({ target: 'agent', value: '' }, r), false);
+});
+
+test('planMails: new once, deduction once, reminder every N hours as a digest, rules filter, old complaints skipped', () => {
+  const cfg = cfgWith([{ id: 'r1', target: 'tl', value: 'RAMDEV SIYAG', to: 'tl@x.com' }, { id: 'r2', target: 'agent', value: 'nobody', to: 'n@x.com' }]);
+  const rows = [mk({ caseNo: '10' }), mk({ caseNo: '11', date: NOW2 - 9 * 86400e3 }), mk({ caseNo: '12', status: 'Solved by Bank', deducted: 300, resolvedAt: NOW2 - 600e3 })];
+  const st = { sent: {}, remind: {} };
+  let plan = planMails({ rows, cfg, state: st, now: NOW2 });
+  assert.deepEqual(plan.map((m) => m.kind).sort(), ['deduct', 'new'], 'old pending 11 gets no instant mail; no reminder yet (since < 4h)');
+  assert.ok(plan.every((m) => m.ruleId === 'r1' && m.to === 'tl@x.com'));
+  assert.match(plan.find((m) => m.kind === 'new').subject, /Case 10 · Ramdev/);
+  assert.match(plan.find((m) => m.kind === 'deduct').text, /₹300/);
+  for (const m of plan) for (const k of m.marks) st.sent[k.key] = { ...(st.sent[k.key] || {}), [k.f]: NOW2 };
+  assert.equal(planMails({ rows, cfg, state: st, now: NOW2 }).length, 0, 'nothing repeats');
+  const later = NOW2 + 5 * 3600e3;
+  const rem = planMails({ rows, cfg, state: st, now: later });
+  assert.equal(rem.length, 1); assert.equal(rem[0].kind, 'remind'); assert.equal(rem[0].count, 2);
+  assert.match(rem[0].text, /Case 10/); assert.match(rem[0].text, /Case 11/);
+  st.remind.r1 = later;
+  assert.equal(planMails({ rows, cfg, state: st, now: later + 3 * 3600e3 }).length, 0);
+  assert.equal(planMails({ rows, cfg, state: st, now: later + 4.1 * 3600e3 }).length, 1);
+  assert.equal(planMails({ rows, cfg: { ...cfg, mail: { ...cfg.mail, enabled: false } }, state: { sent: {}, remind: {} }, now: later }).length, 0);
 });

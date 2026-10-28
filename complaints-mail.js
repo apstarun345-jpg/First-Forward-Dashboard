@@ -15,7 +15,7 @@ const AMOUNT_RE = /(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d+)?)/i;
 
 export const DEFAULT_COMPLAINTS_CFG = { enabled: true, refreshMin: 10, subjects: ['POS Related-Request'], ownerName: 'Tarun', tatHours: 24 };
 
-export function normalizeCfg(raw) {
+export function normalizeCfg(raw, prev = null, nowMs = Date.now()) {
   const c = raw && typeof raw === 'object' ? raw : {};
   const subjects = (Array.isArray(c.subjects) ? c.subjects : String(c.subjects || '').split(/\n/))
     .map((s) => String(s || '').replace(/["\r\n]/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 12);
@@ -26,8 +26,119 @@ export function normalizeCfg(raw) {
     refreshMin: Number.isFinite(refresh) ? Math.min(1440, Math.max(2, Math.round(refresh))) : DEFAULT_COMPLAINTS_CFG.refreshMin,
     subjects: subjects.length ? subjects : DEFAULT_COMPLAINTS_CFG.subjects.slice(),
     ownerName: String(c.ownerName || '').trim().slice(0, 40) || DEFAULT_COMPLAINTS_CFG.ownerName,
-    tatHours: Number.isFinite(tat) && tat > 0 ? Math.min(720, tat) : DEFAULT_COMPLAINTS_CFG.tatHours
+    tatHours: Number.isFinite(tat) && tat > 0 ? Math.min(720, tat) : DEFAULT_COMPLAINTS_CFG.tatHours,
+    mail: normalizeMailCfg(c.mail, prev && prev.mail, nowMs)
   };
+}
+
+// ---------------------------------------------------------------- 📧 mail alerts (rules + templates)
+export const MAIL_PLACEHOLDERS = ['{case}', '{date}', '{agent}', '{agentId}', '{tl}', '{tlId}', '{vrn}', '{tag}', '{description}', '{bc}', '{status}', '{amount}', '{note}', '{age}', '{tat}', '{link}', '{owner}', '{count}', '{list}'];
+export const DEFAULT_MAIL_TEMPLATES = {
+  newSubject: '🚨 New POS complaint · Case {case} · {agent}',
+  newBody: 'Hello,\n\nA new POS complaint has come from the bank.\n\nCase: {case}\nDate: {date}\nAgent: {agent} ({agentId})\nTL: {tl} ({tlId})\nVRN: {vrn}\nTag ID: {tag}\nIssue: {description}\n\nPlease check and reply to the bank within TAT ({tat}). If there is no response, the bank deducts the amount from the pool account.\n\nOpen the mail: {link}\n\n— {owner}',
+  deductSubject: '💸 Bank deducted ₹{amount} · Case {case} · {agent}',
+  deductBody: 'Hello,\n\nThe bank has deducted ₹{amount} from the pool account for this POS complaint.\n\nCase: {case}\nAgent: {agent} ({agentId})\nTL: {tl} ({tlId})\nVRN: {vrn}\nTag ID: {tag}\nIssue: {description}\nBank note: {note}\n\nPlease recover this amount from the agent / settle it.\n\nOpen the mail: {link}\n\n— {owner}',
+  remindSubject: '⏰ Reminder · {count} pending POS complaint(s)',
+  remindBody: 'Hello,\n\nThese POS complaints are still pending (no reply to the bank yet):\n\n{list}\n\nPlease reply to the bank before TAT ends, otherwise the amount is deducted from the pool account.\n\n— {owner}'
+};
+const EMAIL_OK = /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/;
+export const splitEmails = (v) => String(v || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+export const invalidEmails = (v) => splitEmails(v).filter((x) => !EMAIL_OK.test(x));
+const normKey = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+
+export function normalizeMailCfg(raw, prev = null, nowMs = Date.now()) {
+  const m = raw && typeof raw === 'object' ? raw : {};
+  const old = new Map(((prev && prev.rules) || []).map((r) => [r.id, r]));
+  const rh = Number(m.remindHours);
+  const tpl = {};
+  for (const k of Object.keys(DEFAULT_MAIL_TEMPLATES)) {
+    const t = m.templates && typeof m.templates[k] === 'string' ? m.templates[k].replace(/\r/g, '').trim() : '';
+    tpl[k] = (t || DEFAULT_MAIL_TEMPLATES[k]).slice(0, k.endsWith('Subject') ? 200 : 4000);
+  }
+  const rules = (Array.isArray(m.rules) ? m.rules : []).slice(0, 30).map((r, i) => {
+    const id = String((r && r.id) || '').replace(/[^\w-]/g, '').slice(0, 24) || `r${nowMs.toString(36)}${i}`;
+    const target = ['all', 'tl', 'agent'].includes(r && r.target) ? r.target : 'all';
+    const prevRule = old.get(id);
+    const enabled = !(r && (r.enabled === false || r.enabled === 'false'));
+    // since: is waqt ke BAAD aayi complaints par hi mail — rule banate / ON karte waqt purani complaints par mail ki baarish nahi
+    const since = prevRule && prevRule.enabled && prevRule.since ? prevRule.since : (!prev && Number(r && r.since) > 0 ? Number(r.since) : nowMs);
+    return {
+      id, enabled, label: String((r && r.label) || '').trim().slice(0, 60), target,
+      value: target === 'all' ? '' : String((r && r.value) || '').trim().slice(0, 80),
+      to: splitEmails(r && r.to).filter((x) => EMAIL_OK.test(x)).slice(0, 10).join(', '),
+      onNew: !(r && (r.onNew === false || r.onNew === 'false')), onDeduct: !(r && (r.onDeduct === false || r.onDeduct === 'false')), remind: !(r && (r.remind === false || r.remind === 'false')),
+      since
+    };
+  });
+  return { enabled: m.enabled === true || m.enabled === 'true', remindHours: Number.isFinite(rh) ? Math.min(72, Math.max(1, Math.round(rh * 2) / 2)) : 4, rules, templates: tpl };
+}
+
+/** Rule ka target is complaint par lagta hai? (TL / agent: naam ya ID) */
+export function ruleMatches(rule, row) {
+  if (!rule || rule.target === 'all') return true;
+  const v = normKey(rule.value);
+  if (!v) return false;
+  if (rule.target === 'tl') return normKey(row.tlName) === v || normKey(row.tlId) === v;
+  return normKey(row.agentName) === v || normKey(row.agentId) === v;
+}
+
+const fmtDate = (ms) => { try { return new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) + ' IST'; } catch { return ''; } };
+const ageOf = (ms, now) => { const h = Math.max(0, Math.round((now - ms) / 3600e3)); return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`; };
+const fill = (tpl, map) => String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => (k in map ? String(map[k] ?? '') : m));
+export function rowVars(row, cfg, now = Date.now()) {
+  return { case: row.caseNo, date: fmtDate(row.date), agent: row.agentName || '—', agentId: row.agentId || '—', tl: row.tlName || '—', tlId: row.tlId || '—', vrn: row.vrn || '—', tag: row.tagId || '—', description: row.description || '—', bc: row.bcName || '—', status: row.status, amount: row.deducted ? String(row.deducted) : '', note: row.bankNote || '—', age: ageOf(row.date, now), tat: `${cfg.tatHours || 24}h`, link: row.link || '', owner: cfg.ownerName || '' };
+}
+const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+export function htmlOf(text) {
+  const body = esc(text).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>').replace(/\n/g, '<br>');
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#0f172a">${body}</div>`;
+}
+export function buildMail(kind, rowsOrRow, cfg, now = Date.now()) {
+  const t = cfg.mail.templates;
+  if (kind === 'remind') {
+    const rows = rowsOrRow;
+    const list = rows.map((r) => `• Case ${r.caseNo} · ${r.agentName || '—'} (${r.agentId || '—'}) · TL ${r.tlName || '—'} · pending ${ageOf(r.date, now)}${r.tatBreached ? ' · TAT BREACHED' : ''}\n  ${r.description ? r.description.slice(0, 140) : ''}\n  ${r.link}`).join('\n');
+    const vars = { count: rows.length, list, owner: cfg.ownerName || '', tat: `${cfg.tatHours || 24}h` };
+    const text = fill(t.remindBody, vars);
+    return { subject: fill(t.remindSubject, vars), text, html: htmlOf(text) };
+  }
+  const vars = rowVars(rowsOrRow, cfg, now);
+  const text = fill(kind === 'deduct' ? t.deductBody : t.newBody, vars);
+  return { subject: fill(kind === 'deduct' ? t.deductSubject : t.newSubject, vars), text, html: htmlOf(text) };
+}
+
+/**
+ * Kaun si mail ab jaani chahiye (pure — state mutate nahi karta).
+ *   state: { sent: { '<rowKey>|<ruleId>': { n: ts, d: ts } }, remind: { '<ruleId>': ts } }
+ * Return: [{ kind, ruleId, to, subject, text, html, marks: [{ type:'sent', key, f }, { type:'remind', ruleId }] }]
+ */
+export function planMails({ rows, cfg, state, now = Date.now(), max = 15 }) {
+  const mail = cfg.mail;
+  if (!mail || !mail.enabled) return [];
+  const out = [];
+  const sent = (state && state.sent) || {}, remindAt = (state && state.remind) || {};
+  const recent = (rows || []).filter((r) => now - r.date < 35 * 86400e3);
+  for (const rule of mail.rules) {
+    if (!rule.enabled || !rule.to) continue;
+    const mine = recent.filter((r) => ruleMatches(rule, r));
+    for (const r of mine) {
+      const key = `${r.key}|${rule.id}`, done = sent[key] || {};
+      if (rule.onNew && !done.n && r.status === COMPLAINT_STATUS.PENDING && r.date >= rule.since) {
+        out.push({ kind: 'new', ruleId: rule.id, to: rule.to, ...buildMail('new', r, cfg, now), marks: [{ type: 'sent', key, f: 'n' }], caseNo: r.caseNo });
+      }
+      if (rule.onDeduct && !done.d && r.status === COMPLAINT_STATUS.BANK && r.deducted > 0 && (r.resolvedAt || 0) >= rule.since) {
+        out.push({ kind: 'deduct', ruleId: rule.id, to: rule.to, ...buildMail('deduct', r, cfg, now), marks: [{ type: 'sent', key, f: 'd' }], caseNo: r.caseNo });
+      }
+    }
+    if (rule.remind) {
+      const last = remindAt[rule.id] || rule.since;
+      const pend = mine.filter((r) => r.status === COMPLAINT_STATUS.PENDING).sort((a, b) => a.date - b.date);
+      if (pend.length && now - last >= mail.remindHours * 3600e3) {
+        out.push({ kind: 'remind', ruleId: rule.id, to: rule.to, ...buildMail('remind', pend.slice(0, 40), cfg, now), marks: [{ type: 'remind', ruleId: rule.id }], count: pend.length });
+      }
+    }
+  }
+  return out.slice(0, max);
 }
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -223,6 +334,6 @@ export function createComplaintsService({ getStore, getConfig, lookupAgent, now 
       return { ...r, day: istDay(r.date), tlName: a.tlName || '', tlId: a.tlId || '', agentFound: !!a.found };
     });
   }
-  const meta = () => ({ at: st.at ? new Date(st.at).toISOString() : '', okAt: st.ok ? new Date(st.ok).toISOString() : '', running: !!st.running, error: st.error, coverFrom: st.coverFrom, threads: byThread.size, config: cfg(), account: st.me[0] || '' });
+  const meta = () => ({ at: st.at ? new Date(st.at).toISOString() : '', okAt: st.ok ? new Date(st.ok).toISOString() : '', running: !!st.running, error: st.error, coverFrom: st.coverFrom, threads: byThread.size, config: (({ mail, ...rest }) => rest)(cfg()), account: st.me[0] || '' });
   return { sync, ensureRange, tick, rows, meta, _state: st, _byThread: byThread };
 }

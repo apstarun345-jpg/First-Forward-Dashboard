@@ -20,7 +20,7 @@ import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, disp
 import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
-import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG } from './complaints-mail.js';
+import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
@@ -241,7 +241,7 @@ const DEFAULT_SETTINGS = {
   },
   vrnRules: { enabled: true, bands: [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }] }, // GV live: VRN length → status
   kpiColors: {}, // Admin KPI card colours: { g1: {a:'#6366f1', b:'#8b5cf6'}, ... } — empty = built-in default
-  complaints: { enabled: true, refreshMin: 10, subjects: ['POS Related-Request'], ownerName: 'Tarun', tatHours: 24 }, // 📨 Agents Complaints Summary: Gmail se bank complaint mails (background refresh)
+  complaints: { enabled: true, refreshMin: 10, subjects: ['POS Related-Request'], ownerName: 'Tarun', tatHours: 24, mail: { enabled: false, remindHours: 4, rules: [] } }, // 📨 Agents Complaints Summary: Gmail se bank complaint mails (background refresh)
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
   // all other classes wait for an admin-entered official rate. Empty is unresolved, never zero.
@@ -3607,6 +3607,56 @@ const complaintsSvc = createComplaintsService({
   lookupAgent: complaintsLookupAgent,
   log: (m) => console.log(m)
 });
+
+// 📧 Complaints mail alerts: nayi complaint / bank deduction turant, pending ka reminder har N ghante — rule (TL / agent / all) ke hisaab se.
+const complaintsMailRun = { busy: false, lastTry: 0, lastErr: '' };
+function complaintsMailState() {
+  if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+  const st = db.notify.complaintMail && typeof db.notify.complaintMail === 'object' ? db.notify.complaintMail : (db.notify.complaintMail = {});
+  if (!st.sent || typeof st.sent !== 'object') st.sent = {};
+  if (!st.remind || typeof st.remind !== 'object') st.remind = {};
+  if (!Array.isArray(st.log)) st.log = [];
+  return st;
+}
+async function complaintsMailTick() {
+  if (complaintsMailRun.busy) return;
+  const cfg = normalizeComplaintsCfg((db.settings || {}).complaints);
+  if (!cfg.enabled || !cfg.mail.enabled || !cfg.mail.rules.some((r) => r.enabled && r.to)) return;
+  if (!complaintsSvc.meta().okAt) return;                 // cache abhi Gmail se bhara nahi — khaali cache par kuch mat bhejo
+  if (Date.now() - complaintsMailRun.lastTry < 60e3) return;
+  complaintsMailRun.busy = true; complaintsMailRun.lastTry = Date.now();
+  try {
+    try { await Promise.race([loadRegistryFull(false), new Promise((r) => setTimeout(r, 4000))]); } catch { /* TL blank rahega */ }
+    const st = complaintsMailState();
+    const rows = complaintsSvc.rows({});
+    const plan = planComplaintMails({ rows, cfg, state: st, now: Date.now() });
+    if (!plan.length) return;
+    const base = { ...(db.settings.email || {}) };
+    if (!resolveProviders({ ...base, to: 'x@x.x' }).length) { complaintsMailRun.lastErr = 'Email provider configure nahi — Settings → Features → Email.'; return; }
+    for (const m of plan) {
+      try {
+        await sendMail({ ...base, to: m.to }, m.subject, m.text, { html: m.html });
+        for (const k of m.marks) {
+          if (k.type === 'sent') { st.sent[k.key] = { ...(st.sent[k.key] || {}), [k.f]: Date.now() }; }
+          else st.remind[k.ruleId] = Date.now();
+        }
+        st.log.push({ at: Date.now(), kind: m.kind, to: m.to, subject: String(m.subject).slice(0, 120), ok: true });
+        complaintsMailRun.lastErr = '';
+      } catch (err) {
+        const msg = String((err && err.message) || err).slice(0, 200);
+        complaintsMailRun.lastErr = msg;
+        st.log.push({ at: Date.now(), kind: m.kind, to: m.to, subject: String(m.subject).slice(0, 120), ok: false, error: msg });
+        break;                                            // provider down — agle tick me dobara
+      }
+    }
+    // chhota rakho: 40 din se purani sent-entries + log 80 tak
+    const cutoff = Date.now() - 120 * 86400e3;
+    for (const [k, v] of Object.entries(st.sent)) if (Math.max(v.n || 0, v.d || 0) < cutoff) delete st.sent[k];
+    if (st.log.length > 80) st.log = st.log.slice(-80);
+    persist('notify').catch(() => {});
+  } catch (err) { complaintsMailRun.lastErr = String((err && err.message) || err).slice(0, 200); }
+  finally { complaintsMailRun.busy = false; }
+}
 function complaintsAllowed(user) { return !!user && (user.role === 'admin' || (user.permissions || []).includes('complaints')); }
 
 async function stockAgeIndex(fresh) {
@@ -5787,7 +5837,25 @@ async function handleApi(req, res, url) {
     let timer; const wait = new Promise((r) => { timer = setTimeout(() => r('wait'), 40000); });
     try { await Promise.race([complaintsSvc.ensureRange(from), wait]); } catch { /* error meta me dikhega */ } finally { clearTimeout(timer); }
     await Promise.race([loadRegistryFull(false).catch(() => null), new Promise((r) => setTimeout(r, 4000))]);
-    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, rows: complaintsSvc.rows({ from, to }), meta: complaintsSvc.meta() }), { 'Cache-Control': 'no-store' });
+    const admin = user.role === 'admin';
+    const mst = admin ? complaintsMailState() : null;
+    const extra = admin ? { cfg: normalizeComplaintsCfg((db.settings || {}).complaints), mailLog: mst.log.slice(-25).reverse(), mailErr: complaintsMailRun.lastErr, placeholders: MAIL_PLACEHOLDERS_LIST } : {};
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, rows: complaintsSvc.rows({ from, to }), meta: complaintsSvc.meta(), ...extra }), { 'Cache-Control': 'no-store' });
+  }
+  if (p === '/api/complaints/mail-test' && method === 'POST') {
+    if (!user || user.role !== 'admin') throw new HttpError(403, 'Admin only.');
+    const body = await readBody(req);
+    const bad = complaintsInvalidEmails(body.to);
+    const to = String(body.to || '').trim();
+    if (!to || bad.length) throw new HttpError(400, 'Enter a valid recipient email.');
+    const cfg = normalizeComplaintsCfg({ ...((db.settings || {}).complaints || {}), mail: body.mail || ((db.settings || {}).complaints || {}).mail }, (db.settings || {}).complaints);
+    const kind = ['new', 'deduct', 'remind'].includes(body.kind) ? body.kind : 'new';
+    const latest = complaintsSvc.rows({})[0] || { key: 'sample', caseNo: '1170000000', date: Date.now() - 3600e3, agentName: 'Sample Agent', agentId: '12345678', tlName: 'Sample TL', tlId: 'APN0000', vrn: 'UP00X0000', tagId: '34161FA820328EE84F0C1B20', description: 'Sample complaint: agent charged extra amount for a new tag', bcName: 'APNA PAYMENT', status: 'Pending', deducted: 200, bankNote: 'Debited your pool account for Rs.200', tatBreached: false, link: 'https://mail.google.com/' };
+    const m = buildComplaintMail(kind, kind === 'remind' ? [latest] : { ...latest, deducted: latest.deducted || 200 }, cfg, Date.now());
+    const base = { ...(db.settings.email || {}) };
+    try { await sendMail({ ...base, to }, `[TEST] ${m.subject}`, m.text, { html: m.html }); }
+    catch (err) { return sendJson(res, 200, { ok: false, error: String((err && err.message) || err).slice(0, 300) }); }
+    return sendJson(res, 200, { ok: true });
   }
   if (p === '/api/complaints/refresh' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -9244,7 +9312,12 @@ async function handleApi(req, res, url) {
     if (patch.complaints !== undefined) {
       if (!patch.complaints || typeof patch.complaints !== 'object' || Array.isArray(patch.complaints)) throw new HttpError(400, 'complaints object hona chahiye.');
       const base = { ...DEFAULT_COMPLAINTS_CFG, ...((db.settings || {}).complaints || {}) };
-      patch.complaints = normalizeComplaintsCfg({ ...base, ...patch.complaints });
+      for (const r of ((patch.complaints.mail || {}).rules || [])) {
+        const bad = complaintsInvalidEmails(r && r.to);
+        if (bad.length) throw new HttpError(400, `Invalid email address: ${bad.slice(0, 3).join(', ')}`);
+        if (r && r.enabled !== false && r.target && r.target !== 'all' && !String(r.value || '').trim()) throw new HttpError(400, 'Mail rule: pick a TL / agent name or ID (or choose “All complaints”).');
+      }
+      patch.complaints = normalizeComplaintsCfg({ ...base, ...patch.complaints }, base);
     }
     if (patch.stockMapAlert !== undefined) {
       const sm = patch.stockMapAlert;
@@ -12220,7 +12293,7 @@ async function start() {
     setInterval(() => gvAgentCommission().catch(() => {}), 10 * 60e3).unref();
     // 📨 Complaints: har 30s check — settings ka refreshMin poora hote hi Gmail se current month refresh
     setTimeout(() => { loadRegistryFull(false).catch(() => {}); complaintsSvc.tick(); }, 20e3).unref();
-    setInterval(() => complaintsSvc.tick(), 30e3).unref();
+    setInterval(() => { complaintsSvc.tick(); complaintsMailTick().catch(() => {}); }, 30e3).unref();
     setTimeout(() => warmPersonalLinks().catch(() => {}), 20000).unref?.();
     setInterval(() => warmPersonalLinks().catch(() => {}), 5 * 60e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);

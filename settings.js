@@ -627,15 +627,7 @@ FF.pages = FF.pages || {};
   }
   /** 🆕 Agent master (Sheet4) — New IDs page isse EIR ke agents compare karta hai. */
   function complaintsSection() {
-    const c = Object.assign({ enabled: true, refreshMin: 10, subjects: ['POS Related-Request'], ownerName: 'Tarun', tatHours: 24 }, settings.complaints || {});
-    return section('📨 Agents Complaints Summary · Gmail auto-refresh', `<p class="dim small">The server reads your Gmail in the background and keeps the <b>Management → Agents Complaints Summary</b> page ready — nobody has to click and wait. Needs the Apps Script web app (APPS_SCRIPT_URL) with the latest <code>Code.gs</code> deployed as a <b>New version</b> and Gmail read permission allowed.</p>
-      <div class="form-grid">
-        <label class="check"><input type="checkbox" data-path="complaints.enabled" ${c.enabled !== false ? 'checked' : ''}> <b>Auto-refresh ON</b></label>
-        ${field('Refresh every (minutes)', numI('complaints.refreshMin', c.refreshMin, 'min="2" max="1440"'), 'Default 10 · minimum 2')}
-        ${field('Your name (shown in “Solved by …”)', txt('complaints.ownerName', c.ownerName), 'Status when you replied to the bank mail')}
-        ${field('TAT (hours)', numI('complaints.tatHours', c.tatHours, 'min="1" max="720"'), 'Pending complaints older than this are flagged “TAT breached” (bank note: T+1 day = 24)')}
-        ${field('Mail subjects to watch (one per line)', `<textarea class="input" rows="4" data-path="complaints.subjects" data-lines placeholder="POS Related-Request">${esc((c.subjects || []).join('\n'))}</textarea>`, 'Gmail subject phrase match — add as many subjects as you need, each on its own line')}
-      </div>${saveBar('complaints')}`);
+    return section('📨 Agents Complaints Summary', `<p class="dim small">Gmail refresh interval, mail subjects, TAT and the <b>📧 mail alerts</b> (per TL / agent, instant + reminders) are now managed on the page itself: <a class="btn small" href="#/complaints">Open Agents Complaints Summary → ⚙ Settings & Mail alerts</a></p>`);
   }
   function agentRegistrySection() {
     const ar = Object.assign({ enabled: true, idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E', assistCol: 'M' }, settings.agentRegistry || {});
