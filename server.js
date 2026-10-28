@@ -20,6 +20,7 @@ import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, disp
 import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
+import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
@@ -110,7 +111,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
 let APP_VERSION = '3.65.0';
@@ -128,6 +129,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'tagRequest', label: 'Management · Tag Request (IDFC agents · class-wise stock/tag request form)', group: 'Management' },
   { key: 'masterSearch', label: 'Management · Master Search (GV + FF naam/ID → seedha poora profile)', group: 'Management' },
   { key: 'barcodeChecker', label: 'Management · Barcode Checker (range / multiple barcodes)', group: 'Management' },
+  { key: 'complaints', label: 'Management · Agents Complaints Summary (bank POS complaint mails → status table)', group: 'Management' },
   { key: 'newIds', label: 'Management · New IDs (EIR me hain par Agent master Sheet4 me nahi)', group: 'Management' },
   { key: 'bulkTagStatus', label: 'Management · Bulk Tag Status (VRN / Tag ID / Barcode → GV / FF / stock lookup)', group: 'Management' },
   { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
@@ -239,6 +241,7 @@ const DEFAULT_SETTINGS = {
   },
   vrnRules: { enabled: true, bands: [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }] }, // GV live: VRN length → status
   kpiColors: {}, // Admin KPI card colours: { g1: {a:'#6366f1', b:'#8b5cf6'}, ... } — empty = built-in default
+  complaints: { enabled: true, refreshMin: 10, subjects: ['POS Related-Request'], ownerName: 'Tarun', tatHours: 24 }, // 📨 Agents Complaints Summary: Gmail se bank complaint mails (background refresh)
   stockMapAlert: { enabled: true, limits: {} }, // Home: class-wise Office stock limit — isse niche jaye to upar warning
   // GV personal commission: VC4 is sourced from the exact GV Master row by default;
   // all other classes wait for an admin-entered official rate. Empty is unresolved, never zero.
@@ -3574,6 +3577,38 @@ const mappingJobs = createMappingJobs({
   }
 });
 
+
+// 📨 Agents Complaints Summary — Gmail (Apps Script) se bank POS-complaint mails; background me refresh, cache se turant jawab.
+let complaintsAgentIdx = { rows: null, byId: new Map(), byName: new Map() };
+function complaintsLookupAgent({ agentId, agentName }) {
+  const rows = regFullState.rows;
+  if (!rows) return null;
+  if (complaintsAgentIdx.rows !== rows) {
+    const byId = new Map(), byName = new Map();
+    for (const r of rows) {
+      for (const k of [r.newId, r.id]) { const n = idNorm(k); if (n && !byId.has(n)) byId.set(n, r); }
+      const nm = plNormName(r.name); if (nm && !byName.has(nm)) byName.set(nm, r);
+    }
+    complaintsAgentIdx = { rows, byId, byName };
+  }
+  const hit = complaintsAgentIdx.byId.get(idNorm(agentId)) || complaintsAgentIdx.byName.get(plNormName(agentName)) || null;
+  return hit ? { found: true, tlName: hit.tlName || '', tlId: hit.tlId || '' } : null;
+}
+let complaintsStoreMemo = null;
+const complaintsSvc = createComplaintsService({
+  getStore: () => {
+    if (complaintsStoreMemo) return complaintsStoreMemo;
+    const url0 = (process.env.APPS_SCRIPT_URL || '').trim(), secret0 = (process.env.APPS_SCRIPT_SECRET || '').trim();
+    if (!url0 || !secret0) return null;
+    try { complaintsStoreMemo = new AppsScriptStore({ url: url0, secret: secret0 }); complaintsStoreMemo.timeoutMs = 120000; complaintsStoreMemo.attempts = 2; complaintsStoreMemo.label = 'Gmail (Apps Script)'; } catch { complaintsStoreMemo = null; }
+    return complaintsStoreMemo;
+  },
+  getConfig: () => (db.settings || {}).complaints,
+  lookupAgent: complaintsLookupAgent,
+  log: (m) => console.log(m)
+});
+function complaintsAllowed(user) { return !!user && (user.role === 'admin' || (user.permissions || []).includes('complaints')); }
+
 async function stockAgeIndex(fresh) {
   const key = stockAgeKey();
   const have = stockAgeState.index && stockAgeState.key === key ? stockAgeState.index : null;
@@ -5740,6 +5775,25 @@ async function handleApi(req, res, url) {
     if (!index) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
     const results = list.map((b) => dispatchFor(index, b));
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, results, meta: { mode: 'index', at: new Date(ledgerState.at).toISOString(), counts: ledgerState.counts, errors: ledgerState.errors } }), { 'Cache-Control': 'no-store' });
+  }
+  // 📨 Agents Complaints Summary — cache se (background me Gmail se refresh hota rehta hai)
+  if (p === '/api/complaints' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (!complaintsAllowed(user)) throw new HttpError(403, 'Complaints access nahi hai.');
+    const q = url.searchParams;
+    const dk = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '');
+    const from = dk(q.get('from')), to = dk(q.get('to'));
+    loadRegistryFull(false).catch(() => {});   // TL lookup ke liye Sheet4 (cached)
+    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r('wait'), 40000); });
+    try { await Promise.race([complaintsSvc.ensureRange(from), wait]); } catch { /* error meta me dikhega */ } finally { clearTimeout(timer); }
+    await Promise.race([loadRegistryFull(false).catch(() => null), new Promise((r) => setTimeout(r, 4000))]);
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, rows: complaintsSvc.rows({ from, to }), meta: complaintsSvc.meta() }), { 'Cache-Control': 'no-store' });
+  }
+  if (p === '/api/complaints/refresh' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (!complaintsAllowed(user)) throw new HttpError(403, 'Complaints access nahi hai.');
+    try { await complaintsSvc.sync({ full: true }); } catch (err) { return sendJson(res, 200, { ok: false, error: String((err && err.message) || err), meta: complaintsSvc.meta() }); }
+    return sendJson(res, 200, { ok: true, meta: complaintsSvc.meta() }, { 'Cache-Control': 'no-store' });
   }
   // 🆕 New IDs: EIR me issuance karne wale agents jinki ID Agent master (Sheet4 col A) me nahi hai.
   if (p === '/api/new-ids' && method === 'GET') {
@@ -9187,6 +9241,11 @@ async function handleApi(req, res, url) {
       }
       patch.kpiColors = clean;
     }
+    if (patch.complaints !== undefined) {
+      if (!patch.complaints || typeof patch.complaints !== 'object' || Array.isArray(patch.complaints)) throw new HttpError(400, 'complaints object hona chahiye.');
+      const base = { ...DEFAULT_COMPLAINTS_CFG, ...((db.settings || {}).complaints || {}) };
+      patch.complaints = normalizeComplaintsCfg({ ...base, ...patch.complaints });
+    }
     if (patch.stockMapAlert !== undefined) {
       const sm = patch.stockMapAlert;
       if (!sm || typeof sm !== 'object' || Array.isArray(sm)) throw new HttpError(400, 'stockMapAlert object hona chahiye.');
@@ -12159,6 +12218,9 @@ async function start() {
     setInterval(() => checkReports(false).catch(() => {}), 30e3).unref();
     setTimeout(() => gvAgentCommission().catch(() => {}), 25000).unref?.();
     setInterval(() => gvAgentCommission().catch(() => {}), 10 * 60e3).unref();
+    // 📨 Complaints: har 30s check — settings ka refreshMin poora hote hi Gmail se current month refresh
+    setTimeout(() => { loadRegistryFull(false).catch(() => {}); complaintsSvc.tick(); }, 20e3).unref();
+    setInterval(() => complaintsSvc.tick(), 30e3).unref();
     setTimeout(() => warmPersonalLinks().catch(() => {}), 20000).unref?.();
     setInterval(() => warmPersonalLinks().catch(() => {}), 5 * 60e3).unref();
     setTimeout(() => maybeMonthlyReport(), 8000);

@@ -64,6 +64,7 @@ window.FF = window.FF || {};
     bulkTagStatus: ['bulkTagStatus'],
     barcodeChecker: ['barcodeChecker'],
     newIds: ['newIds'],
+    complaints: ['complaints'],
     tagIssued: ['tagIssued'],
     performance: [...PROFILE_DEPS, 'agentBoard', 'perfWatch', 'performance'],
     targets: ['targets'],

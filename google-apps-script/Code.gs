@@ -320,6 +320,30 @@ function doPost(e) {
     try { return json_({ ok: true, quota: MailApp.getRemainingDailyQuota(), account: Session.getEffectiveUser().getEmail() }); }
     catch (err) { return json_({ ok: false, error: 'mail permission missing — Deploy → Manage deployments → Edit → New version, then Allow email permission (' + String(err && err.message || err) + ')' }); }
   }
+  // 📨 Agents Complaints Summary (v3.112) — bank complaint mails ko Gmail se padho (READ-ONLY, kuch delete/send nahi hota).
+  // body: { query: 'subject:("POS Related-Request") after:2026/10/01', start: 0, max: 100 }
+  // Thread-wise data deta hai; dashboard server status/table khud nikalta hai. Pehli baar: Deploy → New version → Allow (Gmail read).
+  if (body.action === 'complaints') {
+    try {
+      const q = String(body.query || '').slice(0, 600);
+      if (!q) return json_({ ok: false, error: 'query missing' });
+      const start = Math.max(0, Number(body.start) || 0), max = Math.min(100, Math.max(1, Number(body.max) || 100));
+      const me = [Session.getEffectiveUser().getEmail()];
+      try { GmailApp.getAliases().forEach(function (a) { me.push(a); }); } catch (e) {}
+      const threads = GmailApp.search(q, start, max);
+      const out = threads.map(function (th) {
+        const msgs = th.getMessages().slice(0, 25).map(function (m, i) {
+          let html = '';
+          if (i === 0) { html = String(m.getBody() || ''); if (!/<table/i.test(html)) html = ''; else if (html.length > 90000) html = html.slice(0, 90000); }
+          return { id: m.getId(), from: m.getFrom(), date: m.getDate().getTime(), plain: String(m.getPlainBody() || '').slice(0, 3000), html: html };
+        });
+        return { id: th.getId(), subject: th.getFirstMessageSubject(), messages: msgs };
+      });
+      return json_({ ok: true, me: me, threads: out, more: threads.length === max });
+    } catch (err) {
+      return json_({ ok: false, error: 'Gmail read permission missing — editor me authorizeComplaints() ek baar Run karo, phir Deploy → Manage deployments → Edit → New version → Deploy (' + String(err && err.message || err) + ')' });
+    }
+  }
   if (body.action === 'mail') {
     try {
       const m = body.mail || {};
@@ -1306,4 +1330,11 @@ function colIndex_(letters) {
 
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+/** ▶ Editor me ek baar Run karo — Gmail READ permission maangta hai (Agents Complaints Summary ke liye). */
+function authorizeComplaints() {
+  const n = GmailApp.search('subject:"POS Related-Request"', 0, 1).length;
+  Logger.log('Gmail read OK · test search threads: ' + n + ' · account: ' + Session.getEffectiveUser().getEmail());
 }
