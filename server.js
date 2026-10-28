@@ -980,9 +980,27 @@ function prunePersonalLinkSessions() {
   for (const [key, session] of personalLinkSessions) if (!session || session.expiresAt <= now) personalLinkSessions.delete(key);
   while (personalLinkSessions.size > 5000) personalLinkSessions.delete(personalLinkSessions.keys().next().value);
 }
+// 🔐 Stateless (HMAC-signed) personal-link sessions: survive deploys / restarts, so a verified viewer is not asked to log in again.
+// Secret is derived from deployment env (stable across restarts); without any env it falls back to a per-process random secret.
+const PL_SESSION_SECRET = (process.env.APPS_SCRIPT_SECRET || ADMIN_PASSWORD) ? sha(`${process.env.APPS_SCRIPT_SECRET || ''}|${ADMIN_PASSWORD}|pl-session-v2`) : crypto.randomBytes(32).toString('hex');
+const plLoggedOut = new Set();
+const plSessionMac = (payload) => crypto.createHmac('sha256', PL_SESSION_SECRET).update(payload).digest('base64url');
+const plCredFp = (link) => sha(`${link && link.token || ''}|${String(link && link.personId || '').trim()}|${String(link && link.mobile || '').replace(/\D/g, '')}`).slice(0, 20);
+function plVerifySigned(value, link) {
+  const parts = String(value || '').split('.');
+  if (parts.length !== 5 || parts[0] !== 'v2') return false;
+  const [, iat, exp, lid, mac] = parts;
+  const want = plSessionMac(`v2.${iat}.${exp}.${lid}.${plCredFp(link)}`);
+  const a = Buffer.from(mac), b = Buffer.from(want);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  if (Number(exp) <= Date.now() || lid !== sha(String(link.id || '')).slice(0, 16)) return false;
+  if (Number(iat) <= (Number(link.revokedAt) || 0)) return false;
+  return !plLoggedOut.has(sha(value));
+}
 function personalLinkSession(req, link) {
   const value = parseCookies(req)[personalLinkCookieName(link && link.token)];
   if (!value) return false;
+  if (value.startsWith('v2.')) return plVerifySigned(value, link);
   const key = sha(value);
   const session = personalLinkSessions.get(key);
   if (!session || session.expiresAt <= Date.now()) { personalLinkSessions.delete(key); return false; }
@@ -990,14 +1008,16 @@ function personalLinkSession(req, link) {
 }
 function createPersonalLinkSession(req, link) {
   prunePersonalLinkSessions();
-  const value = crypto.randomBytes(32).toString('base64url');
-  const expiresAt = Date.now() + PERSONAL_LINK_SESSION_TTL_MS;
-  personalLinkSessions.set(sha(value), { linkId: link.id, tokenHash: sha(String(link.token || '')), expiresAt });
+  const iat = Date.now();
+  const expiresAt = iat + PERSONAL_LINK_SESSION_TTL_MS;
+  const head = `v2.${iat}.${expiresAt}.${sha(String(link.id || '')).slice(0, 16)}`;
+  const value = `${head}.${plSessionMac(`${head}.${plCredFp(link)}`)}`;
   const maxAge = Math.floor(PERSONAL_LINK_SESSION_TTL_MS / 1000);
   const cookie = `${personalLinkCookieName(link.token)}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${isSecure(req) ? '; Secure' : ''}`;
   return { cookie, value };
 }
 function revokePersonalLinkSessions(linkId) {
+  try { const l = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((x) => x && x.id === linkId); if (l) l.revokedAt = Date.now(); } catch { /* best effort */ }
   for (const [key, session] of personalLinkSessions) if (session && session.linkId === linkId) personalLinkSessions.delete(key);
 }
 function clearPersonalLinkCookie(req, link) {
@@ -8086,7 +8106,7 @@ async function handleApi(req, res, url) {
     const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
     if (savedLink) {
       const value = parseCookies(req)[personalLinkCookieName(savedLink.token)];
-      if (value) { if (personalLinkSession(req, savedLink)) plRecordActivity(savedLink, req, 'logout', 'Locked / logged out', {}, plCleanSid(body.sid)); personalLinkSessions.delete(sha(value)); }
+      if (value) { if (personalLinkSession(req, savedLink)) plRecordActivity(savedLink, req, 'logout', 'Locked / logged out', {}, plCleanSid(body.sid)); personalLinkSessions.delete(sha(value)); plLoggedOut.add(sha(value)); if (plLoggedOut.size > 5000) plLoggedOut.delete(plLoggedOut.values().next().value); }
       const lsid = plCleanSid(body.sid); if (lsid) publicLiveSessions.delete(lsid);
       return sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearPersonalLinkCookie(req, savedLink), 'Cache-Control': 'no-store' });
     }
