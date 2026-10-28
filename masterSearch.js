@@ -1918,10 +1918,42 @@ FF.pages = FF.pages || {};
           <div class="msp-hero-id"><b>${esc(g.name)}</b> <button type="button" class="cp-btn" data-copy="${esc(g.name)}" title="Copy name" aria-label="Copy name">📋</button>${heroNewTags(viewGroup)}<div class="msp-pills">${bits || '<span class="msp-pill">Report</span>'}${viewGroup.ff && !isTlP(viewGroup.ff) ? `<span data-alias-of="${esc(viewGroup.ff.sub || '')}"></span>` : ''}</div></div>
           ${person ? `<div class="msp-hero-act">${FF.auth && FF.auth.can && FF.auth.can('export') ? '<button class="btn small primary" data-msp-report title="Choose: Full report / Stock + pivot (ageing auto) / Current month / Last month — Excel">⬇ Full report</button>' : ''}<button class="btn small" data-ms-tags="${esc(person.name)}">🏷️ Tag-level rows</button></div>` : ''}
         </div>
+        <div id="msp-det" class="msp-det"></div>
         <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => viewGroup[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
         <div id="msp-rank"></div>
         ${gvStripHtml(viewGroup.gv)}${ffStripHtml(viewGroup.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
+      const paintDet = () => {
+        const host = out.querySelector('#msp-det');
+        if (!host || current !== g) return;
+        const contacts = !FF.auth || !FF.auth.can || FF.auth.can('contacts');
+        const f = (k, v, mono) => `<div class="msp-det-f"><small>${k}</small><b${mono ? ' class="mono"' : ''}>${v ? esc(v) : '<span class="dim">—</span>'}</b></div>`;
+        const mob = (m) => contacts ? (m && !/^na$/i.test(String(m)) ? esc(m) : '<span class="dim">—</span>') : '🔒';
+        const card = (pp, ch) => {
+          if (!pp) return '';
+          let q = null;
+          try { q = MP() && MP().supports(pp) ? MP().quick(pp) : null; } catch { q = null; }
+          const tlKind = isTlP(pp);
+          const id = (q && q.id) || pp.sub || '';
+          const tl = q && q.tl ? q.tl : {};
+          const tlName = tlKind ? pp.name : (tl.name || [...(pp.tlSet || [])][0] || '');
+          const tlId = tlKind ? id : (tl.id || '');
+          const tlMob = tlKind ? (q && q.mobile) : tl.mobile;
+          return `<div class="msp-det-card ${ch}"><div class="msp-det-h">${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${tlKind ? 'Team Leader' : 'Agent'}</div><div class="msp-det-grid">
+            ${f(tlKind ? 'TL ID' : 'Agent ID', id, true)}
+            ${f(tlKind ? 'TL name' : 'Agent name', pp.name)}
+            <div class="msp-det-f"><small>${tlKind ? 'TL mobile' : 'Mobile'}</small><b>${mob(q && q.mobile)}</b></div>
+            ${tlKind ? '' : f('TL name', pp.direct ? (pp.directLabel || 'Direct') : tlName)}
+            ${tlKind ? '' : f('TL ID', tlId, true)}
+            ${tlKind ? '' : `<div class="msp-det-f"><small>TL mobile</small><b>${mob(tlMob)}</b></div>`}
+            ${q && q.status ? f('Status', q.status) : ''}${q && q.lastActive ? f('Last active', q.lastActive) : ''}
+            ${pp.last ? f('Last allocation', pp.last) : ''}
+          </div></div>`;
+        };
+        host.innerHTML = [card(viewGroup.ff, 'ff'), card(viewGroup.gv, 'gv')].join('');
+      };
+      paintDet();
+      try { if (MP() && MP().loadFor) [viewGroup.ff, viewGroup.gv].filter(Boolean).forEach((pp) => { if (MP().supports(pp)) MP().loadFor(pp).then(paintDet).catch(() => {}); }); } catch { /* optional */ }
       paintKpis(viewGroup, U.$('#msp-kpis', out)).catch(() => {});
       try { if (FF.newAgentTag) FF.newAgentTag.paint(out); if (FF.aliases) FF.aliases.paint(out); } catch { /* ignore */ }
       const host = U.$('#msp-report', out);

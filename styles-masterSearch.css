@@ -78,3 +78,11 @@
 .msp-rep-menu { position: absolute; z-index: 40; top: 100%; right: 0; margin-top: 6px; min-width: 270px; display: flex; flex-direction: column; background: var(--card, #fff); border: 1px solid rgba(100,116,139,.35); border-radius: 12px; box-shadow: 0 12px 30px rgba(0,0,0,.2); padding: 4px; }
 .msp-rep-menu button { text-align: left; background: transparent; border: 0; padding: 9px 12px; border-radius: 8px; cursor: pointer; color: inherit; font: inherit; }
 .msp-rep-menu button:hover { background: rgba(99,102,241,.12); }
+.msp-det { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; margin: 10px 0; }
+.msp-det:empty { display: none; }
+.msp-det-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e8f0); border-left: 4px solid #2563eb; border-radius: 12px; padding: 10px 12px; }
+.msp-det-card.gv { border-left-color: #16a34a; }
+.msp-det-h { font-weight: 800; font-size: 13px; margin-bottom: 8px; }
+.msp-det-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px 12px; }
+.msp-det-f small { display: block; color: var(--muted, #64748b); font-size: 11px; }
+.msp-det-f b { font-size: 13px; word-break: break-word; }
