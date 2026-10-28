@@ -1080,7 +1080,7 @@ FF.pages = FF.pages || {};
     const paint = () => {
       const canExp = FF.auth.can('export');
       host.innerHTML = `<div class="btn-row smap-dr-bar"><input class="input" id="smap-q" placeholder="Search tag / barcode / agent / TL…" value="${esc(state.q)}">${canExp ? `<button class="btn small primary" id="smap-xlsx">⬇ Excel (all)</button><a class="btn small" id="smap-csv" href="/api/stock-map/csv?${qs(state.q ? `&q=${encodeURIComponent(state.q)}` : '')}" download>⬇ CSV</a>` : ''}<a class="btn small" href="#/stock">📦 Stock page</a><span class="dim small">${U.fmt(state.total)} tags · pehle ${U.fmt(state.rows.length)} dikh rahe</span></div>
-        <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Tag ID</th><th>Barcode</th><th>Class</th><th>Bucket</th><th>FF agent</th><th>FF TL</th><th>GV agent</th><th>GV TL</th><th class="num">Age</th></tr></thead><tbody>${state.rows.map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.tagId)}</td><td class="mono">${esc(r.barcode)}</td><td>${esc(r.cls)}</td><td>${esc(r.bucket)}</td><td>${esc(r.ffAgent)}${r.ffAgentId ? ` <small class="dim">${esc(r.ffAgentId)}</small>` : ''}</td><td>${esc(r.ffTl)}</td><td>${esc(r.gvAgent)}${r.gvAgentId ? ` <small class="dim">${esc(r.gvAgentId)}</small>` : ''}</td><td>${esc(r.gvTl)}</td><td class="num">${r.age === '' ? '—' : esc(r.age)}</td></tr>`).join('') || '<tr><td colspan="10" class="empty">Koi tag nahi.</td></tr>'}</tbody></table></div>
+        <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Tag ID</th><th>Barcode</th><th>Class</th><th>Bucket</th><th>FF agent</th><th>FF TL</th><th>GV agent</th><th>GV TL</th><th class="num">Age</th>${bucket === 'gvonly' ? '<th>Remark</th>' : ''}</tr></thead><tbody>${state.rows.map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.tagId)}</td><td class="mono">${esc(r.barcode)}</td><td>${esc(r.cls)}</td><td>${esc(r.bucket)}</td><td>${esc(r.ffAgent)}${r.ffAgentId ? ` <small class="dim">${esc(r.ffAgentId)}</small>` : ''}</td><td>${esc(r.ffTl)}</td><td>${esc(r.gvAgent)}${r.gvAgentId ? ` <small class="dim">${esc(r.gvAgentId)}</small>` : ''}</td><td>${esc(r.gvTl)}</td><td class="num">${r.age === '' ? '—' : esc(r.age)}</td>${bucket === 'gvonly' ? `<td><span class="badge ${r.remark === 'Not In FF Stock' ? 'red' : 'amber'}">${esc(r.remark || '')}</span></td>` : ''}</tr>`).join('') || '<tr><td colspan="10" class="empty">Koi tag nahi.</td></tr>'}</tbody></table></div>
         ${state.rows.length < state.total ? '<div class="btn-row"><button class="btn small" id="smap-more">⬇ Aur dikhao</button></div>' : ''}`;
       const q = host.querySelector('#smap-q');
       let tm = null;
@@ -1092,8 +1092,8 @@ FF.pages = FF.pages || {};
         x.disabled = true; const old = x.textContent; x.textContent = 'Excel ban raha hai…';
         try {
           const d = await fetchPage(0, 1000, true);
-          const rows = (d.rows || []).map((r) => [r.tagId, r.barcode, r.cls, r.type, r.bucket, r.ffAgent, r.ffAgentId, r.ffTl, r.gvAgent, r.gvAgentId, r.gvTl, r.age]);
-          FF.xlsx.download(`stock-map-${bucket}${cls ? `-${cls}` : ''}-${U.stamp()}.xlsx`, [{ name: 'Tags', header: ['Tag ID', 'Barcode', 'Class', 'Tag type', 'Bucket', 'FF agent', 'FF agent ID', 'FF TL', 'GV agent', 'GV agent ID', 'GV TL', 'Age (days)'], rows }]);
+          const rows = (d.rows || []).map((r) => [r.tagId, r.barcode, r.cls, r.type, r.bucket, r.ffAgent, r.ffAgentId, r.ffTl, r.gvAgent, r.gvAgentId, r.gvTl, r.age].concat(bucket === 'gvonly' ? [r.remark || ''] : []));
+          FF.xlsx.download(`stock-map-${bucket}${cls ? `-${cls}` : ''}-${U.stamp()}.xlsx`, [{ name: 'Tags', header: ['Tag ID', 'Barcode', 'Class', 'Tag type', 'Bucket', 'FF agent', 'FF agent ID', 'FF TL', 'GV agent', 'GV agent ID', 'GV TL', 'Age (days)'].concat(bucket === 'gvonly' ? ['Remark'] : []), rows }]);
         } catch (e) { U.toast(e.message || 'Excel nahi bana', 'err'); }
         x.disabled = false; x.textContent = old;
       });
@@ -1122,6 +1122,7 @@ FF.pages = FF.pages || {};
     if (!chip.isConnected) return;
     const g = data.gvOnly || { total: 0, rows: [] };
     chip.querySelector('.kpi-value').textContent = U.fmt(g.total);
+    chip.title = `GV stock me hai, FF field stock me nahi — Not In FF Stock ${U.fmt(g.notIn || 0)} · In FF Office Stock ${U.fmt(g.office || 0)}`;
     chip.querySelector('.kpi-foot').innerHTML = g.rows.length ? g.rows.map((r) => `${esc(r.cls)} <b>${U.fmt(r.n)}</b>`).join(' · ') : 'Sab GV tags FF stock me hain';
     const open = () => openGvOnlyDrawer(g);
     chip.addEventListener('click', open);
@@ -1131,7 +1132,7 @@ FF.pages = FF.pages || {};
     if (!FF.app || !FF.app.openDrawer) return;
     const canExp = FF.auth.can('export');
     const rows = g.rows.map((r) => `<tr><td><b>${esc(r.cls)}</b></td><td>${esc(r.type)}</td><td class="num"><button type="button" class="smap-cell smap-gv" data-gvo-c="${esc(r.cls)}" title="${esc(r.cls)} tags dekho">${U.fmt(r.n)}</button></td></tr>`).join('');
-    const body = FF.app.openDrawer({ kicker: '🔎 Stock check', title: 'GV tags · not in FF stock', sub: 'GV Tag Assignment (assigned) me hain, StockDataa (FF stock) me Tag ID / Barcode se nahi mile', wide: false,
+    const body = FF.app.openDrawer({ kicker: '🔎 Stock check', title: 'GV tags · not in FF stock', sub: `GV stock me hain, FF field stock me nahi — Not In FF Stock: ${U.fmt(g.notIn || 0)} · In FF Office Stock: ${U.fmt(g.office || 0)}`, wide: false,
       body: `<div class="btn-row">${canExp ? '<button class="btn small primary" id="gvo-xlsx">⬇ Excel (all)</button><a class="btn small" href="/api/stock-map/csv?bucket=gvonly" download>⬇ CSV</a>' : ''}<button class="btn small" data-gvo-c="">📋 Saare tags</button></div>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th>Tag type</th><th class="num">Tags</th></tr></thead><tbody>${rows || '<tr><td colspan="3" class="empty">Koi tag nahi — sab GV tags FF stock me hain.</td></tr>'}<tr class="smap-foot"><td colspan="2"><b>Total</b></td><td class="num"><button type="button" class="smap-link" data-gvo-c="">${U.fmt(g.total)}</button></td></tr></tbody></table></div>` });
     const host = body && body.querySelector ? body : U.$('#drawer-body');
@@ -1142,9 +1143,9 @@ FF.pages = FF.pages || {};
       x.disabled = true; const old = x.textContent; x.textContent = 'Excel ban raha hai…';
       try {
         const d = await FF.auth.api('/api/stock-map/tags?bucket=gvonly&all=1');
-        const out = (d.rows || []).map((r) => [r.tagId, r.barcode, r.cls, r.type, r.gvAgent, r.gvAgentId, r.gvTl, r.age]);
-        const sum = g.rows.map((r) => [r.cls, r.type, r.n]).concat([['Total', '', g.total]]);
-        FF.xlsx.download(`gv-tags-not-in-ff-stock-${U.stamp()}.xlsx`, [{ name: 'Class-wise', header: ['Class', 'Tag type', 'Tags'], rows: sum }, { name: 'Tags', header: ['Tag ID', 'Barcode', 'Class', 'Tag type', 'GV agent', 'GV agent ID', 'GV TL', 'Age (days)'], rows: out }]);
+        const out = (d.rows || []).map((r) => [r.tagId, r.barcode, r.cls, r.type, r.gvAgent, r.gvAgentId, r.gvTl, r.age, r.remark || '']);
+        const sum = g.rows.map((r) => [r.cls, r.type, r.n]).concat([['Not In FF Stock', '', g.notIn || 0], ['In FF Office Stock (not in field)', '', g.office || 0], ['Total difference', '', g.total]]);
+        FF.xlsx.download(`gv-tags-not-in-ff-stock-${U.stamp()}.xlsx`, [{ name: 'Class-wise', header: ['Class', 'Tag type', 'Tags'], rows: sum }, { name: 'Tags', header: ['Tag ID', 'Barcode', 'Class', 'Tag type', 'GV agent', 'GV agent ID', 'GV TL', 'Age (days)', 'Remark'], rows: out }]);
       } catch (err) { U.toast(err.message || 'Excel nahi bana', 'err'); }
       x.disabled = false; x.textContent = old;
     });

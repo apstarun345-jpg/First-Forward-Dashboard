@@ -127,24 +127,36 @@ export const MAP_BUCKET_LABEL = { ff: 'First Forward', gv: 'GV Partner', both: '
 export function gvOnlyList(index) {
   if (!index || !index.gv || !index.mapGv) return [];
   if (index._gvOnly && index._gvOnlyAt === index.at) return index._gvOnly;
-  const ffTags = new Set(), ffBcs = new Set();
-  for (const r of (index.ff && index.ff.raw) || []) { ffTags.add(str(r[0]).toUpperCase()); const b = normBarcode(r[1]); if (b) ffBcs.add(b); }
-  const out = [], seen = new Set();
+  // FF side: sirf "in field" (ffMapped) rows ko FF stock maano; office/parked rows alag remark ke saath dikhte hain.
+  const ffField = new Set(), ffFieldBc = new Set(), ffAny = new Set(), ffAnyBc = new Set();
+  for (const r of (index.ff && index.ff.raw) || []) {
+    const t = str(r[0]).toUpperCase(), b = normBarcode(r[1]);
+    ffAny.add(t); if (b) ffAnyBc.add(b);
+    if (mapBucketOf(r, index.mapGv, index.mapOpts || {}).ffMapped) { ffField.add(t); if (b) ffFieldBc.add(b); }
+  }
+  const out = [], seen = new Set(), remarks = new Map();
   for (const r of index.gv.raw || []) {
     const tu = str(r[0]).toUpperCase();
     if (!tu || seen.has(tu) || !index.mapGv.tags.has(tu)) continue;   // sirf GV "assigned" (in-stock) tags
     const b = normBarcode(r[1]);
-    if (ffTags.has(tu) || (b && ffBcs.has(b))) continue;
+    if (ffField.has(tu) || (b && ffFieldBc.has(b))) continue;          // FF field stock me hai → difference nahi
     seen.add(tu); out.push(r);
+    remarks.set(tu, ffAny.has(tu) || (b && ffAnyBc.has(b)) ? GVONLY_REMARK_OFFICE : GVONLY_REMARK_NONE);
   }
-  index._gvOnly = out; index._gvOnlyAt = index.at;
+  index._gvOnly = out; index._gvOnlyAt = index.at; index._gvOnlyRemark = remarks;
   return out;
 }
+export const GVONLY_REMARK_NONE = 'Not In FF Stock';
+export const GVONLY_REMARK_OFFICE = 'In FF Office Stock (not in field)';
+export function gvOnlyRemark(index, r) { return (index._gvOnlyRemark && index._gvOnlyRemark.get(str(r[0]).toUpperCase())) || GVONLY_REMARK_NONE; }
 export function gvOnlySummary(index) {
   const by = new Map();
   for (const r of gvOnlyList(index)) by.set(r[2] || 'NA', (by.get(r[2] || 'NA') || 0) + 1);
   const rows = [...by].map(([cls, n]) => ({ cls, n, type: TAG_TYPE_LABEL[cls] || '' })).sort((a, b) => (CLS_ORDER.indexOf(a.cls) + 1 || 99) - (CLS_ORDER.indexOf(b.cls) + 1 || 99));
-  return { total: rows.reduce((t, x) => t + x.n, 0), rows };
+  const list = gvOnlyList(index);
+  let notIn = 0, office = 0;
+  for (const r of list) { if (gvOnlyRemark(index, r) === GVONLY_REMARK_OFFICE) office++; else notIn++; }
+  return { total: rows.reduce((t, x) => t + x.n, 0), rows, notIn, office };
 }
 /** Tag-level rows ek bucket (ff|gv|both|office|all) + optional class ke liye. */
 export function mapRows(index, { bucket = 'all', cls = '', q = '' } = {}) {
@@ -155,7 +167,7 @@ export function mapRows(index, { bucket = 'all', cls = '', q = '' } = {}) {
   if (bucket === 'gvonly') {
     for (const r of gvOnlyList(index)) {
       if (want && r[2] !== want) continue;
-      const row = { tagId: str(r[0]), barcode: str(r[1]), cls: r[2], type: TAG_TYPE_LABEL[r[2]] || '', bucket: MAP_BUCKET_LABEL.gvonly, ffAgent: '', ffAgentId: '', ffTl: '', gvAgent: str(r[4]), gvAgentId: str(r[5]), gvTl: str(r[6]), age: r[7] === null || r[7] === undefined ? '' : r[7] };
+      const row = { tagId: str(r[0]), barcode: str(r[1]), cls: r[2], type: TAG_TYPE_LABEL[r[2]] || '', bucket: MAP_BUCKET_LABEL.gvonly, ffAgent: '', ffAgentId: '', ffTl: '', gvAgent: str(r[4]), gvAgentId: str(r[5]), gvTl: str(r[6]), age: r[7] === null || r[7] === undefined ? '' : r[7], remark: gvOnlyRemark(index, r) };
       if (needle && !Object.values(row).some((v) => String(v).toLowerCase().includes(needle))) continue;
       out.push(row);
     }

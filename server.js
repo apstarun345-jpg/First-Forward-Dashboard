@@ -6039,7 +6039,8 @@ async function handleApi(req, res, url) {
     if (p === '/api/stock-map/csv') {
       const cell = (v) => { const t = String(v ?? ''); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : (/^[=+\-@]/.test(t) ? `'${t}` : t); };
       const head = ['Tag ID', 'Barcode', 'Class', 'Tag type', 'Bucket', 'FF agent', 'FF agent ID', 'FF TL', 'GV agent', 'GV agent ID', 'GV TL', 'Age (days)'];
-      const lines = [head.join(',')].concat(rows.map((r) => [r.tagId, r.barcode, r.cls, r.type, r.bucket, r.ffAgent, r.ffAgentId, r.ffTl, r.gvAgent, r.gvAgentId, r.gvTl, r.age].map(cell).join(',')));
+      if (bucket === 'gvonly') head.push('Remark');
+      const lines = [head.join(',')].concat(rows.map((r) => [r.tagId, r.barcode, r.cls, r.type, r.bucket, r.ffAgent, r.ffAgentId, r.ffTl, r.gvAgent, r.gvAgentId, r.gvTl, r.age].concat(bucket === 'gvonly' ? [r.remark] : []).map(cell).join(',')));
       const name = `stock-map-${bucket}${q.get('cls') ? '-' + String(q.get('cls')).replace(/[^A-Za-z0-9]/g, '') : ''}-${dateKeyNow()}.csv`;
       return sendMaybeCompressed(req, res, 200, 'text/csv; charset=utf-8', '\ufeff' + lines.join('\r\n'), { 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="${name}"` });
     }
