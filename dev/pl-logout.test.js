@@ -12,3 +12,7 @@ test('header decoration cannot swallow clicks on the Logout button', () => {
   assert.match(src, /\.pb-wrap \.pb-head::after\{pointer-events:none;/);
   assert.match(src, /\.pb-wrap \.pb-head>\.pb-btn[^}]*z-index:2/);
 });
+test('personal link issuance donuts only show VC4/5/6/7/12/16', () => {
+  assert.match(src, /var ISS_CLS = \['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16'\]/);
+  assert.match(src, /PL_ISS_CLS = \['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16'\]/);
+});

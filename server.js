@@ -10899,7 +10899,9 @@ async function servePersonalPage(req, res, rawToken) {
     const live = await livePromise;
     const lvNorm = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
     const grp3 = (obj) => { const o = { VC4: 0, VC20: 0, 'VC5+': 0 }; Object.entries(obj || {}).forEach(([k, v]) => { const u = String(k).toUpperCase().replace(/\s+/g, ''); o[u === 'VC4' ? 'VC4' : u === 'VC20' ? 'VC20' : 'VC5+'] += v; }); return o; };
-    const donutIssue = donutHtml(Object.entries(st.cls || {}).map(([label, value]) => ({ label, value })), nf(st.mtd), 'MTD issued');
+    const PL_ISS_CLS = ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16'];
+    const issEntries = Object.entries(st.cls || {}).filter(([label]) => PL_ISS_CLS.includes(String(label).toUpperCase().replace(/\s+/g, ''))).map(([label, value]) => ({ label, value }));
+    const donutIssue = donutHtml(issEntries, nf(issEntries.reduce((t, e) => t + (Number(e.value) || 0), 0)), 'MTD issued');
     const donutStock = stockInfo ? donutHtml(Object.entries(stockInfo.byCls || {}).map(([label, v]) => ({ label, value: v.t })), nf(stTotal), 'in stock') : '<p class="dim" style="text-align:center;padding:26px 0">Stock data is not available yet</p>';
     const ageC = totAgeC;
     const ageItems = stockInfo ? [
@@ -11608,12 +11610,14 @@ const PERSONAL_PORTAL_JS = `(function () {
       return h + '<div class="pb-donut"><svg viewBox="0 0 160 160" width="170" height="170" role="img"><circle cx="80" cy="80" r="' + R + '" fill="none" stroke="#eef2f7" stroke-width="22"/>' + arcs +
         '<text x="80" y="78" text-anchor="middle" class="pb-dn-top">' + nf(top) + '</text><text x="80" y="96" text-anchor="middle" class="pb-dn-sub">' + sub + '</text></svg><ul class="pb-dn-legend">' + leg + '</ul></div></div>';
     }
+    var ISS_CLS = ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16'];   // personal link: issuance donuts sirf yahi classes
     function donuts(it) {
       if (!it.c) return '';
       var mtd = [], last = [], stk = [], tm = 0, tl = 0, ts = 0, s48 = 0;
       B3.forEach(function (k) {
         var a = it.c[k] || [0, 0, 0, 0];
-        mtd.push({ l: k, v: a[1] }); last.push({ l: k, v: a[0] }); tm += a[1]; tl += a[0]; ts += a[2];
+        if (ISS_CLS.indexOf(String(k).toUpperCase().replace(/\s+/g, '')) >= 0) { mtd.push({ l: k, v: a[1] }); last.push({ l: k, v: a[0] }); tm += a[1]; tl += a[0]; }
+        ts += a[2];
         if (G1.indexOf(k) >= 0) s48 += a[2]; else stk.push({ l: k, v: a[2] });
       });
       stk.unshift({ l: 'VC4/VC20', v: s48 });
