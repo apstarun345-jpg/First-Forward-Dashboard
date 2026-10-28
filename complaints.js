@@ -171,11 +171,11 @@ FF.pages = FF.pages || {};
         <label>TAT (hours)<input class="input" type="number" min="1" max="720" data-f="tatHours" value="${esc(d.tatHours ?? 24)}"></label>
         <label class="cmp-wide">Mail subjects to watch (one per line)<textarea class="input" rows="3" data-f="subjects" placeholder="POS Related-Request">${esc((d.subjects || []).join('\n'))}</textarea></label>
       </div>
-      <h4>📧 Mail alerts</h4>
+      <h4>📧 Mail alerts — who gets which complaints</h4>
       <p class="dim small">As soon as a new bank complaint is found (checked at every refresh), when the bank deducts the amount, and a reminder digest every few hours while complaints stay pending — mailed to whoever you set below. A new rule only mails complaints that arrive <b>after</b> it is saved.</p>
       <div class="form-grid cmp-fg"><label class="check"><input type="checkbox" data-f="mailEnabled" ${m.enabled ? 'checked' : ''}> <b>Mail alerts ON</b></label><label>Reminder every (hours)<input class="input" type="number" min="1" max="72" step="0.5" data-f="remindHours" value="${esc(m.remindHours ?? 4)}"></label></div>
-      <div class="cmp-rules">${(m.rules || []).map(ruleRow).join('') || '<p class="dim small">No rules yet — add one below.</p>'}</div>
-      <div class="btn-row"><button type="button" class="btn small" data-cmp-radd>➕ Add rule</button></div>
+      <div class="cmp-rules">${(m.rules || []).map(ruleRow).join('') || '<p class="dim small">No recipient yet — click “Add recipient / TL / agent rule”.</p>'}</div>
+      <div class="btn-row"><button type="button" class="btn small" data-cmp-radd>➕ Add another recipient (TL / agent rule)</button></div>
       ${datalists()}
       <h4>✉️ Message</h4>
       <p class="dim small">Placeholders: ${(state.data.placeholders || []).map((x) => `<code>${esc(x)}</code>`).join(' ')} · <code>{list}</code> / <code>{count}</code> are for the reminder only.</p>
@@ -226,6 +226,7 @@ FF.pages = FF.pages || {};
     // jo naam chip box me type hua par Enter/Add nahi hua — wo bhi save me aa jaye
     state.root.querySelectorAll('[data-chip-in]').forEach((i) => { if (i.value.trim()) addChip(i); });
     const d = collectDraft();
+    d.mail.rules = (d.mail.rules || []).filter((r) => r.to || r.all || (r.tls || []).length || (r.agents || []).length);   // untouched blank rule save na ho
     await U.withButtonBusy(btn, async () => {
       try {
         const out = await FF.auth.api('/api/settings', 'PUT', { settings: { complaints: d } });
@@ -331,7 +332,11 @@ FF.pages = FF.pages || {};
       if (t.closest('[data-cmp-clear]')) { state.status = 'all'; state.tl = ''; state.agent = ''; state.q = ''; paint(); return; }
       if (t.closest('[data-cmp-xlsx]')) { exportXlsx(); return; }
       const rf = t.closest('[data-cmp-refresh]'); if (rf) { syncNow(rf); return; }
-      if (t.closest('[data-cmp-settings]')) { state.setOpen = !state.setOpen; if (state.setOpen && state.data && state.data.cfg) state.draft = clone(state.data.cfg); paint(); return; }
+      if (t.closest('[data-cmp-settings]')) { state.setOpen = !state.setOpen; if (state.setOpen && state.data && state.data.cfg) {
+          state.draft = clone(state.data.cfg); state.draft.mail = state.draft.mail || {};
+          if (!(state.draft.mail.rules || []).length) state.draft.mail.rules = [{ id: `n${Date.now().toString(36)}`, enabled: true, all: false, tls: [], agents: [], to: '', onNew: true, onDeduct: true, remind: true, attach: true }];
+        }
+        paint(); return; }
       if (t.closest('[data-cmp-setclose]')) { state.setOpen = false; paint(); return; }
       if (t.closest('[data-cmp-radd]')) { collectDraft(); state.draft.mail.rules = (state.draft.mail.rules || []).concat([{ id: `n${Date.now().toString(36)}`, enabled: true, all: false, tls: [], agents: [], to: '', onNew: true, onDeduct: true, remind: true, attach: true }]); paint(); return; }
       const cx = t.closest('[data-chip-x]'); if (cx) { cx.closest('.cmp-chip').remove(); collectDraft(); paint(); return; }
