@@ -742,6 +742,7 @@ FF.pages = FF.pages || {};
     return `<div class="kpi-grid mini hm-stock-grid">
         ${kpi('g1', 'First Forward · Stock in field', '📦', U.fmt(ff.total), `VC4 <b>${U.fmt(ff.vc4)}</b> · Comm <b>${U.fmt(ff.comm)}</b> · cover <b>${esc(cover(ff.total, ffRate))}</b> din`, 'src=ff&scope=stock')}
         ${kpi('g2', 'GV Partner · Stock in field', '📦', U.fmt(gv.total), `VC4 <b>${U.fmt(gv.vc4)}</b> · Comm <b>${U.fmt(gv.comm)}</b> · cover <b>${esc(cover(gv.total, gvRate))}</b> din`, 'src=gv&scope=stock')}
+        <div class="kpi g3 hm-gvonly" id="hm-gvonly" role="button" tabindex="0" title="GV me hai, FF stock (StockDataa) me nahi — click: class-wise"><div class="kpi-top"><span class="kpi-title">GV tags · not in FF stock</span><span class="kpi-icon">🔎</span></div><div class="kpi-value">…</div><div class="kpi-foot">loading…</div></div>
       </div>
       <div class="grid g-2" style="margin-top:12px">
         ${card('📊 Stock · FF vs GV <span class="dim">(class-wise)</span>', bars, '')}
@@ -1060,7 +1061,7 @@ FF.pages = FF.pages || {};
     const chips = list.map((w) => `<button type="button" class="smap-warn-chip" data-smap-b="office" data-smap-c="${esc(w.cls)}" title="Office stock ke tags dekho"><b>${esc(w.cls)}</b> ${esc(w.type || '')} · <b>${U.fmt(w.office)}</b> <small>/ limit ${U.fmt(w.limit)}</small></button>`).join('');
     return `<section class="smap-warn" role="alert"><div class="smap-warn-head"><b>⚠️ Office stock kam hai</b><span class="dim small">${list.length} class limit se niche · click = tags dekho / download</span>${FF.auth.can && FF.auth.can('settings') ? '<a class="btn small" href="#/settings">⚙ Limit</a>' : ''}</div><div class="smap-warn-chips">${chips}</div></section>`;
   }
-  const SMAP_LABEL = { ff: '🟦 First Forward', gv: '🟩 GV Partner', both: '🟪 GV + FF', office: '🟧 Office stock', all: '📦 All stock' };
+  const SMAP_LABEL = { gvonly: '🔎 GV tags · not in FF stock', ff: '🟦 First Forward', gv: '🟩 GV Partner', both: '🟪 GV + FF', office: '🟧 Office stock', all: '📦 All stock' };
   async function openStockMapDrawer(bucket, cls) {
     if (!FF.app || !FF.app.openDrawer) return;
     const title = `${SMAP_LABEL[bucket] || bucket}${cls ? ` · ${cls}` : ''}`;
@@ -1102,6 +1103,51 @@ FF.pages = FF.pages || {};
       catch (e) { host.innerHTML = U.errorBox ? U.errorBox(e) : esc(e.message); }
     };
     load();
+  }
+
+  // 🔎 GV assigned tags jo FF stock (StockDataa) me nahi — chip + class-wise drawer + download
+  async function mountGvOnly(host) {
+    const chip = host && host.querySelector('#hm-gvonly');
+    if (!chip || !FF.auth || typeof FF.auth.api !== 'function') return;
+    const began = Date.now();
+    let data = null;
+    try {
+      for (;;) {
+        data = await FF.auth.api('/api/stock-map');
+        if (!(data && data.pending)) break;
+        if (Date.now() - began > 4 * 60e3 || !chip.isConnected) throw new Error('Index abhi ready nahi');
+        await new Promise((r) => setTimeout(r, Math.min(8000, Math.max(1000, Number(data.retryAfterMs) || 3000))));
+      }
+    } catch (e) { if (chip.isConnected) { chip.querySelector('.kpi-value').textContent = '—'; chip.querySelector('.kpi-foot').textContent = 'Stock index ready nahi — refresh karo'; } return; }
+    if (!chip.isConnected) return;
+    const g = data.gvOnly || { total: 0, rows: [] };
+    chip.querySelector('.kpi-value').textContent = U.fmt(g.total);
+    chip.querySelector('.kpi-foot').innerHTML = g.rows.length ? g.rows.map((r) => `${esc(r.cls)} <b>${U.fmt(r.n)}</b>`).join(' · ') : 'Sab GV tags FF stock me hain';
+    const open = () => openGvOnlyDrawer(g);
+    chip.addEventListener('click', open);
+    chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+  }
+  function openGvOnlyDrawer(g) {
+    if (!FF.app || !FF.app.openDrawer) return;
+    const canExp = FF.auth.can('export');
+    const rows = g.rows.map((r) => `<tr><td><b>${esc(r.cls)}</b></td><td>${esc(r.type)}</td><td class="num"><button type="button" class="smap-cell smap-gv" data-gvo-c="${esc(r.cls)}" title="${esc(r.cls)} tags dekho">${U.fmt(r.n)}</button></td></tr>`).join('');
+    const body = FF.app.openDrawer({ kicker: '🔎 Stock check', title: 'GV tags · not in FF stock', sub: 'GV Tag Assignment (assigned) me hain, StockDataa (FF stock) me Tag ID / Barcode se nahi mile', wide: false,
+      body: `<div class="btn-row">${canExp ? '<button class="btn small primary" id="gvo-xlsx">⬇ Excel (all)</button><a class="btn small" href="/api/stock-map/csv?bucket=gvonly" download>⬇ CSV</a>' : ''}<button class="btn small" data-gvo-c="">📋 Saare tags</button></div>
+        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th>Tag type</th><th class="num">Tags</th></tr></thead><tbody>${rows || '<tr><td colspan="3" class="empty">Koi tag nahi — sab GV tags FF stock me hain.</td></tr>'}<tr class="smap-foot"><td colspan="2"><b>Total</b></td><td class="num"><button type="button" class="smap-link" data-gvo-c="">${U.fmt(g.total)}</button></td></tr></tbody></table></div>` });
+    const host = body && body.querySelector ? body : U.$('#drawer-body');
+    if (!host) return;
+    host.addEventListener('click', (e) => { const t = e.target.closest('[data-gvo-c]'); if (t) openStockMapDrawer('gvonly', t.dataset.gvoC || ''); });
+    const x = host.querySelector('#gvo-xlsx');
+    if (x) x.addEventListener('click', async () => {
+      x.disabled = true; const old = x.textContent; x.textContent = 'Excel ban raha hai…';
+      try {
+        const d = await FF.auth.api('/api/stock-map/tags?bucket=gvonly&all=1');
+        const out = (d.rows || []).map((r) => [r.tagId, r.barcode, r.cls, r.type, r.gvAgent, r.gvAgentId, r.gvTl, r.age]);
+        const sum = g.rows.map((r) => [r.cls, r.type, r.n]).concat([['Total', '', g.total]]);
+        FF.xlsx.download(`gv-tags-not-in-ff-stock-${U.stamp()}.xlsx`, [{ name: 'Class-wise', header: ['Class', 'Tag type', 'Tags'], rows: sum }, { name: 'Tags', header: ['Tag ID', 'Barcode', 'Class', 'Tag type', 'GV agent', 'GV agent ID', 'GV TL', 'Age (days)'], rows: out }]);
+      } catch (err) { U.toast(err.message || 'Excel nahi bana', 'err'); }
+      x.disabled = false; x.textContent = old;
+    });
   }
   async function mountStockMap(el, allowed) {
     if (!el || !allowed || !FF.auth || typeof FF.auth.api !== 'function') return;
@@ -1633,6 +1679,7 @@ FF.pages = FF.pages || {};
       rows: []
     };
     stockMount.innerHTML = stockHtml(ffStock, gvStock, sf);
+    mountGvOnly(stockMount);
     paintPulse({ total: ffStock.total + gvStock.total });
     // GV agent-wise stock (agar permission/load ho to) — top holders
     const gvStockAgentP = canGv ? G.need('stockAgent', { only: true }).catch(() => null) : Promise.resolve(null);

@@ -7163,3 +7163,9 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 .tix-rep-tbl tr.tix-rep-total td { background: #e0e7ff; font-weight: 800; }
 .tix-rep-tbl tr.tix-rep-grand td { background: #c7d2fe; font-weight: 900; border-top: 2px solid #6366f1; }
 .tix-rep-tbl tr.tix-rep-gap td { background: transparent; border: 0; height: 8px; padding: 0; }
+
+/* v3.111.0 — GV tags not in FF stock chip */
+.hm-stock-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+@media (max-width: 900px) { .hm-stock-grid { grid-template-columns: 1fr !important; } }
+.hm-gvonly { cursor: pointer; }
+.hm-gvonly .kpi-foot { white-space: normal; }

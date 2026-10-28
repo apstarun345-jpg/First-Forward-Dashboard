@@ -20,7 +20,7 @@ import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, disp
 import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
-import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows } from './stock-age.js';
+import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
@@ -5772,12 +5772,12 @@ async function handleApi(req, res, url) {
     if (!user) throw new HttpError(401, 'Login required');
     const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, false);
     if (!index) return sendJson(res, 200, stockAgePending());
-    return sendJson(res, 200, { ok: true, at: new Date(index.at).toISOString(), building: !!stockAgeState.promise, errors: index.errors || null, map: index.map || null }, { 'Cache-Control': 'no-store' });
+    return sendJson(res, 200, { ok: true, at: new Date(index.at).toISOString(), building: !!stockAgeState.promise, errors: index.errors || null, map: index.map || null, gvOnly: stockGvOnlySummary(index) }, { 'Cache-Control': 'no-store' });
   }
   if ((p === '/api/stock-map/tags' || p === '/api/stock-map/csv') && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
     const q = url.searchParams;
-    const bucket = ['ff', 'gv', 'both', 'office', 'all'].includes(q.get('bucket')) ? q.get('bucket') : 'all';
+    const bucket = ['ff', 'gv', 'both', 'office', 'all', 'gvonly'].includes(q.get('bucket')) ? q.get('bucket') : 'all';
     const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, false);
     if (!index) return sendJson(res, 200, stockAgePending());
     const rows = stockMapRows(index, { bucket, cls: q.get('cls') || '', q: q.get('q') || '' });
