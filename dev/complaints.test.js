@@ -101,9 +101,9 @@ const mk = (o) => ({ key: `t:${o.caseNo}:x`, caseNo: o.caseNo, date: NOW2 - 2 * 
 const cfgWith = (rules, extra = {}) => nc({ ownerName: 'Tarun', tatHours: 24, mail: { enabled: true, remindHours: 4, rules, ...extra } }, null, NOW2 - 3 * 3600e3);
 
 test('mail rule normalization: since is set once, invalid emails dropped, templates default', () => {
-  const m1 = normalizeMailCfg({ enabled: true, rules: [{ id: 'a', target: 'tl', value: 'X', to: 'ok@x.com, nope' }] }, null, 1000);
+  const m1 = normalizeMailCfg({ enabled: true, rules: [{ id: 'a', all: false, tls: ['X'], to: 'ok@x.com, nope' }] }, null, 1000);
   assert.equal(m1.rules[0].since, 1000); assert.equal(m1.rules[0].to, 'ok@x.com');
-  const m2 = normalizeMailCfg({ enabled: true, rules: [{ id: 'a', target: 'tl', value: 'X', to: 'ok@x.com' }, { id: 'b', target: 'all', to: 'z@x.com' }] }, m1, 5000);
+  const m2 = normalizeMailCfg({ enabled: true, rules: [{ id: 'a', all: false, tls: ['X'], to: 'ok@x.com' }, { id: 'b', all: true, to: 'z@x.com' }] }, m1, 5000);
   assert.equal(m2.rules[0].since, 1000, 'existing enabled rule keeps its since'); assert.equal(m2.rules[1].since, 5000, 'new rule starts now');
   const off = normalizeMailCfg({ rules: [{ id: 'a', enabled: false, to: 'ok@x.com' }] }, m1, 7000);
   const on = normalizeMailCfg({ rules: [{ id: 'a', enabled: true, to: 'ok@x.com' }] }, off, 9000);
@@ -111,23 +111,30 @@ test('mail rule normalization: since is set once, invalid emails dropped, templa
   assert.match(m1.templates.newSubject, /\{case\}/); assert.equal(m1.remindHours, 4);
 });
 
-test('rule matching by TL / agent name or ID', () => {
+test('rule matching: all, or any of the selected TLs / agents (name or ID)', () => {
   const r = mk({ caseNo: '1' });
-  assert.equal(ruleMatches({ target: 'all' }, r), true);
-  assert.equal(ruleMatches({ target: 'tl', value: 'ramdev siyag' }, r), true);
-  assert.equal(ruleMatches({ target: 'tl', value: 'APN2233' }, r), true);
-  assert.equal(ruleMatches({ target: 'agent', value: '15037228' }, r), true);
-  assert.equal(ruleMatches({ target: 'agent', value: 'someone else' }, r), false);
-  assert.equal(ruleMatches({ target: 'agent', value: '' }, r), false);
+  assert.equal(ruleMatches({ all: true }, r), true);
+  assert.equal(ruleMatches({ all: false, tls: ['ramdev siyag'] }, r), true);
+  assert.equal(ruleMatches({ all: false, tls: ['Other TL', 'APN2233'] }, r), true);
+  assert.equal(ruleMatches({ all: false, agents: ['15037228'] }, r), true);
+  assert.equal(ruleMatches({ all: false, tls: ['Other'], agents: ['nobody'] }, r), false);
+  assert.equal(ruleMatches({ all: false, tls: [], agents: [] }, r), false);
+});
+
+test('legacy single-target rules migrate to the multi-select shape; attach defaults ON', () => {
+  const m = normalizeMailCfg({ rules: [{ id: 'o', target: 'agent', value: 'Ramdev', to: 'a@x.com' }, { id: 'p', target: 'all', to: 'a@x.com' }] }, null, 1);
+  assert.deepEqual([m.rules[0].all, m.rules[0].agents, m.rules[0].tls], [false, ['Ramdev'], []]);
+  assert.equal(m.rules[1].all, true); assert.equal(m.rules[0].attach, true);
 });
 
 test('planMails: new once, deduction once, reminder every N hours as a digest, rules filter, old complaints skipped', () => {
-  const cfg = cfgWith([{ id: 'r1', target: 'tl', value: 'RAMDEV SIYAG', to: 'tl@x.com' }, { id: 'r2', target: 'agent', value: 'nobody', to: 'n@x.com' }]);
+  const cfg = cfgWith([{ id: 'r1', all: false, tls: ['RAMDEV SIYAG'], to: 'tl@x.com' }, { id: 'r2', all: false, agents: ['nobody'], to: 'n@x.com' }]);
   const rows = [mk({ caseNo: '10' }), mk({ caseNo: '11', date: NOW2 - 9 * 86400e3 }), mk({ caseNo: '12', status: 'Solved by Bank', deducted: 300, resolvedAt: NOW2 - 600e3 })];
   const st = { sent: {}, remind: {} };
   let plan = planMails({ rows, cfg, state: st, now: NOW2 });
   assert.deepEqual(plan.map((m) => m.kind).sort(), ['deduct', 'new'], 'old pending 11 gets no instant mail; no reminder yet (since < 4h)');
   assert.ok(plan.every((m) => m.ruleId === 'r1' && m.to === 'tl@x.com'));
+  assert.ok(plan.filter((m) => m.kind !== 'remind').every((m) => m.attach === true && m.threadId === undefined || m.threadId));
   assert.match(plan.find((m) => m.kind === 'new').subject, /Case 10 · Ramdev/);
   assert.match(plan.find((m) => m.kind === 'deduct').text, /₹300/);
   for (const m of plan) for (const k of m.marks) st.sent[k.key] = { ...(st.sent[k.key] || {}), [k.f]: NOW2 };
@@ -140,4 +147,17 @@ test('planMails: new once, deduction once, reminder every N hours as a digest, r
   assert.equal(planMails({ rows, cfg, state: st, now: later + 3 * 3600e3 }).length, 0);
   assert.equal(planMails({ rows, cfg, state: st, now: later + 4.1 * 3600e3 }).length, 1);
   assert.equal(planMails({ rows, cfg: { ...cfg, mail: { ...cfg.mail, enabled: false } }, state: { sent: {}, remind: {} }, now: later }).length, 0);
+});
+
+import { sendMail } from '../mailer.js';
+test('binary (already base64) attachments are passed through untouched; text ones still get encoded', async () => {
+  const bodies = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (_u, init) => { bodies.push(JSON.parse(init.body)); return { ok: true, status: 200, text: async () => '{"id":"1"}', json: async () => ({ id: '1' }) }; };
+  try {
+    await sendMail({ provider: 'resend', to: 'a@b.com', from: 'Dash <d@b.com>', resendKey: 're_test' }, 's', 't', { attachments: [{ name: 'shot.png', type: 'image/png', content: 'iVBORw0KGgo=', base64: true }, { name: 'r.csv', content: 'a,b' }] }, {});
+  } finally { globalThis.fetch = realFetch; }
+  const att = bodies[0].attachments;
+  assert.equal(att[0].content, 'iVBORw0KGgo=');
+  assert.equal(att[1].content, Buffer.from('a,b').toString('base64'));
 });

@@ -136,15 +136,21 @@ FF.pages = FF.pages || {};
   // ---- ⚙ Settings + 📧 mail alerts (admin) -------------------------------------------------------------------------
   const clone = (v) => JSON.parse(JSON.stringify(v || {}));
   const TPL = [['newSubject', 'New complaint · subject', 1], ['newBody', 'New complaint · mail body', 0], ['deductSubject', 'Bank deducted · subject', 1], ['deductBody', 'Bank deducted · mail body', 0], ['remindSubject', 'Reminder · subject', 1], ['remindBody', 'Reminder · mail body', 0]];
+  const chipBox = (kind, label, list) => `<div class="cmp-chipbox" data-chips="${kind}"><span class="cmp-chip-l">${label}</span>
+      <div class="cmp-chips">${(list || []).map((v) => `<span class="cmp-chip" data-v="${esc(v)}">${esc(v)}<button type="button" data-chip-x title="Remove">×</button></span>`).join('') || '<span class="dim small">none selected</span>'}</div>
+      <div class="cmp-chip-add"><input class="input" data-chip-in list="cmp-dl-${kind === 'tls' ? 'tl' : 'agent'}" placeholder="${kind === 'tls' ? 'Pick / type TL name or ID → Enter' : 'Pick / type agent name or ID → Enter'}"><button type="button" class="btn small" data-chip-add>＋ Add</button></div></div>`;
   function ruleRow(r) {
-    const tgt = r.target || 'all';
+    const all = r.all !== false;
     return `<div class="cmp-rule" data-rule="${esc(r.id)}" data-since="${esc(r.since || '')}">
-      <label class="check cmp-rule-on"><input type="checkbox" data-r="enabled" ${r.enabled !== false ? 'checked' : ''}> On</label>
-      <label>Send for <select class="input" data-r="target"><option value="all"${tgt === 'all' ? ' selected' : ''}>All complaints</option><option value="tl"${tgt === 'tl' ? ' selected' : ''}>A TL (name or ID)</option><option value="agent"${tgt === 'agent' ? ' selected' : ''}>An agent (name or ID)</option></select></label>
-      <label class="cmp-rule-val">${tgt === 'tl' ? 'TL name / ID' : tgt === 'agent' ? 'Agent name / ID' : 'Match'} <input class="input" data-r="value" ${tgt === 'all' ? 'disabled placeholder="everything"' : `list="cmp-dl-${tgt}" placeholder="pick or type"`} value="${esc(r.value || '')}"></label>
+      <div class="cmp-rule-top">
+        <label class="check cmp-rule-on"><input type="checkbox" data-r="enabled" ${r.enabled !== false ? 'checked' : ''}> <b>Rule ON</b></label>
+        <label class="check"><input type="radio" name="cmp-all-${esc(r.id)}" data-r="all" value="1" ${all ? 'checked' : ''}> All complaints</label>
+        <label class="check"><input type="radio" name="cmp-all-${esc(r.id)}" data-r="all" value="0" ${all ? '' : 'checked'}> Only selected TLs / agents</label>
+        <button type="button" class="btn small cmp-rdel" data-cmp-rdel title="Remove rule">🗑 Remove</button>
+      </div>
+      ${all ? '' : `<div class="cmp-pick">${chipBox('tls', '👥 TLs', r.tls)}${chipBox('agents', '👤 Agents', r.agents)}</div>`}
       <label class="cmp-rule-to">Mail to <input class="input" data-r="to" placeholder="name@example.com, other@example.com" value="${esc(r.to || '')}"></label>
-      <div class="cmp-rule-ev"><label class="check"><input type="checkbox" data-r="onNew" ${r.onNew !== false ? 'checked' : ''}> New complaint</label><label class="check"><input type="checkbox" data-r="onDeduct" ${r.onDeduct !== false ? 'checked' : ''}> Bank deducted</label><label class="check"><input type="checkbox" data-r="remind" ${r.remind !== false ? 'checked' : ''}> Reminder</label></div>
-      <button type="button" class="btn small" data-cmp-rdel title="Remove rule">🗑</button></div>`;
+      <div class="cmp-rule-ev"><span class="dim small">Send when:</span><label class="check"><input type="checkbox" data-r="onNew" ${r.onNew !== false ? 'checked' : ''}> New complaint</label><label class="check"><input type="checkbox" data-r="onDeduct" ${r.onDeduct !== false ? 'checked' : ''}> Bank deducted</label><label class="check"><input type="checkbox" data-r="remind" ${r.remind !== false ? 'checked' : ''}> Reminder</label><label class="check"><input type="checkbox" data-r="attach" ${r.attach !== false ? 'checked' : ''}> 📎 Attach the mail’s screenshots / files</label></div></div>`;
   }
   function datalists() {
     const rows = rowsAll();
@@ -193,13 +199,32 @@ FF.pages = FF.pages || {};
     d.mail.remindHours = Number(q('[data-f="remindHours"]').value) || 4;
     d.mail.rules = [...p.querySelectorAll('[data-rule]')].map((row) => {
       const g = (k) => row.querySelector(`[data-r="${k}"]`);
-      return { id: row.dataset.rule, since: Number(row.dataset.since) || undefined, enabled: g('enabled').checked, target: g('target').value, value: g('value').value.trim(), to: g('to').value.trim(), onNew: g('onNew').checked, onDeduct: g('onDeduct').checked, remind: g('remind').checked };
+      const chips = (kind) => [...row.querySelectorAll(`[data-chips="${kind}"] .cmp-chip`)].map((c) => c.dataset.v);
+      const allEl = row.querySelector('[data-r="all"]:checked');
+      const old = ((state.draft.mail || {}).rules || []).find((x) => x.id === row.dataset.rule) || {};
+      const all = allEl ? allEl.value === '1' : true;
+      return { id: row.dataset.rule, since: Number(row.dataset.since) || undefined, enabled: g('enabled').checked, all, tls: row.querySelector('[data-chips]') ? chips('tls') : (old.tls || []), agents: row.querySelector('[data-chips]') ? chips('agents') : (old.agents || []), to: g('to').value.trim(), onNew: g('onNew').checked, onDeduct: g('onDeduct').checked, remind: g('remind').checked, attach: g('attach').checked };
     });
     d.mail.templates = d.mail.templates || {};
     p.querySelectorAll('[data-t]').forEach((el) => { d.mail.templates[el.dataset.t] = el.value; });
     return d;
   }
+  /** Chip box me TL / agent jodo (Enter, ＋ ya list se chun-ne par) — DOM me chip daalke draft me collect karta hai. */
+  function addChip(input) {
+    const v = String((input && input.value) || '').trim(); if (!v) return;
+    const box = input.closest('[data-chips]'), wrap = box.querySelector('.cmp-chips');
+    if (![...wrap.querySelectorAll('.cmp-chip')].some((c) => c.dataset.v.toLowerCase() === v.toLowerCase())) {
+      const chip = document.createElement('span'); chip.className = 'cmp-chip'; chip.dataset.v = v; chip.textContent = v;
+      const x = document.createElement('button'); x.type = 'button'; x.setAttribute('data-chip-x', ''); x.title = 'Remove'; x.textContent = '×'; chip.appendChild(x);
+      const none = wrap.querySelector('.dim'); if (none) none.remove();
+      wrap.appendChild(chip);
+    }
+    collectDraft(); paint();
+    const again = state.root.querySelector(`[data-rule="${CSS.escape(box.closest('[data-rule]').dataset.rule)}"] [data-chips="${box.dataset.chips}"] [data-chip-in]`); if (again) again.focus();
+  }
   async function saveSettings(btn) {
+    // jo naam chip box me type hua par Enter/Add nahi hua — wo bhi save me aa jaye
+    state.root.querySelectorAll('[data-chip-in]').forEach((i) => { if (i.value.trim()) addChip(i); });
     const d = collectDraft();
     await U.withButtonBusy(btn, async () => {
       try {
@@ -286,13 +311,15 @@ FF.pages = FF.pages || {};
       <div data-cmp-body></div></div>`;
     root.addEventListener('change', (e) => {
       const t = e.target;
-      if (t.matches('[data-r="target"]')) { collectDraft(); paint(); return; }
+      if (t.matches('[data-r="all"]')) { collectDraft(); paint(); return; }
+      if (t.matches('[data-chip-in]')) { addChip(t); return; }
       if (t.matches('[data-cmp-from]')) { if (t.value) { state.from = t.value; if (state.to < state.from) state.to = state.from; load(); } return; }
       if (t.matches('[data-cmp-to]')) { if (t.value) { state.to = t.value; if (state.from > state.to) state.from = state.to; load(); } return; }
       if (t.matches('[data-cmp-statussel]')) { state.status = t.value; paint(); return; }
       if (t.matches('[data-cmp-tl]')) { state.tl = t.value; paint(); return; }
       if (t.matches('[data-cmp-agent]')) { state.agent = t.value; paint(); }
     });
+    root.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches && e.target.matches('[data-chip-in]')) { e.preventDefault(); addChip(e.target); } });
     root.addEventListener('input', (e) => { if (e.target.matches('[data-cmp-q]')) { state.q = e.target.value; paint(); } });
     root.addEventListener('click', (e) => {
       const t = e.target;
@@ -306,7 +333,9 @@ FF.pages = FF.pages || {};
       const rf = t.closest('[data-cmp-refresh]'); if (rf) { syncNow(rf); return; }
       if (t.closest('[data-cmp-settings]')) { state.setOpen = !state.setOpen; if (state.setOpen && state.data && state.data.cfg) state.draft = clone(state.data.cfg); paint(); return; }
       if (t.closest('[data-cmp-setclose]')) { state.setOpen = false; paint(); return; }
-      if (t.closest('[data-cmp-radd]')) { collectDraft(); state.draft.mail.rules = (state.draft.mail.rules || []).concat([{ id: `n${Date.now().toString(36)}`, enabled: true, target: 'all', value: '', to: '', onNew: true, onDeduct: true, remind: true }]); paint(); return; }
+      if (t.closest('[data-cmp-radd]')) { collectDraft(); state.draft.mail.rules = (state.draft.mail.rules || []).concat([{ id: `n${Date.now().toString(36)}`, enabled: true, all: false, tls: [], agents: [], to: '', onNew: true, onDeduct: true, remind: true, attach: true }]); paint(); return; }
+      const cx = t.closest('[data-chip-x]'); if (cx) { cx.closest('.cmp-chip').remove(); collectDraft(); paint(); return; }
+      const ca = t.closest('[data-chip-add]'); if (ca) { addChip(ca.closest('.cmp-chip-add').querySelector('[data-chip-in]')); return; }
       const rd = t.closest('[data-cmp-rdel]'); if (rd) { collectDraft(); const id = rd.closest('[data-rule]').dataset.rule; state.draft.mail.rules = state.draft.mail.rules.filter((x) => x.id !== id); paint(); return; }
       const sv = t.closest('[data-cmp-save]'); if (sv) { saveSettings(sv); return; }
       const ts = t.closest('[data-cmp-test]'); if (ts) sendTest(ts);

@@ -131,7 +131,8 @@ export function smtpSend(cfg, subject, text, opts = {}) {
           const chunks = [`--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64w(text)}`];
           for (const a of opts.attachments) {
             const nm = String(a.name || 'report.csv').replace(/"/g, '');
-            chunks.push(`--${boundary}\r\nContent-Type: text/csv; name="${nm}"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename="${nm}"\r\n\r\n${b64w(a.content)}`);
+            const ct = String(a.type || 'text/csv').replace(/[\r\n;]/g, '');
+            chunks.push(`--${boundary}\r\nContent-Type: ${ct}; name="${nm}"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename="${nm}"\r\n\r\n${a.base64 ? String(a.content || '').replace(/\s+/g, '').replace(/(.{76})/g, '$1\r\n') : b64w(a.content)}`);
           }
           chunks.push(`--${boundary}--\r\n`);
           mime = `${subjHdr}Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n${chunks.join('\r\n')}`;
@@ -162,7 +163,7 @@ const withTimeout = async (url, init, ms = 20000) => {
   finally { clearTimeout(t); }
 };
 const b64 = (s) => Buffer.from(String(s), 'utf8').toString('base64');
-const attachmentsOf = (opts) => (opts.attachments || []).map((a) => ({ name: String(a.name || 'report.csv').replace(/"/g, ''), content: b64(a.content), type: a.type || 'text/csv' }));
+const attachmentsOf = (opts) => (opts.attachments || []).map((a) => ({ name: String(a.name || 'report.csv').replace(/"/g, ''), content: a.base64 ? String(a.content || '').replace(/\s+/g, '') : b64(a.content), type: a.type || 'text/csv' }));
 
 async function sendResend(key, msg) {
   const res = await withTimeout('https://api.resend.com/emails', {

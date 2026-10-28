@@ -344,6 +344,28 @@ function doPost(e) {
       return json_({ ok: false, error: 'Gmail read permission missing — editor me authorizeComplaints() ek baar Run karo, phir Deploy → Manage deployments → Edit → New version → Deploy (' + String(err && err.message || err) + ')' });
     }
   }
+  // 📎 Complaint mail ki attachments / screenshots (sirf pehli mail) — dashboard mail bhejte waqt maangta hai.
+  // body: { threadId } → { ok, files: [{ name, type, size, b64 }] } (chhote signature icons skip, max 6 files / ~12 MB)
+  if (body.action === 'complaintfiles') {
+    try {
+      const th = GmailApp.getThreadById(String(body.threadId || ''));
+      if (!th) return json_({ ok: true, files: [] });
+      const msg = th.getMessages()[0];
+      const files = [];
+      let total = 0;
+      msg.getAttachments({ includeInlineImages: true, includeAttachments: true }).forEach(function (a) {
+        const size = a.getBytes().length;
+        const type = a.getContentType() || 'application/octet-stream';
+        if (/^image\//i.test(type) && size < 6000) return;           // signature / tracking icons
+        if (size > 4 * 1024 * 1024 || total + size > 12 * 1024 * 1024 || files.length >= 6) return;
+        total += size;
+        files.push({ name: a.getName() || ('attachment-' + (files.length + 1)), type: type, size: size, b64: Utilities.base64Encode(a.getBytes()) });
+      });
+      return json_({ ok: true, files: files });
+    } catch (err) {
+      return json_({ ok: false, error: String(err && err.message || err) });
+    }
+  }
   if (body.action === 'mail') {
     try {
       const m = body.mail || {};

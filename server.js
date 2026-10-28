@@ -3609,6 +3609,21 @@ const complaintsSvc = createComplaintsService({
 });
 
 // 📧 Complaints mail alerts: nayi complaint / bank deduction turant, pending ka reminder har N ghante — rule (TL / agent / all) ke hisaab se.
+
+const complaintFilesMemo = new Map();   // threadId → { at, files } (ek complaint ki attachments kai rules ke liye dobara Gmail se nahi)
+async function complaintFilesFor(threadId) {
+  const hit = complaintFilesMemo.get(threadId);
+  if (hit && Date.now() - hit.at < 30 * 60e3) return hit.files;
+  const store = complaintsSvc.getStore ? complaintsSvc.getStore() : null;
+  if (!store) throw new Error('Apps Script not connected');
+  let out;
+  try { out = await store.call('complaintfiles', { threadId }); }
+  catch (err) { if (/unknown action|invalid action/i.test(String((err && err.message) || err))) throw new Error('update Code.gs + New version'); throw err; }
+  const files = ((out && out.files) || []).map((f) => ({ name: f.name, type: f.type, content: f.b64, base64: true }));
+  complaintFilesMemo.set(threadId, { at: Date.now(), files });
+  if (complaintFilesMemo.size > 60) complaintFilesMemo.delete(complaintFilesMemo.keys().next().value);
+  return files;
+}
 const complaintsMailRun = { busy: false, lastTry: 0, lastErr: '' };
 function complaintsMailState() {
   if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
@@ -3635,12 +3650,17 @@ async function complaintsMailTick() {
     if (!resolveProviders({ ...base, to: 'x@x.x' }).length) { complaintsMailRun.lastErr = 'Email provider configure nahi — Settings → Features → Email.'; return; }
     for (const m of plan) {
       try {
-        await sendMail({ ...base, to: m.to }, m.subject, m.text, { html: m.html });
+        let attachments = [], attachNote = '';
+        if (m.attach && m.threadId && m.kind !== 'remind') {
+          try { attachments = await complaintFilesFor(m.threadId); }
+          catch (err) { attachNote = ` (attachments skipped: ${String((err && err.message) || err).slice(0, 80)})`; }
+        }
+        await sendMail({ ...base, to: m.to }, m.subject, m.text, { html: m.html, ...(attachments.length ? { attachments } : {}) });
         for (const k of m.marks) {
           if (k.type === 'sent') { st.sent[k.key] = { ...(st.sent[k.key] || {}), [k.f]: Date.now() }; }
           else st.remind[k.ruleId] = Date.now();
         }
-        st.log.push({ at: Date.now(), kind: m.kind, to: m.to, subject: String(m.subject).slice(0, 120), ok: true });
+        st.log.push({ at: Date.now(), kind: m.kind, to: m.to, subject: String(m.subject).slice(0, 120) + (attachments.length ? ` · 📎${attachments.length}` : '') + attachNote, ok: true });
         complaintsMailRun.lastErr = '';
       } catch (err) {
         const msg = String((err && err.message) || err).slice(0, 200);
@@ -5853,7 +5873,9 @@ async function handleApi(req, res, url) {
     const latest = complaintsSvc.rows({})[0] || { key: 'sample', caseNo: '1170000000', date: Date.now() - 3600e3, agentName: 'Sample Agent', agentId: '12345678', tlName: 'Sample TL', tlId: 'APN0000', vrn: 'UP00X0000', tagId: '34161FA820328EE84F0C1B20', description: 'Sample complaint: agent charged extra amount for a new tag', bcName: 'APNA PAYMENT', status: 'Pending', deducted: 200, bankNote: 'Debited your pool account for Rs.200', tatBreached: false, link: 'https://mail.google.com/' };
     const m = buildComplaintMail(kind, kind === 'remind' ? [latest] : { ...latest, deducted: latest.deducted || 200 }, cfg, Date.now());
     const base = { ...(db.settings.email || {}) };
-    try { await sendMail({ ...base, to }, `[TEST] ${m.subject}`, m.text, { html: m.html }); }
+    let attachments = [];
+    if (latest.threadId) { try { attachments = await complaintFilesFor(latest.threadId); } catch { attachments = []; } }
+    try { await sendMail({ ...base, to }, `[TEST] ${m.subject}`, m.text, { html: m.html, ...(attachments.length && kind !== 'remind' ? { attachments } : {}) }); }
     catch (err) { return sendJson(res, 200, { ok: false, error: String((err && err.message) || err).slice(0, 300) }); }
     return sendJson(res, 200, { ok: true });
   }
@@ -9315,7 +9337,10 @@ async function handleApi(req, res, url) {
       for (const r of ((patch.complaints.mail || {}).rules || [])) {
         const bad = complaintsInvalidEmails(r && r.to);
         if (bad.length) throw new HttpError(400, `Invalid email address: ${bad.slice(0, 3).join(', ')}`);
-        if (r && r.enabled !== false && r.target && r.target !== 'all' && !String(r.value || '').trim()) throw new HttpError(400, 'Mail rule: pick a TL / agent name or ID (or choose “All complaints”).');
+        const legacy = r && r.all === undefined && r.target !== undefined;
+        const all = legacy ? r.target === 'all' : !(r && (r.all === false || r.all === 'false'));
+        const picked = legacy ? String(r.value || '').trim().length : ((r && r.tls) || []).length + ((r && r.agents) || []).length;
+        if (r && r.enabled !== false && !all && !picked) throw new HttpError(400, 'Mail rule: add at least one TL or agent (or choose “All complaints”).');
       }
       patch.complaints = normalizeComplaintsCfg({ ...base, ...patch.complaints }, base);
     }

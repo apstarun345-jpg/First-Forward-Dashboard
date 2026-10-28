@@ -55,31 +55,35 @@ export function normalizeMailCfg(raw, prev = null, nowMs = Date.now()) {
     const t = m.templates && typeof m.templates[k] === 'string' ? m.templates[k].replace(/\r/g, '').trim() : '';
     tpl[k] = (t || DEFAULT_MAIL_TEMPLATES[k]).slice(0, k.endsWith('Subject') ? 200 : 4000);
   }
+  const list = (v) => [...new Set((Array.isArray(v) ? v : String(v || '').split(/[\n;|]+/)).map((x) => String(x || '').trim().slice(0, 80)).filter(Boolean))].slice(0, 100);
   const rules = (Array.isArray(m.rules) ? m.rules : []).slice(0, 30).map((r, i) => {
     const id = String((r && r.id) || '').replace(/[^\w-]/g, '').slice(0, 24) || `r${nowMs.toString(36)}${i}`;
-    const target = ['all', 'tl', 'agent'].includes(r && r.target) ? r.target : 'all';
+    // purana shape (target + value) → naya (all / tls[] / agents[])
+    const legacy = r && r.all === undefined && r.target !== undefined;
+    const all = legacy ? r.target === 'all' : !(r && (r.all === false || r.all === 'false'));
+    const tls = legacy ? (r.target === 'tl' ? list(r.value) : []) : list(r && r.tls);
+    const agents = legacy ? (r.target === 'agent' ? list(r.value) : []) : list(r && r.agents);
     const prevRule = old.get(id);
     const enabled = !(r && (r.enabled === false || r.enabled === 'false'));
     // since: is waqt ke BAAD aayi complaints par hi mail — rule banate / ON karte waqt purani complaints par mail ki baarish nahi
     const since = prevRule && prevRule.enabled && prevRule.since ? prevRule.since : (!prev && Number(r && r.since) > 0 ? Number(r.since) : nowMs);
     return {
-      id, enabled, label: String((r && r.label) || '').trim().slice(0, 60), target,
-      value: target === 'all' ? '' : String((r && r.value) || '').trim().slice(0, 80),
+      id, enabled, label: String((r && r.label) || '').trim().slice(0, 60), all, tls: all ? [] : tls, agents: all ? [] : agents,
       to: splitEmails(r && r.to).filter((x) => EMAIL_OK.test(x)).slice(0, 10).join(', '),
       onNew: !(r && (r.onNew === false || r.onNew === 'false')), onDeduct: !(r && (r.onDeduct === false || r.onDeduct === 'false')), remind: !(r && (r.remind === false || r.remind === 'false')),
+      attach: !(r && (r.attach === false || r.attach === 'false')),
       since
     };
   });
   return { enabled: m.enabled === true || m.enabled === 'true', remindHours: Number.isFinite(rh) ? Math.min(72, Math.max(1, Math.round(rh * 2) / 2)) : 4, rules, templates: tpl };
 }
 
-/** Rule ka target is complaint par lagta hai? (TL / agent: naam ya ID) */
+/** Rule ka target is complaint par lagta hai? all, ya chune hue TL / agent (naam ya ID) me se koi ek. */
 export function ruleMatches(rule, row) {
-  if (!rule || rule.target === 'all') return true;
-  const v = normKey(rule.value);
-  if (!v) return false;
-  if (rule.target === 'tl') return normKey(row.tlName) === v || normKey(row.tlId) === v;
-  return normKey(row.agentName) === v || normKey(row.agentId) === v;
+  if (!rule) return false;
+  if (rule.all) return true;
+  const hit = (list, ...fields) => (list || []).some((v) => { const k = normKey(v); return k && fields.some((f) => normKey(f) === k); });
+  return hit(rule.tls, row.tlName, row.tlId) || hit(rule.agents, row.agentName, row.agentId);
 }
 
 const fmtDate = (ms) => { try { return new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) + ' IST'; } catch { return ''; } };
@@ -124,10 +128,10 @@ export function planMails({ rows, cfg, state, now = Date.now(), max = 15 }) {
     for (const r of mine) {
       const key = `${r.key}|${rule.id}`, done = sent[key] || {};
       if (rule.onNew && !done.n && r.status === COMPLAINT_STATUS.PENDING && r.date >= rule.since) {
-        out.push({ kind: 'new', ruleId: rule.id, to: rule.to, ...buildMail('new', r, cfg, now), marks: [{ type: 'sent', key, f: 'n' }], caseNo: r.caseNo });
+        out.push({ kind: 'new', ruleId: rule.id, to: rule.to, ...buildMail('new', r, cfg, now), marks: [{ type: 'sent', key, f: 'n' }], caseNo: r.caseNo, threadId: r.threadId, attach: rule.attach !== false });
       }
       if (rule.onDeduct && !done.d && r.status === COMPLAINT_STATUS.BANK && r.deducted > 0 && (r.resolvedAt || 0) >= rule.since) {
-        out.push({ kind: 'deduct', ruleId: rule.id, to: rule.to, ...buildMail('deduct', r, cfg, now), marks: [{ type: 'sent', key, f: 'd' }], caseNo: r.caseNo });
+        out.push({ kind: 'deduct', ruleId: rule.id, to: rule.to, ...buildMail('deduct', r, cfg, now), marks: [{ type: 'sent', key, f: 'd' }], caseNo: r.caseNo, threadId: r.threadId, attach: rule.attach !== false });
       }
     }
     if (rule.remind) {
@@ -335,5 +339,5 @@ export function createComplaintsService({ getStore, getConfig, lookupAgent, now 
     });
   }
   const meta = () => ({ at: st.at ? new Date(st.at).toISOString() : '', okAt: st.ok ? new Date(st.ok).toISOString() : '', running: !!st.running, error: st.error, coverFrom: st.coverFrom, threads: byThread.size, config: (({ mail, ...rest }) => rest)(cfg()), account: st.me[0] || '' });
-  return { sync, ensureRange, tick, rows, meta, _state: st, _byThread: byThread };
+  return { sync, ensureRange, tick, rows, meta, getStore, _state: st, _byThread: byThread };
 }
