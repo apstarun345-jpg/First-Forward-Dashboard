@@ -204,11 +204,15 @@ test('GV Master issuer replaces the bank-mail agent (APNA PAYMENT / master ID) i
   });
   await svc.sync({ full: true });
   const r = svc.rows({})[0];
-  assert.deepEqual([r.agentId, r.agentName, r.tlName, r.tlId, r.issuerSrc, r.mailAgentId], ['20354013', 'Real Agent', 'Registry TL', 'APN9', 'GV Master', '5845036']);
-  // no registry hit → GV Master TL
+  assert.deepEqual([r.agentId, r.agentName, r.tlName, r.tlId, r.issuerSrc, r.mailAgentId], ['20354013', 'Real Agent', 'GV TL', 'G1', 'GV Master', '5845036']);
+  assert.ok(!lookups.includes('20354013'), 'GV agent must never get the FF Agent-master (Sheet4) TL');
+  // GV agent without any GV TL stays blank (never borrows a same-named FF agent's TL)
   const svc2 = createComplaintsService({ getStore: () => store, getConfig: () => ({}), now: () => NOW, getMasterIds: () => master, lookupAgent: () => null, enrichIssuers: async (it) => new Map([[it[0].key, { id: '1', name: 'X', tlName: 'GV TL', tlId: 'G1' }]]) });
   await svc2.sync({ full: true });
   assert.deepEqual([svc2.rows({})[0].tlName, svc2.rows({})[0].tlId], ['GV TL', 'G1']);
+  const svc4 = createComplaintsService({ getStore: () => store, getConfig: () => ({}), now: () => NOW, getMasterIds: () => master, lookupAgent: () => ({ found: true, tlName: 'FF TL', tlId: 'F1' }), enrichIssuers: async (it) => new Map([[it[0].key, { id: 'APS07949', name: 'MUKESH .', tlName: '', tlId: '' }]]) });
+  await svc4.sync({ full: true });
+  assert.deepEqual([svc4.rows({})[0].tlName, svc4.rows({})[0].tlId], ['', ''], 'blank GV TL stays blank');
   // not found → stays as the mail says and is retried only after 30 min
   let calls = 0;
   const svc3 = createComplaintsService({ getStore: () => store, getConfig: () => ({}), now: () => NOW, getMasterIds: () => master, enrichIssuers: async () => { calls++; return new Map(); } });
@@ -217,7 +221,7 @@ test('GV Master issuer replaces the bank-mail agent (APNA PAYMENT / master ID) i
   // mail carries the resolved name / id in a bank-style table
   const cfg = nc({ ownerName: 'Tarun', tatHours: 24, mail: { enabled: true } }, null, 1);
   const mail = bm('new', r, cfg, NOW);
-  assert.match(mail.html, /background:#ffff00/); assert.match(mail.html, /Real Agent/); assert.match(mail.html, /20354013/); assert.match(mail.html, /✓ GV Master/); assert.match(mail.html, /Registry TL/);
+  assert.match(mail.html, /background:#ffff00/); assert.match(mail.html, /Real Agent/); assert.match(mail.html, /20354013/); assert.match(mail.html, /✓ GV Master/); assert.match(mail.html, /GV TL/); assert.doesNotMatch(mail.html, /Registry TL/);
   assert.doesNotMatch(mail.html, />Sunil Kumar Rudra</);
   assert.match(mail.text, /Agent Name: Real Agent/); assert.match(mail.text, /Agent ID: 20354013/);
   assert.match(DEFAULT_MAIL_TEMPLATES.newBody, /\{table\}/);
@@ -228,4 +232,11 @@ test('GV Master issuer replaces the bank-mail agent (APNA PAYMENT / master ID) i
 test('old default mail bodies (saved earlier) migrate to the new {table} default; custom text is kept', () => {
   const old = normalizeMailCfg({ templates: { newBody: 'Hello,\n\nA new POS complaint has come from the bank.\n\nCase: {case}\nDate: {date}\nAgent: {agent} ({agentId})\nTL: {tl} ({tlId})\nVRN: {vrn}\nTag ID: {tag}\nIssue: {description}\n\nPlease check and reply to the bank within TAT ({tat}). If there is no response, the bank deducts the amount from the pool account.\n\nOpen the mail: {link}\n\n— {owner}', deductBody: 'my own text {case}' } }, null, 1);
   assert.match(old.templates.newBody, /\{table\}/); assert.equal(old.templates.deductBody, 'my own text {case}');
+});
+
+
+test('server: Agent-master TL lookup is ID-only (a common first name must not borrow another agent\'s TL)', () => {
+  const src = read('server.js');
+  assert.match(src, /const hit = id \? complaintsAgentIdx\.byId\.get\(id\) : \(complaintsAgentIdx\.byName\.get\(plNormName\(agentName\)\) \|\| null\)/);
+  assert.match(src, /byName\.set\(nm, byName\.has\(nm\) \? null : r\)/);
 });

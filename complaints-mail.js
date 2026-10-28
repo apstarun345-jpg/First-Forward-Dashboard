@@ -399,12 +399,13 @@ export function createComplaintsService({ getStore, getConfig, lookupAgent, enri
     return out.map((r) => {
       const iss = r.issuer || null;
       const agentId = iss ? iss.id : r.agentId, agentName = iss ? iss.name : r.agentName;
+      // GV Master se mile agent ka TL sirf GV ka hona chahiye (supervisor) — FF Agent master (Sheet4) ka TL nahi.
       const k = `${agentId}|${agentName}`;
-      if (!lookups.has(k)) { let v = null; try { v = lookupAgent ? lookupAgent({ agentId, agentName }) : null; } catch { v = null; } lookups.set(k, v || {}); }
-      const a = lookups.get(k);
-      const tlName = a.tlName || (iss && iss.tlName) || '', tlId = a.tlId || (iss && iss.tlId) || '';
+      if (!iss && !lookups.has(k)) { let v = null; try { v = lookupAgent ? lookupAgent({ agentId, agentName }) : null; } catch { v = null; } lookups.set(k, v || {}); }
+      const a = iss ? {} : lookups.get(k);
+      const tlName = iss ? (iss.tlName || '') : (a.tlName || ''), tlId = iss ? (iss.tlId || '') : (a.tlId || '');
       const { issuer, issuerTriedAt, ...rest } = r; void issuer; void issuerTriedAt;
-      return { ...rest, agentId, agentName, ...(iss ? { issuerSrc: 'GV Master', mailAgentId: r.agentId, mailAgentName: r.agentName } : {}), day: istDay(r.date), tlName, tlId, agentFound: !!a.found || !!iss };
+      return { ...rest, agentId, agentName, ...(iss ? { issuerSrc: 'GV Master', mailAgentId: r.agentId, mailAgentName: r.agentName } : {}), day: istDay(r.date), tlName, tlId, agentFound: !!a.found || !!iss, tlSource: iss ? 'GV Master' : (a.found ? 'Agent master' : '') };
     });
   };
   const meta = () => ({ at: st.at ? new Date(st.at).toISOString() : '', okAt: st.ok ? new Date(st.ok).toISOString() : '', running: !!st.running, error: st.error, enrichErr: st.enrichErr, coverFrom: st.coverFrom, threads: byThread.size, config: (({ mail, ...rest }) => rest)(cfg()), account: st.me[0] || '' });

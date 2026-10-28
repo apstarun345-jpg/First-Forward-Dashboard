@@ -3580,6 +3580,8 @@ const mappingJobs = createMappingJobs({
 
 // 📨 Agents Complaints Summary — Gmail (Apps Script) se bank POS-complaint mails; background me refresh, cache se turant jawab.
 let complaintsAgentIdx = { rows: null, byId: new Map(), byName: new Map() };
+/** Agent master (Sheet4) se TL — sirf ID se. Naam se tabhi jab mail me ID hi na ho aur poore sheet me wo naam sirf ek agent ka ho
+ *  ("MUKESH" jaise aam naam par galat TL aa jata tha). */
 function complaintsLookupAgent({ agentId, agentName }) {
   const rows = regFullState.rows;
   if (!rows) return null;
@@ -3587,14 +3589,14 @@ function complaintsLookupAgent({ agentId, agentName }) {
     const byId = new Map(), byName = new Map();
     for (const r of rows) {
       for (const k of [r.newId, r.id]) { const n = idNorm(k); if (n && !byId.has(n)) byId.set(n, r); }
-      const nm = plNormName(r.name); if (nm && !byName.has(nm)) byName.set(nm, r);
+      const nm = plNormName(r.name); if (nm) byName.set(nm, byName.has(nm) ? null : r);   // null = naam ek se zyada agents ka
     }
     complaintsAgentIdx = { rows, byId, byName };
   }
-  const hit = complaintsAgentIdx.byId.get(idNorm(agentId)) || complaintsAgentIdx.byName.get(plNormName(agentName)) || null;
+  const id = idNorm(agentId);
+  const hit = id ? complaintsAgentIdx.byId.get(id) : (complaintsAgentIdx.byName.get(plNormName(agentName)) || null);
   return hit ? { found: true, tlName: hit.tlName || '', tlId: hit.tlId || '' } : null;
 }
-
 /** 🔎 Complaint ke Tag ID / VRN se GV Master me asli agent (ID + naam) + TL nikalo. Bank mail me agent APNA PAYMENT (master ID) hota hai. */
 async function complaintsGvIssuers(items) {
   const st = db.settings || {};
@@ -3630,6 +3632,25 @@ async function complaintsGvIssuers(items) {
   if (tags.length) await run(L.tagId, tags, 'tag');
   const missing = items.filter((it) => !best.has(it.key) && clean(it.vrn));
   if (missing.length) { const mv = [...new Set(missing.map((it) => clean(it.vrn)))]; await run(L.vrn, mv, 'vrn'); }
+  // Is tag ki row me supervisor blank ho to usi GV agent ki kisi aur GV Master row se uska (GV) TL lo — FF ka TL kabhi nahi.
+  const noTl = [...new Set([...best.values()].filter((v) => !v.hit.tlName && !v.hit.tlId && v.hit.id).map((v) => clean(v.hit.id)))];
+  const tlByAgent = new Map();
+  for (let i = 0; i < noTl.length; i += 20) {
+    const part = noTl.slice(i, i + 20);
+    const where = `(${part.map((v) => `upper(${L.agentId}) = '${v}'`).join(' or ')}) and (${L.tlName} is not null or ${L.gvTlId} is not null or ${L.tlId} is not null)`;
+    const params = new URLSearchParams({ id: String(st.gvSheetId).replace(/[^A-Za-z0-9_-]/g, ''), sheet: tab, ...(m.gid ? { gid: String(m.gid) } : {}), tq: `select ${letters.join(', ')} where ${where} limit 1000` });
+    try {
+      const table = await uaGvizTable(params);
+      for (const row of table.rows || []) {
+        const cell = (k) => serverCell(row, table.at(L[k]));
+        const id = clean(cell('agentId')); if (!id) continue;
+        const day = serverDate(cell('date')) || '';
+        const cur = tlByAgent.get(id);
+        if (!cur || day > cur.day) tlByAgent.set(id, { day, tlName: String(cell('tlName') || '').trim(), tlId: String(cell('gvTlId') || cell('tlId') || '').trim() });
+      }
+    } catch { /* TL fallback optional */ }
+  }
+  for (const v of best.values()) { const t = tlByAgent.get(clean(v.hit.id)); if (t && !v.hit.tlName && !v.hit.tlId) { v.hit.tlName = t.tlName; v.hit.tlId = t.tlId; } }
   const masters = complaintsMasterIds();
   for (const [key, v] of best) if (v.hit.id && !masters.has(String(v.hit.id).toUpperCase())) out.set(key, v.hit);   // master ID hi mila to koi sudhaar nahi
   return out;
