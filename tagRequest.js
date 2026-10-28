@@ -2805,6 +2805,12 @@ body.colorful .from-hdr { color: #166534; }
   const canDeleteReq = (r) => isAdmin() || r.by === me();
   function classCellHtml(dr) {
     const editing = state.edit && state.edit.key === dr.key;
+    if (editing && !hasItem('FASTag', dr.req.itemName)) {
+      const ed = state.edit;
+      const f = (k, label, ph, max) => `<label class="tr-cq-row tr-ed-field"><b>${label}</b><input class="input" data-tr-efield="${k}" maxlength="${max}" placeholder="${ph}" value="${esc(ed[k] || '')}"></label>`;
+      return `<div class="tr-cq tr-cq-edit tr-cq-item">${hasItem('Biomatric Device', dr.req.itemName) ? f('serialNumber', '🔢 Serial', 'Serial number', 100) + f('deviceName', '📟 Device', 'Device name', 120) : ''}${hasItem('Matarial', dr.req.itemName) ? f('materialDescription', '📦 Material', 'Material details', 200) : ''}
+      ${isAdmin() ? `<input class="input tr-cq-note" data-tr-enote maxlength="300" placeholder="💬 Admin note (optional)" value="${esc(ed.note || '')}">` : ''}</div>`;
+    }
     if (editing) {
       const classes = [...new Set([...CLASS_LIST, ...dr.rows.map((x) => String(x.cls || '').toUpperCase()).filter(Boolean)])];
       return `<div class="tr-cq tr-cq-edit">${classes.map((c) => {
@@ -2812,6 +2818,7 @@ body.colorful .from-hdr { color: #166534; }
         const asked = x ? (x.requested === undefined ? num(x.approved) : num(x.requested)) : 0;
         return `<label class="tr-cq-row"><b>${esc(c)}</b><input class="input" data-tr-eq="${esc(c)}" inputmode="numeric" maxlength="6" value="${esc(state.edit.qty[c] === undefined ? '' : state.edit.qty[c])}" placeholder="0">${asked ? `<small class="dim" title="Agent ne maanga">req ${fmt(asked)}</small>` : '<small></small>'}</label>`;
       }).join('')}
+      ${hasItem('Biomatric Device', dr.req.itemName) ? ['serialNumber', 'deviceName'].map((k) => `<label class="tr-cq-row tr-ed-field"><b>${k === 'serialNumber' ? '🔢 Serial' : '📟 Device'}</b><input class="input" data-tr-efield="${k}" maxlength="120" value="${esc(state.edit[k] || '')}"></label>`).join('') : ''}${hasItem('Matarial', dr.req.itemName) ? `<label class="tr-cq-row tr-ed-field"><b>📦 Material</b><input class="input" data-tr-efield="materialDescription" maxlength="200" value="${esc(state.edit.materialDescription || '')}"></label>` : ''}
       ${isAdmin() ? `<input class="input tr-cq-note" data-tr-enote maxlength="300" placeholder="💬 Admin note (optional)" value="${esc(state.edit.note || '')}">` : ''}</div>`;
     }
     if (!dr.rows.length) return '<span class="dim small">—</span>';
@@ -3310,6 +3317,7 @@ body.colorful .from-hdr { color: #166534; }
     if (payload.adminNote !== undefined) next.adminNote = String(payload.adminNote || '');
     if (payload.note !== undefined && (next.status || 'pending') === 'pending') next.note = String(payload.note || '');
     for (const k of ['firstBarcode', 'lastBarcode']) if (payload[k] !== undefined) { const v = String(payload[k] || '').replace(/[^\d-]/g, ''); if (v) next[k] = v; else delete next[k]; }
+    for (const k of ['serialNumber', 'deviceName', 'materialDescription']) if (payload[k] !== undefined) next[k] = String(payload[k] || '');
     if (payload.courier !== undefined) {
       const courier = String(payload.courier || '').trim();
       if (courier) next.courier = courier; else delete next.courier;
@@ -3371,7 +3379,7 @@ body.colorful .from-hdr { color: #166534; }
   function startEdit(dr) {
     const qty = {};
     dr.rows.forEach((x) => { qty[String(x.cls).toUpperCase()] = String(num(x.approved)); });
-    state.edit = { key: dr.key, qty, note: dr.req.adminNote || '' };
+    state.edit = { key: dr.key, qty, note: dr.req.adminNote || '', serialNumber: dr.req.serialNumber || '', deviceName: dr.req.deviceName || '', materialDescription: dr.req.materialDescription || '' };
     renderReqTable();
   }
   function saveEdit() {
@@ -3392,6 +3400,11 @@ body.colorful .from-hdr { color: #166534; }
     const payload = {};
     if (Object.keys(classQty).length) { payload.classQty = classQty; if (dr.agentKey) payload.agentKey = dr.agentKey; if (Object.keys(extraData).length) payload.classData = extraData; }
     if (isAdmin() && clean(ed.note) !== clean(dr.req.adminNote)) payload.adminNote = clean(ed.note);
+    if (hasItem('Biomatric Device', dr.req.itemName)) {
+      if (clean(ed.serialNumber).length < 2) { U.toast('Serial number likho', 'err'); return; }
+      if (clean(ed.deviceName).length < 2) { U.toast('Device name likho', 'err'); return; }
+    }
+    ['serialNumber', 'deviceName', 'materialDescription'].forEach((k) => { if (clean(ed[k]) !== clean(dr.req[k])) payload[k] = clean(ed[k]); });
     if (!Object.keys(payload).length) { state.edit = null; renderReqTable(); U.toast('Kuch badla nahi', 'info'); return; }
     const btn = rootEl.querySelector('.tr-editing [data-tr-op="save"]');
     if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
@@ -3695,10 +3708,11 @@ body.colorful .from-hdr { color: #166534; }
         return;
       }
       if (t.matches && t.matches('[data-tr-enote]') && state.edit) state.edit.note = t.value;
+      if (t.matches && t.matches('[data-tr-efield]') && state.edit) state.edit[t.dataset.trEfield] = t.value;
     });
     card.addEventListener('keydown', (e) => {
       const t = e.target;
-      if (!state.edit || !(t.matches && (t.matches('[data-tr-eq]') || t.matches('[data-tr-enote]')))) return;
+      if (!state.edit || !(t.matches && (t.matches('[data-tr-eq]') || t.matches('[data-tr-enote]') || t.matches('[data-tr-efield]')))) return;
       if (e.key === 'Enter') { e.preventDefault(); saveEdit(); }
       else if (e.key === 'Escape') { state.edit = null; renderReqTable(); }
     });

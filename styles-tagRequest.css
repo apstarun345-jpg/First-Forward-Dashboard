@@ -344,3 +344,6 @@ html[data-theme="dark"] .tr-item-chips .tr-item-chip.on { color: #fff !important
 .tr-c-suggest .tr-grp { margin-top: 4px; font-size: 9.5px; }
 html.mobile-ui .tr-req-tbl .tr-grp, html.mobile-ui .tr-req-tbl .tr-m-growth .tr-gr-all { font-size: 17px; row-gap: 3px; }
 html.mobile-ui .tr-req-tbl .tr-c-suggest .tr-grp { font-size: 16px; }
+.tr-cq-item .tr-ed-field { display: flex; gap: 4px; align-items: center; }
+.tr-cq-item .tr-ed-field b { width: 64px; flex: none; }
+.tr-cq-item .tr-ed-field .input, .tr-cq-edit .tr-ed-field .input { width: 150px; text-align: left; font-weight: 600; }

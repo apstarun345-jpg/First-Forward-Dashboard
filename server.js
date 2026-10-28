@@ -7698,6 +7698,7 @@ async function handleApi(req, res, url) {
     // 🔢 First / Last barcode — admin dispatch ke waqt bharta hai; Google Sheet me column dropdown se chun sakte hain.
     for (const k of ['firstBarcode', 'lastBarcode']) if (body[k] !== undefined) { const v = tagBarcode(body[k]); if (v) row[k] = v; else delete row[k]; }
     if (body.itemName !== undefined) row.itemName = normItemName(body.itemName);
+    for (const [k, n] of [['serialNumber', 100], ['deviceName', 120], ['materialDescription', 200]]) if (body[k] !== undefined) row[k] = shortText(body[k], n);
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
     if (Object.keys(body).every((k) => k === 'status')) persistBackground('notify'); // status-only → instant reply
     else await persist('notify');
