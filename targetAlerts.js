@@ -53,6 +53,14 @@ window.FF = window.FF || {};
   .ta-pct{font-size:11px;font-weight:800;margin-left:8px;color:#15803d}.ta-row.wait .ta-pct{color:#b45309}
   .ta-confetti{position:absolute;left:0;right:0;top:0;height:0;pointer-events:none}
   .ta-confetti i{position:absolute;top:4px;width:7px;height:11px;border-radius:2px;opacity:0;animation:ta-conf 1.9s ease-out forwards}
+  .ta-pill.set{background:#e0e7ff;color:#4338ca}
+  .ta-links{border-color:rgba(99,102,241,.35);border-left-color:#6366f1;background:linear-gradient(90deg,color-mix(in srgb,#6366f1 7%,var(--card,#fff)),var(--card,#fff) 55%)}
+  .ta-links::before{background:linear-gradient(90deg,#6366f1,#22d3ee,#a78bfa,#6366f1);background-size:300% 100%}.ta-links .ta-live{color:#6366f1}
+  .ta-link{display:grid;grid-template-columns:28px minmax(0,1fr) auto auto;gap:10px;align-items:center;width:100%;text-align:left;border:0;background:transparent;padding:9px 8px;border-radius:10px;cursor:pointer;font:inherit;color:inherit;animation:ta-in .45s ease both}
+  .ta-link + .ta-link{border-top:1px dashed rgba(100,116,139,.25)}.ta-link:hover{background:rgba(99,102,241,.08)}
+  .ta-lmain{min-width:0}.ta-lmain b{font-weight:800}.ta-lmain small{display:block;color:var(--muted,#64748b);font-size:12px;margin-top:1px}
+  .ta-lpct{font-weight:800;color:#4338ca;font-size:15px}.ta-lgo{font-size:12px;font-weight:700;color:#4f46e5}.ta-link:hover .ta-lgo{text-decoration:underline}
+  .ta-links .ta-bar i{background:linear-gradient(90deg,#6366f1,#22d3ee)}
   @keyframes ta-flow{to{background-position:300% 0}}
   @keyframes ta-ping{0%{box-shadow:0 0 0 0 rgba(22,163,74,.55)}80%,100%{box-shadow:0 0 0 8px rgba(22,163,74,0)}}
   @keyframes ta-shimmer{to{background-position:-200% 0}}
@@ -97,10 +105,32 @@ window.FF = window.FF || {};
     return out;
   }
 
+  /** Pure: targets set from personal (team) links, grouped per link → { linkId, linkName, set, achieved, rows[] }. */
+  function linkSummary(targets, curByKey, ym) {
+    const by = new Map();
+    (targets || []).forEach((t) => {
+      if (!t || t.ym !== ym || t.via !== 'link' || !t.key) return;
+      const classSum = t.classTargets ? Object.values(t.classTargets).reduce((a, v) => a + (Number(v) || 0), 0) : 0;
+      const target = Number(t.target) > 0 ? Number(t.target) : classSum;
+      const activeGoal = !(target > 0) && t.goal === 'active';
+      if (!target && !activeGoal) return;
+      const cur = Number(curByKey.get(t.key)) || 0;
+      const achieved = activeGoal ? cur > 0 : cur >= target;
+      const id = t.linkId || t.linkName || 'link';
+      let g = by.get(id); if (!g) { g = { linkId: id, linkName: t.linkName || 'Team link', set: 0, achieved: 0, rows: [] }; by.set(id, g); }
+      g.set++; if (achieved) g.achieved++;
+      g.rows.push({ name: t.agent || String(t.key).split('|')[1] || '', source: t.source === 'gv' ? 'gv' : 'ff', tl: t.tl || '', target, activeGoal, cur, achieved, at: t.at || '' });
+    });
+    const out = [...by.values()];
+    out.forEach((g) => g.rows.sort((a, b) => (a.achieved === b.achieved ? (b.cur - a.cur) : (a.achieved ? -1 : 1))));
+    out.sort((a, b) => b.set - a.set || a.linkName.localeCompare(b.linkName));
+    return out;
+  }
+
   async function compute() {
     const settings = (FF.auth && FF.auth.settings) || {};
     const targets = (settings.targets || []).filter((t) => t && t.ym && t.key);
-    if (!targets.length) return { alerts: [], ym: '' };
+    if (!targets.length) return { alerts: [], links: [], ym: '' };
     const [agentsR] = await Promise.allSettled([S.need('agents'), S.need('daily'), G && G.enabled && G.enabled() ? G.need('master') : Promise.resolve([])]);
     const agents = agentsR.status === 'fulfilled' ? agentsR.value : [];
     let latest = null;
@@ -109,7 +139,7 @@ window.FF = window.FF || {};
     const cur = new Map();
     for (const a of agents) { if (a.channel !== 'First Forward' || a.ym !== ym) continue; const k = keyOf('ff', a.name); cur.set(k, (cur.get(k) || 0) + (Number(a.n) || 0)); }
     try { if (G && G.enabled && G.enabled()) G.agentRollup(ym).forEach((a) => cur.set(keyOf('gv', a.agentName), Number(a.total) || 0)); } catch { /* ignore */ }
-    return { alerts: evaluate(targets, cur, ym, Date.now()), ym };
+    return { alerts: evaluate(targets, cur, ym, Date.now()), links: linkSummary(targets, cur, ym), ym };
   }
   function data() {
     if (cache.data && Date.now() - cache.at < 60e3) return Promise.resolve(cache.data);
@@ -134,10 +164,30 @@ window.FF = window.FF || {};
       <div class="ta-main"><a class="ta-name" href="${link}" title="Open in Master Search">${esc(a.name)}</a>${ch}<span class="ta-tag ${ok ? 'ok' : 'wait'}">${ok ? 'Achieved' : 'No progress'}</span><small>${text}${a.tl && a.tl !== '—' ? ` · TL ${esc(a.tl)}` : ''}${bar ? `<span class="ta-pct">${pct}%</span>` : ''}</small>${bar}</div>
       <div class="ta-act"><a class="btn small" href="#/targets?month=${esc(a.ym)}" title="Open Targets">🎯</a><button type="button" class="btn small" data-ta-x title="Dismiss">✕</button></div></div>`;
   }
+  const fmtAt = (iso) => { const t = Date.parse(iso || ''); if (!t) return '—'; try { return new Date(t).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; } };
+  function linksHtml(links) {
+    if (!links || !links.length) return '';
+    const set = links.reduce((a, g) => a + g.set, 0), ach = links.reduce((a, g) => a + g.achieved, 0);
+    return `<section class="card ta-card ta-links"><div class="ta-head" data-ta-toggle-l><h3>🔗 Team link targets</h3><span class="ta-live">LIVE</span><span class="ta-pill set">🎯 Set <b>${set}</b></span><span class="ta-pill ok">🏆 Achieved <b>${ach}</b></span><span class="chev">▾</span></div>
+      <div class="ta-body">${links.map((g) => { const pc = g.set ? Math.round(g.achieved / g.set * 100) : 0; return `<button type="button" class="ta-link" data-ta-link="${esc(g.linkId)}"><span class="ta-ic">🔗</span><span class="ta-lmain"><b>${esc(g.linkName)}</b><small>${g.set} target${g.set === 1 ? '' : 's'} set · ${g.achieved} achieved · ${g.set - g.achieved} pending</small><span class="ta-bar"><i style="--w:${Math.max(3, pc)}%"></i></span></span><span class="ta-lpct">${pc}%</span><span class="ta-lgo">View details ›</span></button>`; }).join('')}</div></section>`;
+  }
+  function openLinkDrawer(g) {
+    if (!g || !FF.app || !FF.app.openDrawer) return;
+    const rows = g.rows.map((r, i) => {
+      const pc = r.activeGoal ? (r.cur > 0 ? 100 : 0) : (r.target ? Math.round(r.cur / r.target * 100) : 0);
+      const st = r.achieved ? '<span class="ta-tag ok">Achieved</span>' : (r.cur > 0 ? '<span class="ta-tag wait">In progress</span>' : '<span class="ta-tag wait">Not started</span>');
+      return `<tr><td>${i + 1}</td><td><b>${esc(r.name)}</b> <span class="ta-tag ${r.source}">${r.source === 'gv' ? 'GV' : 'FF'}</span></td><td>${esc(r.tl || '—')}</td><td>${r.activeGoal ? '⚡ Active' : U.fmt(r.target)}</td><td><b>${U.fmt(r.cur)}</b></td><td>${pc}%</td><td>${st}</td><td>${esc(fmtAt(r.at))}</td></tr>`;
+    }).join('');
+    FF.app.openDrawer({
+      kicker: 'Team link targets', title: g.linkName, sub: `${g.set} set · ${g.achieved} achieved · ${g.set - g.achieved} pending`,
+      body: `<div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>Agent</th><th>TL</th><th>Target</th><th>Achieved</th><th>%</th><th>Status</th><th>Set at</th></tr></thead><tbody>${rows}</tbody></table></div>`
+    });
+  }
   function paint(host, d) {
     const hide = dismissed();
     const list = (d.alerts || []).filter((a) => !hide.has(alertId(a)));
-    if (!list.length) { host.innerHTML = ''; return; }
+    host.__links = d.links || [];
+    if (!list.length) { ensureCss(); host.innerHTML = linksHtml(host.__links); return; }
     ensureCss();
     const nOk = list.filter((a) => a.kind === 'achieved').length, nWait = list.length - nOk;
     let collapsed = false; try { collapsed = localStorage.getItem('ff_ta_collapsed') === '1'; } catch { /* ignore */ }
@@ -146,7 +196,7 @@ window.FF = window.FF || {};
     host.innerHTML = `<section class="card ta-card${nOk ? '' : ' warn-only'}${collapsed ? ' collapsed' : ''}">
       <div class="ta-head" data-ta-toggle><h3>🎯 Target updates</h3><span class="ta-live">LIVE</span>${nOk ? `<span class="ta-pill ok">🏆 Achieved <b>${nOk}</b></span>` : ''}${nWait ? `<span class="ta-pill wait">⏸️ No improvement <b>${nWait}</b></span>` : ''}<span class="ta-ticker" data-ta-ticker></span><span class="chev">▾</span></div>
       <div class="ta-confetti" aria-hidden="true"></div>
-      <div class="ta-body">${shown.map(rowHtml).join('')}${list.length > shown.length ? `<div class="ta-more"><button type="button" class="btn small" data-ta-all>Show all ${list.length}</button></div>` : ''}</div></section>`;
+      <div class="ta-body">${shown.map(rowHtml).join('')}${list.length > shown.length ? `<div class="ta-more"><button type="button" class="btn small" data-ta-all>Show all ${list.length}</button></div>` : ''}</div></section>${linksHtml(host.__links)}`;
   }
   function tickerMsgs(list) {
     return list.map((a) => (a.kind === 'achieved'
@@ -183,11 +233,15 @@ window.FF = window.FF || {};
         const x = e.target.closest('[data-ta-x]');
         if (x) { e.preventDefault(); const row = x.closest('[data-ta]'); const set = dismissed(); set.add(row.dataset.ta); saveDismissed(set); if (cache.data) { paint(host, cache.data); startTicker(host, cache.data.alerts.filter((a) => !dismissed().has(alertId(a)))); } return; }
         if (e.target.closest('[data-ta-all]')) { host.__showAll = true; if (cache.data) { paint(host, cache.data); startTicker(host, cache.data.alerts.filter((a) => !dismissed().has(alertId(a)))); } return; }
+        const lk = e.target.closest('[data-ta-link]');
+        if (lk) { e.preventDefault(); openLinkDrawer((host.__links || []).find((g) => String(g.linkId) === lk.getAttribute('data-ta-link'))); return; }
+        const tl = e.target.closest('[data-ta-toggle-l]');
+        if (tl) { tl.closest('.ta-card').classList.toggle('collapsed'); return; }
         const t = e.target.closest('[data-ta-toggle]');
         if (t) { const card = t.closest('.ta-card'); card.classList.toggle('collapsed'); try { localStorage.setItem('ff_ta_collapsed', card.classList.contains('collapsed') ? '1' : '0'); } catch { /* ignore */ } }
       });
     }
     try { paint(host, await data()); const l = (cache.data && cache.data.alerts || []).filter((a) => !dismissed().has(alertId(a))); startTicker(host, l); if (l.some((a) => a.kind === 'achieved')) celebrate(host); } catch (err) { host.innerHTML = ''; console.warn('target alerts:', err && err.message); }
   }
-  FF.targetAlerts = { mount, evaluate, invalidate, _alertId: alertId };
+  FF.targetAlerts = { mount, evaluate, linkSummary, invalidate, _alertId: alertId };
 })(window.FF);

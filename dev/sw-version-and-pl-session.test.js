@@ -9,9 +9,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 test('sw.js CACHE_NAME carries the package version (bump both on every release → "new version" toast fires)', () => {
-  const v = JSON.parse(read('package.json')).version;
+  const [maj, min, pat] = JSON.parse(read('package.json')).version.split('.').map(Number);
+  const v = maj * 100000 + min * 100 + pat; // 3.109.0 → 310900
   const cache = (read('sw.js').match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/) || [])[1];
-  assert.equal(cache, `apnapayment-v${v}`);
+  assert.equal(cache, `apnapayment-v${v}`, 'bump sw.js CACHE_NAME = major*100000 + minor*100 + patch on every release');
 });
 
 test('personal link sessions are signed (stateless) so a deploy/restart does not log viewers out', () => {

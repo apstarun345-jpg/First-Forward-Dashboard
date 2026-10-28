@@ -97,6 +97,8 @@ export function loadFfDispatchRows(table, settings = {}) {
       stock: { vc4: numeric(c.stock), comm: numeric(c.stock + 7), total: numeric(c.stock + 6) },
       tlStock: { vc4: numeric(c.tlStock), comm: numeric(c.tlStock + 1), total: numeric(c.tlStock + 2) }
     };
+    // 📞 mobile (non-enumerable so existing row-shape comparisons stay unchanged): own mobile in the profile "ID" column, else a 10-digit agent ID
+    { const idc = text(c.agentId + 1).replace(/\D/g, ''), aid = agentId.replace(/\D/g, ''); Object.defineProperty(row, 'mobile', { value: /^\d{10}$/.test(idc.slice(-10)) && idc.length >= 10 ? idc.slice(-10) : (/^\d{10}$/.test(aid) && aid === agentId ? aid : ''), enumerable: false }); }
     row.direct = isDirect(row, 'ff', settings);
     row.directLabel = row.direct ? directLabel('ff', settings) : '';
     rows.push(row);
@@ -123,6 +125,7 @@ export function loadGvDispatchRows(table, settings = {}) {
       stock: { vc4: numeric(7), comm: numeric(12), total: numeric(11) },
       tlStock: { vc4: numeric(16), comm: numeric(17), total: numeric(18) }
     };
+    { const m = text(0).replace(/\D/g, '').slice(-10); Object.defineProperty(row, 'mobile', { value: m.length === 10 ? m : '', enumerable: false }); }
     row.direct = isDirect(row, 'gv', settings);
     row.directLabel = row.direct ? directLabel('gv', settings) : '';
     rows.push(row);

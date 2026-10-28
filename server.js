@@ -288,6 +288,7 @@ const DEFAULT_SETTINGS = {
     loginHistory: true,  // 🕘 Login history table (Settings → Users)
     pendingBadge: true,  // ⏳ Pending-approvals sidebar badge
     updateToast: true,   // 🔄 "Update available" toast
+    plTargets: true,     // 🎯 personal-link viewers can set agent targets (shown on admin Home)
     backupReminder: true,// ☁️ Settings backup reminder
     waNumber: '',        // 📤 WhatsApp share target number (blank = share picker)
     alerts: { lowCover: true, midMonth: true, inactive: true, zeroDay: true, newLoginIp: true },
@@ -1032,7 +1033,7 @@ const PL_KIND_ALERT = { login: 'login', login_failed: 'failed', link_open: 'open
 const PL_KIND_META = {
   login: ['🔐', 'Logged in', 'page'], login_failed: ['⚠️', 'Failed login', 'action'], link_open: ['👀', 'Link opened', 'page'], page_open: ['📄', 'Report opened', 'page'],
   search: ['🔍', 'Searched', 'search'], search_open: ['🎯', 'Opened result', 'search'], tab: ['🪟', 'Switched tab', 'tab'], channel: ['🔀', 'Switched channel', 'tab'],
-  dispatch_filter: ['🚚', 'Dispatch filter', 'tab'], refresh: ['🔄', 'Refreshed data', 'click'], export: ['⬇️', 'Exported', 'click'], logout: ['🚪', 'Logged out', 'action']
+  dispatch_filter: ['🚚', 'Dispatch filter', 'tab'], refresh: ['🔄', 'Refreshed data', 'click'], export: ['⬇️', 'Exported', 'click'], logout: ['🚪', 'Logged out', 'action'], target: ['🎯', 'Set a target', 'click']
 };
 const PL_THROTTLE_MS = { search: 20e3, search_open: 5e3, tab: 15e3, channel: 5e3, dispatch_filter: 15e3, page_open: 10 * 60e3, link_open: 10 * 60e3, login_failed: 30e3 };
 const plActivityLog = [];
@@ -8112,6 +8113,46 @@ async function handleApi(req, res, url) {
     }
     return sendJson(res, 200, { ok: true });
   }
+  // 🎯 Personal link → set / clear an agent's monthly target (Active goal or a number). Shows on the admin Home "Team link targets" card.
+  if (p === '/api/public/personal-link/target' && method === 'POST') {
+    const body = await readBody(req);
+    const token = String(body.token || '').trim();
+    const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
+    if (!savedLink || savedLink.enabled === false || !personalLinkSession(req, savedLink)) throw new HttpError(401, 'Session expired — open the link again.');
+    if (feats().plTargets === false || !isTeamLink(savedLink)) throw new HttpError(403, 'Target setting is turned off.');
+    const scope = await plScopeAgents(savedLink);
+    const who = scope.get(plNormName(body.name));
+    if (!who) throw new HttpError(404, 'This agent is not part of this link.');
+    const ym = dateKeyNow().slice(0, 7);
+    const key = plTargetKey(who.src, who.name);
+    const list = Array.isArray(db.settings.targets) ? db.settings.targets : (db.settings.targets = []);
+    const idx = list.findIndex((t) => t && t.ym === ym && t.key === key);
+    const prev = idx >= 0 ? list[idx] : null;
+    if (prev && !(prev.via === 'link' && prev.linkId === savedLink.id)) throw new HttpError(409, 'A target is already set for this agent by the admin.');
+    if (body.clear === true) {
+      if (idx >= 0) list.splice(idx, 1);
+      await persist('settings');
+      logAudit(null, 'link_target_clear', { actor: `link:${savedLink.name}`, target: who.name, ip: clientIp(req) });
+      return sendJson(res, 200, { ok: true, tg: 0 });
+    }
+    const num = Math.max(0, Math.min(100000, Math.floor(Number(body.target) || 0)));
+    const active = body.goal === 'active' && !num;
+    if (!num && !active) throw new HttpError(400, 'Enter a target number or choose Active.');
+    let cur = 0;
+    try { const tm = isComboLink(savedLink) ? await comboTeamAgents(savedLink) : await personalTeamAgents(savedLink); const dm = tm.get(who.name) || [...tm.entries()].find(([n]) => plNormName(n) === plNormName(who.name)); const m2 = dm && (dm instanceof Map ? dm : dm[1]); if (m2) for (const [d, n] of m2) if (String(d).startsWith(ym)) cur += Number(n) || 0; } catch { cur = 0; }
+    const entry = {
+      ...(prev || {}), key, ym, source: who.src, agent: who.name, tl: who.tl || (prev && prev.tl) || '',
+      target: num, classTargets: (prev && prev.classTargets) || {},
+      by: `link:${savedLink.name}`, via: 'link', linkId: savedLink.id, linkName: savedLink.name,
+      at: new Date().toISOString(), baseCur: cur
+    };
+    if (active) entry.goal = 'active'; else delete entry.goal;
+    if (idx >= 0) list[idx] = entry; else list.push(entry);
+    await persist('settings');
+    logAudit(null, 'link_target_set', { actor: `link:${savedLink.name}`, target: who.name, ip: clientIp(req), note: active ? 'Active goal' : `target ${num}` });
+    try { plRecordActivity(savedLink, req, 'target', `Set target for ${who.name}: ${active ? 'Active goal' : num}`); } catch { /* feed optional */ }
+    return sendJson(res, 200, { ok: true, tg: active ? 'A' : num });
+  }
   // 📡 Personal link activity: one beacon for events (search / tab / export / page open) and one heartbeat for the live preview.
   if ((p === '/api/public/personal-link/event' || p === '/api/public/personal-link/ping') && method === 'POST') {
     const ip = clientIp(req);
@@ -9633,6 +9674,50 @@ async function personalAgentClassRows(link) {
   }
   return out;
 }
+/** 📞 Agent mobile numbers for personal links: FF REPORT (profile "ID" col / 10-digit agent ID) + GV REPORT (col A). Cached 15 min. */
+const plMobileCache = { at: 0, maps: null, promise: null };
+const plIdKey = (v) => String(v == null ? '' : v).trim().toUpperCase().replace(/\.0+$/, '');
+async function personalReportMobiles() {
+  if (plMobileCache.maps && Date.now() - plMobileCache.at < 15 * 60e3) return plMobileCache.maps;
+  if (plMobileCache.promise) return plMobileCache.promise;
+  plMobileCache.promise = (async () => {
+    const maps = { ff: { id: new Map(), name: new Map() }, gv: { id: new Map(), name: new Map() } };
+    const [ff, gv] = await Promise.allSettled([
+      dispatchReportTable('ff').then((t) => loadFfDispatchRows(t, db.settings)),
+      dispatchReportTable('gv').then((t) => loadGvDispatchRows(t, db.settings))
+    ]);
+    [['ff', ff], ['gv', gv]].forEach(([ch, r]) => {
+      if (r.status !== 'fulfilled') return;
+      r.value.forEach((row) => { const m = row.mobile; if (!m) return; const ik = plIdKey(row.agentId), nk2 = plNormName(row.name); if (ik && !maps[ch].id.has(ik)) maps[ch].id.set(ik, m); if (nk2 && !maps[ch].name.has(nk2)) maps[ch].name.set(nk2, m); });
+    });
+    plMobileCache.maps = maps; plMobileCache.at = Date.now();
+    return maps;
+  })().finally(() => { plMobileCache.promise = null; });
+  return plMobileCache.promise;
+}
+const plMobileFor = (maps, src, id, name) => {
+  if (!maps) return '';
+  const nk2 = plNormName(name), ik = plIdKey(id), order = src === 'gv' ? ['gv', 'ff'] : ['ff', 'gv'];
+  for (const ch of order) { const m = (ik && maps[ch].id.get(ik)) || maps[ch].name.get(nk2); if (m) return m; }
+  return /^\d{10}$/.test(String(id || '').trim()) ? String(id).trim() : '';
+};
+/** 🎯 Agents a team link may set targets for: Map(normName → { name, src, tl }). */
+async function plScopeAgents(link) {
+  const out = new Map();
+  const put = (name, src, tl) => { const k = plNormName(name); if (k && !out.has(k)) out.set(k, { name: String(name).trim(), src, tl: tl || '' }); };
+  if (isComboLink(link)) {
+    const sp = await comboSplit(link);
+    sp.tlMaps.forEach(({ part, map }) => [...map.keys()].forEach((n) => put(n, part.source, part.name)));
+    ['ff', 'gv'].forEach((s2) => sp.memBySrc[s2].forEach((m) => put(m.name, s2, '')));
+  } else {
+    const src = link.source === 'gv' ? 'gv' : 'ff';
+    try { for (const n of (await personalTeamAgents(link)).keys()) put(n, src, link.kind === 'tl' ? link.name : ''); } catch { /* members below */ }
+    personalMemberNames(link).forEach((n) => put(n, src, ''));
+  }
+  return out;
+}
+const plTargetKey = (src, name) => `${src === 'gv' ? 'gv' : 'ff'}|${String(name || '').trim().toUpperCase().replace(/\s+/g, ' ')}`;
+const plTargetValue = (t) => { const cls = t && t.classTargets ? Object.values(t.classTargets).reduce((a, v) => a + (Number(v) || 0), 0) : 0; const n = Number(t && t.target) > 0 ? Number(t.target) : cls; return n > 0 ? n : (t && t.goal === 'active' ? 'A' : 0); };
 /** Per-agent DAILY class issuance for the current month: Map(normName → { name, d: { 'YYYY-MM-DD': { VC4, VC20, 'VC5+' } } }). */
 async function personalAgentDailyRows(link) {
   const out = new Map();
@@ -10190,9 +10275,9 @@ async function servePersonalPage(req, res, rawToken) {
     const needsStock = hasSec('stock') || hasSec('ageing') || (hasSec('insights') && isTeamLink(link));
     // Start independent sheet/index work together so verified links don't wait for serial requests.
     const rowsPromise = needsIssuance ? personalDailyRows(link) : Promise.resolve([]);
-    const classRowsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance'))
+    const classRowsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance') || hasSec('insights'))
       ? personalAgentClassRows(link).catch(() => new Map()) : Promise.resolve(new Map());
-    const dailyClsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance'))
+    const dailyClsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights'))
       ? personalAgentDailyRows(link).catch(() => new Map()) : Promise.resolve(new Map());
     const livePromise = hasSec('overview')
       ? Promise.race([personalLiveToday(link), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 5000); if (t.unref) t.unref(); })]).catch(() => null)
@@ -10393,9 +10478,9 @@ async function servePersonalPage(req, res, rawToken) {
       }
       const list = agentRows.sort((a, b) => b.mtd - a.mtd || b.last - a.last).slice(0, 80);
       const sum = (k) => list.reduce((a, r) => a + r[k], 0);
-      teamTable = list.length ? `<section class="pb-card"><div class="pb-card-head"><h3>👥 Team · agent-wise issuance (${list.length} agents)</h3>${expBtns('pl-tbl-team', `${link.name} - Team Agent-wise Issuance`)}</div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-team"><thead><tr><th>Agent</th><th>Last Month Issued</th><th>MTD Issued</th><th>Combined</th></tr></thead><tbody>${list.map((r) => `<tr><td>${pAg(r.name)}</td><td>${nf(r.last)}</td><td><b>${nf(r.mtd)}</b></td><td>${nf(r.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td>Grand Total</td><td>${nf(sum('last'))}</td><td>${nf(sum('mtd'))}</td><td>${nf(sum('total'))}</td></tr></tfoot></table></div></section>` : '';
+      teamTable = list.length ? `<section class="pb-card"><div class="pb-card-head"><h3>👥 Team · agent-wise issuance (${list.length} agents)</h3>${expBtns('pl-tbl-team', `${link.name} - Team Agent-wise Issuance`)}</div><div class="pl-aglist" data-ag-id="pl-tbl-team" data-ag-names="${escHtml(JSON.stringify(list.map((x) => x.name)))}"></div></section>` : '';
     }
-    const teamHtml = team.length ? `<section class="pb-card"><h3>👥 Team (this month)</h3>${team.map((t, i) => `<div class="pb-rank"><span class="pb-pos">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span><span class="pb-name">${pAg(t.name)}</span><b>${t.mtd}</b></div>`).join('')}</section>` : '';
+    const teamHtml = team.length ? `<section class="pb-card"><div class="pb-card-head"><h3>👥 Team (this month) · ranked by MTD</h3>${expBtns('pl-tbl-perf-team', `${link.name} - Team performance`)}</div><div class="pl-aglist" data-ag-id="pl-tbl-perf-team" data-ag-names="${escHtml(JSON.stringify(team.map((x) => x.name)))}"></div></section>` : '';
 
     // 5. 🏆 Performance Scorecard Table
     // Growth rule (same as main site): pichle mahine ke SAME din (1..kal) vs is mahine 1..kal.
@@ -10498,6 +10583,7 @@ async function servePersonalPage(req, res, rawToken) {
       const proj = dayNo ? Math.round((totMtd / dayNo) * daysInMonth) : 0;
       const tile = (cls, label, val, sub) => `<div class="pb-kpi ${cls}"><small>${label}</small><b>${val}</b><span>${sub}</span></div>`;
       const tbl = (id, title, heads, body, empty) => `${(insNav.push([id, title.replace(/<[^>]+>/g, '').trim()]), '')}<section class="pb-card" data-ins-sec="${id}"><div class="pb-card-head"><h3>${title}</h3>${expBtns(id, `${link.name} - ${title.replace(/<[^>]+>/g, '').replace(/[^\w\s-]/g, '').trim()}`)}</div>${body ? `<div class="pb-scroll"><table class="pb-tbl" id="${id}"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>` : `<p class="dim" style="padding:8px 4px">${empty}</p>`}</section>`;
+      const agTbl = (id, title, arr2, empty) => `${(insNav.push([id, title.replace(/<[^>]+>/g, '').trim()]), '')}<section class="pb-card" data-ins-sec="${id}"><div class="pb-card-head"><h3>${title}</h3>${expBtns(id, `${link.name} - ${title.replace(/<[^>]+>/g, '').replace(/[^\w\s-]/g, '').trim()}`)}</div>${arr2.length ? `<div class="pl-aglist" data-ag-id="${id}" data-ag-names="${escHtml(JSON.stringify(arr2.map((x) => x.name)))}"></div>` : `<p class="dim" style="padding:8px 4px">${empty}</p>`}</section>`;
       const inactiveBody = inactive.map((a) => `<tr data-gap="${a.gap === null ? 999 : a.gap}"><td>${pAg(a.name)}</td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td><td>${nf(a.mtd)}</td><td class="${a.stock ? 'pb-warn' : ''}">${stockInfo ? nf(a.stock) : '—'}</td></tr>`).join('');
       const growthBody = (arr) => arr.map((a) => `<tr><td>${pAg(a.name)}</td><td>${nf(a.prevSame)}</td><td><b>${nf(a.mtd)}</b></td><td>${growthLbl(a.growth)}</td><td>${lastLbl(a)}</td></tr>`).join('');
       const inactMonth = list.filter((a) => a.mtd === 0).sort((a, b) => b.prevTot - a.prevTot || b.stock - a.stock);
@@ -10517,16 +10603,16 @@ async function servePersonalPage(req, res, rawToken) {
         ${isT ? tile('best', '🛑 Inactive 2 months', nf(inact2.length), `${nf(inactMonth.length)} inactive this month`) : ''}
         ${isT ? tile('issuance', '🔥 High growth / 🔻 de-growth', `${nf(highG.length)} / ${nf(highD.length)}`, '±50% vs same days last month') : ''}
       </section>
-      ${isT ? (insNav.push(['pl-tbl-inactive', '😴 Inactive agents (7+ days)']), '') : ''}${isT ? `<section class="pb-card" data-ins-sec="pl-tbl-inactive"><div class="pb-card-head"><h3>😴 Inactive agents</h3><div class="pb-ins-filter" id="pl-ins-filter"><span class="dim small">No issuance for:</span> ${[7, 10, 15, 30].map((d, i) => `<button type="button" class="pb-btn${i === 0 ? ' on' : ''}" data-ins-days="${d}">${d}+ days</button>`).join('')}</div>${expBtns('pl-tbl-inactive', `${link.name} - Inactive agents`)}</div>${inactiveBody ? `<div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-inactive"><thead><tr><th>Agent</th><th>Last active</th><th>Last month</th><th>MTD</th><th>Stock</th></tr></thead><tbody>${inactiveBody}</tbody></table></div><p class="dim small" id="pl-ins-empty" hidden style="padding:8px 4px">✅ No inactive agents for this filter.</p>` : '<p class="dim" style="padding:8px 4px">✅ All agents are active (issued in the last 7 days).</p>'}<p class="pb-matrix-note">Today's incomplete day is not counted · "60+ days" = no issuance in the last 2 months.</p></section>` : `<section class="pb-card"><h3>🕒 Last active</h3><div class="pb-kv"><span>Last issuance</span><b>${list[0] ? lastLbl(list[0]) : '—'}</b></div></section>`}
-      ${isT ? tbl('pl-tbl-inact-m', '😴 Inactive this month <small class="dim">(no issuance in the current month)</small>', ['Agent', 'Last active', 'Last month', 'MTD', 'Stock'], inactMonthBody, '✅ Every agent has issued this month.') : ''}
-      ${isT ? tbl('pl-tbl-inact-2m', '🛑 Inactive 2 months <small class="dim">(no issuance last month and this month)</small>', ['Agent', 'Last active', 'Last month', 'MTD', 'Stock'], inact2Body, '✅ No agent is inactive for 2 months.') : ''}
-      ${isT ? tbl('pl-tbl-high50', '🔥 High growth <small class="dim">(+50% or more vs same days last month)</small>', gHeads, growthBody(highG), 'No agent is at +50% or more.') : ''}
-      ${isT ? tbl('pl-tbl-down50', '🔻 High de-growth <small class="dim">(−50% or worse vs same days last month)</small>', gHeads, growthBody(highD), '✅ No agent is at −50% or worse.') : ''}
-      ${isT ? tbl('pl-tbl-high', `🚀 High growth <small class="dim">(above the same days last month)</small>`, gHeads, growthBody(high), 'No agent is growing right now.') : ''}
-      ${isT && fresh.length ? tbl('pl-tbl-new', '🆕 Newly active <small class="dim">(0 in the same period last month, issuing now)</small>', gHeads, freshBody, '') : ''}
-      ${isT ? tbl('pl-tbl-down', `📉 De-growth <small class="dim">(below the same days last month)</small>`, gHeads, growthBody(down), '✅ No agent is in de-growth.') : ''}
-      ${isT ? tbl('pl-tbl-top', '🥇 Top performers (MTD)', ['#', 'Agent', 'MTD', 'Share', 'Last active'], top.map((a, i) => `<tr><td>${i + 1}</td><td>${pAg(a.name)}</td><td><b>${nf(a.mtd)}</b></td><td>${pct(a.mtd, totMtd)}%</td><td>${lastLbl(a)}</td></tr>`).join(''), 'No issuance yet this month.') : `<section class="pb-card"><h3>📈 Growth</h3><div class="pb-kv"><span>Last month same period (1–${dayNo || 1})</span><b>${nf(list[0] ? list[0].prevSame : 0)}</b></div><div class="pb-kv"><span>MTD</span><b>${nf(totMtd)}</b></div><div class="pb-kv"><span>Growth</span><b>${list[0] ? growthLbl(list[0].growth) : '—'}</b></div></section>`}
-      ${isT && stockInfo ? tbl('pl-tbl-dead', '📦 Stock but no issuance <small class="dim">(0 this month)</small>', ['Agent', 'Stock', 'Last active', 'Last month'], dead.map((a) => `<tr><td>${pAg(a.name)}</td><td class="pb-warn"><b>${nf(a.stock)}</b></td><td>${lastLbl(a)}</td><td>${nf(a.prevTot)}</td></tr>`).join(''), '✅ Every agent holding stock has issued this month.') : ''}`;
+      ${isT ? (insNav.push(['pl-tbl-inactive', '😴 Inactive agents (7+ days)']), '') : ''}${isT ? `<section class="pb-card" data-ins-sec="pl-tbl-inactive"><div class="pb-card-head"><h3>😴 Inactive agents</h3><div class="pb-ins-filter" id="pl-ins-filter"><span class="dim small">No issuance for:</span> ${[7, 10, 15, 30].map((d, i) => `<button type="button" class="pb-btn${i === 0 ? ' on' : ''}" data-ins-days="${d}">${d}+ days</button>`).join('')}</div>${expBtns('pl-tbl-inactive', `${link.name} - Inactive agents`)}</div>${inactive.length ? `<div class="pl-aglist" data-ag-id="pl-tbl-inactive" data-ag-names="${escHtml(JSON.stringify(inactive.map((x) => x.name)))}"></div><p class="dim small" id="pl-ins-empty" hidden style="padding:8px 4px">✅ No inactive agents for this filter.</p>` : '<p class="dim" style="padding:8px 4px">✅ All agents are active (issued in the last 7 days).</p>'}<p class="pb-matrix-note">Today's incomplete day is not counted · "60+ days" = no issuance in the last 2 months.</p></section>` : `<section class="pb-card"><h3>🕒 Last active</h3><div class="pb-kv"><span>Last issuance</span><b>${list[0] ? lastLbl(list[0]) : '—'}</b></div></section>`}
+      ${isT ? agTbl('pl-tbl-inact-m', '😴 Inactive this month <small class="dim">(no issuance in the current month)</small>', inactMonth, '✅ Every agent has issued this month.') : ''}
+      ${isT ? agTbl('pl-tbl-inact-2m', '🛑 Inactive 2 months <small class="dim">(no issuance last month and this month)</small>', inact2, '✅ No agent is inactive for 2 months.') : ''}
+      ${isT ? agTbl('pl-tbl-high50', '🔥 High growth <small class="dim">(+50% or more vs same days last month)</small>', highG, 'No agent is at +50% or more.') : ''}
+      ${isT ? agTbl('pl-tbl-down50', '🔻 High de-growth <small class="dim">(−50% or worse vs same days last month)</small>', highD, '✅ No agent is at −50% or worse.') : ''}
+      ${isT ? agTbl('pl-tbl-high', `🚀 High growth <small class="dim">(above the same days last month)</small>`, high, 'No agent is growing right now.') : ''}
+      ${isT && fresh.length ? agTbl('pl-tbl-new', '🆕 Newly active <small class="dim">(0 in the same period last month, issuing now)</small>', fresh, '') : ''}
+      ${isT ? agTbl('pl-tbl-down', `📉 De-growth <small class="dim">(below the same days last month)</small>`, down, '✅ No agent is in de-growth.') : ''}
+      ${isT ? agTbl('pl-tbl-top', '🥇 Top performers (MTD)', top, 'No issuance yet this month.') : `<section class="pb-card"><h3>📈 Growth</h3><div class="pb-kv"><span>Last month same period (1–${dayNo || 1})</span><b>${nf(list[0] ? list[0].prevSame : 0)}</b></div><div class="pb-kv"><span>MTD</span><b>${nf(totMtd)}</b></div><div class="pb-kv"><span>Growth</span><b>${list[0] ? growthLbl(list[0].growth) : '—'}</b></div></section>`}
+      ${isT && stockInfo ? agTbl('pl-tbl-dead', '📦 Stock but no issuance <small class="dim">(0 this month)</small>', dead, '✅ Every agent holding stock has issued this month.') : ''}`;
     }
 
     // 🟢 Today Live + 🍩 donut charts
@@ -10595,9 +10681,9 @@ async function servePersonalPage(req, res, rawToken) {
     // 🔎 Scoped search — only the TLs / agents this link covers
     let searchHtml = '';
     let dispatchOk = false;
-    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance'))) {
-      const issueOk = hasSec('overview') || hasSec('issuance') || hasSec('performance');
-      const stockOk = hasSec('stock') || hasSec('overview') || hasSec('ageing');
+    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance') || hasSec('insights'))) {
+      const issueOk = hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights');
+      const stockOk = hasSec('stock') || hasSec('overview') || hasSec('ageing') || hasSec('insights');
       const nk = plNormName;
       const defSrc = link.source === 'gv' ? 'gv' : 'ff';
       const agentSrc = new Map(), agentTl = new Map(), tlGroups = [];
@@ -10653,6 +10739,13 @@ async function servePersonalPage(req, res, rawToken) {
       }
       const memberId = new Map(); (Array.isArray(link.members) ? link.members : []).forEach((m) => { if (m && m.name && m.id) memberId.set(nk(m.name), String(m.id).trim().replace(/\.0+$/, '')); });
       for (const [k8, p] of peopleMap) { const idv = agentIdBy.get(k8) || memberId.get(k8); if (idv) p.i = idv; }
+      const mobMaps = await Promise.race([personalReportMobiles().catch(() => null), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 3500); if (t.unref) t.unref(); })]);
+      const tgList = Array.isArray(db.settings.targets) ? db.settings.targets : [];
+      const tgBy = new Map(); tgList.forEach((t) => { if (t && t.ym === ym && t.key) tgBy.set(t.key, t); });
+      for (const [k9, p] of peopleMap) {
+        const mo = plMobileFor(mobMaps, p.s, p.i, p.n); if (mo) p.mo = mo;
+        const tt = tgBy.get(plTargetKey(p.s, p.n)); if (tt) { const v = plTargetValue(tt); if (v) p.tg = v; if (tt.via === 'link') p.tl2 = 1; }
+      }
       const dailyCls = await dailyClsPromise;
       const todayKeyNow = dateKeyNow(), domNow = Number(todayKeyNow.slice(8, 10));
       const dayCompact = (dm) => {
@@ -10682,7 +10775,7 @@ async function servePersonalPage(req, res, rawToken) {
         ags.forEach((x) => { if (x.la && x.la > tlLa) tlLa = x.la; tlLp += x.lp || 0; if (x.dd) Object.keys(x.dd).forEach((dy) => { const t = tlDd[dy] = tlDd[dy] || [0, 0, 0]; for (let i = 0; i < 3; i++) t[i] += x.dd[dy][i]; }); });
         items.push({ k: 't', n: g.name, s: g.src, dd: Object.keys(tlDd).length ? tlDd : undefined, la: tlLa || undefined, lp: tlLp, ag: ags.length, m: sum('m'), l: sum('l'), d: sum('d'), st: tlStock, c: tlC, members: ags.map((x) => x.n) });
       });
-      const dataJson = JSON.stringify({ classes: [...classSet].sort((a, b) => plClsRank(a) - plClsRank(b)), items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, td: Number(dateKeyNow().slice(8, 10)), today: dateKeyNow(), both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
+      const dataJson = JSON.stringify({ classes: [...classSet].sort((a, b) => plClsRank(a) - plClsRank(b)), items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, td: Number(dateKeyNow().slice(8, 10)), today: dateKeyNow(), tgOk: feats().plTargets !== false, tok: token, both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
       dispatchOk = issueOk && stockOk && items.some((x) => x.k === 'a' && x.c);
       searchHtml = `<section class="pb-card pl-search" id="pl-search"><div class="pl-search-row"><span class="pl-search-ico">🔎</span><input id="pl-search-q" type="search" placeholder="Search a TL or agent — by name or agent ID…" autocomplete="off" aria-label="Search TL or agent"><div id="pl-search-drop" class="pl-search-drop" hidden></div></div><div id="pl-search-res"></div><script type="application/json" id="pl-search-data">${dataJson}</script></section>`;
     }
@@ -10896,7 +10989,20 @@ body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);fon
 .pb-split{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:16px;align-items:center}
 @media(max-width:900px){.pb-split{grid-template-columns:1fr}}
 .pl-pr{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:800;color:#fff;background:#16a34a}
-.pb-wrap .pb-kpi .pl-pr{color:#fff;font-size:13px;padding:2px 14px}.pl-dngrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}.pl-dngrid .pb-card{margin:0}.pl-team td,.pl-team th{white-space:nowrap}.pl-team tfoot td{border-top:2px solid #e2e8f0;background:#f8fafc}.pl-la{font-weight:700;font-size:12px}.pl-la.ok{color:#16a34a}.pl-la.mid{color:#d97706}.pl-la.bad{color:#dc2626}.pl-gr{font-weight:800;font-size:12px}.pl-gr.up{color:#16a34a}.pl-gr.dn{color:#dc2626}.pl-gr.eq{color:#64748b}.pl-dd{margin-bottom:12px}.pl-dd-wrap{position:relative;padding-top:2px}.pl-dd-svg{width:100%;height:auto;display:block}.pl-dd-tot{font-size:11px;font-weight:800;fill:#334155}.pl-dd-day{font-size:10px;fill:#94a3b8}.pl-dd-bar:hover rect:not([fill=transparent]){opacity:.8}.pl-dd-tip{position:absolute;z-index:5;background:#0f172a;color:#fff;font-size:12px;line-height:1.6;padding:6px 10px;border-radius:8px;pointer-events:none;white-space:nowrap;box-shadow:0 6px 18px rgba(15,23,42,.25)}.pl-dd-tip i,.pl-dd-leg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px}.pl-dd-tip span{margin-right:10px}.pl-dd-leg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:#64748b;margin-top:6px}.pl-dd-leg b{margin-left:auto;color:#0f172a}
+.pb-wrap .pb-kpi .pl-pr{color:#fff;font-size:13px;padding:2px 14px}.pl-dngrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}.pl-dngrid .pb-card{margin:0}.pl-ag{border-collapse:separate;border-spacing:0;min-width:100%;font-variant-numeric:tabular-nums}.pl-ag th,.pl-ag td{padding:8px 10px;text-align:right;white-space:nowrap;vertical-align:middle;border-bottom:1px solid #eef2f7}.pl-ag th.pl-l,.pl-ag td.pl-l{text-align:left}
+.pl-ag thead th{position:sticky;top:0;z-index:2;background:#0f172a;color:#e2e8f0;font-size:11px;letter-spacing:.04em;text-transform:uppercase;font-weight:800;border-bottom:0}
+.pl-ag thead th.pl-gs{background:linear-gradient(0deg,rgba(255,255,255,.0),rgba(255,255,255,.0)),#0f172a;box-shadow:inset 0 -3px 0 var(--c)}.pl-ag thead th.pl-gi{box-shadow:inset 0 -3px 0 var(--c,#94a3b8);background:#1e293b}
+.pl-ag tbody tr:nth-child(even) td{background:#f8fafc}.pl-ag tbody tr:hover td{background:#eef2ff}.pl-ag tbody tr.pl-res-row{cursor:pointer}
+.pl-ag tfoot td{background:#f1f5f9;border-top:2px solid #cbd5e1;font-weight:800}.pl-ag .pl-dim{color:#94a3b8}
+.pl-ag .pl-nm b{font-weight:800}.pl-ag .pl-nm small{display:block;font-size:11px;margin-top:1px}
+.pl-mob{font:600 12.5px ui-monospace,Menlo,monospace;color:#2563eb;text-decoration:none}.pl-mob:hover{text-decoration:underline}
+.pl-cp{display:inline-block;min-width:30px;padding:2px 8px;border-radius:999px;font-weight:800;font-size:12px;text-align:center;color:var(--c);background:color-mix(in srgb,var(--c) 14%,#fff);border:1px solid color-mix(in srgb,var(--c) 30%,#fff)}.pl-cz{color:#cbd5e1;font-weight:600}
+.pl-la{display:block;font-weight:800;font-size:12px}.pl-la.ok{color:#16a34a}.pl-la.mid{color:#d97706}.pl-la.bad{color:#dc2626}.pl-lac small{display:block;font-size:11px}
+.pl-tgc{min-width:150px}.pl-tg{display:inline-flex;align-items:baseline;gap:6px;font-size:13px}.pl-tg.act{font-weight:800;color:#7c3aed}.pl-tg em{font-style:normal;font-weight:800;font-size:11px;padding:1px 7px;border-radius:999px}.pl-tg em.ok{background:#dcfce7;color:#15803d}.pl-tg em.mid{background:#fef3c7;color:#b45309}.pl-tg em.low{background:#fee2e2;color:#b91c1c}
+.pl-tg-ok{display:block;color:#16a34a;font-size:11px;font-weight:700}.pl-tgc small{display:block;font-size:11px;margin-top:1px}.pl-tgc .pl-tg-btn{margin:4px 0 0}.pl-tg-bar{display:block;height:5px;border-radius:999px;background:#e2e8f0;margin-top:4px;max-width:120px;overflow:hidden}.pl-tg-bar i{display:block;height:100%;border-radius:999px}.pl-tg-bar i.ok{background:#16a34a}.pl-tg-bar i.mid{background:#f59e0b}.pl-tg-bar i.low{background:#ef4444}
+.pl-tg-btn{margin-left:6px;border:1px dashed #94a3b8;background:#fff;color:#4f46e5;border-radius:8px;padding:2px 8px;font-size:11.5px;font-weight:700;cursor:pointer}.pl-tg-btn:hover{background:#eef2ff;border-color:#6366f1}
+.pl-tg-pop{position:fixed;z-index:9999;width:260px;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 14px 40px rgba(15,23,42,.25);padding:12px}.pl-tg-t{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}.pl-tg-row{display:flex;gap:6px;margin-top:6px}.pl-tg-row input{flex:1;min-width:0;border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font-size:14px}.pl-tg-err{color:#b91c1c;margin:6px 0 0}
+.pl-team td,.pl-team th{white-space:nowrap}.pl-team tfoot td{border-top:2px solid #e2e8f0;background:#f8fafc}.pl-la{font-weight:700;font-size:12px}.pl-la.ok{color:#16a34a}.pl-la.mid{color:#d97706}.pl-la.bad{color:#dc2626}.pl-gr{font-weight:800;font-size:12px}.pl-gr.up{color:#16a34a}.pl-gr.dn{color:#dc2626}.pl-gr.eq{color:#64748b}.pl-dd{margin-bottom:12px}.pl-dd-wrap{position:relative;padding-top:2px}.pl-dd-svg{width:100%;height:auto;display:block}.pl-dd-tot{font-size:11px;font-weight:800;fill:#334155}.pl-dd-day{font-size:10px;fill:#94a3b8}.pl-dd-bar:hover rect:not([fill=transparent]){opacity:.8}.pl-dd-tip{position:absolute;z-index:5;background:#0f172a;color:#fff;font-size:12px;line-height:1.6;padding:6px 10px;border-radius:8px;pointer-events:none;white-space:nowrap;box-shadow:0 6px 18px rgba(15,23,42,.25)}.pl-dd-tip i,.pl-dd-leg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px}.pl-dd-tip span{margin-right:10px}.pl-dd-leg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:#64748b;margin-top:6px}.pl-dd-leg b{margin-left:auto;color:#0f172a}
 .pl-pr.high{background:#dc2626}.pl-pr.medium{background:#f59e0b}.pl-pr.low{background:#16a34a}
 .pb-kpi.pl-hi{border-top-color:#dc2626!important}.pb-kpi.pl-md{border-top-color:#f59e0b!important}
 .pl-prf{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
@@ -11340,14 +11446,17 @@ const PERSONAL_PORTAL_JS = `(function () {
       return '<section class="pb-kpis">' + t + '</section>';
     }
     var tlFilter = 'all';
-    // ---- TL → agents team table: ID, name, class stock, last month, this month, last active, growth ----
-    var TCLS = [['VC4/VC20', ['VC4', 'VC20']], ['VC5', ['VC5']], ['VC6', ['VC6']], ['VC7', ['VC7']], ['VC12', ['VC12']]];
+    // ---- 🧾 unified agent grid (used by every agent list): ID · name · mobile · last/this month · growth · stock · class-wise stock + issuance · last active · target ----
+    var GC = [['VC4/20', ['VC4', 'VC20']], ['VC5', ['VC5']], ['VC6', ['VC6']], ['VC7', ['VC7']], ['VC12', ['VC12']], ['VC16', ['VC16']]];
+    var GCOL = ['#6366f1', '#f59e0b', '#10b981', '#f43f5e', '#8b5cf6', '#64748b'];
+    function gapDays(a) {
+      var la = a.d > 0 ? D.today : a.la; if (!la) return 999;
+      return Math.max(0, Math.round((Date.parse(D.today + 'T00:00:00Z') - Date.parse(la + 'T00:00:00Z')) / 864e5));
+    }
     function lastActive(a) {
-      var la = a.la || ''; if (a.d > 0) la = D.today;
-      if (!la) return '<span class="dim">—</span>';
-      var ms = Date.parse(D.today + 'T00:00:00Z') - Date.parse(la + 'T00:00:00Z'), n = Math.round(ms / 864e5);
-      var lbl = n <= 0 ? 'Today' : (n === 1 ? 'Yesterday' : n + ' days ago'), dt = Number(la.slice(8, 10)) + ' ' + MON[Number(la.slice(5, 7)) - 1];
-      return '<span class="pl-la ' + (n <= 1 ? 'ok' : (n <= 3 ? 'mid' : 'bad')) + '">' + lbl + '</span> <small class="dim">' + dt + '</small>';
+      var n = gapDays(a); if (n === 999) return '<span class="dim">—</span>';
+      var la = a.d > 0 ? D.today : a.la, lbl = n <= 0 ? 'Today' : (n === 1 ? 'Yesterday' : n + ' days ago'), dt = Number(la.slice(8, 10)) + ' ' + MON[Number(la.slice(5, 7)) - 1];
+      return '<span class="pl-la ' + (n <= 1 ? 'ok' : (n <= 3 ? 'mid' : 'bad')) + '">' + lbl + '</span><small class="dim">' + dt + '</small>';
     }
     function growthCell(a) {
       var lp = a.lp || 0, m = a.m || 0;
@@ -11355,18 +11464,109 @@ const PERSONAL_PORTAL_JS = `(function () {
       var g = Math.round((m - lp) / lp * 100);
       return '<span class="pl-gr ' + (g > 0 ? 'up' : (g < 0 ? 'dn' : 'eq')) + '">' + (g > 0 ? '▲ +' : (g < 0 ? '▼ ' : '')) + g + '%</span>';
     }
-    function teamTable(id, list) {
-      var head = '<thead><tr><th>#</th><th>Agent ID</th><th>Agent</th>' + TCLS.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '<th>Stock</th><th>Last month</th><th>This month</th><th>Last active</th><th>Growth %</th></tr></thead>';
-      var tot = { st: 0, l: 0, m: 0, lp: 0, c: TCLS.map(function () { return 0; }) };
-      var body = list.map(function (a, i) {
-        tot.st += a.st || 0; tot.l += a.l || 0; tot.m += a.m || 0; tot.lp += a.lp || 0;
-        var cells = TCLS.map(function (c, k) { var v = sumC(a, c[1])[2]; tot.c[k] += v; return '<td>' + (v ? nf(v) : '<span class="dim">0</span>') + '</td>'; }).join('');
-        return '<tr class="pl-res-row" data-name="' + esc(a.n) + '"><td>' + (i + 1) + '</td><td>' + (a.i ? '<span class="pb-aid">' + esc(a.i) + '</span>' : '<span class="dim">—</span>') + '</td><td><b>' + esc(a.n) + '</b> ' + chBadge(a) + '</td>' + cells +
-          '<td><b>' + nf(a.st) + '</b></td><td>' + nf(a.l) + '</td><td><b>' + nf(a.m) + '</b></td><td>' + lastActive(a) + '</td><td>' + growthCell(a) + '</td></tr>';
+    function tgInner(a) {
+      var out;
+      if (a.tg === 'A') out = '<span class="pl-tg act">⚡ Active</span>' + (a.m > 0 ? '<small class="pl-tg-ok">✓ issuing</small>' : '<small class="dim">no issuance yet</small>');
+      else if (a.tg > 0) { var pc = Math.round((a.m || 0) / a.tg * 100); out = '<span class="pl-tg num"><b>' + nf(a.tg) + '</b><em class="' + (pc >= 100 ? 'ok' : (pc >= 50 ? 'mid' : 'low')) + '">' + pc + '%</em></span><span class="pl-tg-bar"><i style="width:' + Math.min(100, pc) + '%" class="' + (pc >= 100 ? 'ok' : (pc >= 50 ? 'mid' : 'low')) + '"></i></span>'; }
+      else out = '<span class="dim">—</span>';
+      if (D.tgOk && (!a.tg || a.tl2)) out += '<button type="button" class="pl-tg-btn" data-tg="' + esc(a.n) + '" title="' + (a.tg ? 'Change target' : 'Set target') + '">' + (a.tg ? '✎' : '＋ Set') + '</button>';
+      return out;
+    }
+    function stkPill(v, k) { return v ? '<span class="pl-cp" style="--c:' + GCOL[k] + '">' + nf(v) + '</span>' : '<span class="pl-cz">0</span>'; }
+    function agentGrid(id, list, opts) {
+      opts = opts || {};
+      var hasMob = list.some(function (a) { return a.mo; }), hasId = list.some(function (a) { return a.i; });
+      var otherIss = list.some(function (a) { var t = sumC(a, B3)[1]; GC.forEach(function (g) { t -= sumC(a, g[1])[1]; }); return t > 0; });
+      var showStk = D.stock, showIss = D.issue;
+      var th = '<tr><th class="pl-l">#</th><th class="pl-l">Agent ID</th><th class="pl-l">Agent</th>' + (hasMob ? '<th class="pl-l">Mobile</th>' : '') +
+        (showIss ? '<th>Last month</th><th>This month</th><th>Growth %</th>' : '') + (showStk ? '<th>Stock</th>' : '') + '<th class="pl-l">Last active</th>' + (D.tgOk || list.some(function (a) { return a.tg; }) ? '<th class="pl-l">Target</th>' : '') +
+        (showStk ? GC.map(function (g, k) { return '<th class="pl-gs" style="--c:' + GCOL[k] + '">' + g[0] + ' stock</th>'; }).join('') : '') +
+        (showIss ? GC.map(function (g, k) { return '<th class="pl-gi" style="--c:' + GCOL[k] + '">' + g[0] + ' issued</th>'; }).join('') + (otherIss ? '<th class="pl-gi">Other issued</th>' : '') : '') +
+        (opts.priority ? '<th>Priority</th><th>Need</th>' : '') + '</tr>';
+      var showTg = D.tgOk || list.some(function (a) { return a.tg; });
+      var tot = { l: 0, m: 0, lp: 0, st: 0, s: GC.map(function () { return 0; }), i: GC.map(function () { return 0; }), o: 0 };
+      var body = list.map(function (a, n) {
+        var cs = GC.map(function (g) { return sumC(a, g[1]); });
+        tot.l += a.l || 0; tot.m += a.m || 0; tot.lp += a.lp || 0; tot.st += a.st || 0;
+        var oth = sumC(a, B3)[1]; cs.forEach(function (v, k) { tot.s[k] += v[2]; tot.i[k] += v[1]; oth -= v[1]; }); if (oth < 0) oth = 0; tot.o += oth;
+        var o = opts.priority && a.c ? overall(a) : null;
+        return '<tr class="pl-res-row" data-name="' + esc(a.n) + '" data-gap="' + gapDays(a) + '"><td class="pl-l pl-dim">' + (n + 1) + '</td><td class="pl-l">' + (a.i ? '<span class="pb-aid">' + esc(a.i) + '</span>' : '<span class="dim">—</span>') + '</td>' +
+          '<td class="pl-l pl-nm"><b>' + esc(a.n) + '</b> ' + chBadge(a) + (opts.tl && a.tl ? '<small class="dim">TL ' + esc(a.tl) + '</small>' : '') + '</td>' +
+          (hasMob ? '<td class="pl-l">' + (a.mo ? '<a class="pl-mob" href="tel:' + esc(a.mo) + '">' + esc(a.mo) + '</a>' : '<span class="dim">—</span>') + '</td>' : '') +
+          (showIss ? '<td>' + nf(a.l) + '</td><td><b>' + nf(a.m) + '</b></td><td>' + growthCell(a) + '</td>' : '') + (showStk ? '<td><b>' + nf(a.st) + '</b></td>' : '') +
+          '<td class="pl-l pl-lac">' + lastActive(a) + '</td>' + (showTg ? '<td class="pl-l pl-tgc" data-tgcell="' + esc(norm(a.n)) + '">' + tgInner(a) + '</td>' : '') +
+          (showStk ? cs.map(function (v, k) { return '<td>' + stkPill(v[2], k) + '</td>'; }).join('') : '') +
+          (showIss ? cs.map(function (v, k) { return '<td>' + (v[1] ? '<b>' + nf(v[1]) + '</b>' : '<span class="pl-cz">0</span>') + '</td>'; }).join('') + (otherIss ? '<td>' + (oth ? '<b>' + nf(oth) + '</b>' : '<span class="pl-cz">0</span>') + '</td>' : '') : '') +
+          (opts.priority ? '<td>' + (o ? prBadge(o.pr) : '') + '</td><td>' + (o ? '<b>' + nf(o.need) + '</b>' : '') + '</td>' : '') + '</tr>';
       }).join('');
-      var foot = list.length ? '<tfoot><tr><td></td><td></td><td><b>Total</b></td>' + tot.c.map(function (v) { return '<td><b>' + nf(v) + '</b></td>'; }).join('') + '<td><b>' + nf(tot.st) + '</b></td><td><b>' + nf(tot.l) + '</b></td><td><b>' + nf(tot.m) + '</b></td><td></td><td>' + growthCell({ m: tot.m, lp: tot.lp }) + '</td></tr></tfoot>' : '';
-      return '<div class="pb-scroll"><table class="pb-tbl pl-team" id="' + id + '">' + head + '<tbody>' + (list.length ? body : '<tr><td colspan="' + (TCLS.length + 8) + '" class="dim">No agents found.</td></tr>') + '</tbody>' + foot + '</table></div>' +
-        '<p class="dim small" style="margin-top:6px">Growth % = this month so far vs the same days of last month. Stock columns are class-wise stock in hand.</p>';
+      var cols = 3 + (hasMob ? 1 : 0) + (showIss ? 3 : 0) + (showStk ? 7 : 0) + (showIss ? 6 + (otherIss ? 1 : 0) : 0) + 1 + (showTg ? 1 : 0) + (opts.priority ? 2 : 0);
+      var foot = list.length ? '<tfoot><tr><td></td><td></td><td class="pl-l"><b>Total · ' + nf(list.length) + ' agents</b></td>' + (hasMob ? '<td></td>' : '') +
+        (showIss ? '<td><b>' + nf(tot.l) + '</b></td><td><b>' + nf(tot.m) + '</b></td><td>' + growthCell({ m: tot.m, lp: tot.lp }) + '</td>' : '') + (showStk ? '<td><b>' + nf(tot.st) + '</b></td>' : '') + '<td></td>' + (showTg ? '<td></td>' : '') +
+        (showStk ? tot.s.map(function (v) { return '<td><b>' + nf(v) + '</b></td>'; }).join('') : '') +
+        (showIss ? tot.i.map(function (v) { return '<td><b>' + nf(v) + '</b></td>'; }).join('') + (otherIss ? '<td><b>' + nf(tot.o) + '</b></td>' : '') : '') +
+        (opts.priority ? '<td></td><td></td>' : '') + '</tr></tfoot>' : '';
+      return '<div class="pb-scroll"><table class="pb-tbl pl-ag" id="' + id + '"><thead>' + th + '</thead><tbody>' + (list.length ? body : '<tr><td colspan="' + cols + '" class="dim">' + esc(opts.empty || 'No agents found.') + '</td></tr>') + '</tbody>' + foot + '</table></div>' +
+        '<p class="dim small" style="margin-top:6px">Growth % = this month so far vs the same days of last month · class columns are stock in hand and tags issued this month.</p>';
+    }
+    // 🎯 set / change / clear an agent target (Active goal or a number) — shows on the admin Home
+    var tgPop = null;
+    function closeTg() { if (tgPop) { tgPop.remove(); tgPop = null; } }
+    function openTg(btn, it) {
+      closeTg();
+      var r = btn.getBoundingClientRect(), pop = document.createElement('div');
+      pop.className = 'pl-tg-pop';
+      pop.innerHTML = '<div class="pl-tg-t"><b>' + esc(it.n) + '</b><small class="dim">Target for ' + esc(D.ym) + '</small></div>' +
+        '<div class="pl-tg-row"><input type="number" min="1" max="100000" inputmode="numeric" placeholder="Enter target number" value="' + (it.tg > 0 ? it.tg : '') + '"><button type="button" class="pb-btn on" data-a="set">Set</button></div>' +
+        '<div class="pl-tg-row"><button type="button" class="pb-btn" data-a="active">⚡ Active goal</button>' + (it.tg ? '<button type="button" class="pb-btn" data-a="clear">Clear</button>' : '') + '<button type="button" class="pb-btn" data-a="x">Close</button></div>' +
+        '<p class="pl-tg-err dim small" hidden></p>';
+      document.body.appendChild(pop); tgPop = pop;
+      pop.style.top = Math.min(window.innerHeight - pop.offsetHeight - 8, r.bottom + 6) + 'px';
+      pop.style.left = Math.max(8, Math.min(window.innerWidth - pop.offsetWidth - 8, r.left - 40)) + 'px';
+      var inp = pop.querySelector('input'); try { inp.focus(); } catch (e) {}
+      function save(payload) {
+        var err = pop.querySelector('.pl-tg-err'); err.hidden = true;
+        Array.prototype.forEach.call(pop.querySelectorAll('button'), function (b) { b.disabled = true; });
+        fetch('/api/public/personal-link/target', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ token: D.tok, name: it.n }, payload)) })
+          .then(function (r2) { return r2.json().then(function (j) { return { ok: r2.ok, j: j }; }); })
+          .then(function (o) {
+            if (!o.ok) throw new Error((o.j && o.j.error) || 'Could not save');
+            if (o.j.tg) { it.tg = o.j.tg; it.tl2 = 1; } else { delete it.tg; delete it.tl2; }
+            Array.prototype.forEach.call(document.querySelectorAll('[data-tgcell]'), function (c) { if (c.getAttribute('data-tgcell') === norm(it.n)) c.innerHTML = tgInner(it); });
+            closeTg();
+          })
+          .catch(function (e2) { err.textContent = '⚠️ ' + (e2.message || 'Could not save'); err.hidden = false; Array.prototype.forEach.call(pop.querySelectorAll('button'), function (b) { b.disabled = false; }); });
+      }
+      pop.addEventListener('click', function (e) {
+        var b = e.target.closest ? e.target.closest('[data-a]') : null; if (!b) return;
+        var a = b.getAttribute('data-a');
+        if (a === 'x') return closeTg();
+        if (a === 'clear') return save({ clear: true });
+        if (a === 'active') return save({ goal: 'active' });
+        var n = Math.floor(Number(inp.value) || 0);
+        if (n < 1) { var er = pop.querySelector('.pl-tg-err'); er.textContent = 'Enter a number of 1 or more, or choose Active goal.'; er.hidden = false; return; }
+        save({ target: n });
+      });
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var b = pop.querySelector('[data-a="set"]'); if (b) b.click(); } if (e.key === 'Escape') closeTg(); });
+    }
+    if (holder) {
+      if (holder.__tgH) holder.removeEventListener('click', holder.__tgH);
+      holder.__tgH = function (e) {
+        var b = e.target.closest ? e.target.closest('[data-tg]') : null; if (!b) return;
+        e.stopPropagation(); e.preventDefault();
+        var nm = norm(b.getAttribute('data-tg'));
+        for (var i = 0; i < items.length; i++) if (items[i].k === 'a' && items[i]._k === nm) { openTg(b, items[i]); break; }
+      };
+      holder.addEventListener('click', holder.__tgH, true);
+    }
+    // ⬇ fill the Insights lists (server sends only the ordered names)
+    function fillAgLists() {
+      Array.prototype.forEach.call(document.querySelectorAll('.pl-aglist[data-ag-names]'), function (box) {
+        var names; try { names = JSON.parse(box.getAttribute('data-ag-names') || '[]'); } catch (e) { names = []; }
+        var byK = {}; items.forEach(function (x) { if (x.k === 'a') byK[x._k] = x; });
+        var list = names.map(function (n) { return byK[norm(n)]; }).filter(Boolean);
+        box.innerHTML = agentGrid(box.getAttribute('data-ag-id'), list, { tl: D.both || true });
+        bindRows(box);
+      });
     }
     function paintTlAgents(it) {
       var names = {}; (it.members || []).forEach(function (n) { names[norm(n)] = 1; });
@@ -11374,7 +11574,7 @@ const PERSONAL_PORTAL_JS = `(function () {
       var box = document.getElementById('pl-res-agents'); if (!box) return;
       var list = filterPr(all, tlFilter).sort(function (a, b) { return (b.m - a.m) || (b.l - a.l) || a.n.localeCompare(b.n); });
       var counts = countPr(all);
-      box.innerHTML = (D.issue && D.stock ? prFilterHtml('pl-res-prf', counts, tlFilter) : '') + teamTable('pl-tbl-res-agents', list);
+      box.innerHTML = (D.issue && D.stock ? prFilterHtml('pl-res-prf', counts, tlFilter) : '') + agentGrid('pl-tbl-res-agents', list, {});
       var prf = document.getElementById('pl-res-prf');
       if (prf) prf.addEventListener('click', function (e) { var b = e.target.closest ? e.target.closest('[data-prf]') : null; if (b) { tlFilter = b.getAttribute('data-prf'); paintTlAgents(it); } });
       bindRows(box);
@@ -11420,7 +11620,7 @@ const PERSONAL_PORTAL_JS = `(function () {
           (tlRows ? '<section class="pb-card"><div class="pb-card-head"><h3>👥 TL-wise priority <small class="dim">click a TL to filter</small></h3></div><div class="pb-scroll"><table class="pb-tbl" id="pl-tbl-dp-tl"><thead><tr><th>TL</th><th>Agents</th><th>VC4/VC20 stock</th><th>Need</th><th>VC5+ stock</th><th>Need</th><th>Priority</th><th>High agents</th><th>Medium agents</th></tr></thead><tbody>' + tlRows + '</tbody></table></div></section>' : '') +
           '<section class="pb-card"><div class="pb-card-head"><h3>🚚 Tag dispatch priority' + (st.tl ? ' · ' + esc(st.tl) + ' <button type="button" class="pb-btn" id="pl-dp-cleartl">✕ all TLs</button>' : '') + '</h3>' +
           (D.exp ? '<div class="pb-card-acts"><button type="button" class="pb-btn" data-pl-csv="pl-tbl-dp-agents" data-pl-title="Dispatch priority">⬇ CSV</button><button type="button" class="pb-btn pb-btn-pdf" data-pl-pdf="pl-tbl-dp-agents" data-pl-title="Dispatch priority">⬇ PDF</button></div>' : '') + '</div>' +
-          prFilterHtml('pl-dp-prf', counts, st.f) + agentTable('pl-tbl-dp-agents', list, 'No agents in this priority.', { tl: true }) + '</section>';
+          prFilterHtml('pl-dp-prf', counts, st.f) + agentGrid('pl-tbl-dp-agents', list, { tl: true, priority: true, empty: 'No agents in this priority.' }) + '</section>';
         var prf = document.getElementById('pl-dp-prf');
         if (prf) prf.addEventListener('click', function (e) { var b = e.target.closest ? e.target.closest('[data-prf]') : null; if (b) { st.f = b.getAttribute('data-prf'); track('dispatch_filter', 'Dispatch priority filter: ' + st.f, {}); paintDp(); } });
         Array.prototype.forEach.call(dp.querySelectorAll('.pl-tl-row'), function (tr) { tr.addEventListener('click', function () { st.tl = tr.getAttribute('data-tl'); paintDp(); }); });
@@ -11429,6 +11629,7 @@ const PERSONAL_PORTAL_JS = `(function () {
       };
       paintDp();
     }
+    fillAgLists();
     if (embed && plQ) { var f0 = find(plQ)[0]; if (f0) openItem(f0, true); }
   })();
 

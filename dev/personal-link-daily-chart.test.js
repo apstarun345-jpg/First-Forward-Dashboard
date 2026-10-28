@@ -47,21 +47,41 @@ test('personal link search matches agent ID too and shows the ID next to the nam
   assert.match(src, /by name or agent ID/);
 });
 
-test('TL result lists agents: ID, name, class stock, last/this month, last active, growth %', () => {
-  const a = src.indexOf('var TCLS = ');
-  const b = src.indexOf('function paintTlAgents');
+test('unified agent grid: ID, mobile, last/this month, growth, stock, class stock + issuance, last active, target', () => {
+  const a = src.indexOf('    var GC = [[');
+  const b = src.indexOf('    // 🎯 set / change / clear an agent target');
   assert.ok(a > 0 && b > a);
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const sumC = (it, names) => { const r = [0, 0, 0, 0]; names.forEach((n) => { const x = (it.c && it.c[n]) || [0, 0, 0, 0]; for (let i = 0; i < 4; i++) r[i] += x[i]; }); return r; };
   // eslint-disable-next-line no-new-func
-  const teamTable = new Function('D', 'MON', 'sumC', 'nf', 'esc', 'chBadge', src.slice(a, b) + '; return teamTable;')({ today: '2026-10-27' }, MON, sumC, (n) => String(n || 0), (x) => String(x), () => '');
-  const html = teamTable('t', [
-    { n: 'Sumit Dixit', i: 'APS016090', c: { VC4: [0, 0, 40, 0], VC20: [0, 0, 15, 0], VC5: [0, 0, 16, 0], VC12: [0, 0, 13, 0] }, st: 116, l: 32, m: 12, lp: 8, la: '2026-10-26', d: 0 },
-    { n: 'Old Agent', i: 'APS000001', c: {}, st: 0, l: 5, m: 0, lp: 5, la: '2026-10-20', d: 0 }
-  ]);
-  assert.match(html, /APS016090/); assert.match(html, /Sumit Dixit/);
-  assert.match(html, /Yesterday/); assert.match(html, /7 days ago/);
+  const grid = new Function('D', 'MON', 'sumC', 'nf', 'esc', 'norm', 'chBadge', 'prBadge', 'overall', 'B3', src.slice(a, b) + '; return agentGrid;')(
+    { issue: true, stock: true, today: '2026-10-28', tgOk: true, ym: '2026-10' }, MON, sumC, (n) => String(n || 0), (x) => String(x), (x) => String(x).toLowerCase(), () => '', () => '', () => ({}), ['VC4', 'VC20', 'VC5']);
+  const html = grid('t', [
+    { n: 'Sumit Dixit', i: 'APS016090', mo: '9876543210', c: { VC4: [0, 0, 40, 0], VC20: [0, 0, 15, 0], VC5: [0, 0, 16, 0], VC12: [0, 0, 13, 0] }, st: 116, l: 32, m: 12, lp: 8, la: '2026-10-27', d: 0, tg: 25, tl2: 1 },
+    { n: 'Old Agent', i: 'APS000001', c: {}, st: 0, l: 5, m: 0, lp: 5, la: '2026-10-10', d: 0, tg: 'A', tl2: 1 },
+    { n: 'No Target', i: 'APS000002', c: {}, st: 0, l: 0, m: 0, lp: 0, d: 0 }
+  ], {});
+  for (const h of ['Agent ID', 'Mobile', 'Last month', 'This month', 'Growth %', 'Last active', 'Target', 'VC4/20 stock', 'VC5 stock', 'VC6 stock', 'VC7 stock', 'VC12 stock', 'VC16 stock', 'VC4/20 issued', 'VC16 issued']) assert.ok(html.includes(h), h);
+  assert.match(html, /APS016090/); assert.match(html, /tel:9876543210/);
+  assert.match(html, /Yesterday/); assert.match(html, /18 days ago/);
   assert.match(html, /▲ \+50%/); assert.match(html, /▼ -100%/);
-  assert.match(html, /<th>VC12<\/th>/); assert.match(html, /<th>Growth %<\/th>/);
-  assert.match(html, /<td><b>55<\/b><\/td>/); // VC4/VC20 stock combined
+  assert.match(html, /⚡ Active/); assert.match(html, /48%/);          // 12 / 25
+  assert.match(html, /data-tg="No Target"/);                             // can set a target
+  assert.match(html, /<td><b>55<\/b>|>55</);                              // VC4 + VC20 stock together
+});
+
+test('admin Home: team-link targets are grouped per link with set / achieved counts', async () => {
+  const code = fs.readFileSync(path.join(ROOT, 'targetAlerts.js'), 'utf8');
+  const FF = { util: { esc: (x) => x, clean: (x) => String(x || '').trim(), dateKey: () => '', fmt: (n) => String(n), ymKey: () => '' } };
+  // eslint-disable-next-line no-new-func
+  new Function('window', code)({ FF });
+  const cur = new Map([['ff|A ONE', 12], ['gv|B TWO', 0], ['ff|C THREE', 3]]);
+  const out = FF.targetAlerts.linkSummary([
+    { key: 'ff|A ONE', ym: '2026-10', via: 'link', linkId: 'L1', linkName: 'Varsha Team', agent: 'A ONE', target: 10, source: 'ff' },
+    { key: 'gv|B TWO', ym: '2026-10', via: 'link', linkId: 'L1', linkName: 'Varsha Team', agent: 'B TWO', goal: 'active', target: 0, source: 'gv' },
+    { key: 'ff|C THREE', ym: '2026-10', via: 'link', linkId: 'L2', linkName: 'Other', agent: 'C THREE', target: 5, source: 'ff' },
+    { key: 'ff|D', ym: '2026-10', by: 'admin', agent: 'D', target: 5 }
+  ], cur, '2026-10');
+  assert.deepEqual(out.map((g) => [g.linkName, g.set, g.achieved]), [['Varsha Team', 2, 1], ['Other', 1, 0]]);
+  assert.match(code, /data-ta-link/); assert.match(code, /Team link targets/);
 });

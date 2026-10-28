@@ -250,6 +250,7 @@ FF.pages = FF.pages || {};
         at: changed ? now : (prev.at || now)
       };
       if (goal) entry.goal = goal; else delete entry.goal;
+      if (changed) { delete entry.via; delete entry.linkId; delete entry.linkName; }   // admin edit → no longer a team-link target
       if (changed) entry.baseCur = row ? Number(row.cur) || 0 : 0;   // progress "set karne ke baad" isi se naapte hain
       byKey.set(key, entry);
     }
