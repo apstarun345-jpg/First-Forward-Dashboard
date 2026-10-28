@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Stable feed snapshots (/api/today),
 // /api/auth/me and /api/settings are network-first with a cached fallback; raw /api/gviz stays live-only.
-const CACHE_NAME = 'apnapayment-v312001';
+const CACHE_NAME = 'apnapayment-v312002';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // A same-origin browser tab and an installed PWA are both WindowClients. Remember the display
@@ -288,6 +288,8 @@ self.addEventListener('message', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  // Personal link pages (/p/<token>, /portal) are private + session based: never cache or proxy them through the app shell cache.
+  if (url.pathname.startsWith('/p/') || url.pathname === '/portal' || url.pathname === '/portal/' || url.pathname === '/p-portal.js' || url.pathname === '/portal.js') return;
 
   // ---- API: cacheable endpoints only (gviz + me + settings) — network first, offline fallback ----
   if (url.pathname.startsWith('/api/')) {

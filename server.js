@@ -11320,7 +11320,7 @@ body{padding:clamp(10px,1.6vw,26px)}
 </style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
 <header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(personName || db.settings.brand || 'FF').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
 <div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p id="pl-sub">${sub}</p>` : ''}</div></div>
-${requireAuth ? `<button type="button" class="pb-btn" id="pl-lock-btn" ${authorized ? '' : 'hidden'} title="Logout from this Personal Link">🚪 Logout</button>` : ''}</header>
+${requireAuth ? (authorized && token ? `<a class="pb-btn" id="pl-lock-btn" href="/p/${encodeURIComponent(token)}?logout=1" rel="nofollow" title="Logout from this Personal Link" style="text-decoration:none">🚪 Logout</a>` : `<button type="button" class="pb-btn" id="pl-lock-btn" hidden>🚪 Logout</button>`) : ''}</header>
 ${body || ''}
 </div>
 <script src="/i18n.js"></script><script src="/i18n-en.js"></script>
