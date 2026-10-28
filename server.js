@@ -3594,6 +3594,50 @@ function complaintsLookupAgent({ agentId, agentName }) {
   const hit = complaintsAgentIdx.byId.get(idNorm(agentId)) || complaintsAgentIdx.byName.get(plNormName(agentName)) || null;
   return hit ? { found: true, tlName: hit.tlName || '', tlId: hit.tlId || '' } : null;
 }
+
+/** 🔎 Complaint ke Tag ID / VRN se GV Master me asli agent (ID + naam) + TL nikalo. Bank mail me agent APNA PAYMENT (master ID) hota hai. */
+async function complaintsGvIssuers(items) {
+  const st = db.settings || {};
+  const out = new Map();
+  if (!st.gvSheetId || !items.length) return out;
+  const m = (st.gv && st.gv.master) || {};
+  const L = { tagId: m.tagId || 'I', vrn: m.vrn || 'E', agentId: m.uniqueId || 'A', agentName: m.agentName || 'B', tlId: m.tlId || 'C', gvTlId: m.gvTlId || 'R', tlName: m.tlName || 'D', date: m.date || 'P' };
+  const letters = [...new Set(Object.values(L))];
+  const tab = m.tab || 'GV Master';
+  const clean = (v) => String(v || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const tagOf = new Map(), vrnOf = new Map();
+  for (const it of items) { const t = clean(it.tagId), v = clean(it.vrn); if (t) (tagOf.get(t) || tagOf.set(t, []).get(t)).push(it.key); if (v) (vrnOf.get(v) || vrnOf.set(v, []).get(v)).push(it.key); }
+  const tags = [...tagOf.keys()], vrns = [...vrnOf.keys()];
+  const best = new Map();   // key → { day, hit, by }
+  const consider = (keys, by, hit, day) => { for (const key of keys) { const cur = best.get(key); if (!cur || (by === 'tag' && cur.by !== 'tag') || (cur.by === by && day > cur.day)) best.set(key, { day, hit, by }); } };
+  const run = async (col, vals, kind) => {
+    for (let i = 0; i < vals.length; i += 25) {
+      const part = vals.slice(i, i + 25);
+      const where = part.map((v) => `upper(${col}) = '${v}'`).join(' or ');
+      const params = new URLSearchParams({ id: String(st.gvSheetId).replace(/[^A-Za-z0-9_-]/g, ''), sheet: tab, ...(m.gid ? { gid: String(m.gid) } : {}), tq: `select ${letters.join(', ')} where ${where} limit 500` });
+      const table = await uaGvizTable(params);
+      const at = table.at;
+      for (const row of table.rows || []) {
+        const cell = (k) => serverCell(row, at(L[k]));
+        const agentId = String(cell('agentId') || '').trim();
+        if (!agentId || /^unique_id$/i.test(agentId)) continue;
+        const key = clean(cell(kind === 'tag' ? 'tagId' : 'vrn'));
+        const keys = (kind === 'tag' ? tagOf : vrnOf).get(key); if (!keys) continue;
+        consider(keys, kind, { id: agentId.replace(/\.0+$/, ''), name: String(cell('agentName') || '').trim(), tlName: String(cell('tlName') || '').trim(), tlId: String(cell('gvTlId') || cell('tlId') || '').trim() }, serverDate(cell('date')) || '');
+      }
+    }
+  };
+  if (tags.length) await run(L.tagId, tags, 'tag');
+  const missing = items.filter((it) => !best.has(it.key) && clean(it.vrn));
+  if (missing.length) { const mv = [...new Set(missing.map((it) => clean(it.vrn)))]; await run(L.vrn, mv, 'vrn'); }
+  const masters = complaintsMasterIds();
+  for (const [key, v] of best) if (v.hit.id && !masters.has(String(v.hit.id).toUpperCase())) out.set(key, v.hit);   // master ID hi mila to koi sudhaar nahi
+  return out;
+}
+function complaintsMasterIds() {
+  const e = (db.settings || {}).eir || {};
+  return new Set([String(e.gvMasterId || '5845036').replace(/\.0+$/, '').toUpperCase(), '5845036']);
+}
 let complaintsStoreMemo = null;
 const complaintsSvc = createComplaintsService({
   getStore: () => {
@@ -3605,6 +3649,8 @@ const complaintsSvc = createComplaintsService({
   },
   getConfig: () => (db.settings || {}).complaints,
   lookupAgent: complaintsLookupAgent,
+  enrichIssuers: complaintsGvIssuers,
+  getMasterIds: complaintsMasterIds,
   log: (m) => console.log(m)
 });
 

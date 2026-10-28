@@ -32,13 +32,19 @@ export function normalizeCfg(raw, prev = null, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------- 📧 mail alerts (rules + templates)
-export const MAIL_PLACEHOLDERS = ['{case}', '{date}', '{agent}', '{agentId}', '{tl}', '{tlId}', '{vrn}', '{tag}', '{description}', '{bc}', '{status}', '{amount}', '{note}', '{age}', '{tat}', '{link}', '{owner}', '{count}', '{list}'];
+export const MAIL_PLACEHOLDERS = ['{case}', '{date}', '{agent}', '{agentId}', '{tl}', '{tlId}', '{vrn}', '{tag}', '{description}', '{bc}', '{status}', '{amount}', '{note}', '{age}', '{tat}', '{link}', '{owner}', '{count}', '{list}', '{table}'];
 export const DEFAULT_MAIL_TEMPLATES = {
   newSubject: '🚨 New POS complaint · Case {case} · {agent}',
-  newBody: 'Hello,\n\nA new POS complaint has come from the bank.\n\nCase: {case}\nDate: {date}\nAgent: {agent} ({agentId})\nTL: {tl} ({tlId})\nVRN: {vrn}\nTag ID: {tag}\nIssue: {description}\n\nPlease check and reply to the bank within TAT ({tat}). If there is no response, the bank deducts the amount from the pool account.\n\nOpen the mail: {link}\n\n— {owner}',
+  newBody: 'Hello,\n\nA new POS complaint has come from the bank. Please check and reply to the bank within TAT ({tat}). If there is no response, the bank deducts the amount from the pool account.\n\n{table}\n\nOpen the mail: {link}\n\n— {owner}',
   deductSubject: '💸 Bank deducted ₹{amount} · Case {case} · {agent}',
-  deductBody: 'Hello,\n\nThe bank has deducted ₹{amount} from the pool account for this POS complaint.\n\nCase: {case}\nAgent: {agent} ({agentId})\nTL: {tl} ({tlId})\nVRN: {vrn}\nTag ID: {tag}\nIssue: {description}\nBank note: {note}\n\nPlease recover this amount from the agent / settle it.\n\nOpen the mail: {link}\n\n— {owner}',
+  deductBody: 'Hello,\n\nThe bank has deducted ₹{amount} from the pool account for this POS complaint.\n\n{table}\n\nBank note: {note}\n\nPlease recover this amount from the agent / settle it.\nOpen the mail: {link}\n\n— {owner}',
   remindSubject: '⏰ Reminder · {count} pending POS complaint(s)',
+  remindBody: 'Hello,\n\nThese POS complaints are still pending (no reply to the bank yet):\n\n{table}\n\nPlease reply to the bank before TAT ends, otherwise the amount is deducted from the pool account.\n\n— {owner}'
+};
+// v3.113 ke default body (jo settings me save ho chuke ho sakte hain) → naye {table} default par apne aap badal jayein
+const OLD_DEFAULT_BODIES = {
+  newBody: 'Hello,\n\nA new POS complaint has come from the bank.\n\nCase: {case}\nDate: {date}\nAgent: {agent} ({agentId})\nTL: {tl} ({tlId})\nVRN: {vrn}\nTag ID: {tag}\nIssue: {description}\n\nPlease check and reply to the bank within TAT ({tat}). If there is no response, the bank deducts the amount from the pool account.\n\nOpen the mail: {link}\n\n— {owner}',
+  deductBody: 'Hello,\n\nThe bank has deducted ₹{amount} from the pool account for this POS complaint.\n\nCase: {case}\nAgent: {agent} ({agentId})\nTL: {tl} ({tlId})\nVRN: {vrn}\nTag ID: {tag}\nIssue: {description}\nBank note: {note}\n\nPlease recover this amount from the agent / settle it.\n\nOpen the mail: {link}\n\n— {owner}',
   remindBody: 'Hello,\n\nThese POS complaints are still pending (no reply to the bank yet):\n\n{list}\n\nPlease reply to the bank before TAT ends, otherwise the amount is deducted from the pool account.\n\n— {owner}'
 };
 const EMAIL_OK = /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/;
@@ -53,7 +59,7 @@ export function normalizeMailCfg(raw, prev = null, nowMs = Date.now()) {
   const tpl = {};
   for (const k of Object.keys(DEFAULT_MAIL_TEMPLATES)) {
     const t = m.templates && typeof m.templates[k] === 'string' ? m.templates[k].replace(/\r/g, '').trim() : '';
-    tpl[k] = (t || DEFAULT_MAIL_TEMPLATES[k]).slice(0, k.endsWith('Subject') ? 200 : 4000);
+    tpl[k] = (!t || t === OLD_DEFAULT_BODIES[k] ? DEFAULT_MAIL_TEMPLATES[k] : t).slice(0, k.endsWith('Subject') ? 200 : 4000);
   }
   const list = (v) => [...new Set((Array.isArray(v) ? v : String(v || '').split(/[\n;|]+/)).map((x) => String(x || '').trim().slice(0, 80)).filter(Boolean))].slice(0, 100);
   const rules = (Array.isArray(m.rules) ? m.rules : []).slice(0, 30).map((r, i) => {
@@ -92,23 +98,58 @@ const fill = (tpl, map) => String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => (k 
 export function rowVars(row, cfg, now = Date.now()) {
   return { case: row.caseNo, date: fmtDate(row.date), agent: row.agentName || '—', agentId: row.agentId || '—', tl: row.tlName || '—', tlId: row.tlId || '—', vrn: row.vrn || '—', tag: row.tagId || '—', description: row.description || '—', bc: row.bcName || '—', status: row.status, amount: row.deducted ? String(row.deducted) : '', note: row.bankNote || '—', age: ageOf(row.date, now), tat: `${cfg.tatHours || 24}h`, link: row.link || '', owner: cfg.ownerName || '' };
 }
-const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-export function htmlOf(text) {
-  const body = esc(text).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>').replace(/\n/g, '<br>');
+const esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const TABLE_TOKEN = '\u0001TABLE\u0001';
+const TH = 'background:#ffff00;border:1px solid #000000;padding:7px 9px;text-align:center;font-weight:bold;font-size:13px;color:#000000;white-space:nowrap';
+const TD = 'border:1px solid #000000;padding:7px 9px;text-align:center;font-size:13px;color:#111111;vertical-align:middle';
+/** Bank ki mail jaisi table (peela header, gulabi Case cell). Single complaint = 1 row; reminder = pending rows. */
+export function complaintTableHtml(rows, kind, cfg, now = Date.now()) {
+  const cols = [['Case Number', 'case'], ['Vehicle Registration Number', 'vrn'], ['Tag Id', 'tag'], ['Description', 'desc'], ['BC Name', 'bc'], ['Agent Name', 'agent'], ['Agent ID', 'agentId'], ['TL Name', 'tl'], ['TL ID', 'tlId']];
+  if (kind === 'deduct') cols.push(['Deducted (₹)', 'ded']);
+  if (kind === 'remind') cols.push(['Pending', 'age'], ['TAT', 'tat']);
+  const cell = (r, k) => {
+    switch (k) {
+      case 'case': return `<td style="${TD};background:#f8c9d0;color:#d6193b;font-weight:bold;font-size:14px">${r.link ? `<a href="${esc(r.link)}" style="color:#d6193b;text-decoration:none">${esc(r.caseNo)}</a>` : esc(r.caseNo)}</td>`;
+      case 'vrn': return `<td style="${TD}">${esc(r.vrn || '—')}</td>`;
+      case 'tag': return `<td style="${TD};font-family:Consolas,Menlo,monospace;font-size:12px;word-break:break-all">${esc(r.tagId || '—')}</td>`;
+      case 'desc': return `<td style="${TD};text-align:left;min-width:220px">${esc(r.description || '—')}</td>`;
+      case 'bc': return `<td style="${TD}">${esc(r.bcName || '—')}</td>`;
+      case 'agent': return `<td style="${TD};font-weight:bold">${esc(r.agentName || '—')}${r.issuerSrc ? '<br><span style="font-weight:normal;font-size:11px;color:#2563eb">✓ GV Master</span>' : ''}</td>`;
+      case 'agentId': return `<td style="${TD}">${esc(r.agentId || '—')}</td>`;
+      case 'tl': return `<td style="${TD};font-weight:bold">${esc(r.tlName || '—')}</td>`;
+      case 'tlId': return `<td style="${TD}">${esc(r.tlId || '—')}</td>`;
+      case 'ded': return `<td style="${TD};color:#b91c1c;font-weight:bold">₹${esc(r.deducted || '')}</td>`;
+      case 'age': return `<td style="${TD}${r.tatBreached ? ';color:#e11d48;font-weight:bold' : ''}">${esc(ageOf(r.date, now))}${r.tatBreached ? '<br>TAT breached' : ''}</td>`;
+      case 'tat': return `<td style="${TD}">${esc(`${cfg.tatHours || 24}h`)}</td>`;
+      default: return '<td></td>';
+    }
+  };
+  const note = rows.filter((r) => r.issuerSrc).length ? `<p style="font-size:12px;color:#475569;margin:6px 0 0">✓ Agent name / ID taken from <b>GV Master</b> (looked up by Tag ID / VRN) — the bank mail only shows “${esc(rows.find((r) => r.issuerSrc).mailAgentName || 'APNA PAYMENT')} · ${esc(rows.find((r) => r.issuerSrc).mailAgentId || '')}”.</p>` : '';
+  return `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #000000;font-family:Arial,Helvetica,sans-serif;width:100%"><thead><tr>${cols.map(([l]) => `<th style="${TH}">${esc(l)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${cols.map(([, k]) => cell(r, k)).join('')}</tr>`).join('')}</tbody></table>${note}`;
+}
+export function complaintTableText(rows, kind, cfg, now = Date.now()) {
+  if (kind === 'remind') {
+    return rows.map((r) => `• Case ${r.caseNo} · ${r.agentName || '—'} (${r.agentId || '—'}) · TL ${r.tlName || '—'} (${r.tlId || '—'}) · pending ${ageOf(r.date, now)}${r.tatBreached ? ' · TAT BREACHED' : ''}\n  VRN ${r.vrn || '—'} · Tag ${r.tagId || '—'}\n  ${r.description ? r.description.slice(0, 160) : ''}\n  ${r.link}`).join('\n');
+  }
+  return rows.map((r) => [`Case Number: ${r.caseNo}`, `Vehicle Registration Number: ${r.vrn || '—'}`, `Tag Id: ${r.tagId || '—'}`, `Description: ${r.description || '—'}`, `BC Name: ${r.bcName || '—'}`, `Agent Name: ${r.agentName || '—'}`, `Agent ID: ${r.agentId || '—'}`, `TL Name: ${r.tlName || '—'}`, `TL ID: ${r.tlId || '—'}`, ...(kind === 'deduct' ? [`Deducted: ₹${r.deducted}`] : [])].join('\n')).join('\n\n');
+}
+/** Plain text → HTML mail; TABLE_TOKEN ki jagah asli table lagti hai. */
+export function htmlOf(text, tableHtml = '') {
+  const body = esc(text).replace(/(https?:\/\/[^\s<&]+)/g, '<a href="$1">$1</a>').replace(/\n/g, '<br>').replace(esc(TABLE_TOKEN), `</div>${tableHtml}<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#0f172a">`);
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#0f172a">${body}</div>`;
 }
 export function buildMail(kind, rowsOrRow, cfg, now = Date.now()) {
   const t = cfg.mail.templates;
-  if (kind === 'remind') {
-    const rows = rowsOrRow;
-    const list = rows.map((r) => `• Case ${r.caseNo} · ${r.agentName || '—'} (${r.agentId || '—'}) · TL ${r.tlName || '—'} · pending ${ageOf(r.date, now)}${r.tatBreached ? ' · TAT BREACHED' : ''}\n  ${r.description ? r.description.slice(0, 140) : ''}\n  ${r.link}`).join('\n');
-    const vars = { count: rows.length, list, owner: cfg.ownerName || '', tat: `${cfg.tatHours || 24}h` };
-    const text = fill(t.remindBody, vars);
-    return { subject: fill(t.remindSubject, vars), text, html: htmlOf(text) };
-  }
-  const vars = rowVars(rowsOrRow, cfg, now);
-  const text = fill(kind === 'deduct' ? t.deductBody : t.newBody, vars);
-  return { subject: fill(kind === 'deduct' ? t.deductSubject : t.newSubject, vars), text, html: htmlOf(text) };
+  const rows = Array.isArray(rowsOrRow) ? rowsOrRow : [rowsOrRow];
+  const tk = kind === 'remind' ? 'remind' : kind === 'deduct' ? 'deduct' : 'new';
+  const tableText = complaintTableText(rows, tk, cfg, now), tableHtml = complaintTableHtml(rows, tk, cfg, now);
+  let vars;
+  if (kind === 'remind') vars = { count: rows.length, list: complaintTableText(rows, 'remind', cfg, now), owner: cfg.ownerName || '', tat: `${cfg.tatHours || 24}h` };
+  else vars = rowVars(rows[0], cfg, now);
+  const render = (tpl, forHtml) => fill(tpl, { ...vars, table: forHtml ? TABLE_TOKEN : tableText });
+  const body = kind === 'remind' ? t.remindBody : kind === 'deduct' ? t.deductBody : t.newBody;
+  const subj = kind === 'remind' ? t.remindSubject : kind === 'deduct' ? t.deductSubject : t.newSubject;
+  return { subject: fill(subj, vars), text: render(body, false), html: htmlOf(render(body, true), tableHtml) };
 }
 
 /**
@@ -248,9 +289,10 @@ export function parseThread(thread, { me = [], cfg = DEFAULT_COMPLAINTS_CFG, now
 const istDay = (ms) => new Date(ms + 5.5 * 3600e3).toISOString().slice(0, 10);
 const monthStart = (day) => `${day.slice(0, 7)}-01`;
 
-export function createComplaintsService({ getStore, getConfig, lookupAgent, now = () => Date.now(), log = () => {} }) {
+export function createComplaintsService({ getStore, getConfig, lookupAgent, enrichIssuers = null, getMasterIds = () => new Set(), now = () => Date.now(), log = () => {} }) {
   const byThread = new Map();      // threadId → [rows]
-  const st = { at: 0, ok: 0, running: null, error: '', coverFrom: '', month: '', sig: '', me: [], threads: 0, lastRun: 0, runs: 0 };
+  const issuerCache = new Map();   // rowKey → { issuer|null, at } — refresh me thread dobara parse hota hai, lookup dobara na chale
+  const st = { enrichErr: '', at: 0, ok: 0, running: null, error: '', coverFrom: '', month: '', sig: '', me: [], threads: 0, lastRun: 0, runs: 0 };
   const cfg = () => normalizeCfg(getConfig());
 
   async function fetchWindow(from, to) {
@@ -271,11 +313,33 @@ export function createComplaintsService({ getStore, getConfig, lookupAgent, now 
       st.me = Array.isArray(out.me) ? out.me : st.me;
       for (const th of out.threads) {
         const rows = parseThread(th, { me: st.me, cfg: c, now: now() });
+        for (const r of rows) { const c = issuerCache.get(r.key); if (c) { if (c.issuer) r.issuer = c.issuer; r.issuerTriedAt = c.at; } }
         if (rows.length) byThread.set(th.id, rows); n++;
       }
       if (!out.more) break;
     }
     return n;
+  }
+
+
+  const idKey = (v) => String(v ?? '').replace(/\.0+$/, '').replace(/\s+/g, '').toUpperCase();
+  /** Bank mail me agent = APNA PAYMENT (master ID 5845036) hoti hai — asli issue karne wala GV Master se Tag ID / VRN par nikalo. */
+  async function enrich() {
+    if (!enrichIssuers) return;
+    const masters = getMasterIds();
+    const todo = [];
+    for (const list of byThread.values()) for (const r of list) {
+      const needs = !idKey(r.agentId) || masters.has(idKey(r.agentId));
+      if (!needs || r.issuer || (r.issuerTriedAt && now() - r.issuerTriedAt < 30 * 60e3)) continue;
+      if (!r.tagId && !r.vrn) continue;
+      todo.push(r);
+    }
+    if (!todo.length) return;
+    try {
+      const found = await enrichIssuers(todo.map((r) => ({ key: r.key, tagId: r.tagId, vrn: r.vrn })));
+      for (const r of todo) { const hit = found && found.get(r.key); if (hit) r.issuer = hit; else r.issuerTriedAt = now(); issuerCache.set(r.key, { issuer: hit || null, at: now() }); }
+      st.enrichErr = '';
+    } catch (err) { st.enrichErr = String((err && err.message) || err).slice(0, 200); for (const r of todo) { r.issuerTriedAt = now(); issuerCache.set(r.key, { issuer: null, at: now() }); } }
   }
 
   /** Current month (ya jo window do) refresh. full=true → mahine ka poora; warna pichhle 3 din (naye messages). */
@@ -285,7 +349,7 @@ export function createComplaintsService({ getStore, getConfig, lookupAgent, now 
       const today = istDay(now());
       const c = cfg();
       const sig = JSON.stringify([c.subjects, c.ownerName, c.tatHours]);
-      if (st.sig !== sig || st.month !== today.slice(0, 7)) { byThread.clear(); st.coverFrom = ''; full = true; st.sig = sig; st.month = today.slice(0, 7); }
+      if (st.sig !== sig || st.month !== today.slice(0, 7)) { byThread.clear(); issuerCache.clear(); st.coverFrom = ''; full = true; st.sig = sig; st.month = today.slice(0, 7); }
       let f = from, t = to;
       if (!f) {
         const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 3);
@@ -293,6 +357,7 @@ export function createComplaintsService({ getStore, getConfig, lookupAgent, now 
       }
       try {
         const n = await fetchWindow(f, t || '');
+        await enrich();
         st.threads = byThread.size; st.error = ''; st.ok = now(); st.at = now();
         if (!from && (!st.coverFrom || f < st.coverFrom)) st.coverFrom = f;
         if (from && (!st.coverFrom || from < st.coverFrom)) st.coverFrom = from;
@@ -332,12 +397,16 @@ export function createComplaintsService({ getStore, getConfig, lookupAgent, now 
     out.sort((a, b) => b.date - a.date);
     const lookups = new Map();
     return out.map((r) => {
-      const k = `${r.agentId}|${r.agentName}`;
-      if (!lookups.has(k)) { let v = null; try { v = lookupAgent ? lookupAgent({ agentId: r.agentId, agentName: r.agentName }) : null; } catch { v = null; } lookups.set(k, v || {}); }
+      const iss = r.issuer || null;
+      const agentId = iss ? iss.id : r.agentId, agentName = iss ? iss.name : r.agentName;
+      const k = `${agentId}|${agentName}`;
+      if (!lookups.has(k)) { let v = null; try { v = lookupAgent ? lookupAgent({ agentId, agentName }) : null; } catch { v = null; } lookups.set(k, v || {}); }
       const a = lookups.get(k);
-      return { ...r, day: istDay(r.date), tlName: a.tlName || '', tlId: a.tlId || '', agentFound: !!a.found };
+      const tlName = a.tlName || (iss && iss.tlName) || '', tlId = a.tlId || (iss && iss.tlId) || '';
+      const { issuer, issuerTriedAt, ...rest } = r; void issuer; void issuerTriedAt;
+      return { ...rest, agentId, agentName, ...(iss ? { issuerSrc: 'GV Master', mailAgentId: r.agentId, mailAgentName: r.agentName } : {}), day: istDay(r.date), tlName, tlId, agentFound: !!a.found || !!iss };
     });
-  }
-  const meta = () => ({ at: st.at ? new Date(st.at).toISOString() : '', okAt: st.ok ? new Date(st.ok).toISOString() : '', running: !!st.running, error: st.error, coverFrom: st.coverFrom, threads: byThread.size, config: (({ mail, ...rest }) => rest)(cfg()), account: st.me[0] || '' });
+  };
+  const meta = () => ({ at: st.at ? new Date(st.at).toISOString() : '', okAt: st.ok ? new Date(st.ok).toISOString() : '', running: !!st.running, error: st.error, enrichErr: st.enrichErr, coverFrom: st.coverFrom, threads: byThread.size, config: (({ mail, ...rest }) => rest)(cfg()), account: st.me[0] || '' });
   return { sync, ensureRange, tick, rows, meta, getStore, _state: st, _byThread: byThread };
 }

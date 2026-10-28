@@ -100,7 +100,7 @@ FF.pages = FF.pages || {};
       <td class="mono cmp-tag">${esc(r.tagId || '—')}</td>
       <td class="cmp-desc">${esc(r.description || '—')}</td>
       <td class="cmp-c">${esc(r.bcName || '—')}</td>
-      <td><b>${esc(r.agentName || '—')}</b></td>
+      <td><b>${esc(r.agentName || '—')}</b>${r.issuerSrc ? `<small class="cmp-gvm" title="Bank mail showed: ${esc(r.mailAgentName || '')} (${esc(r.mailAgentId || '')})">✓ GV Master</small>` : ''}</td>
       <td class="mono cmp-c">${esc(r.agentId || '—')}</td>
       <td>${r.tlName ? `<b>${esc(r.tlName)}</b>` : '<span class="dim">—</span>'}</td>
       <td class="mono cmp-c">${esc(r.tlId || '—')}</td>
@@ -166,7 +166,7 @@ FF.pages = FF.pages || {};
     if (!m) return '';
     const c = m.config || {};
     const t = m.okAt ? new Date(m.okAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—';
-    const err = m.error ? `<span class="cmp-err">⚠ ${esc(m.error)}</span>` : '';
+    const err = m.error ? `<span class="cmp-err">⚠ ${esc(m.error)}</span>` : (m.enrichErr ? `<span class="cmp-err">⚠ GV Master lookup: ${esc(m.enrichErr)}</span>` : '');
     return `<p class="dim small cmp-meta">${m.running ? '⏳ Syncing with Gmail… · ' : ''}Last Gmail sync <b>${esc(t)}</b> · auto-refresh every <b>${esc(c.refreshMin || 10)} min</b> · subjects: ${(c.subjects || []).map((s) => `<code>${esc(s)}</code>`).join(' ')}${m.account ? ` · mailbox ${esc(m.account)}` : ''}${c.enabled === false ? ' · <b>auto-refresh is OFF</b>' : ''} ${err}</p>`;
   }
 
@@ -287,9 +287,9 @@ FF.pages = FF.pages || {};
 
   function exportXlsx() {
     const rows = visible();
-    const header = ['Date', 'Case Number', 'Vehicle Registration Number', 'Tag Id', 'Description', 'BC Name', 'Agent Name', 'Agent ID', 'TL Name', 'TL ID', 'Status', 'Replied at', 'Resolved at', 'Deducted (₹)', 'Bank note', 'TAT breached', 'Mail link'];
+    const header = ['Date', 'Case Number', 'Vehicle Registration Number', 'Tag Id', 'Description', 'BC Name', 'Agent Name', 'Agent ID', 'Agent source', 'Mail showed (name · ID)', 'TL Name', 'TL ID', 'Status', 'Replied at', 'Resolved at', 'Deducted (₹)', 'Bank note', 'TAT breached', 'Mail link'];
     const iso = (ms) => (ms ? new Date(ms).toISOString().replace('T', ' ').slice(0, 16) : '');
-    const body = rows.map((r) => [iso(r.date), r.caseNo, r.vrn, r.tagId, r.description, r.bcName, r.agentName, r.agentId, r.tlName, r.tlId, r.status, iso(r.repliedAt), iso(r.resolvedAt), r.deducted || '', r.bankNote, r.tatBreached ? 'Yes' : '', r.link]);
+    const body = rows.map((r) => [iso(r.date), r.caseNo, r.vrn, r.tagId, r.description, r.bcName, r.agentName, r.agentId, r.issuerSrc || 'Bank mail', r.issuerSrc ? `${r.mailAgentName} · ${r.mailAgentId}` : '', r.tlName, r.tlId, r.status, iso(r.repliedAt), iso(r.resolvedAt), r.deducted || '', r.bankNote, r.tatBreached ? 'Yes' : '', r.link]);
     FF.xlsx.download(`agents-complaints-${state.from}_${state.to}-${U.stamp()}.xlsx`, [{ name: 'Complaints', header, rows: body }]);
   }
 

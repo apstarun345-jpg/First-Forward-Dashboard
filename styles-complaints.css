@@ -90,3 +90,4 @@
 .cmp-mok { color: #15803d; font-weight: 700; }
 .cmp-mailc { white-space: nowrap; }
 .cmp-tbl tr.cmp-hfail td:not(.cmp-case) { background: #fff1f2; }
+.cmp-gvm { display: block; color: #2563eb !important; font-weight: 600; }

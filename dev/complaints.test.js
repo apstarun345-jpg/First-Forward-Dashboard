@@ -188,3 +188,41 @@ test('page smoke: list shows the Mail column, history tab renders sent / failed 
   assert.match(mount.innerHTML, /SMTP timeout/);
   assert.match(mount.innerHTML, /tl@x\.com/);
 });
+
+import { complaintTableHtml, buildMail as bm, DEFAULT_MAIL_TEMPLATES } from '../complaints-mail.js';
+test('GV Master issuer replaces the bank-mail agent (APNA PAYMENT / master ID) in table + mail; TL falls back to GV Master', async () => {
+  const master = new Set(['5845036']);
+  const lookups = [];
+  const store = { call: async () => ({ ok: true, me: ['me@gmail.com'], threads: [thread([])], more: false }) };
+  const svc = createComplaintsService({
+    getStore: () => store, getConfig: () => ({}), now: () => NOW, getMasterIds: () => master,
+    lookupAgent: ({ agentId }) => { lookups.push(agentId); return agentId === '20354013' ? { found: true, tlName: 'Registry TL', tlId: 'APN9' } : null; },
+    enrichIssuers: async (items) => { assert.equal(items[0].tagId, '34161FA820328EE84F0C1B20'); return new Map([[items[0].key, { id: '20354013', name: 'Real Agent', tlName: 'GV TL', tlId: 'G1' }]]); }
+  });
+  await svc.sync({ full: true });
+  const r = svc.rows({})[0];
+  assert.deepEqual([r.agentId, r.agentName, r.tlName, r.tlId, r.issuerSrc, r.mailAgentId], ['20354013', 'Real Agent', 'Registry TL', 'APN9', 'GV Master', '5845036']);
+  // no registry hit → GV Master TL
+  const svc2 = createComplaintsService({ getStore: () => store, getConfig: () => ({}), now: () => NOW, getMasterIds: () => master, lookupAgent: () => null, enrichIssuers: async (it) => new Map([[it[0].key, { id: '1', name: 'X', tlName: 'GV TL', tlId: 'G1' }]]) });
+  await svc2.sync({ full: true });
+  assert.deepEqual([svc2.rows({})[0].tlName, svc2.rows({})[0].tlId], ['GV TL', 'G1']);
+  // not found → stays as the mail says and is retried only after 30 min
+  let calls = 0;
+  const svc3 = createComplaintsService({ getStore: () => store, getConfig: () => ({}), now: () => NOW, getMasterIds: () => master, enrichIssuers: async () => { calls++; return new Map(); } });
+  await svc3.sync({ full: true }); await svc3.sync({ full: true });
+  assert.equal(calls, 1); assert.equal(svc3.rows({})[0].agentId, '5845036');
+  // mail carries the resolved name / id in a bank-style table
+  const cfg = nc({ ownerName: 'Tarun', tatHours: 24, mail: { enabled: true } }, null, 1);
+  const mail = bm('new', r, cfg, NOW);
+  assert.match(mail.html, /background:#ffff00/); assert.match(mail.html, /Real Agent/); assert.match(mail.html, /20354013/); assert.match(mail.html, /✓ GV Master/); assert.match(mail.html, /Registry TL/);
+  assert.doesNotMatch(mail.html, />Sunil Kumar Rudra</);
+  assert.match(mail.text, /Agent Name: Real Agent/); assert.match(mail.text, /Agent ID: 20354013/);
+  assert.match(DEFAULT_MAIL_TEMPLATES.newBody, /\{table\}/);
+  const rem = bm('remind', [r], cfg, NOW);
+  assert.match(rem.html, /<th[^>]*>Pending<\/th>/);
+});
+
+test('old default mail bodies (saved earlier) migrate to the new {table} default; custom text is kept', () => {
+  const old = normalizeMailCfg({ templates: { newBody: 'Hello,\n\nA new POS complaint has come from the bank.\n\nCase: {case}\nDate: {date}\nAgent: {agent} ({agentId})\nTL: {tl} ({tlId})\nVRN: {vrn}\nTag ID: {tag}\nIssue: {description}\n\nPlease check and reply to the bank within TAT ({tat}). If there is no response, the bank deducts the amount from the pool account.\n\nOpen the mail: {link}\n\n— {owner}', deductBody: 'my own text {case}' } }, null, 1);
+  assert.match(old.templates.newBody, /\{table\}/); assert.equal(old.templates.deductBody, 'my own text {case}');
+});

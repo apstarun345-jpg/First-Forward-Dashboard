@@ -1,0 +1,3 @@
+# v3.116.0 — Complaints: real issuer from GV Master + bank-style mail table
+- When the bank mail shows agent APNA PAYMENT / 5845036, the real agent (ID + name) is looked up in GV Master by Tag ID (then VRN). The complaints table, mail rules (TL / agent selection), Excel and alert mails all use the resolved agent; "✓ GV Master" marks it. TL comes from Agent master (Sheet4), else GV Master.
+- Alert mails now carry a table like the bank's (yellow header, pink case cell): Case, VRN, Tag Id, Description, BC Name, Agent Name, Agent ID, TL Name, TL ID (+ Deducted / Pending / TAT). New `{table}` placeholder; earlier default bodies upgrade automatically, custom text is kept.
