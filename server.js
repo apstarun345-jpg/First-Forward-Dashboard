@@ -11198,7 +11198,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 .pb-wrap{max-width:1240px}
 .pb-wrap .pb-head{background:linear-gradient(115deg,#1e1b4b 0%,#312e81 45%,#1d4ed8 100%);border:0;color:#fff;padding:20px 24px;border-radius:20px;box-shadow:0 14px 34px rgba(30,27,75,.28);position:relative;overflow:hidden}
-.pb-wrap .pb-head::after{content:"";position:absolute;right:-60px;top:-80px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.18),transparent 70%)}
+.pb-wrap .pb-head::after{pointer-events:none;content:"";position:absolute;right:-60px;top:-80px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.18),transparent 70%)}
+.pb-wrap .pb-head>.pb-btn,.pb-wrap .pb-head a.pb-btn{position:relative;z-index:2}
 .pb-wrap .pb-head h1{font-size:22px;font-weight:800;color:#fff;letter-spacing:-.01em}
 .pb-wrap .pb-head h1 b{color:#fde68a}
 .pb-wrap .pb-head p{color:#c7d2fe;font-size:13px;margin-top:2px}
