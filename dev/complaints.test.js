@@ -161,3 +161,30 @@ test('binary (already base64) attachments are passed through untouched; text one
   assert.equal(att[0].content, 'iVBORw0KGgo=');
   assert.equal(att[1].content, Buffer.from('a,b').toString('base64'));
 });
+
+import vm from 'node:vm';
+test('page smoke: list shows the Mail column, history tab renders sent / failed rows', async () => {
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const mount = { innerHTML: '' };
+  const handlers = {};
+  const rootEl = { innerHTML: '', isConnected: true, addEventListener(t, f) { handlers[t] = f; }, contains: () => false, querySelector: (sel) => (sel === '[data-cmp-body]' ? mount : null), querySelectorAll: () => [] };
+  const row = { key: 'k', threadId: 't', caseNo: '1170081271', date: Date.now() - 3600e3, day: '2026-10-28', vrn: 'UP87K2812', tagId: 'T1', description: 'cx did', bcName: 'APNA', agentName: 'Ramdev', agentId: '15037228', tlName: 'TL X', tlId: 'APN2233', status: 'Pending', resolvedAt: 0, deducted: 0, bankNote: '', tatBreached: true, tatDueAt: Date.now(), link: 'https://mail.google.com/x' };
+  const data = { ok: true, rows: [row], meta: { okAt: new Date().toISOString(), config: { refreshMin: 10, subjects: ['POS'], ownerName: 'Tarun' } }, cfg: { mail: { rules: [] } }, placeholders: [],
+    mailLog: [{ at: Date.now(), kind: 'new', to: 'tl@x.com', subject: 'New POS complaint', ok: true, caseNo: '1170081271', files: 2 }, { at: Date.now() - 1000, kind: 'deduct', to: 'tl@x.com', subject: 'Bank deducted', ok: false, error: 'SMTP timeout', caseNo: '1170081271', tries: 3 }], mailErr: '' };
+  const ctx = { console, setInterval() {}, clearInterval() {}, document: { activeElement: null, hidden: false }, CSS: { escape: (x) => x } };
+  ctx.window = ctx;
+  ctx.FF = { pages: {}, util: { esc, fmt: (n) => String(n), spinner: () => '', stamp: () => '', withButtonBusy: async () => {}, toast() {} }, auth: { api: async () => data } };
+  vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(new URL('../complaints.js', import.meta.url), 'utf8'), ctx);
+  ctx.FF.pages.complaints.render(rootEl);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.match(mount.innerHTML, /<th[^>]*>Mail<\/th>/);
+  assert.match(mount.innerHTML, /cmp-mok/);                 // ✅ count in the complaint row
+  assert.match(mount.innerHTML, /data-cmp-tab="mail"/);
+  assert.match(mount.innerHTML, /1170081271/);
+  handlers.click({ target: { closest: (sel) => (sel === '[data-cmp-tab]' ? { dataset: { cmpTab: 'mail' } } : null) } });
+  assert.match(mount.innerHTML, /✅ 1 sent/);
+  assert.match(mount.innerHTML, /❌ Failed ×3/);
+  assert.match(mount.innerHTML, /SMTP timeout/);
+  assert.match(mount.innerHTML, /tl@x\.com/);
+});

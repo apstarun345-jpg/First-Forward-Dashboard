@@ -87,10 +87,12 @@ FF.pages = FF.pages || {};
       </div></div></div>`;
   }
 
-  const TH = [['date', 'Date'], ['caseNo', 'Case Number'], ['vrn', 'Vehicle Registration Number'], ['tagId', 'Tag Id'], ['description', 'Description'], ['bcName', 'BC Name'], ['agentName', 'Agent Name'], ['agentId', 'Agent ID'], ['tlName', 'TL Name'], ['tlId', 'TL ID'], ['status', 'Status'], ['deducted', 'Deducted'], ['date', 'Age']];
+  const TH = [['date', 'Date'], ['caseNo', 'Case Number'], ['vrn', 'Vehicle Registration Number'], ['tagId', 'Tag Id'], ['description', 'Description'], ['bcName', 'BC Name'], ['agentName', 'Agent Name'], ['agentId', 'Agent ID'], ['tlName', 'TL Name'], ['tlId', 'TL ID'], ['status', 'Status'], ['deducted', 'Deducted'], ['date', 'Age'], ['', 'Mail']];
   function listHtml(rows) {
     if (!rows.length) return '<div class="empty">No complaints found for these filters.</div>';
-    const head = TH.map(([k, l], i) => `<th class="cmp-th${state.sort === k && i < 12 ? ' on' : ''}" data-cmp-sort="${k}" title="Sort">${l}${state.sort === k && i < 12 ? (state.dir < 0 ? ' ▼' : ' ▲') : ''}</th>`).join('');
+    const showMail = !!logOf();
+    const head = TH.filter(([k]) => k || showMail).map(([k, l], i) => `<th class="cmp-th${state.sort === k && i < 12 ? ' on' : ''}" ${k ? `data-cmp-sort="${k}" title="Sort"` : ''}>${l}${state.sort === k && i < 12 ? (state.dir < 0 ? ' ▼' : ' ▲') : ''}</th>`).join('');
+    const by = mailByCase();
     const body = rows.map((r, i) => `<tr class="cmp-r-${STATUS_CLS(r.status)}${r.tatBreached ? ' cmp-tat' : ''}">
       <td class="cmp-d"><b>${esc(dayLabel(r.day))}</b><small>${esc(when(r.date))}</small></td>
       <td class="cmp-case"><a href="${esc(r.link)}" target="_blank" rel="noopener" title="Open the mail in Gmail">${esc(r.caseNo || '—')}</a></td>
@@ -104,8 +106,44 @@ FF.pages = FF.pages || {};
       <td class="mono cmp-c">${esc(r.tlId || '—')}</td>
       <td class="cmp-st"><span class="cmp-pill cmp-${STATUS_CLS(r.status)}" title="${esc(r.bankNote || '')}">${esc(r.status)}</span>${r.resolvedAt ? `<small>${esc(when(r.resolvedAt))}</small>` : (r.tatBreached ? '<small class="cmp-late">TAT breached</small>' : `<small>TAT ${esc(when(r.tatDueAt))}</small>`)}</td>
       <td class="num cmp-ded">${r.deducted ? `<b>${rupee(r.deducted)}</b>` : '—'}</td>
-      <td class="num cmp-age">${esc(ageText(r))}</td></tr>`).join('');
+      <td class="num cmp-age">${esc(ageText(r))}</td>${showMail ? `<td class="cmp-c cmp-mailc">${mailCell(r, by)}</td>` : ''}</tr>`).join('');
     return `<div class="table-wrap cmp-wrap"><table class="tbl cmp-tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+
+
+  // ---- 📧 Mail history: kis complaint ki mail kise gayi / nahi gayi ---------------------------------------------------
+  const KIND_L = { new: ['New complaint', 'cmp-pend'], deduct: ['Bank deducted', 'cmp-bank'], remind: ['Reminder', 'cmp-team'] };
+  const logOf = () => (state.data && state.data.mailLog) || null;
+  function mailByCase() {
+    const m = new Map();
+    (logOf() || []).forEach((l) => { if (l.caseNo) { const a = m.get(l.caseNo) || []; a.push(l); m.set(l.caseNo, a); } });
+    return m;
+  }
+  function mailCell(r, by) {
+    const list = by.get(r.caseNo);
+    if (!list || !list.length) return '<span class="dim" title="No alert mail for this complaint yet">—</span>';
+    const ok = list.filter((l) => l.ok), bad = list.filter((l) => !l.ok);
+    const tip = list.map((l) => `${(KIND_L[l.kind] || [l.kind])[0]} → ${l.to} · ${when(l.at)} · ${l.ok ? 'sent' : `FAILED ${l.error || ''}`}`).join('\n');
+    return `<span title="${esc(tip)}">${ok.length ? `<span class="cmp-mok">✅ ${ok.length}</span>` : ''}${bad.length ? ` <span class="cmp-err">❌ ${bad.length}</span>` : ''}<small>${esc(when((ok[0] || bad[0]).at))}</small></span>`;
+  }
+  function historyHtml() {
+    const log = logOf();
+    if (!log) return '<div class="empty">Mail history is visible to admins only.</div>';
+    const q = state.q.trim().toLowerCase();
+    const byCase = new Map(rowsAll().map((r) => [r.caseNo, r]));
+    const rows = log.filter((l) => {
+      const r = byCase.get(l.caseNo) || {};
+      return !q || [l.to, l.subject, l.caseNo, l.kind, r.agentName, r.agentId, r.tlName, r.tlId].some((v) => String(v || '').toLowerCase().includes(q));
+    });
+    const sentN = log.filter((l) => l.ok).length, failN = log.length - sentN;
+    const head = `<div class="cmp-hsum"><span class="cmp-pill cmp-me">✅ ${sentN} sent</span><span class="cmp-pill ${failN ? 'cmp-tatp' : 'cmp-team'}">${failN ? '❌' : '•'} ${failN} failed</span><span class="dim small">Last ${log.length} mails · ${state.data.mailErr ? `<b class="cmp-err">Mail problem: ${esc(state.data.mailErr)}</b>` : 'mail provider OK'}</span></div>`;
+    if (!rows.length) return `${head}<div class="empty">${log.length ? 'No mail matches the search.' : 'No alert mail has been sent yet. Turn on Mail alerts, add a recipient and save — mails appear here as they go out.'}</div>`;
+    const body = rows.map((l) => {
+      const r = byCase.get(l.caseNo) || {};
+      const k = KIND_L[l.kind] || [l.kind, 'cmp-team'];
+      return `<tr class="${l.ok ? '' : 'cmp-hfail'}"><td class="cmp-d"><b>${esc(when(l.at))}</b></td><td><span class="cmp-pill ${k[1]}">${esc(k[0])}</span>${l.kind === 'remind' ? `<small>${l.count} pending</small>` : ''}</td><td class="cmp-case">${l.caseNo ? `<a href="${esc(r.link || '#')}" target="_blank" rel="noopener">${esc(l.caseNo)}</a>` : '—'}</td><td>${r.agentName ? `<b>${esc(r.agentName)}</b><small>${esc(r.agentId || '')}</small>` : '—'}</td><td>${esc(r.tlName || '—')}</td><td>${esc(l.to)}</td><td>${esc(l.subject)}${l.files ? ` <span title="${l.files} attachment(s)">📎${l.files}</span>` : ''}${l.note ? `<small>${esc(l.note)}</small>` : ''}</td><td class="cmp-st">${l.ok ? '<span class="cmp-pill cmp-me">✅ Sent</span>' : `<span class="cmp-pill cmp-tatp">❌ Failed${l.tries > 1 ? ` ×${l.tries}` : ''}</span><small class="cmp-err">${esc(l.error || '')}</small>`}</td></tr>`;
+    }).join('');
+    return `${head}<div class="table-wrap cmp-wrap"><table class="tbl cmp-tbl cmp-sum"><thead><tr><th>When</th><th>Type</th><th>Case</th><th>Agent</th><th>TL</th><th>Mailed to</th><th>Subject</th><th>Result</th></tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   function groupHtml(rows, by) {
@@ -161,7 +199,6 @@ FF.pages = FF.pages || {};
   function panelHtml() {
     const d = state.draft; if (!d) return '';
     const m = d.mail || {};
-    const log = (state.data.mailLog || []).map((l) => `<tr><td>${esc(when(l.at))}</td><td>${esc(l.kind)}</td><td>${esc(l.to)}</td><td>${esc(l.subject)}</td><td>${l.ok ? '✅ sent' : `<span class="cmp-err">❌ ${esc(l.error || 'failed')}</span>`}</td></tr>`).join('');
     return `<div class="card cmp-panel" data-cmp-panel><div class="card-head"><h3>⚙ Settings · 📧 Mail alerts</h3><div class="card-right"><button type="button" class="btn small" data-cmp-setclose>✖ Close</button></div></div><div class="card-body">
       <h4>Gmail fetch</h4>
       <div class="form-grid cmp-fg">
@@ -183,7 +220,6 @@ FF.pages = FF.pages || {};
       <div class="cmp-testrow"><input class="input" data-cmp-testto placeholder="Test recipient email"><button type="button" class="btn small" data-cmp-test="new">📨 Test “new”</button><button type="button" class="btn small" data-cmp-test="deduct">📨 Test “deducted”</button><button type="button" class="btn small" data-cmp-test="remind">📨 Test “reminder”</button></div>
       <div class="save-bar"><button type="button" class="btn primary" data-cmp-save>💾 Save settings</button><span class="dim small">${esc(state.setMsg)}</span></div>
       ${state.data.mailErr ? `<p class="cmp-err">Mail problem: ${esc(state.data.mailErr)}</p>` : ''}
-      ${log ? `<h4>Recent mails</h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>When</th><th>Type</th><th>To</th><th>Subject</th><th>Result</th></tr></thead><tbody>${log}</tbody></table></div>` : ''}
     </div></div>`;
   }
   function collectDraft() {
@@ -264,12 +300,12 @@ FF.pages = FF.pages || {};
     const keepQ = root.querySelector('[data-cmp-q]');
     const hadFocus = keepQ && document.activeElement === keepQ; const pos = hadFocus ? keepQ.selectionStart : 0;
     const rows = visible();
-    const tabs = `<div class="seg cmp-tabs"><button type="button" class="seg-btn${state.tab === 'list' ? ' on' : ''}" data-cmp-tab="list">📋 Complaints</button><button type="button" class="seg-btn${state.tab === 'agent' ? ' on' : ''}" data-cmp-tab="agent">👤 By agent</button><button type="button" class="seg-btn${state.tab === 'tl' ? ' on' : ''}" data-cmp-tab="tl">👥 By TL</button></div>`;
+    const tabs = `<div class="seg cmp-tabs"><button type="button" class="seg-btn${state.tab === 'list' ? ' on' : ''}" data-cmp-tab="list">📋 Complaints</button><button type="button" class="seg-btn${state.tab === 'agent' ? ' on' : ''}" data-cmp-tab="agent">👤 By agent</button><button type="button" class="seg-btn${state.tab === 'tl' ? ' on' : ''}" data-cmp-tab="tl">👥 By TL</button>${logOf() ? `<button type="button" class="seg-btn${state.tab === 'mail' ? ' on' : ''}" data-cmp-tab="mail">📧 Mail history</button>` : ''}</div>`;
     const err = state.err ? `<div class="notice err">${esc(state.err)}</div>` : '';
     const loading = state.busy ? '<p class="dim small">⏳ Loading… (older months are read from Gmail, this can take up to a minute)</p>' : '';
     mount.innerHTML = `${metaLine()}${err}${loading}${state.data && state.setOpen && state.draft ? panelHtml() : ''}${state.data ? tilesHtml() + filtersHtml() : ''}
       ${state.data ? `<div class="cmp-bar">${tabs}<span class="dim small">${U.fmt(rows.length)} of ${U.fmt(rowsAll().length)} complaints</span><span class="cmp-bar-r">${state.data.cfg ? '<button type="button" class="btn small" data-cmp-settings>⚙ Settings & Mail alerts</button>' : ''}<button type="button" class="btn small" data-cmp-refresh>🔄 Sync Gmail now</button><button type="button" class="btn small primary" data-cmp-xlsx>⬇ Excel</button></span></div>
-      <div class="card"><div class="card-body cmp-card">${state.tab === 'list' ? listHtml(rows) : groupHtml(rows, state.tab)}</div></div>` : (state.busy ? U.spinner('Reading complaints…') : '')}`;
+      <div class="card"><div class="card-body cmp-card">${state.tab === 'list' ? listHtml(rows) : state.tab === 'mail' ? historyHtml() : groupHtml(rows, state.tab)}</div></div>` : (state.busy ? U.spinner('Reading complaints…') : '')}`;
     if (hadFocus) { const q = root.querySelector('[data-cmp-q]'); if (q) { q.focus(); try { q.setSelectionRange(pos, pos); } catch { /* ignore */ } } }
   }
 

@@ -3660,19 +3660,21 @@ async function complaintsMailTick() {
           if (k.type === 'sent') { st.sent[k.key] = { ...(st.sent[k.key] || {}), [k.f]: Date.now() }; }
           else st.remind[k.ruleId] = Date.now();
         }
-        st.log.push({ at: Date.now(), kind: m.kind, to: m.to, subject: String(m.subject).slice(0, 120) + (attachments.length ? ` · 📎${attachments.length}` : '') + attachNote, ok: true });
+        st.log.push({ at: Date.now(), kind: m.kind, to: m.to, subject: String(m.subject).slice(0, 120), ok: true, caseNo: m.caseNo || '', count: m.count || 0, ruleId: m.ruleId, files: attachments.length, note: attachNote.trim() });
         complaintsMailRun.lastErr = '';
       } catch (err) {
         const msg = String((err && err.message) || err).slice(0, 200);
         complaintsMailRun.lastErr = msg;
-        st.log.push({ at: Date.now(), kind: m.kind, to: m.to, subject: String(m.subject).slice(0, 120), ok: false, error: msg });
+        const lastL = st.log[st.log.length - 1];
+        if (lastL && lastL.ok === false && lastL.kind === m.kind && lastL.to === m.to && lastL.caseNo === (m.caseNo || '') && Date.now() - lastL.at < 10 * 60e3) { lastL.at = Date.now(); lastL.tries = (lastL.tries || 1) + 1; lastL.error = msg; }   // same failure: spam nahi, ek line update
+        else st.log.push({ at: Date.now(), kind: m.kind, to: m.to, subject: String(m.subject).slice(0, 120), ok: false, error: msg, caseNo: m.caseNo || '', count: m.count || 0, ruleId: m.ruleId });
         break;                                            // provider down — agle tick me dobara
       }
     }
     // chhota rakho: 40 din se purani sent-entries + log 80 tak
     const cutoff = Date.now() - 120 * 86400e3;
     for (const [k, v] of Object.entries(st.sent)) if (Math.max(v.n || 0, v.d || 0) < cutoff) delete st.sent[k];
-    if (st.log.length > 80) st.log = st.log.slice(-80);
+    if (st.log.length > 300) st.log = st.log.slice(-300);
     persist('notify').catch(() => {});
   } catch (err) { complaintsMailRun.lastErr = String((err && err.message) || err).slice(0, 200); }
   finally { complaintsMailRun.busy = false; }
@@ -5859,7 +5861,7 @@ async function handleApi(req, res, url) {
     await Promise.race([loadRegistryFull(false).catch(() => null), new Promise((r) => setTimeout(r, 4000))]);
     const admin = user.role === 'admin';
     const mst = admin ? complaintsMailState() : null;
-    const extra = admin ? { cfg: normalizeComplaintsCfg((db.settings || {}).complaints), mailLog: mst.log.slice(-25).reverse(), mailErr: complaintsMailRun.lastErr, placeholders: MAIL_PLACEHOLDERS_LIST } : {};
+    const extra = admin ? { cfg: normalizeComplaintsCfg((db.settings || {}).complaints), mailLog: mst.log.slice(-200).reverse(), mailErr: complaintsMailRun.lastErr, placeholders: MAIL_PLACEHOLDERS_LIST } : {};
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, rows: complaintsSvc.rows({ from, to }), meta: complaintsSvc.meta(), ...extra }), { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/complaints/mail-test' && method === 'POST') {
