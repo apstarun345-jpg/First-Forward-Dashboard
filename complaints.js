@@ -121,10 +121,11 @@ FF.pages = FF.pages || {};
   }
   function mailCell(r, by) {
     const list = by.get(r.caseNo);
-    if (!list || !list.length) return '<span class="dim" title="No alert mail for this complaint yet">—</span>';
+    const rs = `<button type="button" class="btn small cmp-resend" data-cmp-resend="${esc(r.caseNo)}" title="Send the alert mail for this complaint again">↻ Resend</button>`;
+    if (!list || !list.length) return `<span class="dim" title="No alert mail for this complaint yet">—</span>${rs}`;
     const ok = list.filter((l) => l.ok), bad = list.filter((l) => !l.ok);
     const tip = list.map((l) => `${(KIND_L[l.kind] || [l.kind])[0]} → ${l.to} · ${when(l.at)} · ${l.ok ? 'sent' : `FAILED ${l.error || ''}`}`).join('\n');
-    return `<span title="${esc(tip)}">${ok.length ? `<span class="cmp-mok">✅ ${ok.length}</span>` : ''}${bad.length ? ` <span class="cmp-err">❌ ${bad.length}</span>` : ''}<small>${esc(when((ok[0] || bad[0]).at))}</small></span>`;
+    return `<span title="${esc(tip)}">${ok.length ? `<span class="cmp-mok">✅ ${ok.length}</span>` : ''}${bad.length ? ` <span class="cmp-err">❌ ${bad.length}</span>` : ''}<small>${esc(when((ok[0] || bad[0]).at))}</small></span>${rs}`;
   }
   function historyHtml() {
     const log = logOf();
@@ -141,7 +142,7 @@ FF.pages = FF.pages || {};
     const body = rows.map((l) => {
       const r = byCase.get(l.caseNo) || {};
       const k = KIND_L[l.kind] || [l.kind, 'cmp-team'];
-      return `<tr class="${l.ok ? '' : 'cmp-hfail'}"><td class="cmp-d"><b>${esc(when(l.at))}</b></td><td><span class="cmp-pill ${k[1]}">${esc(k[0])}</span>${l.kind === 'remind' ? `<small>${l.count} pending</small>` : ''}</td><td class="cmp-case">${l.caseNo ? `<a href="${esc(r.link || '#')}" target="_blank" rel="noopener">${esc(l.caseNo)}</a>` : '—'}</td><td>${r.agentName ? `<b>${esc(r.agentName)}</b><small>${esc(r.agentId || '')}</small>` : '—'}</td><td>${esc(r.tlName || '—')}</td><td>${esc(l.to)}</td><td>${esc(l.subject)}${l.files ? ` <span title="${l.files} attachment(s)">📎${l.files}</span>` : ''}${l.note ? `<small>${esc(l.note)}</small>` : ''}</td><td class="cmp-st">${l.ok ? '<span class="cmp-pill cmp-me">✅ Sent</span>' : `<span class="cmp-pill cmp-tatp">❌ Failed${l.tries > 1 ? ` ×${l.tries}` : ''}</span><small class="cmp-err">${esc(l.error || '')}</small>`}</td></tr>`;
+      return `<tr class="${l.ok ? '' : 'cmp-hfail'}"><td class="cmp-d"><b>${esc(when(l.at))}</b></td><td><span class="cmp-pill ${k[1]}">${esc(k[0])}</span>${l.kind === 'remind' ? `<small>${l.count} pending</small>` : ''}</td><td class="cmp-case">${l.caseNo ? `<a href="${esc(r.link || '#')}" target="_blank" rel="noopener">${esc(l.caseNo)}</a>` : '—'}</td><td>${r.agentName ? `<b>${esc(r.agentName)}</b><small>${esc(r.agentId || '')}</small>` : '—'}</td><td>${esc(r.tlName || '—')}</td><td>${esc(l.to)}</td><td>${esc(l.subject)}${l.files ? ` <span title="${l.files} attachment(s)">📎${l.files}</span>` : ''}${l.note ? `<small>${esc(l.note)}</small>` : ''}</td><td class="cmp-st">${l.caseNo ? `<button type="button" class="btn small cmp-resend" data-cmp-resend="${esc(l.caseNo)}" data-kind="${esc(l.kind === 'remind' ? '' : l.kind)}" data-to="${esc(l.to)}" title="Send this mail again to ${esc(l.to)}">↻ Resend</button>` : ''}${l.ok ? '<span class="cmp-pill cmp-me">✅ Sent</span>' : `<span class="cmp-pill cmp-tatp">❌ Failed${l.tries > 1 ? ` ×${l.tries}` : ''}</span><small class="cmp-err">${esc(l.error || '')}</small>`}</td></tr>`;
     }).join('');
     return `${head}<div class="table-wrap cmp-wrap"><table class="tbl cmp-tbl cmp-sum"><thead><tr><th>When</th><th>Type</th><th>Case</th><th>Agent</th><th>TL</th><th>Mailed to</th><th>Subject</th><th>Result</th></tr></thead><tbody>${body}</tbody></table></div>`;
   }
@@ -274,6 +275,23 @@ FF.pages = FF.pages || {};
       } catch (e) { state.setMsg = ''; U.toast((e && e.message) || 'Could not save', 'err'); }
     }, 'Saving…');
   }
+  async function resend(btn) {
+    const caseNo = btn.dataset.cmpResend;
+    const kind = btn.dataset.kind || '', to0 = btn.dataset.to || '';
+    await U.withButtonBusy(btn, async () => {
+      try {
+        let out = await FF.auth.api('/api/complaints/mail-resend', 'POST', { caseNo, kind, to: to0 });
+        if (out && out.needTo) {
+          const to = window.prompt(`No mail rule matches case ${caseNo}.\nSend this mail to (email):`, '');
+          if (!to) return;
+          out = await FF.auth.api('/api/complaints/mail-resend', 'POST', { caseNo, kind, to: to.trim() });
+        }
+        if (out && out.ok) U.toast(`Mail sent again ✓ (${(out.results || []).map((r) => r.to).join(', ')})`, 'ok');
+        else U.toast((out && (out.error || (out.results || []).filter((r) => !r.ok).map((r) => `${r.to}: ${r.error}`).join(' · '))) || 'Resend failed', 'err');
+        await load();
+      } catch (e) { U.toast((e && e.message) || 'Resend failed', 'err'); }
+    }, 'Sending…');
+  }
   async function sendTest(btn) {
     const d = collectDraft();
     const to = (state.root.querySelector('[data-cmp-testto]') || {}).value || '';
@@ -379,7 +397,8 @@ FF.pages = FF.pages || {};
       const ca = t.closest('[data-chip-add]'); if (ca) { addChip(ca.closest('.cmp-chip-add').querySelector('[data-chip-in]')); return; }
       const rd = t.closest('[data-cmp-rdel]'); if (rd) { collectDraft(); const id = rd.closest('[data-rule]').dataset.rule; state.draft.mail.rules = state.draft.mail.rules.filter((x) => x.id !== id); paint(); return; }
       const sv = t.closest('[data-cmp-save]'); if (sv) { saveSettings(sv); return; }
-      const ts = t.closest('[data-cmp-test]'); if (ts) sendTest(ts);
+      const ts = t.closest('[data-cmp-test]'); if (ts) { sendTest(ts); return; }
+      const rsb = t.closest('[data-cmp-resend]'); if (rsb) resend(rsb);
     });
     load();
     // background cache is refreshed by the server; the page just re-reads it quietly every minute

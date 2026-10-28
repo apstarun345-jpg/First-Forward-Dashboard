@@ -20,7 +20,7 @@ import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, disp
 import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
-import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
+import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
@@ -5909,6 +5909,48 @@ async function handleApi(req, res, url) {
     const mst = admin ? complaintsMailState() : null;
     const extra = admin ? { cfg: normalizeComplaintsCfg((db.settings || {}).complaints), mailLog: mst.log.slice(-200).reverse(), mailErr: complaintsMailRun.lastErr, placeholders: MAIL_PLACEHOLDERS_LIST } : {};
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, rows: complaintsSvc.rows({ from, to }), meta: complaintsSvc.meta(), ...extra }), { 'Cache-Control': 'no-store' });
+  }
+  // 📨 Resend: ek complaint ki alert mail dobara bhejo (matching rules ke recipients ko, ya diye gaye `to` par)
+  if (p === '/api/complaints/mail-resend' && method === 'POST') {
+    if (!user || user.role !== 'admin') throw new HttpError(403, 'Admin only.');
+    const body = await readBody(req);
+    const caseNo = String(body.caseNo || '').trim();
+    const row = complaintsSvc.rows({}).find((r) => r.caseNo === caseNo);
+    if (!row) throw new HttpError(404, 'Complaint not found in the loaded data — pick a date range that includes it first.');
+    const cfg = normalizeComplaintsCfg((db.settings || {}).complaints);
+    const kind = ['new', 'deduct', 'remind'].includes(body.kind) ? body.kind : (row.status === 'Solved by Bank' && row.deducted > 0 ? 'deduct' : 'new');
+    let targets = [];
+    if (String(body.to || '').trim()) {
+      const bad = complaintsInvalidEmails(body.to);
+      if (bad.length) throw new HttpError(400, `Invalid email address: ${bad.slice(0, 3).join(', ')}`);
+      targets = [{ to: String(body.to).trim(), attach: true }];
+    } else {
+      targets = cfg.mail.rules.filter((r) => r.enabled && r.to && complaintRuleMatches(r, row)).map((r) => ({ to: r.to, attach: r.attach !== false, ruleId: r.id }));
+      if (!targets.length) return sendJson(res, 200, { ok: false, needTo: true, error: 'No mail rule matches this complaint — enter the recipient email.' });
+    }
+    const base = { ...(db.settings.email || {}) };
+    const st = complaintsMailState();
+    const m = buildComplaintMail(kind === 'remind' ? 'remind' : kind, kind === 'remind' ? [row] : row, cfg, Date.now());
+    let files = null;
+    const results = [];
+    for (const t of targets) {
+      let attachments = [], note = '';
+      if (t.attach && kind !== 'remind' && row.threadId) {
+        try { files = files || await complaintFilesFor(row.threadId); attachments = files; } catch (err) { note = `attachments skipped: ${String((err && err.message) || err).slice(0, 80)}`; }
+      }
+      try {
+        await sendMail({ ...base, to: t.to }, m.subject, m.text, { html: m.html, ...(attachments.length ? { attachments } : {}) });
+        st.log.push({ at: Date.now(), kind, to: t.to, subject: String(m.subject).slice(0, 120), ok: true, caseNo, count: 0, ruleId: t.ruleId || '', files: attachments.length, note, resend: true, by: user.username || user.name || '' });
+        results.push({ to: t.to, ok: true });
+      } catch (err) {
+        const msg = String((err && err.message) || err).slice(0, 200);
+        st.log.push({ at: Date.now(), kind, to: t.to, subject: String(m.subject).slice(0, 120), ok: false, error: msg, caseNo, ruleId: t.ruleId || '', resend: true });
+        results.push({ to: t.to, ok: false, error: msg });
+      }
+    }
+    if (st.log.length > 300) st.log = st.log.slice(-300);
+    persist('notify').catch(() => {});
+    return sendJson(res, 200, { ok: results.every((r) => r.ok), results, kind }, { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/complaints/mail-test' && method === 'POST') {
     if (!user || user.role !== 'admin') throw new HttpError(403, 'Admin only.');

@@ -91,3 +91,4 @@
 .cmp-mailc { white-space: nowrap; }
 .cmp-tbl tr.cmp-hfail td:not(.cmp-case) { background: #fff1f2; }
 .cmp-gvm { display: block; color: #2563eb !important; font-weight: 600; }
+.cmp-resend { display: block; margin: 4px auto 0; padding: 2px 8px; font-size: 11px; }

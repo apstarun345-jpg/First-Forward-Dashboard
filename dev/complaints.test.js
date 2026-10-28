@@ -181,12 +181,15 @@ test('page smoke: list shows the Mail column, history tab renders sent / failed 
   assert.match(mount.innerHTML, /<th[^>]*>Mail<\/th>/);
   assert.match(mount.innerHTML, /cmp-mok/);                 // ✅ count in the complaint row
   assert.match(mount.innerHTML, /data-cmp-tab="mail"/);
+  assert.match(mount.innerHTML, /data-cmp-resend="1170081271"/);
   assert.match(mount.innerHTML, /1170081271/);
   handlers.click({ target: { closest: (sel) => (sel === '[data-cmp-tab]' ? { dataset: { cmpTab: 'mail' } } : null) } });
   assert.match(mount.innerHTML, /✅ 1 sent/);
   assert.match(mount.innerHTML, /❌ Failed ×3/);
   assert.match(mount.innerHTML, /SMTP timeout/);
   assert.match(mount.innerHTML, /tl@x\.com/);
+  assert.match(mount.innerHTML, /data-kind="new" data-to="tl@x\.com"/);   // history rows can resend to the same recipient
+  assert.match(read('server.js'), /p === '\/api\/complaints\/mail-resend' && method === 'POST'/);
 });
 
 import { complaintTableHtml, buildMail as bm, DEFAULT_MAIL_TEMPLATES } from '../complaints-mail.js';
