@@ -127,21 +127,20 @@ export const MAP_BUCKET_LABEL = { ff: 'First Forward', gv: 'GV Partner', both: '
 export function gvOnlyList(index) {
   if (!index || !index.gv || !index.mapGv) return [];
   if (index._gvOnly && index._gvOnlyAt === index.at) return index._gvOnly;
-  // FF side: sirf "in field" (ffMapped) rows ko FF stock maano; office/parked rows alag remark ke saath dikhte hain.
-  const ffField = new Set(), ffFieldBc = new Set(), ffAny = new Set(), ffAnyBc = new Set();
+  // FF side: StockDataa me Tag ID ya Barcode kahin bhi mile (field/office/parked) to FF stock maana jata hai.
+  const ffAny = new Set(), ffAnyBc = new Set();
   for (const r of (index.ff && index.ff.raw) || []) {
     const t = str(r[0]).toUpperCase(), b = normBarcode(r[1]);
     ffAny.add(t); if (b) ffAnyBc.add(b);
-    if (mapBucketOf(r, index.mapGv, index.mapOpts || {}).ffMapped) { ffField.add(t); if (b) ffFieldBc.add(b); }
   }
   const out = [], seen = new Set(), remarks = new Map();
   for (const r of index.gv.raw || []) {
     const tu = str(r[0]).toUpperCase();
     if (!tu || seen.has(tu) || !index.mapGv.tags.has(tu)) continue;   // sirf GV "assigned" (in-stock) tags
     const b = normBarcode(r[1]);
-    if (ffField.has(tu) || (b && ffFieldBc.has(b))) continue;          // FF field stock me hai → difference nahi
+    if (ffAny.has(tu) || (b && ffAnyBc.has(b))) continue;              // FF StockDataa me Tag ID ya Barcode mila → difference nahi
     seen.add(tu); out.push(r);
-    remarks.set(tu, ffAny.has(tu) || (b && ffAnyBc.has(b)) ? GVONLY_REMARK_OFFICE : GVONLY_REMARK_NONE);
+    remarks.set(tu, GVONLY_REMARK_NONE);
   }
   index._gvOnly = out; index._gvOnlyAt = index.at; index._gvOnlyRemark = remarks;
   return out;

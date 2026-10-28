@@ -28,12 +28,11 @@ test('mapRows gvonly lists same tags, class filter works', () => {
   assert.equal(r.length, 1); assert.equal(r[0].tagId, 'T4');
 });
 
-test('GV tag sitting in FF office stock is counted with a remark; tag absent in FF says Not In FF Stock', () => {
+test('GV tag present in FF StockDataa (even parked/office) is not counted; absent ones get Not In FF Stock', () => {
   const idx = mkIndex();
-  idx.ff.raw.push(['T3', '9003', 'VC4', 0, '', '', '']);   // parked (no agent) in FF raw
+  idx.ff.raw.push(['T3', '9003', 'VC4', 0, '', '', '']);   // parked in FF raw -> present
   const s = gvOnlySummary(idx);
-  assert.equal(s.total, 2); assert.equal(s.notIn, 1); assert.equal(s.office, 1);
+  assert.equal(s.total, 1); assert.equal(s.notIn, 1); assert.equal(s.office, 0);
   const rows = mapRows(idx, { bucket: 'gvonly' });
-  assert.equal(rows.find((r) => r.tagId === 'T3').remark, 'In FF Office Stock (not in field)');
-  assert.equal(rows.find((r) => r.tagId === 'T4').remark, 'Not In FF Stock');
+  assert.equal(rows[0].tagId, 'T4'); assert.equal(rows[0].remark, 'Not In FF Stock');
 });
