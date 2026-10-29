@@ -742,7 +742,7 @@ FF.pages = FF.pages || {};
     return `<div class="kpi-grid mini hm-stock-grid">
         ${kpi('g1', 'First Forward · Stock in field', '📦', U.fmt(ff.total), `VC4 <b>${U.fmt(ff.vc4)}</b> · Comm <b>${U.fmt(ff.comm)}</b> · cover <b>${esc(cover(ff.total, ffRate))}</b> din`, 'src=ff&scope=stock')}
         ${kpi('g2', 'GV Partner · Stock in field', '📦', U.fmt(gv.total), `VC4 <b>${U.fmt(gv.vc4)}</b> · Comm <b>${U.fmt(gv.comm)}</b> · cover <b>${esc(cover(gv.total, gvRate))}</b> din`, 'src=gv&scope=stock')}
-        <div class="kpi g3 hm-gvonly" id="hm-gvonly" role="button" tabindex="0" title="GV Tag Assignment (in-stock) me hai par FF StockDataa me barcode nahi hai — click: class-wise"><div class="kpi-top"><span class="kpi-title">GV tags · not in FF stock</span><span class="kpi-icon">🔎</span></div><div class="kpi-value">…</div><div class="kpi-foot">loading…</div></div>
+        <div class="kpi g3 hm-gvonly" id="hm-gvonly"><div class="hm-gvonly-open" role="button" tabindex="0" aria-label="GV tags not in FF stock: open tag list"><div class="kpi-top"><span class="kpi-title">GV tags · not in FF stock</span><span class="kpi-icon">🔎</span></div><div class="kpi-value">…</div><div class="kpi-foot">loading…</div></div><div class="hm-gvonly-actions" hidden><button type="button" data-gvo-list>📋 Tag list</button><button type="button" data-gvo-summary>Class-wise</button>${FF.auth.can('export') ? '<a href="/api/stock-map/csv?bucket=gvonly" download>⬇ CSV</a>' : ''}</div></div>
       </div>
       <div class="grid g-2" style="margin-top:12px">
         ${card('📊 Stock · FF vs GV <span class="dim">(class-wise)</span>', bars, '')}
@@ -1101,7 +1101,7 @@ FF.pages = FF.pages || {};
       });
     };
     const load = async () => {
-      try { const d = await fetchPage(0, 300); state.rows = d.rows || []; state.total = d.total || 0; paint(); const q = host.querySelector('#smap-q'); if (q && state.q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
+      try { const d = await fetchPage(0, 300, bucket === 'gvonly'); state.rows = bucket === 'gvonly' ? (d.rows || []).slice(0, 10000) : (d.rows || []); state.total = d.total || 0; paint(); const q = host.querySelector('#smap-q'); if (q && state.q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
       catch (e) { host.innerHTML = U.errorBox ? U.errorBox(e) : esc(e.message); }
     };
     load();
@@ -1133,11 +1133,16 @@ FF.pages = FF.pages || {};
     chip.querySelector('.kpi-value').textContent = U.fmt(g.total);
     chip.title = `GV Tag Assignment (in-stock) me hai par FF StockDataa me barcode nahi hai — GV Assigned: ${U.fmt(assigned)} · GV Not Assigned: ${U.fmt(unassigned)}`;
     chip.querySelector('.kpi-foot').innerHTML = g.rows.length ? g.rows.map((r) => `${esc(r.cls)} <b>${U.fmt(r.n)}</b>`).join(' · ') : 'Sab GV tags FF stock me hain';
+    const actions = chip.querySelector('.hm-gvonly-actions');
+    if (actions) actions.hidden = false;
     if (!chip._gvOnlyBound) {
       chip._gvOnlyBound = true;
-      const open = () => openGvOnlyDrawer(chip._gvOnlyData || g);
-      chip.addEventListener('click', open);
-      chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      const open = () => openStockMapDrawer('gvonly', '');
+      const target = chip.querySelector('.hm-gvonly-open');
+      target.addEventListener('click', open);
+      target.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      chip.querySelector('[data-gvo-list]').addEventListener('click', open);
+      chip.querySelector('[data-gvo-summary]').addEventListener('click', () => openGvOnlyDrawer(chip._gvOnlyData || g));
     }
   }
 
