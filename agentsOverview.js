@@ -232,7 +232,7 @@ FF.pages = FF.pages || {};
 
   // ---- 📌 Assign work to a team link (admin) -----------------------------------------------------------
   const isAdmin = () => { try { return !!(FF.auth && FF.auth.user && FF.auth.user.role === 'admin'); } catch { return false; } };
-  const asg = { links: [], at: 0, busy: false, sel: new Set(), f: 'in1', type: 'all', q: '', sort: { k: 'stock', d: -1 }, limit: 100, linkId: '', msg: '' };
+  const asg = { links: [], at: 0, busy: false, sel: new Set(), ch: 'both', f: 'in1', type: 'all', q: '', sort: { k: 'stock', d: -1 }, limit: 100, linkId: '', msg: '' };
   const rowKey = (r) => `${r.ch}|${keyOf(r.name)}`;
   const ASG_FILTERS = [['in1', '🟠 Inactive · this month'], ['in2', '🔴 Inactive · 2 months'], ['deg', '🔻 De-growth'], ['inactive', '⚪ All inactive'], ['active', '🟢 Active'], ['all', '📦 All with stock']];
   const bucketLabel = (r) => (r.status === 'in1' ? 'Inactive · this month' : r.status === 'in2' ? 'Inactive · 2 months' : r.deg ? 'De-growth' : 'Assigned');
@@ -248,7 +248,7 @@ FF.pages = FF.pages || {};
   const linkLabel = (l) => `${l.name} · ${l.kind === 'tl' ? 'TL' : 'Team'} · ${l.source === 'gv' ? 'GV' : l.source === 'ff' ? 'FF' : 'GV+FF'}`;
   function asgRows() {
     const q = asg.q.trim().toLowerCase(), amap = assignedMap();
-    const list = forCh(state.tab).filter(BUCKETS[asg.f] || BUCKETS.all).filter((r) => asg.type === 'all' || (asg.type === 'direct' ? r.direct : !r.direct))
+    const list = forCh(asg.ch).filter(BUCKETS[asg.f] || BUCKETS.all).filter((r) => asg.type === 'all' || (asg.type === 'direct' ? r.direct : !r.direct))
       .filter((r) => !q || `${r.name} ${r.id} ${r.tlName}`.toLowerCase().includes(q));
     const val = (r) => { const k = asg.sort.k; if (k === 'name') return r.name.toLowerCase(); if (k === 'tl') return (r.direct ? 'direct' : r.tlName || '').toLowerCase(); if (k === 'status') return r.status === 'active' ? 2 : r.status === 'in1' ? 1 : 0; if (k === 'to') return ((amap.get(rowKey(r)) || {}).name || '').toLowerCase(); if (k.startsWith('c:')) return (r.cls && r.cls[k.slice(2)]) || 0; return r[k] || 0; };
     list.sort((a, b) => { const x = val(a), y = val(b); const c = x < y ? -1 : x > y ? 1 : 0; return (c * asg.sort.d) || (b.stock - a.stock); });
@@ -260,25 +260,28 @@ FF.pages = FF.pages || {};
     const th = (k, label, cls) => `<th class="${cls || ''} aov-sortable" data-asg-sort="${k}">${label}${asg.sort.k === k ? (asg.sort.d > 0 ? ' ▲' : ' ▼') : ''}</th>`;
     const opts = (arr, cur) => arr.map(([v, t]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${t}</option>`).join('');
     const linkOpts = `<option value="">Select a team link…</option>${asg.links.map((l) => `<option value="${esc(l.id)}" ${l.id === asg.linkId ? 'selected' : ''}>${esc(linkLabel(l))}${(l.assigned || []).length ? ` (${(l.assigned || []).length} assigned)` : ''}</option>`).join('')}`;
-    const allOn = shown.length > 0 && shown.every((r) => asg.sel.has(rowKey(r)));
+    const allOn = list.length > 0 && list.every((r) => asg.sel.has(rowKey(r)));
     const body = shown.map((r) => { const k = rowKey(r), to = amap.get(k); return `<tr class="${asg.sel.has(k) ? 'aov-sel' : ''}"><td><input type="checkbox" data-asg-row="${esc(k)}" ${asg.sel.has(k) ? 'checked' : ''}></td><td>${r.ch === 'gv' ? '🟩' : '🟦'} <b>${esc(r.name)}</b> <small class="dim">${esc(r.id || '')}</small></td><td>${esc(r.direct ? 'Direct' : r.tlName || '—')}</td><td>${ST_LBL[r.status]}${r.deg ? ' · 🔻 De-growth' : ''}</td><td class="num"><b>${fmt(r.stock)}</b></td>${CLASSES.map((c) => `<td class="num">${fmt((r.cls && r.cls[c]) || 0)}</td>`).join('')}<td class="num">${fmt(r.last)}</td><td class="num">${fmt(r.cur)}</td><td>${to ? `📌 ${esc(to.name)}` : '<span class="dim">—</span>'}</td></tr>`; }).join('');
     return `<div class="aov-asg-bar">
+        <select class="input" data-asg-ch>${opts([['both', '🔗 GV + FF'], ['ff', '🟦 First Forward'], ['gv', '🟩 GV Partner']], asg.ch)}</select>
         <select class="input" data-asg-f>${opts(ASG_FILTERS, asg.f)}</select>
         <select class="input" data-asg-type>${opts([['all', 'Direct + TL-managed'], ['direct', '🚫 Direct only'], ['managed', '🧑‍💼 TL-managed only']], asg.type)}</select>
         <input class="input" data-asg-q placeholder="Search agent / ID / TL…" value="${esc(asg.q)}">
         <select class="input" data-asg-link>${linkOpts}</select>
         <button class="btn small primary" data-asg-go ${selN && asg.linkId ? '' : 'disabled'}>📌 Assign ${selN ? `(${selN})` : ''}</button>
+        <button class="btn small" data-asg-selall ${list.length ? '' : 'disabled'}>☑ Select all ${fmt(list.length)}</button>
+        <button class="btn small" data-asg-clear ${selN ? '' : 'disabled'}>Clear</button>
         <button class="btn small" data-asg-un ${selN ? '' : 'disabled'} title="Remove the selected agents from whichever link they are assigned to">Unassign</button>
       </div>
       ${asg.msg ? `<p class="aov-asg-msg">${asg.msg}</p>` : ''}
       <div class="aov-leg" style="margin:6px 0">${fmt(list.length)} agents · ${fmt(sumStock(list))} tags in stock · ${fmt(selN)} selected</div>
-      <div class="table-wrap tall"><table class="tbl compact"><thead><tr><th><input type="checkbox" data-asg-all ${allOn ? 'checked' : ''} title="Select all shown"></th>${th('name', 'Agent')}${th('tl', 'TL')}${th('status', 'Status')}${th('stock', 'Stock', 'num')}${CLASSES.map((c) => th(`c:${c}`, clsLabel(c), 'num')).join('')}${th('last', 'Last month', 'num')}${th('cur', 'This month', 'num')}${th('to', 'Assigned to')}</tr></thead><tbody>${body || '<tr><td colspan="13" class="dim">No agents match.</td></tr>'}</tbody></table></div>
-      ${list.length > shown.length ? `<div class="btn-row"><button class="btn small" data-asg-more>⬇ Show ${fmt(Math.min(200, list.length - shown.length))} more</button> <span class="dim small">showing ${fmt(shown.length)} of ${fmt(list.length)} — “Select all” covers only the rows shown</span></div>` : ''}`;
+      <div class="table-wrap tall"><table class="tbl compact"><thead><tr><th><input type="checkbox" data-asg-all ${allOn ? 'checked' : ''} title="Select all ${fmt(list.length)} matching agents"></th>${th('name', 'Agent')}${th('tl', 'TL')}${th('status', 'Status')}${th('stock', 'Stock', 'num')}${CLASSES.map((c) => th(`c:${c}`, clsLabel(c), 'num')).join('')}${th('last', 'Last month', 'num')}${th('cur', 'This month', 'num')}${th('to', 'Assigned to')}</tr></thead><tbody>${body || '<tr><td colspan="13" class="dim">No agents match.</td></tr>'}</tbody></table></div>
+      ${list.length > shown.length ? `<div class="btn-row"><button class="btn small" data-asg-more>⬇ Show ${fmt(Math.min(200, list.length - shown.length))} more</button> <span class="dim small">showing ${fmt(shown.length)} of ${fmt(list.length)} — Select all covers all matching agents, not just the rows shown</span></div>` : ''}`;
   }
   function paintAsg(root) { const el = root.querySelector('#aov-asg-body'); if (el) el.innerHTML = asgHtml(); }
   async function doAssign(root, un) {
     const { list } = asgRows(), keys = asg.sel;
-    const all = forCh(state.tab), byKey = new Map(all.map((r) => [rowKey(r), r]));
+    const all = state.rows, byKey = new Map(all.map((r) => [rowKey(r), r]));
     const picked = [...keys].map((k) => byKey.get(k)).filter(Boolean);
     if (!picked.length) return;
     if (!un && !asg.linkId) return;
@@ -305,11 +308,12 @@ FF.pages = FF.pages || {};
     if (root.__asgBound) return; root.__asgBound = true;
     root.addEventListener('change', (e) => {
       const t = e.target; if (!t || !t.closest || !t.closest('#aov-asg')) return;
-      if (t.matches('[data-asg-f]')) { asg.f = t.value; asg.sel.clear(); asg.limit = 100; }
+      if (t.matches('[data-asg-ch]')) { asg.ch = t.value; asg.sel.clear(); asg.limit = 100; }
+      else if (t.matches('[data-asg-f]')) { asg.f = t.value; asg.sel.clear(); asg.limit = 100; }
       else if (t.matches('[data-asg-type]')) { asg.type = t.value; asg.sel.clear(); asg.limit = 100; }
       else if (t.matches('[data-asg-link]')) asg.linkId = t.value;
       else if (t.matches('[data-asg-row]')) { if (t.checked) asg.sel.add(t.getAttribute('data-asg-row')); else asg.sel.delete(t.getAttribute('data-asg-row')); }
-      else if (t.matches('[data-asg-all]')) { const { list } = asgRows(); list.slice(0, asg.limit).forEach((r) => { if (t.checked) asg.sel.add(rowKey(r)); else asg.sel.delete(rowKey(r)); }); }
+      else if (t.matches('[data-asg-all]')) { const { list } = asgRows(); list.forEach((r) => { if (t.checked) asg.sel.add(rowKey(r)); else asg.sel.delete(rowKey(r)); }); }
       else return;
       asg.msg = ''; paintAsg(root);
     });
@@ -318,6 +322,8 @@ FF.pages = FF.pages || {};
       const t = e.target; if (!t || !t.closest || !t.closest('#aov-asg')) return;
       const th = t.closest('[data-asg-sort]');
       if (th) { const k = th.getAttribute('data-asg-sort'); asg.sort = { k, d: asg.sort.k === k ? -asg.sort.d : (k === 'name' || k === 'tl' || k === 'to' ? 1 : -1) }; paintAsg(root); return; }
+      if (t.closest('[data-asg-selall]')) { asgRows().list.forEach((r) => asg.sel.add(rowKey(r))); asg.msg = ''; paintAsg(root); return; }
+      if (t.closest('[data-asg-clear]')) { asg.sel.clear(); asg.msg = ''; paintAsg(root); return; }
       if (t.closest('[data-asg-more]')) { asg.limit += 200; paintAsg(root); return; }
       if (t.closest('[data-asg-go]')) { doAssign(root, false); return; }
       if (t.closest('[data-asg-un]')) doAssign(root, true);
