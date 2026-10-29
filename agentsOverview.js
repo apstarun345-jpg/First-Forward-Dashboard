@@ -18,7 +18,14 @@ FF.pages = FF.pages || {};
   const keyOf = (v) => clean(v).toUpperCase().replace(/\.0+$/, '').replace(/\s+/g, ' ');
   const isDirect = (r, ch) => { try { return !!FF.config.isDirectAgent(r, ch); } catch { return false; } };
   const num = (v) => Number(v) || 0;
+  const CLASSES = ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'VC20', 'Other'];
+  const clsKey = (c) => { const m = /^\s*VC\s*0*(\d+)/i.exec(String(c || '')); const k = m ? `VC${m[1]}` : ''; return CLASSES.includes(k) ? k : 'Other'; };
+  const clsMap = (rows) => { const m = new Map(); (rows || []).forEach((r) => { const n = num(r.n); if (!n) return; [keyOf(r.agentId), `N:${keyOf(r.agentName)}`].forEach((k) => { if (!k || k === 'N:') return; const o = m.get(k) || {}; const c = clsKey(r.cls); o[c] = (o[c] || 0) + n; m.set(k, o); }); }); return m; };
+  const clsOf = (m, id, name) => { const o = m.get(keyOf(id)) || m.get(`N:${keyOf(name)}`) || {}; const out = {}; CLASSES.forEach((c) => { out[c] = o[c] || 0; }); return out; };
+  const clsSum = (l) => { const t = {}; CLASSES.forEach((c) => { t[c] = l.reduce((s, r) => s + ((r.cls && r.cls[c]) || 0), 0); }); return t; };
 
+  // Office / placeholder holders are not agents: GV "Not Assigned", FF "APNA PAYMENT" (company ID 5845036).
+  const isOffice = (id, name) => /^\s*not\s*assigned\s*$/i.test(`${id}`) || /^\s*not\s*assigned\s*$/i.test(`${name}`) || /^\s*apna\s*payment(\s*pvt.*)?\s*$/i.test(`${name}`) || String(id).trim() === '5845036';
   // ---- data ---------------------------------------------------------------------------------------
   const classify = (r) => {
     r.type = r.direct ? 'direct' : 'managed';
@@ -27,12 +34,14 @@ FF.pages = FF.pages || {};
   };
   async function ffRows() {
     const out = [];
+    let fm = new Map();
+    try { fm = clsMap(await FF.store.need('stockAgents')); } catch { /* class split optional */ }
     try {
       if (FF.pages.performance && FF.pages.performance.ensureLoaded) await FF.pages.performance.ensureLoaded();
       const list = (FF.pages.performance && FF.pages.performance.agents && FF.pages.performance.agents()) || [];
       list.forEach((a) => {
-        const stock = num(a.stockTotal); if (stock <= 0) return;
-        out.push(classify({ ch: 'ff', id: clean(a.agentId || a.id), name: clean(a.name || a.agentId), tlName: clean(a.tlName), tlId: clean(a.tlId), direct: isDirect(a, 'ff'), stock, vc4Stock: num(a.stockVc4), cur: num(a.curTotal), last: num(a.lastTotal), lastActive: clean(a.lastActive).replace(/^[^\p{L}\d]+/u, '') }));
+        const stock = num(a.stockTotal); if (stock <= 0 || isOffice(a.agentId || a.id, a.name)) return;
+        out.push(classify({ ch: 'ff', id: clean(a.agentId || a.id), name: clean(a.name || a.agentId), tlName: clean(a.tlName), tlId: clean(a.tlId), direct: isDirect(a, 'ff'), stock, vc4Stock: num(a.stockVc4), cls: clsOf(fm, a.agentId || a.id, a.name), cur: num(a.curTotal), last: num(a.lastTotal), lastActive: clean(a.lastActive).replace(/^[^\p{L}\d]+/u, '') }));
       });
     } catch { /* FF optional */ }
     return out;
@@ -42,7 +51,8 @@ FF.pages = FF.pages || {};
     const out = [], G = FF.gv;
     if (!G) return out;
     try { await FF.store.need('daily'); } catch { /* optional */ }
-    let stockRows = [], report = [];
+    let stockRows = [], report = [], gm = new Map();
+    try { gm = clsMap(await G.need('stockAgentClass')); } catch { /* class split optional */ }
     try { stockRows = (await G.need('stockAgent')) || []; } catch { /* optional */ }
     try { report = (await G.need('report')) || []; } catch { /* optional */ }
     const latest = G.latestDate && G.latestDate();
@@ -62,6 +72,8 @@ FF.pages = FF.pages || {};
     });
     agg.forEach((o) => {
       if (o.stock <= 0) return;
+      o.cls = clsOf(gm, o.id, o.name);
+      if (isOffice(o.id, o.name)) return;
       const rp = rep.get(keyOf(o.id)) || rep.get(keyOf(o.name)) || {};
       const hasEir = curM.size > 0;
       o.cur = hasEir ? (curM.get(keyOf(o.id)) || curM.get(keyOf(o.name)) || 0) : num(rp.curTotal);
@@ -126,7 +138,7 @@ FF.pages = FF.pages || {};
     register.done = true;
     const e = esc;
     const cols = [['Ch', (r) => (r.ch === 'gv' ? '🟩 GV' : '🟦 FF')], ['Agent', (r) => `<b>${e(r.name)}</b> <small class="dim">${e(r.id || '')}</small>`], ['TL', (r) => e(r.direct ? 'Direct' : r.tlName || '—')], ['Status', (r) => ST_LBL[r.status]],
-      ['Stock', (r) => fmt(r.stock), 1], ['This month', (r) => fmt(r.cur), 1], ['Last month', (r) => fmt(r.last), 1], ['Last active', (r) => e(r.lastActive || '—')]];
+      ['Stock', (r) => fmt(r.stock), 1], ...CLASSES.map((c) => [c, (r) => fmt((r.cls && r.cls[c]) || 0), 1]), ['This month', (r) => fmt(r.cur), 1], ['Last month', (r) => fmt(r.last), 1], ['Last active', (r) => e(r.lastActive || '—')]];
     ['ff', 'gv', 'both'].forEach((ch) => {
       Object.keys(BUCKETS).forEach((b) => {
         FF.kpiDetail.registerList(`aov.${ch}.${b}`, () => {
@@ -134,7 +146,7 @@ FF.pages = FF.pages || {};
           const who = ch === 'both' ? 'GV + FF' : CH[ch].label;
           return { kicker: `${who} · ${TITLES[b]}`, title: `${who} · ${TITLES[b]}`, unit: 'agents', rows, columns: cols, agent: (r) => ({ name: r.name, id: r.id, ch: r.ch }),
             headline: { value: sumStock(rows), unit: 'tags in stock' },
-            sub: `This month issued <b>${fmt(U.sum(rows, (r) => r.cur))}</b> · last month <b>${fmt(U.sum(rows, (r) => r.last))}</b>` };
+            sub: `Stock by class: ${classLine(rows)} · This month issued <b>${fmt(U.sum(rows, (r) => r.cur))}</b> · last month <b>${fmt(U.sum(rows, (r) => r.last))}</b>` };
         });
       });
       FF.kpiDetail.registerList(`aov.${ch}.tls`, () => {
@@ -145,6 +157,7 @@ FF.pages = FF.pages || {};
       });
     });
   }
+  const classLine = (l) => { const t = clsSum(l); return CLASSES.filter((c) => t[c]).map((c) => `${c} <b>${fmt(t[c])}</b>`).join(' · ') || '—'; };
   const kp = (ch, b) => `data-kpi="scope=list&list=aov.${ch}.${b}&src=${ch === 'both' ? 'both' : ch}"`;
 
   // ---- render -------------------------------------------------------------------------------------
@@ -168,6 +181,7 @@ FF.pages = FF.pages || {};
     const bar = `<div class="aov-bar" title="Stock split"><span style="width:${pct(s.active.stock, s.all.stock)}%;background:#10b981"></span><span style="width:${pct(s.in1.stock, s.all.stock)}%;background:#f59e0b"></span><span style="width:${pct(s.in2.stock, s.all.stock)}%;background:#ef4444"></span></div><div class="aov-leg">🟢 active ${pct(s.active.stock, s.all.stock)}% · 🟠 inactive this month ${pct(s.in1.stock, s.all.stock)}% · 🔴 inactive 2 months ${pct(s.in2.stock, s.all.stock)}% <b>of stock</b></div>`;
     const block = (p, name, nCh) => `<div class="aov-sec">${name}</div><div class="aov-chips">${chip(nCh, p ? 'direct' : 'managed', 'Total', p ? s.direct : s.managed)}${chip(nCh, p ? 'd.active' : 'm.active', '🟢 Active', s[p ? 'd.active' : 'm.active'], 'good')}${chip(nCh, p ? 'd.inactive' : 'm.inactive', '⚪ Inactive', s[p ? 'd.inactive' : 'm.inactive'], 'warn')}${chip(nCh, p ? 'd.in1' : 'm.in1', '🟠 Inactive · this month', s[p ? 'd.in1' : 'm.in1'], 'warn')}${chip(nCh, p ? 'd.in2' : 'm.in2', '🔴 Inactive · 2 months', s[p ? 'd.in2' : 'm.in2'], 'bad')}</div>`;
     return `<div class="aov-card"><h3>${who}</h3><div class="aov-sub">${fmt(s.all.n)} agents hold ${fmt(s.all.stock)} tags · inactive agents hold <b>${fmt(s.inactive.stock)}</b> (${pct(s.inactive.stock, s.all.stock)}%)</div>
+      <div class="aov-leg" style="margin:-4px 0 6px">📦 Stock by class: ${classLine(forCh(ch))}<br>⚪ Inactive agents' stock: ${classLine(forCh(ch).filter(BUCKETS.inactive))}</div>
       <div class="aov-chips">${chip(ch, 'all', '📦 Agents with stock', s.all)}${chip(ch, 'direct', '🚫 Direct agents', s.direct)}${chip(ch, 'managed', '🧑‍💼 TL-managed agents', s.managed)}<button type="button" class="aov-chip" ${kp(ch, 'tls')}><small>🧑‍💼 TLs</small><b>${fmt(s.tls.n)}</b><i>${s.tls.n ? `${s.perTl.toFixed(1)} agents / TL` : '—'}</i></button></div>
       <div class="aov-chips">${chip(ch, 'active', '🟢 Active agents', s.active, 'good')}${chip(ch, 'inactive', '⚪ Inactive agents', s.inactive, 'warn')}${chip(ch, 'in1', '🟠 Inactive · this month', s.in1, 'warn')}${chip(ch, 'in2', '🔴 Inactive · 2 months', s.in2, 'bad')}</div>${bar}
       ${block(true, '🚫 Direct agents', ch)}${block(false, '🧑‍💼 TL-managed agents', ch)}</div>`;
@@ -179,8 +193,8 @@ FF.pages = FF.pages || {};
   }
   function csv() {
     const rows = forCh(state.tab).slice().sort((a, b) => a.ch.localeCompare(b.ch) || b.stock - a.stock);
-    U.downloadCsv(`gv-ff-agents-summary-${U.stamp()}.csv`, ['Channel', 'Agent', 'Agent ID', 'Type', 'TL', 'TL ID', 'Status', 'Stock', 'Issued this month', 'Issued last month', 'Last active'],
-      rows.map((r) => [CH[r.ch].label, r.name, r.id, r.direct ? 'Direct' : 'TL-managed', r.direct ? '' : r.tlName, r.direct ? '' : r.tlId, ST_LBL[r.status].replace(/^\S+\s/, ''), r.stock, r.cur, r.last, r.lastActive || '']));
+    U.downloadCsv(`gv-ff-agents-summary-${U.stamp()}.csv`, ['Channel', 'Agent', 'Agent ID', 'Type', 'TL', 'TL ID', 'Status', 'Stock', ...CLASSES.map((c) => `Stock ${c}`), 'Issued this month', 'Issued last month', 'Last active'],
+      rows.map((r) => [CH[r.ch].label, r.name, r.id, r.direct ? 'Direct' : 'TL-managed', r.direct ? '' : r.tlName, r.direct ? '' : r.tlId, ST_LBL[r.status].replace(/^\S+\s/, ''), r.stock, ...CLASSES.map((c) => (r.cls && r.cls[c]) || 0), r.cur, r.last, r.lastActive || '']));
   }
   function paint(root) {
     const tabBtn = (v, t) => `<button class="btn small ${state.tab === v ? 'primary' : ''}" data-aov-tab="${v}">${t}</button>`;
@@ -192,7 +206,7 @@ FF.pages = FF.pages || {};
       ${state.tab === 'both' ? `<div class="aov-grid" style="margin-bottom:14px">${card('both')}</div>` : ''}
       <div class="aov-grid">${chans.map(card).join('')}</div>
       <section class="card" style="margin-top:14px"><div class="card-head"><h3>🧑‍💼 TLs holding stock</h3><div class="card-right"><input class="input" id="aov-q" placeholder="Search TL…" value="${esc(state.q)}"></div></div><div class="card-body" id="aov-tls">${tlTable()}</div></section>
-      <p class="dim small">Active = issued ≥ 1 tag this month · Inactive this month = issued last month but not this month · Inactive 2 months = nothing issued last month or this month. Only agents with stock &gt; 0 are counted. Direct agent rule = Settings → Direct Agents.</p></div>`;
+      <p class="dim small">Active = issued ≥ 1 tag this month · Inactive this month = issued last month but not this month · Inactive 2 months = nothing issued last month or this month. Only agents with stock &gt; 0 are counted (office holders “APNA PAYMENT” and “Not Assigned” are excluded). Class split: VC4 · VC5 · VC6 · VC7 · VC12 · VC16 · VC20 · Other. Direct agent rule = Settings → Direct Agents.</p></div>`;
     root.querySelectorAll('[data-aov-tab]').forEach((b) => b.addEventListener('click', () => { state.tab = b.dataset.aovTab; paint(root); }));
     const rf = root.querySelector('#aov-refresh'); if (rf) rf.addEventListener('click', () => { root.innerHTML = U.spinner('Refreshing…'); load(true).then(() => paint(root)).catch((err) => { root.innerHTML = U.errorBox(err); }); });
     const cv = root.querySelector('#aov-csv'); if (cv) cv.addEventListener('click', csv);
