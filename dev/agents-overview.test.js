@@ -39,6 +39,6 @@ test('agents summary: direct/TL × active/inactive buckets, stock-only', async (
   assert.equal(gv.in1.n, 1, 'G1 issued last month only'); assert.equal(gv.active.n, 1);
   assert.equal(AO.stat('both').all.n, 6);
   assert.equal(AO.listFor('both', 'in2').length, 1);
-  const c = AO.listFor('ff', 'm.in2')[0]; assert.equal(c.cls.VC4, 20); assert.equal(c.cls.VC20, 10);
+  const c = AO.listFor('ff', 'm.in2')[0]; assert.equal(c.cls.VC4, 30, 'VC20 folds into VC4/20');
   assert.equal(AO.listFor('gv', 'in1')[0].cls.VC12, 4);
 });

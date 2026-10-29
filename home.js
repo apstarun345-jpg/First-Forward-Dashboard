@@ -1150,6 +1150,33 @@ FF.pages = FF.pages || {};
       x.disabled = false; x.textContent = old;
     });
   }
+
+  // 📌 Admin: work assigned to team links (from GV & FF Agents Summary) + how many of those agents have a target set.
+  async function mountAssignCard(el) {
+    if (!el || !FF.auth || !FF.auth.user || FF.auth.user.role !== 'admin' || typeof FF.auth.api !== 'function') return;
+    let links = [], targets = [];
+    try {
+      const [l, st] = await Promise.all([FF.auth.api('/api/personal-links'), FF.auth.api('/api/settings')]);
+      links = ((l && l.links) || []).filter((x) => x && Array.isArray(x.assigned) && x.assigned.length);
+      targets = ((st && st.settings && st.settings.targets) || (FF.auth.settings && FF.auth.settings.targets) || []);
+    } catch { return; }
+    if (!el.isConnected || !links.length) { if (el.isConnected) el.innerHTML = ''; return; }
+    const ym = new Date().toISOString().slice(0, 7);
+    const keyOf = (src, name) => `${src === 'gv' ? 'gv' : 'ff'}|${U.clean(name).toUpperCase().replace(/\s+/g, ' ')}`;
+    const tmap = new Map(); targets.forEach((t) => { if (t && t.ym === ym && t.key) tmap.set(t.key, t); });
+    let tA = 0, tT = 0, tC = 0, tAc = 0;
+    const rows = links.map((l) => {
+      let cnt = 0, act = 0;
+      l.assigned.forEach((a) => { const t = tmap.get(keyOf(a.src, a.name)); if (!t) return; if (t.goal === 'active') act++; else if (Number(t.target) > 0 || Object.values(t.classTargets || {}).some((v) => Number(v) > 0)) cnt++; });
+      const n = l.assigned.length, set = cnt + act;
+      tA += n; tT += set; tC += cnt; tAc += act;
+      const pct = n ? Math.round((set / n) * 100) : 0;
+      return `<tr class="clickable" data-go="#/agentsOverview"><td><b>${esc(l.name)}</b> <small class="dim">${l.kind === 'tl' ? 'TL' : 'Team'}</small></td><td class="num"><b>${U.fmt(n)}</b></td><td class="num">${U.fmt(set)} <small class="dim">(${pct}%)</small></td><td class="num">${U.fmt(cnt)}</td><td class="num">${U.fmt(act)}</td><td class="num">${U.fmt(n - set)}</td></tr>`;
+    });
+    el.innerHTML = `<section class="card"><div class="card-head"><div><h3>📌 Assigned work by RSM</h3><span class="dim small">${U.fmt(tA)} agents assigned to ${U.fmt(links.length)} team link${links.length > 1 ? 's' : ''} · ${U.fmt(tT)} have a target set (${U.fmt(tC)} count · ${U.fmt(tAc)} Active goal) · ${U.fmt(tA - tT)} without a target</span></div><div class="card-right"><a class="btn small" href="#/agentsOverview">Assign more →</a></div></div>
+      <div class="card-body"><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Team link</th><th class="num">Assigned</th><th class="num">Targets set</th><th class="num">Count target</th><th class="num">Active goal</th><th class="num">No target yet</th></tr></thead><tbody>${rows.join('')}</tbody></table></div></div></section>`;
+    el.querySelectorAll('tr[data-go]').forEach((tr) => tr.addEventListener('click', () => { location.hash = tr.dataset.go; }));
+  }
   async function mountStockMap(el, allowed) {
     if (!el || !allowed || !FF.auth || typeof FF.auth.api !== 'function') return;
     const load = async (force) => {
@@ -1180,6 +1207,7 @@ FF.pages = FF.pages || {};
   const homeLayout = (() => {
     const SECTIONS = [
       ['home-target-alerts', '🎯 Target updates'],
+      ['home-assign', '📌 Assigned work by RSM'],
       ['home-todo', "✅ Today's work"],
       ['home-gv-live', '🟩 GV live today'],
       ['home-month', '📅 Month KPI cards'],
@@ -1293,6 +1321,7 @@ FF.pages = FF.pages || {};
         </div>
       </div>
       <div id="home-target-alerts"></div>
+      <div id="home-assign"></div>
       <div id="home-todo"></div>
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
       <div id="home-month">${U.spinner('Building month KPI cards from the EIR sheet…')}</div>
@@ -1316,6 +1345,7 @@ FF.pages = FF.pages || {};
 
     // ✅ v3.78 — "Today's work" card: pending Tag Requests + one-click shortcuts (cheap: one small API call).
     try { if (FF.targetAlerts) FF.targetAlerts.mount(U.$('#home-target-alerts', root)); } catch { /* ignore */ }
+    try { mountAssignCard(U.$('#home-assign', root)); } catch { /* optional */ }
     const todoMount = U.$('#home-todo', root);
     if (todoMount) {
       const canReq = FF.auth.can('tagRequest') || (u.role === 'admin');

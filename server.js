@@ -6216,6 +6216,17 @@ async function handleApi(req, res, url) {
       source: m && m.source === 'gv' ? 'gv' : (m && m.source === 'ff' ? 'ff' : '')
     })).filter((m) => { const k = `${m.source}|${m.name.toLowerCase()}`; if (!m.name || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 120);
   };
+  const normPlAssigned = (arr) => {
+    const seen = new Set();
+    return (Array.isArray(arr) ? arr : []).map((a) => ({
+      src: a && a.src === 'gv' ? 'gv' : 'ff',
+      name: String((a && a.name) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80),
+      id: String((a && a.id) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40),
+      tl: String((a && a.tl) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80),
+      bucket: String((a && a.bucket) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40),
+      at: String((a && a.at) || ''), by: String((a && a.by) || '').slice(0, 60)
+    })).filter((a) => { const k = `${a.src}|${plNormName(a.name)}`; if (!a.name || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 600);
+  };
   const normPlTls = (arr) => {
     const seen = new Set();
     return (Array.isArray(arr) ? arr : []).map((t) => ({
@@ -6341,6 +6352,33 @@ async function handleApi(req, res, url) {
     void personalDailyRows(link).catch(() => {});
     if (kind !== 'agent') void personalTeamAgents(link).catch(() => {});
     return sendJson(res, 200, { ok: true, link: normPlLink(link) });
+  }
+  // 📌 Assign agents (from GV & FF Agents Summary) to a team link — "Assigned work by RSM" tab on that link. One agent → one link.
+  const plAssign = p.match(/^\/api\/personal-links\/([^/]+)\/assign$/);
+  if (plAssign && method === 'POST') {
+    requireAdmin(user);
+    const id = decodeURIComponent(plAssign[1]);
+    const links = Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : [];
+    const link = links.find((l) => l.id === id);
+    if (!link) throw new HttpError(404, 'Link nahi mila.');
+    if (!isTeamLink(link)) throw new HttpError(400, 'Work can only be assigned to a team link (TL / group).');
+    const body = await readBody(req);
+    const keyOf = (a) => `${a.src === 'gv' ? 'gv' : 'ff'}|${plNormName(a.name)}`;
+    let cur = normPlAssigned(link.assigned);
+    if (body.clear === true) cur = [];
+    const rem = new Set((Array.isArray(body.remove) ? body.remove : []).map(keyOf));
+    if (rem.size) cur = cur.filter((a) => !rem.has(keyOf(a)));
+    const add = normPlAssigned((Array.isArray(body.add) ? body.add : []).slice(0, 600).map((a) => ({ ...a, at: new Date().toISOString(), by: user.username })));
+    if (add.length) {
+      const addKeys = new Set(add.map(keyOf));
+      links.forEach((l) => { if (l.id !== link.id && Array.isArray(l.assigned) && l.assigned.length) l.assigned = normPlAssigned(l.assigned).filter((a) => !addKeys.has(keyOf(a))); });
+      cur = cur.filter((a) => !addKeys.has(keyOf(a))).concat(add);
+    }
+    link.assigned = normPlAssigned(cur);
+    await persist('settings');
+    for (const k of [...plPageCache.keys()]) if (String(k).startsWith(`${link.token}|`)) plPageCache.delete(k);
+    logAudit(user, 'link_assign', { target: `${link.kind}:${link.name}`, ip: clientIp(req), note: `${add.length} added · ${rem.size} removed · now ${link.assigned.length}` });
+    return sendJson(res, 200, { ok: true, link: normPlLink(link), links: links.map((l) => ({ id: l.id, assigned: normPlAssigned(l.assigned).length })) });
   }
   const plItem = p.match(/^\/api\/personal-links\/([^/]+)$/);
   if (plItem && method === 'PUT') {
@@ -9986,6 +10024,12 @@ const plMobileFor = (maps, src, id, name) => {
   for (const ch of order) { const m = (ik && maps[ch].id.get(ik)) || maps[ch].name.get(nk2); if (m) return m; }
   return /^[6-9]\d{9}$/.test(String(id || '').trim()) ? String(id).trim() : '';
 };
+/** Assigned-work list of a team link (module-level copy of normPlAssigned: src | name | id | tl | bucket). */
+function normPlAssignedGlobal(arr) {
+  const seen = new Set();
+  return (Array.isArray(arr) ? arr : []).map((a) => ({ src: a && a.src === 'gv' ? 'gv' : 'ff', name: String((a && a.name) || '').trim().slice(0, 80), id: String((a && a.id) || '').trim().slice(0, 40), tl: String((a && a.tl) || '').trim().slice(0, 80), bucket: String((a && a.bucket) || '').trim().slice(0, 40) }))
+    .filter((a) => { const k = `${a.src}|${plNormName(a.name)}`; if (!a.name || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 600);
+}
 /** 🎯 Agents a team link may set targets for: Map(normName → { name, src, tl }). */
 async function plScopeAgents(link) {
   const out = new Map();
@@ -9999,6 +10043,7 @@ async function plScopeAgents(link) {
     try { for (const n of (await personalTeamAgents(link)).keys()) put(n, src, link.kind === 'tl' ? link.name : ''); } catch { /* members below */ }
     personalMemberNames(link).forEach((n) => put(n, src, ''));
   }
+  normPlAssignedGlobal(link.assigned).forEach((a) => put(a.name, a.src, a.tl || ''));   // 📌 assigned work → targets allowed
   return out;
 }
 const plTargetKey = (src, name) => `${src === 'gv' ? 'gv' : 'ff'}|${String(name || '').trim().toUpperCase().replace(/\s+/g, ' ')}`;
@@ -10565,13 +10610,15 @@ async function servePersonalPage(req, res, rawToken) {
   };
   if (!wantFresh) { const hit = plPageCache.get(cacheKey); if (hit && Date.now() - hit.at < PL_CACHE_MS) return replyPage(hit); }
   try {
-    const needsIssuance = hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights');
-    const needsStock = hasSec('stock') || hasSec('ageing') || (hasSec('insights') && isTeamLink(link));
+    const asgAll = isTeamLink(link) ? normPlAssignedGlobal(link.assigned) : [];
+    const asg = chView === 'all' ? asgAll : asgAll.filter((a) => a.src === chView);   // 📌 work assigned by RSM (this channel view)
+    const needsIssuance = hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights') || asg.length > 0;
+    const needsStock = hasSec('stock') || hasSec('ageing') || (hasSec('insights') && isTeamLink(link)) || asg.length > 0;
     // Start independent sheet/index work together so verified links don't wait for serial requests.
     const rowsPromise = needsIssuance ? personalDailyRows(link) : Promise.resolve([]);
-    const classRowsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance') || hasSec('insights'))
+    const classRowsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance') || hasSec('insights') || asg.length > 0)
       ? personalAgentClassRows(link).catch(() => new Map()) : Promise.resolve(new Map());
-    const dailyClsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights'))
+    const dailyClsPromise = isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights') || asg.length > 0)
       ? personalAgentDailyRows(link).catch(() => new Map()) : Promise.resolve(new Map());
     const livePromise = hasSec('overview')
       ? Promise.race([personalLiveToday(link), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 5000); if (t.unref) t.unref(); })]).catch(() => null)
@@ -10977,9 +11024,10 @@ async function servePersonalPage(req, res, rawToken) {
     // 🔎 Scoped search — only the TLs / agents this link covers
     let searchHtml = '';
     let dispatchOk = false;
-    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance') || hasSec('insights'))) {
-      const issueOk = hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights');
-      const stockOk = hasSec('stock') || hasSec('overview') || hasSec('ageing') || hasSec('insights');
+    let asgPaneHtml = '';
+    if (isTeamLink(link) && (hasSec('overview') || hasSec('issuance') || hasSec('stock') || hasSec('performance') || hasSec('insights') || asg.length > 0)) {
+      const issueOk = hasSec('overview') || hasSec('issuance') || hasSec('performance') || hasSec('insights') || asg.length > 0;
+      const stockOk = hasSec('stock') || hasSec('overview') || hasSec('ageing') || hasSec('insights') || asg.length > 0;
       const nk = plNormName;
       const defSrc = link.source === 'gv' ? 'gv' : 'ff';
       const agentSrc = new Map(), agentTl = new Map(), tlGroups = [];
@@ -11004,11 +11052,15 @@ async function servePersonalPage(req, res, rawToken) {
       const peopleMap = new Map();
       const addPerson = (name) => { const k = nk(name); if (!k) return null; let p = peopleMap.get(k); if (!p) { p = { k: 'a', n: String(name).trim(), s: agentSrc.get(k) || defSrc, tl: agentTl.get(k) || '', m: 0, l: 0, d: 0, st: 0 }; peopleMap.set(k, p); } return p; };
       for (const [name, dm] of byAgentMap) { const p = addPerson(name); if (!p) continue; for (const [d, n] of dm) { if (String(d).startsWith(ym)) p.m += n; else if (String(d).startsWith(prevYm)) p.l += n; } }
+      asg.forEach((a) => { const k0 = nk(a.name); if (k0 && !agentSrc.has(k0)) agentSrc.set(k0, a.src); if (k0 && a.tl && !agentTl.has(k0)) agentTl.set(k0, a.tl); });
+      asg.forEach((a) => addPerson(a.name));
       personalMemberNames(link).forEach((n) => addPerson(n));
       if (stockInfo && stockInfo.agents) stockInfo.agents.forEach((a) => addPerson(a.n));
       for (const [k2, p] of peopleMap) { p.d = liveBy.get(k2) || 0; p.st = stockBy.get(k2) || 0; }
       // 🎯 class-wise issuance (last / MTD) + stock per agent → client computes cover, priority and dispatch need
       const classRows = await classRowsPromise;
+      const asgPseudo = (s2) => { const ms = asg.filter((a) => a.src === s2).map((a) => ({ name: a.name, id: a.id, source: s2 })); return ms.length ? { kind: 'group', source: s2, name: link.name, members: ms } : null; };
+      if (asg.length) await Promise.all(['ff', 'gv'].map(async (s2) => { const ps = asgPseudo(s2); if (!ps) return; try { const m = await personalAgentClassRows(ps); for (const [k0, v0] of m) if (!classRows.has(k0)) classRows.set(k0, v0); } catch { /* assigned issuance optional */ } }));
       const stockCls = new Map();
       const addStockCls = (m) => { for (const [k3, v3] of m) stockCls.set(plNormName(k3), v3); };
       if (stockIdxRef.v) {
@@ -11020,6 +11072,7 @@ async function servePersonalPage(req, res, rawToken) {
           else addStockCls(personalClassStockByAgent(stockIdxRef.v, defSrc, 'group', personalMemberNames(link)));
         } catch { /* stock by class optional */ }
       }
+      if (stockIdxRef.v && asg.length) ['ff', 'gv'].forEach((s2) => { const ns = asg.filter((a) => a.src === s2).map((a) => a.name); if (ns.length) { try { addStockCls(personalClassStockByAgent(stockIdxRef.v, s2, 'group', ns)); } catch { /* assigned stock optional */ } } });
       const liveCls = new Map();
       if (live) live.agents.forEach((a) => { const o = {}; Object.entries(a.cls || {}).forEach(([k4, v4]) => { const ck = plCls(k4); o[ck] = (o[ck] || 0) + v4; }); liveCls.set(nk(a.name), o); });
       const classSet = new Set(['VC4', 'VC20']);
@@ -11034,6 +11087,7 @@ async function servePersonalPage(req, res, rawToken) {
         if (sc) p.st = sumK(2);
       }
       const memberId = new Map(); (Array.isArray(link.members) ? link.members : []).forEach((m) => { if (m && m.name && m.id) memberId.set(nk(m.name), String(m.id).trim().replace(/\.0+$/, '')); });
+      asg.forEach((a) => { if (a.id && !memberId.has(nk(a.name))) memberId.set(nk(a.name), a.id.replace(/\.0+$/, '')); });
       for (const [k8, p] of peopleMap) { const idv = agentIdBy.get(k8) || memberId.get(k8); if (idv) p.i = idv; }
       const mobMaps = await Promise.race([personalReportMobiles().catch(() => null), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 3500); if (t.unref) t.unref(); })]);
       const tgList = Array.isArray(db.settings.targets) ? db.settings.targets : [];
@@ -11043,6 +11097,7 @@ async function servePersonalPage(req, res, rawToken) {
         const tt = tgBy.get(plTargetKey(p.s, p.n)); if (tt) { const v = plTargetValue(tt); if (v) p.tg = v; if (tt.via === 'link') p.tl2 = 1; }
       }
       const dailyCls = await dailyClsPromise;
+      if (asg.length) await Promise.all(['ff', 'gv'].map(async (s2) => { const ps = asgPseudo(s2); if (!ps) return; try { const m = await personalAgentDailyRows(ps); for (const [k0, v0] of m) if (!dailyCls.has(k0)) dailyCls.set(k0, v0); } catch { /* optional */ } }));
       const todayKeyNow = dateKeyNow(), domNow = Number(todayKeyNow.slice(8, 10));
       const dayCompact = (dm) => {
         const o = {}; let la = '', lp = 0;
@@ -11073,12 +11128,22 @@ async function servePersonalPage(req, res, rawToken) {
       });
       const dataJson = JSON.stringify({ classes: [...classSet].sort((a, b) => plClsRank(a) - plClsRank(b)), items: items.slice(0, 1500), issue: issueOk, stock: stockOk, live: !!live, ym, prevYm, td: Number(dateKeyNow().slice(8, 10)), today: dateKeyNow(), tgOk: feats().plTargets !== false, tok: token, both: linkChannels.length > 1, exp: !!canExport, days: Number(feats().suggestDays) || 15, elapsed: Math.max(1, Number(dateKeyNow().slice(8, 10)) - 1), red: Number((db.settings.thresholds || {}).coverRed) || 7, orange: Number((db.settings.thresholds || {}).coverOrange) || 15, isTl: link.kind === 'tl' || (link.tls || []).length > 0 || tlGroups.length > 0 }).replace(/</g, '\\u003c');
       dispatchOk = issueOk && stockOk && items.some((x) => x.k === 'a' && x.c);
+      if (asg.length) {
+        const BK = [['Inactive · this month', '😴 Inactive this month'], ['Inactive · 2 months', '🛑 Inactive 2 months'], ['De-growth', '🔻 De-growth']];
+        const groups = new Map();
+        asg.forEach((a) => { const b = a.bucket || 'Assigned'; if (!groups.has(b)) groups.set(b, []); groups.get(b).push(a.name); });
+        const order = [...BK.map((x) => x[0]), ...[...groups.keys()].filter((k) => !BK.some((x) => x[0] === k))].filter((k) => groups.has(k));
+        const title = (b) => (BK.find((x) => x[0] === b) || [b, `📌 ${b}`])[1];
+        asgPaneHtml = `<section class="pb-card"><div class="pb-card-head"><div><h3>📌 Assigned work by RSM</h3><p class="pb-matrix-note">${nf(asg.length)} agents assigned to ${escHtml(link.name)} — get them issuing. Click a column header to sort · set a target (count or Active) against each agent.</p></div></div></section>` +
+          order.map((b, gi) => { const id = `pl-tbl-assigned-${gi}`; return `<section class="pb-card"><div class="pb-card-head"><h3>${escHtml(title(b))} <small class="dim">(${nf(groups.get(b).length)})</small></h3>${expBtns(id, `${link.name} - Assigned - ${title(b).replace(/[^\w\s-]/g, '').trim()}`)}</div><div class="pl-aglist" data-ag-id="${id}" data-ag-names="${escHtml(JSON.stringify(groups.get(b)))}"></div></section>`; }).join('');
+      }
       searchHtml = `<section class="pb-card pl-search" id="pl-search"><div class="pl-search-row"><span class="pl-search-ico">🔎</span><input id="pl-search-q" type="search" placeholder="Search a TL or agent — by name or agent ID…" autocomplete="off" aria-label="Search TL or agent"><div id="pl-search-drop" class="pl-search-drop" hidden></div></div><div id="pl-search-res"></div><script type="application/json" id="pl-search-data">${dataJson}</script></section>`;
     }
 
     // Build only tabs that the admin granted; an "All" view can expose only emitted sections.
     const tabDefs = [
       { id: 'overview', label: '📊 Overview', show: hasSec('overview') },
+      { id: 'assigned', label: `📌 Assigned work by RSM (${asg.length})`, show: !!asgPaneHtml },
       { id: 'live', label: '🟢 Today Live', show: hasSec('overview') },
       { id: 'dispatch', label: '🚚 Dispatch Priority', show: dispatchOk },
       { id: 'stock', label: '📦 Class-wise Stock', show: hasSec('stock') },
@@ -11120,6 +11185,7 @@ async function servePersonalPage(req, res, rawToken) {
             </div>
           </section>
         </div>` : ''}
+        ${asgPaneHtml ? `<div class="pl-pane" data-pl-pane="assigned" hidden>${asgPaneHtml}</div>` : ''}
         ${hasSec('overview') ? `<div class="pl-pane" data-pl-pane="live" hidden>${liveHtml}</div>` : ''}
         ${dispatchOk ? '<div class="pl-pane" data-pl-pane="dispatch" hidden><div id="pl-dispatch"></div></div>' : ''}
         ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${!stockInfo && stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>` : ''}${classStockCardHtml}</div>` : ''}
@@ -11215,6 +11281,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 .pb-wrap{max-width:1240px}
 .pb-wrap .pb-head{background:linear-gradient(115deg,#1e1b4b 0%,#312e81 45%,#1d4ed8 100%);border:0;color:#fff;padding:20px 24px;border-radius:20px;box-shadow:0 14px 34px rgba(30,27,75,.28);position:relative;overflow:hidden}
+.pb-wrap table.pb-tbl thead th{cursor:pointer;user-select:none}.pb-wrap table.pb-tbl thead th[data-sort=asc]::after{content:" ▲";font-size:.8em;opacity:.7}.pb-wrap table.pb-tbl thead th[data-sort=desc]::after{content:" ▼";font-size:.8em;opacity:.7}
 .pb-wrap .pb-head::after{pointer-events:none;content:"";position:absolute;right:-60px;top:-80px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.18),transparent 70%)}
 .pb-wrap .pb-head>.pb-btn,.pb-wrap .pb-head a.pb-btn{position:relative;z-index:2}
 .pb-wrap .pb-head h1{font-size:22px;font-weight:800;color:#fff;letter-spacing:-.01em}
@@ -12090,6 +12157,37 @@ const PERSONAL_PORTAL_JS = `(function () {
       exportPdfTables(person + ' - Complete Performance & Stock Report', list);
     }
   });
+  // ↕ Click any table header (team links) to sort the rows ascending / descending — works on every .pb-tbl, survives view swaps.
+  if (!window.__plSortBound) {
+    window.__plSortBound = true;
+    var numOf = function (t) {
+      t = String(t || '').replace(/,/g, '');
+      var m = /-?[0-9]+([.][0-9]+)?/.exec(t);
+      return m ? parseFloat(m[0]) : NaN;
+    };
+    document.addEventListener('click', function (e) {
+      var th = e.target && e.target.closest ? e.target.closest('table.pb-tbl thead th') : null;
+      if (!th || (e.target.closest && e.target.closest('button,a,input,select'))) return;
+      var tbl = th.closest('table'), body = tbl && tbl.tBodies[0];
+      if (!body) return;
+      var heads = th.parentNode.children, idx = Array.prototype.indexOf.call(heads, th);
+      var rows = Array.prototype.slice.call(body.rows);
+      if (rows.length < 2) return;
+      for (var i = 0; i < rows.length; i++) if (rows[i].cells.length !== heads.length) return;
+      var dir = th.getAttribute('data-sort') === 'asc' ? 'desc' : 'asc';
+      Array.prototype.forEach.call(heads, function (h) { h.removeAttribute('data-sort'); });
+      th.setAttribute('data-sort', dir);
+      var vals = rows.map(function (r, n) { var t = r.cells[idx].textContent.trim(); return { r: r, n: n, t: t, v: numOf(t) }; });
+      var numeric = vals.filter(function (x) { return !isNaN(x.v); }).length >= vals.length * 0.6;
+      vals.sort(function (a, b) {
+        var c;
+        if (numeric) { var av = isNaN(a.v) ? -Infinity : a.v, bv = isNaN(b.v) ? -Infinity : b.v; c = av === bv ? 0 : (av < bv ? -1 : 1); }
+        else c = a.t.localeCompare(b.t, undefined, { numeric: true, sensitivity: 'base' });
+        return (dir === 'asc' ? c : -c) || (a.n - b.n);
+      });
+      vals.forEach(function (x) { body.appendChild(x.r); });
+    });
+  }
 })();`;
 
 let appReady = false;
