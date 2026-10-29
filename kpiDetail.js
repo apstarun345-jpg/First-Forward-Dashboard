@@ -41,7 +41,7 @@ window.FF = window.FF || {};
     gv: { label: 'GV Partner', fn: (r) => r.channel === 'GV Partner' },
     ff: { label: 'First Forward', fn: (r) => r.channel !== 'GV Partner' }
   };
-  const clsNum = (c) => parseInt(String(c).replace(/\D/g, ''), 10) || 999;
+  const clsNum = (c) => { const m = /\d+/.exec(String(c)); return m ? parseInt(m[0], 10) : 999; };   // 'VC4/20' sorts as 4
   /** f can be a comma list, e.g. "ff,vc4" = First Forward channel AND VC4. */
   function filterOf(f) {
     const list = String(f || '').split(',').map((x) => x.trim()).filter((x) => FILTERS[x]);
@@ -259,6 +259,16 @@ window.FF = window.FF || {};
   }
   const inP = (r, p) => r.key >= p.from && r.key <= p.to;
   const classKey = (value) => { const text = String(value || '').toUpperCase().replace(/\s+/g, ''); return /^\d+$/.test(text) ? `VC${text}` : text; };
+  // 🧮 TVC (tag vehicle class) — CCH classes fold into their TVC via Settings → TVC mapping
+  // (VC4+VC20 → VC4/20, VC5+VC9 → VC5, VC6+VC8+VC11 → VC6, VC7+VC10 → VC7, VC12+VC13+VC14 → VC12, VC16+VC17 → VC16).
+  const tvcGroups = () => (FF.config.tvcGroups || []).map((g) => {
+    const t = String(g.tvc).replace(/^VC/i, '');
+    const cch = [...new Set([`VC${t}`, ...(g.cch || []).map(classKey)])];
+    return { label: t === '4' ? 'VC4/20' : `VC${t}`, cch };
+  });
+  const tvcOf = (cls) => { const k = classKey(cls); if (!k) return '—'; const g = tvcGroups().find((x) => x.cch.includes(k)); return g ? g.label : k; };
+  /** Drill filter for a TVC row = all its CCH classes (comma list — the row filter accepts that). */
+  const tvcCls = (label) => { const g = tvcGroups().find((x) => x.label === label); return g ? g.cch.join(',') : label; };
   const personKey = (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   function rowMatchesSpec(r, spec) {
     const groupFilter = filterOf(spec.f);
@@ -547,7 +557,7 @@ window.FF = window.FF || {};
         reconciliationNote = `<div class="kd-reconciliation"><b>GV REPORT ↔ tag-ledger reconciliation</b><span>GV REPORT TL snapshot: <b>${U.fmt(report.total)}</b> · GV Master / EIR detail: <b>${U.fmt(ledgerTot)}</b> · Difference: <b>${difference > 0 ? '+' : ''}${U.fmt(difference)}</b>.</span><small>${difference ? 'The headline TL card uses the dedicated GV REPORT TL value; class and tag details show the live issuance ledger. A refresh or source-coverage gap can explain the difference.' : 'TL snapshot and tag-level detail currently reconcile.'}</small></div>`;
       }
     }
-    const byClass = tally(cur, (r) => r.cls), byClassPrev = tally(prev, (r) => r.cls);
+    const byClass = tally(cur, (r) => tvcOf(r.cls)), byClassPrev = tally(prev, (r) => tvcOf(r.cls));
     const byChannel = tally(cur, (r) => r.channel), byChannelPrev = tally(prev, (r) => r.channel);
     const byType = tally(cur, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance')), byTypePrev = tally(prev, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'New issuance'));
     const byVrn = tally(cur, (r) => vrnBucket(r.vrnType)), byVrnPrev = tally(prev, (r) => vrnBucket(r.vrnType));
@@ -597,14 +607,14 @@ window.FF = window.FF || {};
         ${breakdownTable('Class group', byGroup, useSheet ? null : byGroupPrev, tot, { head: 'Group', prevLabel: pp.label, sortCls: true, drill: (key) => ({ f: key === 'VC4' ? 'vc4' : key === 'VC20' ? 'vc20' : 'vc5p', cls: '', type: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
       </div>
       ${agentSection(cur, spec, tot, sheetCtx, ledgerTot)}
-      ${breakdownTable('🏷️ Class-wise (har class kitne)', byClass, useSheet ? null : byClassPrev, tot, { head: 'Class', prevLabel: pp.label, sortCls: true, drill: (key) => ({ cls: key, f: '', type: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
+      ${breakdownTable('🏷️ Class-wise (har class kitne)', byClass, useSheet ? null : byClassPrev, tot, { head: 'Class', prevLabel: pp.label, sortCls: true, drill: (key) => ({ cls: tvcCls(key), f: '', type: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
       <div class="kd-grid">
         ${breakdownTable('🔁 New issuance vs Replacement', byType, byTypePrev, ledgerTot, { head: 'Type', prevLabel: pp.label, drill: (key) => ({ type: key === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', cls: '', f: '', vrnBucket: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
         ${breakdownTable('🧩 Chassis / New VRN / Wrong VRN', byVrn, byVrnPrev, ledgerTot, { head: 'VRN type', prevLabel: pp.label, drill: (key) => ({ vrnBucket: key, cls: '', f: '', type: '', title: `${spec.title || 'Detail'} · ${key}` }) })}
       </div>
-      ${matrix('🧮 Class × Issuance / Replacement', cur, (r) => r.cls, (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'Issuance'), { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, type) => ({ cls, f: '', type: type === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', vrnBucket: '' }) })}
-      ${matrix('🧮 Class × Chassis / VRN', cur, (r) => r.cls, (r) => vrnBucket(r.vrnType).replace(/^New \/ VRN.*/, 'New / VRN'), { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, bucket) => ({ cls, f: '', type: '', vrnBucket: bucket }) })}
-      ${matrix('🧮 Class × Channel', cur, (r) => r.cls, (r) => r.channel, { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }), drillCell: (cls, channel) => ({ cls, src: /GV Partner/i.test(channel) ? 'gv' : 'ff', channel: '', f: '', type: '', vrnBucket: '' }) })}
+      ${matrix('🧮 Class × Issuance / Replacement', cur, (r) => tvcOf(r.cls), (r) => (r.type === 'REPLACEMENT' ? 'Replacement' : 'Issuance'), { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: tvcCls(key), f: '', type: '', vrnBucket: '' }), drillCell: (cls, type) => ({ cls: tvcCls(cls), f: '', type: type === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', vrnBucket: '' }) })}
+      ${matrix('🧮 Class × Chassis / VRN', cur, (r) => tvcOf(r.cls), (r) => vrnBucket(r.vrnType).replace(/^New \/ VRN.*/, 'New / VRN'), { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: tvcCls(key), f: '', type: '', vrnBucket: '' }), drillCell: (cls, bucket) => ({ cls: tvcCls(cls), f: '', type: '', vrnBucket: bucket }) })}
+      ${matrix('🧮 Class × Channel', cur, (r) => tvcOf(r.cls), (r) => r.channel, { head: 'Class', sortCls: true, drillRow: (key) => ({ cls: tvcCls(key), f: '', type: '', vrnBucket: '' }), drillCell: (cls, channel) => ({ cls: tvcCls(cls), src: /GV Partner/i.test(channel) ? 'gv' : 'ff', channel: '', f: '', type: '', vrnBucket: '' }) })}
       ${dayTable}
       ${ffPendingNote(spec)}
       <section class="kd-sec" id="kd-raw"><h4>📄 Poora data — sab ${U.fmt(ledgerTot || tot)} tags (tag-level list)</h4>
@@ -703,7 +713,7 @@ window.FF = window.FF || {};
       }
     }
     const byDay = tally(inRange, (r) => r.key);
-    const byCls = tally(inRange, (r) => r.cls);
+    const byCls = tally(inRange, (r) => tvcOf(r.cls));
     const byGroup = tally(inRange, (r) => r.group);
     const byChannel = tally(inRange, (r) => r.channel);
     applySheetBreakdowns(sheetCtx, byChannel, byGroup, byCls, ledgerTot, tot);
@@ -730,7 +740,7 @@ window.FF = window.FF || {};
       ${reconciliationNote}
       <div class="kd-stats">${stat('VC4 (payable)', U.fmt(totVc4), pct(totVc4, tot), 'blue', { f: 'vc4', cls: '', title: `${name} · VC4` })}${stat('Commercial', U.fmt(totComm), pct(totComm, tot), 'violet', { f: 'comm', cls: '', title: `${name} · Commercial` })}${stat('Chassis', U.fmt(totChassis), '', 'orange', { f: 'chassis', title: `${name} · Chassis` })}${stat('Replacement', U.fmt(totRepl), '', 'amber', { type: 'REPLACEMENT', title: `${name} · Replacement` })}${stat('Active days', U.fmt(days.length), days.length ? `${U.fmt(Math.round(tot / days.length))}/day` : '', 'green')}</div>
       <div class="kd-grid">${breakdownTable('Class group', byGroup, null, tot, { head: 'Group', sortCls: true, drill: (key) => ({ f: key === 'VC4' ? 'vc4' : key === 'VC20' ? 'vc20' : 'vc5p', cls: '', type: '', vrnBucket: '' }) })}${breakdownTable('🔁 Type', byType, null, ledgerTot, { head: 'Type', drill: (key) => ({ type: key === 'Replacement' ? 'REPLACEMENT' : 'NOT_REPLACEMENT', cls: '', f: '', vrnBucket: '' }) })}</div>
-      ${breakdownTable('🏷️ Class-wise', byCls, null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ cls: key, f: '', type: '', vrnBucket: '' }) })}
+      ${breakdownTable('🏷️ Class-wise', byCls, null, tot, { head: 'Class', sortCls: true, drill: (key) => ({ cls: tvcCls(key), f: '', type: '', vrnBucket: '' }) })}
       ${breakdownTable('🧩 VRN type', byVrn, null, ledgerTot, { head: 'VRN type', drill: (key) => ({ vrnBucket: key, cls: '', f: '', type: '' }) })}
       <section class="kd-sec"><h4>📅 Day-wise (${days.length} din)</h4><div class="table-wrap kd-scroll"><table class="tbl compact kd-tbl"><thead><tr><th>Date</th><th class="num">Tags</th><th class="num">VC4</th><th class="num">Commercial</th></tr></thead><tbody>${days.slice().reverse().map((k) => { const rs = inRange.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')); return `<tr class="clickable" data-kd-agent-day="${k}"><td><b>${esc(U.labelDateKey(k))}</b> <small class="dim">${esc(U.weekday(U.fromDateKey(k)))}</small></td><td class="num"><b>${U.fmt(t)}</b></td><td class="num">${U.fmt(v)}</td><td class="num">${U.fmt(t - v)}</td></tr>`; }).join('')}<tr class="kd-total"><td><b>Grand Total</b></td><td class="num"><b>${U.fmt(ledgerTot)}</b></td><td class="num"><b>${U.fmt(ledgerVc4)}</b></td><td class="num"><b>${U.fmt(ledgerComm)}</b></td></tr></tbody></table></div></section>
       <section class="kd-sec" id="kd-raw"><h4>📄 Poora data — sab ${U.fmt(ledgerTot || tot)} tags (tag-level list)</h4>
