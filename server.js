@@ -18,10 +18,11 @@ import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.j
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
 import { createMappingStock, sheetIdFrom, identifierText } from './mapping-stock.js';
+import { createDuplicateBarcodeCollector } from './duplicate-barcode.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
-import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary } from './stock-age.js';
+import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
@@ -3482,7 +3483,10 @@ async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage, extra)
     inflight.delete(page);
     if (page > 0 && rows.length) {
       // Offset ignore ho raha ho (wahi page dobara) to duplicate mat jodo — pehla page hi poora data tha.
-      if (JSON.stringify(rows[0].c || rows[0]) === firstSig) break;
+      if (JSON.stringify(rows[0].c || rows[0]) === firstSig) {
+        if (extra && extra.rejectRepeatedPage) throw new Error(`${sheet}: page repeated; scan may be incomplete`);
+        break;
+      }
     }
     if (page === 0) firstSig = rows.length ? JSON.stringify(rows[0].c || rows[0]) : '';
     const at = (L) => { const i = ids.indexOf(L); return i >= 0 ? i : cols.indexOf(L); };
@@ -3493,6 +3497,45 @@ async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage, extra)
   }
   return total;
 }
+// On-demand duplicate scan, serialized with other heavy sheet reads. Each source is independent.
+const duplicateScanState = new Map();
+async function loadDuplicateBarcodes(source) {
+  const s = db.settings || {}, st = s.stock || {}, a = (s.gv && s.gv.assignment) || {};
+  const isGv = source === 'gv';
+  const sheetId = isGv ? s.gvSheetId : s.sheetId;
+  if (!sheetId) throw new Error(`${isGv ? 'GV' : 'FF'} sheet is not configured`);
+  const fields = isGv
+    ? { barcode: colLetter(a.serial, 'C'), tagId: colLetter(a.tagId, 'B'), cls: colLetter(a.cls, 'A'), status: colLetter(a.status, 'D'), agentId: colLetter(a.agentId, 'E'), agentName: colLetter(a.agentName, 'F'), tl: colLetter(a.tlName, 'H') }
+    : { barcode: colLetter(st.barcode, 'D'), tagId: colLetter(st.tagId, 'C'), cls: colLetter(st.cls, 'E'), status: '', agentId: colLetter(st.agentId, 'H'), agentName: colLetter(st.agentName, 'I'), tl: colLetter(st.tlName, 'K') };
+  const sheet = isGv ? (a.tab || 'Tag Assignment') : (s.stockSheet || 'StockDataa');
+  const collector = createDuplicateBarcodeCollector();
+  const letters = [...new Set(Object.values(fields).filter(Boolean))];
+  const count = await gvizPagesServer(sheetId, sheet, letters, `${fields.barcode} is not null`, async (rows, at) => {
+    const ix = Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, v ? at(v) : -1]));
+    for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
+      for (const row of rows.slice(i, i + STOCK_AGE_CHUNK)) {
+        const item = {};
+        for (const [k, pos] of Object.entries(ix)) item[k] = pos < 0 ? '' : (k === 'barcode' || k === 'tagId' ? identifierText(row && row.c && row.c[pos]) : serverCell(row, pos));
+        collector.add(item);
+      }
+      await yieldLoop();
+    }
+  }, { rejectRepeatedPage: true });
+  if (count >= STOCK_AGE_PAGE_ROWS * STOCK_AGE_MAX_PAGES) throw new Error('Sheet scan reached its safety limit; results would be incomplete.');
+  return { ok: true, source, sheet, at: new Date().toISOString(), ...collector.finish() };
+}
+function duplicateScan(source, fresh) {
+  const s = db.settings || {};
+  const key = JSON.stringify([source, s.sheetId, s.gvSheetId, s.stockSheet, s.stock, s.gv && s.gv.assignment]);
+  let entry = duplicateScanState.get(source);
+  if (!entry || entry.key !== key) { entry = { key, result: null, error: null, promise: null }; duplicateScanState.set(source, entry); }
+  if (!entry.promise && (fresh || (!entry.result && !entry.error) || (entry.result && Date.now() - Date.parse(entry.result.at) > 10 * 60e3))) {
+    entry.error = null;
+    entry.promise = loadDuplicateBarcodes(source).then((result) => { entry.result = result; }).catch((err) => { entry.error = err; }).finally(() => { entry.promise = null; });
+  }
+  return entry;
+}
+
 async function loadStockAgeIndex() {
   const s = db.settings || {};
   const st = s.stock || {};
@@ -5898,6 +5941,31 @@ async function handleApi(req, res, url) {
     user.notificationsSeenAt = new Date().toISOString();
     await persist('users');
     return sendJson(res, 200, { ok: true, at: user.notificationsSeenAt });
+  }
+  // Duplicate barcode audit: same-sheet repetitions only; matching FF/GV rows are normal.
+  if (p === '/api/duplicate-barcodes' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const source = url.searchParams.get('source');
+    if (!['ff', 'gv'].includes(source)) throw new HttpError(400, 'Select source ff or gv');
+    const permits = user.permissions || [];
+    if (user.role !== 'admin' && (!permits.includes('barcodeChecker') || !permits.includes(source === 'ff' ? 'sheet:StockDataa' : 'sheet:Tag Assignment'))) throw new HttpError(403, 'Barcode checker or sheet access disabled.');
+    const entry = duplicateScan(source, url.searchParams.get('fresh') === '1');
+    if (entry.promise) await Promise.race([entry.promise, new Promise((resolve) => setTimeout(resolve, STOCK_AGE_WAIT_MS))]);
+    if (entry.promise) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 }, { 'Cache-Control': 'no-store' });
+    if (entry.error) throw new HttpError(502, `Duplicate scan failed: ${entry.error.message}`);
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify(entry.result), { 'Cache-Control': 'no-store' });
+  }
+  if (p === '/api/agent-followup-age' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const source = url.searchParams.get('source');
+    if (!['ff', 'gv'].includes(source)) throw new HttpError(400, 'Select source ff or gv');
+    const permits = user.permissions || [];
+    if (user.role !== 'admin' && (!permits.includes('agentsOverview') || !permits.includes(source === 'ff' ? 'sheet:StockDataa' : 'sheet:Tag Assignment'))) throw new HttpError(403, 'Agents summary or sheet access disabled.');
+    if (source === 'gv' && !db.settings.gvSheetId) throw new HttpError(502, 'GV sheet is not configured');
+    const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, false);
+    if (!index) return sendJson(res, 200, stockAgePending());
+    if (index.errors && index.errors[source]) throw new HttpError(502, `Stock age unavailable: ${index.errors[source]}`);
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, at: new Date(index.at).toISOString(), source, rows: followupAgeByAgent(index, source) }), { 'Cache-Control': 'no-store' });
   }
   // 🧓 v3.31 stock ageing — summary (agent / TL / network bucket counts, FF + GV) aur tag-level list.
   if (p === '/api/stock-age' && method === 'GET') {

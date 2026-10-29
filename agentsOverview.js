@@ -14,7 +14,7 @@ FF.pages = FF.pages || {};
   const U = FF.util;
   const esc = U.esc, clean = U.clean, fmt = U.fmt;
   const CH = { ff: { label: 'First Forward', icon: '🟦' }, gv: { label: 'GV Partner', icon: '🟩' } };
-  const state = { rows: [], months: {}, tab: 'both', q: '', at: 0, busy: null };
+  const state = { rows: [], months: {}, tab: 'both', q: '', at: 0, busy: null, sourceErrors: {} };
   const keyOf = (v) => clean(v).toUpperCase().replace(/\.0+$/, '').replace(/\s+/g, ' ');
   const isDirect = (r, ch) => { try { return !!FF.config.isDirectAgent(r, ch); } catch { return false; } };
   const num = (v) => Number(v) || 0;
@@ -52,7 +52,7 @@ FF.pages = FF.pages || {};
         const stock = num(a.stockTotal); if (stock <= 0 || isOffice(a.agentId || a.id, a.name)) return;
         out.push(classify({ ch: 'ff', id: clean(a.agentId || a.id), name: clean(a.name || a.agentId), tlName: clean(a.tlName), tlId: clean(a.tlId), direct: isDirect(a, 'ff'), stock, vc4Stock: num(a.stockVc4), cls: clsOf(fm, a.agentId || a.id, a.name), proj: num(a.curProjected), cur: num(a.curTotal), last: num(a.lastTotal), lastActive: clean(a.lastActive).replace(/^[^\p{L}\d]+/u, '') }));
       });
-    } catch { /* FF optional */ }
+    } catch (err) { state.sourceErrors.ff = err.message || 'FF summary unavailable'; }
     return out;
   }
   const prevYm = (ym) => { const [y, m] = String(ym).split('-').map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
@@ -62,10 +62,12 @@ FF.pages = FF.pages || {};
     // Same datasets as GV Performance: EIR (daily + agent/class roll-ups) + GV Master (today) + GV REPORT.
     // Without agents/agentClass/master the EIR roll-up came back empty → "this month 0 · last month 0" for everyone.
     const opt = (p) => Promise.resolve().then(p).catch(() => null);
-    const [, , , , stockRowsR, reportR, clsR] = await Promise.all([
+    const [dailyR, agentsR, agentClassR, masterR, stockRowsR, reportR, clsR] = await Promise.all([
       opt(() => S && S.need('daily')), opt(() => S && S.need('agents')), opt(() => S && S.need('agentClass')), opt(() => G.need('master')),
       opt(() => G.need('stockAgent')), opt(() => G.need('report')), opt(() => G.need('stockAgentClass'))
     ]);
+    if (stockRowsR === null) { state.sourceErrors.gv = 'GV stock could not be loaded'; return out; }
+    if ([dailyR, agentsR, agentClassR, masterR, reportR].every((v) => v === null)) { state.sourceErrors.gv = 'GV issuance sources could not be loaded'; return out; }
     const stockRows = stockRowsR || [], report = reportR || [], gm = clsMap(clsR || []);
     // Calendar months (same rule as GV Performance): this month = today's month, last = previous calendar month.
     const cur = U.ymKey(new Date()), prev = U.prevMonthKey ? U.prevMonthKey(cur) : prevYm(cur);
@@ -129,6 +131,7 @@ FF.pages = FF.pages || {};
     if (state.busy) return state.busy;
     if (!force && state.rows.length && Date.now() - state.at < 120000) return state.rows;
     state.busy = (async () => {
+      state.sourceErrors = {};
       const [f, g] = await Promise.all([ffRows(), gvRows()]);
       state.rows = [...f, ...g]; state.at = Date.now();
       return state.rows;
@@ -204,6 +207,72 @@ FF.pages = FF.pages || {};
   const classLine = (l) => { const t = clsSum(l); return CLASSES.filter((c) => t[c]).map((c) => `${clsLabel(c)} <b>${fmt(t[c])}</b>`).join(' · ') || '—'; };
   const kp = (ch, b) => `data-kpi="scope=list&list=aov.${ch}.${b}&src=${ch === 'both' ? 'both' : ch}"`;
 
+  // Follow-up rules use the same stock and issuance as this summary; ageing is separate and may be unavailable.
+  const follow = { age: {}, errors: {}, q: '', reason: 'all', low: 5, limit: 100, seq: 0 };
+  function followupRows(rows, ageSources, targets, ym, lowThreshold = 5) {
+    const targetMap = new Map((targets || []).filter((t) => t && t.ym === ym && t.key).map((t) => [String(t.key).toUpperCase(), t]));
+    const indices = {};
+    for (const ch of ['ff', 'gv']) {
+      if (!Array.isArray(ageSources[ch])) continue;
+      const ids = new Map(), names = new Map();
+      for (const a of ageSources[ch]) {
+        const id = keyOf(a.id), name = keyOf(a.name);
+        if (id) ids.set(id, a);
+        if (name) names.set(name, names.has(name) ? null : a);
+      }
+      indices[ch] = { ids, names };
+    }
+    return (rows || []).filter((r) => !r.isTl).map((r) => {
+      const idx = indices[r.ch], id = keyOf(r.id), name = keyOf(r.name);
+      // Do not join two different IDs by name; a name-only record is usable only when unambiguous.
+      const byName = idx && idx.names.get(name);
+      const age = idx ? (idx.ids.get(id) || (byName && (!id || !keyOf(byName.id)) ? byName : null)) : null;
+      const t = targetMap.get(`${r.ch}|${name}`.toUpperCase());
+      const target = t && Number(t.target) > 0 ? Number(t.target) : null;
+      const projection = num(r.proj) || projected(num(r.cur), r.ch);
+      const reasons = [];
+      if (r.status === 'in2') reasons.push('No issuance in 2 months');
+      else if (r.status === 'in1') reasons.push('No issuance this month');
+      else if (num(r.cur) > 0 && lowThreshold > 0 && num(r.cur) <= lowThreshold) reasons.push(`Low issuance (≤${lowThreshold} MTD)`);
+      if (r.deg) reasons.push('Projected de-growth');
+      if (age && age.age90 > 0) reasons.push('Stock aged 90+ days');
+      if (target && projection < target) reasons.push('Below target pace');
+      if (t && t.goal === 'active' && !num(r.cur)) reasons.push('Active goal pending');
+      const score = (r.status === 'in2' ? 4 : r.status === 'in1' ? 3 : num(r.cur) > 0 && lowThreshold > 0 && num(r.cur) <= lowThreshold ? 1 : 0) + (age && age.age90 > 0 ? 2 : 0) + (r.deg ? 1 : 0) + (target && projection < target ? 1 : 0);
+      return { ...r, age, target, projection, reasons, score, priority: score >= 5 ? 'High' : score >= 3 ? 'Medium' : 'Review' };
+    }).filter((r) => r.reasons.length).sort((a, b) => b.score - a.score || (b.age?.age90 || 0) - (a.age?.age90 || 0) || b.stock - a.stock || a.name.localeCompare(b.name));
+  }
+  const followRows = () => followupRows(forCh(state.tab).filter((r) => FF.auth.can(r.ch === 'ff' ? 'sheet:StockDataa' : 'sheet:Tag Assignment')), follow.age, FF.auth.settings?.targets || [], U.ymKey(new Date()), follow.low)
+    .filter((r) => follow.reason === 'all' || r.reasons.some((x) => x.toLowerCase().includes(follow.reason)))
+    .filter((r) => !follow.q || `${r.name} ${r.id} ${r.tlName} ${r.reasons.join(' ')}`.toLowerCase().includes(follow.q));
+  function followHtml() {
+    const rows = followRows(), shown = rows.slice(0, follow.limit);
+    const notes = Object.entries(follow.errors).filter(([ch]) => state.tab === 'both' || state.tab === ch).map(([ch, msg]) => `${ch.toUpperCase()}: ${msg}`).join(' · ');
+    const sourceNotes = Object.entries(state.sourceErrors).filter(([ch]) => state.tab === 'both' || state.tab === ch).map(([ch, msg]) => `${ch.toUpperCase()}: ${msg}`).join(' · ');
+    return `<div class="aov-asg-bar"><select class="input" data-fu-reason><option value="all" ${follow.reason === 'all' ? 'selected' : ''}>All reasons</option><option value="no issuance" ${follow.reason === 'no issuance' ? 'selected' : ''}>No issuance</option><option value="low issuance" ${follow.reason === 'low issuance' ? 'selected' : ''}>Low issuance</option><option value="de-growth" ${follow.reason === 'de-growth' ? 'selected' : ''}>De-growth</option><option value="90+" ${follow.reason === '90+' ? 'selected' : ''}>90+ days stock</option><option value="target pace" ${follow.reason === 'target pace' ? 'selected' : ''}>Below target pace</option></select><label class="small">Low MTD ≤ <select class="input" data-fu-low>${[0, 1, 5, 10, 20].map((n) => `<option value="${n}" ${follow.low === n ? 'selected' : ''}>${n || 'Off'}</option>`).join('')}</select></label><input class="input" data-fu-q placeholder="Search agent / ID / TL" value="${esc(follow.q)}">${FF.auth.can('export') ? '<button class="btn small" data-fu-csv>⬇ CSV (filtered)</button>' : ''}<span class="dim small">${fmt(rows.length)} agents</span></div>
+      ${sourceNotes ? `<p role="alert" class="small">⚠ Summary data unavailable: ${esc(sourceNotes)}. Affected agents are not shown.</p>` : ''}
+      ${notes ? `<p role="alert" class="small">⚠ Ageing unavailable: ${esc(notes)}. Other follow-up reasons remain available.</p>` : ''}
+      <div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Priority</th><th>Agent</th><th>TL</th><th>Reasons</th><th>Stock</th><th>90+ days</th><th>Age unknown</th><th>This month</th><th>Last month</th><th>Target / projected</th></tr></thead><tbody>${shown.map((r) => `<tr><td><b>${esc(r.priority)}</b></td><td>${r.ch === 'gv' ? '🟩' : '🟦'} ${FF.auth.can(`${r.ch}AgentSummary`) ? `<a href="#/${r.ch}AgentSummary?name=${encodeURIComponent(r.name)}">${esc(r.name)}</a>` : esc(r.name)}<br><small class="dim">${esc(r.id)}</small></td><td>${esc(r.direct ? 'Direct' : r.tlName || '—')}</td><td>${esc(r.reasons.join(' · '))}</td><td>${fmt(r.stock)}</td><td>${r.age ? fmt(r.age.age90) : '—'}</td><td>${r.age ? fmt(r.age.unknown) : '—'}</td><td>${fmt(r.cur)}</td><td>${fmt(r.last)}</td><td>${r.target ? `${fmt(r.target)} / ${fmt(Math.round(r.projection))}` : '—'}</td></tr>`).join('') || '<tr><td colspan="10" class="empty">No agents match the follow-up rules.</td></tr>'}</tbody></table></div>${rows.length > shown.length ? `<button class="btn small" data-fu-more>Show more (${fmt(rows.length - shown.length)} remaining)</button>` : ''}
+      <p class="dim small">Stock holders only; priority uses inactivity, low MTD issuance (threshold above), 90+ day stock, projected de-growth and overall monthly target pace. Target pace uses month-end projection, not actual target achievement; class-only targets are not evaluated. GV 90+ age uses assigned in-stock rows; unknown ages are shown separately. FF / GV issuance uses Agents Summary sources and may lag their sheets.</p>`;
+  }
+  function paintFollow(root) { const node = root.querySelector('#aov-follow-body'); if (node) node.innerHTML = followHtml(); }
+  async function loadFollowAge(root) {
+    const seq = ++follow.seq; follow.age = {}; follow.errors = { ff: 'Loading', gv: 'Loading' }; paintFollow(root);
+    await Promise.all(['ff', 'gv'].map(async (ch) => {
+      if (!FF.auth.can(ch === 'ff' ? 'sheet:StockDataa' : 'sheet:Tag Assignment')) { follow.errors[ch] = 'No sheet access'; return; }
+      try {
+        let result; const start = Date.now();
+        do { result = await FF.auth.api(`/api/agent-followup-age?source=${ch}`); if (!result.pending) break; if (Date.now() - start > 4 * 60e3) throw new Error('Index still loading'); await new Promise((resolve) => setTimeout(resolve, 3000)); } while (seq === follow.seq && root.isConnected);
+        if (seq === follow.seq && result && !result.pending) { follow.age[ch] = result.rows; delete follow.errors[ch]; }
+      } catch (err) { if (seq === follow.seq) follow.errors[ch] = err.message || 'Could not load'; }
+    }));
+    if (seq === follow.seq && root.isConnected) paintFollow(root);
+  }
+  function followCsv() {
+    const safe = (v) => { const s = String(v ?? ''); return /^[\t\r\n ]*[=+@-]/.test(s) ? `'${s}` : s; };
+    U.downloadCsv(`agent-follow-up-${U.stamp()}.csv`, ['Priority', 'Channel', 'Agent', 'Agent ID', 'TL', 'Reasons', 'Stock', 'Stock 90+ days', 'Age unknown', 'This month', 'Last month', 'Overall target', 'Month-end projection'], followRows().map((r) => [r.priority, r.ch.toUpperCase(), r.name, r.id, r.direct ? 'Direct' : r.tlName, r.reasons.join(' · '), r.stock, r.age ? r.age.age90 : '', r.age ? r.age.unknown : '', r.cur, r.last, r.target ?? '', r.target ? Math.round(r.projection) : ''].map(safe)));
+  }
+
   // ---- render -------------------------------------------------------------------------------------
   const CSS = `.aov-wrap .aov-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 14px}
 .aov-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
@@ -251,16 +320,23 @@ FF.pages = FF.pages || {};
       <div class="aov-tabs">${tabBtn('both', '🔗 Both')}${tabBtn('ff', '🟦 First Forward')}${tabBtn('gv', '🟩 GV Partner')}</div>
       ${state.tab === 'both' ? `<div class="aov-grid" style="margin-bottom:14px">${card('both')}</div>` : ''}
       <div class="aov-grid">${chans.map(card).join('')}</div>
+      <section class="card" style="margin-top:14px"><div class="card-head"><h3>📋 Agent follow-up list</h3></div><div class="card-body" id="aov-follow-body">${followHtml()}</div></section>
       <section class="card" style="margin-top:14px"><div class="card-head"><h3>🧑‍💼 TLs holding stock</h3><div class="card-right"><input class="input" id="aov-q" placeholder="Search TL…" value="${esc(state.q)}"></div></div><div class="card-body" id="aov-tls">${tlTable()}</div></section>
       ${isAdmin() ? `<section class="card" id="aov-asg" style="margin-top:14px"><div class="card-head"><h3>📌 Assign work to a team link</h3></div><div class="card-body"><p class="dim small" style="margin:0 0 8px">Pick agents (inactive this month, inactive 2 months, de-growth…) and assign them to a team link. They show on that link under <b>Assigned work by RSM</b>, where the team sets a target (count or Active). Totals appear on your Home page.</p><div id="aov-asg-body">${U.spinner('Loading team links…')}</div></div></section>` : ''}
       <p class="dim small">Active = issued ≥ 1 tag this month · Inactive this month = issued last month but not this month · Inactive 2 months = nothing issued last month or this month · De-growth = issuing, but this month's run-rate projects below last month. Only agents with stock &gt; 0 are counted (office holders “APNA PAYMENT” and “Not Assigned” are excluded). Class split: VC4/20 (VC20 is the commercial class of VC4) · VC5 · VC6 · VC7 · VC12 · VC16. Direct agent rule = Settings → Direct Agents.</p></div>`;
     root.querySelectorAll('[data-aov-tab]').forEach((b) => b.addEventListener('click', () => { state.tab = b.dataset.aovTab; paint(root); }));
-    const rf = root.querySelector('#aov-refresh'); if (rf) rf.addEventListener('click', () => { root.innerHTML = U.spinner('Refreshing…'); load(true).then(() => paint(root)).catch((err) => { root.innerHTML = U.errorBox(err); }); });
+    const rf = root.querySelector('#aov-refresh'); if (rf) rf.addEventListener('click', () => { root.innerHTML = U.spinner('Refreshing…'); load(true).then(() => { paint(root); loadFollowAge(root); }).catch((err) => { root.innerHTML = U.errorBox(err); }); });
     const cv = root.querySelector('#aov-csv'); if (cv) cv.addEventListener('click', csv);
     const q = root.querySelector('#aov-q'); if (q) q.addEventListener('input', () => { state.q = q.value.trim().toLowerCase(); const t = root.querySelector('#aov-tls'); if (t) t.innerHTML = tlTable(); });
     if (isAdmin()) { bindAsg(root); loadLinks(false).then(() => paintAsg(root)).catch((err) => { const el = root.querySelector('#aov-asg-body'); if (el) el.innerHTML = `<p class="dim">Could not load team links: ${esc((err && err.message) || err)}</p>`; }); }
     if (!root.__aovClick) root.__aovClick = true; else return;
-    root.addEventListener('click', (ev) => { const tr = ev.target.closest && ev.target.closest('#aov-tls tr[data-q]'); if (tr) location.hash = `#/masterSearch?q=${encodeURIComponent(tr.dataset.q)}`; });
+    root.addEventListener('click', (ev) => {
+      const tr = ev.target.closest && ev.target.closest('#aov-tls tr[data-q]'); if (tr) location.hash = `#/masterSearch?q=${encodeURIComponent(tr.dataset.q)}`;
+      if (ev.target.closest('[data-fu-more]')) { follow.limit += 200; paintFollow(root); }
+      if (ev.target.closest('[data-fu-csv]') && FF.auth.can('export')) followCsv();
+    });
+    root.addEventListener('change', (ev) => { if (ev.target.matches('[data-fu-reason]')) follow.reason = ev.target.value; else if (ev.target.matches('[data-fu-low]')) follow.low = Number(ev.target.value); else return; follow.limit = 100; paintFollow(root); });
+    root.addEventListener('input', (ev) => { if (ev.target.matches('[data-fu-q]')) { const pos = ev.target.selectionStart; follow.q = ev.target.value.trim().toLowerCase(); follow.limit = 100; paintFollow(root); const el = root.querySelector('[data-fu-q]'); if (el) { el.focus(); el.setSelectionRange(pos, pos); } } });
   }
 
   // ---- 📌 Assign work to a team link (admin) -----------------------------------------------------------
@@ -368,7 +444,8 @@ FF.pages = FF.pages || {};
     try { await Promise.race([load(false), new Promise((_, rej) => setTimeout(() => rej(new Error('Data is still loading — sheets are being read. Try ↻ in a moment.')), 45000))]); }
     catch (err) { root.innerHTML = U.errorBox(err); return; }
     paint(root);
+    loadFollowAge(root);
   }
-  FF.agentsOverview = { load, stat, listFor, tlGroups, classify, clsLabel, _state: state };
+  FF.agentsOverview = { load, stat, listFor, tlGroups, classify, clsLabel, followupRows, _state: state };
   FF.pages.agentsOverview = { title: 'GV & FF Agents Summary', render };
 })(FF);
