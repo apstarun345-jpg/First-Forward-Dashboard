@@ -742,7 +742,7 @@ FF.pages = FF.pages || {};
     return `<div class="kpi-grid mini hm-stock-grid">
         ${kpi('g1', 'First Forward · Stock in field', '📦', U.fmt(ff.total), `VC4 <b>${U.fmt(ff.vc4)}</b> · Comm <b>${U.fmt(ff.comm)}</b> · cover <b>${esc(cover(ff.total, ffRate))}</b> din`, 'src=ff&scope=stock')}
         ${kpi('g2', 'GV Partner · Stock in field', '📦', U.fmt(gv.total), `VC4 <b>${U.fmt(gv.vc4)}</b> · Comm <b>${U.fmt(gv.comm)}</b> · cover <b>${esc(cover(gv.total, gvRate))}</b> din`, 'src=gv&scope=stock')}
-        <div class="kpi g3 hm-gvonly" id="hm-gvonly" role="button" tabindex="0" title="GV me hai, FF stock (StockDataa) me nahi — click: class-wise"><div class="kpi-top"><span class="kpi-title">GV tags · not in FF stock</span><span class="kpi-icon">🔎</span></div><div class="kpi-value">…</div><div class="kpi-foot">loading…</div></div>
+        <div class="kpi g3 hm-gvonly" id="hm-gvonly" role="button" tabindex="0" title="GV Tag Assignment (in-stock) me hai par FF StockDataa me barcode nahi hai — click: class-wise"><div class="kpi-top"><span class="kpi-title">GV tags · not in FF stock</span><span class="kpi-icon">🔎</span></div><div class="kpi-value">…</div><div class="kpi-foot">loading…</div></div>
       </div>
       <div class="grid g-2" style="margin-top:12px">
         ${card('📊 Stock · FF vs GV <span class="dim">(class-wise)</span>', bars, '')}
@@ -1039,12 +1039,13 @@ FF.pages = FF.pages || {};
     const rows = m.rows.map((r) => `<tr><td><b>${esc(String(r.cls).replace(/^VC/, ''))}</b></td><td>${esc(r.type || '')}</td>${SMAP_BUCKETS.map(([k, , , cls]) => `<td class="num"><button type="button" class="smap-cell ${cls}" data-smap-b="${k}" data-smap-c="${esc(r.cls)}" title="${esc(r.cls)} · click → tags">${fmt(r[k])}</button></td>`).join('')}<td class="num"><button type="button" class="smap-cell smap-total" data-smap-b="all" data-smap-c="${esc(r.cls)}" title="${esc(r.cls)} · saare tags">${fmt(r.total)}</button></td></tr>`).join('');
     const foot = `<tr class="smap-foot"><td colspan="2"><b>Grand total</b></td>${SMAP_BUCKETS.map(([k]) => `<td class="num"><button type="button" class="smap-link" data-smap-b="${k}">${fmt(T[k])}</button></td>`).join('')}<td class="num"><button type="button" class="smap-link" data-smap-b="all">${fmt(T.total)}</button></td></tr>`;
     const g = m.gv || {};
+    const gvMissing = (data && data.gvOnly && Number.isFinite(data.gvOnly.total)) ? data.gvOnly.total : (g.notInStockData || 0);
     const tl = (m.topTl || []).slice(0, 6).map((t) => `<span class="chip">${esc(t.tl)} <b>${fmt(t.ff)}</b>${t.both ? ` <small class="dim">(${fmt(t.both)} GV+FF)</small>` : ''}</span>`).join('');
     const warn = data.errors ? `<p class="dim small">⚠️ Sheet read adhura (${esc(Object.keys(data.errors).join(', '))}) — numbers purane/adhure ho sakte hain.</p>` : '';
     return `<section class="card smap"><div class="card-head"><div><h3>🗺️ Stock mapping · FF vs GV vs Office</h3><span class="dim small">StockDataa ka har tag Tag ID / Barcode se GV Tag Assignment se milaya gaya · GV "not assigned" count nahi</span></div><div class="card-right"><button class="btn small" data-smap-refresh title="Index dobara padho">↻ Refresh</button></div></div>
       <div class="card-body">${warn}<div class="smap-tiles">${tiles}</div><div class="smap-bar" aria-hidden="true">${bar}</div>
       <div class="table-wrap"><table class="tbl compact smap-tbl"><thead><tr><th>Class</th><th>Tag type</th>${SMAP_BUCKETS.map(([, l, , cls]) => `<th class="num ${cls}-h">${l}</th>`).join('')}<th class="num">Grand total</th></tr></thead><tbody>${rows}${foot}</tbody></table></div>
-      <div class="smap-notes"><span>🟩 GV Tag Assignment: <b>${fmt(g.assigned || 0)}</b> in-stock assigned · <b>${fmt(g.notAssigned || 0)}</b> not assigned${g.outStatus ? ` · <b>${fmt(g.outStatus)}</b> issued/out` : ''} (count nahi)</span>${g.notInStockData ? `<span>🔎 GV assigned par StockDataa me nahi: <b>${fmt(g.notInStockData)}</b></span>` : ''}<span class="dim">Office = StockDataa me hai par na FF agent ID me, na GV me</span></div>
+      <div class="smap-notes"><span>🟩 GV Tag Assignment: <b>${fmt(g.assigned || 0)}</b> in-stock assigned · <b>${fmt(g.notAssigned || 0)}</b> not assigned${g.outStatus ? ` · <b>${fmt(g.outStatus)}</b> issued/out` : ''} (count nahi)</span>${gvMissing ? `<span>🔎 GV in-stock par FF StockDataa me barcode nahi: <button type="button" class="smap-link" data-smap-b="gvonly"><b>${fmt(gvMissing)}</b></button></span>` : ''}<span class="dim">Office = StockDataa me hai par na FF agent ID me, na GV me</span></div>
       ${tl ? `<div class="chip-row smap-tls"><span class="dim small">Top FF TLs (mapped):</span> ${tl}</div>` : ''}</div></section>`;
   }
   /** Office stock limit se niche wali classes (Settings → Stock mapping warning). */
@@ -1066,7 +1067,8 @@ FF.pages = FF.pages || {};
     if (!FF.app || !FF.app.openDrawer) return;
     const title = `${SMAP_LABEL[bucket] || bucket}${cls ? ` · ${cls}` : ''}`;
     const qs = (extra) => `bucket=${encodeURIComponent(bucket)}${cls ? `&cls=${encodeURIComponent(cls)}` : ''}${extra || ''}`;
-    const body = FF.app.openDrawer({ kicker: '🗺️ Stock mapping', title, sub: 'StockDataa tags · FF / GV mapping', body: U.spinner('Tags load ho rahe hain…'), wide: true });
+    const sub = bucket === 'gvonly' ? 'GV Tag Assignment (in-stock) tags jinka barcode FF StockDataa me nahi hai' : 'StockDataa tags · FF / GV mapping';
+    const body = FF.app.openDrawer({ kicker: '🗺️ Stock mapping', title, sub, body: U.spinner('Tags load ho rahe hain…'), wide: true });
     const host = body && body.querySelector ? body : U.$('#drawer-body');
     const state = { q: '', rows: [], total: 0 };
     const fetchPage = async (offset, limit, all) => {
@@ -1080,7 +1082,7 @@ FF.pages = FF.pages || {};
     const paint = () => {
       const canExp = FF.auth.can('export');
       host.innerHTML = `<div class="btn-row smap-dr-bar"><input class="input" id="smap-q" placeholder="Search tag / barcode / agent / TL…" value="${esc(state.q)}">${canExp ? `<button class="btn small primary" id="smap-xlsx">⬇ Excel (all)</button><a class="btn small" id="smap-csv" href="/api/stock-map/csv?${qs(state.q ? `&q=${encodeURIComponent(state.q)}` : '')}" download>⬇ CSV</a>` : ''}<a class="btn small" href="#/stock">📦 Stock page</a><span class="dim small">${U.fmt(state.total)} tags · pehle ${U.fmt(state.rows.length)} dikh rahe</span></div>
-        <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Tag ID</th><th>Barcode</th><th>Class</th><th>Bucket</th><th>FF agent</th><th>FF TL</th><th>GV agent</th><th>GV TL</th><th class="num">Age</th>${bucket === 'gvonly' ? '<th>Remark</th>' : ''}</tr></thead><tbody>${state.rows.map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.tagId)}</td><td class="mono">${esc(r.barcode)}</td><td>${esc(r.cls)}</td><td>${esc(r.bucket)}</td><td>${esc(r.ffAgent)}${r.ffAgentId ? ` <small class="dim">${esc(r.ffAgentId)}</small>` : ''}</td><td>${esc(r.ffTl)}</td><td>${esc(r.gvAgent)}${r.gvAgentId ? ` <small class="dim">${esc(r.gvAgentId)}</small>` : ''}</td><td>${esc(r.gvTl)}</td><td class="num">${r.age === '' ? '—' : esc(r.age)}</td>${bucket === 'gvonly' ? `<td><span class="badge ${r.remark === 'Not In FF Stock' ? 'red' : 'amber'}">${esc(r.remark || '')}</span></td>` : ''}</tr>`).join('') || '<tr><td colspan="10" class="empty">Koi tag nahi.</td></tr>'}</tbody></table></div>
+        <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Tag ID</th><th>Barcode</th><th>Class</th><th>Bucket</th><th>FF agent</th><th>FF TL</th><th>GV agent</th><th>GV TL</th><th class="num">Age</th>${bucket === 'gvonly' ? '<th>Remark</th>' : ''}</tr></thead><tbody>${state.rows.map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.tagId)}</td><td class="mono">${esc(r.barcode)}</td><td>${esc(r.cls)}</td><td>${esc(r.bucket)}</td><td>${esc(r.ffAgent)}${r.ffAgentId ? ` <small class="dim">${esc(r.ffAgentId)}</small>` : ''}</td><td>${esc(r.ffTl)}</td><td>${esc(r.gvAgent)}${r.gvAgentId ? ` <small class="dim">${esc(r.gvAgentId)}</small>` : ''}</td><td>${esc(r.gvTl)}</td><td class="num">${r.age === '' ? '—' : esc(r.age)}</td>${bucket === 'gvonly' ? `<td><span class="badge ${r.remark === 'Not In FF Stock' ? 'red' : 'amber'}">${esc(r.remark || '')}</span></td>` : ''}</tr>`).join('') || `<tr><td colspan="${bucket === 'gvonly' ? 11 : 10}" class="empty">Koi tag nahi.</td></tr>`}</tbody></table></div>
         ${state.rows.length < state.total ? '<div class="btn-row"><button class="btn small" id="smap-more">⬇ Aur dikhao</button></div>' : ''}`;
       const q = host.querySelector('#smap-q');
       let tm = null;
@@ -1105,34 +1107,57 @@ FF.pages = FF.pages || {};
     load();
   }
 
-  // 🔎 GV assigned tags jo FF stock (StockDataa) me nahi — chip + class-wise drawer + download
+  let stockMapInflight = null;
+  function fetchStockMapReady(force) {
+    if (!force && stockMapInflight) return stockMapInflight;
+    const p = (async () => {
+      const began = Date.now();
+      let first = !!force;
+      for (;;) {
+        const data = await FF.auth.api(first ? '/api/stock-map?fresh=1' : '/api/stock-map');
+        first = false;
+        if (!(data && data.pending)) return data;
+        if (Date.now() - began > 4 * 60e3) throw new Error('Server abhi bhi stock index bana raha hai — thodi der baad Refresh karo');
+        await new Promise((r) => setTimeout(r, Math.min(8000, Math.max(1000, Number(data.retryAfterMs) || 3000))));
+      }
+    })().finally(() => { if (stockMapInflight === p) stockMapInflight = null; });
+    if (!force) stockMapInflight = p;
+    return p;
+  }
+
+  function paintGvOnlyChip(chip, data) {
+    if (!chip || !chip.isConnected) return;
+    const g = (data && data.gvOnly) || { total: 0, rows: [], assigned: 0, unassigned: 0 };
+    const assigned = g.assigned ?? g.total, unassigned = g.unassigned || 0;
+    chip._gvOnlyData = g;
+    chip.querySelector('.kpi-value').textContent = U.fmt(g.total);
+    chip.title = `GV Tag Assignment (in-stock) me hai par FF StockDataa me barcode nahi hai — GV Assigned: ${U.fmt(assigned)} · GV Not Assigned: ${U.fmt(unassigned)}`;
+    chip.querySelector('.kpi-foot').innerHTML = g.rows.length ? g.rows.map((r) => `${esc(r.cls)} <b>${U.fmt(r.n)}</b>`).join(' · ') : 'Sab GV tags FF stock me hain';
+    if (!chip._gvOnlyBound) {
+      chip._gvOnlyBound = true;
+      const open = () => openGvOnlyDrawer(chip._gvOnlyData || g);
+      chip.addEventListener('click', open);
+      chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    }
+  }
+
+  // 🔎 GV in-stock tags jinka barcode FF StockDataa me nahi — chip + class-wise drawer + download
   async function mountGvOnly(host) {
     const chip = host && host.querySelector('#hm-gvonly');
     if (!chip || !FF.auth || typeof FF.auth.api !== 'function') return;
-    const began = Date.now();
-    let data = null;
     try {
-      for (;;) {
-        data = await FF.auth.api('/api/stock-map');
-        if (!(data && data.pending)) break;
-        if (Date.now() - began > 4 * 60e3 || !chip.isConnected) throw new Error('Index abhi ready nahi');
-        await new Promise((r) => setTimeout(r, Math.min(8000, Math.max(1000, Number(data.retryAfterMs) || 3000))));
-      }
-    } catch (e) { if (chip.isConnected) { chip.querySelector('.kpi-value').textContent = '—'; chip.querySelector('.kpi-foot').textContent = 'Stock index ready nahi — refresh karo'; } return; }
-    if (!chip.isConnected) return;
-    const g = data.gvOnly || { total: 0, rows: [] };
-    chip.querySelector('.kpi-value').textContent = U.fmt(g.total);
-    chip.title = `GV stock me hai, FF field stock me nahi — Not In FF Stock ${U.fmt(g.notIn || 0)} · In FF Office Stock ${U.fmt(g.office || 0)}`;
-    chip.querySelector('.kpi-foot').innerHTML = g.rows.length ? g.rows.map((r) => `${esc(r.cls)} <b>${U.fmt(r.n)}</b>`).join(' · ') : 'Sab GV tags FF stock me hain';
-    const open = () => openGvOnlyDrawer(g);
-    chip.addEventListener('click', open);
-    chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      const data = await fetchStockMapReady(false);
+      paintGvOnlyChip(chip, data);
+    } catch {
+      if (chip.isConnected) { chip.querySelector('.kpi-value').textContent = '—'; chip.querySelector('.kpi-foot').textContent = 'Stock index ready nahi — refresh karo'; }
+    }
   }
   function openGvOnlyDrawer(g) {
     if (!FF.app || !FF.app.openDrawer) return;
     const canExp = FF.auth.can('export');
+    const assigned = g.assigned ?? g.total, unassigned = g.unassigned || 0;
     const rows = g.rows.map((r) => `<tr><td><b>${esc(r.cls)}</b></td><td>${esc(r.type)}</td><td class="num"><button type="button" class="smap-cell smap-gv" data-gvo-c="${esc(r.cls)}" title="${esc(r.cls)} tags dekho">${U.fmt(r.n)}</button></td></tr>`).join('');
-    const body = FF.app.openDrawer({ kicker: '🔎 Stock check', title: 'GV tags · not in FF stock', sub: `GV stock me hain, FF field stock me nahi — Not In FF Stock: ${U.fmt(g.notIn || 0)} · In FF Office Stock: ${U.fmt(g.office || 0)}`, wide: false,
+    const body = FF.app.openDrawer({ kicker: '🔎 Stock check', title: 'GV tags · not in FF stock', sub: `GV Tag Assignment (in-stock) me hain par FF StockDataa me barcode nahi hai — Total: ${U.fmt(g.total)} · GV Assigned: ${U.fmt(assigned)} · GV Not Assigned: ${U.fmt(unassigned)}`, wide: false,
       body: `<div class="btn-row">${canExp ? '<button class="btn small primary" id="gvo-xlsx">⬇ Excel (all)</button><a class="btn small" href="/api/stock-map/csv?bucket=gvonly" download>⬇ CSV</a>' : ''}<button class="btn small" data-gvo-c="">📋 Saare tags</button></div>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th>Tag type</th><th class="num">Tags</th></tr></thead><tbody>${rows || '<tr><td colspan="3" class="empty">Koi tag nahi — sab GV tags FF stock me hain.</td></tr>'}<tr class="smap-foot"><td colspan="2"><b>Total</b></td><td class="num"><button type="button" class="smap-link" data-gvo-c="">${U.fmt(g.total)}</button></td></tr></tbody></table></div>` });
     const host = body && body.querySelector ? body : U.$('#drawer-body');
@@ -1144,7 +1169,7 @@ FF.pages = FF.pages || {};
       try {
         const d = await FF.auth.api('/api/stock-map/tags?bucket=gvonly&all=1');
         const out = (d.rows || []).map((r) => [r.tagId, r.barcode, r.cls, r.type, r.gvAgent, r.gvAgentId, r.gvTl, r.age, r.remark || '']);
-        const sum = g.rows.map((r) => [r.cls, r.type, r.n]).concat([['Not In FF Stock', '', g.notIn || 0], ['In FF Office Stock (not in field)', '', g.office || 0], ['Total difference', '', g.total]]);
+        const sum = g.rows.map((r) => [r.cls, r.type, r.n]).concat([['GV Assigned', '', assigned], ['GV Not Assigned', '', unassigned], ['Total (not in FF barcode)', '', g.total]]);
         FF.xlsx.download(`gv-tags-not-in-ff-stock-${U.stamp()}.xlsx`, [{ name: 'Class-wise', header: ['Class', 'Tag type', 'Tags'], rows: sum }, { name: 'Tags', header: ['Tag ID', 'Barcode', 'Class', 'Tag type', 'GV agent', 'GV agent ID', 'GV TL', 'Age (days)', 'Remark'], rows: out }]);
       } catch (err) { U.toast(err.message || 'Excel nahi bana', 'err'); }
       x.disabled = false; x.textContent = old;
@@ -1181,20 +1206,13 @@ FF.pages = FF.pages || {};
     if (!el || !allowed || !FF.auth || typeof FF.auth.api !== 'function') return;
     const load = async (force) => {
       el.innerHTML = `<section class="card smap"><div class="card-body">${U.spinner('Stock mapping (StockDataa × GV Tag Assignment) calculate ho raha hai…')}</div></section>`;
-      const began = Date.now();
       try {
-        let data = null;
-        for (;;) {
-          data = await FF.auth.api(`/api/stock-map`);
-          if (!(data && data.pending)) break;
-          if (Date.now() - began > 4 * 60e3) throw new Error('Server abhi bhi stock index bana raha hai — thodi der baad Refresh karo');
-          await new Promise((r) => setTimeout(r, Math.min(8000, Math.max(1000, Number(data.retryAfterMs) || 3000))));
-          if (!el.isConnected) return;
-        }
+        const data = await fetchStockMapReady(!!force);
         if (!el.isConnected) return;
         el.innerHTML = stockMapHtml(data);
         const warnEl = document.getElementById('home-stock-warn');
         if (warnEl) warnEl.innerHTML = stockWarnHtml(stockMapWarnings(data));
+        paintGvOnlyChip(document.getElementById('hm-gvonly'), data);
       } catch (err) {
         if (el.isConnected) el.innerHTML = `<section class="card smap"><div class="card-body">${U.errorBox ? U.errorBox(err) : esc(err.message || err)}<button class="btn small" data-smap-refresh>↻ Retry</button></div></section>`;
       }
