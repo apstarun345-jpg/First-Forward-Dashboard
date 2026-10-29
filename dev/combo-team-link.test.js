@@ -71,6 +71,9 @@ test('team link: TLs + agents from GV and FF are combined without double countin
     // v280: Today Live tab, donut charts, full-width layout
     assert.match(html, /data-pl-tab="live"/, 'Today Live tab button');
     assert.match(html, /data-pl-pane="live"/, 'Today Live pane');
+    assert.match(html, /data-pl-pane="calendar"/, 'calendar available for team with issuance access');
+    assert.match(html, /id="pl-activity-calendar"/, 'calendar is rendered on team link');
+    assert.match(html, /data-cal-month=/, 'calendar offers month controls');
     assert.match(html, /Today Live/, 'Today Live heading');
     assert.match(html, /class="pb-donut"/, 'donut charts are rendered');
     assert.match(html, /Issuance · class mix/, 'issuance donut card');

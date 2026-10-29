@@ -19,6 +19,7 @@ import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, r
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
 import { createMappingStock, sheetIdFrom, identifierText } from './mapping-stock.js';
 import { createDuplicateBarcodeCollector } from './duplicate-barcode.js';
+import { personalActivityCalendar } from './personal-calendar.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
@@ -11233,6 +11234,7 @@ async function servePersonalPage(req, res, rawToken) {
       { id: 'dispatch', label: '🚚 Dispatch Priority', show: dispatchOk },
       { id: 'stock', label: '📦 Class-wise Stock', show: hasSec('stock') },
       { id: 'issuance', label: `📅 Date${isTeamLink(link) ? ' & Agent' : ''} Issuance`, show: hasSec('issuance') },
+      { id: 'calendar', label: '📆 Activity Calendar', show: hasSec('issuance') },
       { id: 'performance', label: '🏆 Performance', show: hasSec('performance') },
       { id: 'insights', label: '🧠 Insights', show: hasSec('insights') },
       { id: 'ageing', label: '⏳ Stock Ageing', show: hasSec('ageing') },
@@ -11274,7 +11276,7 @@ async function servePersonalPage(req, res, rawToken) {
         ${hasSec('overview') ? `<div class="pl-pane" data-pl-pane="live" hidden>${liveHtml}</div>` : ''}
         ${dispatchOk ? '<div class="pl-pane" data-pl-pane="dispatch" hidden><div id="pl-dispatch"></div></div>' : ''}
         ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${!stockInfo && stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>` : ''}${classStockCardHtml}</div>` : ''}
-        ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div>` : ''}
+        ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div><div class="pl-pane" data-pl-pane="calendar" hidden>${personalActivityCalendar(rows, dateKeyNow())}</div>` : ''}
         ${hasSec('performance') ? `<div class="pl-pane" data-pl-pane="performance" hidden>${perfCardHtml}${teamHtml}</div>` : ''}
         ${hasSec('insights') ? `<div class="pl-pane" data-pl-pane="insights" hidden>${insightsHtml}</div>` : ''}
         ${hasSec('ageing') ? `<div class="pl-pane" data-pl-pane="ageing" hidden>${ageHtml}${agentAgeTable}</div>` : ''}
@@ -11485,6 +11487,9 @@ body{padding:clamp(10px,1.6vw,26px)}
 .pb-pulse{display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;margin-right:4px;box-shadow:0 0 0 0 rgba(34,197,94,.6);animation:pbpulse 1.6s infinite}
 @keyframes pbpulse{70%{box-shadow:0 0 0 9px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
 .pb-live-head{background:linear-gradient(120deg,#f0fdf4,#ecfeff)!important;border-color:#bbf7d0!important}
+/* Activity calendar stays readable in a seven-column grid, including on phones. */
+.pl-cal-months,.pl-cal-legend{display:flex;flex-wrap:wrap;gap:7px}.pl-cal-months .on{background:#2563eb;color:#fff;border-color:#2563eb}.pl-cal-legend{color:#64748b;font-size:12px;margin:8px 0 14px}.pl-cal-legend span{margin-right:8px}.pl-cal-summary{margin:8px 0;color:#475569;font-size:13px}.pl-cal-week,.pl-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}.pl-cal-week span{text-align:center;font-size:12px;font-weight:700;color:#64748b}.pl-cal-grid{margin:5px 0 12px}.pl-cal-day{min-width:0;min-height:66px;border:1px solid #dbe5ef;border-radius:10px;background:#f8fafc;color:#334155;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font:inherit}.pl-cal-day span{font-size:12px}.pl-cal-day b{font-size:15px}.pl-cal-day.level1{background:#dcfce7;border-color:#bbf7d0}.pl-cal-day.level2{background:#bbf7d0;border-color:#86efac}.pl-cal-day.level3{background:#86efac;border-color:#4ade80;color:#14532d}.pl-cal-day.level4{background:#16a34a;border-color:#15803d;color:#fff}.pl-cal-day.pending{background:#f1f5f9;color:#94a3b8;cursor:not-allowed}.pl-cal-day[aria-pressed=true]{outline:3px solid #2563eb;outline-offset:1px}.pl-cal-day:focus-visible,.pl-cal-months button:focus-visible{outline:3px solid #2563eb;outline-offset:2px}.pl-cal-details{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;min-height:60px}.pl-cal-detail h4{font-size:14px}.pl-cal-split{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}.pl-cal-split span{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:4px 9px;font-size:12px}.pl-cal-split b{margin-left:5px}.pl-calendar [hidden]{display:none!important}
+@media(max-width:520px){.pl-cal-week,.pl-cal-grid{gap:3px}.pl-cal-day{min-height:50px;border-radius:7px}.pl-cal-day span{font-size:11px}.pl-cal-day b{font-size:13px}.pl-cal-week span{font-size:10px}}
 @media(max-width:1100px){.pb-grid3{grid-template-columns:1fr 1fr}}
 @media(max-width:760px){.pb-grid3{grid-template-columns:1fr}.pb-wrap .pl-side{max-height:none}.pl-layout{grid-template-columns:1fr}}
 </style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
@@ -11731,6 +11736,24 @@ const PERSONAL_PORTAL_JS = `(function () {
     var onChip = document.querySelector('.pl-ch.on'); if (onChip) { curCh = chFromHref(onChip.getAttribute('href')); state.ch = curCh; }
     var h0 = (state.tab || '').replace('#', '');
     if (h0) activateTab(h0, true);
+    // Calendar is rendered only for issuance-enabled links; rebinding here also covers channel switches.
+    var cal = holder && holder.querySelector('#pl-activity-calendar');
+    if (cal) cal.addEventListener('click', function (e) {
+      var monthBtn = e.target.closest && e.target.closest('[data-cal-month]');
+      if (monthBtn && cal.contains(monthBtn)) {
+        var month = monthBtn.getAttribute('data-cal-month');
+        Array.prototype.forEach.call(cal.querySelectorAll('[data-cal-month]'), function (b) { var on = b === monthBtn; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+        Array.prototype.forEach.call(cal.querySelectorAll('[data-cal-grid]'), function (g) { g.hidden = g.getAttribute('data-cal-grid') !== month; });
+        return;
+      }
+      var dayBtn = e.target.closest && e.target.closest('[data-cal-day]');
+      if (!dayBtn || dayBtn.disabled || !cal.contains(dayBtn)) return;
+      var grid = dayBtn.closest('[data-cal-grid]'), date = dayBtn.getAttribute('data-cal-day');
+      if (!grid) return;
+      Array.prototype.forEach.call(grid.querySelectorAll('[data-cal-day]'), function (b) { b.setAttribute('aria-pressed', b === dayBtn ? 'true' : 'false'); });
+      Array.prototype.forEach.call(grid.querySelectorAll('[data-cal-detail]'), function (d) { d.hidden = d.getAttribute('data-cal-detail') !== date; });
+      var ph = grid.querySelector('[data-cal-placeholder]'); if (ph) ph.hidden = true;
+    });
 
   // Scoped search + Dispatch priority — only the TLs / agents this link covers (all data is embedded, so it is instant)
   (function () {
