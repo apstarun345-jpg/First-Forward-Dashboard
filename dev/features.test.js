@@ -595,6 +595,8 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     assert.ok(htmlA.includes('Welcome Back, <b>Rahul Dravid</b>'), 'verified personal report greets the authenticated agent');
     assert.ok(htmlA.includes('Daily Issuance · Current Month') && htmlA.includes('MTD ISSUED') && htmlA.includes("today's incomplete report excluded"), 'current-month graph shows an issued-count total through yesterday');
     assert.ok(htmlA.includes('pl-tbl-date-matrix') && htmlA.includes('Agent Name') && htmlA.includes('MTD Total'), 'date matrix uses agent rows and current-month date columns');
+    assert.match(htmlA, /data-pl-tab="calendar"/); assert.match(htmlA, /data-pl-pane="calendar"/);
+    assert.match(htmlA, /Day-wise Activity Calendar/); assert.match(htmlA, /data-cal-month=/);
     assert.ok(!htmlA.includes('Last 14 Days') && !htmlA.includes('14-Day Total'), 'personal report no longer renders a 14-day issuance view');
     assert.ok(htmlA.includes('pl-exp-stock-csv'), 'stock CSV action is available when stock and export are permitted');
     assert.ok(htmlA.includes('MTD issued') && htmlA.includes('Last'), 'overview KPI and 14-day chart render');
@@ -612,6 +614,7 @@ test('🔗 personal links (agent+TL) /p/ pages, 🗺 team location, 🏆 anomaly
     const emptySectionsPage = await fetch(`${server.base}/p/${agentToken}`, { headers: { cookie: verifyEmpty.setCookie.split(';')[0] } });
     const emptySectionsHtml = await emptySectionsPage.text();
     assert.ok(emptySectionsHtml.includes('No report sections enabled'), 'empty allow-list renders a locked/empty portal, not the global defaults');
+    assert.doesNotMatch(emptySectionsHtml, /data-pl-pane="calendar"|id="pl-activity-calendar"/, 'calendar and its data are not emitted without issuance permission');
     assert.doesNotMatch(emptySectionsHtml, /MTD issued|Class-wise Stock|Date-wise Issuance|Performance &amp; Growth|data-pl-csv|data-pl-pdf|pl-exp-all-pdf/, 'no report values or exports leak when every section is revoked');
     const logoutA = await call('/api/public/personal-link/logout', 'POST', { token: agentToken }, verifyEmpty.setCookie.split(';')[0]);
     assert.equal(logoutA.res.status, 200);
