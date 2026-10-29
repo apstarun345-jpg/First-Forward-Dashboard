@@ -145,6 +145,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvStockReport', label: 'GV Partner · GV Stock Report (GV REPORT-wise)', group: 'GV Partner' },
   { key: 'gvPayout', label: 'GV Partner · Commission Payout (agent / TL commission + tags issued)', group: 'GV Partner' },
   { key: 'fastagMapping', label: 'GV Partner · FASTag Mapping (admin-only API mapping)', group: 'GV Partner' },
+  { key: 'agentsOverview', label: 'Reports · GV & FF Agents Summary (stock agents · direct/TL · active/inactive)', group: 'Reports' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
   { key: 'aiAnalyst', label: 'Management · AI Business Analyst (GV + FF review)', group: 'Management' },
   { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
@@ -199,7 +200,7 @@ export const PERMISSIONS = permissionsFor({ tabs: DEFAULT_TABS });
 // ki zaroorat nahi). Purane users ke saved perms waise hi rehte hain; wo bas kisi page se bind nahi
 // hote, isliye kuch bhi tootta nahi.
 const DEFAULT_USER_PERMS = ['home', 'dataQuality', 'tagIssued', 'masterSearch', 'targets', 'dashboard', 'trend', 'stock', 'stockReport', 'performance', 'gvDashboard', 'gvTrend', 'gvStock', 'gvStockReport', 'gvPerformance', 'dualChannel',
-  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export', 'dispatchPlan', 'voiceAssistant', 'directAgents', 'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary', 'agentSummary'];
+  'sheet:StockDataa', 'sheet:REPORT', 'sheet:GV Master', 'sheet:Tag Assignment', 'sheet:GV REPORT', 'export', 'dispatchPlan', 'voiceAssistant', 'directAgents', 'agentsOverview', 'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary', 'agentSummary'];
 
 // Admin-controlled audience for automated notifications. `users` means all approved non-admin
 // users who have notification access; each user's own master/type preferences still apply.
