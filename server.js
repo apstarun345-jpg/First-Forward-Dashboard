@@ -17,7 +17,7 @@ import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
-import { createMappingStock, sheetIdFrom } from './mapping-stock.js';
+import { createMappingStock, sheetIdFrom, identifierText } from './mapping-stock.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
@@ -3501,16 +3501,18 @@ async function loadStockAgeIndex() {
   const ffL = { id: colLetter(st.id, 'A'), tagId: colLetter(st.tagId, 'C'), barcode: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), bcDate: colLetter(st.bcAllocatedAt, 'G'), agentId: colLetter(st.agentId, 'H'), agentName: colLetter(st.agentName, 'I'), agentDate: colLetter(st.agentAllocatedAt, 'J'), tl: colLetter(st.tlName, 'K') };
   const gvL = { cls: colLetter(A.cls, 'A'), tagId: colLetter(A.tagId, 'B'), serial: colLetter(A.serial, 'C'), status: colLetter(A.status, 'D'), agentId: colLetter(A.agentId, 'E'), agentName: colLetter(A.agentName, 'F'), tlId: colLetter(A.tlId, 'G'), tlName: colLetter(A.tlName, 'H'), date: colLetter(A.allocatedAt, '') };
   const pick = (row, idx) => (idx >= 0 ? serverCell(row, idx) : '');
+  const pickId = (row, idx) => (idx >= 0 ? identifierText(row && row.c && row.c[idx]) : '');
   const [y, m, d] = dateKeyNow().split('-').map(Number);
   const opts = { todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.', gvOutWords: (s.gvStockStatus && Array.isArray(s.gvStockStatus.outStock) && s.gvStockStatus.outStock.length ? s.gvStockStatus.outStock : ['ISSUE', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE']) };
   let builder = createStockAgeBuilder(opts);
   // v3.122 — memory: FF pehle poora padho, phir GV page-by-page seedha builder me (pehle poora GV buffer hota tha: ~50 MB extra peak).
   const ffJob = (async () => {
     const letters = [...new Set(Object.values(ffL).filter(Boolean))];
-    await gvizPagesServer(s.sheetId, s.stockSheet || 'StockDataa', letters, `${ffL.tagId} is not null`, async (rows, at) => {
+    const ffWhere = [ffL.tagId, ffL.barcode].filter(Boolean).map((c) => `${c} is not null`).join(' or ');
+    await gvizPagesServer(s.sheetId, s.stockSheet || 'StockDataa', letters, ffWhere, async (rows, at) => {
       const ix = Object.fromEntries(Object.entries(ffL).map(([k, L]) => [k, L ? at(L) : -1]));
       for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
-        builder.addFf(rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ id: pick(row, ix.id), tagId: pick(row, ix.tagId), barcode: pick(row, ix.barcode), cls: pick(row, ix.cls), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) })));
+        builder.addFf(rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ id: pick(row, ix.id), tagId: pickId(row, ix.tagId), barcode: pickId(row, ix.barcode), cls: pick(row, ix.cls), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) })));
         await yieldLoop();
       }
     });
@@ -3520,11 +3522,12 @@ async function loadStockAgeIndex() {
   if (errors.ff) builder = createStockAgeBuilder(opts);
   if (s.gvSheetId) {
     const letters = [...new Set(Object.values(gvL).filter(Boolean))];
+    const gvWhere = [gvL.tagId, gvL.serial].filter(Boolean).map((c) => `${c} is not null`).join(' or ');
     try {
-      await gvizPagesServer(s.gvSheetId, A.tab || 'Tag Assignment', letters, `${gvL.tagId} is not null`, async (rows, at) => {
+      await gvizPagesServer(s.gvSheetId, A.tab || 'Tag Assignment', letters, gvWhere, async (rows, at) => {
         const ix = Object.fromEntries(Object.entries(gvL).map(([k, L]) => [k, L ? at(L) : -1]));
         for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
-          builder.addGv(rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ cls: pick(row, ix.cls), tagId: pick(row, ix.tagId), serial: pick(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) })));
+          builder.addGv(rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ cls: pick(row, ix.cls), tagId: pickId(row, ix.tagId), serial: pickId(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) })));
           await yieldLoop();
         }
       });
@@ -6051,7 +6054,7 @@ async function handleApi(req, res, url) {
   // 🗺️ Stock mapping summary (home page): StockDataa tags → FF / GV / GV+FF / Office (same index, naya scan nahi).
   if (p === '/api/stock-map' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
-    const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, false);
+    const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, url.searchParams.get('fresh') === '1');
     if (!index) return sendJson(res, 200, stockAgePending());
     return sendJson(res, 200, { ok: true, at: new Date(index.at).toISOString(), building: !!stockAgeState.promise, errors: index.errors || null, map: index.map || null, gvOnly: stockGvOnlySummary(index) }, { 'Cache-Control': 'no-store' });
   }

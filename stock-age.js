@@ -22,7 +22,21 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 const str = (v) => (v === null || v === undefined ? '' : String(v)).trim();
 export const digits = (v) => str(v).replace(/\D/g, '');
 export const normName = (v) => str(v).toUpperCase().replace(/\s+/g, ' ');
-export const normBarcode = (v) => digits(v);
+function expandSciDigits(raw) {
+  const m = raw.match(/^([+-]?)(\d+)(?:\.(\d*))?[eE]([+-]?\d+)$/);
+  if (!m) return raw;
+  const sign = m[1] || '', whole = m[2], frac = m[3] || '', exp = Number(m[4]);
+  const all = whole + frac, at = whole.length + exp;
+  if (at <= 0) return sign + '0.' + '0'.repeat(Math.min(1000, -at)) + all;
+  if (at >= all.length) return sign + all + '0'.repeat(Math.min(1000, at - all.length));
+  return sign + all.slice(0, at) + '.' + all.slice(at);
+}
+export function normBarcode(v) {
+  const raw = str(v);
+  if (!raw || /^0+$/.test(raw)) return '';
+  const expanded = expandSciDigits(raw).replace(/\.0+$/, '');
+  return expanded.replace(/\D/g, '').replace(/^0+/, '');
+}
 
 /** Sheet ke date formats → UTC day number: Date(2026,4,12,…) · 2026-05-12 · 12-05-2026 18:38:03 IST · 12/05/26 · 12-May-2026. */
 export function parseStockDay(value) {
@@ -81,11 +95,22 @@ export function packNode(node) {
  *  todayDay: aaj ka UTC day number (IST date) · masterId: GV master ID (5845036) — sirf label ke liye.
  */
 const NOT_ASSIGNED_RE = /^(not[\s_-]*assigned|unassigned|na|n\/a|none|null|nil|-+|0)$/i;
+export const DEFAULT_GV_OUT_WORDS = ['ISSUE', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE'];
+export function isGvOutStatus(status, outWords) {
+  const st = str(status);
+  if (!st || /not[\s_-]*assigned|unassigned/i.test(st)) return false;
+  const words = outWords && outWords.length ? outWords : DEFAULT_GV_OUT_WORDS;
+  const up = st.toUpperCase();
+  return words.some((w) => up.includes(w));
+}
+export function isGvInStock(r, outWords) {
+  return !!r && !isGvOutStatus(r.status, outWords);
+}
 /** GV Tag Assignment row tab "assigned" maani jaati hai jab uska GV agent ID / naam ho (not-assigned / blank nahi). */
 export function isGvAssigned(r, outWords) {
   const id = str(r.agentId), name = str(r.agentName), st = str(r.status);
   if (/not[\s_-]*assigned|unassigned/i.test(st)) return false;
-  if (outWords && outWords.length && st && outWords.some((w) => st.toUpperCase().includes(w))) return false;   // issued / out status = ab stock nahi
+  if (isGvOutStatus(st, outWords)) return false;   // issued / out status = ab stock nahi
   const ok = (v) => v && !NOT_ASSIGNED_RE.test(v) && !/not[\s_-]*assigned|unassigned/i.test(v);
   return !!(ok(id) || ok(name));
 }
@@ -123,55 +148,80 @@ export function buildMapSummary(ffRaw, gvMap, opts = {}) {
   return { rows, total, gv: { rows: gvMap.rows, assigned: gvMap.assigned, notAssigned: gvMap.notAssigned, outStatus: gvMap.outStatus || 0, notInStockData: gvNotInStock }, ffRows: (ffRaw || []).length, topTl: [...tl.values()].sort((a, b) => b.ff - a.ff).slice(0, 10) };
 }
 export const MAP_BUCKET_LABEL = { ff: 'First Forward', gv: 'GV Partner', both: 'GV + FF', office: 'Office stock', all: 'All stock', gvonly: 'GV only (not in FF stock)' };
-/** GV assigned tags jo StockDataa (FF stock) me nahi hain — Tag ID ya Barcode dono se match check. Index par memoized. */
+export const GVONLY_REMARK_NONE = 'Not In FF Stock';
+export const GVONLY_REMARK_UNASSIGNED = 'Not In FF Stock (GV Not Assigned)';
+export const GVONLY_REMARK_OFFICE = 'In FF Office Stock (not in field)';
+const rowGvUnassigned = (r) => {
+  if (r[11] === 2) return true;
+  if (r[11] === 1) return false;
+  return !isGvAssigned({ agentId: r[5], agentName: r[4], status: '' }, null);
+};
+const isHeaderBarcode = (v) => /^(BARCODE|SERIAL[_ ]?NUMBER|SERIAL|SNO)$/i.test(str(v));
+/** GV Tag Assignment ke sabhi in-stock tags (Assigned + Not Assigned dono, issued/out chhod kar)
+ *  jinka Barcode FF StockDataa ke Barcode column me bilkul nahi hai. Index par memoized. */
 export function gvOnlyList(index) {
-  if (!index || !index.gv || !index.mapGv) return [];
+  if (!index || !index.gv) return [];
   if (index._gvOnly && index._gvOnlyAt === index.at) return index._gvOnly;
-  // FF side: StockDataa me Tag ID ya Barcode kahin bhi mile (field/office/parked) to FF stock maana jata hai.
-  const ffAny = new Set(), ffAnyBc = new Set();
+  const ffAnyBc = new Set((index.ff && index.ff.extraBarcodes) || []);
   for (const r of (index.ff && index.ff.raw) || []) {
-    const t = str(r[0]).toUpperCase(), b = normBarcode(r[1]);
-    ffAny.add(t); if (b) ffAnyBc.add(b);
+    const b = normBarcode(r[1]);
+    if (b) ffAnyBc.add(b);
   }
   const out = [], seen = new Set(), remarks = new Map();
-  for (const r of index.gv.raw || []) {
-    const tu = str(r[0]).toUpperCase();
-    if (!tu || seen.has(tu) || !index.mapGv.tags.has(tu)) continue;   // sirf GV "assigned" (in-stock) tags
-    const b = normBarcode(r[1]);
-    if (ffAny.has(tu) || (b && ffAnyBc.has(b))) continue;              // FF StockDataa me Tag ID ya Barcode mila → difference nahi
-    seen.add(tu); out.push(r);
-    remarks.set(tu, GVONLY_REMARK_NONE);
-  }
+  const scan = (list) => {
+    for (const r of list || []) {
+      if (r[11] === 0) continue;                   // issued / out-of-stock GV row → GV Partner Stock in field me nahi
+      const b = normBarcode(r[1]);
+      if (b && ffAnyBc.has(b)) continue;           // FF StockDataa me ye barcode maujood hai → count nahi
+      const tu = str(r[0]).toUpperCase();
+      const key = b ? `B:${b}` : tu ? `T:${tu}` : '';
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(r);
+      remarks.set(r, rowGvUnassigned(r) ? GVONLY_REMARK_UNASSIGNED : GVONLY_REMARK_NONE);
+    }
+  };
+  scan(index.gv.raw);
+  scan(index.gv.extraInStock);
   index._gvOnly = out; index._gvOnlyAt = index.at; index._gvOnlyRemark = remarks;
   return out;
 }
-export const GVONLY_REMARK_NONE = 'Not In FF Stock';
-export const GVONLY_REMARK_OFFICE = 'In FF Office Stock (not in field)';
-export function gvOnlyRemark(index, r) { return (index._gvOnlyRemark && index._gvOnlyRemark.get(str(r[0]).toUpperCase())) || GVONLY_REMARK_NONE; }
-export function gvOnlySummary(index) {
-  const by = new Map();
-  for (const r of gvOnlyList(index)) by.set(r[2] || 'NA', (by.get(r[2] || 'NA') || 0) + 1);
-  const rows = [...by].map(([cls, n]) => ({ cls, n, type: TAG_TYPE_LABEL[cls] || '' })).sort((a, b) => (CLS_ORDER.indexOf(a.cls) + 1 || 99) - (CLS_ORDER.indexOf(b.cls) + 1 || 99));
-  const list = gvOnlyList(index);
-  let notIn = 0, office = 0;
-  for (const r of list) { if (gvOnlyRemark(index, r) === GVONLY_REMARK_OFFICE) office++; else notIn++; }
-  return { total: rows.reduce((t, x) => t + x.n, 0), rows, notIn, office };
+export function gvOnlyRemark(index, r) {
+  if (index && (!index._gvOnly || index._gvOnlyAt !== index.at)) gvOnlyList(index);
+  return (index && index._gvOnlyRemark && index._gvOnlyRemark.get(r)) || (rowGvUnassigned(r) ? GVONLY_REMARK_UNASSIGNED : GVONLY_REMARK_NONE);
 }
-/** Tag-level rows ek bucket (ff|gv|both|office|all) + optional class ke liye. */
+export function gvOnlySummary(index) {
+  const list = gvOnlyList(index);
+  const by = new Map();
+  let assigned = 0, unassigned = 0;
+  for (const r of list) {
+    const cls = r[2] || 'NA';
+    by.set(cls, (by.get(cls) || 0) + 1);
+    if (rowGvUnassigned(r)) unassigned++; else assigned++;
+  }
+  const rows = [...by].map(([cls, n]) => ({ cls, n, type: TAG_TYPE_LABEL[cls] || '' })).sort((a, b) => (CLS_ORDER.indexOf(a.cls) + 1 || 99) - (CLS_ORDER.indexOf(b.cls) + 1 || 99));
+  const total = list.length;
+  return { total, rows, notIn: total, assigned, unassigned, office: 0 };
+}
+/** Tag-level rows ek bucket (ff|gv|both|office|all|gvonly) + optional class ke liye. */
 export function mapRows(index, { bucket = 'all', cls = '', q = '' } = {}) {
   const out = [];
-  if (!index || !index.ff || !index.mapGv) return out;
+  if (!index) return out;
   const want = str(cls) ? normCls(cls) : '';
   const needle = str(q).toLowerCase();
   if (bucket === 'gvonly') {
     for (const r of gvOnlyList(index)) {
       if (want && r[2] !== want) continue;
-      const row = { tagId: str(r[0]), barcode: str(r[1]), cls: r[2], type: TAG_TYPE_LABEL[r[2]] || '', bucket: MAP_BUCKET_LABEL.gvonly, ffAgent: '', ffAgentId: '', ffTl: '', gvAgent: str(r[4]), gvAgentId: str(r[5]), gvTl: str(r[6]), age: r[7] === null || r[7] === undefined ? '' : r[7], remark: gvOnlyRemark(index, r) };
+      const unassigned = rowGvUnassigned(r);
+      const gvAg = str(r[4]) || (unassigned ? 'Not Assigned' : '');
+      const gvAgId = unassigned && /^(not[\s_-]*assigned|unassigned)$/i.test(str(r[5])) ? '' : str(r[5]);
+      const row = { tagId: str(r[0]), barcode: str(r[1]), cls: r[2], type: TAG_TYPE_LABEL[r[2]] || '', bucket: MAP_BUCKET_LABEL.gvonly, ffAgent: '', ffAgentId: '', ffTl: '', gvAgent: gvAg, gvAgentId: gvAgId, gvTl: str(r[6]), age: r[7] === null || r[7] === undefined ? '' : r[7], remark: gvOnlyRemark(index, r) };
       if (needle && !Object.values(row).some((v) => String(v).toLowerCase().includes(needle))) continue;
       out.push(row);
     }
     return out;
   }
+  if (!index.ff || !index.mapGv) return out;
   for (const r of index.ff.raw || []) {
     if (want && r[2] !== want) continue;
     const m = mapBucketOf(r, index.mapGv, index.mapOpts);
@@ -198,22 +248,23 @@ export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl
     return s;
   };
   // field = agents ke paas (asli field stock) · parked = master (5845036) / "ApnaPayment Pvt. Ltd." / bina agent (BC + GV ka stock)
-  const ff = { all: newNode('First Forward · poora StockDataa'), field: newNode('First Forward · field (agents ke paas)'), parked: newNode('🏬 Master / GV parked (ApnaPayment)'), agents: new Map(), tls: new Map(), raw: [], total: 0, unknown: 0, rows: 0 };
+  const ff = { all: newNode('First Forward · poora StockDataa'), field: newNode('First Forward · field (agents ke paas)'), parked: newNode('🏬 Master / GV parked (ApnaPayment)'), agents: new Map(), tls: new Map(), raw: [], extraBarcodes: new Set(), total: 0, unknown: 0, rows: 0 };
   const byTag = new Map(), byBarcode = new Map();
   const gvMap = { tags: new Map(), bcs: new Map(), assigned: 0, notAssigned: 0, outStatus: 0, rows: 0 };   // 🗺️ mapping summary ke liye (finish par saaf)
-  const gv = { all: newNode('GV Partner · poora network'), agents: new Map(), tls: new Map(), raw: [], total: 0, unknown: 0, matched: 0, own: 0, rows: 0 };
+  const gv = { all: newNode('GV Partner · poora network'), agents: new Map(), tls: new Map(), raw: [], extraInStock: [], total: 0, unknown: 0, matched: 0, own: 0, rows: 0 };
   /** FF (StockDataa) rows ka ek page / chunk. */
   function addFf(rows) {
     for (const r of rows || []) {
       if (!r) continue;
       const tagId = str(r.tagId);
-      if (!tagId || isHeaderTag(tagId, r.cls)) continue;
+      if (isHeaderTag(tagId, r.cls) || isHeaderBarcode(r.barcode)) continue;
+      const bc = normBarcode(r.barcode);
+      if (!tagId) { if (bc) ff.extraBarcodes.add(bc); continue; }
       ff.rows++;
       const aDay = parseStockDay(r.agentDate);
       const day = aDay || parseStockDay(r.bcDate);
       const src = aDay ? 'agent' : day ? 'bc' : '';
       if (day) byTag.set(tagId.toUpperCase(), day);
-      const bc = normBarcode(r.barcode);
       if (bc && day) byBarcode.set(bc, day);
       const age = ageOf(day);
       if (age === null) ff.unknown++;
@@ -241,15 +292,26 @@ export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl
     for (const r of rows || []) {
       if (!r) continue;
       const tagId = str(r.tagId);
-      if (!tagId || isHeaderTag(tagId, r.cls)) continue;
+      if (isHeaderTag(tagId, r.cls) || isHeaderBarcode(r.serial)) continue;
+      const outSt = isGvOutStatus(r.status, outWords);
+      const assigned = !outSt && isGvAssigned(r, outWords);
+      const inStockFlag = outSt ? 0 : (assigned ? 1 : 2);
+      if (!tagId) {
+        const sb = normBarcode(r.serial);
+        if (sb && inStockFlag > 0) {
+          const day = parseStockDay(r.date) || byBarcode.get(sb) || 0;
+          gv.extraInStock.push(['', str(r.serial), same(normCls(r.cls)), day, same(str(r.agentName)), same(str(r.agentId)), same(str(r.tlName)), ageOf(day), '', '', '', inStockFlag]);
+        }
+        continue;
+      }
       gv.rows++;
       gvMap.rows++;
-      if (isGvAssigned(r, outWords)) {
+      if (assigned) {
         gvMap.assigned++;
         const tu = tagId.toUpperCase();
         gvMap.tags.set(tu, [same(str(r.agentName)), same(str(r.agentId)), same(str(r.tlName))]);
         const sb = normBarcode(r.serial); if (sb) gvMap.bcs.set(sb, tu);
-      } else if (outWords && /./.test(str(r.status)) && outWords.some((w) => str(r.status).toUpperCase().includes(w)) && !/not[\s_-]*assigned|unassigned/i.test(str(r.status))) gvMap.outStatus++;
+      } else if (outSt) gvMap.outStatus++;
       else gvMap.notAssigned++;
       let day = parseStockDay(r.date), src = day ? 'sheet' : '';
       if (day) gv.own++;
@@ -270,21 +332,23 @@ export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl
       addAge(tn, g, age);
       addAge(gv.all, g, age);
       gv.total++;
-      gv.raw.push([tagId, str(r.serial), same(normCls(r.cls)), day, agentName, same(str(r.agentId)), tlName, age, aKey, tKey, src]);
+      gv.raw.push([tagId, str(r.serial), same(normCls(r.cls)), day, agentName, same(str(r.agentId)), tlName, age, aKey, tKey, src, inStockFlag]);
     }
   }
   function finish() {
     byTag.clear(); byBarcode.clear(); pool.clear();
     const mapOpts = { masterDigits, parkedTlNorm };
     const map = buildMapSummary(ff.raw, gvMap, mapOpts);
-    return { at: Date.now(), today, masterId: str(masterId), masterDigits, parkedTlNorm, ff, gv, map, mapGv: gvMap, mapOpts };
+    const idx = { at: Date.now(), today, masterId: str(masterId), masterDigits, parkedTlNorm, ff, gv, map, mapGv: gvMap, mapOpts };
+    map.gv.notInStockData = gvOnlySummary(idx).total;
+    return idx;
   }
   return { addFf, addGv, finish, get today() { return today; } };
 }
 
 /** Purana one-shot API (tests / chhote data) — builder ke upar hi bana hai. */
-export function buildStockAgeIndex({ ffRows = [], gvRows = [], todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.' } = {}) {
-  const builder = createStockAgeBuilder({ todayDay, masterId, parkedTl });
+export function buildStockAgeIndex({ ffRows = [], gvRows = [], todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.', gvOutWords = null } = {}) {
+  const builder = createStockAgeBuilder({ todayDay, masterId, parkedTl, gvOutWords });
   builder.addFf(ffRows);
   builder.addGv(gvRows);
   return builder.finish();
