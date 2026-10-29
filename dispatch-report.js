@@ -97,8 +97,8 @@ export function loadFfDispatchRows(table, settings = {}) {
       stock: { vc4: numeric(c.stock), comm: numeric(c.stock + 7), total: numeric(c.stock + 6) },
       tlStock: { vc4: numeric(c.tlStock), comm: numeric(c.tlStock + 1), total: numeric(c.tlStock + 2) }
     };
-    // 📞 mobile (non-enumerable so existing row-shape comparisons stay unchanged): own mobile in the profile "ID" column, else a 10-digit agent ID
-    { const idc = text(c.agentId + 1).replace(/\D/g, ''), aid = agentId.replace(/\D/g, ''); Object.defineProperty(row, 'mobile', { value: /^\d{10}$/.test(idc.slice(-10)) && idc.length >= 10 ? idc.slice(-10) : (/^\d{10}$/.test(aid) && aid === agentId ? aid : ''), enumerable: false }); }
+    // 📞 mobile (non-enumerable so existing row-shape comparisons stay unchanged): only a real 10-digit mobile (starts 6-9) in the profile "ID" column / agent ID. Long agent IDs (18 digits) are NOT mobiles — never slice them.
+    { const idc = text(c.agentId + 1).replace(/\D/g, ''), aid = agentId.replace(/\D/g, ''); const okMob = (v) => /^[6-9]\d{9}$/.test(v); Object.defineProperty(row, 'mobile', { value: okMob(idc) ? idc : (okMob(aid) && aid === agentId ? aid : ''), enumerable: false }); }
     row.direct = isDirect(row, 'ff', settings);
     row.directLabel = row.direct ? directLabel('ff', settings) : '';
     rows.push(row);

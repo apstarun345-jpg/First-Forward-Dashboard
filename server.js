@@ -9969,7 +9969,7 @@ const plMobileFor = (maps, src, id, name) => {
   if (!maps) return '';
   const nk2 = plNormName(name), ik = plIdKey(id), order = src === 'gv' ? ['gv', 'ff'] : ['ff', 'gv'];
   for (const ch of order) { const m = (ik && maps[ch].id.get(ik)) || maps[ch].name.get(nk2); if (m) return m; }
-  return /^\d{10}$/.test(String(id || '').trim()) ? String(id).trim() : '';
+  return /^[6-9]\d{9}$/.test(String(id || '').trim()) ? String(id).trim() : '';
 };
 /** 🎯 Agents a team link may set targets for: Map(normName → { name, src, tl }). */
 async function plScopeAgents(link) {
