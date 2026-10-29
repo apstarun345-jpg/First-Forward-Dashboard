@@ -700,6 +700,16 @@ window.FF = window.FF || {};
     const r = findGvAgent(name, id);
     return r && r.mobile && !/^na$/i.test(r.mobile) ? r.mobile : '';
   }
+  /** Days since latest EIR issuance (live, same basis as the "Last active" badge); '' when no EIR rows. */
+  function liveLastActive(rows) {
+    try {
+      let best = '';
+      for (const r of rows || []) { const k = String(r.key || ''); if (k && Number(r.n) > 0 && k > best) best = k; }
+      if (!best) return '';
+      const days = Math.max(0, Math.round((new Date(U.dateKey(new Date()) + 'T00:00:00') - new Date(best + 'T00:00:00')) / 86400000));
+      return days === 0 ? 'Active today' : `${days} days inactive`;
+    } catch { return ''; }
+  }
   function mobileFor(name, id, own) {
     const clean10 = (v) => String(v || '').replace(/\D/g, '');
     try { const rm = FF.aliases && FF.aliases.mobileOf && FF.aliases.mobileOf(id, name); if (rm) return rm; } catch { /* ignore */ }   // Sheet4 agent master
@@ -1329,7 +1339,7 @@ window.FF = window.FF || {};
       const avgVc4 = U.runRate(a.curVc4, 'ff'), avgNvc4 = U.runRate(a.curNvc4, 'ff');
       Object.assign(out, {
         mobile: mobileFor(a.name, a.agentId || a.id, a.mobile), tl: { name: a.tlName, id: a.tlId, mobile: a.tlMobile },
-        status: a.agentStatus || '', lastActive: a.lastActive || '', priority: a.priority || '', growth: a.growth || '',
+        status: a.agentStatus || '', lastActive: liveLastActive(eirRows) || a.lastActive || '', priority: a.priority || '', growth: a.growth || '',
         direct: !!a.tlExcluded, directLabel: a.tlExcluded ? FF.config.directLabel(a, 'ff') : '',
         stock: { vc4: num(a.stockVc4), comm: num(a.stockNvc4), total: num(a.stockTotal) || num(a.stockVc4) + num(a.stockNvc4) },
         tlStock: { vc4: num(a.tlStockVc4), comm: num(a.tlStockNvc4), total: num(a.tlStockTotal), has: a.tlStockTotal != null || a.tlStockVc4 != null },

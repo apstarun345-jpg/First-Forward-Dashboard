@@ -1940,8 +1940,6 @@ FF.pages = FF.pages || {};
           const tlId = tlKind ? id : (tl.id || '');
           const tlMob = tlKind ? (q && q.mobile) : tl.mobile;
           return `<div class="msp-det-card ${ch}"><div class="msp-det-h">${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${tlKind ? 'Team Leader' : 'Agent'}</div><div class="msp-det-grid">
-            ${f(tlKind ? 'TL ID' : 'Agent ID', id, true)}
-            ${f(tlKind ? 'TL name' : 'Agent name', pp.name)}
             <div class="msp-det-f"><small>${tlKind ? 'TL mobile' : 'Mobile'}</small><b>${mob(q && q.mobile)}</b></div>
             ${tlKind ? '' : f('TL name', pp.direct ? (pp.directLabel || 'Direct') : tlName)}
             ${tlKind ? '' : f('TL ID', tlId, true)}
