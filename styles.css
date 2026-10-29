@@ -7167,5 +7167,11 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 /* v3.111.0 — GV tags not in FF stock chip */
 .hm-stock-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
 @media (max-width: 900px) { .hm-stock-grid { grid-template-columns: 1fr !important; } }
-.hm-gvonly { cursor: pointer; }
+.hm-gvonly { cursor: default; }
+.hm-gvonly-open { cursor: pointer; display: flex; flex-direction: column; flex: 1; }
 .hm-gvonly .kpi-foot { white-space: normal; }
+.hm-gvonly-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; position: relative; z-index: 2; }
+.hm-gvonly-actions[hidden] { display: none; }
+.hm-gvonly-actions button, .hm-gvonly-actions a { border: 1px solid rgba(255,255,255,.65); border-radius: 6px; padding: 3px 9px; background: rgba(0,0,0,.2); color: #fff; font: inherit; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.hm-gvonly-actions button:hover, .hm-gvonly-actions a:hover { background: rgba(0,0,0,.4); color: #fff; }
+.hm-gvonly-open:focus-visible, .hm-gvonly-actions :focus-visible { outline: 2px solid #fff; outline-offset: 2px; }

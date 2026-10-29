@@ -204,6 +204,22 @@ test('server /api/stock-map + tags + csv preserve gviz numeric barcodes (v vs sc
     assert.equal(map2.gvOnly.total, 2);
     assert.equal(map2.gvOnly.assigned, 1);
     assert.equal(map2.gvOnly.unassigned, 1);
+
+    // A list as large as the Home KPI must not be cut off at the default 300-row page.
+    extraGv = Array.from({ length: 5630 }, (_, i) => ({ A: 'VC4', B: `BULK-${i}`, C: String(70000000000 + i), D: 'AVAILABLE', E: 'APS9', F: 'GV Nine', G: 'TL1', H: 'GV TL' }));
+    let bulk;
+    for (let i = 0; i < 60; i++) {
+      bulk = await (await fetch(`${base}/api/stock-map${i === 0 ? '?fresh=1' : ''}`, { headers: H })).json();
+      if (!bulk.pending && !bulk.building && bulk.gvOnly?.total === 5631) break;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    assert.equal(bulk.gvOnly.total, 5631);
+    const all = await (await fetch(`${base}/api/stock-map/tags?bucket=gvonly&all=1`, { headers: H })).json();
+    assert.equal(all.total, 5631);
+    assert.equal(all.rows.length, 5631);
+    const csv = await (await fetch(`${base}/api/stock-map/csv?bucket=gvonly`, { headers: H })).text();
+    assert.equal(csv.trim().split('\r\n').length, 5632); // header + every matching tag
+    assert.match(csv, /BULK-5629/);
   } finally {
     child.kill('SIGTERM');
     await once(child, 'exit').catch(() => {});
