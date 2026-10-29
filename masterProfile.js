@@ -702,6 +702,7 @@ window.FF = window.FF || {};
   }
   function mobileFor(name, id, own) {
     const clean10 = (v) => String(v || '').replace(/\D/g, '');
+    try { const rm = FF.aliases && FF.aliases.mobileOf && FF.aliases.mobileOf(id, name); if (rm) return rm; } catch { /* ignore */ }   // Sheet4 agent master
     if (own && !/^na$/i.test(own)) return own;
     if (/^\d{10}$/.test(clean10(id)) && clean10(id) === String(id).trim()) return String(id).trim();
     return gvMobileFor(name, id) || '';

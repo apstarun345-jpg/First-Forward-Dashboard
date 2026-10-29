@@ -237,7 +237,7 @@ const DEFAULT_SETTINGS = {
     gv3: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
   },
   agentRegistry: { // 🆕 Agent master (Sheet4): col A = New Agent ID (EIR J se match). EIR me jo ID yahan nahi → "New IDs" page
-    enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E', assistCol: 'M', tab: ''
+    enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E', assistCol: 'M', mobCol: 'H', tab: ''
   },
   vrnRules: { enabled: true, bands: [{ min: 11, max: 15, status: 'wrong' }, { min: 16, max: 20, status: 'chassis' }, { min: 21, max: 999, status: 'wrong' }] }, // GV live: VRN length → status
   kpiColors: {}, // Admin KPI card colours: { g1: {a:'#6366f1', b:'#8b5cf6'}, ... } — empty = built-in default
@@ -3193,6 +3193,8 @@ function parseCsvText(text) {
 }
 const colIndex = (l) => String(l || '').toUpperCase().split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
 /** Sheet4 ko CSV export se padho — gviz mixed (text+number) column ki minority values null kar deta hai (Agent ID / TL ID blank aate the). */
+/** Sheet4 mobile cell → clean 10-digit (or ''). */
+const regMobile = (v) => { const d = String(v == null ? '' : v).replace(/\D/g, '').slice(-10); return /^[6-9]\d{9}$/.test(d) ? d : ''; };
 async function registryRowsViaCsv(ar, L) {
   if (!/^\d+$/.test(String(ar.gid ?? ''))) throw new Error('gid nahi — tab name se gviz');
   const url = `${GVIZ_BASE}/spreadsheets/d/${String(ar.sheetId).replace(/[^A-Za-z0-9_-]/g, '')}/export?format=csv&gid=${encodeURIComponent(String(ar.gid))}`;
@@ -3200,12 +3202,12 @@ async function registryRowsViaCsv(ar, L) {
   if (out.status < 200 || out.status >= 300 || /^\s*<(!doctype|html)/i.test(out.body)) throw new Error(`CSV export HTTP ${out.status}`);
   const t = parseCsvText(out.body).slice(1);   // header row hatao
   const ix = L.map(colIndex), cell = (r, k) => String((ix[k] >= 0 && r[ix[k]]) || '').trim();
-  return t.map((r) => ({ newId: cell(r, 0), id: cell(r, 1), name: cell(r, 2), tlId: cell(r, 3), tlName: cell(r, 4), assistId: cell(r, 5) })).filter((x) => x.newId || x.id || x.name || x.assistId);
+  return t.map((r) => ({ newId: cell(r, 0), id: cell(r, 1), name: cell(r, 2), tlId: cell(r, 3), tlName: cell(r, 4), assistId: cell(r, 5), mobile: regMobile(cell(r, 6)) })).filter((x) => x.newId || x.id || x.name || x.assistId);
 }
 async function loadRegistryFull(fresh) {
   const ar = (db.settings || {}).agentRegistry || {};
   if (!registryTabOk(ar)) throw new Error('Settings → Agent master (Sheet4) ka link / gid (ya tab name) set karo.');
-  const L = [colLetter(ar.idCol, 'A'), colLetter(ar.legacyCol, 'B'), colLetter(ar.nameCol, 'C'), colLetter(ar.tlIdCol, 'D'), colLetter(ar.tlNameCol, 'E'), colLetter(ar.assistCol, 'M')];
+  const L = [colLetter(ar.idCol, 'A'), colLetter(ar.legacyCol, 'B'), colLetter(ar.nameCol, 'C'), colLetter(ar.tlIdCol, 'D'), colLetter(ar.tlNameCol, 'E'), colLetter(ar.assistCol, 'M'), colLetter(ar.mobCol, 'H')];
   const key = JSON.stringify([ar.sheetId, ar.gid, ar.tab, L]);
   if (!fresh && regFullState.rows && regFullState.key === key && Date.now() - regFullState.at < 10 * 60e3) return regFullState.rows;
   if (!regFullState.promise) {
@@ -3216,7 +3218,7 @@ async function loadRegistryFull(fresh) {
       const sel = [...new Set(L.filter(Boolean))], ix = L.map((l) => (l ? sel.indexOf(l) : -1)), at = (x, k) => (ix[k] >= 0 ? idCellText(x, ix[k]) : '');
       const q = new URLSearchParams({ id: ar.sheetId, ...registryTabParams(ar), headers: '1', tq: `select ${sel.join(', ')} limit 60000` });
       const r = await gvizPageServer(q, `gid:${ar.gid || ar.tab}`);
-      rows = r.rows.map((x) => ({ newId: at(x, 0), id: at(x, 1), name: at(x, 2), tlId: at(x, 3), tlName: at(x, 4), assistId: at(x, 5) })).filter((x) => x.newId || x.id || x.name || x.assistId);
+      rows = r.rows.map((x) => ({ newId: at(x, 0), id: at(x, 1), name: at(x, 2), tlId: at(x, 3), tlName: at(x, 4), assistId: at(x, 5), mobile: regMobile(at(x, 6)) })).filter((x) => x.newId || x.id || x.name || x.assistId);
       }
       regFullState.rows = rows; regFullState.key = key; regFullState.at = Date.now();
       return rows;
@@ -6020,7 +6022,7 @@ async function handleApi(req, res, url) {
     if (!user) throw new HttpError(401, 'Login required');
     const fresh = url.searchParams.get('fresh') === '1';
     let rows; try { rows = await loadRegistryFull(fresh); } catch (err) { throw new HttpError(502, `Sheet4 load nahi hua: ${String((err && err.message) || err).slice(0, 200)}`); }
-    const list = rows.filter((r) => r.assistId || r.id || r.newId).map((r) => ({ a: r.newId, b: r.id, m: r.assistId, n: r.name, tid: r.tlId, tn: r.tlName }));
+    const list = rows.filter((r) => r.assistId || r.id || r.newId).map((r) => ({ a: r.newId, b: r.id, m: r.assistId, n: r.name, tid: r.tlId, tn: r.tlName, mo: r.mobile || '' }));
     return sendJson(res, 200, { ok: true, at: new Date(regFullState.at || Date.now()).toISOString(), total: rows.length, assistants: rows.filter((r) => r.assistId).length, rows: list }, { 'Cache-Control': 'private, max-age=120' });
   }
   if (p === '/api/agent-master-search' && method === 'POST') {
@@ -9417,7 +9419,7 @@ async function handleApi(req, res, url) {
       if (ar.sheetId !== undefined) { ar.sheetId = sheetIdFromLink(ar.sheetId) || String(ar.sheetId).trim(); if (ar.sheetId && !/^[A-Za-z0-9_-]{20,}$/.test(ar.sheetId)) throw new HttpError(400, 'Agent master: Google Sheet ka valid link / ID dein.'); }
       if (ar.tab !== undefined) ar.tab = String(ar.tab).trim().slice(0, 100);
       if (ar.gid !== undefined) { ar.gid = String(ar.gid).trim(); if (!(ar.gid === '' && ar.tab) && !/^\d{1,12}$/.test(ar.gid)) throw new HttpError(400, 'Agent master: gid sirf number hota hai (URL me gid=...) — ya Tab name daalo.'); }
-      for (const k of ['idCol', 'legacyCol', 'nameCol', 'tlIdCol', 'tlNameCol', 'assistCol']) if (ar[k] !== undefined) { ar[k] = String(ar[k]).trim().toUpperCase(); if (ar[k] !== '' && !/^[A-Z]{1,3}$/.test(ar[k])) throw new HttpError(400, `Agent master: ${k} column letter hona chahiye (jaise A).`); }
+      for (const k of ['idCol', 'legacyCol', 'nameCol', 'tlIdCol', 'tlNameCol', 'assistCol', 'mobCol']) if (ar[k] !== undefined) { ar[k] = String(ar[k]).trim().toUpperCase(); if (ar[k] !== '' && !/^[A-Z]{1,3}$/.test(ar[k])) throw new HttpError(400, `Agent master: ${k} column letter hona chahiye (jaise A).`); }
       if (ar.label !== undefined) ar.label = String(ar.label).slice(0, 60);
     }
     if (patch.vrnRules !== undefined) {
@@ -9960,11 +9962,13 @@ async function personalReportMobiles() {
   if (plMobileCache.maps && Date.now() - plMobileCache.at < 15 * 60e3) return plMobileCache.maps;
   if (plMobileCache.promise) return plMobileCache.promise;
   plMobileCache.promise = (async () => {
-    const maps = { ff: { id: new Map(), name: new Map() }, gv: { id: new Map(), name: new Map() } };
-    const [ff, gv] = await Promise.allSettled([
+    const maps = { ff: { id: new Map(), name: new Map() }, gv: { id: new Map(), name: new Map() }, reg: { id: new Map(), name: new Map() } };
+    const [ff, gv, reg] = await Promise.allSettled([
       dispatchReportTable('ff').then((t) => loadFfDispatchRows(t, db.settings)),
-      dispatchReportTable('gv').then((t) => loadGvDispatchRows(t, db.settings))
+      dispatchReportTable('gv').then((t) => loadGvDispatchRows(t, db.settings)),
+      loadRegistryFull(false)
     ]);
+    if (reg.status === 'fulfilled') reg.value.forEach((r) => { const m = r.mobile; if (!m) return; [r.newId, r.id, r.assistId].forEach((v) => { const k = plIdKey(v); if (k && !maps.reg.id.has(k)) maps.reg.id.set(k, m); }); const nk = plNormName(r.name); if (nk && !maps.reg.name.has(nk)) maps.reg.name.set(nk, m); });
     [['ff', ff], ['gv', gv]].forEach(([ch, r]) => {
       if (r.status !== 'fulfilled') return;
       r.value.forEach((row) => { const m = row.mobile; if (!m) return; const ik = plIdKey(row.agentId), nk2 = plNormName(row.name); if (ik && !maps[ch].id.has(ik)) maps[ch].id.set(ik, m); if (nk2 && !maps[ch].name.has(nk2)) maps[ch].name.set(nk2, m); });
@@ -9977,6 +9981,7 @@ async function personalReportMobiles() {
 const plMobileFor = (maps, src, id, name) => {
   if (!maps) return '';
   const nk2 = plNormName(name), ik = plIdKey(id), order = src === 'gv' ? ['gv', 'ff'] : ['ff', 'gv'];
+  const rm = (ik && maps.reg && maps.reg.id.get(ik)) || (nk2 && maps.reg && maps.reg.name.get(nk2)); if (rm) return rm;   // Sheet4 (agent master) mobile = most reliable
   for (const ch of order) { const m = (ik && maps[ch].id.get(ik)) || maps[ch].name.get(nk2); if (m) return m; }
   return /^[6-9]\d{9}$/.test(String(id || '').trim()) ? String(id).trim() : '';
 };

@@ -203,6 +203,15 @@
     }
     /** Query string ko (agar alias ho to) canonical ID me badlo; warna jaisa tha waisa. */
     const map = (q) => { const r = resolve(q); return r ? r.to : q; };
+    /** Sheet4 mobile for an agent (by any ID or name) — '' if unknown / list not loaded. */
+    function mobileOf(id, name) {
+      if (!list) return '';
+      const v = norm(id), nm = String(name || '').trim().toUpperCase().replace(/\s+/g, ' ');
+      let r = null;
+      if (v) r = list.find((x) => x.mo && (norm(x.a) === v || norm(x.b) === v || norm(x.m) === v));
+      if (!r && nm) { const hits = list.filter((x) => x.mo && String(x.n || '').trim().toUpperCase().replace(/\s+/g, ' ') === nm); if (hits.length === 1) r = hits[0]; }
+      return r ? r.mo : '';
+    }
     /** Agent ki aliases (canonical New ID se). */
     function of(id) {
       if (!byA) return null;
@@ -256,7 +265,7 @@
     }, true);
     // data login ke baad lazily load (idle)
     window.addEventListener('ff:data-loaded', () => { setTimeout(() => { load().catch(() => {}); }, 2500); }, { once: true });
-    return { load, resolve, map, of, chipsHtml, paint, _build: build };
+    return { load, resolve, map, of, mobileOf, chipsHtml, paint, _build: build };
   })();
   FF.aliases = Aliases;
   FF.newAgentTag = NewAgent;
