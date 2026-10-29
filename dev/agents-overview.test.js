@@ -55,3 +55,22 @@ test('GV: last month from REPORT when EIR has no previous month', async () => {
   assert.equal(JSON.stringify(AO.listFor('gv', 'm.in2').map((r) => r.id)), JSON.stringify(['G2']));
   assert.equal(AO.listFor('gv', 'd.in2').length, 0);
 });
+
+test('GV: self-supervised TL is not Direct; ledger gives last month', async () => {
+  const gvStock = [
+    { agentId: 'T1', agentName: 'Rudra', tlName: 'Rudra', tlId: 'T1', n: 50 },     // TL row (leads A1)
+    { agentId: 'A1', agentName: 'Agent One', tlName: 'Rudra', tlId: 'T1', n: 5 },
+    { agentId: 'S1', agentName: 'Solo', tlName: 'Solo', tlId: 'S1', n: 7 },        // self, leads nobody → direct
+    { agentId: 'D1', agentName: 'Dee', tlName: 'Direct', tlId: '', n: 9 }
+  ];
+  const FFx = boot([], gvStock, [], {});
+  FFx.gv.issuanceRows = () => [{ ym: '2026-09', agentId: 'D1', agentName: 'Dee', n: 4, date: '2026-09-20' }, { ym: '2026-10', agentId: 'A1', agentName: 'Agent One', n: 2 }];
+  const AO = FFx.agentsOverview;
+  await AO.load(true);
+  const byId = Object.fromEntries(AO.listFor('gv', 'all').map((r) => [r.id, r]));
+  assert.equal(byId.T1.direct, false, 'TL never counted as direct');
+  assert.equal(byId.S1.direct, true);
+  assert.equal(byId.D1.direct, true); assert.equal(byId.D1.status, 'in1'); assert.equal(byId.D1.last, 4);
+  assert.equal(byId.A1.status, 'active');
+  assert.equal(JSON.stringify(AO.listFor('gv', 'd.in1').map((r) => r.id)), JSON.stringify(['D1']));
+});

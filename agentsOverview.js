@@ -57,43 +57,71 @@ FF.pages = FF.pages || {};
   }
   const prevYm = (ym) => { const [y, m] = String(ym).split('-').map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
   async function gvRows() {
-    const out = [], G = FF.gv;
+    const out = [], G = FF.gv, S = FF.store;
     if (!G) return out;
-    try { await FF.store.need('daily'); } catch { /* optional */ }
-    let stockRows = [], report = [], gm = new Map();
-    try { gm = clsMap(await G.need('stockAgentClass')); } catch { /* class split optional */ }
-    try { stockRows = (await G.need('stockAgent')) || []; } catch { /* optional */ }
-    try { report = (await G.need('report')) || []; } catch { /* optional */ }
-    const latest = G.latestDate && G.latestDate();
-    const cur = latest ? U.ymKey(latest) : '', prev = cur ? prevYm(cur) : '';
-    const iss = (ym) => { const m = new Map(); try { (ym ? G.agentRollup(ym) : []).forEach((a) => { const t = num(a.total); [a.agentId, a.agentName].forEach((v) => { const k = keyOf(v); if (k) m.set(k, Math.max(m.get(k) || 0, t)); }); }); } catch { /* ignore */ } return m; };
-    const curM = iss(cur), lastM = iss(prev);
+    // Same datasets as GV Performance: EIR (daily + agent/class roll-ups) + GV Master (today) + GV REPORT.
+    // Without agents/agentClass/master the EIR roll-up came back empty → "this month 0 · last month 0" for everyone.
+    const opt = (p) => Promise.resolve().then(p).catch(() => null);
+    const [, , , , stockRowsR, reportR, clsR] = await Promise.all([
+      opt(() => S && S.need('daily')), opt(() => S && S.need('agents')), opt(() => S && S.need('agentClass')), opt(() => G.need('master')),
+      opt(() => G.need('stockAgent')), opt(() => G.need('report')), opt(() => G.need('stockAgentClass'))
+    ]);
+    const stockRows = stockRowsR || [], report = reportR || [], gm = clsMap(clsR || []);
+    // Calendar months (same rule as GV Performance): this month = today's month, last = previous calendar month.
+    const cur = U.ymKey(new Date()), prev = U.prevMonthKey ? U.prevMonthKey(cur) : prevYm(cur);
+    // 1) Tag ledger (EIR history + GV Master live) → per agent per month, plus last issuance date.
+    const led = { [cur]: new Map(), [prev]: new Map() }, lastDate = new Map();
+    const bump = (m, keys, n) => { const seen = new Set(); keys.forEach((k) => { if (!k || seen.has(k)) return; seen.add(k); m.set(k, (m.get(k) || 0) + n); }); };
+    let issRows = [];
+    try { issRows = (G.issuanceRows && G.issuanceRows()) || []; } catch { issRows = []; }
+    issRows.forEach((r) => {
+      const keys = [keyOf(r.agentId), `N:${keyOf(r.agentName)}`].filter((k) => k && k !== 'N:');
+      if (led[r.ym]) bump(led[r.ym], keys, num(r.n) || 1);
+      const d = r.date || r.d; const dk = d ? (U.dateKey ? U.dateKey(d) : String(d)) : '';
+      if (dk) keys.forEach((k) => { if (!lastDate.has(k) || lastDate.get(k) < dk) lastDate.set(k, dk); });
+    });
+    // 2) EIR monthly roll-up (covers months where daily rows are not loaded).
+    const roll = (ym) => { const m = new Map(); try { (G.agentRollup(ym) || []).forEach((a) => { const t = num(a.total); [keyOf(a.agentId), `N:${keyOf(a.agentName)}`].forEach((k) => { if (k && k !== 'N:') m.set(k, Math.max(m.get(k) || 0, t)); }); }); } catch { /* ignore */ } return m; };
+    const rollCur = roll(cur), rollPrev = roll(prev);
+    const get = (m, id, name) => (m.get(keyOf(id)) || m.get(`N:${keyOf(name)}`) || 0);
+    // 3) GV REPORT row per agent (TL mapping + sheet totals).
     const rep = new Map();
-    report.forEach((r) => { [r.agentId, r.agentName].forEach((v) => { const k = keyOf(v); if (k && !rep.has(k)) rep.set(k, r); }); });
+    report.forEach((r) => { [keyOf(r.agentId), `N:${keyOf(r.agentName)}`].forEach((k) => { if (k && k !== 'N:' && !rep.has(k)) rep.set(k, r); }); });
+    // Who actually leads agents: any ID / name that appears as another agent's TL. A self-supervised row
+    // (TL ID = own ID) of such a person is a TL — not a direct agent.
+    const leaders = new Set();
+    const addLeader = (r) => { const own = keyOf(r.agentId), tid = keyOf(r.tlId), tn = keyOf(r.tlName); if (tid && tid !== own) leaders.add(tid); if (tn && tn !== keyOf(r.agentName) && !/^(DIRECT|TL .*)$/.test(tn)) leaders.add(`N:${tn}`); };
+    report.forEach(addLeader); stockRows.forEach(addLeader);
+    const isLeader = (id, name) => leaders.has(keyOf(id)) || leaders.has(`N:${keyOf(name)}`);
+    const realTl = (r) => { const id = clean(r && r.tlId), nm = clean(r && r.tlName); return { id, name: /^(direct|—|-)$/i.test(nm) ? '' : nm }; };
+    // Aggregate stock by agent; TL fields from the agent's biggest stock row.
     const agg = new Map();
     stockRows.forEach((r) => {
       const id = clean(r.agentId), key = keyOf(id) || `N:${keyOf(r.agentName)}`;
       if (!key || key === 'N:') return;
-      const o = agg.get(key) || { ch: 'gv', id, name: clean(r.agentName || id), tlName: '', tlId: '', direct: false, stock: 0, vc4Stock: 0, src: r };
+      const o = agg.get(key) || { ch: 'gv', id, name: clean(r.agentName || id), tlName: '', tlId: '', stock: 0, top: -1 };
       const n = num(r.n); o.stock += n;
-      // TL / direct comes from the agent's biggest stock row — never OR-ed across rows (that mixed TL agents into Direct).
-      if (n > (o.top || 0) || (!o.tlName && !o.tlId)) { o.top = Math.max(n, o.top || 0); o.tlName = clean(r.tlName); o.tlId = clean(r.tlId); o.direct = r.directAgent === true || isDirect(r, 'gv'); }
+      if (n > o.top) { o.top = n; const t = realTl(r); o.tlId = t.id; o.tlName = t.name; }
       agg.set(key, o);
     });
     agg.forEach((o) => {
-      if (o.stock <= 0) return;
+      if (o.stock <= 0 || isOffice(o.id, o.name)) return;
       o.cls = clsOf(gm, o.id, o.name);
-      if (isOffice(o.id, o.name)) return;
-      const rp = rep.get(keyOf(o.id)) || rep.get(keyOf(o.name)) || {};
-      // Per month: EIR roll-up and the GV REPORT sheet are both live — take the larger so an empty/partial
-      // month on one side never turns an issuing agent into "inactive 2 months".
-      const pick = (m, rv) => Math.max(m.get(keyOf(o.id)) || m.get(keyOf(o.name)) || 0, num(rv));
-      o.cur = pick(curM, rp.curTotal);
-      o.last = pick(lastM, rp.lastTotal);
-      o.vc4Stock = num(rp.stockVc4);
-      o.lastActive = clean(rp.lastActive || '').replace(/^[^\p{L}\d]+/u, '');
-      if (!o.tlName && !o.tlId && rp.agentId) o.direct = o.direct || isDirect(rp, 'gv');
-      delete o.src; delete o.top; out.push(classify(o));
+      const rp = rep.get(keyOf(o.id)) || rep.get(`N:${keyOf(o.name)}`) || null;
+      // TL mapping: GV REPORT TL first; Tag Assignment TL when the REPORT cell is blank / row missing.
+      if (rp) { const t = realTl(rp); if (t.id || t.name) { o.tlId = t.id; o.tlName = t.name; } }
+      const self = (!o.tlId || keyOf(o.tlId) === keyOf(o.id)) && (!o.tlName || keyOf(o.tlName) === keyOf(o.name));
+      o.isTl = isLeader(o.id, o.name);
+      if (o.isTl) { o.direct = false; o.tlId = o.id; o.tlName = o.name; }                // a TL's own stock → TL side
+      else if (self) { o.direct = true; o.tlId = ''; o.tlName = 'Direct'; }            // no TL / self, leads nobody → direct
+      else o.direct = isDirect({ agentId: o.id, agentName: o.name, tlId: o.tlId, tlName: o.tlName, channel: 'GV Partner' }, 'gv');
+      // Issuance: ledger → EIR roll-up → GV REPORT, largest wins per month (each source can lag).
+      o.cur = Math.max(get(led[cur], o.id, o.name), get(rollCur, o.id, o.name), rp ? num(rp.curTotal) : 0);
+      o.last = Math.max(get(led[prev], o.id, o.name), get(rollPrev, o.id, o.name), rp ? num(rp.lastTotal) : 0);
+      o.vc4Stock = o.cls.VC4 || (rp ? num(rp.stockVc4) : 0);
+      const ld = lastDate.get(keyOf(o.id)) || lastDate.get(`N:${keyOf(o.name)}`) || '';
+      o.lastActive = ld || clean((rp && rp.lastActive) || '').replace(/^[^\p{L}\d]+/u, '');
+      delete o.top; out.push(classify(o));
     });
     return out;
   }
@@ -130,7 +158,9 @@ FF.pages = FF.pages || {};
     forCh(ch).filter((r) => !r.direct).forEach((r) => {
       const name = r.tlName || 'Unmapped', k = `${r.ch}|${keyOf(r.tlId) || keyOf(name)}`;
       const g = map.get(k) || { ch: r.ch, name, id: r.tlId, agents: 0, active: 0, inactive: 0, stock: 0, inactiveStock: 0, cur: 0 };
-      g.agents++; g.stock += r.stock; g.cur += r.cur;
+      g.stock += r.stock; g.cur += r.cur;
+      if (r.isTl) { g.ownStock = (g.ownStock || 0) + r.stock; map.set(k, g); return; }   // TL's own stock — not one of "his agents"
+      g.agents++;
       if (r.status === 'active') g.active++; else { g.inactive++; g.inactiveStock += r.stock; }
       map.set(k, g);
     });
