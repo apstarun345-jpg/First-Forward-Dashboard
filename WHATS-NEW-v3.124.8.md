@@ -1,0 +1,5 @@
+# v3.124.8 — Duplicate barcodes and agent follow-up
+
+- **Barcode Checker → Duplicate barcode checker:** scan FF StockDataa and GV Tag Assignment separately, search duplicate rows and download filtered CSV. A barcode present once in each sheet is an expected cross-sheet match, not a duplicate. GV scans all statuses, including issued and not assigned. Blank tag IDs are included. Scans are on demand, source-specific and require the existing page and sheet permissions; incomplete scans report errors.
+- **GV & FF Agents Summary → Agent follow-up list:** prioritize stock holders by inactivity, configurable low MTD issuance threshold, 90+ day stock, projected de-growth, and overall monthly target pace. Search by agent or TL, filter by reason, and download filtered CSV with export permission. Missing ageing and source errors are surfaced; GV ageing includes assigned in-stock tags only and unknown age stays separate. Class-only targets are not evaluated against overall issuance.
+- Source-specific integration and unit tests cover barcode normalization, blank IDs, permissions, GV statuses, ageing and priority rules.

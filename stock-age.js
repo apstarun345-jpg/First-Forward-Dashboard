@@ -354,6 +354,27 @@ export function buildStockAgeIndex({ ffRows = [], gvRows = [], todayDay, masterI
   return builder.finish();
 }
 
+/** Ageing for follow-up: GV excludes issued / not-assigned rows; unknown dates are not treated as young. */
+export function followupAgeByAgent(index, ch) {
+  const src = index && index[ch];
+  if (!src) return [];
+  const groups = new Map();
+  const rows = ch === 'gv' ? [...(src.raw || []), ...(src.extraInStock || [])] : (src.raw || []);
+  for (const r of rows) {
+    if (ch === 'gv' && r[11] !== 1) continue;
+    if (ch === 'ff' && index.mapGv && !mapBucketOf(r, index.mapGv, index.mapOpts || {}).ffMapped) continue;
+    const id = str(r[5]).toUpperCase().replace(/\.0+$/, ''), name = str(r[4]);
+    const key = id ? `I:${id}` : name ? `N:${normName(name)}` : '';
+    if (!key) continue;
+    const group = groups.get(key) || { id, name, age90: 0, known: 0, unknown: 0 };
+    const age = r[7];
+    if (age === null || age === undefined || age === '' || !Number.isFinite(Number(age))) group.unknown++;
+    else { group.known++; if (Number(age) >= 90) group.age90++; }
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 /** Summary response (sab agents / TLs ke compact nodes). */
 export function summaryOf(index, opts = {}) {
   const pack = (ch) => {

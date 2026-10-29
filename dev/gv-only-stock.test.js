@@ -220,6 +220,25 @@ test('server /api/stock-map + tags + csv preserve gviz numeric barcodes (v vs sc
     const csv = await (await fetch(`${base}/api/stock-map/csv?bucket=gvonly`, { headers: H })).text();
     assert.equal(csv.trim().split('\r\n').length, 5632); // header + every matching tag
     assert.match(csv, /BULK-5629/);
+
+    // Source-specific duplicate audit scans blank tag IDs and all GV statuses.
+    ffSrc.push({ C: '', D: '060811600999.0', E: '4', H: '702', I: 'Agent B' });
+    extraGv.push({ A: 'VC4', B: '', C: '070000000000.0', D: 'ISSUED', E: 'APS2', F: 'GV Two' });
+    const fDup = await (await fetch(`${base}/api/duplicate-barcodes?source=ff&fresh=1`, { headers: H })).json();
+    assert.equal(fDup.duplicateBarcodes, 1); assert.equal(fDup.groups[0].rows.length, 2);
+    assert.equal(fDup.groups[0].rows[1].tagId, '');
+    const gDup = await (await fetch(`${base}/api/duplicate-barcodes?source=gv&fresh=1`, { headers: H })).json();
+    assert.equal(gDup.duplicateBarcodes, 1); assert.equal(gDup.groups[0].rows[1].status, 'ISSUED');
+    const age = await (await fetch(`${base}/api/agent-followup-age?source=gv`, { headers: H })).json();
+    assert.equal(age.ok, true); assert.ok(age.rows.some((r) => r.id === 'APS9'));
+    assert.equal((await fetch(`${base}/api/duplicate-barcodes?source=gv`)).status, 401);
+    const create = await fetch(`${base}/api/users`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'limited', name: 'Limited', password: 'limited-password', role: 'user', permissions: ['barcodeChecker', 'agentsOverview', 'sheet:StockDataa'] }) });
+    assert.equal(create.status, 200);
+    const limitedLogin = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https' }, body: JSON.stringify({ username: 'limited', password: 'limited-password' }) });
+    const lh = { cookie: (limitedLogin.headers.get('set-cookie') || '').split(';')[0], 'X-Forwarded-Proto': 'https' };
+    assert.equal((await fetch(`${base}/api/duplicate-barcodes?source=ff`, { headers: lh })).status, 200);
+    assert.equal((await fetch(`${base}/api/duplicate-barcodes?source=gv`, { headers: lh })).status, 403);
+    assert.equal((await fetch(`${base}/api/agent-followup-age?source=gv`, { headers: lh })).status, 403);
   } finally {
     child.kill('SIGTERM');
     await once(child, 'exit').catch(() => {});

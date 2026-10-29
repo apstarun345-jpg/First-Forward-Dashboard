@@ -210,6 +210,45 @@ FF.pages = FF.pages || {};
     const el = state.root && state.root.querySelector('[data-bcc-out]');
     if (el) el.innerHTML = resultsHtml();
   }
+  // Same-sheet audit is on demand: it scans FF and GV separately and never flags a normal FF↔GV match.
+  const dup = { source: '', data: null, q: '', limit: 300, seq: 0 };
+  const dupRows = () => {
+    const q = dup.q.trim().toLowerCase();
+    return (dup.data?.groups || []).flatMap((g) => g.rows.map((r) => ({ ...r, key: g.key, count: g.count }))).filter((r) => !q || Object.values(r).some((v) => String(v).toLowerCase().includes(q)));
+  };
+  function dupPaint(root) {
+    const el = root.querySelector('[data-dup-out]'); if (!el) return;
+    if (!dup.data) { el.innerHTML = '<p class="dim small">Select FF or GV and run the scan.</p>'; return; }
+    const rows = dupRows(), shown = rows.slice(0, dup.limit), d = dup.data;
+    el.innerHTML = `<p class="small">${esc(d.sheet)} · ${U.fmt(d.duplicateBarcodes)} duplicate barcodes · ${U.fmt(d.duplicateRows)} rows · scanned ${U.fmt(d.scanned)} · ${esc(d.at)}</p>
+      <div class="btn-row"><input class="input" data-dup-q placeholder="Search barcode / tag / agent / TL" value="${esc(dup.q)}">${FF.auth.can('export') ? '<button type="button" class="btn small" data-dup-csv>⬇ CSV (filtered)</button>' : ''}<span class="dim small">${U.fmt(rows.length)} matching rows</span></div>
+      <div class="table-wrap tall"><table class="tbl compact"><thead><tr><th>Barcode</th><th>Occurrences</th><th>Tag ID</th><th>Class</th><th>Status</th><th>Agent</th><th>Agent ID</th><th>TL</th></tr></thead><tbody>${shown.map((r) => `<tr><td class="mono">${esc(r.barcode)}</td><td>${U.fmt(r.count)}</td><td class="mono">${esc(r.tagId)}</td><td>${esc(r.cls)}</td><td>${esc(r.status)}</td><td>${esc(r.agentName)}</td><td>${esc(r.agentId)}</td><td>${esc(r.tl)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No matching duplicate rows.</td></tr>'}</tbody></table></div>${rows.length > shown.length ? `<button type="button" class="btn small" data-dup-more>Show more (${U.fmt(rows.length - shown.length)} remaining)</button>` : ''}<p class="dim small">CSV contains the filtered rows. Import barcode columns as text in Excel to preserve long numbers and leading zeroes.</p>`;
+  }
+  async function dupScan(root, source) {
+    const seq = ++dup.seq; dup.source = source; dup.data = null; dup.q = ''; dup.limit = 300;
+    const out = root.querySelector('[data-dup-out]'); if (!out) return;
+    out.innerHTML = U.spinner('Scanning sheet for duplicate barcodes…');
+    try {
+      let first = true, result; const started = Date.now();
+      do {
+        result = await FF.auth.api(`/api/duplicate-barcodes?source=${source}${first ? '&fresh=1' : ''}`); first = false;
+        if (seq !== dup.seq || !root.isConnected) return;
+        if (!result.pending) break;
+        if (Date.now() - started > 5 * 60e3) throw new Error('Scan is still running. Please retry shortly.');
+        await new Promise((resolve) => setTimeout(resolve, Math.max(1000, Math.min(8000, Number(result.retryAfterMs) || 3000))));
+      } while (true);
+      dup.data = result; dupPaint(root);
+    } catch (err) { if (seq === dup.seq && root.isConnected) out.innerHTML = U.errorBox(err); }
+  }
+  function dupCsv() {
+    const safe = (v) => { const s = String(v ?? ''); return /^[\t\r\n ]*[=+@-]/.test(s) ? `'${s}` : s; };
+    const quote = (v) => `"${safe(v).replace(/"/g, '""')}"`;
+    const header = ['Barcode', 'Normalized barcode', 'Occurrences', 'Tag ID', 'Class', 'Status', 'Agent', 'Agent ID', 'TL'];
+    const body = dupRows().map((r) => [r.barcode, r.key, r.count, r.tagId, r.cls, r.status, r.agentName, r.agentId, r.tl]);
+    const csv = [header, ...body].map((r) => r.map(quote).join(',')).join('\r\n');
+    U.downloadBlob(`duplicate-barcodes-${dup.source}-${U.stamp()}.csv`, new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+  }
+
   function render(root, params) {
     state.root = root;
     const p = params || {};
@@ -233,7 +272,9 @@ FF.pages = FF.pages || {};
         <p class="dim small bcc-note">Max ${MAX.toLocaleString('en-IN')} barcodes ek baar me. Jo tag stock me nahi, uska Tag ID aas-paas ke stock tags se anumaan lagaya jaata hai (note me likha aata hai). Range ka koi bhi tag stock me na ho to first barcode ka Tag ID daal do.</p>
       </div></div>
       <div class="card"><div class="card-body" data-bcc-out>${state.rows ? resultsHtml() : '<div class="empty-state compact">👆 Barcode daalo — result yahan aayega</div>'}</div></div>
+      <section class="card" style="margin-top:14px"><div class="card-head"><h3>🔁 Duplicate barcode checker</h3></div><div class="card-body"><p class="dim small">Checks repeated barcodes within each sheet separately: FF StockDataa or GV Tag Assignment (all statuses). A barcode appearing once in each sheet is normal and is not a duplicate. Formatting, leading zeroes and scientific notation are normalized.</p><div class="btn-row">${FF.auth.can('sheet:StockDataa') ? '<button class="btn small" data-dup-scan="ff">🔎 Scan FF</button>' : ''}${FF.auth.can('sheet:Tag Assignment') ? '<button class="btn small" data-dup-scan="gv">🔎 Scan GV</button>' : ''}</div><div data-dup-out></div></div></section>
     </div>`;
+    dup.data = null; dup.seq++; dupPaint(root);
     bind(root);
     if (p.first && p.last) run('range');
   }
@@ -295,8 +336,13 @@ FF.pages = FF.pages || {};
         if (e.inputType === 'insertFromPaste' && n) auto('multi', 300);
       }
       if (e.target.matches('[data-bcc-q]')) { state.q = e.target.value; if (!qRaf) qRaf = requestAnimationFrame(() => { qRaf = 0; paintTable(); }); }
+      if (e.target.matches('[data-dup-q]')) { dup.q = e.target.value; dup.limit = 300; const pos = e.target.selectionStart; dupPaint(root); const next = root.querySelector('[data-dup-q]'); if (next) { next.focus(); next.setSelectionRange(pos, pos); } }
     });
     root.addEventListener('click', (e) => {
+      const scan = e.target.closest('[data-dup-scan]');
+      if (scan) { dupScan(root, scan.dataset.dupScan); return; }
+      if (e.target.closest('[data-dup-more]')) { dup.limit += 300; dupPaint(root); return; }
+      if (e.target.closest('[data-dup-csv]') && dup.data && FF.auth.can('export')) { dupCsv(); return; }
       const tab = e.target.closest('[data-bcc-tab]');
       if (tab) {
         state.tab = tab.dataset.bccTab;
