@@ -10626,6 +10626,10 @@ async function warmPersonalLinks() {
 }
 const plPageCache = new Map();
 const PL_CACHE_MS = 45e3;
+// One report build per link view at a time: while the cold-open build runs, the page's polls get 202 and then
+// pick up its result (even when stock was still indexing) instead of each starting a second slow build.
+const plBuilding = new Map(), plRecentBuilt = new Map();
+const PL_BUILD_WAIT_MS = 4 * 60e3, PL_RECENT_MS = 90e3;
 function plCachePut(key, val) {
   plPageCache.set(key, { ...val, at: Date.now() });
   if (plPageCache.size > 150) { const old = [...plPageCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 50); old.forEach(([k]) => plPageCache.delete(k)); }
@@ -10767,6 +10771,14 @@ async function servePersonalPage(req, res, rawToken) {
     return sendHtml(res, 200, personalShell({ title: v.title, heading: v.heading, sub: v.sub, token, requireAuth: true, authorized: true, personName: link.name, body: `<div id="pl-portal-content">${v.inner}</div>` }), noStore);
   };
   if (!wantFresh) { const hit = plPageCache.get(cacheKey); if (hit && Date.now() - hit.at < PL_CACHE_MS) return replyPage(wantPartial ? hit : { ...hit, inner: `<section class="pb-card" data-pl-refresh role="status">Showing a recent cached report; refreshing… <button class="pb-btn" type="button" data-pl-refresh-retry hidden>Retry refresh</button></section>${hit.inner}` }); }
+  if (!wantFresh) {
+    const rb = plRecentBuilt.get(cacheKey);
+    if (rb && Date.now() - rb.at < PL_RECENT_MS && wantPartial) return replyPage(rb);
+    const b = plBuilding.get(cacheKey);
+    if (wantPartial && b && Date.now() - b < PL_BUILD_WAIT_MS) return sendJson(res, 202, { ok: false, loading: true, building: true }, noStore);
+  }
+  const buildMark = Date.now() + Math.random();
+  plBuilding.set(cacheKey, buildMark);
   // Authenticated cold opens get a shell immediately while the report builds in the background.
   if (!wantPartial) {
     const timer = setTimeout(() => {
@@ -10802,8 +10814,8 @@ async function servePersonalPage(req, res, rawToken) {
         Promise.all([quiet(rowsPromise), quiet(teamPromise)]).then(() => true),
         new Promise((resolve) => { const t = setTimeout(() => resolve(false), 3000); if (t.unref) t.unref(); })
       ]);
-      if (!ready) {
-        if (res.writableEnded) return;
+      // Shell already sent (cold open): keep building in the background so the page's polls receive this result.
+      if (!ready && !res.writableEnded) {
         if (wantPartial) return sendJson(res, 202, { ok: false, loading: true }, noStore);
         return sendHtml(res, 200, personalShell({
           title: `${link.name} · Loading`,
@@ -11367,10 +11379,16 @@ async function servePersonalPage(req, res, rawToken) {
       </div>`;
     const pageVals = { title: `${link.name} · Performance`, heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`, sub: `${chView === 'all' && (link.source === 'both' || linkChannels.length > 1) ? 'GV Partner + First Forward' : (link.source === 'gv' ? 'GV Partner' : 'First Forward')} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${(link.tls || []).length ? `${link.tls.length} TL${link.tls.length > 1 ? 's' : ''} + ` : ''}${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`, inner: innerHtml };
     if (stockMeta.state !== 'loading' && JSON.stringify(savedLink) === linkSnapshot && savedLink.enabled !== false && (db.settings.personalLinks || []).includes(savedLink)) plCachePut(cacheKey, pageVals);
+    plRecentBuilt.set(cacheKey, { ...pageVals, at: Date.now() });
+    if (plRecentBuilt.size > 80) plRecentBuilt.delete(plRecentBuilt.keys().next().value);
     return replyPage({ ...pageVals, at: Date.now() });
   } catch (err) {
     console.warn('personal page:', err.message);
+    if (res.writableEnded) return;
+    if (wantPartial) return sendJson(res, 503, { ok: false, error: 'Data did not load yet', retry: true }, noStore);
     return fail(500, 'Data did not load — try again in a while.');
+  } finally {
+    if (plBuilding.get(cacheKey) === buildMark) plBuilding.delete(cacheKey);
   }
 }
 function personalShell({ title, heading, sub, body, token = '', requireAuth = false, authorized = false, personName = '' }) {
@@ -11751,7 +11769,7 @@ const PERSONAL_PORTAL_JS = `(function () {
       if (ct.indexOf('json') < 0) throw new Error('session');
       return r.json().then(function (j) { return { status: r.status, j: j }; });
     }).then(function (o) {
-      if (o.status === 202 || (o.j && o.j.loading)) { if (tries < 8) return wait(1500).then(function () { return fetchView(ch, fresh, tries + 1); }); throw new Error('slow'); }
+      if (o.status === 202 || (o.j && o.j.loading) || (o.status === 503 && o.j && o.j.retry)) { if (tries < 40) return wait(o.j && o.j.building ? 2500 : 1500).then(function () { return fetchView(ch, fresh, tries + 1); }); throw new Error('slow'); }
       if (!o.j || !o.j.ok) throw new Error('bad');
       views[ch] = { html: o.j.body, sub: o.j.sub, at: o.j.at || Date.now(), view: o.j.view || ch };
       return views[ch];
@@ -12291,12 +12309,25 @@ const PERSONAL_PORTAL_JS = `(function () {
     var bootstrap = holder.querySelector('[data-pl-bootstrap]');
     if (bootstrap) {
       var retryBoot = bootstrap.querySelector('[data-pl-bootstrap-retry]');
+      // Cold opens can take a minute (Google sheets): keep polling on its own, show elapsed time, never give up.
+      var bootT0 = Date.now(), bootTimer = null, bootTry = 0;
+      var msg = bootstrap.querySelector('p');
+      var tick = setInterval(function () {
+        if (!bootstrap.isConnected) { clearInterval(tick); return; }
+        var sec = Math.round((Date.now() - bootT0) / 1000);
+        if (msg && sec >= 5 && !(retryBoot && !retryBoot.hidden)) msg.textContent = 'Live sheet data is loading (' + sec + 's). The report will open here automatically.';
+      }, 1000);
       var startBoot = function () {
+        clearTimeout(bootTimer);
         if (retryBoot) retryBoot.hidden = true;
-        var msg = bootstrap.querySelector('p'); if (msg) msg.textContent = 'Live sheet data is loading. The report will open here automatically.';
-        fetchView(curCh, false).then(function (v) { applyView(curCh, v); }).catch(function () {
-          if (msg) msg.textContent = 'Report is taking longer or could not load. Check your connection or verify your access, then retry.';
+        fetchView(curCh, false).then(function (v) { clearInterval(tick); applyView(curCh, v); }).catch(function (err) {
+          if (!bootstrap.isConnected) return;
+          if (err && err.message === 'session') { clearInterval(tick); if (msg) msg.textContent = 'Your session ended. Please open the link again.'; if (retryBoot) retryBoot.hidden = false; return; }
+          bootTry++;
+          var wait = Math.min(15000, 3000 * bootTry);
+          if (msg) msg.textContent = 'Still loading the sheet data — retrying automatically in ' + Math.round(wait / 1000) + 's…';
           if (retryBoot) retryBoot.hidden = false;
+          bootTimer = setTimeout(startBoot, wait);
         });
       };
       if (retryBoot) retryBoot.addEventListener('click', startBoot);
