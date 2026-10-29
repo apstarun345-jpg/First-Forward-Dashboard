@@ -1,6 +1,6 @@
 {
   "name": "first-forward-dashboard",
-  "version": "3.121.1",
+  "version": "3.122.0",
   "private": true,
   "description": "First Forward + GV Partner FASTag dashboards — login-protected issuance, stock, trend, performance and GV-vs-FF comparison from two Google Sheets, with animated login, forgot-password flow, per-user/per-sheet access matrix and downloadable Excel/CSV.",
   "type": "module",
@@ -8,7 +8,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node --max-old-space-size=420 server.js",
+    "start": "node --max-old-space-size=420 --expose-gc server.js",
     "dev": "PORT=8080 node server.js",
     "mock": "node dev/mock-gviz.js",
     "dev:mock": "GVIZ_BASE=http://localhost:9099 DATA_DIR=/tmp/ffdata PORT=8080 node server.js",

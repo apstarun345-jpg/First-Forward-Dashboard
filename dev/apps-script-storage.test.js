@@ -103,3 +103,17 @@ test('in-app wizard: test + migrate, then restart on EMPTY disk keeps users & se
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('Apps Script store: a save that fails is re-queued and persisted by the automatic retry', async () => {
+  const mock = await startMockAppsScript({ secret: SECRET });
+  try {
+    const store = new AppsScriptStore({ url: mock.url, secret: SECRET, batchDelay: 5, wait: async () => {} });
+    store.attempts = 1; store.requeueDelayMs = 20;
+    await store.save('users', [{ username: 'owner', name: 'O', password: 'salt:hash' }]);
+    await store.save('settings', { brand: 'First' });
+    mock.failWrites(1);
+    await assert.rejects(store.save('settings', { brand: 'Second' }));      // caller sees the failure…
+    await new Promise((r) => setTimeout(r, 400));                           // …but the change is retried automatically
+    assert.equal((await store.read()).settings.brand, 'Second');
+  } finally { await mock.close(); }
+});

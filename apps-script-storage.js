@@ -30,7 +30,7 @@ export class AppsScriptStore {
     this.slowKinds = slowKinds;
     // Keep storage calls bounded so a slow Apps Script cannot hold Render in boot forever.
     // Environment overrides remain available for unusually slow tenants.
-    this.attempts = Math.max(1, Number(process.env.APPS_SCRIPT_ATTEMPTS || 3));
+    this.attempts = Math.max(1, Number(process.env.APPS_SCRIPT_ATTEMPTS || 4));
     this.timeoutMs = Math.max(5000, Number(process.env.APPS_SCRIPT_TIMEOUT_MS || 20000));
     this.pending = new Map(); // kind → { value, waiters: [] }
     this.timer = null;
@@ -217,6 +217,15 @@ export class AppsScriptStore {
       for (const entry of batch.values()) entry.waiters.forEach((w) => w.resolve());
     } catch (err) {
       for (const entry of batch.values()) entry.waiters.forEach((w) => w.reject(err));
+      // 🔁 Do not lose the change: re-queue what failed (unless a newer value is already queued) and retry later with backoff.
+      let maxTry = 0;
+      for (const [kind, entry] of batch) {
+        const tries = (entry.retries || 0) + 1;
+        if (tries > (this.maxRequeue ?? 5) || this.pending.has(kind)) continue;
+        this.pending.set(kind, { value: entry.value, waiters: [], retries: tries });
+        maxTry = Math.max(maxTry, tries);
+      }
+      if (maxTry) this.schedule(Math.min(120000, (this.requeueDelayMs ?? 15000) * maxTry));
       throw err;
     } finally { if (this.flushing === job) this.flushing = null; }
   }

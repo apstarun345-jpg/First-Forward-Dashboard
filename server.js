@@ -1391,6 +1391,14 @@ function softTrim() {
 const memTimer = setInterval(() => {
   const mb = rssMB(), heap = heapMB();
   if (mb > memGuard.peakMB) memGuard.peakMB = mb;
+  if (mb >= MEM_HARD_MB && typeof globalThis.gc === 'function' && Date.now() - (memGuard.lastGcAt || 0) > 15000) {
+    // Garbage collect first — RSS often holds freed memory; restart only if it is still too high afterwards.
+    memGuard.lastGcAt = Date.now();
+    try { softTrim(); } catch { /* ignore */ }
+    const after = rssMB();
+    console.warn(`🛡️ memory guard: RSS ${mb} MB → ${after} MB after GC + cache trim (heap ${heapMB()} MB).`);
+    if (after < MEM_HARD_MB) return;
+  }
   if (mb >= MEM_HARD_MB) {
     console.error(`🛡️ memory guard: RSS ${mb} MB (heap ${heap} MB) ≥ ${MEM_HARD_MB} MB — clean restart (OOM / 502 se bachne ke liye). Data durable storage me hai.`);
     setTimeout(() => process.exit(1), 50);
@@ -3479,7 +3487,7 @@ async function loadStockAgeIndex() {
   const [y, m, d] = dateKeyNow().split('-').map(Number);
   const opts = { todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.', gvOutWords: (s.gvStockStatus && Array.isArray(s.gvStockStatus.outStock) && s.gvStockStatus.outStock.length ? s.gvStockStatus.outStock : ['ISSUE', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE']) };
   let builder = createStockAgeBuilder(opts);
-  const gvBuf = [];   // GV ki umr FF (StockDataa) se match hoti hai → GV rows FF ke baad jodte hain (dono pages parallel padhe jaate hain)
+  // v3.122 — memory: FF pehle poora padho, phir GV page-by-page seedha builder me (pehle poora GV buffer hota tha: ~50 MB extra peak).
   const ffJob = (async () => {
     const letters = [...new Set(Object.values(ffL).filter(Boolean))];
     await gvizPagesServer(s.sheetId, s.stockSheet || 'StockDataa', letters, `${ffL.tagId} is not null`, async (rows, at) => {
@@ -3490,21 +3498,21 @@ async function loadStockAgeIndex() {
       }
     });
   })().catch((err) => { errors.ff = err.message; });
-  const gvJob = (async () => {
-    if (!s.gvSheetId) return;
-    const letters = [...new Set(Object.values(gvL).filter(Boolean))];
-    await gvizPagesServer(s.gvSheetId, A.tab || 'Tag Assignment', letters, `${gvL.tagId} is not null`, async (rows, at) => {
-      const ix = Object.fromEntries(Object.entries(gvL).map(([k, L]) => [k, L ? at(L) : -1]));
-      for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
-        for (const row of rows.slice(i, i + STOCK_AGE_CHUNK)) gvBuf.push({ cls: pick(row, ix.cls), tagId: pick(row, ix.tagId), serial: pick(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) });
-        await yieldLoop();
-      }
-    });
-  })().catch((err) => { errors.gv = err.message; gvBuf.length = 0; });
-  await Promise.all([ffJob, gvJob]);
+  await ffJob;
   // Adhura FF (beech ke page fail) kabhi mat dikhao — kam ginti sahi jaisi dikhti hai. Khaali FF + GV hi do (errors.ff ke saath).
   if (errors.ff) builder = createStockAgeBuilder(opts);
-  for (let i = 0; i < gvBuf.length; i += STOCK_AGE_CHUNK) { builder.addGv(gvBuf.slice(i, i + STOCK_AGE_CHUNK)); await yieldLoop(); }
+  if (s.gvSheetId) {
+    const letters = [...new Set(Object.values(gvL).filter(Boolean))];
+    try {
+      await gvizPagesServer(s.gvSheetId, A.tab || 'Tag Assignment', letters, `${gvL.tagId} is not null`, async (rows, at) => {
+        const ix = Object.fromEntries(Object.entries(gvL).map(([k, L]) => [k, L ? at(L) : -1]));
+        for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
+          builder.addGv(rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ cls: pick(row, ix.cls), tagId: pick(row, ix.tagId), serial: pick(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) })));
+          await yieldLoop();
+        }
+      });
+    } catch (err) { errors.gv = err.message; }
+  }
   const index = builder.finish();
   if (Object.keys(errors).length) index.errors = errors;
   return index;
@@ -3527,6 +3535,7 @@ function startStockAgeBuild(key) {
     }
     stockAgeState.index = index;
     stockAgeState.at = Date.now();
+    setImmediate(() => { try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ } });   // old index + parse garbage → turant free
     const failed = !!(err.ff || err.gv);
     stockAgeState.error = failed ? [err.ff && `FF: ${err.ff}`, err.gv && `GV: ${err.gv}`].filter(Boolean).join(' · ') : '';
     stockAgeState.retryAt = failed ? Date.now() + STOCK_AGE_ERROR_RETRY_MS : 0;
@@ -10593,7 +10602,7 @@ async function servePersonalPage(req, res, rawToken) {
         const sidx = await Promise.race([
           stockAgeIndex(false),
           new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('stock timeout')), 400);
+            timer = setTimeout(() => reject(new Error('stock timeout')), 1500);   // 400 ms was too short right after a restart — the page then showed no stock
             if (timer && timer.unref) timer.unref();
           })
         ]);
