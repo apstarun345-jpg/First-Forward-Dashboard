@@ -41,4 +41,17 @@ test('agents summary: direct/TL × active/inactive buckets, stock-only', async (
   assert.equal(AO.listFor('both', 'in2').length, 1);
   const c = AO.listFor('ff', 'm.in2')[0]; assert.equal(c.cls.VC4, 30, 'VC20 folds into VC4/20');
   assert.equal(AO.listFor('gv', 'in1')[0].cls.VC12, 4);
+  assert.equal(AO.listFor('gv', 'm.active').length, 1, 'TL agent stays TL-managed');
+  assert.equal(AO.listFor('gv', 'd.in2').length, 0, 'TL agents never in Direct inactive 2 months');
+});
+
+test('GV: last month from REPORT when EIR has no previous month', async () => {
+  const gvStock = [{ agentId: 'G1', agentName: 'G One', tlName: '', tlId: '', n: 5, directAgent: true }, { agentId: 'G2', agentName: 'G Two', tlName: 'GT', tlId: 'gt', n: 5 }, { agentId: 'G3', agentName: 'G Three', tlName: 'GT', tlId: 'gt', n: 5 }];
+  const rep = [{ agentId: 'G1', agentName: 'G One', curTotal: 0, lastTotal: 8 }, { agentId: 'G2', agentName: 'G Two', curTotal: 0, lastTotal: 0 }, { agentId: 'G3', agentName: 'G Three', curTotal: 0, lastTotal: 3 }];
+  const AO = boot([], gvStock, rep, { '2026-10': [{ agentId: 'G9', total: 1 }] }).agentsOverview;
+  await AO.load(true);
+  assert.equal(JSON.stringify(AO.listFor('gv', 'd.in1').map((r) => r.id)), JSON.stringify(['G1']));
+  assert.equal(JSON.stringify(AO.listFor('gv', 'm.in1').map((r) => r.id)), JSON.stringify(['G3']));
+  assert.equal(JSON.stringify(AO.listFor('gv', 'm.in2').map((r) => r.id)), JSON.stringify(['G2']));
+  assert.equal(AO.listFor('gv', 'd.in2').length, 0);
 });

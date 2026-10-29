@@ -75,8 +75,9 @@ FF.pages = FF.pages || {};
       const id = clean(r.agentId), key = keyOf(id) || `N:${keyOf(r.agentName)}`;
       if (!key || key === 'N:') return;
       const o = agg.get(key) || { ch: 'gv', id, name: clean(r.agentName || id), tlName: '', tlId: '', direct: false, stock: 0, vc4Stock: 0, src: r };
-      o.stock += num(r.n); if (!o.tlName) o.tlName = clean(r.tlName); if (!o.tlId) o.tlId = clean(r.tlId);
-      o.direct = o.direct || r.directAgent === true || isDirect(r, 'gv');
+      const n = num(r.n); o.stock += n;
+      // TL / direct comes from the agent's biggest stock row — never OR-ed across rows (that mixed TL agents into Direct).
+      if (n > (o.top || 0) || (!o.tlName && !o.tlId)) { o.top = Math.max(n, o.top || 0); o.tlName = clean(r.tlName); o.tlId = clean(r.tlId); o.direct = r.directAgent === true || isDirect(r, 'gv'); }
       agg.set(key, o);
     });
     agg.forEach((o) => {
@@ -84,13 +85,15 @@ FF.pages = FF.pages || {};
       o.cls = clsOf(gm, o.id, o.name);
       if (isOffice(o.id, o.name)) return;
       const rp = rep.get(keyOf(o.id)) || rep.get(keyOf(o.name)) || {};
-      const hasEir = curM.size > 0;
-      o.cur = hasEir ? (curM.get(keyOf(o.id)) || curM.get(keyOf(o.name)) || 0) : num(rp.curTotal);
-      o.last = hasEir ? (lastM.get(keyOf(o.id)) || lastM.get(keyOf(o.name)) || 0) : num(rp.lastTotal);
+      // Per month: EIR roll-up and the GV REPORT sheet are both live — take the larger so an empty/partial
+      // month on one side never turns an issuing agent into "inactive 2 months".
+      const pick = (m, rv) => Math.max(m.get(keyOf(o.id)) || m.get(keyOf(o.name)) || 0, num(rv));
+      o.cur = pick(curM, rp.curTotal);
+      o.last = pick(lastM, rp.lastTotal);
       o.vc4Stock = num(rp.stockVc4);
       o.lastActive = clean(rp.lastActive || '').replace(/^[^\p{L}\d]+/u, '');
-      if (!o.direct && rp.agentId) o.direct = isDirect(rp, 'gv');
-      delete o.src; out.push(classify(o));
+      if (!o.tlName && !o.tlId && rp.agentId) o.direct = o.direct || isDirect(rp, 'gv');
+      delete o.src; delete o.top; out.push(classify(o));
     });
     return out;
   }
