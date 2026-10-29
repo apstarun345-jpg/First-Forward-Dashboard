@@ -9997,8 +9997,8 @@ async function comboDailyRows(link) {
   const sp = await comboSplit(link);
   const agg = new Map();
   const add = (rows) => rows.forEach((r) => { const k = `${r.date}|${r.cls}`; const o = agg.get(k) || { date: r.date, cls: r.cls, n: 0 }; o.n += r.n; agg.set(k, o); });
-  for (const part of sp.tlParts) { try { add(await personalDailyRows({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] })); } catch { /* ignore */ } }
-  for (const src of ['ff', 'gv']) if (sp.memBySrc[src].length) { try { add(await personalDailyRows({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] })); } catch { /* ignore */ } }
+  for (const part of sp.tlParts) add(await personalDailyRows({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] }));
+  for (const src of ['ff', 'gv']) if (sp.memBySrc[src].length) add(await personalDailyRows({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] }));
   return [...agg.values()];
 }
 function mergePersonalStock(list) {
@@ -10630,10 +10630,66 @@ function plCachePut(key, val) {
   plPageCache.set(key, { ...val, at: Date.now() });
   if (plPageCache.size > 150) { const old = [...plPageCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 50); old.forEach(([k]) => plPageCache.delete(k)); }
 }
+/** EIR history within this link's selected scope, not an employment or joining-date registry.
+ * Keep channels separate and de-duplicate overlapping TL/member parts by name, as elsewhere in the portal. */
+async function personalWelcomeHistory(link) {
+  let parts;
+  if (isComboLink(link)) {
+    parts = comboTlParts(link).map((p) => ({ kind: 'tl', source: p.source, name: p.name, personId: p.personId }));
+    for (const src of ['ff', 'gv']) {
+      const members = (link.members || []).filter((m) => m && m.name && plMemberSrc(m, link) === src);
+      if (members.length) parts.push({ kind: 'group', source: src, name: link.name, members });
+    }
+  } else parts = [link];
+  const win = personalWindow(), ym = dateKeyNow().slice(0, 7);
+  let stale = false;
+  const results = await Promise.all(parts.map(async (part) => {
+    const c = personalConfig(part), who = personalNameFilter(part, c);
+    const run = async (select, extra) => {
+      const tq = `select ${c.agentCol}, ${c.masterCol}, ${select} where ${c.tagCol} is not null and ${c.dateCol} is not null and ${who}${extra} group by ${c.agentCol}, ${c.masterCol} limit 20000`;
+      const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+      const res = await fetchPersonalCached(upstreamUrl(params));
+      if (res.status < 200 || res.status >= 300) throw new Error('EIR history unavailable');
+      if (res.stale) stale = true;
+      const table = parseGvizServer(res.body);
+      if (!Array.isArray(table.cols) || table.cols.length < 3 || !Array.isArray(table.rows)) throw new Error('Unexpected EIR history response');
+      // A text minimum is lexicographic, not a reliable chronological first date.
+      if (select.startsWith('min(') && !['date', 'datetime'].includes(String(table.cols[2].type || '').toLowerCase())) throw new Error('EIR date column is not date-typed');
+      return table.rows;
+    };
+    const [firstRows, monthRows] = await Promise.all([
+      run(`min(${c.dateCol})`, ` and ${c.dateCol} <= date '${dateKeyNow()}'`),
+      win.currentStart <= win.today ? run(`count(${c.tagCol})`, ` and ${c.dateCol} >= date '${win.currentStart}' and ${c.dateCol} <= date '${win.today}'`) : Promise.resolve([])
+    ]);
+    if (firstRows.length >= 20000 || monthRows.length >= 20000) throw new Error('EIR history exceeds report limit');
+    const agents = new Map();
+    const valid = (row) => c.source === 'gv' ? isGvPersonalRow(serverCell(row, 1)) : isFfPersonalRow(serverCell(row, 1));
+    const entry = (row) => {
+      const name = serverCell(row, 0).trim(), key = plNormName(name);
+      if (!key || !valid(row)) return null;
+      if (!agents.has(key)) agents.set(key, { name, source: c.source, first: '', month: 0 });
+      return agents.get(key);
+    };
+    for (const row of firstRows) { const a = entry(row); if (!a) continue; const d = serverDate(serverCell(row, 2)); if (d && (!a.first || d < a.first)) a.first = d; }
+    for (const row of monthRows) { const a = entry(row); if (a) a.month += serverNumber(serverCell(row, 2)); }
+    return [...agents.values()];
+  }));
+  const merged = new Map();
+  for (const rows of results) for (const a of rows) {
+    const key = `${a.source}|${plNormName(a.name)}`, old = merged.get(key);
+    if (!old) merged.set(key, { ...a });
+    else { if (a.first && (!old.first || a.first < old.first)) old.first = a.first; old.month = Math.max(old.month, a.month); }
+  }
+  // Explicitly selected agents without any EIR history can still be welcomed, without claiming a join date.
+  const add = (name, source) => { const key = `${source}|${plNormName(name)}`; if (plNormName(name) && !merged.has(key)) merged.set(key, { name, source, first: '', month: 0 }); };
+  if (link.kind === 'agent') add(link.name, link.source === 'gv' ? 'gv' : 'ff');
+  if (link.kind === 'group') for (const m of link.members || []) if (m && m.name) add(m.name, plMemberSrc(m, link));
+  return { rows: [...merged.values()], through: win.today, today: dateKeyNow(), month: ym, stale };
+}
 async function servePersonalPage(req, res, rawToken) {
   const token = String(rawToken || '').split(/[/?#]/)[0].trim();
   const noStore = { 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' };
-  const fail = (code, msg) => sendHtml(res, code, personalShell({ title: 'Link unavailable', heading: '🔒 Link unavailable', body: `<p>${escHtml(msg)}</p>` }), noStore);
+  const fail = (code, msg) => res.writableEnded ? undefined : sendHtml(res, code, personalShell({ title: 'Link unavailable', heading: '🔒 Link unavailable', body: `<p>${escHtml(msg)}</p>` }), noStore);
   if (feats().personalLinks === false) return fail(404, 'This feature has been turned off by the admin.');
   const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
   if (!savedLink) return fail(404, 'This link has either expired or is wrong. Ask the admin for a new one.');
@@ -10686,15 +10742,42 @@ async function servePersonalPage(req, res, rawToken) {
   const chReq = (() => { try { return new URL(req.url, 'http://x').searchParams.get('ch') || ''; } catch { return ''; } })();
   const chView = linkChannels.length > 1 && linkChannels.includes(chReq) ? chReq : 'all';
   const link = chView === 'all' ? baseLink : plChannelView(baseLink, chView);
+  const defaultsSnapshot = JSON.stringify(db.settings.personalLinkDefaults || {});
+  if (urlQ.get('welcome') === '1') {
+    if (!hasSec('overview') && !hasSec('issuance')) return sendJson(res, 403, { ok: false, error: 'Section not allowed' }, noStore);
+    try {
+      const snapshot = JSON.stringify(savedLink);
+      const data = await personalWelcomeHistory(link);
+      if (JSON.stringify(savedLink) !== snapshot || JSON.stringify(db.settings.personalLinkDefaults || {}) !== defaultsSnapshot || savedLink.enabled === false || !(db.settings.personalLinks || []).includes(savedLink) || feats().personalLinks === false || (adminPreview ? !(sessionUser(req) && sessionUser(req).role === 'admin') : !personalLinkSession(req, savedLink))) return sendJson(res, 403, { ok: false, error: 'Access changed' }, noStore);
+      return sendJson(res, 200, { ok: true, ...data, team: isTeamLink(link) }, noStore);
+    } catch (err) { console.warn('personal welcome:', err.message); return sendJson(res, 503, { ok: false, error: 'EIR history unavailable' }, noStore); }
+  }
   const wantPartial = urlQ.get('partial') === '1';
-  // Browser refresh (full page load) always rebuilds with live data; only quick GV/FF switches reuse the 45s cache.
-  const wantFresh = urlQ.get('fresh') === '1' || !wantPartial;
-  const cacheKey = `${token}|${chView}|${allowedSecs.join(',')}|${canExport ? 1 : 0}`;
+  const wantFresh = urlQ.get('fresh') === '1';
+  // Include the complete scope and source config so changed assignments cannot reuse old report HTML.
+  const linkSnapshot = JSON.stringify(savedLink);
+  const cacheKey = `${token}|${chView}|${allowedSecs.join(',')}|${canExport ? 1 : 0}|${sha(JSON.stringify({ link: savedLink, sheetId: db.settings.sheetId, eir: db.settings.eir, eirSheet: db.settings.eirSheet, gv: db.settings.gv }))}`;
   const replyPage = (v) => {
+    if (res.writableEnded) return;
+    if (JSON.stringify(savedLink) !== linkSnapshot || JSON.stringify(db.settings.personalLinkDefaults || {}) !== defaultsSnapshot || !(db.settings.personalLinks || []).includes(savedLink) || savedLink.enabled === false || feats().personalLinks === false || (adminPreview ? !(sessionUser(req) && sessionUser(req).role === 'admin') : !personalLinkSession(req, savedLink))) {
+      if (wantPartial) return sendJson(res, 403, { ok: false, error: 'Access changed' }, noStore);
+      return fail(403, 'Access changed. Please open the link again.');
+    }
     if (wantPartial) return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, view: chView, sub: v.sub, body: v.inner, at: v.at || Date.now() }), noStore);
     return sendHtml(res, 200, personalShell({ title: v.title, heading: v.heading, sub: v.sub, token, requireAuth: true, authorized: true, personName: link.name, body: `<div id="pl-portal-content">${v.inner}</div>` }), noStore);
   };
-  if (!wantFresh) { const hit = plPageCache.get(cacheKey); if (hit && Date.now() - hit.at < PL_CACHE_MS) return replyPage(hit); }
+  if (!wantFresh) { const hit = plPageCache.get(cacheKey); if (hit && Date.now() - hit.at < PL_CACHE_MS) return replyPage(wantPartial ? hit : { ...hit, inner: `<section class="pb-card" data-pl-refresh role="status">Showing a recent cached report; refreshing… <button class="pb-btn" type="button" data-pl-refresh-retry hidden>Retry refresh</button></section>${hit.inner}` }); }
+  // Authenticated cold opens get a shell immediately while the report builds in the background.
+  if (!wantPartial) {
+    const timer = setTimeout(() => {
+      if (res.writableEnded) return;
+      if (JSON.stringify(savedLink) !== linkSnapshot || JSON.stringify(db.settings.personalLinkDefaults || {}) !== defaultsSnapshot || !(db.settings.personalLinks || []).includes(savedLink) || savedLink.enabled === false || feats().personalLinks === false || (adminPreview ? !(sessionUser(req) && sessionUser(req).role === 'admin') : !personalLinkSession(req, savedLink))) return fail(403, 'Access changed. Please open the link again.');
+      const shell = `<div id="pl-portal-content"><section class="pb-card" data-pl-bootstrap role="status"><h3>Loading your report…</h3><p class="dim">Live sheet data is loading. The report will open here automatically.</p><button class="pb-btn" type="button" data-pl-bootstrap-retry hidden>Retry</button></section></div>`;
+      sendHtml(res, 200, personalShell({ title: `${link.name} · Loading`, heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`, sub: 'Preparing your report…', token, requireAuth, authorized: true, personName: link.name, body: shell }), noStore);
+    }, 600);
+    if (timer.unref) timer.unref();
+    res.once('finish', () => clearTimeout(timer));
+  }
   try {
     const asgAll = isTeamLink(link) ? normPlAssignedGlobal(link.assigned) : [];
     const asg = chView === 'all' ? asgAll : asgAll.filter((a) => a.src === chView);   // 📌 work assigned by RSM (this channel view)
@@ -10720,6 +10803,7 @@ async function servePersonalPage(req, res, rawToken) {
         new Promise((resolve) => { const t = setTimeout(() => resolve(false), 3000); if (t.unref) t.unref(); })
       ]);
       if (!ready) {
+        if (res.writableEnded) return;
         if (wantPartial) return sendJson(res, 202, { ok: false, loading: true }, noStore);
         return sendHtml(res, 200, personalShell({
           title: `${link.name} · Loading`,
@@ -10758,12 +10842,7 @@ async function servePersonalPage(req, res, rawToken) {
       }
     })() : Promise.resolve(null);
     const rows = await rowsPromise;
-    // 🔗 v3.79 — issuance khaali ho to 404 nahi: agar StockDataa me is naam ka stock mil jaye to page stock ke saath
-    // khulta hai (naye TL / naye mahine ke shuru me issuance abhi zero hota hai). Dono na mile to saaf message.
-    if (needsIssuance && !rows.length && chView === 'all') {
-      const stockOnly = await stockPromise;
-      if (!stockOnly) return fail(404, `"${link.name}" has no issuance or stock in the data yet. Check the spelling — re-select the name in Settings → Personal links.`);
-    }
+    // Empty issuance is valid for a newly configured agent; sheet errors still propagate.
     const st = personalStats(rows);
     const reportThrough = st.monthDays && st.monthDays.length ? st.monthDays[st.monthDays.length - 1].date : '';
     let team = [];
@@ -11247,11 +11326,13 @@ async function servePersonalPage(req, res, rawToken) {
     const tabsBarHtml = tabDefs.length ? `<aside class="pl-side" aria-label="Reports"><div class="pl-side-title">📂 Reports</div><div class="pb-tabs" id="pl-tabs">${tabDefs.map((t) => `<button type="button" class="pb-tab ${t.id === firstTab ? 'on' : ''}" data-pl-tab="${t.id}">${t.label}</button>${t.id === 'insights' && insNav.length ? `<select id="pl-ins-select" class="pl-ins-select" aria-label="Insight lists"><option value="all">🧠 All insights</option>${insNav.map(([id, label]) => `<option value="${escHtml(id)}">${escHtml(label)}</option>`).join('')}</select>` : ''}`).join('')}</div>${canExport ? `<div class="pl-side-exp">${stockQuickCsv}<button type="button" class="pb-btn" id="pl-exp-all-csv">⬇ Full CSV</button><button type="button" class="pb-btn pb-btn-pdf" id="pl-exp-all-pdf">📄 Full PDF</button></div>` : ''}</aside>` : '';
     const noSectionsHtml = tabDefs.length ? '' : '<section class="pb-card pb-no-sections"><h3>🔒 No report sections enabled</h3><p class="dim">The administrator has not granted any report sections for this link. Contact them to request access.</p></section>';
 
+    const welcomeHtml = (hasSec('overview') || hasSec('issuance')) ? `<section class="pb-card pl-welcome" data-pl-welcome role="region" aria-label="Welcome journey"><h3>✨ Welcome journey</h3><p class="dim" role="status">Loading EIR history…</p></section>` : '';
     const innerHtml = `${chSwitchHtml}${searchHtml}<div class="pl-layout">
         ${tabsBarHtml}
         <div class="pl-main">
         ${noSectionsHtml}
         ${hasSec('overview') ? `<div class="pl-pane" data-pl-pane="overview">
+          ${welcomeHtml}
           ${goalHtml || targetHtml ? `<section class="pb-card pb-goalcard">${goalHtml}${targetHtml}</section>` : ''}
           ${summaryHtml}
           <section class="pb-kpis">
@@ -11276,7 +11357,7 @@ async function servePersonalPage(req, res, rawToken) {
         ${hasSec('overview') ? `<div class="pl-pane" data-pl-pane="live" hidden>${liveHtml}</div>` : ''}
         ${dispatchOk ? '<div class="pl-pane" data-pl-pane="dispatch" hidden><div id="pl-dispatch"></div></div>' : ''}
         ${hasSec('stock') ? `<div class="pl-pane" data-pl-pane="stock" hidden>${!stockInfo && stockNote ? `<p class="pb-note">⏳ ${escHtml(stockNote)}</p>` : ''}${classStockCardHtml}</div>` : ''}
-        ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div><div class="pl-pane" data-pl-pane="calendar" hidden>${personalActivityCalendar(rows, dateKeyNow())}</div>` : ''}
+        ${hasSec('issuance') ? `<div class="pl-pane" data-pl-pane="issuance" hidden>${!hasSec('overview') ? welcomeHtml : ''}${classIssuanceHtml}${teamTable}${matrixTableHtml}${dateTableHtml}</div><div class="pl-pane" data-pl-pane="calendar" hidden>${personalActivityCalendar(rows, dateKeyNow())}</div>` : ''}
         ${hasSec('performance') ? `<div class="pl-pane" data-pl-pane="performance" hidden>${perfCardHtml}${teamHtml}</div>` : ''}
         ${hasSec('insights') ? `<div class="pl-pane" data-pl-pane="insights" hidden>${insightsHtml}</div>` : ''}
         ${hasSec('ageing') ? `<div class="pl-pane" data-pl-pane="ageing" hidden>${ageHtml}${agentAgeTable}</div>` : ''}
@@ -11285,7 +11366,7 @@ async function servePersonalPage(req, res, rawToken) {
         </div>
       </div>`;
     const pageVals = { title: `${link.name} · Performance`, heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`, sub: `${chView === 'all' && (link.source === 'both' || linkChannels.length > 1) ? 'GV Partner + First Forward' : (link.source === 'gv' ? 'GV Partner' : 'First Forward')} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${(link.tls || []).length ? `${link.tls.length} TL${link.tls.length > 1 ? 's' : ''} + ` : ''}${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`, inner: innerHtml };
-    if (stockMeta.state !== 'loading') plCachePut(cacheKey, pageVals);
+    if (stockMeta.state !== 'loading' && JSON.stringify(savedLink) === linkSnapshot && savedLink.enabled !== false && (db.settings.personalLinks || []).includes(savedLink)) plCachePut(cacheKey, pageVals);
     return replyPage({ ...pageVals, at: Date.now() });
   } catch (err) {
     console.warn('personal page:', err.message);
@@ -11417,6 +11498,10 @@ body{background:linear-gradient(180deg,#e8edf8 0,#f1f5f9 260px,#f1f5f9 100%);fon
 .pb-wrap .pb-track{height:11px;background:#e2e8f0}.pb-wrap .pb-fill{background:linear-gradient(90deg,#6366f1,#06b6d4)}
 .pb-wrap .pb-rank{border-bottom:1px solid #f1f5f9}
 .pb-wrap .pb-foot{color:#94a3b8;margin-top:22px}
+.pb-wrap .pb-head{background:linear-gradient(118deg,#10283a 0%,#075e63 58%,#087d86 100%);box-shadow:0 16px 38px rgba(4,76,79,.24)}
+.pb-wrap .pb-head h1 b{color:#ffdfa0;font-family:Georgia,serif;font-size:1.18em;letter-spacing:.01em;text-shadow:0 2px 18px rgba(255,207,124,.3)}
+.pb-wrap .pb-head p{color:#d0f5ed}.pb-wrap .pb-logo{background:linear-gradient(145deg,#f5c86f,#d58a42);color:#26363d}
+.pl-welcome{background:linear-gradient(125deg,#f0fdfa,#fffaf0);border:1px solid #b9e6dc}.pl-welcome h3{color:#14575b}.pl-welcome-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:12px 0}.pl-welcome-item{background:#fff;border:1px solid #dceee9;border-radius:12px;padding:12px}.pl-welcome-item small{display:block;color:#526b70}.pl-welcome-item b{display:block;color:#0f575c;font-size:16px;margin:5px 0}.pl-welcome-res{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.pl-welcome-note{font-size:12px;color:#4d6469;line-height:1.5;margin-top:8px}
 @media(max-width:760px){.pb-wrap .pb-head{padding:16px}.pb-wrap .pb-head h1{font-size:18px}.pb-wrap .pb-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.pb-wrap .pb-kpi b{font-size:23px}.pb-wrap .pl-side{padding:8px}.pb-wrap .pl-side .pb-tab{border-left:0;border-bottom:3px solid transparent;border-radius:8px}.pb-wrap .pl-side .pb-tab.on{border-bottom-color:#4f46e5}}
 .pl-chbar{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 14px}
 .pl-ch{display:flex;flex-direction:column;gap:1px;padding:10px 18px;border-radius:14px;border:1.5px solid #e2e8f0;background:#fff;color:#334155;text-decoration:none;min-width:170px;box-shadow:0 2px 8px rgba(15,23,42,.05);transition:.15s}
@@ -11655,12 +11740,12 @@ const PERSONAL_PORTAL_JS = `(function () {
   }
 
   // ---- instant GV | FF | All switch: views are fetched once (prefetched in the background) and swapped in place ----
-  var views = {}, curCh = 'all', busy = false;
+  var views = {}, curCh = /^(ff|gv)$/.test(state.ch) ? state.ch : 'all', busy = false;
   function chFromHref(h) { var m = /[?&]ch=(\\w+)/.exec(h || ''); return m ? m[1] : 'all'; }
   function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function fetchView(ch, fresh, tries) {
     tries = tries || 0;
-    var u = location.pathname + '?ch=' + encodeURIComponent(ch) + '&partial=1' + (fresh ? '&fresh=1' : '');
+    var u = location.pathname + '?ch=' + encodeURIComponent(ch) + '&partial=1' + (fresh ? '&fresh=1' : '') + (embed ? '&embed=live' : '');
     return fetch(u, { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) {
       var ct = r.headers.get('content-type') || '';
       if (ct.indexOf('json') < 0) throw new Error('session');
@@ -11668,7 +11753,7 @@ const PERSONAL_PORTAL_JS = `(function () {
     }).then(function (o) {
       if (o.status === 202 || (o.j && o.j.loading)) { if (tries < 8) return wait(1500).then(function () { return fetchView(ch, fresh, tries + 1); }); throw new Error('slow'); }
       if (!o.j || !o.j.ok) throw new Error('bad');
-      views[ch] = { html: o.j.body, sub: o.j.sub, at: o.j.at || Date.now() };
+      views[ch] = { html: o.j.body, sub: o.j.sub, at: o.j.at || Date.now(), view: o.j.view || ch };
       return views[ch];
     });
   }
@@ -11681,11 +11766,11 @@ const PERSONAL_PORTAL_JS = `(function () {
     if (target !== 'insights') { var sel0 = document.getElementById('pl-ins-select'); if (sel0) { sel0.value = 'all'; Array.prototype.forEach.call(document.querySelectorAll('[data-ins-sec]'), function (c) { c.hidden = false; }); } }
     Array.prototype.forEach.call(panes, function (p) { p.hidden = target !== 'all' && p.getAttribute('data-pl-pane') !== target; });
     state.tab = target || state.tab;
-    try { if (history.replaceState) history.replaceState(null, '', location.pathname + (curCh !== 'all' ? '?ch=' + curCh : '') + (embed ? '' : '') + '#' + state.tab); } catch (e) {}
+    try { if (history.replaceState) history.replaceState(null, '', location.pathname + (curCh !== 'all' ? '?ch=' + curCh + (embed ? '&embed=live' : '') : (embed ? '?embed=live' : '')) + '#' + state.tab); } catch (e) {}
     return hit;
   }
   function applyView(ch, v) {
-    curCh = ch; state.ch = ch;
+    curCh = v.view || ch; state.ch = curCh;
     holder.innerHTML = v.html;
     var sub = document.getElementById('pl-sub'); if (sub && v.sub) sub.innerHTML = v.sub;
     bindContent();
@@ -11719,7 +11804,63 @@ const PERSONAL_PORTAL_JS = `(function () {
     activateTab(h, true);
   });
 
+  function loadWelcome() {
+    var card = holder && holder.querySelector('[data-pl-welcome]');
+    if (!card) return;
+    var channel = curCh;
+    card.innerHTML = '<h3>✨ Welcome journey</h3><p class="dim" role="status">Loading EIR history…</p>';
+    var url = location.pathname + '?welcome=1&ch=' + encodeURIComponent(channel) + (embed ? '&embed=live' : '');
+    var controller = new AbortController();
+    var timeout = setTimeout(function () { controller.abort(); }, 15000);
+    fetch(url, { credentials: 'same-origin', signal: controller.signal, headers: { Accept: 'application/json' } }).then(function (r) {
+      if (!r.ok || (r.headers.get('content-type') || '').indexOf('json') < 0) throw new Error('unavailable');
+      return r.json();
+    }).then(function (data) {
+      if (!card.isConnected || channel !== curCh) return;
+      if (!data.ok) throw new Error('unavailable');
+      var escWelcome = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+      var today = Date.parse(data.today + 'T00:00:00Z');
+      var list = (data.rows || []).filter(function (a) {
+        if (!data.team) return true;
+        if (!a.first) return true;
+        var t = Date.parse(a.first + 'T00:00:00Z');
+        return Number.isFinite(t) && t <= today && today - t < 90 * 86400000;
+      }).sort(function (a, b) { return (b.first || '').localeCompare(a.first || '') || a.name.localeCompare(b.name); });
+      var cards = list.slice(0, 100).map(function (a) {
+        return '<div class="pl-welcome-item"><small>' + escWelcome(a.source === 'gv' ? 'GV Partner' : 'First Forward') + '</small><b>' + escWelcome(a.name) + '</b><small>First recorded in scoped EIR</small><b>' + escWelcome(a.first || 'No record found') + '</b><small>' + escWelcome(data.month) + ' EIR issuance</small><b>' + Number(a.month || 0).toLocaleString('en-IN') + ' tags</b></div>';
+      }).join('');
+      var resources = [['overview', '📊 Overview'], ['issuance', '📅 Date issuance'], ['calendar', '📆 Activity calendar'], ['stock', '📦 Stock'], ['requests', '🏷️ Tag requests']].filter(function (x) { return !!holder.querySelector('[data-pl-tab="' + x[0] + '"]'); }).map(function (x) { return '<button type="button" class="pb-btn" data-welcome-tab="' + x[0] + '">' + x[1] + '</button>'; }).join('');
+      card.innerHTML = '<h3>✨ ' + (data.team ? 'Team welcome journey' : 'Your welcome journey') + '</h3><p class="pl-welcome-note">' + (data.team ? 'Recent first recorded activity (last 90 days) and selected agents without a record.' : 'Your first recorded activity and progress in the available report.') + '</p>' + (cards ? '<div class="pl-welcome-grid">' + cards + '</div>' : '<p class="pl-welcome-note">No recent first activity or selected agents without a record in this scope.</p>') + (list.length > 100 ? '<p class="pl-welcome-note">Showing 100 of ' + list.length + ' matches.</p>' : '') + '<p class="pl-welcome-note">EIR history within this link’s scope only; first recorded activity is not a joining date and may omit earlier activity under another TL or outside EIR (including GV Master). Month counts are EIR only, through ' + escWelcome(data.through) + '; today is excluded. EIR snapshots may be cached. Same names can merge; overlapping team parts use the highest count, not a sum.' + (data.stale ? ' ⚠️ A stale snapshot was used; refresh later.' : '') + '</p>' + (resources ? '<strong>Explore your available resources</strong><div class="pl-welcome-res">' + resources + '</div>' : '');
+      Array.prototype.forEach.call(card.querySelectorAll('[data-welcome-tab]'), function (btn) { btn.addEventListener('click', function () { activateTab(btn.getAttribute('data-welcome-tab')); }); });
+    }).catch(function () {
+      if (!card.isConnected || channel !== curCh) return;
+      card.innerHTML = '<h3>✨ Welcome journey</h3><p role="status">EIR history could not be loaded. Please try again.</p><button class="pb-btn" type="button" data-welcome-retry>Retry</button>';
+      var retry = card.querySelector('[data-welcome-retry]'); if (retry) retry.addEventListener('click', loadWelcome);
+    }).finally(function () { clearTimeout(timeout); });
+  }
+  function refreshCachedReport() {
+    var banner = holder && holder.querySelector('[data-pl-refresh]');
+    if (!banner) return;
+    var ch = curCh, retry = banner.querySelector('[data-pl-refresh-retry]');
+    var run = function () {
+      if (retry) retry.hidden = true;
+      fetchView(ch, true).then(function (v) {
+        if (!banner.isConnected || curCh !== ch) return;
+        var q = document.getElementById('pl-search-q');
+        if (q && q.value) { banner.firstChild.textContent = 'Updated report is ready; reload after finishing your search. '; return; }
+        applyView(ch, v);
+      }).catch(function () {
+        if (!banner.isConnected) return;
+        banner.firstChild.textContent = 'Showing cached report; refresh failed. ';
+        if (retry) retry.hidden = false;
+      });
+    };
+    if (retry) retry.addEventListener('click', run);
+    run();
+  }
   function bindContent() {
+    loadWelcome();
+    refreshCachedReport();
     var pend = document.getElementById('pl-stock-pending');
     if (pend) setTimeout(function () { softRefresh(false); }, Number(pend.getAttribute('data-refresh-ms')) || 8000);
     // Tab switching
@@ -12147,8 +12288,23 @@ const PERSONAL_PORTAL_JS = `(function () {
   }, 120000);
 
   if (holder) {
-    bindContent();
-    views[curCh] = { html: holder.innerHTML, sub: (document.getElementById('pl-sub') || {}).innerHTML, at: Date.now() };
+    var bootstrap = holder.querySelector('[data-pl-bootstrap]');
+    if (bootstrap) {
+      var retryBoot = bootstrap.querySelector('[data-pl-bootstrap-retry]');
+      var startBoot = function () {
+        if (retryBoot) retryBoot.hidden = true;
+        var msg = bootstrap.querySelector('p'); if (msg) msg.textContent = 'Live sheet data is loading. The report will open here automatically.';
+        fetchView(curCh, false).then(function (v) { applyView(curCh, v); }).catch(function () {
+          if (msg) msg.textContent = 'Report is taking longer or could not load. Check your connection or verify your access, then retry.';
+          if (retryBoot) retryBoot.hidden = false;
+        });
+      };
+      if (retryBoot) retryBoot.addEventListener('click', startBoot);
+      startBoot();
+    } else {
+      bindContent();
+      views[curCh] = { html: holder.innerHTML, sub: (document.getElementById('pl-sub') || {}).innerHTML, at: Date.now(), view: curCh };
+    }
     if (authorized && !embed) {
       track('page_open', 'Opened report' + (document.querySelector('.pl-chbar') ? ' · ' + (CH_LABEL[curCh] || curCh) : '') + ' · tab ' + state.tab);
       ping();
