@@ -39,7 +39,7 @@ test('GV Master truth mapping stays authoritative', () => {
   assert.match(home, /FF\.data\.gvToday/);
   assert.match(home, /AAJ KA LIVE|Aaj ka live/);
   assert.match(home, /function feedMatchesCurrentClassMap/);
-  assert.match(home, /if \(!feedMatchesCurrentClassMap\(quick\.gv\)\) return/);
+  assert.match(home, /if \(!feedMatchesCurrentClassMap\(quick\.gv\) && liveTry < 2\) \{ retryLive/);
   assert.match(index, /homeKpiFix\.css/);
   assert.match(profile, /todayKpiHtml/);
   assert.match(profile, /todayTeamRows/);

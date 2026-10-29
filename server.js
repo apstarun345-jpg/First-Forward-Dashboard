@@ -1761,9 +1761,20 @@ async function gvTodayVrnCounts(settings, resolved, day, nextDay, cacheMs) {
   }
   return null;
 }
-async function gvTodayFeed(force) {
+const GV_TODAY_SWR_MS = 10 * 60e3;   // serve a same-day snapshot up to 10 min old instantly, refresh behind it
+function gvTodayLastGood() {
+  const b = gvTodayFeedCache.body;
+  return b && b.date === dateKeyNow() ? b : null;
+}
+async function gvTodayFeed(force, opts) {
   const ttl = 30e3; // live today: short cache, but never scan the full 30-day history
   if (!force && gvTodayFeedCache.body && Date.now() - gvTodayFeedCache.at < ttl) return { ...gvTodayFeedCache.body, cached: true };
+  // ⚡ Stale-while-revalidate: Home never waits on Google when a recent same-day snapshot exists.
+  const lastGood = gvTodayLastGood();
+  if (!force && !(opts && opts.revalidate) && lastGood && Date.now() - gvTodayFeedCache.at < GV_TODAY_SWR_MS) {
+    if (!gvTodayFeedCache.promise) gvTodayFeed(false, { revalidate: true }).catch(() => {});
+    return { ...lastGood, cached: true, gv: lastGood.gv ? { ...lastGood.gv, cached: true } : lastGood.gv };
+  }
   if (force && gvTodayFeedCache.forcePromise) return gvTodayFeedCache.forcePromise;
   if (gvTodayFeedCache.promise) {
     if (!force) return gvTodayFeedCache.promise;
@@ -1844,6 +1855,9 @@ async function gvTodayFeed(force) {
         lastErr = err;
       }
     }
+    // Google blip: keep showing the last good same-day snapshot (marked stale) instead of an error.
+    const keep = gvTodayLastGood();
+    if (keep) return { ...keep, cached: true, gv: keep.gv ? { ...keep.gv, cached: true, stale: true } : keep.gv };
     throw lastErr || new Error('GV today feed failed');
   })();
   let tracked;

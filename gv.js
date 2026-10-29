@@ -251,7 +251,11 @@ window.FF = window.FF || {};
       if (version === generation) { state.data[key] = value; delete state.errors[key]; }
       return value;
     }).catch((err) => {
-      if (version === generation) state.errors[key] = err;
+      if (version === generation) {
+        state.errors[key] = err;
+        // 🔁 Any failed load (also page-level `need(key, { only: true })`) joins the background auto-retry.
+        if (!state.retrying) setTimeout(() => { if (version === generation && !state.retrying && state.errors[key]) scheduleRetry(version, 0); }, 0);
+      }
       throw err;
     }).finally(() => {
       if (version !== generation) return;
@@ -297,10 +301,14 @@ window.FF = window.FF || {};
   function scheduleRetry(version, round) {
     clearTimeout(retryTimer);
     const failed = Object.keys(state.errors).filter((k) => DATASETS[k]);
-    if (!failed.length || round >= RETRY_DELAYS.length || version !== generation) { state.retrying = false; return; }
+    const browser = typeof document !== 'undefined' && typeof window !== 'undefined' && !!window.addEventListener;
+    if (!failed.length || version !== generation || (!browser && round >= RETRY_DELAYS.length)) { state.retrying = false; return; }
+    // After the fast backoff, keep healing every 90s (visible tab only) instead of giving up.
+    const wait = round < RETRY_DELAYS.length ? RETRY_DELAYS[round] : 90000;
     state.retrying = true;
     retryTimer = setTimeout(async () => {
       if (version !== generation) return;
+      if (typeof document !== 'undefined' && document.hidden && round >= RETRY_DELAYS.length) { scheduleRetry(version, round); return; }
       const list = Object.keys(state.errors).filter((k) => DATASETS[k]);
       list.forEach((k) => { delete state.errors[k]; });
       await runQueue(list, true);
@@ -310,9 +318,12 @@ window.FF = window.FF || {};
         state.retrying = false;
         try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); if (FF.app && FF.app.updateStatus) FF.app.updateStatus(); } catch { /* ignore */ }
       } else scheduleRetry(version, round + 1);
-    }, RETRY_DELAYS[round]);
+    }, wait);
+    if (retryTimer && typeof retryTimer.unref === 'function') retryTimer.unref();   // never keep a Node (test) process alive
   }
   function retryNow() { scheduleRetry(generation, 0); }
+  // Network back / tab visible again → retry failed sheets right away.
+  try { if (typeof window !== 'undefined' && window.addEventListener) { window.addEventListener('online', () => { if (Object.keys(state.errors).length) retryNow(); }); document.addEventListener('visibilitychange', () => { if (!document.hidden && Object.keys(state.errors).length && !state.retrying) retryNow(); }); } } catch { /* non-browser */ }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key, opts) {

@@ -1586,16 +1586,33 @@ FF.pages = FF.pages || {};
 
     // 🟢 First visible live source: only GV Master + today, no FF/history wait.
     paintLive();
-    liveP.then((quick) => {
-      if (!quick || !quick.gv) {
-        liveState = { ...liveState, error: quick && quick.requestError ? quick.requestError : 'GV today live feed unavailable.' };
-        paintLive();
-        return;
-      }
-      // A service worker may briefly serve an older snapshot after a Settings mapping change.
-      // Keep the loading shell rather than painting categories from a different CCH map; the
-      // client GV Master snapshot below is already classified with the current settings.
-      if (!feedMatchesCurrentClassMap(quick.gv)) return;
+    // 🔁 GV live feed auto-retry: a failed / empty / old-class-map feed is fetched again (2s · 4s · 8s · 15s · 30s ·
+    // then every 60s) until it paints, instead of staying on "live data is coming in…" forever.
+    const LIVE_RETRY = [2000, 4000, 8000, 15000, 30000, 60000];
+    let liveTry = 0, liveTimer = null;
+    const liveDone = () => !!liveFromFeed || (liveState.source === 'master' && !liveState.error);
+    function retryLive(reason) {
+      clearTimeout(liveTimer);
+      if (!root.isConnected || liveDone()) return;
+      const wait = LIVE_RETRY[Math.min(liveTry, LIVE_RETRY.length - 1)]; liveTry++;
+      liveState = { ...liveState, error: `${reason || 'GV today live feed unavailable'} — auto-retry in ${Math.round(wait / 1000)}s (attempt ${liveTry})` };
+      paintLive();
+      liveTimer = setTimeout(() => {
+        if (!root.isConnected || liveDone()) return;
+        if (document.hidden) { liveTry--; retryLive(reason); return; }
+        FF.data.gvToday({ nocache: true })
+          .catch((err) => ({ requestError: err && err.message ? err.message : 'GV today feed request failed' }))
+          .then(handleQuick)
+          .catch((err) => retryLive(err && err.message));
+      }, wait);
+      if (liveTimer && typeof liveTimer.unref === 'function') liveTimer.unref();
+    }
+    function handleQuick(quick) {
+      if (!root.isConnected) return;
+      if (!quick || !quick.gv) { retryLive(quick && (quick.requestError || quick.error)); return; }
+      // A service worker / config race may briefly give a snapshot from another CCH map. Retry twice;
+      // after that paint it anyway (totals are right) — the GV Master snapshot below re-splits classes.
+      if (!feedMatchesCurrentClassMap(quick.gv) && liveTry < 2) { retryLive('GV class mapping is updating'); return; }
       liveFromFeed = { ...quick.gv, cached: !!(quick.gv.cached || quick.cached), stale: !!quick.gv.stale };
       feedLiveRows = liveRowsFromFeed(liveFromFeed);
       liveRows = feedLiveRows || [];
@@ -1627,10 +1644,15 @@ FF.pages = FF.pages || {};
         paintMonth();
         paintCharts();
       }
-    }).catch((err) => {
-      liveState = { ...liveState, error: err && err.message ? err.message : 'GV today feed failed.' };
-      paintLive();
-    });
+    }
+    liveP.then(handleQuick).catch((err) => retryLive(err && err.message ? err.message : 'GV today feed failed'));
+    // Live numbers keep refreshing while Home is open (every 60s, visible tab only).
+    const liveRefresh = setInterval(() => {
+      if (!root.isConnected) { clearInterval(liveRefresh); clearTimeout(liveTimer); return; }
+      if (document.hidden || !canGv || !liveFromFeed) return;
+      FF.data.gvToday().then((q) => { if (q && q.gv && feedMatchesCurrentClassMap(q.gv) && liveState.source !== 'master') { liveFromFeed = null; handleQuick(q); } }).catch(() => {});
+    }, 60000);
+    if (liveRefresh && typeof liveRefresh.unref === 'function') liveRefresh.unref();
 
     // 30-day history is background only — it supplies Expected Today / same-weekday bars and
     // must never delay the initial GV live card.

@@ -313,20 +313,24 @@ window.FF = window.FF || {};
 
   function endpointJson(path, cacheState, opts) {
     const o = opts || {};
-    const fresh = !!o.fresh;
+    const fresh = !!o.fresh, nocache = !!o.nocache;   // nocache = skip the client memo (auto-retry), server cache still used
     const now = Date.now();
-    if (!fresh && cacheState.value && now - cacheState.at < TODAY_TTL) return Promise.resolve({ ...cacheState.value, cached: true });
+    if (!fresh && !nocache && cacheState.value && now - cacheState.at < TODAY_TTL) return Promise.resolve({ ...cacheState.value, cached: true });
     if (cacheState.promise && !fresh) return cacheState.promise;
     const base = path || '';
     const url = `${base}${fresh ? '?fresh=1' : ''}`;
-    const promise = fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } })
+    // A hung request must not leave the card on "loading" — abort after 30s so the caller's auto-retry runs.
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), 30000) : null;
+    const promise = fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' }, ...(ctl ? { signal: ctl.signal } : {}) })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`live feed HTTP ${res.status}`))))
+      .catch((err) => { throw (err && err.name === 'AbortError') ? new Error('live feed timed out') : err; })
       .then((json) => {
         if (json && json.ok === false) throw new Error(json.error || 'live feed unavailable');
         cacheState.value = json; cacheState.at = Date.now();
         return json;
       })
-      .finally(() => { if (cacheState.promise === promise) cacheState.promise = null; });
+      .finally(() => { if (timer) clearTimeout(timer); if (cacheState.promise === promise) cacheState.promise = null; });
     cacheState.promise = promise;
     return promise;
   }
