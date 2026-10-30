@@ -3384,6 +3384,7 @@ async function loadLedger() {
       }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 }); });
       counts[src.id] = n;
       ledgerState.good[src.id] = { ch: src.ch, rows: mine, at: Date.now() };
+      for (const e of mine) entries[src.ch].push(e);   // (rows were only added on the failure path — a fresh load gave an empty index)
     } catch (err) {
       errors[src.id] = ledgerErrText(src, err);
       // Fail hua source → pichla successful data hi use karo (khaali index nahi)
@@ -6012,6 +6013,40 @@ async function handleApi(req, res, url) {
     if (!index) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
     const results = list.map((b) => dispatchFor(index, b));
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, results, meta: { mode: 'index', at: new Date(ledgerState.at).toISOString(), counts: ledgerState.counts, errors: ledgerState.errors } }), { 'Cache-Control': 'no-store' });
+  }
+  // 📦 Last dispatch of an agent / TL — every ledger row (IDFC Stock Sheet FF / GV Stock Sheet) addressed to that person:
+  // which date the tags went out and how many of each class. Same ledger as the Barcode Checker.
+  if (p === '/api/dispatch-by' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const ch = String(body && body.ch) === 'gv' ? 'gv' : 'ff';
+    const nm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const names = new Set((Array.isArray(body && body.names) ? body.names : [body && body.name]).map(nm).filter((x) => x.length >= 3));
+    const ids = new Set((Array.isArray(body && body.ids) ? body.ids : [body && body.id]).map(nm).filter((x) => x.length >= 3));
+    if (!names.size && !ids.size) throw new HttpError(400, 'Name or ID needed.');
+    if (!ledgerSources().some((x) => x.ch === ch)) return sendJson(res, 200, { ok: true, none: true, reason: 'Dispatch ledger sheet is not configured for this channel (Settings → Dispatch ledger).', rows: [] }, { 'Cache-Control': 'no-store' });
+    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 25000); });
+    let index; try { index = await Promise.race([ledgerIndex(false), wait]); } finally { clearTimeout(timer); }
+    if (!index) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
+    const idx = index[ch];
+    const hits = [];
+    if (idx && idx.byPfx) for (const list of idx.byPfx.values()) for (const e of list) {
+      if ((e.agentId && ids.has(nm(e.agentId))) || (e.agent && names.has(nm(e.agent))) || (e.agentId && names.has(nm(e.agentId)))) hits.push(e);
+    }
+    hits.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (b.row || 0) - (a.row || 0));
+    const byDate = new Map(), seenRange = new Set();
+    for (const e of hits) {
+      const rk = `${e.date}|${e.first}|${e.last}`; if (seenRange.has(rk)) continue; seenRange.add(rk);   // same range listed in two source sheets
+      const d = e.date || '—';
+      const o = byDate.get(d) || { date: d, total: 0, cls: {}, ranges: [], status: '' };
+      const q = Number(e.qty) || (e.hi - e.lo + 1) || 0;
+      o.total += q; o.cls[e.cls || '—'] = (o.cls[e.cls || '—'] || 0) + q;
+      if (o.ranges.length < 6) o.ranges.push({ cls: e.cls, qty: q, first: e.first, last: e.last });
+      if (!o.status && e.status) o.status = e.status;
+      byDate.set(d, o);
+    }
+    const dates = [...byDate.values()];
+    return sendJson(res, 200, { ok: true, ch, count: hits.length, last: dates[0] || null, recent: dates.slice(0, 8), totalDispatches: dates.length, errors: ledgerState.errors, counts: ledgerState.counts }, { 'Cache-Control': 'no-store' });
   }
   // 📨 Agents Complaints Summary — cache se (background me Gmail se refresh hota rehta hai)
   if (p === '/api/complaints' && method === 'GET') {

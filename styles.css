@@ -7175,3 +7175,10 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 .hm-gvonly-actions button, .hm-gvonly-actions a { border: 1px solid rgba(255,255,255,.65); border-radius: 6px; padding: 3px 9px; background: rgba(0,0,0,.2); color: #fff; font: inherit; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; }
 .hm-gvonly-actions button:hover, .hm-gvonly-actions a:hover { background: rgba(0,0,0,.4); color: #fff; }
 .hm-gvonly-open:focus-visible, .hm-gvonly-actions :focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* 🚚 Last dispatch box (Master Search) */
+.msp-kpi.msp-disp-box { grid-column: span 2; text-align: left; }
+.msp-disp-box .msp-disp-main { font-size: 20px; }
+.msp-disp-box .msp-disp-main small { font-size: 12px; font-weight: 600; margin-left: 4px; }
+.msp-disp-box .msp-disp-sub { font-style: normal; line-height: 1.7; }
+@media (max-width: 720px) { .msp-kpi.msp-disp-box { grid-column: 1 / -1; } }
