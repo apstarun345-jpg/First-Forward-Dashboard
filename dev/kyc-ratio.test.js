@@ -32,14 +32,35 @@ test('kycRatio computes full ÷ (full + not), ignores other', () => {
   assert.strictEqual(kycRatio(rows, (r) => r.group === 'VC4').total, 8);
 });
 
-test('Home KYC cards sit inside the month grid (slot) with last, current and vertical class-wise card', () => {
+test('Home keeps only the class-wise KYC card (in the month grid), clickable to the detail dashboard', () => {
   const h = read('home.js');
   assert.match(h, /id="home-kyc" class="hm-kyc-slot" style="display:contents"/);
   assert.doesNotMatch(h, /\['home-kyc', /);
   assert.match(h, /M\.loadKycMonthly\(\{\}\)/);
   assert.match(h, /kyc-vlist/);
-  assert.match(h, /Last month · ' \+ lbl\.last/);
-  assert.match(h, /Current month · ' \+ lbl\.cur/);
+  assert.doesNotMatch(h, /Last month · ' \+ lbl\.last/);
+  assert.match(h, /data-kpi-self="1" data-kyc-open="1"/);
+  assert.match(h, /FF\.kycDetail\.open\(/);
+  assert.match(h, /pending \$\{U\.fmt\(pend\.pending\)\}/);
+});
+
+test('kycRatio reports pending (blank CUSTOMER_FULL_KYC) separately from the % base', () => {
+  const src = read('model.js');
+  const fnSrc = /function kycRatio[\s\S]*?\n  \}\n/.exec(src)[0];
+  const kycRatio = new Function(`${fnSrc}; return kycRatio;`)();
+  const r = kycRatio([{ kyc: 'full', n: 1 }, { kyc: 'not', n: 3 }, { kyc: 'other', n: 6 }]);
+  assert.strictEqual(r.pending, 6); assert.strictEqual(r.total, 4); assert.strictEqual(r.issued, 10); assert.strictEqual(r.pct, 25);
+});
+
+test('KYC detail dashboard: class / channel / agent / TL sections, pending, search, Excel', () => {
+  const k = read('kpiDetail.js');
+  assert.match(k, /FF\.kycDetail = \{ open: kycOpen \}/);
+  assert.match(k, /loadKycPeople\(filter\)/);
+  for (const t of ['Class-wise KYC', 'Channel-wise KYC', 'Sabse zyada KYC %', 'Sabse zyada Not KYC', 'data-kyc-csv', 'data-kyc-q', 'Pending']) assert.ok(k.includes(t), t);
+  assert.match(k, /kycPeopleSection\(rows, m, lbl, 'agent'/);
+  assert.match(k, /kycPeopleSection\(rows, m, lbl, 'tl'/);
+  const m = read('model.js');
+  assert.match(m, /async function loadKycPeople\(/);
 });
 
 test('Master Search has KYC box filtered by agent or TL, filled async', () => {
@@ -47,5 +68,6 @@ test('Master Search has KYC box filtered by agent or TL, filled async', () => {
   assert.match(m, /function kycBoxHtml\(/);
   assert.match(m, /\$\{kycBoxHtml\(pr, isTl\)\}/);
   assert.match(m, /fillKycBoxes\(host\);/);
+  assert.match(m, /FF\.kycDetail\.open\(\{ title: `\$\{sp\.t\} · FASTag KYC`, filter: sp\.f \}\)/);
   assert.match(m, /isTl \? \{ tl: pr\.name \} : \{ agent: pr\.name \}/);
 });

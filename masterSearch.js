@@ -2239,7 +2239,7 @@ FF.pages = FF.pages || {};
   const kycPct = (p) => (p === null || p === undefined ? '—' : `${p.toFixed(1)}%`);
   function kycBoxHtml(pr, isTl) {
     const f = isTl ? { tl: pr.name } : { agent: pr.name };
-    return `<div class="mp-kpi msp-kpi k12 msp-disp-box msp-kyc-box" data-msp-kyc-box="${esc(JSON.stringify(f))}"><small>🪪 FASTag KYC ratio · last vs current month</small><b class="msp-kyc-main">…</b><em class="msp-disp-sub"><span class="dim small">Loading…</span></em></div>`;
+    return `<div class="mp-kpi msp-kpi k12 msp-disp-box msp-kyc-box kpi-clickable" data-msp-kyc-box="${esc(JSON.stringify({ f, t: pr.name }))}" role="button" tabindex="0" title="Click for detailed KYC dashboard"><small>🪪 FASTag KYC ratio · last vs current month</small><b class="msp-kyc-main">…</b><em class="msp-disp-sub"><span class="dim small">Loading…</span></em></div>`;
   }
   function kycFetch(f) {
     const key = JSON.stringify(f);
@@ -2269,7 +2269,7 @@ FF.pages = FF.pages || {};
     const boxes = host ? host.querySelectorAll('[data-msp-kyc-box]') : [];
     boxes.forEach((box) => {
       if (box.__kycDone) return; box.__kycDone = true;
-      let f; try { f = JSON.parse(box.dataset.mspKycBox); } catch { return; }
+      let f; try { f = JSON.parse(box.dataset.mspKycBox).f; } catch { return; }
       kycFetch(f).then((rows) => { if (box.isConnected) kycPaint(box, rows || []); }).catch((err) => {
         if (!box.isConnected) return;
         const main = box.querySelector('.msp-kyc-main'), sub = box.querySelector('.msp-disp-sub');
@@ -2516,6 +2516,8 @@ FF.pages = FF.pages || {};
     if (!t.closest('.msp-rep-menu')) document.querySelectorAll('.msp-rep-menu').forEach((m) => m.remove());
     const dl = t.closest('[data-msp-age-dl]');
     if (dl) { e.preventDefault(); e.stopPropagation(); const box = dl.closest('[data-msp-age]'); if (box) downloadAgeAll(box).catch((err) => U.toast(String((err && err.message) || err), 'err')); return; }
+    const kbox = t.closest('[data-msp-kyc-box]');
+    if (kbox) { e.preventDefault(); e.stopPropagation(); try { const sp = JSON.parse(kbox.dataset.mspKycBox); if (FF.kycDetail) FF.kycDetail.open({ title: `${sp.t} · FASTag KYC`, filter: sp.f }); } catch { /* ignore */ } return; }
     const dbox = t.closest('[data-msp-disp-box]');
     if (dbox) { e.preventDefault(); e.stopPropagation(); openDispDrawer(dbox); return; }
     const row = t.closest('[data-msp-age-b]');

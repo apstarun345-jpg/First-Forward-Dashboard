@@ -542,11 +542,42 @@ window.FF = window.FF || {};
   }
   /** Ratio = full ÷ (full + not). 'other' (blank/unknown) ginti me nahi. */
   function kycRatio(rows, pick = () => true) {
-    let full = 0, not = 0;
-    for (const r of rows || []) { if (!pick(r)) continue; if (r.kyc === 'full') full += r.n; else if (r.kyc === 'not') not += r.n; }
-    const total = full + not;
-    return { full, not, total, pct: total ? (full / total) * 100 : null };
+    let full = 0, not = 0, pending = 0;
+    for (const r of rows || []) { if (!pick(r)) continue; if (r.kyc === 'full') full += r.n; else if (r.kyc === 'not') not += r.n; else pending += r.n; }
+    const total = full + not;   // total = KYC-checked (TRUE + FALSE). pending = CUSTOMER_FULL_KYC khali (sheet me abhi update nahi)
+    return { full, not, pending, total, issued: total + pending, pct: total ? (full / total) * 100 : null };
   }
 
-  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, kycRatio, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  /** Agent-level KYC rows (click-through dashboard): [{ name, tlName, channel, ym, group, kyc, n }] — last + current month. */
+  const kycPeopleCache = new Map();
+  async function loadKycPeople(filter, opts) {
+    const e = FF.config.eir, kycCol = e.kyc || 'AK';
+    const cur = U.ymKey(new Date()), prev = U.prevMonthKey(cur);
+    const key = `${cur}|${JSON.stringify(filter || {})}`;
+    const hit = kycPeopleCache.get(key);
+    if (hit && Date.now() - hit.at < 10 * 60e3) return hit.rows;
+    const where = `${whereClause(filter)} and ${e.date} >= date '${prev}-01'`;
+    const tq = `select ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${kycCol}, count(${e.tagId}) where ${where} group by ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${kycCol}`;
+    const t = await D.query(e.sheet, tq, opts);
+    const agg = new Map();
+    for (const r of t.rows) {
+      const y = D.cellNumber(r[4]), m = D.cellNumber(r[5]), n = D.cellNumber(r[8]);
+      if (y === null || m === null || !n) continue;
+      const ym = `${y}-${U.pad2(m + 1)}`;
+      if (ym !== cur && ym !== prev) continue;
+      const agentName = U.clean(D.cellText(r[0])), gvName = U.clean(D.cellText(r[1])), tlName = U.clean(D.cellText(r[2])) || '—';
+      const channel = channelOf(D.cellText(r[3]), tlName);
+      const name = channel === 'GV Partner' ? (gvName || agentName || 'Unknown') : (agentName || gvName || 'Unknown');
+      const group = classGroup(D.cellText(r[6]));
+      const kyc = kycOf(D.cellText(r[7]));
+      const k = `${name}|${tlName}|${channel}|${ym}|${group}|${kyc}`;
+      const o = agg.get(k) || { name, tlName, channel, ym, group, kyc, n: 0 };
+      o.n += n; agg.set(k, o);
+    }
+    const rows = [...agg.values()];
+    kycPeopleCache.set(key, { at: Date.now(), rows });
+    return rows;
+  }
+
+  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, loadKycPeople, kycRatio, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

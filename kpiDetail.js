@@ -1433,6 +1433,136 @@ window.FF = window.FF || {};
     if (chip && state.spec) { open({ ...state.spec, ...JSON.parse(chip.dataset.kdSpec || '{}') }); return; }
   });
 
+  // ===== 🪪 FASTag KYC detail dashboard (Home KYC card + Master Search KYC box click) =====
+  // EIR CUSTOMER_FULL_KYC: TRUE = full KYC, FALSE = not KYC, khali = pending (sheet me abhi update nahi).
+  // KYC % = full ÷ (full + not). Pending alag dikhta hai taaki % ka base saaf rahe.
+  const kycUi = { csv: { cur: null, last: null }, pane: 'cur' };
+  const kPct = (p) => (p === null || p === undefined ? '—' : `${p.toFixed(1)}%`);
+  const kTone = (p, ref) => (p === null || p === undefined ? '' : p >= (ref || 0) ? 'kyc-ok' : p < (ref || 0) * 0.5 ? 'kyc-bad' : 'kyc-warn');
+  const kGroups = ['VC4', 'VC20', 'VC5+'];
+  const kBar = (p, tone) => `<span class="kyc-bar"><i class="${tone}" style="width:${Math.max(0, Math.min(100, p || 0)).toFixed(1)}%"></i></span>`;
+  function kycSum(rows, pick) {
+    const o = { full: 0, not: 0, pending: 0 };
+    (rows || []).forEach((r) => { if (!pick(r)) return; if (r.kyc === 'full') o.full += r.n; else if (r.kyc === 'not') o.not += r.n; else o.pending += r.n; });
+    o.total = o.full + o.not; o.issued = o.total + o.pending; o.pct = o.total ? (o.full / o.total) * 100 : null;
+    return o;
+  }
+  function kycTiles(rows, m, lbl) {
+    const one = (ym, name) => {
+      const o = kycSum(rows, (r) => r.ym === ym);
+      return `<div class="kyc-tile"><div class="kyc-t-h">${esc(name)} · ${esc(lbl[ym])}</div><div class="kyc-t-v">${kPct(o.pct)}</div>
+        <div class="kyc-t-s">Issued <b>${U.fmt(o.issued)}</b> · Checked <b>${U.fmt(o.total)}</b></div>
+        <div class="kyc-t-s"><span class="kyc-ok">Full KYC ${U.fmt(o.full)}</span> · <span class="kyc-bad">Not KYC ${U.fmt(o.not)}</span> · <span class="kyc-pend">Pending ${U.fmt(o.pending)}</span></div></div>`;
+    };
+    return `<div class="kyc-tiles">${one(m.last, 'Last month')}${one(m.cur, 'Current month')}</div>`;
+  }
+  function kycClassSection(rows, m, lbl) {
+    const cell = (ym, g) => {
+      const o = kycSum(rows, (r) => r.ym === ym && (!g || r.group === g));
+      return `<td class="num">${U.fmt(o.full)}</td><td class="num">${U.fmt(o.not)}</td><td class="num dim">${U.fmt(o.pending)}</td><td class="num"><b class="${kTone(o.pct, kycSum(rows, (r) => r.ym === ym).pct)}">${kPct(o.pct)}</b></td>`;
+    };
+    const body = kGroups.map((g) => `<tr><td><b>${g}</b></td>${cell(m.last, g)}${cell(m.cur, g)}</tr>`).join('') + `<tr class="kyc-total"><td><b>Total</b></td>${cell(m.last, '')}${cell(m.cur, '')}</tr>`;
+    const base = rows.some((r) => r.ym === m.cur && r.kyc !== 'other') ? m.cur : m.last;
+    const per = kGroups.map((g) => ({ g, o: kycSum(rows, (r) => r.ym === base && r.group === g) })).filter((x) => x.o.total > 0);
+    let call = '';
+    if (per.length) {
+      const best = per.reduce((a, b) => (b.o.pct > a.o.pct ? b : a)), worst = per.reduce((a, b) => (b.o.pct < a.o.pct ? b : a)), mostNot = per.reduce((a, b) => (b.o.not > a.o.not ? b : a));
+      call = `<div class="kyc-callouts"><div><small>Sabse zyada KYC %</small><b class="kyc-ok">${best.g} · ${kPct(best.o.pct)}</b><em>${U.fmt(best.o.full)} / ${U.fmt(best.o.total)}</em></div>
+        <div><small>Sabse kam KYC %</small><b class="kyc-bad">${worst.g} · ${kPct(worst.o.pct)}</b><em>${U.fmt(worst.o.full)} / ${U.fmt(worst.o.total)}</em></div>
+        <div><small>Sabse zyada Not KYC</small><b class="kyc-bad">${mostNot.g} · ${U.fmt(mostNot.o.not)}</b><em>${esc(lbl[base])}</em></div></div>`;
+    }
+    return `<section class="kd-sec"><h4>🏷️ Class-wise KYC (VC4 · VC20 · VC5+)</h4>${call}<div class="table-wrap"><table class="tbl compact kd-tbl"><thead>
+      <tr><th rowspan="2">Class</th><th colspan="4" class="num">${esc(lbl[m.last])}</th><th colspan="4" class="num">${esc(lbl[m.cur])}</th></tr>
+      <tr><th class="num">Full KYC</th><th class="num">Not KYC</th><th class="num">Pending</th><th class="num">KYC %</th><th class="num">Full KYC</th><th class="num">Not KYC</th><th class="num">Pending</th><th class="num">KYC %</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
+  }
+  function kycChannelSection(rows, m, lbl) {
+    const cell = (ym, ch) => { const o = kycSum(rows, (r) => r.ym === ym && r.channel === ch); return `<td class="num">${U.fmt(o.full)}</td><td class="num">${U.fmt(o.not)}</td><td class="num dim">${U.fmt(o.pending)}</td><td class="num"><b>${kPct(o.pct)}</b></td>`; };
+    const chs = ['First Forward', 'GV Partner'].filter((ch) => rows.some((r) => r.channel === ch));
+    if (!chs.length) return '';
+    return `<section class="kd-sec"><h4>🔀 Channel-wise KYC</h4><div class="table-wrap"><table class="tbl compact kd-tbl"><thead>
+      <tr><th rowspan="2">Channel</th><th colspan="4" class="num">${esc(lbl[m.last])}</th><th colspan="4" class="num">${esc(lbl[m.cur])}</th></tr>
+      <tr><th class="num">Full KYC</th><th class="num">Not KYC</th><th class="num">Pending</th><th class="num">KYC %</th><th class="num">Full KYC</th><th class="num">Not KYC</th><th class="num">Pending</th><th class="num">KYC %</th></tr></thead><tbody>${chs.map((ch) => `<tr><td><b>${esc(ch)}</b></td>${cell(m.last, ch)}${cell(m.cur, ch)}</tr>`).join('')}</tbody></table></div></section>`;
+  }
+  /** Agent / TL table for one month, worst (most Not KYC) first. */
+  function kycPeople(rows, ym, by) {
+    const map = new Map();
+    rows.forEach((r) => {
+      if (r.ym !== ym) return;
+      const key = by === 'tl' ? `${r.tlName}|${r.channel}` : `${r.name}|${r.tlName}|${r.channel}`;
+      const o = map.get(key) || { name: by === 'tl' ? r.tlName : r.name, tl: r.tlName, ch: r.channel, agents: new Set(), rows: [] };
+      o.rows.push(r); o.agents.add(r.name); map.set(key, o);
+    });
+    const ref = kycSum(rows, (r) => r.ym === ym).pct;
+    const list = [...map.values()].map((o) => {
+      const t = kycSum(o.rows, () => true), g = {};
+      kGroups.forEach((k) => { g[k] = kycSum(o.rows, (r) => r.group === k); });
+      return { ...o, t, g };
+    }).filter((o) => o.t.issued > 0).sort((a, b) => b.t.not - a.t.not || b.t.pending - a.t.pending);
+    return { list, ref };
+  }
+  function kycPeopleSection(rows, m, lbl, by, icon, head) {
+    const mk = (ym) => {
+      const { list, ref } = kycPeople(rows, ym, by);
+      const body = list.slice(0, 400).map((o, i) => {
+        const tone = kTone(o.t.pct, ref);
+        const flag = o.t.total >= 5 && o.t.pct !== null && o.t.pct < ref * 0.5 ? '⚠' : '';
+        const gc = kGroups.map((k) => `<td class="num ${kTone(o.g[k].pct, ref)}">${o.g[k].total ? `${kPct(o.g[k].pct)} <small class="dim">${U.fmt(o.g[k].full)}/${U.fmt(o.g[k].total)}</small>` : '—'}</td>`).join('');
+        return `<tr class="kyc-row" data-kyc-text="${esc(`${o.name} ${o.tl} ${o.ch}`.toLowerCase())}"><td class="num dim">${i + 1}</td><td><b>${esc(o.name)}</b> ${flag}</td>${by === 'tl' ? `<td class="num">${U.fmt(o.agents.size)}</td>` : `<td>${esc(o.tl)}</td>`}<td>${esc(o.ch === 'GV Partner' ? 'GV' : 'FF')}</td>
+          <td class="num">${U.fmt(o.t.issued)}</td><td class="num kyc-ok">${U.fmt(o.t.full)}</td><td class="num kyc-bad">${U.fmt(o.t.not)}</td><td class="num dim">${U.fmt(o.t.pending)}</td><td class="num"><b class="${tone}">${kPct(o.t.pct)}</b> ${kBar(o.t.pct, tone)}</td>${gc}</tr>`;
+      }).join('');
+      kycUi.csv[ym === m.cur ? 'cur' : 'last'] = kycUi.csv[ym === m.cur ? 'cur' : 'last'] || {};
+      const csvRows = list.map((o) => [o.name, by === 'tl' ? o.agents.size : o.tl, o.ch, o.t.issued, o.t.full, o.t.not, o.t.pending, o.t.pct === null ? '' : o.t.pct.toFixed(1), ...kGroups.map((k) => (o.g[k].pct === null ? '' : o.g[k].pct.toFixed(1)))]);
+      const slot = ym === m.cur ? 'cur' : 'last';
+      kycUi.csv[slot][by] = { head: [head, by === 'tl' ? 'Agents' : 'TL', 'Channel', 'Issued', 'Full KYC', 'Not KYC', 'Pending', 'KYC %', 'VC4 %', 'VC20 %', 'VC5+ %'], rows: csvRows };
+      return { body, count: list.length };
+    };
+    const cur = mk(m.cur), last = mk(m.last);
+    const th = `<th class="num">#</th><th>${head}</th><th${by === 'tl' ? ' class="num"' : ''}>${by === 'tl' ? 'Agents' : 'TL'}</th><th>Ch</th><th class="num">Issued</th><th class="num">Full KYC</th><th class="num">Not KYC</th><th class="num">Pending</th><th class="num">KYC %</th><th class="num">VC4 %</th><th class="num">VC20 %</th><th class="num">VC5+ %</th>`;
+    const pane = (id, d) => `<div class="kyc-pane" data-kyc-pane-id="${id}"${id === kycUi.pane ? '' : ' hidden'}><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${th}</tr></thead><tbody>${d.body || '<tr><td colspan="12" class="dim">No data</td></tr>'}</tbody></table></div></div>`;
+    return `<section class="kd-sec kyc-people" data-kyc-by="${by}"><h4>${icon} ${esc(head)}-wise KYC · sabse zyada Not KYC pehle <small class="dim">(⚠ = KYC % average ke aadhe se kam)</small></h4>${pane('cur', cur)}${pane('last', last)}</section>`;
+  }
+  async function kycOpen(opts) {
+    const o = opts || {}, filter = o.filter || {};
+    const title = o.title || 'FASTag KYC ratio';
+    const kicker = 'FASTag KYC';
+    FF.app.openDrawer({ kicker, title, sub: 'EIR sheet · CUSTOMER_FULL_KYC', body: U.spinner('KYC detail calculate ho raha hai…'), wide: true, loading: true });
+    try {
+      const rows = await FF.model.loadKycPeople(filter);
+      const cur = U.ymKey(new Date()), m = { cur, last: U.prevMonthKey(cur) };
+      const lbl = { [m.cur]: U.labelYM(m.cur, true), [m.last]: U.labelYM(m.last, true) };
+      kycUi.csv = { cur: {}, last: {} }; kycUi.pane = 'cur';
+      const scopeAgent = !!filter.agent, scopeTl = !!filter.tl;
+      const people = (scopeAgent ? '' : kycPeopleSection(rows, m, lbl, 'agent', '🧑‍💼', 'Agent') + (scopeTl ? '' : kycPeopleSection(rows, m, lbl, 'tl', '👥', 'TL')));
+      const chips = people ? `<div class="kyc-toolbar"><span class="dim small">Agent / TL list:</span><button type="button" class="btn small kyc-chip on" data-kyc-pane="cur">${esc(lbl[m.cur])}</button><button type="button" class="btn small kyc-chip" data-kyc-pane="last">${esc(lbl[m.last])}</button><input type="search" class="kyc-q" data-kyc-q placeholder="Agent / TL search…" autocomplete="off"></div>` : '';
+      const note = `<p class="dim small kyc-note">KYC % = Full KYC ÷ (Full KYC + Not KYC). <b>Pending</b> = EIR me CUSTOMER_FULL_KYC abhi khali (sheet me update baad me aata hai) — % me count nahi hota. Issued = Full + Not + Pending.</p>`;
+      const body = `${kycTiles(rows, m, lbl)}${note}${kycClassSection(rows, m, lbl)}${kycChannelSection(rows, m, lbl)}${chips}${people}`;
+      const actions = people ? '<button class="btn small" data-kyc-csv>⬇ Excel (agent list)</button>' : '';
+      FF.app.openDrawer({ kicker, title, sub: `EIR sheet · CUSTOMER_FULL_KYC · ${lbl[m.last]} vs ${lbl[m.cur]}`, body, wide: true, actions, replace: true });
+    } catch (err) {
+      FF.app.openDrawer({ kicker, title, body: U.errorBox(err), wide: true, replace: true });
+    }
+  }
+  document.addEventListener('click', (e) => {
+    const chip = e.target.closest && e.target.closest('[data-kyc-pane]');
+    if (chip) {
+      kycUi.pane = chip.dataset.kycPane === 'last' ? 'last' : 'cur';
+      document.querySelectorAll('[data-kyc-pane]').forEach((b) => b.classList.toggle('on', b.dataset.kycPane === kycUi.pane));
+      document.querySelectorAll('[data-kyc-pane-id]').forEach((p) => { p.hidden = p.dataset.kycPaneId !== kycUi.pane; });
+      return;
+    }
+    if (e.target.closest && e.target.closest('[data-kyc-csv]')) {
+      const d = kycUi.csv[kycUi.pane] && kycUi.csv[kycUi.pane].agent;
+      if (d) U.downloadCsv(`kyc-agents-${kycUi.pane}-${U.stamp()}.csv`, d.head, d.rows);
+    }
+  });
+  document.addEventListener('input', (e) => {
+    const q = e.target.closest && e.target.closest('[data-kyc-q]');
+    if (!q) return;
+    const t = q.value.trim().toLowerCase();
+    document.querySelectorAll('.kyc-row').forEach((tr) => { tr.hidden = !!t && !String(tr.dataset.kycText || '').includes(t); });
+  });
+  FF.kycDetail = { open: kycOpen };
+
   /** ⬇ v214 — Master Search full report: kisi bhi spec + period ki tag-level issuance rows (drawer state ko chhede bina). */
   function rawRowsFor(spec, p) { return loadRaw({ ...spec, _pre: true }, p); }
   FF.kpiDetail = { open, rawRowsFor, RAW_HEAD, specFrom, registerList, normYm, resetHistory, _infer: inferSpec, _rowMatchesSpec: rowMatchesSpec, _stockDetail: stockDetail, _peopleDetail: peopleDetail, _issuanceDetail: issuanceDetail, _agentDetail: agentDetail, _limits: SOFT };

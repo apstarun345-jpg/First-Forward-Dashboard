@@ -1558,13 +1558,16 @@ FF.pages = FF.pages || {};
         const a = M.kycRatio(kycData.rows, pick(last, g)), b = M.kycRatio(kycData.rows, pick(cur, g));
         return `<div class="kyc-vrow"><span class="kyc-vlbl">${l}</span><span class="kyc-vv"><small>${esc(lbl.last)}</small> <b>${pct(a.pct)}</b></span><span class="kyc-vv"><small>${esc(lbl.cur)}</small> <b>${pct(b.pct)}</b></span></div>`;
       }).join('');
-      const clsCard = `<div class="kpi g4 hm-kyc-cls" data-kpi-title="KYC % · class-wise"><div class="kpi-top"><span class="kpi-title">KYC % · class-wise (VC4 / VC20 / VC5+)</span><span class="kpi-icon">🪪</span></div><div class="kyc-vlist">${rows3}</div><div class="kpi-foot">FULL KYC ÷ (FULL + NOT KYC) · VC20 = CCH column</div></div>`;
-      const overall = (ym, name, tone) => {
-        const o = M.kycRatio(kycData.rows, pick(ym));
-        return kpi(tone, `KYC ratio · ${name}`, '🪪', pct(o.pct), `Full KYC ${U.fmt(o.full)} · Not KYC ${U.fmt(o.not)}`);
-      };
-      kycMount.innerHTML = `${overall(last, 'Last month · ' + lbl.last, 'g8')}${overall(cur, 'Current month · ' + lbl.cur, 'g5')}${clsCard}`;
+      const pend = M.kycRatio(kycData.rows, pick(cur));
+      const clsCard = `<div class="kpi g4 hm-kyc-cls" data-kpi-self="1" data-kyc-open="1" role="button" tabindex="0" data-kpi-title="FASTag KYC ratio"><div class="kpi-top"><span class="kpi-title">🪪 FASTag KYC ratio · class-wise</span><span class="kpi-icon">🪪</span></div><div class="kyc-vlist">${rows3}</div><div class="kpi-foot">${esc(lbl.cur)}: checked ${U.fmt(pend.total)} of ${U.fmt(pend.issued)} · pending ${U.fmt(pend.pending)} · Full KYC ÷ (Full + Not) · click for details</div></div>`;
+      kycMount.innerHTML = clsCard;
     }
+    root.addEventListener('click', (ev) => {
+      const c = ev.target.closest && ev.target.closest('[data-kyc-open]');
+      if (!c) return;
+      ev.preventDefault(); ev.stopPropagation();
+      if (FF.kycDetail) FF.kycDetail.open({ title: 'FASTag KYC ratio · all agents' });
+    });
     function paintTargetAchievement() {
       if (!targetAchievementMount || !targetAchievementMount.isConnected) return;
       const targets = ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym === currentTargetYm && classTargetsConfigured(t) && ((targetSource(t) === 'ff' && canFf) || (targetSource(t) === 'gv' && canGv)));
