@@ -1227,8 +1227,86 @@ FF.pages = FF.pages || {};
     if (warnHost) warnHost.addEventListener('click', (e) => { const t = e.target.closest('[data-smap-b]'); if (t) openStockMapDrawer(t.dataset.smapB, t.dataset.smapC || ''); });
     load(false);
   }
+  // The same two-month, first-observed-month rule used by New Agents. EIR is the
+  // single source for both channels here, so monthly totals are never mixed with GV live.
+  function homeJoinerChannels(auth) {
+    return [
+      (auth.can('dashboard') || auth.can('trend') || auth.can('performance')) ? 'ff' : '',
+      (auth.can('gvDashboard') || auth.can('gvTrend') || auth.can('gvPerformance')) ? 'gv' : ''
+    ].filter(Boolean);
+  }
+  function homeJoinerData(rows, channels, analyzer, currentYm) {
+    const nowYm = currentYm || U.ymKey(TODAY());
+    const allowed = new Set(channels || []), result = [], coverage = [];
+    for (const ch of ['ff', 'gv']) {
+      if (!allowed.has(ch)) continue;
+      const input = (rows || []).filter((r) => {
+        const source = /gv/i.test(String(r.channel || '')) ? 'gv' : 'ff';
+        return source === ch && /^\d{4}-\d{2}$/.test(String(r.ym || '')) && r.ym <= nowYm && Number(r.n) > 0;
+      }).map((r) => {
+        const valid = (v) => /^(?:—|-|–|na|n\/a|nan|null|none|undefined|0|unknown)$/i.test(U.clean(v)) ? '' : U.clean(v);
+        return { id: valid(r.id), name: valid(r.name), ym: r.ym, n: r.n, tlName: r.tlName, tlId: r.tlId };
+      }).filter((r) => r.id || r.name);
+      const out = analyzer(input, { ch, months: 2, curYm: nowYm });
+      coverage.push({ ch, minYm: out.minYm, cutoff: out.cutoff });
+      result.push(...out.rows.filter((r) => r.isNew));
+    }
+    result.sort((a, b) => b.firstYm.localeCompare(a.firstYm) || b.curN - a.curN || a.name.localeCompare(b.name));
+    return { rows: result, coverage, currentYm: nowYm };
+  }
+  function homeJoinerHtml(data, stale) {
+    const rows = data.rows || [];
+    const count = U.fmt(rows.length);
+    const one = (r) => `<div class="hj-person"><span class="hj-avatar" aria-hidden="true">${esc((r.name || '?').trim().charAt(0).toUpperCase() || '?')}</span><div class="hj-person-info"><strong>${esc(r.name || 'Name unavailable')}</strong><span>ID · ${esc(r.id || 'Not available')} <i class="hj-channel ${r.ch === 'gv' ? 'gv' : 'ff'}">${r.ch === 'gv' ? 'GV' : 'FF'}</i></span><small>First EIR month · ${esc(U.labelYM(r.firstYm))}</small></div><div class="hj-count"><b>${U.fmt(r.curN)}</b><span>this month</span></div></div>`;
+    const track = rows.map(one).join('');
+    const table = rows.map((r) => `<tr><td><b>${esc(r.name || 'Name unavailable')}</b></td><td>${esc(r.id || 'Not available')}</td><td>${r.ch === 'gv' ? 'GV' : 'FF'}</td><td>${esc(U.labelYM(r.firstYm))}</td><td class="num">${U.fmt(r.curN)}</td></tr>`).join('');
+    const limited = (data.coverage || []).filter((c) => !c.minYm || c.minYm >= c.cutoff).map((c) => c.ch.toUpperCase());
+    const coverageNote = limited.length ? `<p class="hj-notice">${esc(limited.join(' / '))}: limited EIR history; the first available month is excluded, so some new joiners may not appear.</p>` : '';
+    return `<section class="hj-card" aria-label="New joiner list">
+      <div class="hj-head"><div><div class="hj-eyebrow">👋 WELCOME ABOARD</div><h2>New joiners <span>${count}</span></h2><p>First recorded EIR issuance in this or last month · FF &amp; GV as permitted</p></div>${rows.length ? '<button type="button" class="hj-pause" data-hj-pause aria-pressed="false">⏸ Pause animation</button>' : ''}</div>
+      ${stale ? '<p class="hj-notice">⚠️ Latest EIR refresh failed. Showing the last available snapshot; retry to update.</p>' : ''}
+      ${rows.length ? `<div class="hj-viewport" aria-hidden="true"><div class="hj-track" style="--hj-duration:${Math.min(180, Math.max(24, rows.length * 7))}s"><div class="hj-group">${track}</div><div class="hj-group">${track}</div></div></div>
+      <details class="hj-details"><summary>View full list · ${count} agents</summary><div class="hj-table-wrap"><table class="tbl compact"><thead><tr><th>Agent name</th><th>Agent ID</th><th>Channel</th><th>First EIR month</th><th class="num">${esc(U.labelYM(data.currentYm))} issuance</th></tr></thead><tbody>${table}</tbody></table></div></details>` : '<p class="hj-empty">No qualifying first-recorded agents found in the available EIR history for this period.</p>'}
+      ${coverageNote}<p class="hj-foot">Based on available EIR history, not joining date. First available data month is excluded; ID changes or missing history can affect matching. Counts are current-month EIR only and may be delayed; GV Master live is not included.</p>
+      ${stale ? '<button class="btn small" type="button" data-hj-retry>↻ Retry update</button>' : ''}
+    </section>`;
+  }
+  function mountHomeJoiners(el, channels) {
+    if (!el || !channels.length) return;
+    const deadline = (promise) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Request is taking too long.')), 15000);
+      Promise.resolve(promise).then((v) => { clearTimeout(timer); resolve(v); }, (err) => { clearTimeout(timer); reject(err); });
+    });
+    const load = async (force) => {
+      el.innerHTML = '<section class="hj-card"><div class="hj-eyebrow">👋 WELCOME ABOARD</div><h2>New joiners</h2><p role="status">Loading EIR agent history…</p></section>';
+      try {
+        if (!FF.newAgents && FF.lazy && FF.lazy.need) await deadline(FF.lazy.need('newAgents'));
+        if (!FF.newAgents || typeof FF.newAgents.analyze !== 'function') throw new Error('New joiner helper could not load.');
+        if (force && S.refresh) await deadline(S.refresh(['agents']));
+        const rows = await deadline(S.need('agents', { only: true }));
+        if (!Array.isArray(rows)) throw new Error('EIR agent history is unavailable.');
+        const stale = !!(S.error && S.error('agents'));
+        const data = homeJoinerData(rows, channels, FF.newAgents.analyze, U.ymKey(TODAY()));
+        if (el.isConnected) el.innerHTML = homeJoinerHtml(data, stale);
+      } catch (err) {
+        if (el.isConnected) el.innerHTML = `<section class="hj-card"><div class="hj-eyebrow">👋 WELCOME ABOARD</div><h2>New joiners</h2><p role="status">EIR agent history could not be loaded. ${esc(err && err.message || '')}</p><button class="btn small" type="button" data-hj-retry>↻ Retry</button></section>`;
+      }
+    };
+    el.addEventListener('click', (event) => {
+      const retry = event.target.closest('[data-hj-retry]');
+      if (retry) { load(true); return; }
+      const button = event.target.closest('[data-hj-pause]');
+      if (!button) return;
+      const paused = button.getAttribute('aria-pressed') !== 'true';
+      button.setAttribute('aria-pressed', String(paused));
+      button.textContent = paused ? '▶ Resume animation' : '⏸ Pause animation';
+      const card = button.closest('.hj-card'); if (card) card.setAttribute('data-paused', String(paused));
+    });
+    load(false);
+  }
   const homeLayout = (() => {
     const SECTIONS = [
+      ['home-joiners', '👋 New joiners'],
       ['home-target-alerts', '🎯 Target updates'],
       ['home-assign', '📌 Assigned work by RSM'],
       ['home-todo', "✅ Today's work"],
@@ -1343,6 +1421,7 @@ FF.pages = FF.pages || {};
           <button class="btn" id="home-customize" title="Reorder or hide Home sections" aria-expanded="false">⚙ Customize</button>
         </div>
       </div>
+      <div id="home-joiners"></div>
       <div id="home-target-alerts"></div>
       <div id="home-assign"></div>
       <div id="home-todo"></div>
@@ -1365,6 +1444,9 @@ FF.pages = FF.pages || {};
 
     const quick = U.$('#home-quick', root);
     if (quick) quick.innerHTML = `<div class="chip-row"><span class="chip on">🟩 GV aaj · GV Master (live)</span><span class="chip">🧾 EIR: FF + GV history</span><span class="chip dim">📦 Stock: StockDataa + Tag Assignment</span></div>`;
+
+    const joinerChannels = homeJoinerChannels(FF.auth);
+    mountHomeJoiners(U.$('#home-joiners', root), joinerChannels);
 
     // ✅ v3.78 — "Today's work" card: pending Tag Requests + one-click shortcuts (cheap: one small API call).
     try { if (FF.targetAlerts) FF.targetAlerts.mount(U.$('#home-target-alerts', root)); } catch { /* ignore */ }
@@ -1806,7 +1888,7 @@ FF.pages = FF.pages || {};
   }
 
   FF.pages.home = {
-    title: 'Home', render, monthKpiHtml, streams, eirWeekdays, liveRowsFromFeed, targetAchievementSummary, targetAchievementHtml,
+    title: 'Home', render, joiners: { channels: homeJoinerChannels, data: homeJoinerData, html: homeJoinerHtml, mount: mountHomeJoiners }, monthKpiHtml, streams, eirWeekdays, liveRowsFromFeed, targetAchievementSummary, targetAchievementHtml,
     explorer: {
       state: explorerFilters, filterRows: filterExplorerRows, totals: explorerTotals, daily: explorerDaily, html: explorerHtml,
       dateKey: explorerDateKey, rangePreset: explorerRangePreset, reset: resetExplorerFilters,
