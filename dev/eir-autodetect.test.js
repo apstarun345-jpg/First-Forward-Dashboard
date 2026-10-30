@@ -61,19 +61,27 @@ function loadScript() {
   return ctx;
 }
 
-test('script: ISSUE_TIME is planned right after ISSUE_DATE', () => {
+test('script: ISSUE_TIME goes to column BA (found by header once set); never auto-inserted after ISSUE_DATE', () => {
   const s = loadScript();
-  const out = s.withEIRTimeHeader(['TAG_ID', 'ISSUE_DATE', 'CCH']);
-  assert.deepEqual(Array.from(out), ['TAG_ID', 'ISSUE_DATE', 'ISSUE_TIME', 'CCH']);
-  assert.deepEqual(Array.from(s.withEIRTimeHeader(['A', 'ISSUE_DATE', 'issue_time'])), ['A', 'ISSUE_DATE', 'issue_time']);
+  assert.match(script, /TIME_COLUMN: 53/);
+  const blankBA = new Array(52).fill('X').concat(['', '', 'cardStage']);
+  const p = s.planEIRTimeColumn(blankBA, 53);
+  assert.equal(p.col, 53); assert.equal(p.setHeader, true);
+  const named = new Array(60).fill('X'); named[56] = 'issue_time';
+  const q = s.planEIRTimeColumn(named, 53);
+  assert.equal(q.col, 57); assert.equal(q.setHeader, false);
+  const busy = new Array(55).fill('X');
+  const r = s.planEIRTimeColumn(busy, 53);
+  assert.equal(r.col, 56); assert.equal(r.setHeader, true);
+  assert.equal(s.planEIRTimeColumn(['A'], 53).col, 53);
 });
 
 test('script: a new bank column is inserted after the previous bank column, never at the far end', () => {
   const s = loadScript();
   const sheet = ['TAG_ID', 'ISSUE_DATE', 'KYC_MODE', 'CUSTOMER_FULL_KYC', 'Master ID', 'TL ID'];
-  const plan = s.planEIRInsertions(sheet, ['TAG_ID', 'ISSUE_DATE', 'ISSUE_TIME', 'KYC_MODE', 'CUSTOMER_FULL_KYC', 'IS_FULL_KYC']);
-  assert.deepEqual(Array.from(plan.inserts, (i) => [i.header, i.col]), [['ISSUE_TIME', 3], ['IS_FULL_KYC', 6]]);
-  assert.deepEqual(Array.from(plan.layout), ['TAG_ID', 'ISSUE_DATE', 'ISSUE_TIME', 'KYC_MODE', 'CUSTOMER_FULL_KYC', 'IS_FULL_KYC', 'MASTER ID', 'TL ID']);
+  const plan = s.planEIRInsertions(sheet, ['TAG_ID', 'ISSUE_DATE', 'KYC_MODE', 'CUSTOMER_FULL_KYC', 'IS_FULL_KYC']);
+  assert.deepEqual(Array.from(plan.inserts, (i) => [i.header, i.col]), [['IS_FULL_KYC', 5]]);
+  assert.deepEqual(Array.from(plan.layout), ['TAG_ID', 'ISSUE_DATE', 'KYC_MODE', 'CUSTOMER_FULL_KYC', 'IS_FULL_KYC', 'MASTER ID', 'TL ID']);
 });
 
 test('script: no change when the sheet already follows the bank order', () => {

@@ -108,7 +108,7 @@ FF.config = {
     agentId: 'J', agentName: 'L', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX',
     gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH',
     kycMode: 'AJ', kyc: 'AK',   // CUSTOMER_FULL_KYC — TRUE = full KYC, FALSE = not KYC (purane rows)
-    kyc2: 'BN',                // IS_FULL_KYC — bank ka naya naam; naye rows me yahi bharta hai (pehla non-blank use hota hai)
+    kyc2: 'BJ',                // IS_FULL_KYC — bank ka naya naam; naye rows me yahi bharta hai (pehla non-blank use hota hai)
     time: '',                  // ISSUE_TIME (date ke just baad) — auto-detect se bharta hai
     gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.'
   },

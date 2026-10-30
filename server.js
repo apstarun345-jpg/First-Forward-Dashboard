@@ -276,7 +276,7 @@ const DEFAULT_SETTINGS = {
   stockSheet: 'StockDataa',
   stockGid: '',
   eirSheet: 'EIR',
-  eir: { tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA', agentId: 'J', agentLegacyId: 'K', agentName: 'L', assistId: 'M', assistLegacyId: 'N', assistName: 'O', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX', gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH', kycMode: 'AJ', kyc: 'AK', kyc2: 'BN', time: '', gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.' },
+  eir: { tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA', agentId: 'J', agentLegacyId: 'K', agentName: 'L', assistId: 'M', assistLegacyId: 'N', assistName: 'O', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX', gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH', kycMode: 'AJ', kyc: 'AK', kyc2: 'BJ', time: '', gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.' },
   stock: { id: 'A', name: 'B', tagId: 'C', barcode: 'D', cls: 'E', tagType: 'F', bcAllocatedAt: 'G', agentId: 'H', agentName: 'I', agentAllocatedAt: 'J', tlName: 'K' },
   stockMovement: { enabled: false, sheet: 'Stock Movements', date: 'A', channel: 'B', type: 'C', quantity: 'D', cls: 'E', from: 'F', to: 'G', reference: 'H', note: 'I' },
   excludeTls: ['APS'],

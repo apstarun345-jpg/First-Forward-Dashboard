@@ -75,7 +75,7 @@ test('Master Search has KYC box filtered by agent or TL, filled async', () => {
 test('KYC reads CUSTOMER_FULL_KYC and the bank\'s newer IS_FULL_KYC (first non-blank wins)', () => {
   const cfg = fs.readFileSync(new URL('../config.js', import.meta.url), 'utf8');
   const model = fs.readFileSync(new URL('../model.js', import.meta.url), 'utf8');
-  assert.match(cfg, /kyc2:\s*'BN'/);
+  assert.match(cfg, /kyc2:\s*'BJ'/);
   assert.match(model, /kycPick/);
   assert.match(model, /e\.kyc2/);
 });

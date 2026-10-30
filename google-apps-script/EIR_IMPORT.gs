@@ -18,8 +18,10 @@
  *    column (same order as the bank file) - it is no longer pushed
  *    to the far right end of the sheet.
  * B. ISSUE_DATE stays a plain date (dd-mmmm-yyyy). The time of the
- *    bank's ISSUE_DATE is written to a new ISSUE_TIME column placed
- *    immediately after ISSUE_DATE.
+ *    bank's ISSUE_DATE is written to the ISSUE_TIME column, which lives
+ *    in column BA (EIR_CONFIG.TIME_COLUMN). Once BA1 holds the header
+ *    ISSUE_TIME the script finds the column by that header, so it keeps
+ *    working even if columns move.
  * C. One-time helpers to bring the EXISTING sheet in bank order:
  *      previewEIRLayoutMigration()  -> only logs the plan (safe)
  *      runEIRLayoutMigration()      -> applies the plan
@@ -36,7 +38,8 @@ const EIR_CONFIG = {
   DAYS_TO_KEEP: 65,
   TIME_ZONE: 'Asia/Kolkata',
   DATE_HEADER: 'ISSUE_DATE',
-  TIME_HEADER: 'ISSUE_TIME'
+  TIME_HEADER: 'ISSUE_TIME',
+  TIME_COLUMN: 53            // BA - ISSUE_TIME is written here (header ISSUE_TIME is set in BA1 if it is empty)
 };
 
 /**
@@ -251,12 +254,13 @@ function importExcelAndAppend(fileUrl, sheet, daysToKeep) {
     }
 
     /*
-     * The bank header list plus ISSUE_TIME placed right after ISSUE_DATE.
-     * Missing columns are inserted in THIS order (bank order), never at
-     * the far right of the sheet.
+     * Missing bank columns are inserted in bank order (right after the
+     * previous bank column), never at the far right of the sheet.
      */
-    const plannedHeaders = withEIRTimeHeader(sourceHeaders);
-    const targetHeaderMap = ensureEIRHeaders(sheet, plannedHeaders);
+    ensureEIRHeaders(sheet, sourceHeaders);
+    // ISSUE_TIME lives in column BA (found by its header from then on).
+    ensureEIRTimeColumn_(sheet);
+    const targetHeaderMap = buildEIRHeaderMap1_(sheet);
 
     const targetTagIdColumn = targetHeaderMap.TAG_ID;
     const targetDateColumn = targetHeaderMap[EIR_CONFIG.DATE_HEADER];
@@ -394,22 +398,58 @@ function buildEIRHeaderMap(headers) {
 }
 
 /**
- * Bank headers + ISSUE_TIME right after ISSUE_DATE (unless the bank
- * already sends ISSUE_TIME).
+ * Header -> 1-based column map of the sheet's row 1 (first occurrence wins).
  */
-function withEIRTimeHeader(sourceHeaders) {
-  const cleaned = sourceHeaders.map(value => String(value || '').replace(/^﻿/, '').trim());
-  const names = cleaned.map(normalizeEIRHeader);
-  if (names.indexOf(EIR_CONFIG.TIME_HEADER) !== -1) {
-    return cleaned;
+function buildEIRHeaderMap1_(sheet) {
+  const lastColumn = sheet.getLastColumn();
+  const map = {};
+  if (lastColumn < 1) {
+    return map;
   }
-  const dateAt = names.indexOf(EIR_CONFIG.DATE_HEADER);
-  if (dateAt === -1) {
-    return cleaned;
+  sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].forEach((header, index) => {
+    const normalized = normalizeEIRHeader(header);
+    if (normalized && map[normalized] === undefined) {
+      map[normalized] = index + 1;
+    }
+  });
+  return map;
+}
+
+/**
+ * PURE: which column holds ISSUE_TIME?
+ *  - a column whose header is already ISSUE_TIME wins (found by name)
+ *  - else the configured column (BA) if its header cell is empty -> { col, setHeader: true }
+ *  - else (BA is used by something else) a brand-new column at the far right
+ */
+function planEIRTimeColumn(headers, preferredCol) {
+  const names = headers.map(normalizeEIRHeader);
+  const at = names.indexOf(EIR_CONFIG.TIME_HEADER);
+  if (at !== -1) {
+    return { col: at + 1, setHeader: false };
   }
-  const out = cleaned.slice();
-  out.splice(dateAt + 1, 0, EIR_CONFIG.TIME_HEADER);
-  return out;
+  const preferredEmpty = preferredCol > headers.length || !names[preferredCol - 1];
+  if (preferredEmpty) {
+    return { col: preferredCol, setHeader: true };
+  }
+  return { col: headers.length + 1, setHeader: true };
+}
+
+/**
+ * Make sure the ISSUE_TIME header exists (column BA by default).
+ * Returns the 1-based column number.
+ */
+function ensureEIRTimeColumn_(sheet) {
+  const lastColumn = sheet.getLastColumn();
+  const headers = lastColumn > 0 ? sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0] : [];
+  const plan = planEIRTimeColumn(headers, EIR_CONFIG.TIME_COLUMN);
+  if (plan.setHeader) {
+    if (sheet.getMaxColumns() < plan.col) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), plan.col - sheet.getMaxColumns());
+    }
+    sheet.getRange(1, plan.col).setValue(EIR_CONFIG.TIME_HEADER);
+    Logger.log('ISSUE_TIME header set in column ' + plan.col);
+  }
+  return plan.col;
 }
 
 /**
@@ -555,7 +595,7 @@ function previewEIRLayoutMigration() {
   return migrateEIRLayoutToBankOrder_(true);
 }
 
-/** Applies the plan (inserts ISSUE_TIME, moves out-of-order bank columns such as IS_FULL_KYC). */
+/** Applies the plan (moves out-of-order bank columns such as IS_FULL_KYC, sets the ISSUE_TIME header). */
 function runEIRLayoutMigration() {
   return migrateEIRLayoutToBankOrder_(false);
 }
@@ -586,7 +626,7 @@ function migrateEIRLayoutToBankOrder_(dryRun) {
     if (!report.data.length) {
       throw new Error('The latest report is empty.');
     }
-    const planned = withEIRTimeHeader(report.data[0]);
+    const planned = report.data[0].map(value => String(value === null || value === undefined ? '' : value).replace(/^\uFEFF/, '').trim());
 
     const lastColumn = sheet.getLastColumn();
     const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
@@ -594,9 +634,11 @@ function migrateEIRLayoutToBankOrder_(dryRun) {
     const insertPlan = planEIRInsertions(headers, planned);
     const movePlan = planEIRMoves(insertPlan.layout, planned);
 
-    Logger.log('Bank order (with ISSUE_TIME): ' + planned.join(' | '));
+    Logger.log('Bank order: ' + planned.join(' | '));
     Logger.log('INSERT ' + insertPlan.inserts.length + ' column(s): ' +
       (insertPlan.inserts.map(s => s.header + ' @col ' + s.col).join(', ') || 'none'));
+    const timePlan = planEIRTimeColumn(insertPlan.layout, EIR_CONFIG.TIME_COLUMN);
+    Logger.log('ISSUE_TIME column: ' + timePlan.col + (timePlan.setHeader ? ' (header will be set)' : ' (already there)'));
     Logger.log('MOVE ' + movePlan.moves.length + ' column(s): ' +
       (movePlan.moves.map(m => m.header + ' col ' + m.from + ' -> before col ' + m.destination).join(', ') || 'none'));
 
@@ -605,7 +647,7 @@ function migrateEIRLayoutToBankOrder_(dryRun) {
       return { inserts: insertPlan.inserts, moves: movePlan.moves };
     }
 
-    // 1) insert missing columns (ISSUE_TIME ...) in bank order
+    // 1) insert missing bank columns in bank order
     ensureEIRHeaders(sheet, planned);
 
     // 2) move out-of-order bank columns; plan again on the real layout
@@ -615,6 +657,8 @@ function migrateEIRLayoutToBankOrder_(dryRun) {
       sheet.moveColumns(sheet.getRange(1, move.from, 1, 1), move.destination);
       // positions shift after every move - re-plan so the next step is exact
     });
+    // 3) ISSUE_TIME header (column BA unless it is already named somewhere)
+    ensureEIRTimeColumn_(sheet);
     SpreadsheetApp.flush();
     Logger.log('Migration applied. Inserted: ' + insertPlan.inserts.length + ', moved: ' + realMoves.length);
     return { inserts: insertPlan.inserts, moves: realMoves };
