@@ -7187,3 +7187,9 @@ html[data-theme="dark"] .hj-card{background:linear-gradient(115deg,#153b3b,#1d2d
 @media(max-width:600px){.hj-card{padding:16px}.hj-head h2{font-size:19px}.hj-person{width:245px}.hj-pause{padding:7px 9px}}
 @media(prefers-reduced-motion:reduce){.hj-track{animation:none}.hj-pause{display:none}}
 html[data-theme="dark"] .hj-table-wrap{background:#142d36;border-color:#355b62;color:#f0faf8}html[data-theme="dark"] .hj-table-wrap .tbl tbody tr:hover td{background:#203f47}
+/* 🚚 Last dispatch box (Master Search) */
+.msp-kpi.msp-disp-box { grid-column: span 2; text-align: left; }
+.msp-disp-box .msp-disp-main { font-size: 20px; }
+.msp-disp-box .msp-disp-main small { font-size: 12px; font-weight: 600; margin-left: 4px; }
+.msp-disp-box .msp-disp-sub { font-style: normal; line-height: 1.7; }
+@media (max-width: 720px) { .msp-kpi.msp-disp-box { grid-column: 1 / -1; } }

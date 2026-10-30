@@ -1828,6 +1828,7 @@ FF.pages = FF.pages || {};
           ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
           ${box('k10', '🎯 Expected this month · Run-rate', miniHtml(expSplit, expTotal, `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days`), '', spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
+          ${dispBoxHtml(pr, isTl, ch)}
           ${ch === 'gv' ? GVC.boxHtml(pr, isTl) : ''}
         </div>${notFound}</div></section>${donutBlock}`;
     }
@@ -1846,6 +1847,7 @@ FF.pages = FF.pages || {};
         if (host.isConnected !== false && current && (current === g || (sourceKey && activeKey === sourceKey))) {
           host.innerHTML = chans.map((ch) => html[ch] || '').join('');
           fillAgeBoxes(host);
+          fillDispBoxes(host);
         }
       };
       REPORT_CTX.name = g.name; REPORT_CTX.prs = {};
@@ -2158,6 +2160,78 @@ FF.pages = FF.pages || {};
   function ageScopeOfPr(pr, isTl, ch) {
     return isTl ? { kind: 'tl', key: pr.name, ch, title: pr.name } : { kind: 'agent', key: pr.id || pr.name, keys: [pr.name, pr.id].filter(Boolean), ch, title: pr.name };
   }
+  // ===== 🚚 Last dispatch — Stock-sheet ledger (IDFC Stock Sheet FF / GV Stock Sheet): which date, which classes, how many =====
+  const dispByCache = new Map();
+  const dispTvc = (cls) => {
+    const k = String(cls || '').toUpperCase().replace(/\s+/g, '');
+    const g = (FF.config.tvcGroups || []).find((x) => `VC${x.tvc}` === k || (x.cch || []).some((c) => String(c).toUpperCase().replace(/\s+/g, '') === k));
+    return g ? (String(g.tvc) === '4' ? 'VC4/20' : `VC${g.tvc}`) : (k || '—');
+  };
+  const dispClsNum = (c) => { const m = /\d+/.exec(String(c)); return m ? Number(m[0]) : 999; };
+  const dispSplit = (clsMap) => {
+    const m = new Map();
+    Object.entries(clsMap || {}).forEach(([c, n]) => { const l = dispTvc(c); m.set(l, (m.get(l) || 0) + (Number(n) || 0)); });
+    return [...m.entries()].filter(([, n]) => n > 0).sort((a, b) => dispClsNum(a[0]) - dispClsNum(b[0]));
+  };
+  const dispDate = (k) => { try { return U.labelDateKey ? U.labelDateKey(k) : k; } catch { return k; } };
+  const dispAgo = (k) => {
+    try { const d = U.fromDateKey(k), n = Math.round((new Date().setHours(0, 0, 0, 0) - d.getTime()) / 864e5); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago`; } catch { return ''; }
+  };
+  function dispSpecOf(pr, isTl, ch) {
+    const names = [pr.name], ids = [pr.id].filter(Boolean);
+    return { ch, names, ids, title: pr.name, isTl: !!isTl };
+  }
+  function dispBoxHtml(pr, isTl, ch) {
+    const sc = dispSpecOf(pr, isTl, ch);
+    return `<div class="mp-kpi msp-kpi k12 msp-disp-box kpi-clickable" data-msp-disp-box="${esc(JSON.stringify(sc))}" role="button" tabindex="0" title="Click for all recent dispatches"><small>🚚 Last dispatch</small><b class="msp-disp-main">…</b><em class="msp-disp-sub">${esc(ch === 'gv' ? 'GV Stock Sheet' : 'IDFC Stock Sheet')} · searching…</em></div>`;
+  }
+  async function dispFetch(sc) {
+    const key = JSON.stringify(sc);
+    if (!dispByCache.has(key)) {
+      const pr = (async () => {
+        let data = null;
+        for (let i = 0; i < 40; i++) {
+          data = await FF.auth.api('/api/dispatch-by', 'POST', { ch: sc.ch, names: sc.names, ids: sc.ids });
+          if (!(data && data.pending)) break;
+          await new Promise((r) => setTimeout(r, 2500));
+        }
+        if (!data || !data.ok || data.pending) throw new Error('Dispatch ledger is not ready yet');
+        return data;
+      })();
+      dispByCache.set(key, pr);
+      pr.catch(() => dispByCache.delete(key));
+    }
+    return dispByCache.get(key);
+  }
+  function dispPaint(box, d) {
+    const main = box.querySelector('.msp-disp-main'), sub = box.querySelector('.msp-disp-sub');
+    if (!main || !sub) return;
+    if (d.none) { main.textContent = '—'; sub.textContent = d.reason || 'Dispatch ledger not set'; return; }
+    if (!d.last) { main.textContent = 'No dispatch found'; sub.textContent = 'Not in the Stock sheet under this name / ID'; return; }
+    const chips = dispSplit(d.last.cls).map(([c, n]) => `<span class="msp-hl blue">${esc(c)} ${U.fmt(n)}</span>`).join(' ');
+    main.innerHTML = `${esc(dispDate(d.last.date))} <small class="dim">${esc(dispAgo(d.last.date))}</small>`;
+    const more = (d.recent || []).slice(1, 3).map((r) => `<span class="dim small">${esc(dispDate(r.date))} · ${U.fmt(r.total)}</span>`).join(' · ');
+    sub.innerHTML = `<b>${U.fmt(d.last.total)} tags</b> · ${chips}${more ? `<br>${more}` : ''}`;
+  }
+  function fillDispBoxes(host) {
+    const boxes = host ? host.querySelectorAll('[data-msp-disp-box]') : [];
+    boxes.forEach((box) => {
+      if (box.__dispDone) return; box.__dispDone = true;
+      let sc; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { return; }
+      dispFetch(sc).then((d) => { if (box.isConnected) { box.__disp = d; dispPaint(box, d); } }).catch((err) => {
+        if (!box.isConnected) return;
+        const sub = box.querySelector('.msp-disp-sub'), main = box.querySelector('.msp-disp-main');
+        if (main) main.textContent = '—'; if (sub) sub.textContent = String((err && err.message) || err);
+        box.__dispDone = false;
+      });
+    });
+  }
+  function openDispDrawer(box) {
+    const d = box.__disp; let sc; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { return; }
+    if (!d || !d.recent || !d.recent.length || !FF.app || !FF.app.openDrawer) return;
+    const rows = d.recent.map((r) => `<tr><td>${esc(dispDate(r.date))}<br><small class="dim">${esc(dispAgo(r.date))}</small></td><td class="num"><b>${U.fmt(r.total)}</b></td><td>${dispSplit(r.cls).map(([c, n]) => `<span class="msp-hl blue">${esc(c)} ${U.fmt(n)}</span>`).join(' ')}</td><td class="small">${(r.ranges || []).map((x) => `${esc(x.cls || '')} ${U.fmt(x.qty)}: ${esc(x.first)} → ${esc(x.last)}`).join('<br>')}</td></tr>`).join('');
+    FF.app.openDrawer({ kicker: `${sc.ch === 'gv' ? 'GV' : 'FF'} dispatch ledger`, title: `${sc.title} · recent dispatches`, sub: `${U.fmt(d.totalDispatches || d.recent.length)} dispatch dates found · showing latest ${d.recent.length}`, body: `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Date</th><th class="num">Tags</th><th>Class-wise</th><th>Barcode range</th></tr></thead><tbody>${rows}</tbody></table></div>` });
+  }
   function ageBoxHtml(pr, isTl, ch) {
     if (!FF.stockAge) return '';
     const sc = ageScopeOfPr(pr, isTl, ch);
@@ -2396,6 +2470,8 @@ FF.pages = FF.pages || {};
     if (!t.closest('.msp-rep-menu')) document.querySelectorAll('.msp-rep-menu').forEach((m) => m.remove());
     const dl = t.closest('[data-msp-age-dl]');
     if (dl) { e.preventDefault(); e.stopPropagation(); const box = dl.closest('[data-msp-age]'); if (box) downloadAgeAll(box).catch((err) => U.toast(String((err && err.message) || err), 'err')); return; }
+    const dbox = t.closest('[data-msp-disp-box]');
+    if (dbox) { e.preventDefault(); e.stopPropagation(); openDispDrawer(dbox); return; }
     const row = t.closest('[data-msp-age-b]');
     if (row) { e.preventDefault(); e.stopPropagation(); const box = row.closest('[data-msp-age]'); if (box) openAgeBucket(box, Number(row.dataset.mspAgeB)); }
   }, true);
