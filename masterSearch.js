@@ -2257,12 +2257,13 @@ FF.pages = FF.pages || {};
     const pk = (ym, g) => (r) => r.ym === ym && (!g || r.group === g);
     const c = M.kycRatio(rows, pk(cur)), l = M.kycRatio(rows, pk(last));
     if (!c.total && !l.total) { main.textContent = '—'; sub.innerHTML = '<span class="dim small">Is agent / TL ke liye EIR me KYC data nahi mila</span>'; return; }
-    main.innerHTML = `${kycPct(c.pct)} <small class="dim">${esc(U.labelYM(cur, true))} · ${U.fmt(c.full)}/${U.fmt(c.total)}</small>`;
-    const chips = ['VC4', 'VC20', 'VC5+'].map((g) => {
+    const lastL = U.labelYM(last, true), curL = U.labelYM(cur, true);
+    main.innerHTML = `<small class="dim">${esc(lastL)}</small> ${kycPct(l.pct)} <small class="dim">·</small> <small class="dim">${esc(curL)}</small> ${kycPct(c.pct)}`;
+    const vrows = ['VC4', 'VC20', 'VC5+'].map((g) => {
       const a = M.kycRatio(rows, pk(last, g)), b = M.kycRatio(rows, pk(cur, g));
-      return `<span class="msp-hl blue">${g} ${kycPct(a.pct)} → ${kycPct(b.pct)}</span>`;
-    }).join(' ');
-    sub.innerHTML = `<span class="dim small">${esc(U.labelYM(last, true))} → ${esc(U.labelYM(cur, true))} · ${kycPct(l.pct)} → ${kycPct(c.pct)}</span><br>${chips}`;
+      return `<div class="kyc-vrow"><span class="kyc-vlbl">${g}</span><span class="kyc-vv"><small>${esc(lastL)}</small> <b>${kycPct(a.pct)}</b></span><span class="kyc-vv"><small>${esc(curL)}</small> <b>${kycPct(b.pct)}</b></span></div>`;
+    }).join('');
+    sub.innerHTML = `<div class="kyc-vlist">${vrows}</div>`;
   }
   function fillKycBoxes(host) {
     const boxes = host ? host.querySelectorAll('[data-msp-kyc-box]') : [];

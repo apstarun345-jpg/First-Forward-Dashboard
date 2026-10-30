@@ -32,13 +32,14 @@ test('kycRatio computes full ÷ (full + not), ignores other', () => {
   assert.strictEqual(kycRatio(rows, (r) => r.group === 'VC4').total, 8);
 });
 
-test('Home shows KYC section with class-wise card and two overall cards', () => {
+test('Home KYC cards sit inside the month grid (slot) with last, current and vertical class-wise card', () => {
   const h = read('home.js');
-  assert.match(h, /\['home-kyc', '🪪 FASTag KYC ratio'\]/);
-  assert.match(h, /id="home-kyc"/);
+  assert.match(h, /id="home-kyc" class="hm-kyc-slot" style="display:contents"/);
+  assert.doesNotMatch(h, /\['home-kyc', /);
   assert.match(h, /M\.loadKycMonthly\(\{\}\)/);
-  assert.match(h, /KYC % · class-wise \(VC4 \/ VC20 \/ VC5\+\)/);
-  assert.match(h, /overall\(last, lbl\.last\)[\s\S]{0,60}overall\(cur, lbl\.cur\)/);
+  assert.match(h, /kyc-vlist/);
+  assert.match(h, /Last month · ' \+ lbl\.last/);
+  assert.match(h, /Current month · ' \+ lbl\.cur/);
 });
 
 test('Master Search has KYC box filtered by agent or TL, filled async', () => {

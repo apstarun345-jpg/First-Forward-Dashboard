@@ -7184,6 +7184,14 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 @media (max-width: 720px) { .msp-kpi.msp-disp-box { grid-column: 1 / -1; } }
 
 /* 🪪 FASTag KYC ratio (Home) — class-wise card + two overall ratio cards */
-.hm-kyc-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-@media (max-width: 900px) { .hm-kyc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
-@media (max-width: 560px) { .hm-kyc-grid { grid-template-columns: 1fr !important; } }
+
+/* 🪪 KYC — month grid slot + vertical class list (Home + Master Search) */
+.hm-kyc-cls { grid-column: span 2; }
+@media (max-width: 560px) { .hm-kyc-cls { grid-column: auto; } }
+.kyc-vlist { display: grid; gap: 6px; margin-top: 4px; }
+.kyc-vrow { display: grid; grid-template-columns: 56px 1fr 1fr; align-items: baseline; gap: 8px; font-size: 13px; color: inherit; }
+.kyc-vlbl { font-weight: 800; }
+.kyc-vv { text-align: right; white-space: nowrap; }
+.kyc-vv small { opacity: .8; font-size: 11px; }
+.kyc-vv b { font-size: 15px; }
+.msp-kyc-box .kyc-vrow { color: var(--ink, inherit); }
