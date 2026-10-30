@@ -510,5 +510,43 @@ window.FF = window.FF || {};
     return map;
   }
 
-  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  // 🪪 FASTag KYC ratio — EIR CUSTOMER_FULL_KYC (TRUE = full KYC, FALSE = not KYC), class-wise, last + current month.
+  const kycOf = (v) => { const t = String(v === null || v === undefined ? '' : v).trim().toLowerCase(); return t === 'true' ? 'full' : t === 'false' ? 'not' : 'other'; };
+  const kycCache = new Map();
+  /** Rows: [{ ym, channel, group, kyc: 'full'|'not'|'other', n }] — sirf last + current month, filter ke saath (channel / tl / agent). */
+  async function loadKycMonthly(filter, opts) {
+    const e = FF.config.eir, kycCol = e.kyc || 'AK';
+    const cur = U.ymKey(new Date()), prev = U.prevMonthKey(cur);
+    const key = `${cur}|${JSON.stringify(filter || {})}`;
+    const hit = kycCache.get(key);
+    if (hit && Date.now() - hit.at < 10 * 60e3) return hit.rows;
+    const where = `${whereClause(filter)} and ${e.date} >= date '${prev}-01'`;
+    const tq = `select ${e.date}, ${e.cls}, ${kycCol}, ${e.masterId}, ${e.tlName}, count(${e.tagId}) where ${where} group by ${e.date}, ${e.cls}, ${kycCol}, ${e.masterId}, ${e.tlName}`;
+    const t = await D.query(e.sheet, tq, opts);
+    const agg = new Map();
+    for (const r of t.rows) {
+      const d = D.cellDate(r[0]); const n = D.cellNumber(r[5]);
+      if (!d || !n) continue;
+      const ym = U.ymKey(d);
+      if (ym !== cur && ym !== prev) continue;
+      const channel = channelOf(D.cellText(r[3]), D.cellText(r[4]));
+      const group = classGroup(D.cellText(r[1]));
+      const kyc = kycOf(D.cellText(r[2]));
+      const k = `${ym}|${channel}|${group}|${kyc}`;
+      const o = agg.get(k) || { ym, channel, group, kyc, n: 0 };
+      o.n += n; agg.set(k, o);
+    }
+    const rows = [...agg.values()];
+    kycCache.set(key, { at: Date.now(), rows });
+    return rows;
+  }
+  /** Ratio = full ÷ (full + not). 'other' (blank/unknown) ginti me nahi. */
+  function kycRatio(rows, pick = () => true) {
+    let full = 0, not = 0;
+    for (const r of rows || []) { if (!pick(r)) continue; if (r.kyc === 'full') full += r.n; else if (r.kyc === 'not') not += r.n; }
+    const total = full + not;
+    return { full, not, total, pct: total ? (full / total) * 100 : null };
+  }
+
+  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, kycRatio, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

@@ -107,6 +107,7 @@ FF.config = {
     tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA',
     agentId: 'J', agentName: 'L', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX',
     gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH',
+    kyc: 'AK',   // CUSTOMER_FULL_KYC — TRUE = full KYC, FALSE = not KYC
     gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.'
   },
 

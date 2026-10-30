@@ -1234,6 +1234,7 @@ FF.pages = FF.pages || {};
       ['home-todo', "✅ Today's work"],
       ['home-gv-live', '🟩 GV live today'],
       ['home-month', '📅 Month KPI cards'],
+      ['home-kyc', '🪪 FASTag KYC ratio'],
       ['home-target-achievement', '🎯 Target achievement'],
       ['home-pulse', '📡 Management pulse'],
       ['home-charts', '📊 Charts'],
@@ -1348,6 +1349,7 @@ FF.pages = FF.pages || {};
       <div id="home-todo"></div>
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
       <div id="home-month">${U.spinner('Building month KPI cards from the EIR sheet…')}</div>
+      <div id="home-kyc">${U.spinner('FASTag KYC ratio calculate ho raha hai…')}</div>
       <div id="home-target-achievement">${U.spinner('Class-wise target achievement calculate ho raha hai…')}</div>
       <div id="home-pulse"></div>
       <div id="home-charts">${U.spinner('Charts…')}</div>
@@ -1420,6 +1422,7 @@ FF.pages = FF.pages || {};
 
     const gvLiveMount = U.$('#home-gv-live', root);
     const monthMount = U.$('#home-month', root);
+    const kycMount = U.$('#home-kyc', root);
     const chartMount = U.$('#home-charts', root);
     const pulseMount = U.$('#home-pulse', root);
     const targetAchievementMount = U.$('#home-target-achievement', root);
@@ -1534,6 +1537,35 @@ FF.pages = FF.pages || {};
           .then(([cur, last]) => { ui.wrong = cur ? { cur, last } : null; }).catch(() => { ui.wrong = null; }).then(() => paintMonth());
       }
       monthMount.innerHTML = monthKpiHtml(ui.ctx, eirSf, { liveToday: false }, M.summary(eir, ui.ctx.curKey), eir, ui.wrong === undefined ? 'loading' : ui.wrong);
+      paintKyc();
+    }
+    // 🪪 FASTag KYC ratio — EIR CUSTOMER_FULL_KYC (TRUE = full KYC, FALSE = not KYC). Ek class-wise card + do overall ratio cards.
+    const kycData = { req: false, ready: false, rows: [], error: null };
+    function kycLoad() {
+      if (kycData.req) return;
+      kycData.req = true;
+      M.loadKycMonthly({}).then((rows) => { kycData.rows = rows || []; }).catch((err) => { kycData.error = (err && err.message) || 'load failed'; })
+        .then(() => { kycData.ready = true; paintKyc(); });
+    }
+    function paintKyc() {
+      if (!kycMount || !kycMount.isConnected || !ui.ready) return;
+      kycLoad();
+      if (!kycData.ready) { kycMount.innerHTML = U.spinner('FASTag KYC ratio calculate ho raha hai…'); return; }
+      if (kycData.error) { kycMount.innerHTML = card('🪪 FASTag KYC ratio', `<div class="hm-target-empty">KYC data load nahi hua: ${esc(kycData.error)}</div>`, ''); return; }
+      const cx = ui.ctx, cur = cx.curKey, last = cx.prevKey;
+      const pct = (p) => (p === null ? '—' : `${p.toFixed(1)}%`);
+      const pick = (ym, grp) => (r) => r.ym === ym && (!grp || r.group === grp);
+      const lbl = { cur: U.labelYM(cur, true), last: U.labelYM(last, true) };
+      const byCls = [['VC4', 'VC4'], ['VC20', 'VC20'], ['VC5+', 'VC5+']].map(([g, l]) => {
+        const a = M.kycRatio(kycData.rows, pick(last, g)), b = M.kycRatio(kycData.rows, pick(cur, g));
+        return `<span class="${a.pct === null && b.pct === null ? 'zero' : ''}">${l} · ${esc(lbl.last)} <b>${pct(a.pct)}</b> · ${esc(lbl.cur)} <b>${pct(b.pct)}</b></span>`;
+      }).join('');
+      const clsCard = kpi('g1', 'KYC % · class-wise (VC4 / VC20 / VC5+)', '🪪', `<div class="kpi-clsplit">${byCls}</div>`, `${esc(lbl.last)} vs ${esc(lbl.cur)} · FULL KYC ÷ (FULL + NOT KYC)`);
+      const overall = (ym, name) => {
+        const o = M.kycRatio(kycData.rows, pick(ym));
+        return kpi('', `KYC ratio · ${name}`, '🪪', pct(o.pct), `Full KYC ${U.fmt(o.full)} · Not KYC ${U.fmt(o.not)}`);
+      };
+      kycMount.innerHTML = `<div class="kpi-grid mini hm-kyc-grid">${clsCard}${overall(last, lbl.last)}${overall(cur, lbl.cur)}</div>`;
     }
     function paintTargetAchievement() {
       if (!targetAchievementMount || !targetAchievementMount.isConnected) return;

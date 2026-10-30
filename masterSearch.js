@@ -1829,6 +1829,7 @@ FF.pages = FF.pages || {};
           ${box('k10', '🎯 Expected this month · Run-rate', miniHtml(expSplit, expTotal, `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days`), '', spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
           ${dispBoxHtml(pr, isTl, ch)}
+          ${kycBoxHtml(pr, isTl)}
           ${ch === 'gv' ? GVC.boxHtml(pr, isTl) : ''}
         </div>${notFound}</div></section>${donutBlock}`;
     }
@@ -1848,6 +1849,7 @@ FF.pages = FF.pages || {};
           host.innerHTML = chans.map((ch) => html[ch] || '').join('');
           fillAgeBoxes(host);
           fillDispBoxes(host);
+          fillKycBoxes(host);
         }
       };
       REPORT_CTX.name = g.name; REPORT_CTX.prs = {};
@@ -2231,6 +2233,49 @@ FF.pages = FF.pages || {};
     if (!d || !d.recent || !d.recent.length || !FF.app || !FF.app.openDrawer) return;
     const rows = d.recent.map((r) => `<tr><td>${esc(dispDate(r.date))}<br><small class="dim">${esc(dispAgo(r.date))}</small></td><td class="num"><b>${U.fmt(r.total)}</b></td><td>${dispSplit(r.cls).map(([c, n]) => `<span class="msp-hl blue">${esc(c)} ${U.fmt(n)}</span>`).join(' ')}</td><td class="small">${(r.ranges || []).map((x) => `${esc(x.cls || '')} ${U.fmt(x.qty)}: ${esc(x.first)} → ${esc(x.last)}`).join('<br>')}</td></tr>`).join('');
     FF.app.openDrawer({ kicker: `${sc.ch === 'gv' ? 'GV' : 'FF'} dispatch ledger`, title: `${sc.title} · recent dispatches`, sub: `${U.fmt(d.totalDispatches || d.recent.length)} dispatch dates found · showing latest ${d.recent.length}`, body: `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Date</th><th class="num">Tags</th><th>Class-wise</th><th>Barcode range</th></tr></thead><tbody>${rows}</tbody></table></div>` });
+  }
+  // ===== 🪪 FASTag KYC box — EIR CUSTOMER_FULL_KYC (TRUE = full KYC, FALSE = not KYC): last + current month, class-wise =====
+  const kycByCache = new Map();
+  const kycPct = (p) => (p === null || p === undefined ? '—' : `${p.toFixed(1)}%`);
+  function kycBoxHtml(pr, isTl) {
+    const f = isTl ? { tl: pr.name } : { agent: pr.name };
+    return `<div class="mp-kpi msp-kpi k12 msp-disp-box msp-kyc-box" data-msp-kyc-box="${esc(JSON.stringify(f))}"><small>🪪 FASTag KYC ratio · last vs current month</small><b class="msp-kyc-main">…</b><em class="msp-disp-sub"><span class="dim small">Loading…</span></em></div>`;
+  }
+  function kycFetch(f) {
+    const key = JSON.stringify(f);
+    if (!kycByCache.has(key)) {
+      const p = FF.model.loadKycMonthly(f);
+      kycByCache.set(key, p); p.catch(() => kycByCache.delete(key));
+    }
+    return kycByCache.get(key);
+  }
+  function kycPaint(box, rows) {
+    const main = box.querySelector('.msp-kyc-main'), sub = box.querySelector('.msp-disp-sub');
+    if (!main || !sub) return;
+    const cur = FF.util.ymKey(new Date()), last = FF.util.prevMonthKey(cur);
+    const M = FF.model, U = FF.util;
+    const pk = (ym, g) => (r) => r.ym === ym && (!g || r.group === g);
+    const c = M.kycRatio(rows, pk(cur)), l = M.kycRatio(rows, pk(last));
+    if (!c.total && !l.total) { main.textContent = '—'; sub.innerHTML = '<span class="dim small">Is agent / TL ke liye EIR me KYC data nahi mila</span>'; return; }
+    main.innerHTML = `${kycPct(c.pct)} <small class="dim">${esc(U.labelYM(cur, true))} · ${U.fmt(c.full)}/${U.fmt(c.total)}</small>`;
+    const chips = ['VC4', 'VC20', 'VC5+'].map((g) => {
+      const a = M.kycRatio(rows, pk(last, g)), b = M.kycRatio(rows, pk(cur, g));
+      return `<span class="msp-hl blue">${g} ${kycPct(a.pct)} → ${kycPct(b.pct)}</span>`;
+    }).join(' ');
+    sub.innerHTML = `<span class="dim small">${esc(U.labelYM(last, true))} → ${esc(U.labelYM(cur, true))} · ${kycPct(l.pct)} → ${kycPct(c.pct)}</span><br>${chips}`;
+  }
+  function fillKycBoxes(host) {
+    const boxes = host ? host.querySelectorAll('[data-msp-kyc-box]') : [];
+    boxes.forEach((box) => {
+      if (box.__kycDone) return; box.__kycDone = true;
+      let f; try { f = JSON.parse(box.dataset.mspKycBox); } catch { return; }
+      kycFetch(f).then((rows) => { if (box.isConnected) kycPaint(box, rows || []); }).catch((err) => {
+        if (!box.isConnected) return;
+        const main = box.querySelector('.msp-kyc-main'), sub = box.querySelector('.msp-disp-sub');
+        if (main) main.textContent = '—'; if (sub) sub.textContent = String((err && err.message) || err);
+        box.__kycDone = false;
+      });
+    });
   }
   function ageBoxHtml(pr, isTl, ch) {
     if (!FF.stockAge) return '';

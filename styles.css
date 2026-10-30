@@ -7182,3 +7182,8 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 .msp-disp-box .msp-disp-main small { font-size: 12px; font-weight: 600; margin-left: 4px; }
 .msp-disp-box .msp-disp-sub { font-style: normal; line-height: 1.7; }
 @media (max-width: 720px) { .msp-kpi.msp-disp-box { grid-column: 1 / -1; } }
+
+/* 🪪 FASTag KYC ratio (Home) — class-wise card + two overall ratio cards */
+.hm-kyc-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+@media (max-width: 900px) { .hm-kyc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+@media (max-width: 560px) { .hm-kyc-grid { grid-template-columns: 1fr !important; } }
