@@ -512,29 +512,33 @@ window.FF = window.FF || {};
 
   // 🪪 FASTag KYC ratio — EIR CUSTOMER_FULL_KYC (TRUE = full KYC, FALSE = not KYC), class-wise, last + current month.
   const kycOf = (v) => { const t = String(v === null || v === undefined ? '' : v).trim().toLowerCase(); return t === 'true' ? 'full' : t === 'false' ? 'not' : 'other'; };
+  // Bank ne KYC flag do naam se bheja hai: CUSTOMER_FULL_KYC (purane rows) aur IS_FULL_KYC (naye rows) — pehla non-blank le.
+  const kycPick = (a, b) => { const x = kycOf(a); return x !== 'other' ? x : kycOf(b); };
+  const kycCols = (e) => [e.kyc || 'AK', e.kyc2].filter(Boolean);
   const kycCache = new Map();
   /** Rows: [{ ym, channel, group, kyc: 'full'|'not'|'other', n }] — sirf last + current month, filter ke saath (channel / tl / agent). */
   async function loadKycMonthly(filter, opts) {
-    const e = FF.config.eir, kycCol = e.kyc || 'AK';
+    const e = FF.config.eir, kc = kycCols(e), kycSel = kc.join(', ');
     const cur = U.ymKey(new Date()), prev = U.prevMonthKey(cur);
-    const key = `${cur}|${JSON.stringify(filter || {})}`;
+    const key = `${cur}|${kycSel}|${JSON.stringify(filter || {})}`;
     const hit = kycCache.get(key);
     if (hit && Date.now() - hit.at < 10 * 60e3) return hit.rows;
     const where = `${whereClause(filter)} and ${e.date} >= date '${prev}-01'`;
-    const tq = `select ${e.date}, ${e.cls}, ${kycCol}, ${e.masterId}, ${e.tlName}, count(${e.tagId}) where ${where} group by ${e.date}, ${e.cls}, ${kycCol}, ${e.masterId}, ${e.tlName}`;
+    const tq = `select ${e.date}, ${e.cls}, ${kycSel}, ${e.masterId}, ${e.tlName}, count(${e.tagId}) where ${where} group by ${e.date}, ${e.cls}, ${kycSel}, ${e.masterId}, ${e.tlName}`;
     const t = await D.query(e.sheet, tq, opts);
+    const k = kc.length;   // KYC columns ki ginti (1 ya 2): r[2..1+k]
     const agg = new Map();
     for (const r of t.rows) {
-      const d = D.cellDate(r[0]); const n = D.cellNumber(r[5]);
+      const d = D.cellDate(r[0]); const n = D.cellNumber(r[4 + k]);
       if (!d || !n) continue;
       const ym = U.ymKey(d);
       if (ym !== cur && ym !== prev) continue;
-      const channel = channelOf(D.cellText(r[3]), D.cellText(r[4]));
+      const channel = channelOf(D.cellText(r[2 + k]), D.cellText(r[3 + k]));
       const group = classGroup(D.cellText(r[1]));
-      const kyc = kycOf(D.cellText(r[2]));
-      const k = `${ym}|${channel}|${group}|${kyc}`;
-      const o = agg.get(k) || { ym, channel, group, kyc, n: 0 };
-      o.n += n; agg.set(k, o);
+      const kyc = kycPick(D.cellText(r[2]), k > 1 ? D.cellText(r[3]) : '');
+      const gk = `${ym}|${channel}|${group}|${kyc}`;
+      const o = agg.get(gk) || { ym, channel, group, kyc, n: 0 };
+      o.n += n; agg.set(gk, o);
     }
     const rows = [...agg.values()];
     kycCache.set(key, { at: Date.now(), rows });
@@ -551,17 +555,18 @@ window.FF = window.FF || {};
   /** Agent-level KYC rows (click-through dashboard): [{ name, tlName, channel, ym, group, kyc, n }] — last + current month. */
   const kycPeopleCache = new Map();
   async function loadKycPeople(filter, opts) {
-    const e = FF.config.eir, kycCol = e.kyc || 'AK';
+    const e = FF.config.eir, kc = kycCols(e), kycSel = kc.join(', ');
     const cur = U.ymKey(new Date()), prev = U.prevMonthKey(cur);
-    const key = `${cur}|${JSON.stringify(filter || {})}`;
+    const key = `${cur}|${kycSel}|${JSON.stringify(filter || {})}`;
     const hit = kycPeopleCache.get(key);
     if (hit && Date.now() - hit.at < 10 * 60e3) return hit.rows;
     const where = `${whereClause(filter)} and ${e.date} >= date '${prev}-01'`;
-    const tq = `select ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${kycCol}, count(${e.tagId}) where ${where} group by ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${kycCol}`;
+    const tq = `select ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${kycSel}, count(${e.tagId}) where ${where} group by ${e.agentName}, ${e.gvName}, ${e.tlName}, ${e.masterId}, year(${e.date}), month(${e.date}), ${e.cls}, ${kycSel}`;
     const t = await D.query(e.sheet, tq, opts);
+    const k = kc.length;
     const agg = new Map();
     for (const r of t.rows) {
-      const y = D.cellNumber(r[4]), m = D.cellNumber(r[5]), n = D.cellNumber(r[8]);
+      const y = D.cellNumber(r[4]), m = D.cellNumber(r[5]), n = D.cellNumber(r[7 + k]);
       if (y === null || m === null || !n) continue;
       const ym = `${y}-${U.pad2(m + 1)}`;
       if (ym !== cur && ym !== prev) continue;
@@ -569,10 +574,10 @@ window.FF = window.FF || {};
       const channel = channelOf(D.cellText(r[3]), tlName);
       const name = channel === 'GV Partner' ? (gvName || agentName || 'Unknown') : (agentName || gvName || 'Unknown');
       const group = classGroup(D.cellText(r[6]));
-      const kyc = kycOf(D.cellText(r[7]));
-      const k = `${name}|${tlName}|${channel}|${ym}|${group}|${kyc}`;
-      const o = agg.get(k) || { name, tlName, channel, ym, group, kyc, n: 0 };
-      o.n += n; agg.set(k, o);
+      const kyc = kycPick(D.cellText(r[7]), k > 1 ? D.cellText(r[8]) : '');
+      const gk = `${name}|${tlName}|${channel}|${ym}|${group}|${kyc}`;
+      const o = agg.get(gk) || { name, tlName, channel, ym, group, kyc, n: 0 };
+      o.n += n; agg.set(gk, o);
     }
     const rows = [...agg.values()];
     kycPeopleCache.set(key, { at: Date.now(), rows });

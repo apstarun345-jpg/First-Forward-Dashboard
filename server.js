@@ -276,7 +276,7 @@ const DEFAULT_SETTINGS = {
   stockSheet: 'StockDataa',
   stockGid: '',
   eirSheet: 'EIR',
-  eir: { tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA', agentId: 'J', agentLegacyId: 'K', agentName: 'L', assistId: 'M', assistLegacyId: 'N', assistName: 'O', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX', gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH', gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.' },
+  eir: { tagId: 'A', vrn: 'B', cls: 'D', type: 'P', status: 'Z', date: 'AA', agentId: 'J', agentLegacyId: 'K', agentName: 'L', assistId: 'M', assistLegacyId: 'N', assistName: 'O', masterId: 'AU', tlId: 'AV', gvId: 'AW', gvName: 'AX', gvTl: 'AZ', tlName: 'BA', vrnType: 'BC', monthName: 'BD', regNumber: 'BH', kycMode: 'AJ', kyc: 'AK', kyc2: 'BN', time: '', gvMasterId: '5845036', gvChannelTl: 'ApnaPayment Pvt. Ltd.' },
   stock: { id: 'A', name: 'B', tagId: 'C', barcode: 'D', cls: 'E', tagType: 'F', bcAllocatedAt: 'G', agentId: 'H', agentName: 'I', agentAllocatedAt: 'J', tlName: 'K' },
   stockMovement: { enabled: false, sheet: 'Stock Movements', date: 'A', channel: 'B', type: 'C', quantity: 'D', cls: 'E', from: 'F', to: 'G', reference: 'H', note: 'I' },
   excludeTls: ['APS'],
@@ -3489,6 +3489,67 @@ const stockAgeState = { at: 0, index: null, promise: null, key: '', retryAt: 0, 
 const yieldLoop = () => new Promise((resolve) => setImmediate(resolve));
 const colLetter = (v, fallback) => { const c = String(v || fallback || '').trim().toUpperCase(); return /^[A-Z]{1,3}$/.test(c) ? c : ''; };
 /** Ek gviz page (bina proxy cache ke — 4-5 MB ke pages cache me bharne se server ki memory bharti thi) + ek retry. */
+// ===== 🔎 EIR column auto-detect — header NAAM se column letter (bank/import me column order badle to site khud theek karti hai) =====
+const EIR_HEADER_MAP = {
+  tagId: ['TAG_ID'], vrn: ['VRN'], cls: ['CCH'], type: ['TYPE'], status: ['TAG_STATUS'], date: ['ISSUE_DATE'], time: ['ISSUE_TIME'],
+  agentId: ['TAG_ISSUING_AGENT_ID'], agentLegacyId: ['TAG_ISSUING_AGENT_LEGACY_ID'], agentName: ['TAG_ISSUING_AGENT_NAME'],
+  assistId: ['TAG_ISSUING_AGENT_ASSISTANT_ID'], assistLegacyId: ['TAG_ISSUING_AGENT_ASSISTANT_LEGACY_ID'], assistName: ['TAG_ISSUING_AGENT_ASSISTANT_NAME'],
+  kycMode: ['KYC_MODE'], kyc: ['CUSTOMER_FULL_KYC'], kyc2: ['IS_FULL_KYC'],
+  masterId: ['MASTER ID'], tlId: ['TL ID'], gvId: ['GV ID'], gvName: ['GV NAME'], gvTl: ['TL NAME'], tlName: ['TL NAME FF'],
+  vrnType: ['VRN TYPE'], monthName: ['MONTH NAME'], regNumber: ['REGNUMBER']
+};
+const EIR_REQUIRED_KEYS = ['tagId', 'cls', 'date', 'masterId'];
+const normEirHeader = (v) => String(v === null || v === undefined ? '' : v).replace(/^﻿/, '').trim().replace(/\s+/g, ' ').toUpperCase();
+/** gviz cols [{id:'AA',label:'ISSUE_DATE'}] → { found:{date:'AA',…}, missing:[…] }. Duplicate header (jaise 'TL ID') me PEHLA column. */
+function detectEirColumns(cols) {
+  const byHeader = new Map();
+  (cols || []).forEach((c) => {
+    const label = normEirHeader(c && c.label), id = String((c && c.id) || '').toUpperCase();
+    if (label && /^[A-Z]{1,3}$/.test(id) && !byHeader.has(label)) byHeader.set(label, id);
+  });
+  const found = {}, missing = [];
+  Object.entries(EIR_HEADER_MAP).forEach(([key, names]) => {
+    const hit = names.map(normEirHeader).find((n) => byHeader.has(n));
+    if (hit) found[key] = byHeader.get(hit); else missing.push(key);
+  });
+  return { found, missing, headerCount: byHeader.size };
+}
+const eirAuto = { at: 0, ok: null, error: '', changed: {}, found: {}, missing: [], running: null };
+const eirAutoPublic = () => ({ at: eirAuto.at, ok: eirAuto.ok, error: eirAuto.error, changed: eirAuto.changed, found: eirAuto.found, missing: eirAuto.missing, enabled: !(db.settings && db.settings.eirAutoColumns === false), lastApplied: (db.settings && db.settings.eirAuto) || null });
+async function eirAutoDetect(opts) {
+  if (eirAuto.running) return eirAuto.running;
+  eirAuto.running = (async () => {
+    try {
+      const st = db && db.settings;
+      if (!st || !st.sheetId) return eirAutoPublic();
+      if (opts && opts.auto && st.eirAutoColumns === false) return eirAutoPublic();
+      const sheet = st.eirSheet || (st.eir && st.eir.sheet) || 'EIR';
+      const params = new URLSearchParams({ id: String(st.sheetId).replace(/[^A-Za-z0-9_-]/g, ''), sheet, tq: 'select * limit 1', headers: '1' });
+      const out = await fetchUpstream(upstreamUrl(params));
+      if (out.status < 200 || out.status >= 300) throw new Error(`EIR header: Google responded ${out.status}`);
+      const table = parseGvizServer(out.body);
+      const det = detectEirColumns(table.cols);
+      eirAuto.at = Date.now(); eirAuto.found = det.found; eirAuto.missing = det.missing; eirAuto.ok = true; eirAuto.error = ''; eirAuto.changed = {};
+      const lack = EIR_REQUIRED_KEYS.filter((k) => !det.found[k]);
+      if (lack.length) { eirAuto.ok = false; eirAuto.error = `Required headers not found (${lack.join(', ')}) — column settings NOT changed`; return eirAutoPublic(); }
+      const next = { ...(st.eir || {}) }, changed = {};
+      Object.entries(det.found).forEach(([k, v]) => { if (next[k] !== v) { changed[k] = [next[k] || '', v]; next[k] = v; } });
+      eirAuto.changed = changed;
+      if (Object.keys(changed).length) {
+        db.settings = { ...st, eir: next, eirAuto: { at: new Date().toISOString(), changed } };
+        invalidateLiveFeedCaches(); cache.clear();
+        await persist('settings');
+        try { recordNotification({ type: 'settings', title: '🔠 EIR columns auto-updated', body: Object.entries(changed).map(([k, [a, b]]) => `${k}: ${a || '–'} → ${b}`).join(' · ') }); } catch { /* notification best-effort */ }
+      }
+      return eirAutoPublic();
+    } catch (err) {
+      eirAuto.at = Date.now(); eirAuto.ok = false; eirAuto.error = String((err && err.message) || err);
+      return eirAutoPublic();
+    } finally { eirAuto.running = null; }
+  })();
+  return eirAuto.running;
+}
+
 async function gvizPageServer(params, sheet) {
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -9753,6 +9814,8 @@ async function handleApi(req, res, url) {
     if (changes.length || body.reset) recordNotification({ type: 'settings', title: body.reset ? '⚙️ Settings reset to defaults' : `⚙️ Settings changed (${changes.length})`, body: `${user.name || user.username} updated ${changes.slice(0, 4).map((c) => c.field).join(', ')}${changes.length > 4 ? ` +${changes.length - 4} more` : ''}.`, target: 'admin', meta: { username: user.username, name: user.name, changes, reset: !!body.reset, link: '#/settings' } });
     return sendJson(res, 200, { ok: true, settings: db.settings });
   }
+  if (p === '/api/eir-columns' && method === 'GET') { requireAdmin(user); return sendJson(res, 200, { ok: true, ...eirAutoPublic() }); }
+  if (p === '/api/eir-columns/detect' && method === 'POST') { requireAdmin(user); const r = await eirAutoDetect({}); return sendJson(res, 200, { ok: true, ...r, settings: db.settings }); }
   if (p === '/api/cache/clear' && method === 'POST') { requireAdmin(user); cache.clear(); return sendJson(res, 200, { ok: true }); }
 
   // ---- users (admin) ----
@@ -12705,6 +12768,13 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`First Forward Dashboard socket listening on 0.0.0.0:${PORT} — bootstrapping durable storage…`);
 });
+// 🔎 EIR header se column letters khud theek karo (boot ke baad + har 10 min). Admin Settings me band kar sakta hai.
+{
+  const eirColBoot = setTimeout(() => { eirAutoDetect({ auto: true }).catch(() => {}); }, 30e3);
+  const eirColLoop = setInterval(() => { eirAutoDetect({ auto: true }).catch(() => {}); }, 10 * 60e3);
+  if (eirColBoot.unref) eirColBoot.unref();
+  if (eirColLoop.unref) eirColLoop.unref();
+}
 
 async function readLocalStore() {
   return {
