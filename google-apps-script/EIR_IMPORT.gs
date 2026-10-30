@@ -22,6 +22,11 @@
  *    in column BA (EIR_CONFIG.TIME_COLUMN). Once BA1 holds the header
  *    ISSUE_TIME the script finds the column by that header, so it keeps
  *    working even if columns move.
+ * D. CUSTOMER_FULL_KYC: the bank now sends this value under the header
+ *    IS_FULL_KYC. It is written into the CUSTOMER_FULL_KYC column (where
+ *    it always came) and no separate IS_FULL_KYC column is created.
+ *    backfillCustomerFullKyc() copies old IS_FULL_KYC values into
+ *    CUSTOMER_FULL_KYC where that is empty (one-time).
  * C. One-time helpers to bring the EXISTING sheet in bank order:
  *      previewEIRLayoutMigration()  -> only logs the plan (safe)
  *      runEIRLayoutMigration()      -> applies the plan
@@ -39,6 +44,8 @@ const EIR_CONFIG = {
   TIME_ZONE: 'Asia/Kolkata',
   DATE_HEADER: 'ISSUE_DATE',
   TIME_HEADER: 'ISSUE_TIME',
+  // Bank renamed some headers. Data of the key goes into the value column (the column it always came in).
+  ALIASES: { 'IS_FULL_KYC': 'CUSTOMER_FULL_KYC' },
   TIME_COLUMN: 53            // BA - ISSUE_TIME is written here (header ISSUE_TIME is set in BA1 if it is empty)
 };
 
@@ -257,7 +264,7 @@ function importExcelAndAppend(fileUrl, sheet, daysToKeep) {
      * Missing bank columns are inserted in bank order (right after the
      * previous bank column), never at the far right of the sheet.
      */
-    ensureEIRHeaders(sheet, sourceHeaders);
+    ensureEIRHeaders(sheet, withoutEIRAliases(sourceHeaders));
     // ISSUE_TIME lives in column BA (found by its header from then on).
     ensureEIRTimeColumn_(sheet);
     const targetHeaderMap = buildEIRHeaderMap1_(sheet);
@@ -326,8 +333,8 @@ function importExcelAndAppend(fileUrl, sheet, daysToKeep) {
       const targetRow = new Array(targetWidth).fill('');
       for (let sourceCol = 0; sourceCol < sourceHeaders.length; sourceCol++) {
         const header = normalizeEIRHeader(sourceHeaders[sourceCol]);
-        if (!header) {
-          continue;
+        if (!header || EIR_CONFIG.ALIASES[header]) {
+          continue;      // renamed headers are handled below (IS_FULL_KYC -> CUSTOMER_FULL_KYC)
         }
         const targetColumn = targetHeaderMap[header];
         if (!targetColumn) {
@@ -339,6 +346,18 @@ function importExcelAndAppend(fileUrl, sheet, daysToKeep) {
         }
         targetRow[targetColumn - 1] = value === undefined || value === null ? '' : value;
       }
+      Object.keys(EIR_CONFIG.ALIASES).forEach(fromHeader => {
+        const fromIndex = sourceHeaderMap[fromHeader];
+        const toColumn = targetHeaderMap[EIR_CONFIG.ALIASES[fromHeader]];
+        if (fromIndex === undefined || !toColumn) {
+          return;
+        }
+        // The real column wins; the renamed one only fills it when it is empty.
+        if (String(targetRow[toColumn - 1] === undefined || targetRow[toColumn - 1] === null ? '' : targetRow[toColumn - 1]).trim() === '') {
+          const v = sourceRow[fromIndex];
+          targetRow[toColumn - 1] = v === undefined || v === null ? '' : v;
+        }
+      });
       if (fillIssueTime) {
         targetRow[targetTimeColumn - 1] = issueTime;
       }
@@ -395,6 +414,48 @@ function buildEIRHeaderMap(headers) {
     }
   });
   return map;
+}
+
+/**
+ * Bank headers without the renamed ones (IS_FULL_KYC): their data goes to
+ * the original column, so no new column is created for them.
+ */
+function withoutEIRAliases(headers) {
+  return headers.filter(h => !EIR_CONFIG.ALIASES[normalizeEIRHeader(h)]);
+}
+
+/**
+ * ONE-TIME: copy IS_FULL_KYC values (old rows already imported into a separate
+ * IS_FULL_KYC column) into CUSTOMER_FULL_KYC where that cell is empty.
+ */
+function backfillCustomerFullKyc() {
+  const sheet = SpreadsheetApp.openById(EIR_CONFIG.SPREADSHEET_ID).getSheetByName(EIR_CONFIG.SHEET_NAME);
+  const map = buildEIRHeaderMap1_(sheet);
+  const lastRow = sheet.getLastRow();
+  let copied = 0;
+  Object.keys(EIR_CONFIG.ALIASES).forEach(fromHeader => {
+    const from = map[fromHeader], to = map[EIR_CONFIG.ALIASES[fromHeader]];
+    if (!from || !to || lastRow < 3) {
+      Logger.log('Backfill skipped: ' + fromHeader + ' / ' + EIR_CONFIG.ALIASES[fromHeader] + ' column not found.');
+      return;
+    }
+    const src = sheet.getRange(3, from, lastRow - 2, 1).getValues();
+    const dst = sheet.getRange(3, to, lastRow - 2, 1).getValues();
+    const out = dst.map((r, i) => {
+      const empty = String(r[0] === null || r[0] === undefined ? '' : r[0]).trim() === '';
+      const have = String(src[i][0] === null || src[i][0] === undefined ? '' : src[i][0]).trim() !== '';
+      if (empty && have) {
+        copied++;
+        return [src[i][0]];
+      }
+      return r;
+    });
+    if (copied) {
+      sheet.getRange(3, to, out.length, 1).setValues(out);
+    }
+  });
+  Logger.log('CUSTOMER_FULL_KYC backfilled rows: ' + copied);
+  return copied;
 }
 
 /**
@@ -626,7 +687,7 @@ function migrateEIRLayoutToBankOrder_(dryRun) {
     if (!report.data.length) {
       throw new Error('The latest report is empty.');
     }
-    const planned = report.data[0].map(value => String(value === null || value === undefined ? '' : value).replace(/^\uFEFF/, '').trim());
+    const planned = withoutEIRAliases(report.data[0].map(value => String(value === null || value === undefined ? '' : value).replace(/^\uFEFF/, '').trim()));
 
     const lastColumn = sheet.getLastColumn();
     const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];

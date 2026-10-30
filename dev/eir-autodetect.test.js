@@ -121,3 +121,11 @@ test('script: other behaviour kept (dedupe, 65-day retention, markDataArrived)',
   assert.match(script, /function markDataArrived/);
   assert.match(script, /'dd-mmmm-yyyy'/);
 });
+
+test('script: IS_FULL_KYC from the bank goes into CUSTOMER_FULL_KYC (no new column)', () => {
+  const s = loadScript();
+  assert.deepEqual(Array.from(s.withoutEIRAliases(['TAG_ID', 'CUSTOMER_FULL_KYC', 'Is_Full_KYC', 'CCH'])), ['TAG_ID', 'CUSTOMER_FULL_KYC', 'CCH']);
+  assert.match(script, /ALIASES: \{ 'IS_FULL_KYC': 'CUSTOMER_FULL_KYC' \}/);
+  assert.match(script, /function backfillCustomerFullKyc/);
+  assert.match(script, /EIR_CONFIG\.ALIASES\[header\]/);
+});
