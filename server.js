@@ -3364,6 +3364,69 @@ async function ledgerDirect(barcodes) {
   await Promise.all(jobs);
   return { index: { ff: buildLedgerIndex(entries.ff), gv: buildLedgerIndex(entries.gv) }, errors, sources: srcs.map((s) => ({ id: s.id, label: s.label, ok: !!sourcesOk[s.id] && !errors[s.id] })), usable };
 }
+// 🚚 Last-dispatch aggregate: sheets ko ek baar stream karke sirf AGENT × DATE ka total / class-wise count rakhte hain
+// (poori row list nahi). Isse Master Search ke dispatch chip par memory ka spike nahi hota (free plan RSS limit).
+const ledgerAggState = { at: 0, promise: null, data: null, key: '' };
+const LEDGER_AGG_TTL = 30 * 60e3;
+const aggNm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function ledgerAggAddRow(byCh, e) {
+  const m = byCh[e.ch || 'ff'];
+  if (!m) return;
+  const keys = [e.agentId && aggNm(e.agentId) ? `I|${aggNm(e.agentId)}` : '', e.agent && aggNm(e.agent) ? `N|${aggNm(e.agent)}` : ''].filter(Boolean);
+  if (!keys.length) return;
+  let rec = null; for (const k of keys) { if (m.has(k)) { rec = m.get(k); break; } }
+  if (!rec) rec = { agentId: e.agentId || '', agent: e.agent || '', dates: new Map() };
+  for (const k of keys) m.set(k, rec);
+  const d = e.date || '—';
+  let day = rec.dates.get(d);
+  if (!day) { day = { total: 0, cls: {}, ranges: [], status: '', rk: new Set() }; rec.dates.set(d, day); }
+  const rk = `${e.first}|${e.last}`;   // same range listed in two sheets → count once
+  if (day.rk.has(rk)) return;
+  day.rk.add(rk);
+  const q = Number(e.qty) || (e.hi - e.lo + 1) || 0;
+  const c = e.cls || '—';
+  day.total += q; day.cls[c] = (day.cls[c] || 0) + q;
+  if (day.ranges.length < 6) day.ranges.push({ cls: e.cls, qty: q, first: e.first, last: e.last });
+  if (!day.status && e.status) day.status = e.status;
+}
+async function loadLedgerAgg() {
+  const srcs = ledgerSources();
+  const byCh = { ff: new Map(), gv: new Map() }, errors = {}, counts = {};
+  for (const src of srcs) {
+    const firstCol = LAYOUT_LETTERS(src.layout)[src.layout === 'gv' ? 6 : 5];
+    const tmp = { ff: new Map(), gv: new Map() };   // per attempt — withLedgerLetters may retry the read
+    try {
+      let n = 0;
+      await withLedgerLetters(src, (lt) => { n = 0; tmp.ff.clear(); tmp.gv.clear(); return gvizPagesServerRaw(src.sheetId, `gid:${src.gid}`, lt, `${firstCol} is not null`, async (rows) => {
+        for (let i = 0; i < rows.length; i++) {
+          const e = ledgerEntry(rows[i], lt, src, n + 1);
+          n++;
+          if (e) ledgerAggAddRow({ ff: tmp.ff, gv: tmp.gv }, { ...e, ch: src.ch });
+          if (i % 4000 === 3999) await yieldLoop();
+        }
+      }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 }); });
+      counts[src.id] = n;
+      for (const ch of ['ff', 'gv']) for (const [k, rec] of tmp[ch]) if (!byCh[ch].has(k)) byCh[ch].set(k, rec);
+    } catch (err) {
+      errors[src.id] = ledgerErrText(src, err);
+    }
+  }
+  // rk (dedupe set) load ke baad nahi chahiye — memory bachao
+  for (const ch of ['ff', 'gv']) for (const rec of byCh[ch].values()) for (const day of rec.dates.values()) delete day.rk;
+  return { byCh, errors, counts };
+}
+function ledgerAggregate(fresh) {
+  const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.layout]));
+  const have = ledgerAggState.data && ledgerAggState.key === key ? ledgerAggState.data : null;
+  const due = have && Date.now() - ledgerAggState.at >= LEDGER_AGG_TTL;
+  if (have && !fresh && !due) return Promise.resolve(have);
+  if (!ledgerAggState.promise) {
+    ledgerAggState.promise = loadLedgerAgg().then((d) => { ledgerAggState.data = d; ledgerAggState.key = key; ledgerAggState.at = Date.now(); return d; })
+      .catch((err) => { console.warn('dispatch aggregate:', err.message); return ledgerAggState.data; })
+      .finally(() => { ledgerAggState.promise = null; });
+  }
+  return have && !fresh ? Promise.resolve(have) : ledgerAggState.promise;
+}
 async function loadLedger() {
   const srcs = ledgerSources();
   const entries = { ff: [], gv: [] }, errors = {}, counts = {};
@@ -6021,32 +6084,28 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const ch = String(body && body.ch) === 'gv' ? 'gv' : 'ff';
     const nm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const names = new Set((Array.isArray(body && body.names) ? body.names : [body && body.name]).map(nm).filter((x) => x.length >= 3));
-    const ids = new Set((Array.isArray(body && body.ids) ? body.ids : [body && body.id]).map(nm).filter((x) => x.length >= 3));
-    if (!names.size && !ids.size) throw new HttpError(400, 'Name or ID needed.');
-    if (!ledgerSources().some((x) => x.ch === ch)) return sendJson(res, 200, { ok: true, none: true, reason: 'Dispatch ledger sheet is not configured for this channel (Settings → Dispatch ledger).', rows: [] }, { 'Cache-Control': 'no-store' });
+    const names = (Array.isArray(body && body.names) ? body.names : [body && body.name]).map(nm).filter((x) => x.length >= 3);
+    const ids = (Array.isArray(body && body.ids) ? body.ids : [body && body.id]).map(nm).filter((x) => x.length >= 3);
+    if (!names.length && !ids.length) throw new HttpError(400, 'Name or ID needed.');
+    if (!ledgerSources().some((x) => x.ch === ch)) return sendJson(res, 200, { ok: true, none: true, reason: 'Dispatch ledger sheet is not configured for this channel (Settings → Dispatch ledger).', recent: [], last: null }, { 'Cache-Control': 'no-store' });
     let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 25000); });
-    let index; try { index = await Promise.race([ledgerIndex(false), wait]); } finally { clearTimeout(timer); }
-    if (!index) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
-    const idx = index[ch];
-    const hits = [];
-    if (idx && idx.byPfx) for (const list of idx.byPfx.values()) for (const e of list) {
-      if ((e.agentId && ids.has(nm(e.agentId))) || (e.agent && names.has(nm(e.agent))) || (e.agentId && names.has(nm(e.agentId)))) hits.push(e);
+    let agg; try { agg = await Promise.race([ledgerAggregate(false), wait]); } finally { clearTimeout(timer); }
+    if (!agg) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
+    const m = agg.byCh[ch] || new Map();
+    const recs = new Set();
+    names.forEach((n) => { const r = m.get(`N|${n}`); if (r) recs.add(r); });
+    ids.forEach((i) => { const r = m.get(`I|${i}`); if (r) recs.add(r); });
+    const days = new Map();
+    for (const rec of recs) for (const [d, day] of rec.dates) {
+      const o = days.get(d) || { date: d, total: 0, cls: {}, ranges: [], status: '' };
+      o.total += day.total;
+      for (const [c, v] of Object.entries(day.cls)) o.cls[c] = (o.cls[c] || 0) + v;
+      for (const r of day.ranges) { if (o.ranges.length < 6) o.ranges.push(r); }
+      if (!o.status && day.status) o.status = day.status;
+      days.set(d, o);
     }
-    hits.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (b.row || 0) - (a.row || 0));
-    const byDate = new Map(), seenRange = new Set();
-    for (const e of hits) {
-      const rk = `${e.date}|${e.first}|${e.last}`; if (seenRange.has(rk)) continue; seenRange.add(rk);   // same range listed in two source sheets
-      const d = e.date || '—';
-      const o = byDate.get(d) || { date: d, total: 0, cls: {}, ranges: [], status: '' };
-      const q = Number(e.qty) || (e.hi - e.lo + 1) || 0;
-      o.total += q; o.cls[e.cls || '—'] = (o.cls[e.cls || '—'] || 0) + q;
-      if (o.ranges.length < 6) o.ranges.push({ cls: e.cls, qty: q, first: e.first, last: e.last });
-      if (!o.status && e.status) o.status = e.status;
-      byDate.set(d, o);
-    }
-    const dates = [...byDate.values()];
-    return sendJson(res, 200, { ok: true, ch, count: hits.length, last: dates[0] || null, recent: dates.slice(0, 8), totalDispatches: dates.length, errors: ledgerState.errors, counts: ledgerState.counts }, { 'Cache-Control': 'no-store' });
+    const dates = [...days.values()].sort((x, y) => String(y.date).localeCompare(String(x.date)));
+    return sendJson(res, 200, { ok: true, ch, last: dates[0] || null, recent: dates.slice(0, 8), totalDispatches: dates.length, errors: agg.errors, counts: agg.counts }, { 'Cache-Control': 'no-store' });
   }
   // 📨 Agents Complaints Summary — cache se (background me Gmail se refresh hota rehta hai)
   if (p === '/api/complaints' && method === 'GET') {
