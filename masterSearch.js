@@ -2117,6 +2117,16 @@ FF.pages = FF.pages || {};
         }
       }
       groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || Number(!!b.ff) - Number(!!a.ff) || String(a.name).localeCompare(String(b.name)));
+      // v3.125.17 — Index abhi aadha (kuch sheets late / Google 429) aur kuch nahi mila → "nahi mila" mat dikhao;
+      // index pura hote hi khud dobara search (deep link ?q=…&id=… bhi seedha profile khole).
+      if (!groups.length && state.light && state.light.partial && !(opts && opts.final)) {
+        out.innerHTML = U.spinner(`“${q}” — data aa raha hai, profile khul raha hai…`);
+        const off = onIndexReady(() => {
+          if (seq !== runSeq) { off(); return; }
+          if (state.light && !state.light.partial) { off(); run(query, { ...(opts || {}), final: true }); }
+        });
+        return;
+      }
       if (groups.length) {
         let exactIdGroup = null, exactIdChannel = chFilter || '';
         if (askedId) {

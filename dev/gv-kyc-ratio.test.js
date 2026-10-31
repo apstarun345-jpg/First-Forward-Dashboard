@@ -44,3 +44,10 @@ test('Master Search GV KYC box routes to loadGvKycMonthly', () => {
   assert.match(ms, /kycBoxHtml\(pr, isTl, ch\)/);
   assert.match(ms, /f && f\.gv \? FF\.model\.loadGvKycMonthly\(f\)/);
 });
+
+test('Master Search page re-runs a search once a partial index completes (deep links)', () => {
+  const fs = require('node:fs');
+  const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
+  assert.match(ms, /!groups\.length && state\.light && state\.light\.partial && !\(opts && opts\.final\)/);
+  assert.match(ms, /run\(query, \{ \.\.\.\(opts \|\| \{\}\), final: true \}\)/);
+});
