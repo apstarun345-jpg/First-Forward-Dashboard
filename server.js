@@ -74,10 +74,19 @@ function gvizLimitMessage(ms) {
   const sec = Math.max(1, Math.ceil((ms === undefined ? gvizCooldownLeft() : ms) / 1000));
   return `Google Sheets applied a rate limit (429 Too Many Requests). Cached data is being shown; the next attempt happens automatically in ~${sec} seconds.`;
 }
-async function gvizAcquire() {
+async function gvizAcquire(priority) {
   if (gvizGate.active < GVIZ_CONCURRENCY) { gvizGate.active++; return; }
   gvizGate.blocked++;
-  await new Promise((resolve) => gvizGate.queue.push(resolve));
+  // ⚡ v3.125.12 — chhoti lookups (barcode live search, limit ≤ 200) bade 10k-row pages ke peeche na atkein.
+  await new Promise((resolve) => { if (priority) gvizGate.queue.unshift(resolve); else gvizGate.queue.push(resolve); });
+}
+/** Small `limit N` (N ≤ 200) queries are interactive lookups → queue ke aage. */
+function gvizPriority(url) {
+  try {
+    const tq = new URL(url).searchParams.get('tq') || '';
+    const m = tq.match(/\blimit\s+(\d+)/i);
+    return !!(m && Number(m[1]) <= 200);
+  } catch { return false; }
 }
 function gvizRelease() {
   const next = gvizGate.queue.shift();
@@ -1500,7 +1509,7 @@ function upstreamUrl(params) {
   return `${GVIZ_BASE}/spreadsheets/d/${sheetId}/gviz/tq?${p.toString()}`;
 }
 async function fetchUpstream(url) {
-  await gvizAcquire();
+  await gvizAcquire(gvizPriority(url));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
   try {

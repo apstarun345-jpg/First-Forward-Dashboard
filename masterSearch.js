@@ -586,6 +586,7 @@ FF.pages = FF.pages || {};
       const idx = new Map(list.map((col, i) => [col, i]));
       const val = (row, col) => { const i = idx.get(col); return i === undefined ? '' : clean(D.identifierText ? D.identifierText(row[i]) : D.cellText(row[i])); };
       const txt = (row, col) => { const i = idx.get(col); return i === undefined ? '' : clean(D.cellText(row[i])); };
+      // Server gviz gate `limit ≤ 200` wali queries ko queue ke aage rakhta hai (bade register pages ke peeche nahi atakti).
       return D.query(sheet, `select ${list.join(', ')} where ${cond} limit 40`, { timeoutMs: 40000 })
         .then((t) => { (t.rows || []).forEach((row) => onRow(row, val, txt)); })
         .catch(() => { rec.failed++; })

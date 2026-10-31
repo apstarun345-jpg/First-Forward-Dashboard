@@ -57,3 +57,13 @@ test('live lookup also searches the dashed barcode form (608116-011-0558357)', (
   assert.ok(sqls.some((q) => q.includes("contains '608116-011-0558357'")), 'raw dashed needle');
   assert.ok(sqls.some((q) => q.includes("contains '6081160110558357'")), 'digits-only needle');
 });
+
+test('server gviz gate lets small limit queries jump the queue; live lookup uses the proxy', () => {
+  const fs = require('node:fs');
+  const server = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+  assert.match(server, /function gvizPriority\(url\)/);
+  assert.match(server, /await gvizAcquire\(gvizPriority\(url\)\)/);
+  assert.match(server, /if \(priority\) gvizGate\.queue\.unshift\(resolve\)/);
+  const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
+  assert.match(ms, /limit 40`, \{ timeoutMs: 40000 \}/);
+});
