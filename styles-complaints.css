@@ -92,3 +92,12 @@
 .cmp-tbl tr.cmp-hfail td:not(.cmp-case) { background: #fff1f2; }
 .cmp-gvm { display: block; color: #2563eb !important; font-weight: 600; }
 .cmp-resend { display: block; margin: 4px auto 0; padding: 2px 8px; font-size: 11px; }
+/* 📮 v3.125.21 — Channel default mail (GV Master / FF) */
+.cmp-chdef { border: 1px solid #c7d2fe; background: #eef2ff; border-radius: 12px; padding: 10px 12px; margin: 8px 0 14px; }
+.cmp-chdef h4 { margin: 0 0 4px; }
+.cmp-chrow { display: grid; grid-template-columns: auto minmax(220px, 1fr); gap: 6px 12px; align-items: end; padding: 8px 10px; margin: 8px 0; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+.cmp-chrow .cmp-chhead { grid-column: 1 / -1; }
+.cmp-chrow .cmp-rule-ev { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.cmp-chrow label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 600; color: #475569; }
+.cmp-chrow label.check { flex-direction: row; align-items: center; gap: 6px; }
+@media (max-width: 640px) { .cmp-chrow { grid-template-columns: 1fr; } }

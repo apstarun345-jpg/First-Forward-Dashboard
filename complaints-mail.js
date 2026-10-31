@@ -73,8 +73,10 @@ export function normalizeMailCfg(raw, prev = null, nowMs = Date.now()) {
     const enabled = !(r && (r.enabled === false || r.enabled === 'false'));
     // since: is waqt ke BAAD aayi complaints par hi mail — rule banate / ON karte waqt purani complaints par mail ki baarish nahi
     const since = prevRule && prevRule.enabled && prevRule.since ? prevRule.since : (!prev && Number(r && r.since) > 0 ? Number(r.since) : nowMs);
+    // 🟩/🟦 v3.125.21 — channel default rule: sirf GV Master wale agents (issuerSrc) ya sirf FF agents ki complaints.
+    const channel = r && (r.channel === 'gv' || r.channel === 'ff') ? r.channel : '';
     return {
-      id, enabled, label: String((r && r.label) || '').trim().slice(0, 60), all, tls: all ? [] : tls, agents: all ? [] : agents,
+      id, enabled, channel, label: String((r && r.label) || '').trim().slice(0, 60), all: channel ? true : all, tls: all || channel ? [] : tls, agents: all || channel ? [] : agents,
       to: splitEmails(r && r.to).filter((x) => EMAIL_OK.test(x)).slice(0, 10).join(', '),
       onNew: !(r && (r.onNew === false || r.onNew === 'false')), onDeduct: !(r && (r.onDeduct === false || r.onDeduct === 'false')), remind: !(r && (r.remind === false || r.remind === 'false')),
       attach: !(r && (r.attach === false || r.attach === 'false')),
@@ -87,6 +89,9 @@ export function normalizeMailCfg(raw, prev = null, nowMs = Date.now()) {
 /** Rule ka target is complaint par lagta hai? all, ya chune hue TL / agent (naam ya ID) me se koi ek. */
 export function ruleMatches(rule, row) {
   if (!rule) return false;
+  // Channel: GV Master agent = complaint jiska agent GV Master se mila (issuerSrc); baaki FF.
+  if (rule.channel === 'gv' && !(row && row.issuerSrc)) return false;
+  if (rule.channel === 'ff' && row && row.issuerSrc) return false;
   if (rule.all) return true;
   const hit = (list, ...fields) => (list || []).some((v) => { const k = normKey(v); return k && fields.some((f) => normKey(f) === k); });
   return hit(rule.tls, row.tlName, row.tlId) || hit(rule.agents, row.agentName, row.agentId);

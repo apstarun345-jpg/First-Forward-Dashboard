@@ -191,6 +191,23 @@ FF.pages = FF.pages || {};
       <label class="cmp-rule-to">Mail to <input class="input" data-r="to" placeholder="name@example.com, other@example.com" value="${esc(r.to || '')}"></label>
       <div class="cmp-rule-ev"><span class="dim small">Send when:</span><label class="check"><input type="checkbox" data-r="onNew" ${r.onNew !== false ? 'checked' : ''}> New complaint</label><label class="check"><input type="checkbox" data-r="onDeduct" ${r.onDeduct !== false ? 'checked' : ''}> Bank deducted</label><label class="check"><input type="checkbox" data-r="remind" ${r.remind !== false ? 'checked' : ''}> Reminder</label><label class="check"><input type="checkbox" data-r="attach" ${r.attach !== false ? 'checked' : ''}> 📎 Attach the mail’s screenshots / files</label></div></div>`;
   }
+  // 🟩/🟦 v3.125.21 — Channel default mail: GV Master agents / FF agents ki har complaint ek fixed email par.
+  const CH_RULES = [['gv', '🟩 GV Master agents ki complaints', 'Agent GV Master se mila (✓ GV Master)'], ['ff', '🟦 FF (First Forward) agents ki complaints', 'Baaki sab — agent GV Master me nahi']];
+  function channelSection(m) {
+    return `<div class="cmp-chdef"><h4>📮 Channel default mail — GV Master / FF</h4>
+      <p class="dim small">Complaint aate hi (aur bank deduction / reminder par) neeche di gayi email par apne aap mail jayegi. Email likho → ON → <b>💾 Save</b>.</p>
+      ${CH_RULES.map(([ch, label, hint]) => {
+        const r = (m.rules || []).find((x) => x.channel === ch) || { id: `ch-${ch}`, enabled: false, to: '', onNew: true, onDeduct: true, remind: true, attach: true };
+        return `<div class="cmp-chrow" data-chrule="${ch}" data-id="${esc(r.id)}" data-since="${esc(r.since || '')}">
+          <div class="cmp-chhead"><b>${label}</b> <span class="dim small">${hint}</span></div>
+          <label class="check"><input type="checkbox" data-c="enabled" ${r.enabled ? 'checked' : ''}> <b>ON</b></label>
+          <label class="cmp-rule-to">Mail to <input class="input" data-c="to" placeholder="name@example.com, other@example.com" value="${esc(r.to || '')}"></label>
+          <div class="cmp-rule-ev"><label class="check"><input type="checkbox" data-c="onNew" ${r.onNew !== false ? 'checked' : ''}> New complaint</label><label class="check"><input type="checkbox" data-c="onDeduct" ${r.onDeduct !== false ? 'checked' : ''}> Bank deducted</label><label class="check"><input type="checkbox" data-c="remind" ${r.remind !== false ? 'checked' : ''}> Reminder</label><label class="check"><input type="checkbox" data-c="attach" ${r.attach !== false ? 'checked' : ''}> 📎 Attachments</label></div>
+        </div>`;
+      }).join('')}
+      <div class="btn-row"><button type="button" class="btn primary small" data-cmp-save>💾 Save mail</button></div>
+    </div>`;
+  }
   function datalists() {
     const rows = rowsAll();
     const tl = [...new Set(rows.flatMap((r) => [r.tlName, r.tlId]).filter(Boolean))].sort();
@@ -212,7 +229,9 @@ FF.pages = FF.pages || {};
       <h4>📧 Mail alerts — who gets which complaints</h4>
       <p class="dim small">As soon as a new bank complaint is found (checked at every refresh), when the bank deducts the amount, and a reminder digest every few hours while complaints stay pending — mailed to whoever you set below. A new rule only mails complaints that arrive <b>after</b> it is saved.</p>
       <div class="form-grid cmp-fg"><label class="check"><input type="checkbox" data-f="mailEnabled" ${m.enabled ? 'checked' : ''}> <b>Mail alerts ON</b></label><label>Reminder every (hours)<input class="input" type="number" min="1" max="72" step="0.5" data-f="remindHours" value="${esc(m.remindHours ?? 4)}"></label></div>
-      <div class="cmp-rules">${(m.rules || []).map(ruleRow).join('') || '<p class="dim small">No recipient yet — click “Add recipient / TL / agent rule”.</p>'}</div>
+      ${channelSection(m)}
+      <h4>👥 TL / agent wise rules</h4>
+      <div class="cmp-rules">${(m.rules || []).filter((r) => !r.channel).map(ruleRow).join('') || '<p class="dim small">No recipient yet — click “Add recipient / TL / agent rule”.</p>'}</div>
       <div class="btn-row"><button type="button" class="btn small" data-cmp-radd>➕ Add another recipient (TL / agent rule)</button></div>
       ${datalists()}
       <h4>✉️ Message</h4>
@@ -242,6 +261,13 @@ FF.pages = FF.pages || {};
       const all = allEl ? allEl.value === '1' : true;
       return { id: row.dataset.rule, since: Number(row.dataset.since) || undefined, enabled: g('enabled').checked, all, tls: row.querySelector('[data-chips]') ? chips('tls') : (old.tls || []), agents: row.querySelector('[data-chips]') ? chips('agents') : (old.agents || []), to: g('to').value.trim(), onNew: g('onNew').checked, onDeduct: g('onDeduct').checked, remind: g('remind').checked, attach: g('attach').checked };
     });
+    const chRules = [...p.querySelectorAll('[data-chrule]')].map((row) => {
+      const g = (k) => row.querySelector(`[data-c="${k}"]`);
+      return { id: row.dataset.id || `ch-${row.dataset.chrule}`, channel: row.dataset.chrule, since: Number(row.dataset.since) || undefined, enabled: g('enabled').checked, all: true, tls: [], agents: [], to: g('to').value.trim(), onNew: g('onNew').checked, onDeduct: g('onDeduct').checked, remind: g('remind').checked, attach: g('attach').checked };
+    }).filter((r) => r.to || r.enabled);
+    d.mail.rules = [...chRules, ...d.mail.rules];
+    // Channel mail ON + email diya → master "Mail alerts ON" bhi on (warna kuch nahi jaata)
+    if (chRules.some((r) => r.enabled && r.to)) { d.mail.enabled = true; const me = q('[data-f="mailEnabled"]'); if (me) me.checked = true; }
     d.mail.templates = d.mail.templates || {};
     p.querySelectorAll('[data-t]').forEach((el) => { d.mail.templates[el.dataset.t] = el.value; });
     return d;
@@ -388,7 +414,7 @@ FF.pages = FF.pages || {};
       const rf = t.closest('[data-cmp-refresh]'); if (rf) { syncNow(rf); return; }
       if (t.closest('[data-cmp-settings]')) { state.setOpen = !state.setOpen; if (state.setOpen && state.data && state.data.cfg) {
           state.draft = clone(state.data.cfg); state.draft.mail = state.draft.mail || {};
-          if (!(state.draft.mail.rules || []).length) state.draft.mail.rules = [{ id: `n${Date.now().toString(36)}`, enabled: true, all: false, tls: [], agents: [], to: '', onNew: true, onDeduct: true, remind: true, attach: true }];
+          if (!(state.draft.mail.rules || []).filter((r) => !r.channel).length) state.draft.mail.rules = (state.draft.mail.rules || []).concat([{ id: `n${Date.now().toString(36)}`, enabled: true, all: false, tls: [], agents: [], to: '', onNew: true, onDeduct: true, remind: true, attach: true }]);
         }
         paint(); return; }
       if (t.closest('[data-cmp-setclose]')) { state.setOpen = false; paint(); return; }
