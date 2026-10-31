@@ -856,8 +856,8 @@ FF.pages = FF.pages || {};
         kind: 'cls', kindLabel: 'Barcode',
         label: U.barcode(t.key),
         sub: [((f && f.tagId) || (g && g.tagId)) && normBar((f && f.tagId) || (g && g.tagId)) !== t.key ? `Tag ${(f && f.tagId) || (g && g.tagId)}` : '',
-          f ? `FF ${f.agentName}${f.tlName ? ' (TL ' + f.tlName + ')' : ''}` : 'FF not mapped',
-          g ? `GV ${g.agentName}${g.tlName ? ' (TL ' + g.tlName + ')' : ''}` : 'GV not mapped',
+          f ? (clean(f.agentName) ? `FF ${f.agentName}${f.tlName ? ' (TL ' + f.tlName + ')' : ''}` : 'FF stock · agent assign nahi') : 'FF not mapped',
+          g ? (clean(g.agentName) ? `GV ${g.agentName}${g.tlName ? ' (TL ' + g.tlName + ')' : ''}` : 'GV stock · agent assign nahi') : 'GV not mapped',
           (f && f.cls) || (g && g.cls) || ''].filter(Boolean).join(' · '),
         value: t.key, barcode: t.key
       });
