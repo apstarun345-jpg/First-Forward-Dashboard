@@ -80,8 +80,11 @@ async function gvizAcquire(priority) {
   // ⚡ v3.125.12 — chhoti lookups (barcode live search, limit ≤ 200) bade 10k-row pages ke peeche na atkein.
   await new Promise((resolve) => { if (priority) gvizGate.queue.unshift(resolve); else gvizGate.queue.push(resolve); });
 }
+/** Client ne `prio=1` bheja (profile ke interactive boxes — GV KYC etc.) → us URL ko priority lane. */
+const GVIZ_PRIORITY_URLS = new Set();
 /** Small `limit N` (N ≤ 200) queries are interactive lookups → queue ke aage. */
 function gvizPriority(url) {
+  if (GVIZ_PRIORITY_URLS.has(url)) return true;
   try {
     const tq = new URL(url).searchParams.get('tq') || '';
     const m = tq.match(/\blimit\s+(\d+)/i);
@@ -5410,6 +5413,10 @@ function perfNote(params, cacheTag, ms) {
 async function handleGviz(req, res, params) {
   const fresh = params.get('fresh') === '1';
   const url = upstreamUrl(params);
+  if (params.get('prio') === '1') {
+    GVIZ_PRIORITY_URLS.add(url);
+    if (GVIZ_PRIORITY_URLS.size > 300) GVIZ_PRIORITY_URLS.delete(GVIZ_PRIORITY_URLS.values().next().value);
+  }
   const started = Date.now();
   const hit = cache.get(url);
   markHot(url);

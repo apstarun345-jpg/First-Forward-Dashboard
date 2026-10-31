@@ -216,7 +216,7 @@ window.FF = window.FF || {};
     const hit = cache.get(key);
     if (hit && (hit.pending || (!o.fresh && now - hit.t < TTL_MS))) return hit.promise;
 
-    const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(range ? { range } : {}), ...(o.headers !== undefined ? { headers: String(o.headers) } : {}) };
+    const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(o.priority ? { prio: '1' } : {}), ...(range ? { range } : {}), ...(o.headers !== undefined ? { headers: String(o.headers) } : {}) };
     const attempts = [];
     const proxyUrl = FF.config.proxyPath && FF.config.proxy !== false
       ? buildUrl(FF.config.proxyPath, sheetName, tq, gid, extra) : '';

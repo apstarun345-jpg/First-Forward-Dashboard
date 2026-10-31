@@ -51,3 +51,14 @@ test('Master Search page re-runs a search once a partial index completes (deep l
   assert.match(ms, /!groups\.length && state\.light && state\.light\.partial && !\(opts && opts\.final\)/);
   assert.match(ms, /if \(done \|\| found\) \{ off\(\); run\(query, \{ \.\.\.\(opts \|\| \{\}\), final: done \}\); \}/);
 });
+
+test('priority lane: client prio=1 flag marks the upstream URL; GV KYC queries use it', () => {
+  const fs = require('node:fs');
+  const server = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+  const data = fs.readFileSync(path.join(ROOT, 'data.js'), 'utf8');
+  const model = fs.readFileSync(path.join(ROOT, 'model.js'), 'utf8');
+  assert.match(server, /if \(params\.get\('prio'\) === '1'\) \{\s*GVIZ_PRIORITY_URLS\.add\(url\)/);
+  assert.match(server, /if \(GVIZ_PRIORITY_URLS\.has\(url\)\) return true;/);
+  assert.match(data, /\.\.\.\(o\.priority \? \{ prio: '1' \} : \{\}\)/);
+  assert.match(model, /priority: true, timeoutMs: 60000/);
+});
