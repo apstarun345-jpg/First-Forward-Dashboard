@@ -554,6 +554,56 @@ FF.pages = FF.pages || {};
   }
 
   // ---------------------------------------------------------------- query
+  // ⚡ v3.125.11 — Live barcode lookup: poora register (3.5 lakh barcodes, 4 sheets) load hone me 1-3 min lagta hai,
+  // tab tak barcode search khali dikhti thi. Ab typed barcode/tag ke liye 4 chhoti targeted queries (1-9 s) chalti hain
+  // aur register ready hote hi normal index le leta hai.
+  const live = { map: new Map(), order: [] };
+  const liveSafe = (q) => String(q || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  function liveLookup(query) {
+    const key = normBar(query);
+    if (key.length < 4 || !/\d/.test(query)) return null;
+    let rec = live.map.get(key);
+    if (rec) return rec;
+    const D = FF.data, c = FF.config || {};
+    if (!D || !D.query) return null;
+    rec = { key, pending: true, entries: new Map(), failed: 0 };
+    live.map.set(key, rec); live.order.push(key);
+    if (live.order.length > 30) live.map.delete(live.order.shift());
+    const needle = liveSafe(query);
+    const s = c.stock || {}, a = (c.gv && c.gv.assignment) || {}, e = c.eir || {};
+    const gen = state.generation;
+    const add = (barcode, rowFn) => {
+      const k = normBar(barcode); if (!k) return;
+      let en = rec.entries.get(k); if (!en) { en = { key: k, ff: [], gv: [] }; rec.entries.set(k, en); }
+      rowFn(en, k);
+    };
+    const find = (sheet, cols, idCols, onRow) => {
+      const list = [...new Set(cols.filter(Boolean))];
+      const cond = idCols.filter(Boolean).map((col) => `lower(${col}) contains '${needle}'`).join(' or ');
+      if (!list.length || !cond) return Promise.resolve();
+      const idx = new Map(list.map((col, i) => [col, i]));
+      const val = (row, col) => { const i = idx.get(col); return i === undefined ? '' : clean(D.identifierText ? D.identifierText(row[i]) : D.cellText(row[i])); };
+      const txt = (row, col) => { const i = idx.get(col); return i === undefined ? '' : clean(D.cellText(row[i])); };
+      return D.query(sheet, `select ${list.join(', ')} where ${cond} limit 40`, { timeoutMs: 40000 })
+        .then((t) => { (t.rows || []).forEach((row) => onRow(row, val, txt)); })
+        .catch(() => { rec.failed++; })
+        .finally(() => { if (gen === state.generation) emit(); });
+    };
+    const cls = (v) => (FF.gv && FF.gv.normClass ? FF.gv.normClass(v) : v);
+    Promise.all([
+      find(s.sheet || 'StockDataa', [s.barcode, s.tagId, s.agentId, s.agentName, s.tlName, s.cls, s.agentAllocatedAt, s.bcAllocatedAt], [s.barcode, s.tagId], (row, val, txt) => {
+        [val(row, s.barcode), val(row, s.tagId)].forEach((b) => add(b, (en, k) => en.ff.push({ barcode: k, tagId: val(row, s.tagId), agentId: val(row, s.agentId), agentName: txt(row, s.agentName) || val(row, s.agentId), tlName: txt(row, s.tlName), cls: cls(txt(row, s.cls)), allocated: txt(row, s.agentAllocatedAt) || txt(row, s.bcAllocatedAt), source: 'StockDataa' })));
+      }),
+      find('Tag Assignment', [a.serial, a.tagId, a.agentId, a.agentName, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName, a.allocatedAt], [a.serial, a.tagId], (row, val, txt) => {
+        [val(row, a.serial), val(row, a.tagId)].forEach((b) => add(b, (en, k) => en.gv.push({ barcode: k, tagId: val(row, a.tagId), agentId: val(row, a.agentId), agentName: txt(row, a.agentName) || val(row, a.agentId), tlName: txt(row, a.tlName), cls: cls(txt(row, a.cls)), gvId: txt(row, a.gvUniqueId), gvName: txt(row, a.gvUniqueName), allocated: txt(row, a.allocatedAt), source: 'Tag Assignment' })));
+      }),
+      find(e.sheet || 'EIR', [e.tagId, e.agentId, e.agentName, e.tlName, e.cls, e.date], [e.tagId], (row, val, txt) => {
+        add(val(row, e.tagId), (en, k) => en.ff.push({ barcode: k, tagId: val(row, e.tagId), agentId: val(row, e.agentId), agentName: txt(row, e.agentName) || val(row, e.agentId), tlName: txt(row, e.tlName), cls: txt(row, e.cls), allocated: txt(row, e.date), source: 'EIR' }));
+      })
+    ]).finally(() => { rec.pending = false; if (gen === state.generation) emit(); });
+    return rec;
+  }
+
   function search(q) {
     const idx = state.full || state.light;
     const query = clean(q);
@@ -598,6 +648,16 @@ FF.pages = FF.pages || {};
       }
       out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
       if (out.tags.length > 120) out.tags.length = 120;
+    }
+    // Register abhi ban raha hai → typed barcode ko seedha sheet se live dhoondo.
+    if (wantsTags && !out.heavy) {
+      const rec = liveLookup(query);
+      if (rec) {
+        out.livePending = rec.pending;
+        const have = new Set(out.tags.map((t) => t.key));
+        rec.entries.forEach((en, k) => { if (!have.has(k) && out.tags.length < 120) { out.tags.push(en); have.add(k); } });
+        out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
+      }
     }
     out.people = canonicalPeople(out.people, idx);
     suppressFalseFfMatches(out);
@@ -998,7 +1058,7 @@ FF.pages = FF.pages || {};
     if (!res.matched) {
       return `<div class="ms-empty"><b>“${esc(res.q)}” ke liye kuch nahi mila</b>
         <p>Naam, TL, agent ID, TL ID, GV ID, barcode ya tag ID se search karo. Spelling ya ID ke kuch digits bhi kaafi hain.</p>
-        ${res.heavy ? '' : '<p class="dim small">Barcode / tag register abhi background me load ho raha hai — thodi der baad barcode search bhi chalega.</p>'}</div>`;
+        ${res.heavy ? '' : (res.livePending ? '<p class="dim small">Barcode sheet me live dhoondh raha hu… (2-10 sec)</p>' : '<p class="dim small">Barcode / tag register abhi background me load ho raha hai — barcode ke 4+ digits likho, live search chalega.</p>')}</div>`;
     }
     lastPeople = res.people || [];
     const parts = [];
@@ -1045,7 +1105,7 @@ FF.pages = FF.pages || {};
       <div class="ms-panel-box">
         <div class="ms-panel-head">
           <div><span class="ms-panel-kicker">🔎 Master search</span><h2>${esc(/^\d{12,20}$/.test(clean(res.q)) ? U.barcode(res.q) : (res.q || o.title || 'Results'))}</h2>
-            <small class="dim">${U.fmt(res.matched)} match · ${res.heavy ? 'barcode register ready ✓' : 'barcode register loading…'}</small></div>
+            <small class="dim">${U.fmt(res.matched)} match · ${res.heavy ? 'barcode register ready ✓' : (res.livePending ? 'barcode live search…' : 'barcode register loading… (live search on)')}</small></div>
           <div class="btn-row">
             <button class="btn small" data-ms-csv>⬇ CSV</button>
             <button class="btn small" data-ms-pdf>📄 PDF</button>
