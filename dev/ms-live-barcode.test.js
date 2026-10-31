@@ -93,3 +93,16 @@ test('barcode + tag ID of the same tag collapse into ONE result row (barcode key
   assert.match(dd.sub, /Tag 34161FA820328EE84F0CE500/);
   assert.match(dd.sub, /GV SOMANANDA DASH \(TL SOMANANDA DASH\)/);
 });
+
+test('v3.125.16: no auto barcode register on page load; API read retries; boxes auto-retry', () => {
+  const fs = require('node:fs');
+  const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
+  const auth = fs.readFileSync(path.join(ROOT, 'auth.js'), 'utf8');
+  assert.match(ms, /if \(!\(opts && opts\.barcodes\)\) return;/);
+  assert.match(ms, /warmFull\(\{ barcodes: true \}\)/);
+  assert.match(ms, /function autoRetryBox\(box, flag, fill, host\)/);
+  assert.match(ms, /autoRetryBox\(box, '__kycDone'/);
+  assert.match(ms, /autoRetryBox\(box, '__dispDone'/);
+  assert.match(auth, /st === 502 \|\| st === 503 \|\| st === 504/);
+  assert.match(auth, /READ_POSTS = .*dispatch-by/);
+});

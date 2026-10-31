@@ -29,7 +29,23 @@ window.FF = window.FF || {};
   }
   viewAsRestore();
 
+  // 🔁 v3.125.16 — Server restart (Render memory guard) ke ~30-80 s me 502/503/504 aata tha aur boxes "HTTP 502" dikha dete the.
+  //    Read calls (GET + read-only POST) ab chup-chaap retry karte hain: 2s · 5s · 10s · 20s · 30s.
+  const READ_POSTS = /^\/api\/(dispatch-by|stock-age|gv-agent-commission|kyc)/;
+  const RETRY_WAITS = [2000, 5000, 10000, 20000, 30000];
   async function api(path, method, body) {
+    const m = String(method || 'GET').toUpperCase();
+    const retryable = !/^\/api\/auth\//.test(path) && (m === 'GET' || READ_POSTS.test(path));
+    for (let i = 0; ; i++) {
+      try { return await apiOnce(path, method, body); } catch (err) {
+        const st = Number(err && err.status) || 0;
+        const transient = st === 502 || st === 503 || st === 504 || (!st && err && (err.name === 'TypeError' || err.name === 'AbortError'));
+        if (!retryable || !transient || i >= RETRY_WAITS.length) throw err;
+        await new Promise((r) => setTimeout(r, RETRY_WAITS[i]));
+      }
+    }
+  }
+  async function apiOnce(path, method, body) {
     const controller = new AbortController();
     const isAuthCall = /^\/api\/auth\//.test(path);
     const timeoutMs = path === '/api/auth/me' ? 120000 : (isAuthCall ? 25000 : 60000);

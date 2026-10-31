@@ -428,7 +428,7 @@ FF.pages = FF.pages || {};
     return state.fullPromise;
   }
   /** Kick the heavy layer off in the background (non-blocking) — suggestions upgrade automatically. */
-  function warmFull() {
+  function warmFull(opts) {
     GVC.load();
     // 🏷️ Barcode register ke liye insights.js chahiye — wo ab lazy module hai, isliye pehle background
     // me load karo (topbar search khulte hi register bhi taiyaar ho jata hai).
@@ -440,6 +440,9 @@ FF.pages = FF.pages || {};
     }).then(emit).catch(() => {});
     // ⚠️ fullPromise ko yahan reset NAHI karte: har keystroke/render par warmFull() chalta hai, aur reset se
     // har call naya 2.3 lakh-row barcode build shuru kar deta tha (page hang). buildFull() khud dedupe karta hai.
+    // ⚡ v3.125.16 — 3.5 lakh-row barcode register ab har page-load par auto nahi banta (server memory limit par restart
+    //    hota tha → baaki boxes ko 502). Barcode search live lookup se hoti hai; register sirf `warmFull({ barcodes: true })` par.
+    if (!(opts && opts.barcodes)) return;
     ready('insights').then(() => { if (!state.full && !state.fullPromise) return buildFull(); }).catch((err) => {
       state.fullError = String(err && (err.message || err) || 'Barcode register module load failed');
       emit();
@@ -2314,8 +2317,9 @@ FF.pages = FF.pages || {};
       dispFetch(sc).then((d) => { if (box.isConnected) { box.__disp = d; dispPaint(box, d); } }).catch((err) => {
         if (!box.isConnected) return;
         const sub = box.querySelector('.msp-disp-sub'), main = box.querySelector('.msp-disp-main');
-        if (main) main.textContent = '—'; if (sub) sub.textContent = String((err && err.message) || err);
         box.__dispDone = false;
+        if (autoRetryBox(box, '__dispDone', fillDispBoxes, host)) { if (sub) sub.textContent = 'Thoda busy hai — khud dobara load ho raha hai…'; return; }
+        if (main) main.textContent = '—'; if (sub) sub.textContent = String((err && err.message) || err);
       });
     });
   }
@@ -2356,6 +2360,14 @@ FF.pages = FF.pages || {};
     }).join('');
     sub.innerHTML = `<div class="kyc-vlist">${vrows}</div>`;
   }
+  /** Box fail hua (server restart / Google 429) → kuch der baad khud dobara (max 4 baar), user ko Retry nahi dabana. */
+  function autoRetryBox(box, flag, fill, host) {
+    const n = (box.__autoRetry || 0) + 1;
+    if (n > 4) return false;
+    box.__autoRetry = n;
+    setTimeout(() => { if (box.isConnected) { box[flag] = false; fill(host); } }, [8000, 20000, 35000, 60000][n - 1]);
+    return true;
+  }
   function fillKycBoxes(host) {
     const boxes = host ? host.querySelectorAll('[data-msp-kyc-box]') : [];
     boxes.forEach((box) => {
@@ -2364,8 +2376,9 @@ FF.pages = FF.pages || {};
       kycFetch(f).then((rows) => { if (box.isConnected) kycPaint(box, rows || []); }).catch((err) => {
         if (!box.isConnected) return;
         const main = box.querySelector('.msp-kyc-main'), sub = box.querySelector('.msp-disp-sub');
-        if (main) main.textContent = '—'; if (sub) sub.textContent = String((err && err.message) || err);
         box.__kycDone = false;
+        if (autoRetryBox(box, '__kycDone', fillKycBoxes, host)) { if (sub) sub.innerHTML = '<span class="dim small">Thoda busy hai — khud dobara load ho raha hai…</span>'; return; }
+        if (main) main.textContent = '—'; if (sub) sub.textContent = String((err && err.message) || err);
       });
     });
   }
@@ -2392,7 +2405,10 @@ FF.pages = FF.pages || {};
         const list = box.querySelector('.msp-age-list');
         let sc; try { sc = JSON.parse(box.dataset.mspAge); } catch { return; }
         const node = FF.stockAge.nodeFor(sc);
-        if (!node) { list.innerHTML = `<span class="dim small">${FF.stockAge.error ? esc(FF.stockAge.error) : 'Ageing data nahi mila'}</span>`; return; }
+        if (!node) {
+          if (FF.stockAge.error && autoRetryBox(box, '__ageNo', () => fillAgeBoxes(host), host)) { list.innerHTML = '<span class="dim small">Thoda busy hai — khud dobara load ho raha hai…</span>'; return; }
+          list.innerHTML = `<span class="dim small">${FF.stockAge.error ? esc(FF.stockAge.error) : 'Ageing data nahi mila'}</span>`; return;
+        }
         const a = ageSplit(node);
         const max = Math.max(1, ...a.n);
         list.innerHTML = AGE_BUCKETS.map((b, i) => `<button type="button" class="msp-age-row ${b.tone}" data-msp-age-b="${i}" title="${esc(b.label)} wale tags dekho"><span>${b.label}</span><i style="--w:${Math.round((a.n[i] / max) * 100)}%"></i><b>${U.fmt(a.n[i])}</b></button>`).join('')
@@ -2688,7 +2704,7 @@ FF.pages = FF.pages || {};
   function barcodeSuggest(q, limit) {
     const want = normBar(q);
     const idx = state.full || state.light;
-    if (!idx || !idx.bars || !idx.bars.size) { try { warmFull(); } catch { /* ignore */ } return { pending: true, items: [] }; }
+    if (!idx || !idx.bars || !idx.bars.size) { try { warmFull({ barcodes: true }); } catch { /* ignore */ } return { pending: true, items: [] }; }
     if (want.length < 3) return { pending: false, items: [] };
     const cap = Math.max(1, Math.min(30, Number(limit) || 12));
     const items = [];

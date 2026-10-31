@@ -1649,7 +1649,7 @@ window.FF = window.FF || {};
         });
         sugRef = sug;
         if (sug && sug.refresh && FF.masterSearch.onIndexReady) FF.masterSearch.onIndexReady(() => { try { if (barBox.isConnected && document.activeElement === barBox) sug.refresh(); } catch { /* ignore */ } });
-        if (FF.masterSearch.warmFull) { try { FF.masterSearch.warmFull(); } catch { /* ignore */ } }
+        if (FF.masterSearch.warmFull) { try { FF.masterSearch.warmFull({ barcodes: true }); } catch { /* ignore */ } }
       }
     } catch (err) { console.warn('fastag barcode suggest:', err && err.message); }
     startIndexWatch();
