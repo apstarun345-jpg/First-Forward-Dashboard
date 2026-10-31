@@ -1361,7 +1361,7 @@ window.FF = window.FF || {};
 
   const GV = {
     DATASETS, preload, refresh, need, get, error, reset, enabled, wanted, retryNow, on,
-    normClass, classGroup, clsNum,
+    normClass, classGroup, clsNum, configuredGroup,
     rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, masterTlIds, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS, reportMonthBins, reportSheetBins,
     mapping, mappingWarnings, ensureAssignmentMap, stockStatusKind,

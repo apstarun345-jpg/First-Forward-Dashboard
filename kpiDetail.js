@@ -1550,6 +1550,15 @@ window.FF = window.FF || {};
     const kicker = 'FASTag KYC';
     FF.app.openDrawer({ kicker, title, sub: 'EIR sheet · CUSTOMER_FULL_KYC', body: U.spinner('KYC detail calculate ho raha hai…'), wide: true, loading: true });
     try {
+      // 🟩 v3.125.24 — GV agent / TL (Master Search box): GV Master tag IDs → EIR KYC; class tiles + class table.
+      if (filter.gv) {
+        const rows = await FF.model.loadGvKycMonthly(filter);
+        const cur = U.ymKey(new Date()), m = { cur, last: U.prevMonthKey(cur) };
+        const lbl = { [m.cur]: U.labelYM(m.cur, true), [m.last]: U.labelYM(m.last, true) };
+        const note = `<p class="dim small kyc-note">🟩 GV: GV Master ke issued tag IDs (${filter.tl ? 'TL ID' : 'agent ID'} <b>${esc(filter.id)}</b>, last + current month) ko EIR me TAG ID se match karke CUSTOMER_FULL_KYC. Class = GV Master CCH (Settings → GV class map). GV Master issued <b>${U.fmt(rows.issued || 0)}</b> · EIR me mila <b>${U.fmt(rows.matched || 0)}</b>. KYC % = Full ÷ (Full + Not); blank = EIR me KYC khali / tag EIR me nahi.</p>`;
+        FF.app.openDrawer({ kicker, title, sub: `GV Master × EIR · ${lbl[m.last]} vs ${lbl[m.cur]}`, body: `${kycTiles(rows, m, lbl)}${note}${kycClassSection(rows, m, lbl)}`, wide: true, replace: true });
+        return;
+      }
       const rows = await FF.model.loadKycPeople(filter);
       const cur = U.ymKey(new Date()), m = { cur, last: U.prevMonthKey(cur) };
       const lbl = { [m.cur]: U.labelYM(m.cur, true), [m.last]: U.labelYM(m.last, true) };

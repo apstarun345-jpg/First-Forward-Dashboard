@@ -553,13 +553,15 @@ window.FF = window.FF || {};
     const cur = U.ymKey(new Date()), prev = U.prevMonthKey(cur);
     const id = String((f && f.id) || '').trim().replace(/'/g, '');
     if (!id) return [];
-    const key = `${cur}|${kc.join(',')}|${f.tl ? 'tl' : 'agent'}|${id}`;
+    const key = `${cur}|${kc.join(',')}|${f.tl ? 'tl' : 'agent'}|${id}|${FF.config.gvClassMapVersion ? FF.config.gvClassMapVersion() : ''}`;
     const hit = gvKycCache.get(key);
     if (hit && Date.now() - hit.at < 10 * 60e3) return hit.rows;
     const who = f.tl ? [g.tlId, g.gvTlId].filter(Boolean).map((c) => `${c} = '${id}'`).join(' or ') : `${g.uniqueId} = '${id}'`;
-    const clsCol = g.vClass || g.cch;
+    // Class wahi jo baaki GV boxes (Issued this month etc.) me: CCH (G) + Settings → GV class map, fallback VEHICLE_CLASS (F).
+    const cchCol = g.cch || g.vClass, vcCol = g.vClass || g.cch;
+    const gvGroup = (cch, vc) => (FF.gv && FF.gv.configuredGroup ? FF.gv.configuredGroup(cch, vc || cch) : classGroup(vc || cch));
     const q = { ...(opts || {}), priority: true, timeoutMs: 60000 };
-    const t = await D.query(g.tab || 'GV Master', `select ${g.tagId}, ${g.date}, ${clsCol} where (${who}) and ${g.date} >= date '${prev}-01'`, q);
+    const t = await D.query(g.tab || 'GV Master', `select ${g.tagId}, ${g.date}, ${cchCol}, ${vcCol} where (${who}) and ${g.date} >= date '${prev}-01'`, q);
     const tags = new Map();   // TAG_ID → { ym, group }
     for (const r of t.rows || []) {
       const tag = U.clean(D.identifierText ? D.identifierText(r[0]) : D.cellText(r[0])).toUpperCase();
@@ -567,7 +569,7 @@ window.FF = window.FF || {};
       if (!tag || !d) continue;
       const ym = U.ymKey(d);
       if (ym !== cur && ym !== prev) continue;
-      tags.set(tag, { ym, group: classGroup(D.cellText(r[2])) });
+      tags.set(tag, { ym, group: gvGroup(D.cellText(r[2]), D.cellText(r[3])) });
     }
     const kycOfTag = new Map();
     const ids = [...tags.keys()].filter((x) => /^[A-Z0-9]+$/.test(x));

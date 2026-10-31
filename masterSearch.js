@@ -2640,7 +2640,7 @@ FF.pages = FF.pages || {};
     const dl = t.closest('[data-msp-age-dl]');
     if (dl) { e.preventDefault(); e.stopPropagation(); const box = dl.closest('[data-msp-age]'); if (box) downloadAgeAll(box).catch((err) => U.toast(String((err && err.message) || err), 'err')); return; }
     const kbox = t.closest('[data-msp-kyc-box]');
-    if (kbox) { e.preventDefault(); e.stopPropagation(); try { const sp = JSON.parse(kbox.dataset.mspKycBox); if (sp.f && sp.f.gv) { U.toast('GV KYC: GV Master ke issued tag IDs ka EIR me KYC status (last + current month)', 'info'); return; } if (FF.kycDetail) FF.kycDetail.open({ title: `${sp.t} · FASTag KYC`, filter: sp.f }); } catch { /* ignore */ } return; }
+    if (kbox) { e.preventDefault(); e.stopPropagation(); try { const sp = JSON.parse(kbox.dataset.mspKycBox); if (FF.kycDetail) FF.kycDetail.open({ title: `${sp.t} · FASTag KYC`, filter: sp.f }); } catch { /* ignore */ } return; }
     const dbox = t.closest('[data-msp-disp-box]');
     if (dbox) { e.preventDefault(); e.stopPropagation(); openDispDrawer(dbox); return; }
     const row = t.closest('[data-msp-age-b]');

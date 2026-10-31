@@ -95,3 +95,25 @@ test('v3.125.23: KYC detail has class tiles (no overall), sortable agent table',
   const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
   assert.match(css, /\.msp-kyc-box \.kyc-tc \{ flex-direction: row;/);
 });
+
+test('v3.125.24: GV KYC class uses CCH + Settings GV class map (same as Issued box); GV box opens a GV drawer', async () => {
+  require(path.join(ROOT, 'gv.js'));
+  FF.config.gvClassCch = { enabled: true, groups: { VC4: ['CAR'], VC20: [], VC5: [] } };
+  const g = FF.config.gv.master;
+  const now = new Date();
+  const d = { v: `Date(${now.getFullYear()},${now.getMonth()},2)` };
+  const sqls = [];
+  FF.data.query = async (sheet, sql) => {
+    sqls.push(sql);
+    if (sheet === (g.tab || 'GV Master')) return { rows: [[{ v: 'T1' }, d, { v: 'CAR' }, { v: '7' }]] };
+    return { rows: [[{ v: 'T1' }, { v: 'TRUE' }, { v: '' }]] };
+  };
+  const rows = await FF.model.loadGvKycMonthly({ gv: 1, id: 'CCHTEST1' }, {});
+  assert.match(sqls[0], new RegExp(`select ${g.tagId}, ${g.date}, ${g.cch}, ${g.vClass} where`));
+  assert.equal(rows[0].group, 'VC4', 'CCH map wins over VEHICLE_CLASS 7');
+  const fs = require('node:fs');
+  const kd = fs.readFileSync(path.join(ROOT, 'kpiDetail.js'), 'utf8');
+  assert.match(kd, /if \(filter\.gv\) \{\s*const rows = await FF\.model\.loadGvKycMonthly\(filter\)/);
+  const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
+  assert.doesNotMatch(ms, /GV KYC: GV Master ke issued tag IDs ka EIR me KYC status/);
+});
