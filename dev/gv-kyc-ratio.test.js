@@ -129,3 +129,14 @@ test('v3.125.24: GV Issued box takes VC20 from the GV Master ledger when the GV 
   const keep = sheetFirstGroups({ VC4: 10, comm: 6, total: 16, split: true, VC20: 2 }, { VC4: 10, VC20: 5, 'VC5+': 1, total: 16 });
   assert.equal(keep.VC20, 2, 'non-zero sheet VC20 still wins');
 });
+
+test('v3.125.25: empty GV REPORT row falls back to the GV Master ledger (VC20 kept); Master Search box uses classBins', () => {
+  const fs = require('node:fs');
+  const mp = fs.readFileSync(path.join(ROOT, 'masterProfile.js'), 'utf8');
+  const fnSrc = /function sheetFirstGroups[\s\S]*?\n  \}\n/.exec(mp)[0];
+  const sheetFirstGroups = new Function('num', `${fnSrc}; return sheetFirstGroups;`)((v) => Number(v) || 0);
+  const out = sheetFirstGroups({ VC4: 0, comm: 0, total: 0, split: false }, { VC4: 80, VC20: 11, 'VC5+': 65, total: 156 });
+  assert.deepEqual([out.VC4, out.VC20, out['VC5+'], out.source], [80, 11, 65, 'tag ledger']);
+  const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
+  assert.match(ms, /mix\(bins\.cur\) \|\| mix\(cb\.cur\)/);
+});

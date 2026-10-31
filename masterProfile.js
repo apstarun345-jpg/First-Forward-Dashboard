@@ -151,6 +151,8 @@ window.FF = window.FF || {};
       VC4: num(ledgerBins.VC4), VC20: num(ledgerBins.VC20), 'VC5+': num(ledgerBins['VC5+']), total: num(ledgerBins.total)
     } : null;
     out.ledger = ledger;
+    // Sheet row khaali (total 0) par ledger me tags hain → sheet ka 0 nahi, ledger (GV Master) dikhao.
+    if (sheetBins && !num(sheetBins.total) && !num(sheetBins.VC4) && !num(sheetBins.vc4) && ledger && ledger.total > 0) sheetBins = null;
     if (!sheetBins) {
       if (!ledger) return out;
       Object.assign(out, { VC4: ledger.VC4, VC20: ledger.VC20, 'VC5+': ledger['VC5+'], total: ledger.total, comm: ledger.VC20 + ledger['VC5+'], source: 'tag ledger', mix: 'ledger' });

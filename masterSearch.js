@@ -1744,8 +1744,10 @@ FF.pages = FF.pages || {};
       const vcTiles = (v, total) => `<div class="msp-vcs">${[['VC4', 'v4'], ['VC20', 'v20'], ['VC5+', 'v5']].map(([k, c]) => `<span class="vc ${c}"><i>${k}</i><b>${U.fmt((v && v[k]) || 0)}</b></span>`).join('')}${total != null ? `<span class="vc tt"><i>Total</i><b>${U.fmt(total)}</b></span>` : ''}</div>`;
       const mix = (b) => (b && (num(b.VC4) || num(b.VC20) || num(b['VC5+'])) ? vcTiles(b) : '');
       const stockMix = mix(bins.stock) || vcTiles({ VC4: s.vc4, 'VC5+': s.comm });
-      const curMix = mix(bins.cur) || vcTiles({ VC4: t.curVc4, 'VC5+': t.curComm });
-      const lastMix = mix(bins.last) || vcTiles({ VC4: t.lastVc4, 'VC5+': t.lastComm });
+      // Sheet bins khaali → GV Master / EIR tag ledger (pr.classBins) — isme VC20 alag hota hai (pehle VC20 hamesha 0 dikhta tha).
+      const cb = pr.classBins || {};
+      const curMix = mix(bins.cur) || mix(cb.cur) || vcTiles({ VC4: t.curVc4, 'VC5+': t.curComm });
+      const lastMix = mix(bins.last) || mix(cb.last) || vcTiles({ VC4: t.lastVc4, 'VC5+': t.lastComm });
       const who = isTl ? `tl=${encodeURIComponent(pr.name)}${pr.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.id)}` : ''}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
       const spec = (scope, ym) => `src=${ch}&scope=${scope}${ym ? `&ym=${encodeURIComponent(ym)}` : ''}&${who}`;
       const peopleSpec = `src=${ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`;
@@ -1818,7 +1820,9 @@ FF.pages = FF.pages || {};
       const planSub = tvcPlan.rows.map((x) => `${esc(x.k)}: ${U.fmt(x.rate, true)}/day × ${U.fmt(days)} − stock ${U.fmt(x.stock)}${x.basis ? ` (${x.basis} rate)` : ''}`).join(' · ');
       // ---- v3.96 — simple mini tables: VC4 / VC20 / VC5+ + Total
       const miniHtml = (vals, total, tail) => `${vcTiles(vals, total)}${tail ? `<span class="msp-mini-tail">${tail}</span>` : ''}`;
-      const curBins = (bins.cur && (num(bins.cur.VC4) || num(bins.cur.VC20) || num(bins.cur['VC5+']))) ? { VC4: num(bins.cur.VC4), VC20: num(bins.cur.VC20), 'VC5+': num(bins.cur['VC5+']) } : { VC4: num(t.curVc4), VC20: 0, 'VC5+': num(t.curComm) };
+      const hasB = (b) => b && (num(b.VC4) || num(b.VC20) || num(b['VC5+']));
+      const srcB = hasB(bins.cur) ? bins.cur : hasB(cb.cur) ? cb.cur : null;
+      const curBins = srcB ? { VC4: num(srcB.VC4), VC20: num(srcB.VC20), 'VC5+': num(srcB['VC5+']) } : { VC4: num(t.curVc4), VC20: 0, 'VC5+': num(t.curComm) };
       const expTotal = Math.round((p1 && p1.basis && Number.isFinite(Number(p1.basis.projectedCurrent))) ? Number(p1.basis.projectedCurrent) : (p1 && Number.isFinite(Number(p1.total)) ? Number(p1.total) : 0));
       const expSplit = (() => {
         const sum = curBins.VC4 + curBins.VC20 + curBins['VC5+'];
