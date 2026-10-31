@@ -7226,3 +7226,30 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 .msp-kyc-box .msp-disp-sub { display: block; width: 100%; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .kyc-trow:not(.kyc-thead) { background: rgba(255,255,255,.05); } }
 :root[data-theme="dark"] .kyc-trow:not(.kyc-thead) { background: rgba(255,255,255,.05); }
+/* 🪪 v3.125.23 — KYC detail: class tiles + sortable agent / TL table */
+.kyc-tiles-cls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.kyc-tiles-cls .kyc-t-h { font-size: 14px; opacity: 1; font-weight: 800; margin-bottom: 6px; }
+.kyc-cms { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.kyc-cm { display: flex; flex-direction: column; gap: 1px; }
+.kyc-cm small { font-size: 11px; opacity: .7; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.kyc-cm > b { font-size: 24px; font-weight: 800; line-height: 1.15; }
+.kyc-cm em { font-style: normal; font-size: 12px; }
+@media (max-width: 760px) { .kyc-tiles-cls { grid-template-columns: 1fr; } }
+.kyc-ptbl th.kyc-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.kyc-ptbl th.kyc-sort:hover { background: rgba(37, 99, 235, .08); }
+.kyc-ptbl th.kyc-sort.on { color: var(--brand, #1d4ed8); }
+.kyc-ptbl th.kyc-sort i { font-style: normal; font-size: 10px; }
+.kyc-ptbl td { vertical-align: middle; }
+.kyc-ptbl .kyc-nm b { display: block; }
+.kyc-ptbl .kyc-nm small, .kyc-ptbl td.num small { display: block; font-size: 11px; opacity: .7; font-weight: 500; white-space: nowrap; }
+.kyc-ptbl .kyc-gc b { display: block; }
+.kyc-ptbl .kyc-pctc .kyc-bar { display: block; margin: 3px 0 0 auto; width: 70px; }
+.kyc-flag { color: #dc2626; margin-left: 2px; }
+/* Master Search KYC box — compact table (bade numbers wrap nahi honge) */
+.msp-kyc-box .kyc-table { gap: 2px; margin-top: 2px; }
+.msp-kyc-box .kyc-trow { padding: 3px 6px; grid-template-columns: 46px 1fr 1fr; font-size: 12px; }
+.msp-kyc-box .kyc-tc { flex-direction: row; justify-content: flex-end; align-items: baseline; gap: 6px; }
+.msp-kyc-box .kyc-tc .kyc-pct, .msp-kyc-box .kyc-tc b { display: inline; font-size: 13px; line-height: 1.2; margin: 0; }
+.msp-kyc-box .kyc-tc .kyc-cnt, .msp-kyc-box .kyc-tc .kyc-cnt b { display: inline; font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; line-height: 1.2; }
+.msp-kyc-box .kyc-thead span { font-size: 10px; }
+.msp-kyc-box .kyc-vlbl { font-size: 12px; }

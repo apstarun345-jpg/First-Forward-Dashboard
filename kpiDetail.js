@@ -1447,21 +1447,20 @@ window.FF = window.FF || {};
     o.total = o.full + o.not; o.issued = o.total + o.pending; o.pct = o.total ? (o.full / o.total) * 100 : null;
     return o;
   }
+  /** v3.125.23 — Upar overall % nahi: VC4 · VC20 · VC5+ ke tiles (last + current month: % · KYC / Total · Not KYC). */
   function kycTiles(rows, m, lbl) {
-    const one = (ym, name) => {
-      const o = kycSum(rows, (r) => r.ym === ym);
-      return `<div class="kyc-tile"><div class="kyc-t-h">${esc(name)} · ${esc(lbl[ym])}</div><div class="kyc-t-v">${kPct(o.pct)}</div>
-        <div class="kyc-t-s">Issued <b>${U.fmt(o.issued)}</b> · Checked <b>${U.fmt(o.total)}</b></div>
-        <div class="kyc-t-s"><span class="kyc-ok">Full KYC ${U.fmt(o.full)}</span> · <span class="kyc-bad">Not KYC ${U.fmt(o.not)}</span> · <span class="kyc-pend">Pending ${U.fmt(o.pending)}</span></div></div>`;
+    const part = (ym, g) => {
+      const o = kycSum(rows, (r) => r.ym === ym && r.group === g);
+      return `<div class="kyc-cm"><small>${esc(lbl[ym])}</small><b class="${kTone(o.pct, 50)}">${kPct(o.pct)}</b><em>KYC <b>${U.fmt(o.full)}</b> / ${U.fmt(o.total)}</em><em class="kyc-bad">Not KYC ${U.fmt(o.not)}${o.pending ? ` <span class="kyc-pend">· blank ${U.fmt(o.pending)}</span>` : ''}</em></div>`;
     };
-    return `<div class="kyc-tiles">${one(m.last, 'Last month')}${one(m.cur, 'Current month')}</div>`;
+    return `<div class="kyc-tiles kyc-tiles-cls">${kGroups.map((g) => `<div class="kyc-tile"><div class="kyc-t-h">${g}</div><div class="kyc-cms">${part(m.last, g)}${part(m.cur, g)}</div></div>`).join('')}</div>`;
   }
   function kycClassSection(rows, m, lbl) {
     const cell = (ym, g) => {
       const o = kycSum(rows, (r) => r.ym === ym && (!g || r.group === g));
       return `<td class="num">${U.fmt(o.full)}</td><td class="num">${U.fmt(o.not)}</td><td class="num dim">${U.fmt(o.pending)}</td><td class="num"><b class="${kTone(o.pct, kycSum(rows, (r) => r.ym === ym).pct)}">${kPct(o.pct)}</b></td>`;
     };
-    const body = kGroups.map((g) => `<tr><td><b>${g}</b></td>${cell(m.last, g)}${cell(m.cur, g)}</tr>`).join('') + `<tr class="kyc-total"><td><b>Total</b></td>${cell(m.last, '')}${cell(m.cur, '')}</tr>`;
+    const body = kGroups.map((g) => `<tr><td><b>${g}</b></td>${cell(m.last, g)}${cell(m.cur, g)}</tr>`).join('');
     const base = rows.some((r) => r.ym === m.cur && r.kyc !== 'other') ? m.cur : m.last;
     const per = kGroups.map((g) => ({ g, o: kycSum(rows, (r) => r.ym === base && r.group === g) })).filter((x) => x.o.total > 0);
     let call = '';
@@ -1500,15 +1499,26 @@ window.FF = window.FF || {};
     }).filter((o) => o.t.issued > 0).sort((a, b) => b.t.not - a.t.not || b.t.pending - a.t.pending);
     return { list, ref };
   }
+  /** v3.125.23 — Agent / TL table: saaf columns + har header par click = sort (▲/▼). Issued · KYC · Not KYC · KYC % · class-wise. */
+  const KYC_COLS = [
+    ['issued', 'Issued', 'Total issued tags (Full + Not + blank)'], ['full', 'KYC', 'Full KYC (TRUE)'], ['not', 'Not KYC', 'Not KYC (FALSE)'],
+    ['pct', 'KYC %', 'Full ÷ (Full + Not)'], ['notpct', 'Not KYC %', 'Not ÷ (Full + Not)'],
+    ['VC4', 'VC4', 'VC4 KYC % (KYC / Total)'], ['VC20', 'VC20', 'VC20 KYC % (KYC / Total)'], ['VC5+', 'VC5+', 'VC5+ KYC % (KYC / Total)']
+  ];
   function kycPeopleSection(rows, m, lbl, by, icon, head) {
     const mk = (ym) => {
       const { list, ref } = kycPeople(rows, ym, by);
-      const body = list.slice(0, 400).map((o, i) => {
+      const num = (v) => (v === null || v === undefined ? -1 : Number(v.toFixed ? v.toFixed(3) : v));
+      const body = list.slice(0, 1000).map((o, i) => {
         const tone = kTone(o.t.pct, ref);
-        const flag = o.t.total >= 5 && o.t.pct !== null && o.t.pct < ref * 0.5 ? '⚠' : '';
-        const gc = kGroups.map((k) => `<td class="num ${kTone(o.g[k].pct, ref)}">${o.g[k].total ? `${kPct(o.g[k].pct)} <small class="dim">${U.fmt(o.g[k].full)}/${U.fmt(o.g[k].total)}</small>` : '—'}</td>`).join('');
-        return `<tr class="kyc-row" data-kyc-text="${esc(`${o.name} ${o.tl} ${o.ch}`.toLowerCase())}"><td class="num dim">${i + 1}</td><td><b>${esc(o.name)}</b> ${flag}</td>${by === 'tl' ? `<td class="num">${U.fmt(o.agents.size)}</td>` : `<td>${esc(o.tl)}</td>`}<td>${esc(o.ch === 'GV Partner' ? 'GV' : 'FF')}</td>
-          <td class="num">${U.fmt(o.t.issued)}</td><td class="num kyc-ok">${U.fmt(o.t.full)}</td><td class="num kyc-bad">${U.fmt(o.t.not)}</td><td class="num dim">${U.fmt(o.t.pending)}</td><td class="num"><b class="${tone}">${kPct(o.t.pct)}</b> ${kBar(o.t.pct, tone)}</td>${gc}</tr>`;
+        const flag = o.t.total >= 5 && o.t.pct !== null && o.t.pct < ref * 0.5 ? ' <span class="kyc-flag" title="KYC % average ke aadhe se kam">⚠</span>' : '';
+        const notPct = o.t.total ? (o.t.not / o.t.total) * 100 : null;
+        const gc = kGroups.map((k) => `<td class="num kyc-gc" data-v="${num(o.g[k].pct)}">${o.g[k].total ? `<b class="${kTone(o.g[k].pct, ref)}">${kPct(o.g[k].pct)}</b><small>${U.fmt(o.g[k].full)} / ${U.fmt(o.g[k].total)}</small>` : '<span class="dim">—</span>'}</td>`).join('');
+        const nm = o.name === 'Unknown' && o.ch === 'GV Partner' ? 'GV Partner (agent naam EIR me nahi)' : o.name;
+        return `<tr class="kyc-row" data-kyc-text="${esc(`${nm} ${o.tl} ${o.ch}`.toLowerCase())}" data-s-name="${esc(String(nm).toLowerCase())}" data-s-issued="${o.t.issued}" data-s-full="${o.t.full}" data-s-not="${o.t.not}" data-s-pct="${num(o.t.pct)}" data-s-notpct="${num(notPct)}" data-s-VC4="${num(o.g.VC4.pct)}" data-s-VC20="${num(o.g.VC20.pct)}" data-s-VC5+="${num(o.g['VC5+'].pct)}">
+          <td class="num dim kyc-rn">${i + 1}</td><td class="kyc-nm"><b>${esc(nm)}</b>${flag}<small>${by === 'tl' ? `${U.fmt(o.agents.size)} agents` : esc(o.tl)} · ${o.ch === 'GV Partner' ? '🟩 GV' : '🟦 FF'}</small></td>
+          <td class="num"><b>${U.fmt(o.t.issued)}</b>${o.t.pending ? `<small class="kyc-pend">blank ${U.fmt(o.t.pending)}</small>` : ''}</td><td class="num kyc-ok">${U.fmt(o.t.full)}</td><td class="num kyc-bad">${U.fmt(o.t.not)}</td>
+          <td class="num kyc-pctc"><b class="${tone}">${kPct(o.t.pct)}</b>${kBar(o.t.pct, tone)}</td><td class="num kyc-bad">${kPct(notPct)}</td>${gc}</tr>`;
       }).join('');
       kycUi.csv[ym === m.cur ? 'cur' : 'last'] = kycUi.csv[ym === m.cur ? 'cur' : 'last'] || {};
       const csvRows = list.map((o) => [o.name, by === 'tl' ? o.agents.size : o.tl, o.ch, o.t.issued, o.t.full, o.t.not, o.t.pending, o.t.pct === null ? '' : o.t.pct.toFixed(1), ...kGroups.map((k) => (o.g[k].pct === null ? '' : o.g[k].pct.toFixed(1)))]);
@@ -1517,9 +1527,22 @@ window.FF = window.FF || {};
       return { body, count: list.length };
     };
     const cur = mk(m.cur), last = mk(m.last);
-    const th = `<th class="num">#</th><th>${head}</th><th${by === 'tl' ? ' class="num"' : ''}>${by === 'tl' ? 'Agents' : 'TL'}</th><th>Ch</th><th class="num">Issued</th><th class="num">Full KYC</th><th class="num">Not KYC</th><th class="num">Pending</th><th class="num">KYC %</th><th class="num">VC4 %</th><th class="num">VC20 %</th><th class="num">VC5+ %</th>`;
-    const pane = (id, d) => `<div class="kyc-pane" data-kyc-pane-id="${id}"${id === kycUi.pane ? '' : ' hidden'}><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${th}</tr></thead><tbody>${d.body || '<tr><td colspan="12" class="dim">No data</td></tr>'}</tbody></table></div></div>`;
-    return `<section class="kd-sec kyc-people" data-kyc-by="${by}"><h4>${icon} ${esc(head)}-wise KYC · sabse zyada Not KYC pehle <small class="dim">(⚠ = KYC % average ke aadhe se kam)</small></h4>${pane('cur', cur)}${pane('last', last)}</section>`;
+    const th = `<th class="num">#</th><th class="kyc-sort" data-kyc-sort="name" title="Naam se sort">${head} <i></i></th>${KYC_COLS.map(([k, l, t]) => `<th class="num kyc-sort${k === 'not' ? ' on desc' : ''}" data-kyc-sort="${k}" title="${esc(t)} · click = sort">${l} <i>${k === 'not' ? '▼' : ''}</i></th>`).join('')}`;
+    const pane = (id, d) => `<div class="kyc-pane" data-kyc-pane-id="${id}"${id === kycUi.pane ? '' : ' hidden'}><div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl kyc-ptbl"><thead><tr>${th}</tr></thead><tbody>${d.body || '<tr><td colspan="11" class="dim">No data</td></tr>'}</tbody></table></div></div>`;
+    return `<section class="kd-sec kyc-people" data-kyc-by="${by}"><h4>${icon} ${esc(head)}-wise KYC <small class="dim">· header par click = sort ▲▼ · ⚠ = KYC % average ke aadhe se kam</small></h4>${pane('cur', cur)}${pane('last', last)}</section>`;
+  }
+  /** Header click → us column par sort (pehli baar bada→chhota, phir ulta). # dobara 1..n. */
+  function kycSortTable(th) {
+    const table = th.closest('table'), tb = table && table.tBodies[0]; if (!tb) return;
+    const key = th.dataset.kycSort;
+    const desc = th.classList.contains('on') ? !th.classList.contains('desc') : key !== 'name';
+    table.querySelectorAll('th.kyc-sort').forEach((h) => { h.classList.remove('on', 'desc'); const i = h.querySelector('i'); if (i) i.textContent = ''; });
+    th.classList.add('on'); if (desc) th.classList.add('desc');
+    const ic = th.querySelector('i'); if (ic) ic.textContent = desc ? '▼' : '▲';
+    const val = (tr) => (key === 'name' ? tr.dataset.sName || '' : Number(tr.getAttribute(`data-s-${key}`)));
+    const rowsArr = [...tb.querySelectorAll('tr.kyc-row')];
+    rowsArr.sort((a, b) => { const x = val(a), y = val(b); const c = key === 'name' ? String(x).localeCompare(String(y)) : x - y; return desc ? -c : c; });
+    rowsArr.forEach((tr, i) => { const rn = tr.querySelector('.kyc-rn'); if (rn) rn.textContent = String(i + 1); tb.appendChild(tr); });
   }
   async function kycOpen(opts) {
     const o = opts || {}, filter = o.filter || {};
@@ -1543,6 +1566,8 @@ window.FF = window.FF || {};
     }
   }
   document.addEventListener('click', (e) => {
+    const sth = e.target.closest && e.target.closest('th[data-kyc-sort]');
+    if (sth) { e.preventDefault(); kycSortTable(sth); return; }
     const chip = e.target.closest && e.target.closest('[data-kyc-pane]');
     if (chip) {
       kycUi.pane = chip.dataset.kycPane === 'last' ? 'last' : 'cur';
@@ -1561,7 +1586,7 @@ window.FF = window.FF || {};
     const t = q.value.trim().toLowerCase();
     document.querySelectorAll('.kyc-row').forEach((tr) => { tr.hidden = !!t && !String(tr.dataset.kycText || '').includes(t); });
   });
-  FF.kycDetail = { open: kycOpen };
+  FF.kycDetail = { open: kycOpen, _tiles: kycTiles, _people: kycPeopleSection, _sort: kycSortTable };
 
   /** ⬇ v214 — Master Search full report: kisi bhi spec + period ki tag-level issuance rows (drawer state ko chhede bina). */
   function rawRowsFor(spec, p) { return loadRaw({ ...spec, _pre: true }, p); }

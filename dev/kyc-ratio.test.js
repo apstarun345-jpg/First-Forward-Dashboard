@@ -54,7 +54,7 @@ test('kycRatio reports pending (blank CUSTOMER_FULL_KYC) separately from the % b
 
 test('KYC detail dashboard: class / channel / agent / TL sections, pending, search, Excel', () => {
   const k = read('kpiDetail.js');
-  assert.match(k, /FF\.kycDetail = \{ open: kycOpen \}/);
+  assert.match(k, /FF\.kycDetail = \{ open: kycOpen,/);
   assert.match(k, /loadKycPeople\(filter\)/);
   for (const t of ['Class-wise KYC', 'Channel-wise KYC', 'Sabse zyada KYC %', 'Sabse zyada Not KYC', 'data-kyc-csv', 'data-kyc-q', 'Pending']) assert.ok(k.includes(t), t);
   assert.match(k, /kycPeopleSection\(rows, m, lbl, 'agent'/);

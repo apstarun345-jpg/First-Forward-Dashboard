@@ -82,3 +82,16 @@ test('v3.125.22: class-wise KYC table shows Total · KYC · % per class (no mont
   assert.match(home, /M\.kycClassHtml\(kycData\.rows, cur, last\)/);
   assert.match(home, /data-kyc-open="1"/);
 });
+
+test('v3.125.23: KYC detail has class tiles (no overall), sortable agent table', () => {
+  const fs = require('node:fs');
+  const kd = fs.readFileSync(path.join(ROOT, 'kpiDetail.js'), 'utf8');
+  assert.match(kd, /kyc-tiles kyc-tiles-cls/);
+  assert.doesNotMatch(kd, /one\(m\.last, 'Last month'\)/);
+  assert.doesNotMatch(kd, /<tr class="kyc-total">/);
+  assert.match(kd, /data-kyc-sort="\$\{k\}"/);
+  assert.match(kd, /function kycSortTable\(th\)/);
+  assert.match(kd, /th\[data-kyc-sort\]/);
+  const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
+  assert.match(css, /\.msp-kyc-box \.kyc-tc \{ flex-direction: row;/);
+});
