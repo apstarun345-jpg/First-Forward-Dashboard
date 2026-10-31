@@ -1669,6 +1669,10 @@ FF.pages = FF.pages || {};
           <span class="badge blue">🔐 ID + mobile verification cannot be disabled</span>
           <button class="btn small primary" id="pl-save-def" style="margin-left:auto">💾 Save Default &amp; Apply to All Links</button>
         </div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px">
+          <button class="btn small" id="pl-recover" title="Sheet history se kho gaye personal links dhoondh kar wapas jodta hai (kuch hatata nahi)">♻ Recover lost personal links</button>
+          <span class="dim small" id="pl-recover-msg">Links list khaali / adhoori ho to sheet history se wapas laao.</span>
+        </div>
       </div>
 
       <div class="card compact-card" style="margin-bottom:12px">
@@ -1877,6 +1881,18 @@ FF.pages = FF.pages || {};
       U.toast('🛡️ Global default access sabhi Personal Links par apply ho gaya ✓', 'ok');
       await draw();
     }, 'Saving…'));
+
+    const recoverBtn = U.$('#pl-recover', body);
+    if (recoverBtn) recoverBtn.addEventListener('click', () => U.withButtonBusy(recoverBtn, async () => {
+      const msg = U.$('#pl-recover-msg', body);
+      const r = await A.api('/api/personal-links/recover', 'GET');
+      if (!r.missing || !r.missing.length) { if (msg) msg.textContent = `Sheet history (${r.scanned} saves) me koi alag kho gaya link nahi mila. Abhi ${r.current} link hain.`; U.toast('Koi kho gaya link nahi mila', 'ok'); return; }
+      const names = r.missing.map((l) => `${l.name} (${l.kind}${l.source === 'gv' ? ', GV' : ''})`).join('\n');
+      if (!window.confirm(`${r.missing.length} link sheet history me mile jo abhi nahi hain:\n\n${names}\n\nWapas jodein? (Jo aapne jaan-boojh kar delete kiye the wo bhi aa sakte hain — baad me delete kar sakte ho.)`)) { if (msg) msg.textContent = `${r.missing.length} link mile — jodna cancel kiya.`; return; }
+      const done = await A.api('/api/personal-links/recover', 'POST', {});
+      U.toast(`♻ ${done.applied} personal link wapas aa gaye ✓`, 'ok');
+      await draw();
+    }, 'Searching…'));
 
     U.$$('.pl-edit', body).forEach((b) => b.addEventListener('click', () => {
       const link = links.find((x) => x.id === b.dataset.id);

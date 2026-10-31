@@ -1419,7 +1419,8 @@ const memTimer = setInterval(() => {
   }
   if (mb >= MEM_HARD_MB) {
     console.error(`🛡️ memory guard: RSS ${mb} MB (${memBreakdown()}) ≥ ${MEM_HARD_MB} MB — clean restart (OOM / 502 se bachne ke liye). Data durable storage me hai.`);
-    setTimeout(() => process.exit(1), 50);
+    // pending durable saves (settings / personal links) restart me kho na jaayein — max 8 s flush, phir exit
+    Promise.race([ (sheetsStore && sheetsStore.drain ? sheetsStore.drain() : Promise.resolve()).catch(() => {}), new Promise((r) => setTimeout(r, 8000)) ]).finally(() => process.exit(1));
   } else if ((heap >= MEM_HEAP_SOFT_MB || mb >= MEM_SOFT_MB + 40) && Date.now() - memGuard.lastSoftAt > 120000) {
     memGuard.lastSoftAt = Date.now(); memGuard.softCount++;
     const trimmed = softTrim();
@@ -1430,6 +1431,47 @@ if (memTimer.unref) memTimer.unref();
 const inflight = new Map(); // url → Promise
 const cacheMs = () => Math.max(0, Number(db.settings.cacheSeconds ?? DEFAULT_CACHE_SECONDS)) * 1000;
 
+/** gviz "COLUMN_ONLY_ONCE": ek hi column select/group by me do baar nahi ho sakta. Jab do settings (jaise tlName aur
+ *  gvId) ek hi letter par aa jaayein to repeat hue column ko `max(X)` bana do aur group by me ek hi baar rakho —
+ *  select ke positions same rehte hain, isliye pages ko kuch badalna nahi padta. Sirf `group by` wali queries. */
+function splitTop(list) {
+  const out = []; let depth = 0, cur = '';
+  for (const ch of String(list)) {
+    if (ch === '(') depth++; else if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) { out.push(cur.trim()); cur = ''; } else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+function dedupeGvizTq(tq) {
+  try {
+    const q = String(tq || '');
+    if (!/\bgroup by\b/i.test(q)) return q;
+    const sm = /^(\s*select\s+)([\s\S]*?)(\s+(?:where|group by|pivot|order by|limit|offset|label|format|options)\b[\s\S]*)$/i.exec(q);
+    if (!sm) return q;
+    const plain = /^[A-Za-z]{1,3}$/;
+    const seen = new Set(); let changed = false;
+    const sel = splitTop(sm[2]).map((it) => {
+      if (!plain.test(it)) return it;
+      const k = it.toUpperCase();
+      if (seen.has(k)) { changed = true; return `max(${it})`; }
+      seen.add(k); return it;
+    });
+    let rest = sm[3];
+    const gm = /(\bgroup by\s+)([\s\S]*?)(\s+(?:pivot|order by|limit|offset|label|format|options)\b|$)/i.exec(rest);
+    if (gm) {
+      const gseen = new Set();
+      const grp = splitTop(gm[2]).filter((it) => {
+        if (!plain.test(it)) return true;
+        const k = it.toUpperCase();
+        if (gseen.has(k)) { changed = true; return false; }
+        gseen.add(k); return true;
+      });
+      rest = rest.slice(0, gm.index) + gm[1] + grp.join(', ') + gm[3] + rest.slice(gm.index + gm[0].length);
+    }
+    return changed ? `${sm[1]}${sel.join(', ')}${rest}` : q;
+  } catch { return String(tq || ''); }
+}
 function upstreamUrl(params) {
   const p = new URLSearchParams();
   p.set('tqx', 'out:json');
@@ -1437,7 +1479,7 @@ function upstreamUrl(params) {
   const sheet = params.get('sheet');
   if (gid) p.set('gid', gid); else if (sheet) p.set('sheet', sheet);
   const tq = params.get('tq');
-  if (tq) p.set('tq', tq);
+  if (tq) p.set('tq', dedupeGvizTq(tq));
   const hdrRows = params.get('headers');
   if (hdrRows && /^\d{1,2}$/.test(hdrRows)) p.set('headers', hdrRows);   // header rows ki ginti (tag-level rows ke liye 1)
   let range = params.get('range');
@@ -3514,6 +3556,7 @@ const EIR_HEADER_MAP = {
   vrnType: ['VRN TYPE'], monthName: ['MONTH NAME'], regNumber: ['REGNUMBER']
 };
 const EIR_REQUIRED_KEYS = ['tagId', 'cls', 'date', 'masterId'];
+const EIR_GV_FALLBACK = { gvId: 'agentId', gvName: 'agentName', gvTl: 'tlName' };
 const normEirHeader = (v) => String(v === null || v === undefined ? '' : v).replace(/^﻿/, '').trim().replace(/\s+/g, ' ').toUpperCase();
 /** gviz cols [{id:'AA',label:'ISSUE_DATE'}] → { found:{date:'AA',…}, missing:[…] }. Duplicate header (jaise 'TL ID') me PEHLA column. */
 function detectEirColumns(cols) {
@@ -3527,7 +3570,13 @@ function detectEirColumns(cols) {
     const hit = names.map(normEirHeader).find((n) => byHeader.has(n));
     if (hit) found[key] = byHeader.get(hit); else missing.push(key);
   });
-  return { found, missing, headerCount: byHeader.size };
+  // GV ID / GV NAME / GV TL columns sheet se hat gaye to purane letters (jo ab kisi aur column par hain) chhodne ke bajaye
+  // agent / TL ke columns use karo — queries dedupe hoti hain (dedupeGvizTq), isliye ek letter do baar aana theek hai.
+  const fallback = [];
+  Object.entries(EIR_GV_FALLBACK).forEach(([key, from]) => {
+    if (!found[key] && found[from]) { found[key] = found[from]; fallback.push(key); }
+  });
+  return { found, missing, fallback, headerCount: byHeader.size };
 }
 const eirAuto = { at: 0, ok: null, error: '', changed: {}, found: {}, missing: [], running: null };
 const eirAutoPublic = () => ({ at: eirAuto.at, ok: eirAuto.ok, error: eirAuto.error, changed: eirAuto.changed, found: eirAuto.found, missing: eirAuto.missing, enabled: !(db.settings && db.settings.eirAutoColumns === false), lastApplied: (db.settings && db.settings.eirAuto) || null });
@@ -3549,11 +3598,14 @@ async function eirAutoDetect(opts) {
       if (lack.length) { eirAuto.ok = false; eirAuto.error = `Required headers not found (${lack.join(', ')}) — column settings NOT changed`; return eirAutoPublic(); }
       const next = { ...(st.eir || {}) }, changed = {};
       Object.entries(det.found).forEach(([k, v]) => { if (next[k] !== v) { changed[k] = [next[k] || '', v]; next[k] = v; } });
-      eirAuto.changed = changed;
+      eirAuto.changed = changed; eirAuto.fallback = det.fallback || [];
       if (Object.keys(changed).length) {
-        db.settings = { ...st, eir: next, eirAuto: { at: new Date().toISOString(), changed } };
+        // db.settings ko REPLACE mat karo (personal-link requests object identity check karti hain) aur persist() bhi nahi:
+        // persist fail hone par poori settings purane snapshot par rollback hoti thi (Apps Script timeouts) aur har 10 min
+        // yahi loop chalta tha. Letters memory me turant lagte hain, har boot (5 s) + har 10 min detect dobara chalta hai,
+        // aur admin ke agle Settings save ke saath durable ho jaate hain.
+        st.eir = next; st.eirAuto = { at: new Date().toISOString(), changed };
         invalidateLiveFeedCaches(); cache.clear();
-        await persist('settings');
         try { recordNotification({ type: 'settings', title: '🔠 EIR columns auto-updated', body: Object.entries(changed).map(([k, [a, b]]) => `${k}: ${a || '–'} → ${b}`).join(' · ') }); } catch { /* notification best-effort */ }
       }
       return eirAutoPublic();
@@ -9371,6 +9423,44 @@ async function handleApi(req, res, url) {
     if (!sheetsStore || typeof sheetsStore.snapshots !== 'function') throw new HttpError(400, 'Ye recovery sirf Google Sheet storage (appsscript backend) ke saath kaam karti hai. Settings → ☁️ Storage & backup me storage connect karo.');
     return sheetsStore;
   };
+  // 🔗 Personal links recovery: settings rollback / restart me kho gaye links sheet history (APP_STORAGE_HISTORY) se wapas.
+  //    GET = sirf dry-run (kuch nahi badalta) · POST { ids? } = jo current me nahi hain unhe jod do (kuch hatata / badalta nahi).
+  if (p === '/api/personal-links/recover' && (method === 'GET' || method === 'POST')) {
+    requireAdmin(user);
+    const store = cloudStore();
+    const body = method === 'POST' ? await readBody(req) : {};
+    const { snapshots } = await store.snapshots({ limit: 60 });
+    const atByRow = new Map();
+    for (const snap of snapshots) for (const e of snap.entries) if (e.kind === 'settings') atByRow.set(e.row, snap.at);
+    const rows = [...atByRow.keys()].slice(0, 48);
+    const found = new Map();   // id → { link, at }
+    let scanned = 0, withLinks = 0;
+    if (rows.length) {
+      const detailed = await store.history({ rows, withData: true });
+      const ordered = detailed.entries.filter((e) => e.kind === 'settings' && e.data).sort((a, b) => (Date.parse(atByRow.get(b.row)) || 0) - (Date.parse(atByRow.get(a.row)) || 0));
+      for (const e of ordered) {
+        let value; try { value = store.decode(e.kind, { v: e.version, data: e.data }); } catch { continue; }
+        scanned++;
+        const list = value && Array.isArray(value.personalLinks) ? value.personalLinks : [];
+        if (list.length) withLinks++;
+        for (const l of list) if (l && l.id && l.token && l.kind && !l.revokedAt && !found.has(l.id)) found.set(l.id, { link: l, at: atByRow.get(e.row) });
+      }
+    }
+    const cur = Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : [];
+    const haveId = new Set(cur.map((l) => l && l.id)), haveToken = new Set(cur.map((l) => l && l.token));
+    const missing = [...found.values()].filter((x) => !haveId.has(x.link.id) && !haveToken.has(x.link.token));
+    const brief = missing.map((x) => ({ id: x.link.id, name: x.link.name, kind: x.link.kind, source: x.link.source || 'ff', enabled: x.link.enabled !== false, lastSeenIn: x.at }));
+    if (method === 'GET') return sendJson(res, 200, { ok: true, dryRun: true, scanned, snapshotsWithLinks: withLinks, current: cur.length, missing: brief });
+    const only = Array.isArray(body && body.ids) ? new Set(body.ids.map(String)) : null;
+    const add = missing.filter((x) => !only || only.has(String(x.link.id))).map((x) => x.link);
+    if (add.length) {
+      if (!Array.isArray(db.settings.personalLinks)) db.settings.personalLinks = [];
+      db.settings.personalLinks.push(...add);
+      await persist('settings');
+      recordNotification({ type: 'settings', title: '🔗 Personal links recovered', body: `${user.name || user.username} recovered ${add.length} personal link(s) from sheet history: ${add.map((l) => l.name).slice(0, 8).join(', ')}`, target: 'admin' });
+    }
+    return sendJson(res, 200, { ok: true, applied: add.length, current: (db.settings.personalLinks || []).length, restored: add.map((l) => ({ id: l.id, name: l.name })) });
+  }
   // 1) Sheet history (APP_STORAGE_HISTORY) — purani saves ki list + unka preview
   if (p === '/api/storage/history' && method === 'GET') {
     requireAdmin(user);
@@ -12785,7 +12875,7 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 // 🔎 EIR header se column letters khud theek karo (boot ke baad + har 10 min). Admin Settings me band kar sakta hai.
 {
-  const eirColBoot = setTimeout(() => { eirAutoDetect({ auto: true }).catch(() => {}); }, 30e3);
+  const eirColBoot = setTimeout(() => { eirAutoDetect({ auto: true }).catch(() => {}); }, 5e3);
   const eirColLoop = setInterval(() => { eirAutoDetect({ auto: true }).catch(() => {}); }, 10 * 60e3);
   if (eirColBoot.unref) eirColBoot.unref();
   if (eirColLoop.unref) eirColLoop.unref();

@@ -129,3 +129,55 @@ test('script: IS_FULL_KYC from the bank goes into CUSTOMER_FULL_KYC (no new colu
   assert.match(script, /function backfillCustomerFullKyc/);
   assert.match(script, /EIR_CONFIG\.ALIASES\[header\]/);
 });
+
+// ---------- gviz COLUMN_ONLY_ONCE (two settings on one letter) ----------
+function loadDedupe() {
+  const a = server.indexOf('function splitTop');
+  const b = server.indexOf('function upstreamUrl');
+  assert.ok(a > 0 && b > a);
+  const ctx = {};
+  vm.runInNewContext(server.slice(a, b) + '\nthis.dedupe = dedupeGvizTq;', ctx);
+  return ctx.dedupe;
+}
+test('dedupeGvizTq: repeated column becomes max(X) in select and appears once in group by', () => {
+  const d = loadDedupe();
+  const out = d("select AA, D, P, AY, AU, AW, count(A), J, L, AW, AX, AV where AA is not null group by AA, D, P, AY, AU, AW, J, L, AW, AX, AV order by AA");
+  assert.equal(out, "select AA, D, P, AY, AU, AW, count(A), J, L, max(AW), AX, AV where AA is not null group by AA, D, P, AY, AU, AW, J, L, AX, AV order by AA");
+  // positions in select unchanged (same item count)
+  assert.equal(out.split('count(A)')[0].split(',').length, 7);
+});
+test('dedupeGvizTq: leaves clean / non-group queries alone and keeps functions in group by', () => {
+  const d = loadDedupe();
+  const q1 = "select J, L, year(AA), month(AA), count(A) where AA is not null group by J, L, year(AA), month(AA)";
+  assert.equal(d(q1), q1);
+  const q2 = "select A, A limit 5";
+  assert.equal(d(q2), q2);
+  const q3 = "select L, L, year(AA), count(A) where AA = date '2026-10-31' group by L, L, year(AA)";
+  assert.equal(d(q3), "select L, max(L), year(AA), count(A) where AA = date '2026-10-31' group by L, year(AA)");
+});
+test('detectEirColumns: missing GV columns fall back to the agent / TL columns (no stale letters)', () => {
+  const { detectEirColumns } = loadDetect();
+  const r = detectEirColumns(colsOf(['TAG_ID', 'CCH', 'ISSUE_DATE', 'TAG_ISSUING_AGENT_ID', 'TAG_ISSUING_AGENT_NAME', 'Master ID', 'TL Name FF']));
+  assert.equal(r.found.gvId, r.found.agentId);
+  assert.equal(r.found.gvName, r.found.agentName);
+  assert.equal(r.found.gvTl, r.found.tlName);
+  assert.deepEqual(Array.from(r.fallback).sort(), ['gvId', 'gvName', 'gvTl']);
+  const r2 = detectEirColumns(colsOf(['TAG_ID', 'GV ID', 'GV NAME', 'TL NAME', 'TL NAME FF', 'TAG_ISSUING_AGENT_ID']));
+  assert.equal(r2.found.gvId, 'B');
+  assert.equal(r2.fallback.length, 0);
+});
+test('auto-detect no longer replaces db.settings or rolls back through persist()', () => {
+  const blk = server.slice(server.indexOf('async function eirAutoDetect'), server.indexOf('async function gvizPageServer'));
+  assert.ok(!/db\.settings = \{/.test(blk));
+  assert.ok(!/persist\('settings'\)/.test(blk));
+  assert.match(server, /process\.exit\(1\)/);
+  assert.match(server, /sheetsStore\.drain\(\)/);
+});
+
+test('personal links recovery endpoint + Settings button exist (dry-run GET, additive POST)', () => {
+  assert.match(server, /\/api\/personal-links\/recover/);
+  assert.match(server, /dryRun: true/);
+  const st = fs.readFileSync(new URL('../settings.js', import.meta.url), 'utf8');
+  assert.match(st, /id="pl-recover"/);
+  assert.match(st, /\/api\/personal-links\/recover/);
+});
