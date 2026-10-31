@@ -2123,7 +2123,11 @@ FF.pages = FF.pages || {};
         out.innerHTML = U.spinner(`“${q}” — data aa raha hai, profile khul raha hai…`);
         const off = onIndexReady(() => {
           if (seq !== runSeq) { off(); return; }
-          if (state.light && !state.light.partial) { off(); run(query, { ...(opts || {}), final: true }); }
+          // Har late sheet aate hi check: match mil gaya ya index pura → dobara run (pura FF REPORT ka wait nahi).
+          const done = !(state.light && state.light.partial);
+          let found = false;
+          try { found = (search(q).people || []).some((p) => !chFilter || chOfP(p) === chFilter); } catch { /* ignore */ }
+          if (done || found) { off(); run(query, { ...(opts || {}), final: done }); }
         });
         return;
       }

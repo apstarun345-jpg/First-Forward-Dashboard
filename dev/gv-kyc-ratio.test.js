@@ -49,5 +49,5 @@ test('Master Search page re-runs a search once a partial index completes (deep l
   const fs = require('node:fs');
   const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
   assert.match(ms, /!groups\.length && state\.light && state\.light\.partial && !\(opts && opts\.final\)/);
-  assert.match(ms, /run\(query, \{ \.\.\.\(opts \|\| \{\}\), final: true \}\)/);
+  assert.match(ms, /if \(done \|\| found\) \{ off\(\); run\(query, \{ \.\.\.\(opts \|\| \{\}\), final: done \}\); \}/);
 });
