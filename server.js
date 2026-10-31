@@ -1382,14 +1382,29 @@ const MEM_HARD_MB = Number(process.env.MEM_HARD_MB) || 470;
 const memGuard = { lastSoftAt: 0, softCount: 0, peakMB: 0 };
 function rssMB() { return Math.round(process.memoryUsage().rss / 1048576); }
 const MEM_HEAP_SOFT_MB = Number(process.env.MEM_HEAP_SOFT_MB) || 290;
+const MEM_CACHE_TRIM_MB = Number(process.env.MEM_CACHE_TRIM_MB) || 455;   // gc ke baad bhi RSS itna ho tabhi cache ghatao
 function heapMB() { return Math.round(process.memoryUsage().heapUsed / 1048576); }
 /** Soft trim = purani AADHI gviz cache entries hatao (poora cache nahi) + chhote page caches. Pehle har 30s poora cache
  *  khali hota tha jabki RSS (V8 freed memory OS ko turant wapas nahi deta) 400 se upar hi rehta — nateeja: har request
  *  Google tak jaati thi (8–24 s) aur site par stock / issuance der se ya khaali dikhte the. */
-function softTrim() {
-  try { let drop = Math.ceil(cache.size / 2); for (const k of [...cache.keys()]) { if (drop-- <= 0) break; cache.delete(k); } } catch { /* ignore */ }
-  try { if (typeof plPageCache !== 'undefined' && plPageCache.clear) plPageCache.clear(); } catch { /* ignore */ }
+function softTrim(opts) {
+  // gc() pehle — aksar RSS wahi se kam ho jaata hai; gviz cache tabhi ghatao jab gc ke baad bhi RSS ooncha ho
+  // (pehle har 2 min me cache aadha ho jaata tha → cache lagbhag khaali → har request Google tak → sheets late / fail).
   try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ }
+  const still = rssMB();
+  if (opts && opts.cacheAlways || still >= MEM_CACHE_TRIM_MB) {
+    try { let drop = Math.ceil(cache.size / 2); for (const k of [...cache.keys()]) { if (drop-- <= 0) break; cache.delete(k); } } catch { /* ignore */ }
+    try { if (typeof plPageCache !== 'undefined' && plPageCache.clear) plPageCache.clear(); } catch { /* ignore */ }
+    try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ }
+    return true;
+  }
+  return false;
+}
+/** RSS ka hisaab: heap vs native (Buffers / external) — Render log se pata chale ki memory kahan ja rahi hai. */
+function memBreakdown() {
+  const m = process.memoryUsage();
+  const mb = (n) => Math.round((n || 0) / 1048576);
+  return `rss ${mb(m.rss)} · heap ${mb(m.heapUsed)}/${mb(m.heapTotal)} · external ${mb(m.external)} · buffers ${mb(m.arrayBuffers)} · cache ${Math.round(cache.bytes / 1048576)} MB/${cache.size}`;
 }
 const memTimer = setInterval(() => {
   const mb = rssMB(), heap = heapMB();
@@ -1397,18 +1412,18 @@ const memTimer = setInterval(() => {
   if (mb >= MEM_HARD_MB && typeof globalThis.gc === 'function' && Date.now() - (memGuard.lastGcAt || 0) > 15000) {
     // Garbage collect first — RSS often holds freed memory; restart only if it is still too high afterwards.
     memGuard.lastGcAt = Date.now();
-    try { softTrim(); } catch { /* ignore */ }
+    try { softTrim({ cacheAlways: true }); } catch { /* ignore */ }
     const after = rssMB();
-    console.warn(`🛡️ memory guard: RSS ${mb} MB → ${after} MB after GC + cache trim (heap ${heapMB()} MB).`);
+    console.warn(`🛡️ memory guard: RSS ${mb} MB → ${after} MB after GC + cache trim (${memBreakdown()}).`);
     if (after < MEM_HARD_MB) return;
   }
   if (mb >= MEM_HARD_MB) {
-    console.error(`🛡️ memory guard: RSS ${mb} MB (heap ${heap} MB) ≥ ${MEM_HARD_MB} MB — clean restart (OOM / 502 se bachne ke liye). Data durable storage me hai.`);
+    console.error(`🛡️ memory guard: RSS ${mb} MB (${memBreakdown()}) ≥ ${MEM_HARD_MB} MB — clean restart (OOM / 502 se bachne ke liye). Data durable storage me hai.`);
     setTimeout(() => process.exit(1), 50);
   } else if ((heap >= MEM_HEAP_SOFT_MB || mb >= MEM_SOFT_MB + 40) && Date.now() - memGuard.lastSoftAt > 120000) {
     memGuard.lastSoftAt = Date.now(); memGuard.softCount++;
-    softTrim();
-    console.warn(`🛡️ memory guard: RSS ${mb} MB · heap ${heap} MB — half of the gviz cache trimmed (${cache.size} entries left).`);
+    const trimmed = softTrim();
+    console.warn(`🛡️ memory guard: ${trimmed ? 'gc + half of the gviz cache trimmed' : 'gc only (cache kept)'} — ${memBreakdown()}.`);
   }
 }, 10000);
 if (memTimer.unref) memTimer.unref();
@@ -13015,13 +13030,13 @@ async function start() {
     // GV Master is a live source: check every 15s (its shared feed cache caps Google reads at 30s).
     // FF remains at 150s, so the faster GV alert cadence does not multiply EIR queries.
     setInterval(() => checkReports(false).catch(() => {}), 30e3).unref();
-    setTimeout(() => gvAgentCommission().catch(() => {}), 25000).unref?.();
+    setTimeout(() => gvAgentCommission().catch(() => {}), 120e3).unref?.();   // boot ke turant baad user ke sheet-loads ko Google/CPU/memory milne do
     setInterval(() => gvAgentCommission().catch(() => {}), 10 * 60e3).unref();
     // 📨 Complaints: har 30s check — settings ka refreshMin poora hote hi Gmail se current month refresh
     setTimeout(() => { loadRegistryFull(false).catch(() => {}); complaintsSvc.tick(); }, 20e3).unref();
     setInterval(() => { complaintsSvc.tick(); complaintsMailTick().catch(() => {}); }, 30e3).unref();
-    setTimeout(() => warmPersonalLinks().catch(() => {}), 20000).unref?.();
-    setInterval(() => warmPersonalLinks().catch(() => {}), 5 * 60e3).unref();
+    setTimeout(() => warmPersonalLinks().catch(() => {}), 150e3).unref?.();
+    setInterval(() => warmPersonalLinks().catch(() => {}), 10 * 60e3).unref();   // 10 min = gviz cache TTL (5 min par har link ke 3-4 queries dobara jaate the)
     setTimeout(() => maybeMonthlyReport(), 8000);
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🕒 v209 — har 15 min sheet row-count check (home khule na khule), taaki "data kab aaya" ka time sahi rahe
@@ -13038,7 +13053,7 @@ async function start() {
     if (CLOUD_BACKEND) setTimeout(() => recoveryHint().catch(() => {}), 20000).unref?.();
     // 🧓 Stock ageing index pehle se bana lo (pehla user 1-2 min intezaar na kare). Render par default ON; STOCK_AGE_WARM=0 se band.
     const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
-    if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 12000).unref();
+    if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 45e3).unref();   // pehle user ke Home loads (EIR/StockDataa) ke baad
     // 🔗 FASTag Mapping ka StockDataa lookup index bhi pehle se garam rakho — pehla Quick Map instant ho.
     // v3.72: boot ke 25 s ke bajaye 6 s baad shuru, aur fail (jaise Google rate limit) hone par
     // 30 s / 2 min / 5 min ke gaps me dobara — pehla user "sheet load nahi ho rahi" me na atke.
@@ -13046,7 +13061,7 @@ async function start() {
     // 📉 v3.74: pehle 30 s / 2 min / 5 min par ready index ko bhi zabardasti dobara banaya jaata tha
     // (har Render wake par 4× poora StockDataa download = bandwidth quota ka bada hissa).
     if (warmStockAge) {
-      const warmDelays = [6000, 30e3, 2 * 60e3, 5 * 60e3];
+      const warmDelays = [150e3, 4 * 60e3, 8 * 60e3];   // stock-ageing scan ke BAAD (dono bade StockDataa scans ek saath na chalein)
       warmDelays.forEach((delay) => setTimeout(() => {
         const st = mappingStock.status();
         if (st.building || st.ready) return;     // ban raha hai / ban chuka — kuch mat karo

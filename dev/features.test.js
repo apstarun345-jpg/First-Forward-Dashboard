@@ -743,7 +743,7 @@ test('🗓 scheduler force-fire, 🥇 champion email (SMTP), ⏰ follow-up list+
   const pad = (n) => String(n).padStart(2, '0');
   const dcell = (d) => `Date(${d.getFullYear()},${d.getMonth()},${d.getDate()})`;
   const dayBack = (i) => new Date(Date.now() - i * 86400e3);
-  const pm = new Date(); pm.setMonth(pm.getMonth() - 1);
+  const pm = new Date(); pm.setDate(1); pm.setMonth(pm.getMonth() - 1);   // day 1 first: on the 31st setMonth(-1) overflowed into the current month
   // 🥇 champions: prev-month rows (pinned to actual previous month, month-start safe)
   // ⏰ follow-up: Silent Sam (8 din silent · window me), Fresh Fiza (aaj), Old Ollie (40 din = bahar)
   const chRows = [];
