@@ -66,7 +66,7 @@ test('KYC detail dashboard: class / channel / agent / TL sections, pending, sear
 test('Master Search has KYC box filtered by agent or TL, filled async', () => {
   const m = read('masterSearch.js');
   assert.match(m, /function kycBoxHtml\(/);
-  assert.match(m, /\$\{kycBoxHtml\(pr, isTl\)\}/);
+  assert.match(m, /\$\{kycBoxHtml\(pr, isTl, ch\)\}/);
   assert.match(m, /fillKycBoxes\(host\);/);
   assert.match(m, /FF\.kycDetail\.open\(\{ title: `\$\{sp\.t\} · FASTag KYC`, filter: sp\.f \}\)/);
   assert.match(m, /isTl \? \{ tl: pr\.name \} : \{ agent: pr\.name \}/);
