@@ -62,3 +62,23 @@ test('priority lane: client prio=1 flag marks the upstream URL; GV KYC queries u
   assert.match(data, /\.\.\.\(o\.priority \? \{ prio: '1' \} : \{\}\)/);
   assert.match(model, /priority: true, timeoutMs: 60000/);
 });
+
+test('v3.125.22: class-wise KYC table shows Total · KYC · % per class (no monthly overall)', () => {
+  const now = new Date(), cur = U.ymKey(now), last = U.prevMonthKey(cur);
+  const rows = [
+    { ym: cur, group: 'VC4', kyc: 'full', n: 3 }, { ym: cur, group: 'VC4', kyc: 'not', n: 7 }, { ym: cur, group: 'VC4', kyc: 'other', n: 2 },
+    { ym: last, group: 'VC5+', kyc: 'full', n: 1 }
+  ];
+  const html = FF.model.kycClassHtml(rows, cur, last);
+  assert.match(html, /data-kyc-group="VC4"/);
+  assert.match(html, /30\.0%/);
+  assert.match(html, /KYC <b>3<\/b> \/ 10/);
+  assert.match(html, /\+2 blank/);
+  assert.match(html, /100\.0%/);
+  const fs = require('node:fs');
+  const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
+  const home = fs.readFileSync(path.join(ROOT, 'home.js'), 'utf8');
+  assert.match(ms, /sub\.innerHTML = M\.kycClassHtml\(rows, cur, last\)/);
+  assert.match(home, /M\.kycClassHtml\(kycData\.rows, cur, last\)/);
+  assert.match(home, /data-kyc-open="1"/);
+});

@@ -7213,3 +7213,16 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 .kyc-row[hidden], .kyc-pane[hidden] { display: none; }
 @media (max-width: 640px) { .kyc-tiles, .kyc-callouts { grid-template-columns: 1fr; } .kyc-q { margin-left: 0; width: 100%; } }
 .hm-kyc-cls[data-kyc-open], .msp-kyc-box { cursor: pointer; }
+/* 🪪 v3.125.22 — class-wise KYC table: Total · KYC · % (Home card + Master Search box) */
+.kyc-table { display: grid; gap: 4px; margin-top: 6px; width: 100%; }
+.kyc-trow { display: grid; grid-template-columns: 54px 1fr 1fr; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 8px; font-size: 13px; color: var(--ink, inherit); }
+.kyc-trow:not(.kyc-thead) { background: rgba(255,255,255,.55); }
+.kyc-thead { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; opacity: .7; font-weight: 700; padding-top: 0; padding-bottom: 0; }
+.kyc-thead span:not(:first-child), .kyc-tc { text-align: right; }
+.kyc-tc { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
+.kyc-tc .kyc-pct { font-size: 16px; }
+.kyc-tc .kyc-cnt { font-size: 11.5px; opacity: .85; white-space: nowrap; }
+.kyc-tc .kyc-cnt i { font-style: normal; opacity: .75; }
+.msp-kyc-box .msp-disp-sub { display: block; width: 100%; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .kyc-trow:not(.kyc-thead) { background: rgba(255,255,255,.05); } }
+:root[data-theme="dark"] .kyc-trow:not(.kyc-thead) { background: rgba(255,255,255,.05); }

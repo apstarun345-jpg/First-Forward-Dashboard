@@ -2371,13 +2371,10 @@ FF.pages = FF.pages || {};
       const gvNote = rows && rows.issued !== undefined ? ` (GV Master me ${U.fmt(rows.issued)} tag issued · EIR me KYC mila ${U.fmt(rows.matched || 0)})` : '';
       sub.innerHTML = `<span class="dim small">Is agent / TL ke liye EIR me KYC data nahi mila${esc(gvNote)}</span>`; return;
     }
-    const lastL = U.labelYM(last, true), curL = U.labelYM(cur, true);
-    main.innerHTML = `<small class="dim">${esc(lastL)}</small> ${kycPct(l.pct)} <small class="dim">·</small> <small class="dim">${esc(curL)}</small> ${kycPct(c.pct)}`;
-    const vrows = ['VC4', 'VC20', 'VC5+'].map((g) => {
-      const a = M.kycRatio(rows, pk(last, g)), b = M.kycRatio(rows, pk(cur, g));
-      return `<div class="kyc-vrow"><span class="kyc-vlbl">${g}</span><span class="kyc-vv"><small>${esc(lastL)}</small> <b>${kycPct(a.pct)}</b></span><span class="kyc-vv"><small>${esc(curL)}</small> <b>${kycPct(b.pct)}</b></span></div>`;
-    }).join('');
-    sub.innerHTML = `<div class="kyc-vlist">${vrows}</div>`;
+    // v3.125.22 — monthly overall % nahi; sirf VC4 / VC20 / VC5+ vertical: Total · KYC · %.
+    main.innerHTML = '';
+    main.hidden = true;
+    sub.innerHTML = M.kycClassHtml(rows, cur, last);
   }
   /** Box fail hua (server restart / Google 429) → kuch der baad khud dobara (max 4 baar), user ko Retry nahi dabana. */
   function autoRetryBox(box, flag, fill, host) {

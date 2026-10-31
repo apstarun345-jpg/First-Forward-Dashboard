@@ -37,11 +37,11 @@ test('Home keeps only the class-wise KYC card (in the month grid), clickable to 
   assert.match(h, /id="home-kyc" class="hm-kyc-slot" style="display:contents"/);
   assert.doesNotMatch(h, /\['home-kyc', /);
   assert.match(h, /M\.loadKycMonthly\(\{\}\)/);
-  assert.match(h, /kyc-vlist/);
+  assert.match(h, /M\.kycClassHtml\(/);
   assert.doesNotMatch(h, /Last month · ' \+ lbl\.last/);
   assert.match(h, /data-kpi-self="1" data-kyc-open="1"/);
   assert.match(h, /FF\.kycDetail\.open\(/);
-  assert.match(h, /pending \$\{U\.fmt\(pend\.pending\)\}/);
+  assert.match(h, /blank \$\{U\.fmt\(pend\.pending\)\}/);
 });
 
 test('kycRatio reports pending (blank CUSTOMER_FULL_KYC) separately from the % base', () => {

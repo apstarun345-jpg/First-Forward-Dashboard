@@ -599,6 +599,18 @@ window.FF = window.FF || {};
     gvKycCache.set(key, { at: Date.now(), rows });
     return rows;
   }
+  /** 🪪 v3.125.22 — Class-wise KYC table (VC4 · VC20 · VC5+ — monthly overall nahi): har class ke liye last + current month
+   *  me Total (KYC checked = Full + Not) · KYC (Full) · %. Home card aur Master Search box dono yahi use karte hain. */
+  function kycClassHtml(rows, cur, last) {
+    const esc = U.esc, fmt = U.fmt;
+    const pick = (ym, g) => (r) => r.ym === ym && r.group === g;
+    const cell = (x) => (x.total || x.pending
+      ? `<b class="kyc-pct">${x.pct === null ? '—' : `${x.pct.toFixed(1)}%`}</b><small class="kyc-cnt">KYC <b>${fmt(x.full)}</b> / ${fmt(x.total)}${x.pending ? ` <i title="EIR me KYC abhi khali">+${fmt(x.pending)} blank</i>` : ''}</small>`
+      : '<span class="dim">—</span>');
+    const head = `<div class="kyc-trow kyc-thead"><span>Class</span><span>${esc(U.labelYM(last, true))}</span><span>${esc(U.labelYM(cur, true))}</span></div>`;
+    const body = ['VC4', 'VC20', 'VC5+'].map((g) => `<div class="kyc-trow" data-kyc-group="${g}"><span class="kyc-vlbl">${g}</span><span class="kyc-tc">${cell(kycRatio(rows, pick(last, g)))}</span><span class="kyc-tc">${cell(kycRatio(rows, pick(cur, g)))}</span></div>`).join('');
+    return `<div class="kyc-table">${head}${body}</div>`;
+  }
   /** Ratio = full ÷ (full + not). 'other' (blank/unknown) ginti me nahi. */
   function kycRatio(rows, pick = () => true) {
     let full = 0, not = 0, pending = 0;
@@ -639,5 +651,5 @@ window.FF = window.FF || {};
     return rows;
   }
 
-  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, loadGvKycMonthly, loadKycPeople, kycRatio, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, loadGvKycMonthly, loadKycPeople, kycRatio, kycClassHtml, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

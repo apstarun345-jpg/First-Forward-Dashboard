@@ -1554,12 +1554,9 @@ FF.pages = FF.pages || {};
       const pct = (p) => (p === null ? '—' : `${p.toFixed(1)}%`);
       const pick = (ym, grp) => (r) => r.ym === ym && (!grp || r.group === grp);
       const lbl = { cur: U.labelYM(cur, true), last: U.labelYM(last, true) };
-      const rows3 = [['VC4', 'VC4'], ['VC20', 'VC20'], ['VC5+', 'VC5+']].map(([g, l]) => {
-        const a = M.kycRatio(kycData.rows, pick(last, g)), b = M.kycRatio(kycData.rows, pick(cur, g));
-        return `<div class="kyc-vrow"><span class="kyc-vlbl">${l}</span><span class="kyc-vv"><small>${esc(lbl.last)}</small> <b>${pct(a.pct)}</b></span><span class="kyc-vv"><small>${esc(lbl.cur)}</small> <b>${pct(b.pct)}</b></span></div>`;
-      }).join('');
+      // v3.125.22 — class-wise Total · KYC · % (last + current month), poora card clickable → KYC detail.
       const pend = M.kycRatio(kycData.rows, pick(cur));
-      const clsCard = `<div class="kpi g4 hm-kyc-cls" data-kpi-self="1" data-kyc-open="1" role="button" tabindex="0" data-kpi-title="FASTag KYC ratio"><div class="kpi-top"><span class="kpi-title">🪪 FASTag KYC ratio · class-wise</span><span class="kpi-icon">🪪</span></div><div class="kyc-vlist">${rows3}</div><div class="kpi-foot">${esc(lbl.cur)}: checked ${U.fmt(pend.total)} of ${U.fmt(pend.issued)} · pending ${U.fmt(pend.pending)} · Full KYC ÷ (Full + Not) · click for details</div></div>`;
+      const clsCard = `<div class="kpi g4 hm-kyc-cls" data-kpi-self="1" data-kyc-open="1" role="button" tabindex="0" data-kpi-title="FASTag KYC ratio" title="Click → KYC detail (class · channel · agent / TL)"><div class="kpi-top"><span class="kpi-title">🪪 FASTag KYC · class-wise</span><span class="kpi-icon">🪪</span></div>${M.kycClassHtml(kycData.rows, cur, last)}<div class="kpi-foot">Total = KYC checked (Full + Not)${pend.pending ? ` · ${esc(lbl.cur)} blank ${U.fmt(pend.pending)}` : ''} · click for details</div></div>`;
       kycMount.innerHTML = clsCard;
     }
     root.addEventListener('click', (ev) => {
