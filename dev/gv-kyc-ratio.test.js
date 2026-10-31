@@ -117,3 +117,15 @@ test('v3.125.24: GV KYC class uses CCH + Settings GV class map (same as Issued b
   const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
   assert.doesNotMatch(ms, /GV KYC: GV Master ke issued tag IDs ka EIR me KYC status/);
 });
+
+test('v3.125.24: GV Issued box takes VC20 from the GV Master ledger when the GV REPORT split shows VC20 = 0', () => {
+  const fs = require('node:fs');
+  const mp = fs.readFileSync(path.join(ROOT, 'masterProfile.js'), 'utf8');
+  const fnSrc = /function sheetFirstGroups[\s\S]*?\n  \}\n/.exec(mp)[0];
+  const num = (v) => Number(v) || 0;
+  const sheetFirstGroups = new Function('num', `${fnSrc}; return sheetFirstGroups;`)(num);
+  const out = sheetFirstGroups({ VC4: 80, comm: 76, total: 156, split: true, VC20: 0 }, { VC4: 80, VC20: 11, 'VC5+': 65, total: 156 });
+  assert.equal(out.VC4, 80); assert.equal(out.VC20, 11); assert.equal(out['VC5+'], 65); assert.equal(out.mix, 'ledger-mix');
+  const keep = sheetFirstGroups({ VC4: 10, comm: 6, total: 16, split: true, VC20: 2 }, { VC4: 10, VC20: 5, 'VC5+': 1, total: 16 });
+  assert.equal(keep.VC20, 2, 'non-zero sheet VC20 still wins');
+});

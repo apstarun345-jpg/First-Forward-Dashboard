@@ -164,14 +164,18 @@ window.FF = window.FF || {};
     const total = Math.max(num(sheetBins.total), vc4 + comm);
     Object.assign(out, { VC4: vc4, comm, total, source: 'GV REPORT sheet' });
     out.sheet = { vc4, comm, total };
-    if (sheetBins.split && sheetBins.VC20 !== null && sheetBins.VC20 !== undefined) {
+    // v3.125.24 — GV REPORT ke class columns me VC20 nahi hota (0 aata hai) jabki GV Master me VC20 tags hain → sheet ka
+    // VC20 = 0 bharosemand nahi; tab VC20 / VC5+ ka batwara GV Master (tag ledger) se (KYC / ledger se match).
+    const sheetVc20Missing = sheetBins.split && num(sheetBins.VC20) === 0 && ledger && ledger.VC20 > 0;
+    if (sheetBins.split && sheetBins.VC20 !== null && sheetBins.VC20 !== undefined && !sheetVc20Missing) {
       // Current month: sheet khud VC5/VC6/… columns deta hai, isliye batwara bhi sheet ka hai.
       out.VC20 = Math.min(comm, Math.max(0, num(sheetBins.VC20)));
       out['VC5+'] = Math.max(0, comm - out.VC20);
       out.mix = 'sheet';
     } else if (ledger && ledger.VC20 + ledger['VC5+'] > 0) {
       const mixTotal = ledger.VC20 + ledger['VC5+'];
-      out.VC20 = Math.min(comm, Math.max(0, Math.round((comm * ledger.VC20) / mixTotal)));
+      // Sheet ka commercial = ledger ka commercial → seedha ledger counts (rounding nahi); warna anupaat.
+      out.VC20 = comm === mixTotal ? ledger.VC20 : Math.min(comm, Math.max(0, Math.round((comm * ledger.VC20) / mixTotal)));
       out['VC5+'] = Math.max(0, comm - out.VC20);
       out.mix = 'ledger-mix';
     } else {
