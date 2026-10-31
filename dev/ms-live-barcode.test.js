@@ -48,3 +48,12 @@ test('live barcode lookup finds a tag before the full register is loaded', async
   assert.equal(queries.length, n, 'cached per query');
   assert.ok(second.tags.some((t) => t.key === '34161FA82032AAAA' && t.ff.some((x) => x.agentName === 'Ravi Kumar')), 'live hit merged into tags');
 });
+
+test('live lookup also searches the dashed barcode form (608116-011-0558357)', () => {
+  const sqls = [];
+  FF.data.query = async (sheet, sql) => { sqls.push(sql); return { rows: [], cols: [] }; };
+  FF.masterSearch.search('608116-011-0558357');
+  assert.ok(sqls.length >= 1);
+  assert.ok(sqls.some((q) => q.includes("contains '608116-011-0558357'")), 'raw dashed needle');
+  assert.ok(sqls.some((q) => q.includes("contains '6081160110558357'")), 'digits-only needle');
+});

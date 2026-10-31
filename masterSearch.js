@@ -569,7 +569,9 @@ FF.pages = FF.pages || {};
     rec = { key, pending: true, entries: new Map(), failed: 0 };
     live.map.set(key, rec); live.order.push(key);
     if (live.order.length > 30) live.map.delete(live.order.shift());
-    const needle = liveSafe(query);
+    // Sheet me barcode dash ke saath bhi hota hai (608116-011-0558357) — raw aur bina-dash dono roop dhoondo.
+    const raw = String(query || '').trim().toLowerCase().replace(/[^a-z0-9\-\/ ]/g, '');
+    const needles = [...new Set([liveSafe(query), raw].filter((x) => x && x.length >= 4))];
     const s = c.stock || {}, a = (c.gv && c.gv.assignment) || {}, e = c.eir || {};
     const gen = state.generation;
     const add = (barcode, rowFn) => {
@@ -579,7 +581,7 @@ FF.pages = FF.pages || {};
     };
     const find = (sheet, cols, idCols, onRow) => {
       const list = [...new Set(cols.filter(Boolean))];
-      const cond = idCols.filter(Boolean).map((col) => `lower(${col}) contains '${needle}'`).join(' or ');
+      const cond = idCols.filter(Boolean).flatMap((col) => needles.map((n) => `lower(${col}) contains '${n}'`)).join(' or ');
       if (!list.length || !cond) return Promise.resolve();
       const idx = new Map(list.map((col, i) => [col, i]));
       const val = (row, col) => { const i = idx.get(col); return i === undefined ? '' : clean(D.identifierText ? D.identifierText(row[i]) : D.cellText(row[i])); };
@@ -832,6 +834,7 @@ FF.pages = FF.pages || {};
         value: t.key, barcode: t.key
       });
     });
+    if (!items.length && r.livePending) items.push({ kind: 'cls', kindLabel: 'Barcode', label: `“${query}” sheet me dhoondh raha hu…`, sub: 'live barcode search (2-10 sec)', value: query, none: true });
     if (!items.length && query.length >= 2) items.push({ kind: 'cls', kindLabel: 'Search', label: `“${query}” ke liye kuch nahi mila`, sub: 'Doosra naam / ID / barcode try karo', value: query, none: true });
     return items;
   }
