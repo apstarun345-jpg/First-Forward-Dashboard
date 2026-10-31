@@ -544,6 +544,60 @@ window.FF = window.FF || {};
     kycCache.set(key, { at: Date.now(), rows });
     return rows;
   }
+  /** 🟩 v3.125.17 — GV agent / TL ka KYC ratio. GV ke tags EIR me GV agent ke naam se nahi hote, isliye:
+   *  GV Master (agent ID = A, ya TL ID = C / R) se last + current month ke issued TAG IDs → EIR me wahi TAG ID dhoondh kar
+   *  CUSTOMER_FULL_KYC (kyc / kyc2) status. Month + class GV Master ka. Rows loadKycMonthly jaise: [{ ym, channel, group, kyc, n }]. */
+  const gvKycCache = new Map();
+  async function loadGvKycMonthly(f, opts) {
+    const g = (FF.config.gv && FF.config.gv.master) || {}, e = FF.config.eir, kc = kycCols(e);
+    const cur = U.ymKey(new Date()), prev = U.prevMonthKey(cur);
+    const id = String((f && f.id) || '').trim().replace(/'/g, '');
+    if (!id) return [];
+    const key = `${cur}|${kc.join(',')}|${f.tl ? 'tl' : 'agent'}|${id}`;
+    const hit = gvKycCache.get(key);
+    if (hit && Date.now() - hit.at < 10 * 60e3) return hit.rows;
+    const who = f.tl ? [g.tlId, g.gvTlId].filter(Boolean).map((c) => `${c} = '${id}'`).join(' or ') : `${g.uniqueId} = '${id}'`;
+    const clsCol = g.vClass || g.cch;
+    const t = await D.query(g.tab || 'GV Master', `select ${g.tagId}, ${g.date}, ${clsCol} where (${who}) and ${g.date} >= date '${prev}-01'`, opts);
+    const tags = new Map();   // TAG_ID → { ym, group }
+    for (const r of t.rows || []) {
+      const tag = U.clean(D.identifierText ? D.identifierText(r[0]) : D.cellText(r[0])).toUpperCase();
+      const d = D.cellDate(r[1]);
+      if (!tag || !d) continue;
+      const ym = U.ymKey(d);
+      if (ym !== cur && ym !== prev) continue;
+      tags.set(tag, { ym, group: classGroup(D.cellText(r[2])) });
+    }
+    const kycOfTag = new Map();
+    const ids = [...tags.keys()].filter((x) => /^[A-Z0-9]+$/.test(x));
+    const CHUNK = 150, chunks = [];
+    for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+    const sel = [e.tagId, ...kc].join(', ');
+    let next = 0;
+    const worker = async () => {
+      while (next < chunks.length) {
+        const list = chunks[next++];
+        const res = await D.query(e.sheet, `select ${sel} where upper(${e.tagId}) matches '(${list.join('|')})'`, opts);
+        for (const r of res.rows || []) {
+          const tag = U.clean(D.identifierText ? D.identifierText(r[0]) : D.cellText(r[0])).toUpperCase();
+          const k = kycPick(D.cellText(r[1]), kc.length > 1 ? D.cellText(r[2]) : '');
+          if (tag && (!kycOfTag.has(tag) || kycOfTag.get(tag) === 'other')) kycOfTag.set(tag, k);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, chunks.length) }, worker));
+    const agg = new Map();
+    tags.forEach((v, tag) => {
+      const kyc = kycOfTag.get(tag) || 'other';
+      const gk = `${v.ym}|${v.group}|${kyc}`;
+      const o = agg.get(gk) || { ym: v.ym, channel: 'GV Partner', group: v.group, kyc, n: 0 };
+      o.n++; agg.set(gk, o);
+    });
+    const rows = [...agg.values()];
+    rows.matched = kycOfTag.size; rows.issued = tags.size;
+    gvKycCache.set(key, { at: Date.now(), rows });
+    return rows;
+  }
   /** Ratio = full ÷ (full + not). 'other' (blank/unknown) ginti me nahi. */
   function kycRatio(rows, pick = () => true) {
     let full = 0, not = 0, pending = 0;
@@ -584,5 +638,5 @@ window.FF = window.FF || {};
     return rows;
   }
 
-  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, loadKycPeople, kycRatio, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, loadGvKycMonthly, loadKycPeople, kycRatio, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

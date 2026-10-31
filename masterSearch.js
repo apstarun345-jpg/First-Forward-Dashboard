@@ -1923,7 +1923,7 @@ FF.pages = FF.pages || {};
           ${box('k10', '🎯 Expected this month · Run-rate', miniHtml(expSplit, expTotal, `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days`), '', spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
           ${dispBoxHtml(pr, isTl, ch)}
-          ${kycBoxHtml(pr, isTl)}
+          ${kycBoxHtml(pr, isTl, ch)}
           ${ch === 'gv' ? GVC.boxHtml(pr, isTl) : ''}
         </div>${notFound}</div></section>${donutBlock}`;
     }
@@ -2332,14 +2332,15 @@ FF.pages = FF.pages || {};
   // ===== 🪪 FASTag KYC box — EIR CUSTOMER_FULL_KYC (TRUE = full KYC, FALSE = not KYC): last + current month, class-wise =====
   const kycByCache = new Map();
   const kycPct = (p) => (p === null || p === undefined ? '—' : `${p.toFixed(1)}%`);
-  function kycBoxHtml(pr, isTl) {
-    const f = isTl ? { tl: pr.name } : { agent: pr.name };
+  function kycBoxHtml(pr, isTl, ch) {
+    // GV: EIR me GV agent ka naam nahi hota → GV Master ke tag IDs se EIR KYC (model.loadGvKycMonthly).
+    const f = ch === 'gv' ? { gv: 1, id: pr.id || pr.sub || '', tl: isTl ? 1 : 0 } : (isTl ? { tl: pr.name } : { agent: pr.name });
     return `<div class="mp-kpi msp-kpi k12 msp-disp-box msp-kyc-box kpi-clickable" data-msp-kyc-box="${esc(JSON.stringify({ f, t: pr.name }))}" role="button" tabindex="0" title="Click for detailed KYC dashboard"><small>🪪 FASTag KYC ratio · last vs current month</small><b class="msp-kyc-main">…</b><em class="msp-disp-sub"><span class="dim small">Loading…</span></em></div>`;
   }
   function kycFetch(f) {
     const key = JSON.stringify(f);
     if (!kycByCache.has(key)) {
-      const p = FF.model.loadKycMonthly(f);
+      const p = f && f.gv ? FF.model.loadGvKycMonthly(f) : FF.model.loadKycMonthly(f);
       kycByCache.set(key, p); p.catch(() => kycByCache.delete(key));
     }
     return kycByCache.get(key);
@@ -2351,7 +2352,11 @@ FF.pages = FF.pages || {};
     const M = FF.model, U = FF.util;
     const pk = (ym, g) => (r) => r.ym === ym && (!g || r.group === g);
     const c = M.kycRatio(rows, pk(cur)), l = M.kycRatio(rows, pk(last));
-    if (!c.total && !l.total) { main.textContent = '—'; sub.innerHTML = '<span class="dim small">Is agent / TL ke liye EIR me KYC data nahi mila</span>'; return; }
+    if (!c.total && !l.total) {
+      main.textContent = '—';
+      const gvNote = rows && rows.issued !== undefined ? ` (GV Master me ${U.fmt(rows.issued)} tag issued · EIR me KYC mila ${U.fmt(rows.matched || 0)})` : '';
+      sub.innerHTML = `<span class="dim small">Is agent / TL ke liye EIR me KYC data nahi mila${esc(gvNote)}</span>`; return;
+    }
     const lastL = U.labelYM(last, true), curL = U.labelYM(cur, true);
     main.innerHTML = `<small class="dim">${esc(lastL)}</small> ${kycPct(l.pct)} <small class="dim">·</small> <small class="dim">${esc(curL)}</small> ${kycPct(c.pct)}`;
     const vrows = ['VC4', 'VC20', 'VC5+'].map((g) => {
@@ -2624,7 +2629,7 @@ FF.pages = FF.pages || {};
     const dl = t.closest('[data-msp-age-dl]');
     if (dl) { e.preventDefault(); e.stopPropagation(); const box = dl.closest('[data-msp-age]'); if (box) downloadAgeAll(box).catch((err) => U.toast(String((err && err.message) || err), 'err')); return; }
     const kbox = t.closest('[data-msp-kyc-box]');
-    if (kbox) { e.preventDefault(); e.stopPropagation(); try { const sp = JSON.parse(kbox.dataset.mspKycBox); if (FF.kycDetail) FF.kycDetail.open({ title: `${sp.t} · FASTag KYC`, filter: sp.f }); } catch { /* ignore */ } return; }
+    if (kbox) { e.preventDefault(); e.stopPropagation(); try { const sp = JSON.parse(kbox.dataset.mspKycBox); if (sp.f && sp.f.gv) { U.toast('GV KYC: GV Master ke issued tag IDs ka EIR me KYC status (last + current month)', 'info'); return; } if (FF.kycDetail) FF.kycDetail.open({ title: `${sp.t} · FASTag KYC`, filter: sp.f }); } catch { /* ignore */ } return; }
     const dbox = t.closest('[data-msp-disp-box]');
     if (dbox) { e.preventDefault(); e.stopPropagation(); openDispDrawer(dbox); return; }
     const row = t.closest('[data-msp-age-b]');
