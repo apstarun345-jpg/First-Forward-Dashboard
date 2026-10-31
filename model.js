@@ -613,6 +613,82 @@ window.FF = window.FF || {};
     const body = ['VC4', 'VC20', 'VC5+'].map((g) => `<div class="kyc-trow" data-kyc-group="${g}"><span class="kyc-vlbl">${g}</span><span class="kyc-tc">${cell(kycRatio(rows, pick(last, g)))}</span><span class="kyc-tc">${cell(kycRatio(rows, pick(cur, g)))}</span></div>`).join('');
     return `<div class="kyc-table">${head}${body}</div>`;
   }
+  /** 🎯 v3.125.27 — GV "Expected Today" forecast (GV Master tag-level history, time column ke saath).
+   *  1) Base  = weekday index (pichhle 8 hafte) × level (pichhle 14 din, weekday-adjusted, min/max trim)
+   *  2) Intraday: pichhle 21 din me "is waqt tak" din ka kitna hissa issue ho chuka tha (same weekday ko double weight) →
+   *     aaj ab tak ÷ wo hissa. "Is waqt" = sheet ki aaj ki AAKHRI row ka time (sheet 1-2 ghante peeche chalti hai).
+   *  3) Blend: subah base, din badhne ke saath intraday (w = hissa^0.8); kabhi "ab tak" se kam nahi.
+   *  4) Backtest: pichhle 14 din par yahi model (sirf us din se pehle ka data) same waqt par → avg error = accuracy.
+   *  rows: [{ key:'YYYY-MM-DD', mins: 0..1439 | null }]  →  { expected, base, intraday, frac, soFar, cutoffMins, accuracy, low, high, days } */
+  function gvDayForecast(rows, todayKey, opts) {
+    const o = opts || {};
+    const byDay = new Map();
+    for (const r of rows || []) {
+      if (!r || !r.key) continue;
+      const d = byDay.get(r.key) || { n: 0, mins: [] };
+      d.n++; if (Number.isFinite(r.mins)) d.mins.push(r.mins);
+      byDay.set(r.key, d);
+    }
+    byDay.forEach((d) => d.mins.sort((a, b) => a - b));
+    const wdOf = (k) => new Date(`${k}T00:00:00Z`).getUTCDay();
+    const today = byDay.get(todayKey) || { n: 0, mins: [] };
+    const soFar = Math.max(today.n, Number(o.liveTotal) || 0);
+    let cutoff = Number.isFinite(o.cutoffMins) ? o.cutoffMins : (today.mins.length ? today.mins[today.mins.length - 1] : null);
+    const countUpTo = (mins, c) => { let lo = 0, hi = mins.length; while (lo < hi) { const m = (lo + hi) >> 1; if (mins[m] <= c) lo = m + 1; else hi = m; } return lo; };
+    const run = (before, cut, haveSoFar) => {
+      const past = [...byDay.keys()].filter((k) => k < before).sort().slice(-56).filter((k) => byDay.get(k).n > 0);
+      if (past.length < 7) return null;
+      const all = past.map((k) => byDay.get(k).n), mean = all.reduce((a, b) => a + b, 0) / all.length;
+      const wdSum = new Array(7).fill(0), wdCnt = new Array(7).fill(0);
+      past.forEach((k) => { const w = wdOf(k); wdSum[w] += byDay.get(k).n; wdCnt[w]++; });
+      const idx = wdSum.map((v, w) => (wdCnt[w] ? (v / wdCnt[w]) / mean : 1));
+      const lastDs = past.slice(-14).map((k) => byDay.get(k).n / Math.max(0.2, idx[wdOf(k)])).sort((a, b) => a - b);
+      const trimmed = lastDs.length > 4 ? lastDs.slice(1, -1) : lastDs;
+      const level = trimmed.reduce((a, b) => a + b, 0) / trimmed.length;
+      const twd = wdOf(before);
+      const base = level * idx[twd];
+      let frac = null;
+      if (cut !== null && cut !== undefined) {
+        let fw = 0, fs = 0;
+        past.slice(-21).forEach((k) => {
+          const d = byDay.get(k); if (!d.mins.length) return;
+          const w = wdOf(k) === twd ? 2 : 1;
+          fs += w * (countUpTo(d.mins, cut) / d.mins.length); fw += w;
+        });
+        frac = fw ? fs / fw : null;
+      }
+      let intraday = null, expected = base;
+      if (frac !== null && frac >= 0.03 && haveSoFar > 0) {
+        intraday = haveSoFar / frac;
+        const cond = haveSoFar + base * (1 - frac);
+        const w = Math.min(1, Math.pow(frac, 0.8));
+        expected = w * intraday + (1 - w) * cond;
+      } else if (frac !== null && haveSoFar > 0) expected = haveSoFar + base * (1 - frac);
+      expected = Math.max(haveSoFar, expected);
+      return { expected: Math.round(expected), base: Math.round(base), intraday: intraday === null ? null : Math.round(intraday), frac, idx: idx[twd] };
+    };
+    const now = run(todayKey, cutoff, soFar);
+    if (!now) return null;
+    // Backtest — pichhle 14 poore din, aaj jaise waqt (cutoff) par.
+    const errs = [];
+    [...byDay.keys()].filter((k) => k < todayKey).sort().slice(-14).forEach((k) => {
+      const d = byDay.get(k); if (!d || d.n < 5) return;
+      const have = cutoff === null ? 0 : (d.mins.length ? Math.round(countUpTo(d.mins, cutoff) * (d.n / d.mins.length)) : 0);
+      const f = run(k, cutoff, have);
+      if (f) errs.push(Math.abs(f.expected - d.n) / d.n);
+    });
+    const mape = errs.length ? errs.reduce((a, b) => a + b, 0) / errs.length : null;
+    const band = mape === null ? null : Math.round(now.expected * mape);
+    return { ...now, soFar, cutoffMins: cutoff, accuracy: mape === null ? null : Math.max(0, 100 - mape * 100), low: band === null ? null : Math.max(soFar, now.expected - band), high: band === null ? null : now.expected + band, days: errs.length };
+  }
+  /** "18:28:20" / "6:28 PM" → minutes of day. */
+  function timeToMins(t) {
+    const m = String(t || '').match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?/);
+    if (!m) return null;
+    let h = Number(m[1]) % 24; const mi = Number(m[2]);
+    if (m[3]) { const pm = /p/i.test(m[3]); if (pm && h < 12) h += 12; if (!pm && h === 12) h = 0; }
+    return h * 60 + mi;
+  }
   /** Ratio = full ÷ (full + not). 'other' (blank/unknown) ginti me nahi. */
   function kycRatio(rows, pick = () => true) {
     let full = 0, not = 0, pending = 0;
@@ -653,5 +729,5 @@ window.FF = window.FF || {};
     return rows;
   }
 
-  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, loadGvKycMonthly, loadKycPeople, kycRatio, kycClassHtml, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, loadGvKycMonthly, loadKycPeople, kycRatio, kycClassHtml, gvDayForecast, timeToMins, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

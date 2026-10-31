@@ -447,6 +447,15 @@ FF.pages = FF.pages || {};
     return best;
   }
 
+  const hhmm = (m) => (m === null || m === undefined ? '' : `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+  /** Expected Today card ka neeche wala text: range · backtest accuracy · kis waqt tak ka data. */
+  function forecastSub(f) {
+    const parts = [];
+    if (f.low !== null && f.high !== null) parts.push(`range <b>${U.fmt(f.low)}–${U.fmt(f.high)}</b>`);
+    if (f.accuracy !== null) parts.push(`accuracy ~${Math.round(f.accuracy)}% <small>(${f.days} din backtest)</small>`);
+    if (f.frac !== null && f.cutoffMins !== null) parts.push(`${hhmm(f.cutoffMins)} tak ${U.fmt(f.soFar)} = din ka ~${Math.round(f.frac * 100)}%`);
+    return parts.join(' · ');
+  }
   // ---------------------------------------------------------------- cards
   function gvLiveHtml(live) {
     const tk = todayK();
@@ -464,7 +473,7 @@ FF.pages = FF.pages || {};
     };
     const cards = [
       kpi('g11', 'Aaj Total (GV live)', '🏷️', U.fmt(live.total),
-        `${expected != null ? `expected <b>${U.fmt(expected)}</b> · ` : ''}pace ${pace != null ? U.fmt(pace) : '—'} day-end`,
+        live.forecast ? `expected <b>${U.fmt(expected)}</b> · baaki ~${U.fmt(Math.max(0, (expected || 0) - (live.total || 0)))}` : `${expected != null ? `expected <b>${U.fmt(expected)}</b> · ` : ''}pace ${pace != null ? U.fmt(pace) : '—'} day-end`,
         `src=gv&scope=day&date=${tk}`),
       kpi('g3', 'VC4', '🚗', U.fmt(live.vc4), live.total ? `${U.fmtPct(U.pctOf(live.vc4, live.total), 0)} share` : '—', `src=gv&scope=day&date=${tk}&f=vc4`),
       kpi('g8', 'VC20', '🛻', U.fmt(live.vc20), live.total ? `${U.fmtPct(U.pctOf(live.vc20, live.total), 0)} share` : '—', `src=gv&scope=day&date=${tk}&f=vc20`),
@@ -473,7 +482,7 @@ FF.pages = FF.pages || {};
       kpi('g7', 'Chassis', '🔧', U.fmt(live.chassis), `${live.total ? `${U.fmtPct(U.pctOf(live.chassis, live.total), 0)} of today` : '—'}${clsSplit(live.chassisBy)}`, `src=gv&scope=day&date=${tk}&f=chassis`),
       kpi('g-red', 'Wrong VRN', '⚠️', U.fmt(live.wrongVrn || 0), live.total ? `${U.fmtPct(U.pctOf(live.wrongVrn || 0, live.total), 0)} of today${clsSplit(live.wrongVrnBy)}` : 'VRN length rule', `src=gv&scope=day&date=${tk}&f=wrong`),
       kpi('g2', 'Expected Today', '🎯', expected != null ? U.fmt(expected) : '—',
-        live.weekdayNote ? esc(live.weekdayNote) : 'pichhle same-weekday ka average',
+        live.forecast ? forecastSub(live.forecast) : (live.weekdayNote ? esc(live.weekdayNote) : 'pichhle same-weekday ka average'),
         expectedTodaySpec(), expected != null ? `Expected ${U.fmt(expected)}` : ''),
       kpi('g10', 'Today Highest Issued', '🏆',
         live.highest ? `<div class="hm-highest-list">
@@ -496,7 +505,7 @@ FF.pages = FF.pages || {};
     return card(`🟩 GV · Aaj ka live <span class="dim">· ${esc(U.labelDate(TODAY(), true))} (${esc(U.weekday(TODAY()))}) · ${esc(sourceNote)}</span>`,
       `<div class="kpi-grid mini gv-aaj-grid">${cards.join('')}</div>
        ${errorNote}${zeroNote}
-       <p class="dim small" style="margin:10px 0 0">🎯 <b>Expected Today</b> = pichhle 4 same-weekday ka average (pichhla mahina bhi shaamil)${live.weekdayNote ? ` — ${esc(live.weekdayNote)}` : ''}. ⚡ Pace = ab tak ke tags ÷ ab tak ke ghante × 24. Har card par click → kis agent/TL ne lagaye, tag-level rows.</p>`,
+       <p class="dim small" style="margin:10px 0 0">🎯 <b>Expected Today</b> = ${live.forecast ? `GV Master forecast: weekday pattern (8 hafte) × haal ka level (14 din) = base <b>${U.fmt(live.forecast.base)}</b>${live.forecast.intraday !== null ? `, aur aaj ka pace (pichhle dino me is waqt tak din ka ~${Math.round(live.forecast.frac * 100)}% ho jaata hai → <b>${U.fmt(live.forecast.intraday)}</b>)` : ''} — din badhne ke saath pace ka weight badhta hai. Accuracy = pichhle din yahi model isi waqt par kitna sahi tha` : `pichhle 4 same-weekday ka average (pichhla mahina bhi shaamil)${live.weekdayNote ? ` — ${esc(live.weekdayNote)}` : ''}. ⚡ Pace = ab tak ke tags ÷ ab tak ke ghante × 24`}. Har card par click → kis agent/TL ne lagaye, tag-level rows.</p>`,
       `<a class="btn small" href="#/gvDashboard">🚀 GV Dashboard →</a>`);
   }
 
@@ -1508,6 +1517,25 @@ FF.pages = FF.pages || {};
       }
     }
 
+    const fcMemo = { key: '', val: null };
+    /** GV Master history (date + time) → FF.model.gvDayForecast. Memo: rows / live total badle tabhi dobara. */
+    function gvForecastNow(liveTotal) {
+      try {
+        const all = G && G.rows ? G.rows() : [];
+        if (!all.length || !M.gvDayForecast) return null;
+        const tk = todayK();
+        const key = `${all.length}|${liveTotal || 0}|${tk}`;
+        if (fcMemo.key === key) return fcMemo.val;
+        const hist = all.map((r) => ({ key: r.date ? dayKey(r.date) : '', mins: M.timeToMins(r.time) }));
+        const todays = hist.filter((h) => h.key === tk);
+        // Server feed sheet se aage ho (zyada tags) → cutoff = abhi ka waqt; warna sheet ki aaj ki aakhri row ka time.
+        const now = new Date();
+        const cutoffMins = (Number(liveTotal) || 0) > todays.length ? now.getHours() * 60 + now.getMinutes() : undefined;
+        fcMemo.key = key;
+        fcMemo.val = M.gvDayForecast(hist, tk, { liveTotal, cutoffMins });
+        return fcMemo.val;
+      } catch (e) { console.warn('GV forecast', e); return null; }
+    }
     function paintLive() {
       if (!gvLiveMount || !gvLiveMount.isConnected) return;
       const pace = liveState.total > 0 ? Math.round((liveState.total / hoursGone) * 24) : null;
@@ -1516,9 +1544,12 @@ FF.pages = FF.pages || {};
       const wdEir = ui.daily ? eirWeekdays(todayK(), ui.daily) : null;
       const bars = wdEir ? wdEir.bars : wdBars;
       const wdKeys = wdEir ? wdEir.keys : null;
-      const expectedNow = wdEir && wdEir.expected != null ? wdEir.expected : liveState.expected;
+      let expectedNow = wdEir && wdEir.expected != null ? wdEir.expected : liveState.expected;
+      // 🎯 v3.125.27 — GV Master (tag + time) se forecast: weekday pattern × haal ka level + aaj ab tak ka intraday pace.
+      const fc = gvForecastNow(liveState.total);
+      if (fc && fc.expected != null) expectedNow = fc.expected;
       const wdNote = bars ? `pichhle ${bars.labels.length} same-weekday (${bars.labels.map((l) => `${l} = ${U.fmt(bars.values[bars.labels.indexOf(l)])}`).join(' · ')}) ka average` : '';
-      gvLiveMount.innerHTML = gvLiveHtml({ ...liveState, expected: expectedNow, pace, weekdayNote: wdNote, weekdayBars: bars, weekdayKeys: wdKeys });
+      gvLiveMount.innerHTML = gvLiveHtml({ ...liveState, expected: expectedNow, pace: fc ? fc.expected : pace, forecast: fc, weekdayNote: wdNote, weekdayBars: bars, weekdayKeys: wdKeys });
     }
     // 🧩 Merge fix: yeh teen painter main me call hote the par define nahi the (Home render
     //    ReferenceError: paintMonth is not defined → poore KPI cards gayab). Base v3.47 se wapas.
