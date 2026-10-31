@@ -37,7 +37,7 @@ test('KYC detail renders class table, callouts, pending and agent/TL lists worst
   assert.match(html, /Class-wise KYC/);
   assert.match(html, /Sabse zyada KYC %<\/small><b class="kyc-ok">VC20 · 75\.0%/);
   assert.match(html, /Sabse kam KYC %<\/small><b class="kyc-bad">VC4 · 10\.0%/);
-  assert.match(html, /Pending 25/);          // current month pending (blank KYC) shown separately
+  assert.match(html, /blank 25/);           // current month pending (blank KYC) shown separately (class tiles)
   // agent list: A One (90 not KYC) ranks above B Two (10)
   assert.ok(html.indexOf('A One') < html.indexOf('B Two'));
   assert.match(html, /data-kyc-by="agent"/); assert.match(html, /data-kyc-by="tl"/);
