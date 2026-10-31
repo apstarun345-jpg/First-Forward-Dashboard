@@ -67,3 +67,29 @@ test('server gviz gate lets small limit queries jump the queue; live lookup uses
   const ms = fs.readFileSync(path.join(ROOT, 'masterSearch.js'), 'utf8');
   assert.match(ms, /limit 40`, \{ timeoutMs: 40000 \}/);
 });
+
+test('barcode + tag ID of the same tag collapse into ONE result row (barcode key wins)', async () => {
+  const s = FF.config.stock, a = FF.config.gv.assignment;
+  const colsOf = (sql) => sql.replace(/^select\s+/i, '').split(/\s+where\s+/i)[0].split(',').map((x) => x.trim());
+  const sqls = [];
+  FF.data.query = async (sheet, sql) => {
+    sqls.push({ sheet, sql });
+    const cols = colsOf(sql);
+    const map = sheet === 'Tag Assignment'
+      ? { [a.serial]: '608116-039-0550696', [a.tagId]: '34161FA820328EE84F0CE500', [a.agentName]: 'SOMANANDA DASH', [a.tlName]: 'SOMANANDA DASH' }
+      : { [s.barcode]: '608116-039-0550696', [s.tagId]: '34161FA820328EE84F0CE500', [s.agentName]: 'Ravi', [s.tlName]: 'TL One' };
+    return { rows: [cols.map((c) => ({ v: map[c] || '' }))], cols: cols.map((id) => ({ id })) };
+  };
+  FF.masterSearch.search('608116-039-0550696');
+  // dashed barcode → only barcode/serial column, no EIR scan
+  assert.ok(sqls.every((q) => [...q.sql.split(' where ')[1].matchAll(/lower\((\w+)\)/g)].every((m) => m[1] === s.barcode || m[1] === a.serial)), 'only barcode/serial column scanned');
+  assert.ok(!sqls.some((q) => q.sheet === (FF.config.eir.sheet || 'EIR')), 'EIR skipped for barcode input');
+  await new Promise((r) => setTimeout(r, 30));
+  const res = FF.masterSearch.search('608116-039-0550696');
+  assert.equal(res.tags.length, 1, 'one row per tag');
+  assert.equal(res.tags[0].key, '6081160390550696');
+  assert.equal(res.tags[0].ff.length, 1); assert.equal(res.tags[0].gv.length, 1);
+  const dd = FF.masterSearch.suggestItems('608116-039-0550696').find((i) => i.barcode);
+  assert.match(dd.sub, /Tag 34161FA820328EE84F0CE500/);
+  assert.match(dd.sub, /GV SOMANANDA DASH \(TL SOMANANDA DASH\)/);
+});

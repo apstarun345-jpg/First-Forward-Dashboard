@@ -574,6 +574,11 @@ FF.pages = FF.pages || {};
     const needles = [...new Set([liveSafe(query), raw].filter((x) => x && x.length >= 4))];
     const s = c.stock || {}, a = (c.gv && c.gv.assignment) || {}, e = c.eir || {};
     const gen = state.generation;
+    // Format dekh kar sirf zaroori column scan karo (kam conditions = tez query):
+    //   • 608116-011-… ya sirf digits → barcode/serial column (EIR me barcode nahi hota → EIR skip)
+    //   • hex tag ID (34161FA8…)     → tag ID column
+    const kindOf = /[a-z]/i.test(key) ? 'tag' : (/-/.test(String(query)) || /^60\d{4}/.test(key)) ? 'barcode' : 'both';
+    const pick = (barCol, tagCol) => (kindOf === 'tag' ? [tagCol] : kindOf === 'barcode' ? [barCol] : [barCol, tagCol]);
     const add = (barcode, rowFn) => {
       const k = normBar(barcode); if (!k) return;
       let en = rec.entries.get(k); if (!en) { en = { key: k, ff: [], gv: [] }; rec.entries.set(k, en); }
@@ -594,17 +599,35 @@ FF.pages = FF.pages || {};
     };
     const cls = (v) => (FF.gv && FF.gv.normClass ? FF.gv.normClass(v) : v);
     Promise.all([
-      find(s.sheet || 'StockDataa', [s.barcode, s.tagId, s.agentId, s.agentName, s.tlName, s.cls, s.agentAllocatedAt, s.bcAllocatedAt], [s.barcode, s.tagId], (row, val, txt) => {
-        [val(row, s.barcode), val(row, s.tagId)].forEach((b) => add(b, (en, k) => en.ff.push({ barcode: k, tagId: val(row, s.tagId), agentId: val(row, s.agentId), agentName: txt(row, s.agentName) || val(row, s.agentId), tlName: txt(row, s.tlName), cls: cls(txt(row, s.cls)), allocated: txt(row, s.agentAllocatedAt) || txt(row, s.bcAllocatedAt), source: 'StockDataa' })));
+      find(s.sheet || 'StockDataa', [s.barcode, s.tagId, s.agentId, s.agentName, s.tlName, s.cls, s.agentAllocatedAt, s.bcAllocatedAt], pick(s.barcode, s.tagId), (row, val, txt) => {
+        [val(row, s.barcode) || val(row, s.tagId)].forEach((b) => add(b, (en, k) => en.ff.push({ barcode: k, tagId: val(row, s.tagId), agentId: val(row, s.agentId), agentName: txt(row, s.agentName) || val(row, s.agentId), tlName: txt(row, s.tlName), cls: cls(txt(row, s.cls)), allocated: txt(row, s.agentAllocatedAt) || txt(row, s.bcAllocatedAt), source: 'StockDataa' })));
       }),
-      find('Tag Assignment', [a.serial, a.tagId, a.agentId, a.agentName, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName, a.allocatedAt], [a.serial, a.tagId], (row, val, txt) => {
-        [val(row, a.serial), val(row, a.tagId)].forEach((b) => add(b, (en, k) => en.gv.push({ barcode: k, tagId: val(row, a.tagId), agentId: val(row, a.agentId), agentName: txt(row, a.agentName) || val(row, a.agentId), tlName: txt(row, a.tlName), cls: cls(txt(row, a.cls)), gvId: txt(row, a.gvUniqueId), gvName: txt(row, a.gvUniqueName), allocated: txt(row, a.allocatedAt), source: 'Tag Assignment' })));
+      find('Tag Assignment', [a.serial, a.tagId, a.agentId, a.agentName, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName, a.allocatedAt], pick(a.serial, a.tagId), (row, val, txt) => {
+        [val(row, a.serial) || val(row, a.tagId)].forEach((b) => add(b, (en, k) => en.gv.push({ barcode: k, tagId: val(row, a.tagId), agentId: val(row, a.agentId), agentName: txt(row, a.agentName) || val(row, a.agentId), tlName: txt(row, a.tlName), cls: cls(txt(row, a.cls)), gvId: txt(row, a.gvUniqueId), gvName: txt(row, a.gvUniqueName), allocated: txt(row, a.allocatedAt), source: 'Tag Assignment' })));
       }),
-      find(e.sheet || 'EIR', [e.tagId, e.agentId, e.agentName, e.tlName, e.cls, e.date], [e.tagId], (row, val, txt) => {
+      kindOf === 'barcode' ? Promise.resolve() : find(e.sheet || 'EIR', [e.tagId, e.agentId, e.agentName, e.tlName, e.cls, e.date], [e.tagId], (row, val, txt) => {
         add(val(row, e.tagId), (en, k) => en.ff.push({ barcode: k, tagId: val(row, e.tagId), agentId: val(row, e.agentId), agentName: txt(row, e.agentName) || val(row, e.agentId), tlName: txt(row, e.tlName), cls: txt(row, e.cls), allocated: txt(row, e.date), source: 'EIR' }));
       })
     ]).finally(() => { rec.pending = false; if (gen === state.generation) emit(); });
     return rec;
+  }
+
+  /** v3.125.14 — Ek tag ke do keys (barcode + tag ID) index me alag entries hain; result me ek hi row dikhao.
+      Row ka key hamesha barcode/serial (agar mile), tag ID apne column me rehta hai. Index entries mutate nahi hote. */
+  function mergeTagEntries(tags) {
+    const groups = new Map(), order = [];
+    const recKey = (x) => [x.source, normName(x.agentName), normId(x.agentId), normId(x.tagId), normId(x.gvId)].join('|');
+    for (const t of tags) {
+      const recs = [...(t.ff || []), ...(t.gv || [])];
+      const tid = normBar((recs.find((x) => x && x.tagId) || {}).tagId);
+      const barcodeKey = normBar((recs.find((x) => x && x.barcode && normBar(x.barcode) !== tid) || {}).barcode);
+      const id = tid || t.key;
+      let g = groups.get(id);
+      if (!g) { g = { key: t.key, ff: [], gv: [], seen: new Set(), tid }; groups.set(id, g); order.push(g); }
+      if (t.key !== tid) g.key = t.key; else if (g.key === tid && barcodeKey) g.key = barcodeKey;
+      for (const side of ['ff', 'gv']) for (const x of t[side] || []) { const k = side + recKey(x); if (!g.seen.has(k)) { g.seen.add(k); g[side].push(x); } }
+    }
+    return order.map((g) => ({ key: g.key, ff: g.ff, gv: g.gv }));
   }
 
   function search(q) {
@@ -662,6 +685,7 @@ FF.pages = FF.pages || {};
         out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
       }
     }
+    if (out.tags.length > 1) out.tags = mergeTagEntries(out.tags);
     out.people = canonicalPeople(out.people, idx);
     suppressFalseFfMatches(out);
     out.matched = out.people.length + out.ids.length + out.tags.length;
@@ -831,7 +855,10 @@ FF.pages = FF.pages || {};
       items.push({
         kind: 'cls', kindLabel: 'Barcode',
         label: U.barcode(t.key),
-        sub: [f ? `FF ${f.agentName}` : '', g ? `GV ${g.agentName}` : '', (f && f.cls) || (g && g.cls) || ''].filter(Boolean).join(' · '),
+        sub: [((f && f.tagId) || (g && g.tagId)) && normBar((f && f.tagId) || (g && g.tagId)) !== t.key ? `Tag ${(f && f.tagId) || (g && g.tagId)}` : '',
+          f ? `FF ${f.agentName}${f.tlName ? ' (TL ' + f.tlName + ')' : ''}` : 'FF not mapped',
+          g ? `GV ${g.agentName}${g.tlName ? ' (TL ' + g.tlName + ')' : ''}` : 'GV not mapped',
+          (f && f.cls) || (g && g.cls) || ''].filter(Boolean).join(' · '),
         value: t.key, barcode: t.key
       });
     });
