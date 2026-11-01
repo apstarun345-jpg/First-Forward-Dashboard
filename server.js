@@ -7,6 +7,9 @@
 // Run locally:  npm start   (PORT defaults to 8080; Render sets PORT automatically)
 import http from 'node:http';
 import zlib from 'node:zlib';
+// 🧠 v3.125.31 — Brotli window 4 MB (default 22) ki jagah 256 KB (18): har bade response par native memory kam,
+// RSS fragmentation kam (Render 512 MB). Size par asar ~1-3%.
+const BR_LGWIN = Math.min(24, Math.max(10, Number(process.env.BR_LGWIN) || 18));
 import fs from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -1337,7 +1340,7 @@ function sendJson(res, status, payload, extra = {}) {
   if (req && req.headers && body.length > 1024 && !(extra && extra['Content-Encoding'])) {
     let encoded = null, encoding = '';
     try {
-      if (accepts(req, 'br')) { encoded = zlib.brotliCompressSync(Buffer.from(body), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } }); encoding = 'br'; }
+      if (accepts(req, 'br')) { encoded = zlib.brotliCompressSync(Buffer.from(body), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4, [zlib.constants.BROTLI_PARAM_LGWIN]: BR_LGWIN } }); encoding = 'br'; }
       else if (accepts(req, 'gzip')) { encoded = zlib.gzipSync(body, { level: 6 }); encoding = 'gzip'; }
     } catch { encoded = null; }
     if (encoded) {
@@ -9441,6 +9444,25 @@ async function handleApi(req, res, url) {
   };
   // 🔗 Personal links recovery: settings rollback / restart me kho gaye links sheet history (APP_STORAGE_HISTORY) se wapas.
   //    GET = sirf dry-run (kuch nahi badalta) · POST { ids? } = jo current me nahi hain unhe jod do (kuch hatata / badalta nahi).
+  // 🧠 v3.125.31 — Memory report (admin): kaunsa in-memory index kitna bada (v8.serialize size ≈ heap me jagah).
+  if (p === '/api/admin/memory' && method === 'GET') {
+    requireAdmin(user);
+    const v8 = await import('node:v8');
+    const sz = (v) => { if (v === null || v === undefined) return 0; try { return Math.round(v8.serialize(v).length / 1048576 * 10) / 10; } catch { try { return Math.round(JSON.stringify(v).length / 1048576 * 10) / 10; } catch { return -1; } } };
+    const mapSz = (m) => { let n = 0; try { for (const v of m.values()) n += sz(v); } catch { /* ignore */ } return Math.round(n * 10) / 10; };
+    let staticBytes = 0; try { for (const v of STATIC_MEMO.values()) staticBytes += (v.raw ? v.raw.length : 0) + (v.enc && v.enc.br ? v.enc.br.length : 0) + (v.enc && v.enc.gzip ? v.enc.gzip.length : 0); } catch { /* ignore */ }
+    const parts = {
+      gvizCache: Math.round(cache.bytes / 1048576 * 10) / 10, gvizCacheEntries: cache.size,
+      staticMemo: Math.round(staticBytes / 1048576 * 10) / 10,
+      stockAge: sz(stockAgeState.index), dispatchLedger: sz(ledgerState.index), ledgerGood: sz(ledgerState.good),
+      registerRows: sz(regFullState.rows), newIds: sz(newIdsState.data), unusualScan: sz(uaScanState.index),
+      ledgerAgg: sz(ledgerAggState.data), gvReportHistory: sz(gvReportHistoryCache.history),
+      plPages: mapSz(plPageCache), plMobile: sz(plMobileCache.maps), duplicateScan: mapSz(duplicateScanState),
+      complaintFiles: mapSz(complaintFilesMemo), db: sz(db), todayFeed: sz(todayFeedCache.body), gvTodayFeed: sz(gvTodayFeedCache.body)
+    };
+    const ranked = Object.entries(parts).filter(([k]) => k !== 'gvizCacheEntries').sort((a, b) => b[1] - a[1]);
+    return sendJson(res, 200, { ok: true, mem: memBreakdown(), mb: parts, top: ranked.slice(0, 8) });
+  }
   if (p === '/api/personal-links/recover' && (method === 'GET' || method === 'POST')) {
     requireAdmin(user);
     const store = cloudStore();
@@ -11910,13 +11932,13 @@ const BR_QUALITY_FRESH = 5;   // memo ke bina (har request par compute) — halk
 const BR_QUALITY_MEMO = 7;    // memo ke saath (ek baar compute) — ~6% chhota output
 function encodingFor(req) { return accepts(req, 'br') ? 'br' : accepts(req, 'gzip') ? 'gzip' : ''; }
 function compressSync(buf, encoding, quality) {
-  if (encoding === 'br') return zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length } });
+  if (encoding === 'br') return zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length, [zlib.constants.BROTLI_PARAM_LGWIN]: BR_LGWIN } });
   return zlib.gzipSync(buf, { level: 6 });
 }
 /** Event loop block kiye bina compress (static files ke liye) + same file ki parallel requests dedupe. */
 const compressAsync = (buf, encoding, quality) => new Promise((resolve, reject) => {
   const done = (err, out) => (err ? reject(err) : resolve(out));
-  if (encoding === 'br') zlib.brotliCompress(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length } }, done);
+  if (encoding === 'br') zlib.brotliCompress(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length, [zlib.constants.BROTLI_PARAM_LGWIN]: BR_LGWIN } }, done);
   else zlib.gzip(buf, { level: 6 }, done);
 });
 async function warmEncoding(req, buf, memo) {
