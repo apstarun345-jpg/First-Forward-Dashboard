@@ -795,6 +795,16 @@ FF.pages = FF.pages || {};
       out.ids.sort((a, b) => a.id.length - b.id.length);
       if (out.ids.length > 40) out.ids.length = 40;
     }
+    // 🤝 v3.125.43 — Assistant ID / purani Agent ID (Sheet4) → us agent (ya kai agents) ki New ID.
+    if (FF.aliases && FF.aliases.hits && ni.length >= 4) {
+      const have = new Set(out.ids.map((v) => v.id));
+      FF.aliases.hits(query).forEach((h) => {
+        const id = normId(h.to); if (have.has(id)) return; have.add(id);
+        const known = idx && idx.ids && idx.ids.get(id);
+        const r = h.row || {};
+        out.ids.unshift({ id, name: (known && known.name) || clean(r.n) || h.to, kind: (known && known.kind) || 'ff-agent', tl: (known && known.tl) || clean(r.tn), via: h.kind });
+      });
+    }
     // 📞 mobile number (agent + TL) — poora ya aakhri digits, indexed by 5-digit fragments.
     const dq = query.replace(/\D/g, '');
     if (dq.length >= 5 && dq.length <= 13 && !/[a-z]/i.test(query) && idx && idx.mobiles) {
@@ -993,7 +1003,7 @@ FF.pages = FF.pages || {};
 
     (r.ids || []).slice(0, 6).forEach((v) => items.push({
       kind: 'cls', kindLabel: KIND_LABEL[v.kind] || 'ID', label: `${v.name} · ${v.id}`,
-      sub: [`ID ${v.id}`, v.tl ? `TL ${v.tl}` : ''].filter(Boolean).join(' · '), value: v.name, personKey: `${v.kind}|${normName(v.name)}`
+      sub: [`ID ${v.id}`, v.tl ? `TL ${v.tl}` : '', v.via ? `🤝 ${v.via} match` : ''].filter(Boolean).join(' · '), value: v.name, personKey: `${v.kind}|${normName(v.name)}`
     }));
     (r.tags || []).slice(0, 8).forEach((t) => {
       const f = t.ff[0], g = t.gv[0];
@@ -1423,6 +1433,7 @@ FF.pages = FF.pages || {};
       return false;
     }
     if (force === true) mountedTopbar = false;
+    try { if (FF.aliases && FF.aliases.load) FF.aliases.load().then(() => emit()).catch(() => {}); } catch { /* ignore */ }
     try { SNAP.ensure(); if (!SNAP.timer) { SNAP.timer = setInterval(() => SNAP.ensure(), 5 * 60e3); } } catch { /* ignore */ }
     const actions = U.$('#top-actions');
     // Guard: dobara mount na ho (querySelector par bharosa nahi — DOM shim/iframe me naya element
