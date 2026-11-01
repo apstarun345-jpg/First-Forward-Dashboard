@@ -1514,10 +1514,10 @@ function upstreamUrl(params) {
   const sheetId = (params.get('id') || db.settings.sheetId || DEFAULT_SHEET_ID).replace(/[^A-Za-z0-9_-]/g, '');
   return `${GVIZ_BASE}/spreadsheets/d/${sheetId}/gviz/tq?${p.toString()}`;
 }
-async function fetchUpstream(url) {
+async function fetchUpstream(url, opts) {
   await gvizAcquire(gvizPriority(url));
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), Math.max(5000, Number(opts && opts.timeoutMs) || UPSTREAM_TIMEOUT_MS));
   try {
     // Cooldown ke dauran Google par nayi request nahi bhejni — utna intezaar kar ke hi bhejo
     // (bahut lamba cooldown ho to GVIZ_GATE_WAIT_MS ke baad chhod dena, warna request latak jaati).
@@ -3550,7 +3550,8 @@ function ledgerIndex(fresh) {
 // ---------------------------------------------------------------------------------------------
 const STOCK_AGE_TTL = 30 * 60e3;   // 📉 v3.74: 10 → 30 min — har rebuild poora StockDataa + Tag Assignment padhta hai                 // index itna purana ho to background me refresh (purana turant serve hota hai)
 const STOCK_AGE_ERROR_RETRY_MS = Math.max(0, Number(process.env.STOCK_AGE_ERROR_RETRY_MS ?? 30e3));   // fail / adhura index mila → itni der baad dobara koshish (10 min nahi!)
-const STOCK_AGE_PAGE_ROWS = Math.max(1, Number(process.env.STOCK_AGE_PAGE_ROWS) || 25000);
+const STOCK_AGE_PAGE_ROWS = Math.max(1, Number(process.env.STOCK_AGE_PAGE_ROWS) || 15000);
+const SCAN_PAGE_TIMEOUT_MS = Math.max(20000, Number(process.env.SCAN_PAGE_TIMEOUT_MS) || 100000);
 const STOCK_AGE_MAX_PAGES = 60;                   // 60 × 25k = 15 lakh rows — safety cap
 const STOCK_AGE_PAGE_WINDOW = Math.max(1, Math.min(6, Number(process.env.STOCK_AGE_PAGE_WINDOW) || 3));   // ek saath itne pages in-flight
 const STOCK_AGE_CHUNK = 4000;                     // itni rows ke baad event loop ko saans (health check / baaki users na atkein)
@@ -3634,9 +3635,11 @@ async function eirAutoDetect(opts) {
 
 async function gvizPageServer(params, sheet) {
   let lastErr;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // v3.125.35 — Google sheet slow ho to 15k-row page bhi 45 s se zyada le leta tha ("This operation was aborted") →
+  // poora FF stock index khaali. Bade scan pages: 100 s timeout, 3 koshish.
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const out = await fetchUpstream(upstreamUrl(params));
+      const out = await fetchUpstream(upstreamUrl(params), { timeoutMs: SCAN_PAGE_TIMEOUT_MS });
       if (out.rateLimited) {
         const limitErr = new Error(gvizLimitMessage(out.retryAfterMs));
         limitErr.rateLimited = true; limitErr.retryAfterMs = out.retryAfterMs;
@@ -3650,7 +3653,7 @@ async function gvizPageServer(params, sheet) {
     } catch (err) {
       lastErr = err;
       // Rate limit par turant dobara maarna ulta nuksaan hai — Retry-After / cooldown ka intezaar.
-      if (attempt === 0) await gvizSleep(lastErr && lastErr.rateLimited ? 2500 : 800);
+      if (attempt < 2) await gvizSleep(lastErr && lastErr.rateLimited ? 2500 : 1500 * (attempt + 1));
     }
   }
   throw lastErr;
