@@ -26,7 +26,7 @@ import { personalActivityCalendar } from './personal-calendar.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
-import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent } from './stock-age.js';
+import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
@@ -3747,6 +3747,28 @@ function duplicateScan(source, fresh) {
   return entry;
 }
 
+let barcodeSnapCache = null, barcodeSnapBuild = null;
+/** Stock index → gzip TSV Buffer, chhote tukdon me (peak RAM ~kuch MB, poora 17 MB string kabhi nahi banta). */
+async function buildBarcodeSnapshot(index, canFf, canGv) {
+  const gz = zlib.createGzip({ level: 6 });
+  const out = [];
+  gz.on('data', (b) => out.push(b));
+  const ended = new Promise((resolve, reject) => { gz.on('end', resolve); gz.on('error', reject); });
+  gz.write(`#at\t${index.at}\n`);
+  const sides = [canFf && ['ff', index.ff], canGv && index.gv && ['gv', index.gv]].filter(Boolean);
+  for (const [ch, side] of sides) {
+    let buf = [];
+    const flush = async () => { if (buf.length) { gz.write(buf.join('\n') + '\n'); buf = []; await yieldLoop(); } };
+    if (typeof side.each === 'function') {
+      const total = side.each(() => {}, 0, 0);
+      for (let i = 0; i < total; i += 5000) { side.each((r) => buf.push(snapshotLine(ch, r)), i, i + 5000); await flush(); }
+    } else for (const r of side.raw || []) { buf.push(snapshotLine(ch, r)); if (buf.length >= 5000) await flush(); }
+    await flush();
+  }
+  gz.end();
+  await ended;
+  return Buffer.concat(out);
+}
 async function loadStockAgeIndex() {
   const s = db.settings || {};
   const st = s.stock || {};
@@ -6388,6 +6410,28 @@ async function handleApi(req, res, url) {
     }
     const offset = Math.max(0, Number(q.get('offset')) || 0), limit = q.get('all') === '1' ? 200000 : Math.max(1, Math.min(1000, Number(q.get('limit')) || 300));
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, total: rows.length, offset, rows: rows.slice(offset, offset + limit) }), { 'Cache-Control': 'no-store' });
+  }
+  // ⚡ v3.125.40 — Browser snapshot: poora barcode/tag register ek gzip TSV (~3-4 MB). Browser IndexedDB me rakhta hai →
+  // Master Search me barcode / tag type karte hi browser me hi result (server restart / Google slow ho tab bhi).
+  if (p === '/api/barcode-snapshot' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const index = stockAgeState.index;
+    if (!index || !index.ff || index.errors && index.errors.ff) { void stockAgeIndexWithin(0, false).catch(() => {}); return sendJson(res, 200, { ok: true, pending: true }, { 'Cache-Control': 'no-store' }); }
+    const perms = user.role === 'admin' ? null : new Set(user.permissions || []);
+    const canFf = !perms || perms.has('sheet:StockDataa') || perms.has('ff') || perms.has('masterSearch');
+    const canGv = !perms || perms.has('sheet:Tag Assignment') || perms.has('gv') || perms.has('masterSearch');
+    const ck = `${index.at}|${canFf ? 1 : 0}${canGv ? 1 : 0}`;
+    if (!barcodeSnapCache || barcodeSnapCache.key !== ck) {
+      if (!barcodeSnapBuild || barcodeSnapBuild.key !== ck) {
+        const job = buildBarcodeSnapshot(index, canFf, canGv).then((buf) => { barcodeSnapCache = { key: ck, at: index.at, buf }; return barcodeSnapCache; });
+        barcodeSnapBuild = { key: ck, job };
+        job.catch(() => {}).finally(() => { if (barcodeSnapBuild && barcodeSnapBuild.job === job) barcodeSnapBuild = null; });
+      }
+      await barcodeSnapBuild.job;
+    }
+    if (url.searchParams.get('at') === String(barcodeSnapCache.at)) return sendJson(res, 200, { ok: true, same: true, at: barcodeSnapCache.at }, { 'Cache-Control': 'no-store' });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Encoding': 'gzip', 'Content-Length': barcodeSnapCache.buf.length, 'Cache-Control': 'no-store', 'X-Snapshot-At': String(barcodeSnapCache.at) });
+    return res.end(barcodeSnapCache.buf);
   }
   // ⚡ v3.125.35 — Instant barcode / tag lookup (Master Search): server ke stock-age index (StockDataa + Tag Assignment) se,
   // Google ke paas jaaye bina (~ms). Index abhi ban raha ho to { pending: true } → client sheet query par jaata hai.

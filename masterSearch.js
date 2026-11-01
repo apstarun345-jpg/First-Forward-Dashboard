@@ -561,6 +561,79 @@ FF.pages = FF.pages || {};
   // tab tak barcode search khali dikhti thi. Ab typed barcode/tag ke liye 4 chhoti targeted queries (1-9 s) chalti hain
   // aur register ready hote hi normal index le leta hai.
   const live = { map: new Map(), order: [] };
+  // ⚡ v3.125.40 — Browser snapshot: poora barcode/tag register (StockDataa + Tag Assignment) IndexedDB me.
+  // Type karte hi browser me hi dhoondo (~1 ms) — server restart ho ya Google slow, result turant. Har 20 min background refresh.
+  const SNAP = {
+    ready: false, at: 0, lines: null, keys: '', kStarts: null, loading: null, nextTry: 0,
+    REFRESH_MS: 20 * 60e3,
+    idb(mode, fn) {
+      return new Promise((resolve) => {
+        try {
+          if (typeof indexedDB === 'undefined') return resolve(null);
+          const rq = indexedDB.open('ffdash-snap', 1);
+          rq.onupgradeneeded = () => { try { rq.result.createObjectStore('kv'); } catch { /* ignore */ } };
+          rq.onerror = () => resolve(null);
+          rq.onsuccess = () => {
+            try {
+              const db = rq.result, tx = db.transaction('kv', mode), st = tx.objectStore('kv');
+              const r = fn(st);
+              tx.oncomplete = () => { db.close(); resolve(r && 'result' in r ? r.result : true); };
+              tx.onerror = tx.onabort = () => { db.close(); resolve(null); };
+            } catch { resolve(null); }
+          };
+        } catch { resolve(null); }
+      });
+    },
+    use(text) {
+      const body = String(text || '');
+      const m = /^#at\t(\d+)\n/.exec(body);
+      if (!m) return false;
+      const lines = body.slice(m[0].length).split('\n').filter(Boolean);
+      const keyLines = lines.map((l) => { const f = l.split('\t', 4); return `${f[1] || ''} ${f[3] || ''}`; });
+      const kStarts = new Int32Array(keyLines.length + 1);
+      let pos = 0;
+      for (let i = 0; i < keyLines.length; i++) { kStarts[i] = pos; pos += keyLines[i].length + 1; }
+      kStarts[keyLines.length] = pos;
+      Object.assign(SNAP, { lines, keys: keyLines.join('\n'), kStarts, at: Number(m[1]), ready: lines.length > 0 });
+      live.map.clear(); live.order.length = 0;
+      return SNAP.ready;
+    },
+    /** IndexedDB se turant load, phir server se naya (purana / missing ho to). */
+    ensure() {
+      if (SNAP.loading || !(FF.auth && FF.auth.api)) return SNAP.loading;
+      SNAP.loading = (async () => {
+        if (!SNAP.ready) { const t = await SNAP.idb('readonly', (st) => st.get('barcodes')); if (t) { SNAP.use(t); emit(); } }
+        if (SNAP.ready && Date.now() - SNAP.at < SNAP.REFRESH_MS) return;
+        if (Date.now() < SNAP.nextTry) return;
+        try {
+          const r = await fetch(`/api/barcode-snapshot${SNAP.at ? `?at=${SNAP.at}` : ''}`, { credentials: 'same-origin', headers: FF.auth.headers ? FF.auth.headers() : {} });
+          const ct = r.headers.get('content-type') || '';
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          if (/json/.test(ct)) { const d = await r.json(); SNAP.nextTry = Date.now() + (d && d.same ? SNAP.REFRESH_MS : 45e3); return; }
+          const text = await r.text();
+          if (SNAP.use(text)) { await SNAP.idb('readwrite', (st) => st.put(text, 'barcodes')); emit(); }
+        } catch { SNAP.nextTry = Date.now() + 60e3; }
+      })().finally(() => { SNAP.loading = null; });
+      return SNAP.loading;
+    },
+    lineOf(p) { let lo = 0, hi = SNAP.lines.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (SNAP.kStarts[m] <= p) lo = m; else hi = m - 1; } return lo; },
+    /** query → rows [ch, key, barcode, tagId, cls, day, agent, agentId, tl, inStock] (exact barcode / tag pehle). */
+    find(query, limit = 30) {
+      if (!SNAP.ready) return null;
+      const raw = String(query || '').trim();
+      const hex = /[a-f]/i.test(raw.replace(/[^0-9a-z]/gi, ''));
+      const needle = hex ? raw.toUpperCase().replace(/[^0-9A-Z]/g, '') : raw.replace(/\D/g, '').replace(/^0+/, '');
+      if (needle.length < 4) return [];
+      const keys = SNAP.keys, out = [], seen = new Set();
+      const addAt = (p) => { const i = SNAP.lineOf(p); if (!seen.has(i)) { seen.add(i); out.push(SNAP.lines[i].split('\t')); } return i; };
+      const exact = (tok, off) => { let p = keys.indexOf(tok); while (p >= 0 && out.length < limit) { const at = p + off; if (at === 0 || keys[at - 1] === '\n' || keys[at - 1] === ' ') addAt(at); p = keys.indexOf(tok, p + tok.length); } };
+      exact(`${needle} `, 0); exact(` ${needle}\n`, 1);
+      if (out.length < limit && keys.endsWith(` ${needle}`)) addAt(keys.length - needle.length);
+      let p = keys.indexOf(needle);
+      while (p >= 0 && out.length < limit) { const i = addAt(p); p = keys.indexOf(needle, SNAP.kStarts[i + 1]); }
+      return out;
+    }
+  };
   // Long barcode/tag input can use the fast lane without waiting for the people/REPORT index.
   // Already-known person IDs stay in the person flow (including long numeric legacy IDs).
   function isBarcodeQuery(q) {
@@ -582,6 +655,20 @@ FF.pages = FF.pages || {};
     if (live.map.has(key)) live.order.splice(live.order.indexOf(key), 1);
     live.map.set(key, rec); live.order.push(key);
     if (live.order.length > 30) live.map.delete(live.order.shift());
+    // ⚡ Browser snapshot me mila → turant (koi network nahi). Na mile to neeche server / sheet / EIR (issued tag).
+    const local = SNAP.find(query, 30);
+    if (local && local.length) {
+      const clsL = (v) => (FF.gv && FF.gv.normClass ? FF.gv.normClass(v) : v);
+      const dayIso = (d) => (Number(d) ? new Date(Number(d) * 86400e3).toISOString().slice(0, 10) : '');
+      local.forEach((f) => {
+        const k = normBar(f[2] || f[3]); if (!k) return;
+        let en = rec.entries.get(k); if (!en) { en = { key: k, ff: [], gv: [] }; rec.entries.set(k, en); }
+        const r = { barcode: k, tagId: clean(f[3]), agentId: clean(f[7]), agentName: clean(f[6]) || clean(f[7]), tlName: clean(f[8]), cls: clsL(f[4]), allocated: dayIso(f[5]) };
+        if (f[0] === 'gv') en.gv.push({ ...r, source: 'Tag Assignment' }); else en.ff.push({ ...r, source: 'StockDataa' });
+      });
+      rec.pending = false; rec.instantHit = true; rec.local = true; rec.at = Date.now();
+      return rec;
+    }
     // Sheet me barcode dash ke saath bhi hota hai (608116-011-0558357) — raw aur bina-dash dono roop dhoondo.
     const raw = String(query || '').trim().toLowerCase().replace(/[^a-z0-9\-\/ ]/g, '');
     const needles = [...new Set([key.toLowerCase(), liveSafe(query), raw].filter((x) => x && x.length >= 4))];
@@ -1336,6 +1423,7 @@ FF.pages = FF.pages || {};
       return false;
     }
     if (force === true) mountedTopbar = false;
+    try { SNAP.ensure(); if (!SNAP.timer) { SNAP.timer = setInterval(() => SNAP.ensure(), 5 * 60e3); } } catch { /* ignore */ }
     const actions = U.$('#top-actions');
     // Guard: dobara mount na ho (querySelector par bharosa nahi — DOM shim/iframe me naya element
     // bhi mil sakta hai, isliye innerHTML + module flag dono check karte hain).
@@ -2857,6 +2945,7 @@ FF.pages = FF.pages || {};
     reloadCommission() { GVC.data = null; GVC.failAt = 0; return GVC.load(true); },
     get ready() { return !!(state.light); }, get heavyReady() { return !!(state.full && state.full.fullLoaded); },
     get topbarMounted() { return mountedTopbar; },
+    _snap: SNAP,
     label: KIND_LABEL
   };
 })(window.FF);

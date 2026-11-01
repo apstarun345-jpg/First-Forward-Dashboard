@@ -301,8 +301,15 @@ export function compactRaw(c) {
       return out;
     }
   });
+  /** Har row par fn(row, i) — sirf ek row parse hoti hai (snapshot export ke liye; .raw cold rehta hai). */
+  Object.defineProperty(c, 'each', { configurable: true, enumerable: false, value(fn, from = 0, to = count) { for (let i = from; i < Math.min(to, count); i++) fn(rowAt(i), i); return count; } });
   Object.defineProperty(c, 'rawBytes', { value: text.length + keys.length, enumerable: true, configurable: true });
   return c;
+}
+/** ⚡ v3.125.40 — Browser snapshot line (TSV): ch · barcodeKey · barcode · tagId · cls · day · agent · agentId · tl · inStock */
+export function snapshotLine(ch, r) {
+  const t = (v) => str(v).replace(/[\t\n\r]/g, ' ');
+  return [ch, normBarcode(r[1]), t(r[1]), t(r[0]).toUpperCase(), t(r[2]), r[3] || '', t(r[4]), t(r[5]), t(r[6]), ch === 'gv' ? (r[11] === undefined ? '' : r[11]) : ''].join('\t');
 }
 export function createStockAgeBuilder({ compact = false, todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.', gvOutWords = null } = {}) {
   const outWords = Array.isArray(gvOutWords) ? gvOutWords.map((w) => str(w).toUpperCase()).filter(Boolean) : null;
