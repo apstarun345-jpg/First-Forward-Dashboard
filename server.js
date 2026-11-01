@@ -13266,7 +13266,7 @@ async function start() {
     setInterval(() => warmPersonalLinks().catch(() => {}), 10 * 60e3).unref();   // 10 min = gviz cache TTL (5 min par har link ke 3-4 queries dobara jaate the)
     setTimeout(() => maybeMonthlyReport(), 8000);
     // ⚡ v3.125.45 — Master Search ka 'Last dispatch' box: ledger aggregate boot par hi + har 25 min (user kabhi intezaar na kare)
-    setTimeout(() => ledgerAggregate(false).catch(() => {}), 6000).unref?.();
+    setTimeout(() => ledgerAggregate(false).catch(() => {}), 90e3).unref?.();
     setInterval(() => ledgerAggregate(true).catch(() => {}), 25 * 60e3).unref?.();
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🕒 v209 — har 15 min sheet row-count check (home khule na khule), taaki "data kab aaya" ka time sahi rahe
@@ -13283,7 +13283,7 @@ async function start() {
     if (CLOUD_BACKEND) setTimeout(() => recoveryHint().catch(() => {}), 20000).unref?.();
     // 🧓 Stock ageing index pehle se bana lo (pehla user 1-2 min intezaar na kare). Render par default ON; STOCK_AGE_WARM=0 se band.
     const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
-    if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 2e3).unref();   // pehle user ke Home loads (EIR/StockDataa) ke baad
+    if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 45e3).unref();   // pehle user ke Home loads (EIR/StockDataa) ke baad
     // 🔗 FASTag Mapping ka StockDataa lookup index bhi pehle se garam rakho — pehla Quick Map instant ho.
     // v3.72: boot ke 25 s ke bajaye 6 s baad shuru, aur fail (jaise Google rate limit) hone par
     // 30 s / 2 min / 5 min ke gaps me dobara — pehla user "sheet load nahi ho rahi" me na atke.

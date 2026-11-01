@@ -20,7 +20,7 @@ test('soft memory trim runs gc first and keeps the gviz cache unless RSS stays h
 });
 
 test('boot warm-ups are staggered behind the first user loads', () => {
-  assert.match(server, /stockAgeIndex\(false\)[^\n]*2e3/);
+  assert.match(server, /stockAgeIndex\(false\)[^\n]*45e3/);
   assert.match(server, /warmDelays = \[150e3, 4 \* 60e3, 8 \* 60e3\]/);
   assert.match(server, /gvAgentCommission\(\)\.catch\(\(\) => \{\}\), 120e3\)/);
   assert.match(server, /warmPersonalLinks\(\)\.catch\(\(\) => \{\}\), 10 \* 60e3\)/);
