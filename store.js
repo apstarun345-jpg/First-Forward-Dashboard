@@ -138,7 +138,7 @@ window.FF = window.FF || {};
     const inflight = [...jobs.keys()].filter((k) => DATASETS[k]);
     if (!stale.length && !inflight.length) return;
     const version = generation;
-    (async () => {
+    configReload = (async () => {
       await Promise.allSettled(inflight.map((k) => jobs.get(k)));   // pre-settings in-flight job ka result bhi purane config ka hai
       const redo = Object.keys(state.data).filter((k) => DATASETS[k] && builtWith[k] !== cfgFp());
       if (!redo.length || version !== generation) return;
@@ -146,7 +146,14 @@ window.FF = window.FF || {};
       if (version !== generation) return;
       emit('refresh', { config: true });
       try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
-    })();
+    })().finally(() => { configReload = null; });
+  }
+  let configReload = null;
+  /** Drill-downs isse pehle await karein: settings (column letters) aa chuke hon aur unke hisaab se data dobara ban chuka ho. */
+  async function settled(maxMs = 15000) {
+    const end = Date.now() + maxMs;
+    while (!(FF.config && FF.config._applied) && Date.now() < end && typeof window !== 'undefined' && window.document) await new Promise((r) => setTimeout(r, 150));
+    if (configReload) await Promise.race([configReload, new Promise((r) => setTimeout(r, Math.max(0, end - Date.now())))]);
   }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
@@ -193,5 +200,5 @@ window.FF = window.FF || {};
     return items;
   }
 
-  FF.store = { onConfig, preload, refresh, retryNow, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
+  FF.store = { onConfig, settled, preload, refresh, retryNow, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
 })(window.FF);
