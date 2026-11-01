@@ -33,3 +33,11 @@ test('no page derives the current month from today directly any more', () => {
   assert.deepEqual(bad, []);
   assert.match(fs.readFileSync(path.join(ROOT, 'home.js'), 'utf8'), /const curKey = U\.reportYm\(TODAY\(\)\)/);
 });
+
+test('v3.125.33: tvcClass — CCH → TVC, VC4 / VC20 alag', () => {
+  const t = U.tvcClass;
+  assert.equal(t('VC4'), 'VC4'); assert.equal(t('VC20'), 'VC20'); assert.equal(t('4'), 'VC4');
+  assert.equal(t('VC10'), 'VC7'); assert.equal(t('VC13'), 'VC12'); assert.equal(t('VC14'), 'VC12');
+  assert.equal(t('VC11'), 'VC6'); assert.equal(t('VC8'), 'VC6'); assert.equal(t('VC9'), 'VC5'); assert.equal(t('VC17'), 'VC16');
+  assert.equal(t('vc 7'), 'VC7'); assert.equal(t('NA'), 'NA');
+});

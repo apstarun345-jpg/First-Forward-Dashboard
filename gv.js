@@ -20,9 +20,9 @@ window.FF = window.FF || {};
   function normClass(raw) {
     const c = U.clean(raw).toUpperCase().replace(/\s+/g, '');
     if (!c) return 'NA';
-    if (/^\d+$/.test(c)) return `VC${c}`;
-    if (/^VC\d+$/.test(c)) return c;
-    return c;
+    const k = /^\d+$/.test(c) ? `VC${c}` : c;
+    // v3.125.33 — TVC (VC4 / VC20 alag, baaki CCH → TVC: VC10 → VC7, VC13 → VC12 …)
+    return U.tvcClass ? U.tvcClass(k) : k;
   }
   const classGroup = (cls) => {
     const c = normClass(cls);

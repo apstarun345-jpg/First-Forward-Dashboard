@@ -7,7 +7,8 @@ window.FF = window.FF || {};
   const lit = (value) => typeof D.lit === 'function' ? D.lit(value) : `"${String(value ?? '').replace(/["\\]/g, '')}"`;
 
   // Normalise a class cell: EIR has "VC4", StockDataa has "4" → both become "VC4".
-  const normClass = (raw) => { const c = U.clean(raw).toUpperCase(); if (!c) return 'NA'; return /^\d+$/.test(c) ? `VC${c}` : c; };
+  // v3.125.33 — class = TVC (VC4 / VC20 alag, baaki CCH → TVC via Settings TVC mapping).
+  const normClass = (raw) => { const c = U.clean(raw).toUpperCase(); if (!c) return 'NA'; const k = /^\d+$/.test(c) ? `VC${c}` : c; return U.tvcClass ? U.tvcClass(k) : k; };
   const classGroup = (cls) => {
     const c = normClass(cls);
     if (c === 'VC4') return 'VC4';

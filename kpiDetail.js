@@ -829,7 +829,7 @@ window.FF = window.FF || {};
       const filt = filterOf(spec.f);
       for (const r of t.rows) {
         const d = D.cellDate(r[0]);
-        const cls = (() => { const c = D.cellText(r[3]).toUpperCase().trim(); return /^\d+$/.test(c) ? `VC${c}` : c || 'NA'; })();
+        const cls = (() => { const c = D.cellText(r[3]).toUpperCase().trim(); const k = /^\d+$/.test(c) ? `VC${c}` : c || 'NA'; return U.tvcClass ? U.tvcClass(k) : k; })();
         const channel = FF.model.channelOf(D.cellText(r[10]), D.cellText(r[9]));
         // GV rows sirf tab jab master available na ho (warna GV Master hi authority hai).
         if (channel === 'GV Partner' ? !wantGv || gvFromMaster : !wantFf) continue;

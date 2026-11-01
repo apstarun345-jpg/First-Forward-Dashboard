@@ -371,6 +371,23 @@ window.FF = window.FF || {};
     return d;
   }
   function reportYm(now) { return ymKey(reportDate(now)); }
+  /** 🏷️ v3.125.33 — Site ki class = TVC (tag vehicle class), sirf VC4 / VC20 alag (CCH se). CCH → TVC: Settings → TVC mapping
+   *  (FF.config.tvcGroups: 4 = VC4/VC20 · 5 = VC5/VC9 · 6 = VC8/VC11 · 7 = VC7/VC10 · 12 = VC12/13/14 · 16 = VC16/17).
+   *  "VC10" → "VC7" · "VC13" → "VC12" · "VC20" → "VC20" · "4" → "VC4". Mapping me na ho to waisa hi. */
+  let tvcMemo = { src: null, map: null };
+  function tvcClass(raw) {
+    const c = String(raw == null ? '' : raw).toUpperCase().replace(/\s+/g, '');
+    if (!c) return c;
+    const k = /^\d+$/.test(c) ? `VC${c}` : c;
+    if (k === 'VC20' || k === 'VC4') return k;
+    const groups = (typeof FF !== 'undefined' && FF.config && FF.config.tvcGroups) || [];
+    if (tvcMemo.src !== groups) {
+      const map = new Map();
+      groups.forEach((g) => { const t = `VC${String(g.tvc).replace(/\D/g, '')}`; (g.cch || []).forEach((x) => { const y = String(x).toUpperCase().replace(/\s+/g, ''); if (y !== 'VC20') map.set(y, t); }); });
+      tvcMemo = { src: groups, map };
+    }
+    return tvcMemo.map.get(k) || k;
+  }
   function dateKey(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
   function fromDateKey(key) { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d); }
   function ymParts(key) { const [y, m] = key.split('-').map(Number); return { y, m }; }
@@ -1645,7 +1662,7 @@ window.FF = window.FF || {};
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml, pctHtml,
     suggestDays, suggestMode, runRateDays, runRate, reportBasis, channelBasis, dataBasis, parseDayLabel, ffCapDate, basisText, projectMonthEnd, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
-    MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, reportDate, reportYm, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
+    MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, reportDate, reportYm, tvcClass, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,

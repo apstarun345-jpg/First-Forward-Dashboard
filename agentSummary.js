@@ -1066,7 +1066,7 @@ FF.pages = FF.pages || {};
     const holders = S.list || [];
     const classKey = (v) => {
       const s = clean(v).toUpperCase().replace(/\s+/g, '');
-      return /^\d+$/.test(s) ? `VC${s}` : s;
+      return U.tvcClass(/^\d+$/.test(s) ? `VC${s}` : s);
     };
     const classSet = new Set();
     (p.classTable || []).forEach((x) => { if (Number(x.stock) > 0) classSet.add(classKey(x.cls)); });

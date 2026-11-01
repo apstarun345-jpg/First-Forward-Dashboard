@@ -4092,7 +4092,7 @@ const uaDateOk = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
 const uaNormCls = (v) => {
   const c = String(v || '').trim().toUpperCase().replace(/\s+/g, '');
   if (!c) return 'VC4';
-  return /^VC\d/.test(c) ? c : /^\d+$/.test(c) ? `VC${c}` : c;
+  return tvcCls(/^VC\d/.test(c) ? c : /^\d+$/.test(c) ? `VC${c}` : c);
 };
 
 async function uaGvizTable(params) {
@@ -10332,9 +10332,19 @@ function personalStockFor(sidx, link) {
   return mergePersonalStock(res);
 }
 /** Class bucket for a stock/issuance class string: VC4 | VC20 | VC5+. */
+/** 🏷️ v3.125.33 — CCH → TVC (VC4 / VC20 alag), Settings → TVC mapping (db.settings.tvcGroups) — client U.tvcClass jaisa. */
+function tvcCls(raw) {
+  const c = String(raw == null ? '' : raw).toUpperCase().replace(/\s+/g, '');
+  if (!c) return c;
+  const k = /^\d+$/.test(c) ? `VC${c}` : c;
+  if (k === 'VC4' || k === 'VC20') return k;
+  const groups = (db && db.settings && Array.isArray(db.settings.tvcGroups) && db.settings.tvcGroups.length) ? db.settings.tvcGroups : DEFAULT_SETTINGS.tvcGroups;
+  for (const g of groups || []) if ((g.cch || []).some((x) => String(x).toUpperCase().replace(/\s+/g, '') === k)) return `VC${String(g.tvc).replace(/\D/g, '')}`;
+  return k;
+}
 const plBucket = (x) => { const u = String(x || '').toUpperCase().replace(/\s+/g, ''); return u === 'VC4' ? 'VC4' : u === 'VC20' ? 'VC20' : 'VC5+'; };
 /** Actual class label: 4 / VC4 → VC4, 20 → VC20, 5 → VC5 … (anything else keeps its short name). */
-const plCls = (x) => { const u = String(x == null ? '' : x).toUpperCase().replace(/\s+/g, ''); if (!u) return 'VC4'; if (/^\d+$/.test(u)) return `VC${u}`; return /^VC\d+\+?$/.test(u) ? u : u.slice(0, 12); };
+const plCls = (x) => { const u = String(x == null ? '' : x).toUpperCase().replace(/\s+/g, ''); if (!u) return 'VC4'; if (/^\d+$/.test(u)) return tvcCls(`VC${u}`); return /^VC\d+\+?$/.test(u) ? tvcCls(u) : u.slice(0, 12); };
 const plClsRank = (k) => { const m = /(\d+)/.exec(k); return m ? Number(m[1]) + (/\+$/.test(k) ? 0.5 : 0) : 999; };
 /** Per-agent class-wise issuance: Map(normName → { name, c: { VC4: [last, cur], VC20: [..], 'VC5+': [..] } }). Two grouped queries
  *  (last month / this month) so the result stays small even for big teams. */
