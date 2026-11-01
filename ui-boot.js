@@ -79,6 +79,12 @@
       if ((!pack || pack === 'default') && !wantsDark) { pack = 'desk'; try { localStorage.setItem('ff_theme_pack', 'desk'); } catch { /* ignore */ } }
       try { localStorage.setItem('ff_desk_default_v1', '1'); } catch { /* ignore */ }
     }
+    // 💙 v3.125.41 — sab users ka look admin jaisa (Royal Blue Desk) — ek baar har device par reset; baad me koi badle to wahi rahega.
+    // (Jisne khud dark mode chuna hai uska dark rehta hai.)
+    if (localStorage.getItem('ff_desk_default_v2') !== '1') {
+      if (!wantsDark) { pack = 'desk'; try { localStorage.setItem('ff_theme_pack', 'desk'); } catch { /* ignore */ } }
+      try { localStorage.setItem('ff_desk_default_v2', '1'); } catch { /* ignore */ }
+    }
     pack = pack || (wantsDark ? 'default' : 'desk');
     if (PACK_MODES[pack]) {
       root.dataset.themePack = pack;
