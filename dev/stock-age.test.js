@@ -149,3 +149,18 @@ test('/api/stock-age: login zaroori · summary FF + GV · tag list endpoint', as
     upstream.close();
   }
 });
+
+test('v3.125.32: compact raw (JSON string) gives identical summaries / tag lists / personal stock', async () => {
+  const { createStockAgeBuilder, personalStock, followupAgeByAgent } = await import('../stock-age.js');
+  const mk = (compact) => { const b = createStockAgeBuilder({ todayDay: TODAY, compact }); b.addFf(ffRows); b.addGv(gvRows); return b.finish(); };
+  const a = mk(false), b = mk(true);
+  assert.ok(b.ff.rawBytes > 0 && !Object.keys(b.ff).includes('raw'), 'raw stored as JSON, non-enumerable');
+  const noAt = (x) => { const { at, ...rest } = x; return rest; };
+  assert.deepEqual(noAt(summaryOf(b)), noAt(summaryOf(a)));
+  for (const ch of ['ff', 'gv']) {
+    assert.deepEqual(tagsFor(b, { ch, kind: 'all', limit: 999 }), tagsFor(a, { ch, kind: 'all', limit: 999 }));
+    assert.deepEqual(followupAgeByAgent(b, ch), followupAgeByAgent(a, ch));
+  }
+  assert.deepEqual(personalStock(b, 'ff', 'tl', 'TL One'), personalStock(a, 'ff', 'tl', 'TL One'));
+  assert.deepEqual(b.map, a.map);
+});

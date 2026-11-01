@@ -3754,7 +3754,7 @@ async function loadStockAgeIndex() {
   const pick = (row, idx) => (idx >= 0 ? serverCell(row, idx) : '');
   const pickId = (row, idx) => (idx >= 0 ? identifierText(row && row.c && row.c[idx]) : '');
   const [y, m, d] = dateKeyNow().split('-').map(Number);
-  const opts = { todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.', gvOutWords: (s.gvStockStatus && Array.isArray(s.gvStockStatus.outStock) && s.gvStockStatus.outStock.length ? s.gvStockStatus.outStock : ['ISSUE', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE']) };
+  const opts = { todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.', gvOutWords: (s.gvStockStatus && Array.isArray(s.gvStockStatus.outStock) && s.gvStockStatus.outStock.length ? s.gvStockStatus.outStock : ['ISSUE', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE']), compact: process.env.STOCK_AGE_COMPACT !== '0' };
   let builder = createStockAgeBuilder(opts);
   // v3.122 — memory: FF pehle poora padho, phir GV page-by-page seedha builder me (pehle poora GV buffer hota tha: ~50 MB extra peak).
   const ffJob = (async () => {
@@ -9454,7 +9454,7 @@ async function handleApi(req, res, url) {
     const parts = {
       gvizCache: Math.round(cache.bytes / 1048576 * 10) / 10, gvizCacheEntries: cache.size,
       staticMemo: Math.round(staticBytes / 1048576 * 10) / 10,
-      stockAge: sz(stockAgeState.index), dispatchLedger: sz(ledgerState.index), ledgerGood: sz(ledgerState.good),
+      stockAge: sz(stockAgeState.index), stockAgeRawJson: Math.round(((stockAgeState.index && stockAgeState.index.ff && stockAgeState.index.ff.rawBytes) || 0) / 1048576 * 10 + ((stockAgeState.index && stockAgeState.index.gv && stockAgeState.index.gv.rawBytes) || 0) / 1048576 * 10) / 10, dispatchLedger: sz(ledgerState.index), ledgerGood: sz(ledgerState.good),
       registerRows: sz(regFullState.rows), newIds: sz(newIdsState.data), unusualScan: sz(uaScanState.index),
       ledgerAgg: sz(ledgerAggState.data), gvReportHistory: sz(gvReportHistoryCache.history),
       plPages: mapSz(plPageCache), plMobile: sz(plMobileCache.maps), duplicateScan: mapSz(duplicateScanState),

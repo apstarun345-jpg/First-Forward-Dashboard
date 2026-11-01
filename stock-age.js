@@ -233,7 +233,29 @@ export function mapRows(index, { bucket = 'all', cls = '', q = '' } = {}) {
   }
   return out;
 }
-export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.', gvOutWords = null } = {}) {
+/** 🧠 v3.125.32 — RAM bachat (Render 512 MB): ~2.5 lakh tag rows JS arrays (har row ~350 byte heap) ki jagah ek JSON
+ *  string me (≈1 byte/char, ~3x kam). `.raw` padhte hi parse hokar 60 sec ke liye rehta hai (drill / CSV / personal links),
+ *  phir chhod diya jaata hai. Rows read-only hain, isliye behaviour same. */
+export const RAW_KEEP_MS = 60e3;
+export function compactRaw(c) {
+  if (!c || !Array.isArray(c.raw)) return c;
+  const json = JSON.stringify(c.raw);
+  let cache = null, timer = null;
+  Object.defineProperty(c, 'raw', {
+    configurable: true, enumerable: false,
+    get() {
+      if (!cache) {
+        cache = JSON.parse(json);
+        timer = setTimeout(() => { cache = null; timer = null; }, RAW_KEEP_MS);
+        if (timer && typeof timer.unref === 'function') timer.unref();
+      }
+      return cache;
+    }
+  });
+  Object.defineProperty(c, 'rawBytes', { value: json.length, enumerable: true, configurable: true });
+  return c;
+}
+export function createStockAgeBuilder({ compact = false, todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.', gvOutWords = null } = {}) {
   const outWords = Array.isArray(gvOutWords) ? gvOutWords.map((w) => str(w).toUpperCase()).filter(Boolean) : null;
   const today = Number.isFinite(todayDay) ? todayDay : Math.floor(Date.now() / DAY_MS);
   const ageOf = (day) => (day ? Math.max(0, Math.round(today - day)) : null);
@@ -341,6 +363,7 @@ export function createStockAgeBuilder({ todayDay, masterId = '5845036', parkedTl
     const map = buildMapSummary(ff.raw, gvMap, mapOpts);
     const idx = { at: Date.now(), today, masterId: str(masterId), masterDigits, parkedTlNorm, ff, gv, map, mapGv: gvMap, mapOpts };
     map.gv.notInStockData = gvOnlySummary(idx).total;
+    if (compact) { compactRaw(ff); compactRaw(gv); }
     return idx;
   }
   return { addFf, addGv, finish, get today() { return today; } };
