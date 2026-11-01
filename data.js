@@ -203,7 +203,33 @@ window.FF = window.FF || {};
   }
 
   /** Run a gviz query. Returns { cols, rows, headers, source }. */
+  /** v3.125.29 — Google gviz ek column ko select me do baar nahi leta ("COLUMN_ONLY_ONCE: L") — jaise EIR me GV Name
+   *  column na ho to gvName → agentName ka hi letter (L). Plain `select A, L, …, L where …` (bina group by) me duplicates
+   *  hata kar unique query bhejo, jawab ki rows ko phir original column order me phaila do. */
+  function dedupeSelect(tq) {
+    const q = String(tq || '');
+    if (/\bgroup by\b|\bpivot\b/i.test(q)) return null;
+    const m = /^(\s*select\s+)([\s\S]*?)(\s+(?:where|order by|limit|offset|label|format|options)\b[\s\S]*|\s*)$/i.exec(q);
+    if (!m) return null;
+    const items = m[2].split(',').map((x) => x.trim());
+    if (!items.length || !items.every((x) => /^[A-Za-z]{1,3}$/.test(x))) return null;
+    const uniq = [], pos = [];
+    items.forEach((it) => { const k = it.toUpperCase(); let i = uniq.indexOf(k); if (i < 0) { uniq.push(k); i = uniq.length - 1; } pos.push(i); });
+    if (uniq.length === items.length) return null;
+    return { tq: `${m[1]}${uniq.join(', ')}${m[3]}`, pos };
+  }
+  function expandTable(table, pos) {
+    if (!table || !pos) return table;
+    table.rows = (table.rows || []).map((r) => pos.map((i) => (r ? r[i] : null)));
+    if (Array.isArray(table.cols)) { const c = table.cols; table.cols = pos.map((i) => c[i]); }
+    return table;
+  }
   async function query(sheetName, tq, opts) {
+    const dd = dedupeSelect(tq);
+    if (dd) return queryRaw(sheetName, dd.tq, opts).then((t) => expandTable({ ...t, rows: (t.rows || []).slice(), cols: t.cols }, dd.pos));
+    return queryRaw(sheetName, tq, opts);
+  }
+  async function queryRaw(sheetName, tq, opts) {
     const o = opts || {};
     const cfg = FF.config.sheetByName(sheetName);
     const gid = o.gid !== undefined ? o.gid : (cfg && cfg.gid) || '';
