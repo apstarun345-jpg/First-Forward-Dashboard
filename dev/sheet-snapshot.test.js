@@ -22,6 +22,7 @@ globalThis.indexedDB = { open() { const r = {}; setTimeout(() => { r.result = { 
 ['config', 'util', 'data'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
 const FF = globalThis.FF;
 FF.auth = { user: { username: 'admin' } };
+FF.config._applied = true;
 
 test('second load returns the saved table instantly and refreshes in the background', async () => {
   let calls = 0, slow = false;

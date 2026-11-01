@@ -24,11 +24,15 @@ window.FF = window.FF || {};
   /** Load all datasets in parallel. fresh=true bypasses the server cache (Google se naya data). */
   let generation = 0;
   const jobs = new Map();
+  // v3.125.51 — kis config (column letters) se dataset bana — settings badle to purana dobara bane.
+  const cfgFp = () => { try { const c = FF.config; return JSON.stringify([c.sheetId, c.eir, c.stock, c.report && [c.report.sheet, c.report.gid]]); } catch { return ''; } };
+  const builtWith = {};
   function loadKey(key, fresh) {
     if (jobs.has(key)) return jobs.get(key);
     const version = generation;
+    const fp = cfgFp();
     const p = Promise.resolve().then(() => DATASETS[key].load({ fresh })).then((value) => {
-      if (version === generation) { state.data[key] = value; delete state.errors[key]; }
+      if (version === generation) { state.data[key] = value; builtWith[key] = fp; delete state.errors[key]; }
       return value;
     }).catch((err) => {
       if (version === generation) {
@@ -127,6 +131,23 @@ window.FF = window.FF || {};
       try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
     });
   } catch { /* ignore */ }
+  /** Settings (column letters) aane ke baad: jo datasets purane config se bane, unhe chup-chaap dobara banao. */
+  function onConfig() {
+    const fp = cfgFp();
+    const stale = Object.keys(state.data).filter((k) => DATASETS[k] && builtWith[k] !== undefined && builtWith[k] !== fp);
+    const inflight = [...jobs.keys()].filter((k) => DATASETS[k]);
+    if (!stale.length && !inflight.length) return;
+    const version = generation;
+    (async () => {
+      await Promise.allSettled(inflight.map((k) => jobs.get(k)));   // pre-settings in-flight job ka result bhi purane config ka hai
+      const redo = Object.keys(state.data).filter((k) => DATASETS[k] && builtWith[k] !== cfgFp());
+      if (!redo.length || version !== generation) return;
+      await Promise.allSettled(redo.map((k) => loadKey(k, false)));
+      if (version !== generation) return;
+      emit('refresh', { config: true });
+      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+    })();
+  }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key, opts) {
@@ -172,5 +193,5 @@ window.FF = window.FF || {};
     return items;
   }
 
-  FF.store = { preload, refresh, retryNow, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
+  FF.store = { onConfig, preload, refresh, retryNow, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
 })(window.FF);

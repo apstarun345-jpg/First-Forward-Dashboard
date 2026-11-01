@@ -244,11 +244,14 @@ window.FF = window.FF || {};
 
   let generation = 0;
   const jobs = new Map();
+  const cfgFp = () => { try { const c = FF.config; return JSON.stringify([c.gvSheetId, c.gv, c.eir && c.eir.gvMasterId]); } catch { return ''; } };
+  const builtWith = {};
   function loadKey(key, fresh) {
     if (jobs.has(key)) return jobs.get(key);
     const version = generation;
+    const fp = cfgFp();
     const p = Promise.resolve().then(() => LOADERS[key]({ fresh })).then((value) => {
-      if (version === generation) { state.data[key] = value; delete state.errors[key]; }
+      if (version === generation) { state.data[key] = value; builtWith[key] = fp; delete state.errors[key]; }
       return value;
     }).catch((err) => {
       if (version === generation) {
@@ -336,6 +339,21 @@ window.FF = window.FF || {};
       try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
     });
   } catch { /* ignore */ }
+  function onConfig() {
+    const version = generation;
+    const inflight = [...jobs.keys()];
+    if (!inflight.length && !Object.keys(state.data).some((k) => builtWith[k] !== undefined && builtWith[k] !== cfgFp())) return;
+    (async () => {
+      await Promise.allSettled(inflight.map((k) => jobs.get(k)));
+      const fp = cfgFp();
+      const redo = ['master', ...Object.keys(state.data).filter((k) => k !== 'master')].filter((k) => state.data[k] !== undefined && LOADERS[k] && builtWith[k] !== fp);
+      if (!redo.length || version !== generation) return;
+      state.mapping = {};
+      for (const k of redo) { try { await loadKey(k, false); } catch { /* ignore */ } }
+      if (version !== generation) return;
+      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+    })();
+  }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key, opts) {
@@ -1507,7 +1525,7 @@ window.FF = window.FF || {};
   }
 
   const GV = {
-    DATASETS, preload, refresh, need, get, error, reset, enabled, wanted, retryNow, on,
+    DATASETS, onConfig, preload, refresh, need, get, error, reset, enabled, wanted, retryNow, on,
     normClass, classGroup, clsNum, configuredGroup,
     rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, masterTlIds, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS, reportMonthBins, reportSheetBins,

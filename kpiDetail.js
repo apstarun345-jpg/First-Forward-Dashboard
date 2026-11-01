@@ -201,7 +201,16 @@ window.FF = window.FF || {};
       }
     }
     let daily = FF.store.get('daily');
-    if (!daily) { try { daily = await FF.store.need('daily'); } catch { daily = []; } }
+    // v3.125.51 — EIR load fail / abhi aa raha ho to 0 mat dikhao (card par number, drawer me 0 — galat lagta tha):
+    // ek baar aur koshish, phir bhi na mile to saaf error (drawer me ↻ retry).
+    if (!Array.isArray(daily)) {
+      try { daily = await FF.store.need('daily'); }
+      catch {
+        await new Promise((r) => setTimeout(r, 2500));
+        try { daily = await FF.store.need('daily'); }
+        catch (err) { throw new Error(`EIR (First Forward) sheet abhi load nahi hui — Google slow hai. Thodi der me dobara kholo. (${(err && err.message) || err})`); }
+      }
+    }
     if (eirOnly && FF.model && FF.model.eirOnlyDaily) daily = FF.model.eirOnlyDaily(daily);   // GV Master ka aaj ka live bhi nahi
     // 🟩 GV ka aaj ka data GV Master se aata hai (model/gv layer ise already splice karta hai),
     // 🟦 FF ka data EIR se. Isliye yahan sirf channel split aur T+1 lag filter hota hai.

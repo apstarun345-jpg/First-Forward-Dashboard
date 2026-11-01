@@ -12,7 +12,8 @@ window.FF = window.FF || {};
   const PSNAP = {
     MAX_AGE_MS: 36 * 3600e3, MAX_ROWS: 90000, outstanding: 0, served: 0, timer: null,
     user() { try { return (FF.auth && FF.auth.user && FF.auth.user.username) || ''; } catch { return ''; } },
-    key(k) { const u = PSNAP.user(); return u && typeof indexedDB !== 'undefined' ? `${u}|${k}` : ''; },
+    // Settings (column letters) aane ke baad hi — warna default columns wala galat result save / serve hota.
+    key(k) { const u = PSNAP.user(); return u && FF.config && FF.config._applied && typeof indexedDB !== 'undefined' ? `${u}|${k}` : ''; },
     db: null,
     open() {
       if (PSNAP.db) return PSNAP.db;
