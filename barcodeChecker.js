@@ -128,12 +128,30 @@ FF.pages = FF.pages || {};
     const eir = tagOf.size ? await eirByTags([...new Set(tagOf.values())]) : new Map();
     return list.map((b) => { const t = tagOf.get(b.key) || ''; return makeRow(b.label, byKey.get(b.key), t, inferred.has(b.key), t ? eir.get(t) : null); });
   }
+  /** v3.125.42 — List me "A to B" / "A se B" / "A - B" / "A → B" = range: first se last tak saare barcodes.
+   *  Faltu shabd (VC6, to, se…) chhod do — sirf barcode (6+ digit) ya tag ID (hex) ginte hain. */
+  const RANGE_RE = /(\d[\d-]{5,}\d)\s*(?:to|se|till|tak|→|->|=>|~|–|—|\s-\s)\s*(\d[\d-]{5,}\d)/gi;
   function parseMulti(text) {
-    const seen = new Set(), out = [];
-    String(text || '').split(/[\n,;\t ]+/).map((x) => x.trim()).filter(Boolean).forEach((x) => {
+    const seen = new Set(), out = [], errors = [];
+    const push = (x) => {
       const k = strip0(bcDigits(x)) || x.toUpperCase();
       if (seen.has(k)) return; seen.add(k); out.push(x);
+    };
+    const ranges = [];
+    const rest = String(text || '').replace(RANGE_RE, (m, a, b) => { ranges.push([a, b]); return ` \u0000${ranges.length - 1}\u0000 `; });
+    rest.split(/[\n,;\t ]+/).map((x) => x.trim()).filter(Boolean).forEach((x) => {
+      const rm = /^\u0000(\d+)\u0000$/.exec(x);
+      if (rm) {
+        const [a, b] = ranges[Number(rm[1])];
+        try {
+          const [lo, hi] = BigInt(bcDigits(a)) <= BigInt(bcDigits(b)) ? [a, b] : [b, a];
+          expandRange(lo, hi).forEach((r) => push(r.label));
+        } catch (err) { errors.push(`${a} to ${b}: ${err.message}`); }
+        return;
+      }
+      if (bcDigits(x).length >= 6 || (isHex(x) && x.length >= 12 && /[a-f]/i.test(x))) push(x);
     });
+    out.errors = errors;
     return out;
   }
   async function checkMulti(list) {
@@ -265,7 +283,7 @@ FF.pages = FF.pages || {};
           <button class="btn primary" type="submit">🔎 Check</button>
         </form>
         <form class="bcc-form bcc-multi" data-bcc-form="multi" ${state.tab === 'multi' ? '' : 'hidden'}>
-          <label class="field"><span class="dim small">Barcodes — ek line me ek (ya comma / space se alag) · Excel column copy-paste chalega</span>
+          <label class="field"><span class="dim small">Barcodes — ek line me ek (ya comma / space se alag) · range: A to B / A se B · Excel column copy-paste chalega</span>
             <textarea class="input mono" name="list" rows="6" placeholder="608116-011-0558283&#10;608116-011-0558290&#10;6081160110558301">${esc(p.list || '')}</textarea></label>
           <div class="btn-row"><button class="btn primary" type="submit">🔎 Check</button><span class="dim small" data-bcc-count></span></div>
         </form>
@@ -299,6 +317,7 @@ FF.pages = FF.pages || {};
       } else {
         const f = root.querySelector('[data-bcc-form="multi"]');
         const list = parseMulti(f.list.value);
+        if (list.errors.length) throw new Error(list.errors.join(' · '));
         if (!list.length) return;
         const key = `m|${list.join('|')}`;
         if (key === state.lastKey && state.rows) return;
@@ -331,8 +350,8 @@ FF.pages = FF.pages || {};
         if (a.length >= 8 && b.length >= 8 && a.length === b.length) auto('range', 500);   // dono barcode poore → turant
       }
       if (f && f.dataset.bccForm === 'multi') {
-        const n = parseMulti(f.list.value).length;
-        const c = root.querySelector('[data-bcc-count]'); if (c) c.textContent = n ? `${U.fmt(n)} barcodes` : '';
+        const pl = parseMulti(f.list.value), n = pl.length;
+        const c = root.querySelector('[data-bcc-count]'); if (c) c.textContent = (n ? `${U.fmt(n)} barcodes` : '') + (pl.errors.length ? ` · ⚠️ ${pl.errors[0]}` : '');
         if (e.inputType === 'insertFromPaste' && n) auto('multi', 300);
       }
       if (e.target.matches('[data-bcc-q]')) { state.q = e.target.value; if (!qRaf) qRaf = requestAnimationFrame(() => { qRaf = 0; paintTable(); }); }
