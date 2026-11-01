@@ -403,7 +403,7 @@ window.FF = window.FF || {};
     const cellText = (row, index) => U.clean(D.cellText ? D.cellText(row[index]) : (row[index] && row[index].v));
     const cellNumber = (row, index) => Number(D.cellNumber ? D.cellNumber(row[index]) : row[index] && row[index].v) || 0;
     // model.normClass ke saath same normalisation — '4' → 'VC4' (EIR/REPORT me dono shapes aate hain).
-    const clsOf = (raw) => { const t = U.clean(raw).toUpperCase(); return !t ? 'NA' : U.tvcClass(/^\d+$/.test(t) ? `VC${t}` : t); };
+    const clsOf = (raw) => { const t = U.clean(raw).toUpperCase(); const k = /^\d+$/.test(t) ? `VC${t}` : t; return !t ? 'NA' : (U.tvcClass ? U.tvcClass(k) : k); };
     const add = (ch, name, n, cls) => {
       if (n <= 0) return;
       if (name) { const key = `${ch}|${name}`; out.agents.set(key, (out.agents.get(key) || 0) + n); }
