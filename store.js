@@ -159,12 +159,14 @@ window.FF = window.FF || {};
   async function settled(maxMs = 15000) {
     const end = Date.now() + maxMs;
     while (!(FF.config && FF.config._applied) && Date.now() < end && typeof window !== 'undefined' && window.document) await new Promise((r) => setTimeout(r, 150));
-    if (configReload) await Promise.race([configReload, new Promise((r) => setTimeout(r, Math.max(0, end - Date.now())))]);
+    if (configReload && !(arguments.length > 1 && arguments[1] === 'config-only')) await Promise.race([configReload, new Promise((r) => setTimeout(r, Math.max(0, end - Date.now())))]);
   }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key, opts) {
     // A slow unrelated stock/report query must not block this page.
+    // v3.125.54 — purane (login se pehle wale) column letters se bana ho to sirf ye dataset naye config se.
+    if (state.data[key] !== undefined && builtWith[key] !== undefined && builtWith[key] !== cfgFp() && FF.config && FF.config._applied) return loadKey(key, false);
     if (state.data[key] !== undefined) return state.data[key];
     // `{ only: true }` — sirf yehi dataset load karo. Public (bina login) employee form isi ko use
     // karta hai: poora preload wahan bekaar hai aur Google par extra load daalta hai.

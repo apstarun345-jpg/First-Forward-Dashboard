@@ -200,8 +200,9 @@ window.FF = window.FF || {};
         if (Array.isArray(scoped)) return scoped.map((r) => ({ ...r, raw: null }));
       }
     }
-    if (FF.store.settled) { try { await FF.store.settled(); } catch { /* ignore */ } }   // v3.125.52 — settings ke columns wala data hi
-    let daily = FF.store.get('daily');
+    if (FF.store.settled) { try { await FF.store.settled(15000, 'config-only'); } catch { /* ignore */ } }   // settings (columns) aa jaayein
+    let daily = null;
+    try { daily = await FF.store.need('daily'); } catch { daily = null; }   // sirf daily — naye columns se bana hua (baaki slow datasets ka wait nahi)
     // v3.125.51 — EIR load fail / abhi aa raha ho to 0 mat dikhao (card par number, drawer me 0 — galat lagta tha):
     // ek baar aur koshish, phir bhi na mile to saaf error (drawer me ↻ retry).
     if (!Array.isArray(daily)) {
