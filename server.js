@@ -3637,7 +3637,23 @@ async function eirAutoDetect(opts) {
   return eirAuto.running;
 }
 
+// ⚡ v3.125.47 — background scans (stock index, dispatch ledger, mapping) ek saath max BG_SCAN_SLOTS Google requests;
+// baaki gviz slots hamesha user ki sheets ke liye khaali (pehle boot par user queries 55 s timeout hoti thi).
+const BG_SCAN_SLOTS = Math.max(1, Math.min(GVIZ_CONCURRENCY - 1, Number(process.env.BG_SCAN_SLOTS) || 2));
+const bgScanGate = { active: 0, queue: [] };
+async function bgScanAcquire() {
+  if (bgScanGate.active < BG_SCAN_SLOTS) { bgScanGate.active++; return; }
+  await new Promise((resolve) => bgScanGate.queue.push(resolve));
+}
+function bgScanRelease() {
+  const next = bgScanGate.queue.shift();
+  if (next) next(); else bgScanGate.active = Math.max(0, bgScanGate.active - 1);
+}
 async function gvizPageServer(params, sheet) {
+  await bgScanAcquire();
+  try { return await gvizPageServerInner(params, sheet); } finally { bgScanRelease(); }
+}
+async function gvizPageServerInner(params, sheet) {
   let lastErr;
   // v3.125.35 — Google sheet slow ho to 15k-row page bhi 45 s se zyada le leta tha ("This operation was aborted") →
   // poora FF stock index khaali. Bade scan pages: 100 s timeout, 3 koshish.
