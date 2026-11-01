@@ -640,7 +640,7 @@ window.FF = window.FF || {};
   function reportSheetBins(row) {
     return { last: reportMonthBins(row, 'last'), cur: reportMonthBins(row, 'cur') };
   }
-  async function loadReport(opts) {
+  async function loadReportSheet(opts) {
     const rc = reportCfg();
     const headerRow = rc.headerRow || 4;
     const lastCol = rc.lastCol || 'BE';
@@ -710,6 +710,141 @@ window.FF = window.FF || {};
     return rows;
   }
 
+  /**
+   * 🧮 v3.125.46 — GV agent report site khud banati hai (GV REPORT tab ke formulas par nirbhar nahi):
+   *   • Agent ID / naam / TL      → Tag Assignment (E, F, G, H)
+   *   • Stock class-wise          → Tag Assignment (status "In Stock" waghaira — stockStatusKind)
+   *   • Issuance cur / last month → GV Master (report month = aaj − 1 din; 1 tareekh ko pichhla mahina)
+   *   • Run-rate · expected · cover days · priority · status → in dono se.
+   * Row shape wahi jo GV REPORT loader deta tha, isliye saare pages bina badlav chalte hain.
+   * Purana sheet loader: FF.config.gv.report.source = 'sheet'.
+   */
+  const RAW_STOCK_CLS = ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16'];
+  function rawCls(v) {
+    const m = /VC\s*0*(\d+)/i.exec(String(v || ''));
+    return m ? `VC${Number(m[1])}` : U.clean(v).toUpperCase();
+  }
+  const prioLabel = (p) => (p === 'High' ? '🔴 High' : p === 'Medium' ? '🟡 Medium' : '🟢 Low');
+  async function loadReportComputed(opts) {
+    const a = assignCfg();
+    const map = await assignMap(opts);
+    const agId = letterOf(map, 'agentId', a.agentId), agName = letterOf(map, 'agentName', a.agentName);
+    const tlIdL = letterOf(map, 'tlId', a.tlId), tlNameL = letterOf(map, 'tlName', a.tlName);
+    const clsL = letterOf(map, 'cls', a.cls), tagL = letterOf(map, 'tagId', a.tagId), stL = letterOf(map, 'status', a.status);
+    const [t, master] = await Promise.all([
+      D.query('Tag Assignment', `select ${agId}, ${agName}, ${tlIdL}, ${tlNameL}, ${clsL}, ${stL}, count(${tagL}) group by ${agId}, ${agName}, ${tlIdL}, ${tlNameL}, ${clsL}, ${stL}`, opts),
+      state.data.master !== undefined ? Promise.resolve(state.data.master) : loadKey('master', false).catch(() => [])
+    ]);
+    const NA = /^(NOT\s*ASSIGNED|NULL|NA|N\/A|-)$/i;
+    const keyOf = (id) => U.clean(id).toUpperCase();
+    const ag = new Map();
+    const agent = (id, name, tlId, tlName) => {
+      const k = keyOf(id);
+      let o = ag.get(k);
+      if (!o) {
+        o = { agentId: U.clean(id), agentName: U.clean(name) || U.clean(id), tlId: '', tlName: '', stock: {}, stockTotal: 0,
+          cur: {}, curTotal: 0, curDays: new Set(), last: {}, lastTotal: 0, lastDays: new Set(), today: 0, replace: 0, lastIssue: null };
+        ag.set(k, o);
+      }
+      if (!o.tlId && U.clean(tlId) && !NA.test(U.clean(tlId))) o.tlId = U.clean(tlId);
+      const tn = U.clean(tlName); if (!o.tlName && tn && !NA.test(tn) && !/^(DIRECT|TL\s)/i.test(tn) && (!FF.config.isRealTl || FF.config.isRealTl(tn))) o.tlName = tn;
+      if ((!o.agentName || o.agentName === o.agentId) && U.clean(name)) o.agentName = U.clean(name);
+      return o;
+    };
+    for (const r of t.rows || []) {
+      const id = U.clean(D.cellText(r[0]));
+      if (!id || NA.test(id) || isHeaderRow([id, D.cellText(r[1])])) continue;
+      const o = agent(id, D.cellText(r[1]), D.cellText(r[2]), D.cellText(r[3]));
+      const c = stockCounts(r[6], D.cellText(r[5]));
+      if (!c.in) continue;
+      const cls = rawCls(D.cellText(r[4]));
+      o.stock[cls] = (o.stock[cls] || 0) + c.in;
+      o.stockTotal += c.in;
+    }
+    // Report month: aaj − lag (1 Nov → October). Days elapsed = report date ka din.
+    const rd = U.reportDate ? U.reportDate() : new Date(Date.now() - 864e5);
+    const curYm = U.ymKey(rd), lastYm = prevCalendarYm(curYm);
+    const elapsed = Math.max(1, rd.getDate());
+    const dim = new Date(rd.getFullYear(), rd.getMonth() + 1, 0).getDate();
+    const todayK = U.dateKey(new Date());
+    for (const m of master || []) {
+      if (!m || !m.agentId || !m.ym) continue;
+      const o = agent(m.agentId, m.agentName, m.directAgent ? '' : m.tlId, m.directAgent ? '' : m.tlName);
+      const cls = rawCls(m.cch || m.cls);
+      const dk = m.date ? U.dateKey(m.date) : '';
+      if (dk === todayK) o.today++;
+      if (m.date && (!o.lastIssue || m.date > o.lastIssue)) o.lastIssue = m.date;
+      if (m.ym === curYm) { o.cur[cls] = (o.cur[cls] || 0) + 1; o.curTotal++; if (dk) o.curDays.add(dk); if (/replac/i.test(m.status || '')) o.replace++; }
+      else if (m.ym === lastYm) { o.last[cls] = (o.last[cls] || 0) + 1; o.lastTotal++; if (dk) o.lastDays.add(dk); }
+    }
+    const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+    const rows = [];
+    for (const o of ag.values()) {
+      const curVc4 = o.cur.VC4 || 0, lastVc4 = o.last.VC4 || 0;
+      const stockVc4 = o.stock.VC4 || 0;
+      const runrate = o.curTotal / elapsed;
+      const cover = runrate > 0 ? o.stockTotal / runrate : null;
+      const prio = o.stockTotal === 0 && o.curTotal > 0 ? 'High' : runrate === 0 ? 'Low' : cover < 10 ? 'High' : cover < 15 ? 'Medium' : 'Low';
+      const expected = Math.round(runrate * dim);
+      let status = 'Inactive In Month';
+      if (o.lastIssue && o.curTotal > 0) {
+        const d0 = new Date(o.lastIssue); d0.setHours(0, 0, 0, 0);
+        const n = Math.max(0, Math.round((today0 - d0) / 864e5));
+        status = n === 0 ? '🟢 Active Today' : n <= 3 ? `🟡 ${n} days inactive` : `🔴 ${n} days inactive`;
+      }
+      let perf = '';
+      if (o.curTotal === 0) perf = o.lastTotal > 0 ? '🔴 Inactive In Current Month' : '🔴 Inactive 2+ Months';
+      else if (!o.lastTotal) perf = '🚀 High Growth';
+      else { const r = expected / o.lastTotal; perf = r < 0.5 ? '🔻 High De-Growth' : r < 0.8 ? ' De-Growth' : r < 1 ? '🟡 Slight Low' : r <= 1.2 ? '🟢 Growth' : '🚀 High Growth'; }
+      const growth = o.lastTotal ? Math.round(((expected / o.lastTotal) - 1) * 100) : null;
+      rows.push({
+        agentId: o.agentId, agentName: o.agentName, mobile: '',
+        tlId: o.tlId, tlName: o.tlName || (o.tlId ? `TL ${o.tlId}` : 'Direct'), directAgent: !o.tlName && !o.tlId,
+        stockVc4, stockComm: o.stockTotal - stockVc4, stockTotal: o.stockTotal,
+        stockByClass: Object.fromEntries(RAW_STOCK_CLS.map((k) => [k, o.stock[k] || 0])),
+        minRequired: Math.ceil(runrate * 15), suggestedDispatch: Math.max(0, Math.ceil(runrate * 30) - o.stockTotal),
+        coverDays: cover === null ? null : Math.round(cover * 10) / 10,
+        priority: prioLabel(prio), tlStockVc4: 0, tlStockComm: 0, tlStockTotal: 0,
+        lastDays: o.lastDays.size, lastVc4, lastComm: o.lastTotal - lastVc4, lastTotal: o.lastTotal,
+        growth, agentStatus: status, agentPerf: perf,
+        todayIssued: o.today, curDays: o.curDays.size, replace: o.replace, chassis: 0,
+        curVc4, curComm: o.curTotal - curVc4, curTotal: o.curTotal,
+        curByClass: Object.fromEntries(RAW_STOCK_CLS.map((k) => [k, o.cur[k] || 0])),
+        lastAvailable: true, curAvailable: true, curClassAvailable: true, stockClassAvailable: true, tlStockAvailable: true,
+        expected, runrateVc4: Math.round((curVc4 / elapsed) * 100) / 100, runrateComm: Math.round(((o.curTotal - curVc4) / elapsed) * 100) / 100, runrate: Math.round(runrate * 100) / 100,
+        tlLastVc4: 0, tlLastComm: 0, tlLastTotal: 0, tlLastAvailable: true, tlCurVc4: 0, tlCurComm: 0, tlCurTotal: 0, tlCurAvailable: true,
+        avgRunrateVc4: 0, avgRunrateComm: 0, eRunrate: Math.round(runrate * 100) / 100,
+        supervisorId: o.tlId, computed: true, reportYm: curYm
+      });
+    }
+    // TL roll-ups (har agent row par TL ka snapshot, GV REPORT jaisa)
+    const tl = new Map();
+    for (const r of rows) {
+      if (r.directAgent) continue;
+      const k = keyOf(r.tlId || r.tlName);
+      const x = tl.get(k) || { sv: 0, sc: 0, st: 0, lv: 0, lc: 0, lt: 0, cv: 0, cc: 0, ct: 0 };
+      x.sv += r.stockVc4; x.sc += r.stockComm; x.st += r.stockTotal; x.lv += r.lastVc4; x.lc += r.lastComm; x.lt += r.lastTotal; x.cv += r.curVc4; x.cc += r.curComm; x.ct += r.curTotal;
+      tl.set(k, x);
+    }
+    for (const r of rows) {
+      const x = !r.directAgent && tl.get(keyOf(r.tlId || r.tlName)); if (!x) continue;
+      Object.assign(r, { tlStockVc4: x.sv, tlStockComm: x.sc, tlStockTotal: x.st, tlLastVc4: x.lv, tlLastComm: x.lc, tlLastTotal: x.lt, tlCurVc4: x.cv, tlCurComm: x.cc, tlCurTotal: x.ct });
+    }
+    for (const r of rows) {
+      r.raw = Object.keys(REPORT_COLS).map((k) => {
+        if (k.startsWith('stockVc') && k !== 'stockVc4') return r.stockByClass['VC' + k.slice(7)] || 0;
+        if (k.startsWith('curVc') && k !== 'curVc4') return r.curByClass['VC' + k.slice(5)] || 0;
+        const v = r[k]; return v === null || v === undefined ? '' : v;
+      });
+    }
+    state.labels.report = REPORT_COLS_LABELS.slice();
+    state.mapping.report = { idx: Object.fromEntries(Object.entries(REPORT_COLS)), warnings: [], hasLabels: true, computed: true };
+    rows.sort((a, b) => b.curTotal - a.curTotal || b.stockTotal - a.stockTotal);
+    return rows;
+  }
+  function loadReport(opts) {
+    return reportCfg().source === 'sheet' ? loadReportSheet(opts) : loadReportComputed(opts);
+  }
   const LOADERS = { master: loadMaster, stockClass: loadStockClass, stockTl: loadStockTl, stockTlClass: loadStockTlClass, stockAgent: loadStockAgent, stockAgentClass: loadStockAgentClass, report: loadReport };
 
   // ---- in-memory aggregations over GV Master ------------------------------------------------------

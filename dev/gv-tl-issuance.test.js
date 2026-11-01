@@ -20,6 +20,8 @@ globalThis.document = {
   querySelector: () => null, querySelectorAll: () => [], getElementById: () => null
 };
 ['config', 'util', 'data', 'model', 'gv', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
+// Ye tests GV REPORT sheet parser (purana source) ko check karte hain.
+globalThis.FF.config.gv.report = { ...(globalThis.FF.config.gv.report || {}), source: 'sheet' };
 const FF = globalThis.FF;
 const U = FF.util;
 const ym = U.ymKey(new Date());
