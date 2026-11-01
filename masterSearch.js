@@ -601,18 +601,41 @@ FF.pages = FF.pages || {};
         .finally(() => { if (gen === state.generation) emit(); });
     };
     const cls = (v) => (FF.gv && FF.gv.normClass ? FF.gv.normClass(v) : v);
-    Promise.all([
+    const eirOnly = () => (kindOf === 'barcode' ? Promise.resolve() : find(e.sheet || 'EIR', [e.tagId, e.agentId, e.agentName, e.tlName, e.cls, e.date], [e.tagId], (row, val, txt) => {
+      add(val(row, e.tagId), (en, k) => en.ff.push({ barcode: k, tagId: val(row, e.tagId), agentId: val(row, e.agentId), agentName: txt(row, e.agentName) || val(row, e.agentId), tlName: txt(row, e.tlName), cls: txt(row, e.cls), allocated: txt(row, e.date), source: 'EIR' }));
+    }));
+    const done = () => { rec.pending = false; if (gen === state.generation) emit(); };
+    // ⚡ v3.125.35 — Pehle server ka instant index (StockDataa + Tag Assignment, ~ms). Mil gaya → turant dikhao.
+    // Index abhi ban raha ho / server busy → purani sheet queries (fallback).
+    const instant = FF.auth && FF.auth.api ? Promise.race([
+      FF.auth.api(`/api/barcode-lookup?q=${encodeURIComponent(String(query || '').trim())}&limit=30`),
+      new Promise((resolve) => setTimeout(() => resolve(null), 4000))
+    ]).catch(() => null) : Promise.resolve(null);
+    instant.then((d) => {
+      if (gen !== state.generation) return;
+      if (d && d.ok && !d.pending) {
+        (d.rows || []).forEach((r) => {
+          const rowRec = { tagId: clean(r.tagId), agentId: clean(r.agentId), agentName: clean(r.agent) || clean(r.agentId), tlName: clean(r.tl), cls: cls(r.cls), allocated: clean(r.date) };
+          add(r.barcode || r.tagId, (en, k) => (r.ch === 'gv' ? en.gv.push({ barcode: k, ...rowRec, source: 'Tag Assignment' }) : en.ff.push({ barcode: k, ...rowRec, source: 'StockDataa' })));
+        });
+        if ((d.rows || []).length) { done(); return; }
+        // Stock me nahi (issue ho chuka tag) → sirf EIR (tag ID) — barcode ke liye kuch aur nahi.
+        rec.instantMiss = true; emit();
+        eirOnly().finally(done);
+        return;
+      }
+      sheetSearch();
+    });
+    return rec;
+    function sheetSearch() { Promise.all([
       find(s.sheet || 'StockDataa', [s.barcode, s.tagId, s.agentId, s.agentName, s.tlName, s.cls, s.agentAllocatedAt, s.bcAllocatedAt], pick(s.barcode, s.tagId), (row, val, txt) => {
         [val(row, s.barcode) || val(row, s.tagId)].forEach((b) => add(b, (en, k) => en.ff.push({ barcode: k, tagId: val(row, s.tagId), agentId: val(row, s.agentId), agentName: txt(row, s.agentName) || val(row, s.agentId), tlName: txt(row, s.tlName), cls: cls(txt(row, s.cls)), allocated: txt(row, s.agentAllocatedAt) || txt(row, s.bcAllocatedAt), source: 'StockDataa' })));
       }),
       find('Tag Assignment', [a.serial, a.tagId, a.agentId, a.agentName, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName, a.allocatedAt], pick(a.serial, a.tagId), (row, val, txt) => {
         [val(row, a.serial) || val(row, a.tagId)].forEach((b) => add(b, (en, k) => en.gv.push({ barcode: k, tagId: val(row, a.tagId), agentId: val(row, a.agentId), agentName: txt(row, a.agentName) || val(row, a.agentId), tlName: txt(row, a.tlName), cls: cls(txt(row, a.cls)), gvId: txt(row, a.gvUniqueId), gvName: txt(row, a.gvUniqueName), allocated: txt(row, a.allocatedAt), source: 'Tag Assignment' })));
       }),
-      kindOf === 'barcode' ? Promise.resolve() : find(e.sheet || 'EIR', [e.tagId, e.agentId, e.agentName, e.tlName, e.cls, e.date], [e.tagId], (row, val, txt) => {
-        add(val(row, e.tagId), (en, k) => en.ff.push({ barcode: k, tagId: val(row, e.tagId), agentId: val(row, e.agentId), agentName: txt(row, e.agentName) || val(row, e.agentId), tlName: txt(row, e.tlName), cls: txt(row, e.cls), allocated: txt(row, e.date), source: 'EIR' }));
-      })
-    ]).finally(() => { rec.pending = false; if (gen === state.generation) emit(); });
-    return rec;
+      eirOnly()
+    ]).finally(done); }
   }
 
   /** v3.125.14 — Ek tag ke do keys (barcode + tag ID) index me alag entries hain; result me ek hi row dikhao.
@@ -872,7 +895,7 @@ FF.pages = FF.pages || {};
         value: t.key, barcode: t.key
       });
     });
-    if (!items.length && r.livePending) items.push({ kind: 'cls', kindLabel: 'Barcode', label: `“${query}” sheet me dhoondh raha hu…`, sub: 'live barcode search (2-10 sec)', value: query, none: true });
+    if (!items.length && r.livePending) items.push({ kind: 'cls', kindLabel: 'Barcode', label: `“${query}” dhoondh raha hu…`, sub: 'barcode / tag search', value: query, none: true });
     if (!items.length && query.length >= 2) items.push({ kind: 'cls', kindLabel: 'Search', label: `“${query}” ke liye kuch nahi mila`, sub: 'Doosra naam / ID / barcode try karo', value: query, none: true });
     return items;
   }
@@ -1099,7 +1122,7 @@ FF.pages = FF.pages || {};
     if (!res.matched) {
       return `<div class="ms-empty"><b>“${esc(res.q)}” ke liye kuch nahi mila</b>
         <p>Naam, TL, agent ID, TL ID, GV ID, barcode ya tag ID se search karo. Spelling ya ID ke kuch digits bhi kaafi hain.</p>
-        ${res.heavy ? '' : (res.livePending ? '<p class="dim small">Barcode sheet me live dhoondh raha hu… (2-10 sec)</p>' : '<p class="dim small">Barcode / tag register abhi background me load ho raha hai — barcode ke 4+ digits likho, live search chalega.</p>')}</div>`;
+        ${res.heavy ? '' : (res.livePending ? '<p class="dim small">Barcode dhoondh raha hu…</p>' : '<p class="dim small">Barcode / tag register abhi background me load ho raha hai — barcode ke 4+ digits likho, live search chalega.</p>')}</div>`;
     }
     lastPeople = res.people || [];
     const parts = [];

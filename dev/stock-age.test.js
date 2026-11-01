@@ -164,3 +164,16 @@ test('v3.125.32: compact raw (JSON string) gives identical summaries / tag lists
   assert.deepEqual(personalStock(b, 'ff', 'tl', 'TL One'), personalStock(a, 'ff', 'tl', 'TL One'));
   assert.deepEqual(b.map, a.map);
 });
+
+test('v3.125.35: compact index find() — instant barcode / tag lookup', async () => {
+  const { createStockAgeBuilder } = await import('../stock-age.js');
+  const b = createStockAgeBuilder({ todayDay: TODAY, compact: true }); b.addFf(ffRows); b.addGv(gvRows); const idx = b.finish();
+  const byBar = idx.ff.find('6081160110000003');
+  assert.equal(byBar.length, 1); assert.equal(byBar[0][0], 'T3'); assert.equal(byBar[0][4], 'Ravi Kumar');
+  assert.equal(idx.ff.find('0110000003').length, 1, 'middle digits');
+  assert.equal(idx.ff.find('6081160110000').length, 5, 'prefix → all five T rows');
+  assert.equal(idx.gv.find('GVT1')[0][4], 'Suneel Kumar', 'tag id');
+  assert.deepEqual(idx.ff.find('999999999'), []);
+  const s = (await import('node:fs')).readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(s, /p === '\/api\/barcode-lookup' && method === 'GET'/);
+});

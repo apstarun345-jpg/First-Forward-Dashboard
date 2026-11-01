@@ -239,20 +239,51 @@ export function mapRows(index, { bucket = 'all', cls = '', q = '' } = {}) {
 export const RAW_KEEP_MS = 60e3;
 export function compactRaw(c) {
   if (!c || !Array.isArray(c.raw)) return c;
-  const json = JSON.stringify(c.raw);
+  const rows = c.raw;
+  // Har row ek JSON line (JSON.stringify '\n' escape karta hai, isliye line todna safe) + line ke shuru ka offset.
+  const lines = rows.map((r) => JSON.stringify(r));
+  const starts = new Int32Array(lines.length + 1);
+  let pos = 0;
+  for (let i = 0; i < lines.length; i++) { starts[i] = pos; pos += lines[i].length + 1; }
+  starts[lines.length] = pos;
+  const text = lines.join('\n');
+  // ⚡ v3.125.35 — Instant barcode / tag lookup: har row ki "BARCODE_DIGITS TAG_ID" ek line (indexOf se substring search).
+  const keyLines = rows.map((r) => `${normBarcode(r[1])} ${str(r[0]).toUpperCase()}`);
+  const kStarts = new Int32Array(keyLines.length + 1);
+  pos = 0;
+  for (let i = 0; i < keyLines.length; i++) { kStarts[i] = pos; pos += keyLines[i].length + 1; }
+  kStarts[keyLines.length] = pos;
+  const keys = keyLines.join('\n');
   let cache = null, timer = null;
   Object.defineProperty(c, 'raw', {
     configurable: true, enumerable: false,
     get() {
       if (!cache) {
-        cache = JSON.parse(json);
+        cache = JSON.parse(`[${text.replace(/\n/g, ',')}]`);
         timer = setTimeout(() => { cache = null; timer = null; }, RAW_KEEP_MS);
         if (timer && typeof timer.unref === 'function') timer.unref();
       }
       return cache;
     }
   });
-  Object.defineProperty(c, 'rawBytes', { value: json.length, enumerable: true, configurable: true });
+  const rowAt = (i) => JSON.parse(text.slice(starts[i], starts[i + 1] - 1));
+  const lineOf = (p) => { let lo = 0, hi = keyLines.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (kStarts[m] <= p) lo = m; else hi = m - 1; } return lo; };
+  /** needle (already normalized: digits ya UPPERCASE tag) → matching rows (max `limit`). */
+  Object.defineProperty(c, 'find', {
+    configurable: true, enumerable: false,
+    value(needle, limit = 20) {
+      const out = [], seen = new Set();
+      if (!needle || needle.length < 4) return out;
+      let p = keys.indexOf(needle);
+      while (p >= 0 && out.length < limit) {
+        const li = lineOf(p);
+        if (!seen.has(li)) { seen.add(li); out.push(rowAt(li)); }
+        p = keys.indexOf(needle, kStarts[li + 1]);
+      }
+      return out;
+    }
+  });
+  Object.defineProperty(c, 'rawBytes', { value: text.length + keys.length, enumerable: true, configurable: true });
   return c;
 }
 export function createStockAgeBuilder({ compact = false, todayDay, masterId = '5845036', parkedTl = 'ApnaPayment Pvt. Ltd.', gvOutWords = null } = {}) {

@@ -39,6 +39,7 @@ test('live barcode lookup finds a tag before the full register is loaded', async
   await FF.masterSearch.buildLight().catch(() => {});
   const first = FF.masterSearch.search('34161FA82032');
   assert.equal(first.heavy, false);
+  await new Promise((r) => setTimeout(r, 5));   // v3.125.35: instant API (yahan nahi) ke baad sheet fallback
   assert.ok(queries.length >= 1, 'live queries were fired');
   assert.ok(queries.every((q) => /lower\(\w+\) contains '34161fa82032'/.test(q.sql)), 'contains filter on lowercase needle');
   assert.ok(queries.every((q) => /limit 40/.test(q.sql)));
@@ -49,10 +50,11 @@ test('live barcode lookup finds a tag before the full register is loaded', async
   assert.ok(second.tags.some((t) => t.key === '34161FA82032AAAA' && t.ff.some((x) => x.agentName === 'Ravi Kumar')), 'live hit merged into tags');
 });
 
-test('live lookup also searches the dashed barcode form (608116-011-0558357)', () => {
+test('live lookup also searches the dashed barcode form (608116-011-0558357)', async () => {
   const sqls = [];
   FF.data.query = async (sheet, sql) => { sqls.push(sql); return { rows: [], cols: [] }; };
   FF.masterSearch.search('608116-011-0558357');
+  await new Promise((r) => setTimeout(r, 5));
   assert.ok(sqls.length >= 1);
   assert.ok(sqls.some((q) => q.includes("contains '608116-011-0558357'")), 'raw dashed needle');
   assert.ok(sqls.some((q) => q.includes("contains '6081160110558357'")), 'digits-only needle');
@@ -105,4 +107,19 @@ test('v3.125.16: no auto barcode register on page load; API read retries; boxes 
   assert.match(ms, /autoRetryBox\(box, '__dispDone'/);
   assert.match(auth, /st === 502 \|\| st === 503 \|\| st === 504/);
   assert.match(auth, /READ_POSTS = .*dispatch-by/);
+});
+
+test('v3.125.35: instant server lookup answers without any sheet query', async () => {
+  const sqls = [];
+  FF.data.query = async (sheet, sql) => { sqls.push(sql); return { rows: [], cols: [] }; };
+  const calls = [];
+  FF.auth = { api: async (url) => { calls.push(url); return { ok: true, rows: [{ ch: 'gv', tagId: '34161FA820328EE84F0CE5AA', barcode: '608116-039-0119734', cls: 'VC4', agent: 'SOMANANDA DASH', agentId: 'APS013344', tl: 'SOMANANDA DASH', date: '2026-10-20' }] }; } };
+  FF.masterSearch.search('608116-039-0119734');
+  await new Promise((r) => setTimeout(r, 5));
+  const res = FF.masterSearch.search('608116-039-0119734');
+  assert.equal(calls.length, 1); assert.match(calls[0], /\/api\/barcode-lookup\?q=608116-039-0119734/);
+  assert.equal(sqls.length, 0, 'no sheet query');
+  assert.equal(res.livePending, false);
+  assert.ok(res.tags.some((t) => t.key === '6081160390119734' && t.gv[0].agentName === 'SOMANANDA DASH'));
+  delete FF.auth;
 });
