@@ -177,3 +177,17 @@ test('v3.125.35: compact index find() — instant barcode / tag lookup', async (
   const s = (await import('node:fs')).readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   assert.match(s, /p === '\/api\/barcode-lookup' && method === 'GET'/);
 });
+
+test('compact barcode lookup ranks an exact match ahead of capped partial matches without hydrating raw rows', async () => {
+  const { compactRaw } = await import('../stock-age.js');
+  const needle = '6081160110558357';
+  const rows = Array.from({ length: 45 }, (_, i) => [`PARTIAL-${i}`, needle + i, 'VC4']);
+  rows.push(['EXACT-TAG', '608116-011-0558357', 'VC4']);
+  rows.push([needle, '608116-039-0119734', 'VC4']);
+  const compact = compactRaw({ raw: rows });
+  Object.defineProperty(compact, 'raw', { get() { throw new Error('full register must not be parsed for one barcode'); } });
+  assert.equal(compact.find(needle, 1)[0][0], 'EXACT-TAG');
+  assert.deepEqual(compact.find(needle, 2).map((r) => r[0]), ['EXACT-TAG', needle]);
+  assert.equal(compact.find(needle, 30).length, 30);
+  assert.deepEqual(compact.find('000000000000'), []);
+});

@@ -161,6 +161,9 @@ test('server: Tag Assignment fail ho to FF ageing phir bhi aati hai (errors.gv),
   assert.ok(bad.errors && bad.errors.gv, 'GV ka error saaf dikhta hai (chup-chaap khaali nahi)');
   assert.ok(!bad.errors.ff);
   assert.deepEqual((await app.get('/api/health')).stockAge.errors, ['gv']);
+  const lookup = await app.get('/api/barcode-lookup?q=6081160110000003');
+  assert.equal(lookup.pending, true, 'partial index is not an authoritative no-match');
+  assert.ok(lookup.rows.some((r) => r.ch === 'ff' && r.tagId === 'T3'), 'ready channel still returns instantly');
   cfg.fail = {};
   const good = await app.get('/api/stock-age?fresh=1');
   assert.equal(good.gv.total, 7); assert.equal(good.errors, undefined, 'recover ke baad errors hata diye');
@@ -213,4 +216,30 @@ test('server: gviz proxy cache bytes par capped (CACHE_MAX_MB) — bade bodies m
   const after = (await app.get('/api/perf')).perf;
   assert.equal(after.cacheEntries, perf.cacheEntries, 'over-sized entry cache me nahi gayi');
   assert.equal(after.cacheMB, perf.cacheMB);
+}));
+
+test('Master Search barcode API: warm lookups use only the compact index; common formats match instantly', withApp({}, { STOCK_AGE_PAGE_ROWS: '50' }, async ({ app, up }) => {
+  await app.get('/api/stock-age');
+  const before = up.log.length;
+  for (const q of ['608116-011-0000003', '6081160110000003', '6,081,160,110,000,003', '6.081160110000003E+15', '6081160110000003.0']) {
+    const data = await app.get(`/api/barcode-lookup?q=${encodeURIComponent(q)}`);
+    assert.equal(data.ok, true); assert.equal(data.pending, false);
+    assert.ok(data.rows.some((r) => r.ch === 'ff' && r.tagId === 'T3'), `format: ${q}`);
+  }
+  const gv = await app.get('/api/barcode-lookup?q=GVX4');
+  assert.ok(gv.rows.some((r) => r.ch === 'gv' && r.tagId === 'GVX4'), 'alphanumeric tag ID is not reduced to digits');
+  assert.equal(up.log.length, before, 'no additional sheet reads for warm barcode searches');
+  const anon = await fetch(`${app.base}/api/barcode-lookup?q=6081160110000003`, { headers: { 'X-Forwarded-Proto': 'https' } });
+  assert.equal(anon.status, 401, 'lookup remains login protected');
+}));
+
+test('Master Search barcode API returns pending promptly on cold index, not a false no-match', withApp({ delay: { StockDataa: 600 } }, { STOCK_AGE_PAGE_ROWS: '50' }, async ({ app, up }) => {
+  const empty = await app.get('/api/barcode-lookup?q=12');
+  assert.deepEqual(empty.rows, []); assert.equal(up.log.length, 0, 'short query must not start a full scan');
+  const started = Date.now();
+  const cold = await app.get('/api/barcode-lookup?q=6081160110000003');
+  assert.ok(Date.now() - started < 500, 'cold lookup does not wait for full scan');
+  assert.equal(cold.pending, true);
+  const warm = await until(() => app.get('/api/barcode-lookup?q=6081160110000003'), (v) => !v.pending);
+  assert.ok(warm.rows.some((r) => r.tagId === 'T3'));
 }));

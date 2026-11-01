@@ -171,7 +171,9 @@ test('🛑 suggestion selection locks current instance until next typing', async
   assert.match(u, /let list = \[\], active = -1, destroyed = false, suspended = false/);
   assert.match(u, /if \(suspended\) \{ close\(\); return; \}/);
   assert.match(u, /const suspend = \(\) => \{ suspended = true; close\(\); \}/);
-  assert.match(u, /const onInput = debounce\(\(\) => \{ suspended = false; compute\(\); \}, 80\)/);
+  // The debounce is cancellable now: Enter/selection/close must stop a queued refresh.
+  assert.match(u, /const onInput = \(\) => \{\s*clearTimeout\(inputTimer\);\s*suspended = false;\s*inputTimer = setTimeout\(compute, 80\);/);
+  assert.match(u, /function close\(\) \{\s*clearTimeout\(inputTimer\)/);
   assert.match(u, /function destroyAllSuggestions\(keep\)/);
   const ms = await read('masterSearch.js');
   assert.match(ms, /U\.destroyAllSuggestions\(sug\)/);

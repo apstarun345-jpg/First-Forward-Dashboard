@@ -267,18 +267,36 @@ export function compactRaw(c) {
     }
   });
   const rowAt = (i) => JSON.parse(text.slice(starts[i], starts[i + 1] - 1));
-  const lineOf = (p) => { let lo = 0, hi = keyLines.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (kStarts[m] <= p) lo = m; else hi = m - 1; } return lo; };
+  const count = starts.length - 1; // do not retain the per-row keyLines array in this closure
+  const lineOf = (p) => { let lo = 0, hi = count - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (kStarts[m] <= p) lo = m; else hi = m - 1; } return lo; };
   /** needle (already normalized: digits ya UPPERCASE tag) → matching rows (max `limit`). */
   Object.defineProperty(c, 'find', {
     configurable: true, enumerable: false,
     value(needle, limit = 20) {
       const out = [], seen = new Set();
       if (!needle || needle.length < 4) return out;
+      const addAt = (p) => {
+        const i = lineOf(p);
+        if (!seen.has(i)) { seen.add(i); out.push(rowAt(i)); }
+        return i;
+      };
+      // Token searches rank exact hits first without walking every matching row for a
+      // common partial prefix (608116…). Only returned rows are parsed; .raw stays cold.
+      const exactToken = (token, offset) => {
+        let p = keys.indexOf(token);
+        while (p >= 0 && out.length < limit) {
+          const at = p + offset;
+          if (at === 0 || keys[at - 1] === '\n' || keys[at - 1] === ' ') addAt(at);
+          p = keys.indexOf(token, p + token.length);
+        }
+      };
+      exactToken(`${needle} `, 0);             // whole barcode (first field)
+      exactToken(` ${needle}\n`, 1);           // whole tag ID (last field)
+      if (out.length < limit && keys.endsWith(` ${needle}`)) addAt(keys.length - needle.length);
       let p = keys.indexOf(needle);
       while (p >= 0 && out.length < limit) {
-        const li = lineOf(p);
-        if (!seen.has(li)) { seen.add(li); out.push(rowAt(li)); }
-        p = keys.indexOf(needle, kStarts[li + 1]);
+        const i = addAt(p);
+        p = keys.indexOf(needle, kStarts[i + 1]);
       }
       return out;
     }

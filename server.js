@@ -20,7 +20,7 @@ import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
-import { createMappingStock, sheetIdFrom, identifierText } from './mapping-stock.js';
+import { createMappingStock, sheetIdFrom, identifierText, expandIdentifierNumber } from './mapping-stock.js';
 import { createDuplicateBarcodeCollector } from './duplicate-barcode.js';
 import { personalActivityCalendar } from './personal-calendar.js';
 import { createMappingJobs } from './mapping-job.js';
@@ -6395,18 +6395,21 @@ async function handleApi(req, res, url) {
     if (!user) throw new HttpError(401, 'Login required');
     const raw = String(url.searchParams.get('q') || '').trim();
     const limit = Math.max(1, Math.min(60, Number(url.searchParams.get('limit')) || 30));
+    const normalized = expandIdentifierNumber(raw.replace(/[,\s]/g, '')).replace(/\.0+$/, '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    const needle = /^\d+$/.test(normalized) ? normalized.replace(/^0+/, '') : normalized;
+    if (needle.length < 4) return sendJson(res, 200, { ok: true, rows: [] });
+    // Keep serving the small ready index while refreshing stale/failed data in the background.
+    void stockAgeIndex(false).catch(() => {});
     const index = stockAgeState.index;
-    if (!index || !index.ff || typeof index.ff.find !== 'function') { void stockAgeIndexWithin(0, false).catch(() => {}); return sendJson(res, 200, { ok: true, pending: true, rows: [] }); }
+    if (!index || !index.ff || typeof index.ff.find !== 'function') return sendJson(res, 200, { ok: true, pending: true, rows: [] });
     const perms = user.role === 'admin' ? null : new Set(user.permissions || []);
     const canFf = !perms || perms.has('sheet:StockDataa') || perms.has('ff') || perms.has('masterSearch');
     const canGv = !perms || perms.has('sheet:Tag Assignment') || perms.has('gv') || perms.has('masterSearch');
-    const hex = /[a-f]/i.test(raw.replace(/[^0-9a-z]/gi, ''));
-    const needle = hex ? raw.toUpperCase().replace(/[^0-9A-Z]/g, '') : raw.replace(/\D/g, '').replace(/^0+/, '');
     const iso = (day) => (day ? new Date(day * 86400e3).toISOString().slice(0, 10) : '');
     const rows = [];
     if (canFf) index.ff.find(needle, limit).forEach((r) => rows.push({ ch: 'ff', tagId: r[0], barcode: r[1], cls: r[2], date: iso(r[3]), agent: r[4], agentId: r[5], tl: r[6], age: r[7] }));
     if (canGv && index.gv && index.gv.find) index.gv.find(needle, limit).forEach((r) => rows.push({ ch: 'gv', tagId: r[0], barcode: r[1], cls: r[2], date: iso(r[3]), agent: r[4], agentId: r[5], tl: r[6], age: r[7], inStock: r[11] }));
-    return sendJson(res, 200, { ok: true, at: index.at, rows });
+    return sendJson(res, 200, { ok: true, at: index.at, pending: !!(index.errors && ((canFf && index.errors.ff) || (canGv && index.errors.gv))), rows });
   }
   if (p === '/api/stock-age/tags' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
