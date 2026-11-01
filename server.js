@@ -3464,7 +3464,8 @@ function ledgerAggAddRow(byCh, e) {
 async function loadLedgerAgg() {
   const srcs = ledgerSources();
   const byCh = { ff: new Map(), gv: new Map() }, errors = {}, counts = {};
-  for (const src of srcs) {
+  // ⚡ v3.125.45 — sources ek saath padho (chhoti sheets; pehle ek-ek karke = 10-30 s)
+  const results = await Promise.all(srcs.map(async (src) => {
     const firstCol = LAYOUT_LETTERS(src.layout)[src.layout === 'gv' ? 6 : 5];
     const tmp = { ff: new Map(), gv: new Map() };   // per attempt — withLedgerLetters may retry the read
     try {
@@ -3478,11 +3479,14 @@ async function loadLedgerAgg() {
         }
       }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 }); });
       counts[src.id] = n;
-      for (const ch of ['ff', 'gv']) for (const [k, rec] of tmp[ch]) if (!byCh[ch].has(k)) byCh[ch].set(k, rec);
+      return tmp;
     } catch (err) {
       errors[src.id] = ledgerErrText(src, err);
+      return null;
     }
-  }
+  }));
+  // Order same as before (pehla source jeetta hai)
+  for (const tmp of results) if (tmp) for (const ch of ['ff', 'gv']) for (const [k, rec] of tmp[ch]) if (!byCh[ch].has(k)) byCh[ch].set(k, rec);
   // rk (dedupe set) load ke baad nahi chahiye — memory bachao
   for (const ch of ['ff', 'gv']) for (const rec of byCh[ch].values()) for (const day of rec.dates.values()) delete day.rk;
   return { byCh, errors, counts };
@@ -13245,6 +13249,9 @@ async function start() {
     setTimeout(() => warmPersonalLinks().catch(() => {}), 150e3).unref?.();
     setInterval(() => warmPersonalLinks().catch(() => {}), 10 * 60e3).unref();   // 10 min = gviz cache TTL (5 min par har link ke 3-4 queries dobara jaate the)
     setTimeout(() => maybeMonthlyReport(), 8000);
+    // ⚡ v3.125.45 — Master Search ka 'Last dispatch' box: ledger aggregate boot par hi + har 25 min (user kabhi intezaar na kare)
+    setTimeout(() => ledgerAggregate(false).catch(() => {}), 6000).unref?.();
+    setInterval(() => ledgerAggregate(true).catch(() => {}), 25 * 60e3).unref?.();
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🕒 v209 — har 15 min sheet row-count check (home khule na khule), taaki "data kab aaya" ka time sahi rahe
     setInterval(() => {
