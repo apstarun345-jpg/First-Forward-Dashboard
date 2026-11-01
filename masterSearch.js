@@ -695,6 +695,13 @@ FF.pages = FF.pages || {};
     return out;
   }
 
+  /** Ye ID is insaan ki apni hai? Agent: sub / ids / alias. TL: inke saath TL IDs bhi. (Agent ke tlIds = uske TL ki ID — identity nahi.) */
+  function ownIdMatch(p, want) {
+    if (!p || !want) return false;
+    if (normId(p.sub || p.id) === want) return true;
+    if ([...(p.ids || []), ...(p.alias || [])].some((id) => normId(id) === want)) return true;
+    return /tl$/.test(String(p.kind || '')) && [...(p.tlIds || [])].some((id) => normId(id) === want);
+  }
   /** Exact agent/TL ID match wins before name/TL substring matches.
       GV Master: A=UNIQUE_ID (agent), C=TL ID, R=GV TL ID alias. */
   function preferNameMatches(people, query) {
@@ -2099,10 +2106,12 @@ FF.pages = FF.pages || {};
       if (askedId && chFilter) {
         const want = normId(askedId);
         const idx = state.full || state.light;
-        exactRequestedPerson = idx && idx.people ? [...idx.people.values()].find((p) => {
-          if (chOfP(p) !== chFilter) return false;
-          return normId(p.sub || p.id) === want || [...(p.ids || []), ...(p.alias || []), ...(p.tlIds || [])].some((id) => normId(id) === want);
-        }) || null : null;
+        // v3.125.30 — ID us insaan ki APNI honi chahiye. Agent ke `tlIds` (uske TL ki ID) se match nahi —
+        // warna "SUNIL MATALE (TL) · APN2405" kholne par uske under ka koi agent (jiska TL bhi APN2405) khul jaata tha.
+        // Kai match hon to typed naam wala pehle.
+        const cands = idx && idx.people ? [...idx.people.values()].filter((p) => chOfP(p) === chFilter && ownIdMatch(p, want)) : [];
+        const qn = normName(q);
+        exactRequestedPerson = cands.find((p) => normName(p.name) === qn) || cands.find((p) => isTlP(p)) || cands[0] || null;
       }
       const channelPeople = exactRequestedPerson ? [exactRequestedPerson] : (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
       const people = preferNameMatches(channelPeople, q);
@@ -2139,11 +2148,10 @@ FF.pages = FF.pages || {};
         let exactIdGroup = null, exactIdChannel = chFilter || '';
         if (askedId) {
           const want = normId(askedId);
-          const matchId = (p) => !!p && (
-            normId(p.sub || p.id) === want ||
-            [...(p.ids || []), ...(p.alias || []), ...(p.tlIds || [])].some((id) => normId(id) === want)
-          );
-          exactIdGroup = groups.find((g) => (chFilter ? matchId(g[chFilter]) : matchId(g.gv) || matchId(g.ff))) || null;
+          const matchId = (p) => !!p && ownIdMatch(p, want);
+          const qn = normName(q);
+          const hits = groups.filter((g) => (chFilter ? matchId(g[chFilter]) : matchId(g.gv) || matchId(g.ff)));
+          exactIdGroup = hits.find((g) => normName(g.name) === qn) || hits[0] || null;
           if (exactIdGroup && !chFilter) {
             if (matchId(exactIdGroup.gv)) exactIdChannel = 'gv';
             else if (matchId(exactIdGroup.ff)) exactIdChannel = 'ff';
