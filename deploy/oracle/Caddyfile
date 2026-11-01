@@ -1,0 +1,7 @@
+# Caddy apne aap Let's Encrypt HTTPS certificate banata / renew karta hai.
+{{DOMAIN}} {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:10000 {
+		header_up X-Forwarded-Proto https
+	}
+}

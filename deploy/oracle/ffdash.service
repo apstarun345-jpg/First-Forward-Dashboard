@@ -1,0 +1,19 @@
+[Unit]
+Description=First Forward Dashboard (Node)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ffdash
+WorkingDirectory=/opt/ffdash/app
+EnvironmentFile=/etc/ffdash.env
+Environment=NODE_ENV=production
+Environment=MALLOC_ARENA_MAX=2
+# Oracle ARM free: 12 GB RAM — Render ki 420 MB heap cap / 470 MB memory guard yahan nahi chahiye.
+ExecStart=/usr/bin/node --max-old-space-size=4096 --expose-gc server.js
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

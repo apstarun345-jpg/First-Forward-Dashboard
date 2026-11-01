@@ -1,0 +1,6 @@
+[Unit]
+Description=First Forward Dashboard — GitHub se auto-deploy
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ffdash-update

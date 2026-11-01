@@ -1,0 +1,9 @@
+[Unit]
+Description=Har 2 minute GitHub main check (Render jaisa auto-deploy)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target
