@@ -137,7 +137,7 @@ FF.pages = FF.pages || {};
   };
 
   /** Layer 1 — aggregated rows (instant, never blocks on barcode scans). */
-  const LIMITS = { lightSoftMs: 1500 };   // itni der baad jo datasets aa chuke unse index banao; baaki aate hi index me judte hain (tests chhota karte hain)
+  const LIMITS = { lightSoftMs: 1500, liveFallbackMs: 300, liveTtlMs: 60000, liveRetryMs: 2000 };   // itni der baad jo datasets aa chuke unse index banao; baaki aate hi index me judte hain (tests chhota karte hain)
   /** Sabhi promises ka intezaar — par `ms` se zyada nahi. Return: { name: { status, value|reason } } (pending wale missing). */
   function settleSoon(sources, ms) {
     const out = {};
@@ -561,20 +561,30 @@ FF.pages = FF.pages || {};
   // tab tak barcode search khali dikhti thi. Ab typed barcode/tag ke liye 4 chhoti targeted queries (1-9 s) chalti hain
   // aur register ready hote hi normal index le leta hai.
   const live = { map: new Map(), order: [] };
+  // Long barcode/tag input can use the fast lane without waiting for the people/REPORT index.
+  // Already-known person IDs stay in the person flow (including long numeric legacy IDs).
+  function isBarcodeQuery(q) {
+    const key = normBar(q), idx = state.full || state.light;
+    if (/^\+\d/.test(clean(q)) || /^91[6-9]\d{9}$/.test(key)) return false; // mobile with country code
+    return (/^\d{12,16}$/.test(key) || (/^[0-9A-F]{12,}$/i.test(key) && /[A-F]/i.test(key) && /\d/.test(key)))
+      && !(idx && idx.ids.has(normId(q)));
+  }
   const liveSafe = (q) => String(q || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   function liveLookup(query) {
     const key = normBar(query);
     if (key.length < 4 || !/\d/.test(query)) return null;
     let rec = live.map.get(key);
-    if (rec) return rec;
+    if (rec && (rec.pending || Date.now() - rec.at < (rec.failed ? LIMITS.liveRetryMs : LIMITS.liveTtlMs))) return rec;
     const D = FF.data, c = FF.config || {};
-    if (!D || !D.query) return null;
-    rec = { key, pending: true, entries: new Map(), failed: 0 };
+    const hasApi = !!(FF.auth && FF.auth.api);
+    if ((!D || !D.query) && !hasApi) return null;
+    rec = { key, pending: true, entries: new Map(), failed: 0, at: Date.now() };
+    if (live.map.has(key)) live.order.splice(live.order.indexOf(key), 1);
     live.map.set(key, rec); live.order.push(key);
     if (live.order.length > 30) live.map.delete(live.order.shift());
     // Sheet me barcode dash ke saath bhi hota hai (608116-011-0558357) — raw aur bina-dash dono roop dhoondo.
     const raw = String(query || '').trim().toLowerCase().replace(/[^a-z0-9\-\/ ]/g, '');
-    const needles = [...new Set([liveSafe(query), raw].filter((x) => x && x.length >= 4))];
+    const needles = [...new Set([key.toLowerCase(), liveSafe(query), raw].filter((x) => x && x.length >= 4))];
     const s = c.stock || {}, a = (c.gv && c.gv.assignment) || {}, e = c.eir || {};
     const gen = state.generation;
     // Format dekh kar sirf zaroori column scan karo (kam conditions = tez query):
@@ -588,6 +598,7 @@ FF.pages = FF.pages || {};
       rowFn(en, k);
     };
     const find = (sheet, cols, idCols, onRow) => {
+      if (!D || !D.query) { rec.failed++; return Promise.resolve(); }
       const list = [...new Set(cols.filter(Boolean))];
       const cond = idCols.filter(Boolean).flatMap((col) => needles.map((n) => `lower(${col}) contains '${n}'`)).join(' or ');
       if (!list.length || !cond) return Promise.resolve();
@@ -596,46 +607,62 @@ FF.pages = FF.pages || {};
       const txt = (row, col) => { const i = idx.get(col); return i === undefined ? '' : clean(D.cellText(row[i])); };
       // Server gviz gate `limit ≤ 200` wali queries ko queue ke aage rakhta hai (bade register pages ke peeche nahi atakti).
       return D.query(sheet, `select ${list.join(', ')} where ${cond} limit 40`, { timeoutMs: 40000 })
-        .then((t) => { (t.rows || []).forEach((row) => onRow(row, val, txt)); })
-        .catch(() => { rec.failed++; })
+        .then((t) => { if (gen === state.generation && !rec.instantHit) (t.rows || []).forEach((row) => onRow(row, val, txt)); })
+        .catch(() => { if (!rec.instantHit) rec.failed++; })
         .finally(() => { if (gen === state.generation) emit(); });
     };
     const cls = (v) => (FF.gv && FF.gv.normClass ? FF.gv.normClass(v) : v);
     const eirOnly = () => (kindOf === 'barcode' ? Promise.resolve() : find(e.sheet || 'EIR', [e.tagId, e.agentId, e.agentName, e.tlName, e.cls, e.date], [e.tagId], (row, val, txt) => {
       add(val(row, e.tagId), (en, k) => en.ff.push({ barcode: k, tagId: val(row, e.tagId), agentId: val(row, e.agentId), agentName: txt(row, e.agentName) || val(row, e.agentId), tlName: txt(row, e.tlName), cls: txt(row, e.cls), allocated: txt(row, e.date), source: 'EIR' }));
     }));
-    const done = () => { rec.pending = false; if (gen === state.generation) emit(); };
-    // ⚡ v3.125.35 — Pehle server ka instant index (StockDataa + Tag Assignment, ~ms). Mil gaya → turant dikhao.
-    // Index abhi ban raha ho / server busy → purani sheet queries (fallback).
-    const instant = FF.auth && FF.auth.api ? Promise.race([
-      FF.auth.api(`/api/barcode-lookup?q=${encodeURIComponent(String(query || '').trim())}&limit=30`),
-      new Promise((resolve) => setTimeout(() => resolve(null), 4000))
-    ]).catch(() => null) : Promise.resolve(null);
-    instant.then((d) => {
-      if (gen !== state.generation) return;
-      if (d && d.ok && !d.pending) {
-        (d.rows || []).forEach((r) => {
-          const rowRec = { tagId: clean(r.tagId), agentId: clean(r.agentId), agentName: clean(r.agent) || clean(r.agentId), tlName: clean(r.tl), cls: cls(r.cls), allocated: clean(r.date) };
-          add(r.barcode || r.tagId, (en, k) => (r.ch === 'gv' ? en.gv.push({ barcode: k, ...rowRec, source: 'Tag Assignment' }) : en.ff.push({ barcode: k, ...rowRec, source: 'StockDataa' })));
-        });
-        if ((d.rows || []).length) { done(); return; }
-        // Stock me nahi (issue ho chuka tag) → sirf EIR (tag ID) — barcode ke liye kuch aur nahi.
-        rec.instantMiss = true; emit();
-        eirOnly().finally(done);
-        return;
-      }
-      sheetSearch();
-    });
+    let apiPending = hasApi, sheetFinished = false;
+    const done = () => { rec.pending = apiPending && !rec.instantHit; if (!rec.pending) rec.at = Date.now(); if (gen === state.generation) emit(); };
+    // Prefer the small server index. If the request is slow, start sheet fallback promptly,
+    // but KEEP listening for its response: a late index hit must still paint immediately.
+    let sheetStarted = false;
+    let fallbackTimer;
+    if (hasApi) {
+      fallbackTimer = setTimeout(sheetSearch, LIMITS.liveFallbackMs);
+      let instant;
+      try { instant = FF.auth.api(`/api/barcode-lookup?q=${encodeURIComponent(String(query || '').trim())}&limit=30`); }
+      catch { instant = Promise.resolve(null); }
+      Promise.resolve(instant).catch(() => null).then((d) => {
+        clearTimeout(fallbackTimer);
+        apiPending = false;
+        if (gen !== state.generation) return;
+        if (d && d.ok && (d.rows || []).length) {
+          if (!d.pending) { rec.instantHit = true; rec.failed = 0; rec.entries.clear(); }
+          d.rows.forEach((r) => {
+            const rowRec = { tagId: clean(r.tagId), agentId: clean(r.agentId), agentName: clean(r.agent) || clean(r.agentId), tlName: clean(r.tl), cls: cls(r.cls), allocated: clean(r.date) };
+            add(r.barcode || r.tagId, (en, k) => (r.ch === 'gv' ? en.gv.push({ barcode: k, ...rowRec, source: 'Tag Assignment' }) : en.ff.push({ barcode: k, ...rowRec, source: 'StockDataa' })));
+          });
+          if (!d.pending) { done(); return; }
+          emit(); // use a ready channel immediately while the missing channel falls back
+        }
+        if (d && d.ok && !d.pending) {
+          // A stock miss can still be an issued tag. Never make a barcode wait for EIR.
+          if (!sheetStarted) { rec.instantMiss = true; eirOnly().finally(done); }
+          else if (sheetFinished) done();
+          return;
+        }
+        sheetSearch();
+        if (sheetFinished) done();
+      });
+    } else sheetSearch();
     return rec;
-    function sheetSearch() { Promise.all([
-      find(s.sheet || 'StockDataa', [s.barcode, s.tagId, s.agentId, s.agentName, s.tlName, s.cls, s.agentAllocatedAt, s.bcAllocatedAt], pick(s.barcode, s.tagId), (row, val, txt) => {
-        [val(row, s.barcode) || val(row, s.tagId)].forEach((b) => add(b, (en, k) => en.ff.push({ barcode: k, tagId: val(row, s.tagId), agentId: val(row, s.agentId), agentName: txt(row, s.agentName) || val(row, s.agentId), tlName: txt(row, s.tlName), cls: cls(txt(row, s.cls)), allocated: txt(row, s.agentAllocatedAt) || txt(row, s.bcAllocatedAt), source: 'StockDataa' })));
-      }),
-      find('Tag Assignment', [a.serial, a.tagId, a.agentId, a.agentName, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName, a.allocatedAt], pick(a.serial, a.tagId), (row, val, txt) => {
-        [val(row, a.serial) || val(row, a.tagId)].forEach((b) => add(b, (en, k) => en.gv.push({ barcode: k, tagId: val(row, a.tagId), agentId: val(row, a.agentId), agentName: txt(row, a.agentName) || val(row, a.agentId), tlName: txt(row, a.tlName), cls: cls(txt(row, a.cls)), gvId: txt(row, a.gvUniqueId), gvName: txt(row, a.gvUniqueName), allocated: txt(row, a.allocatedAt), source: 'Tag Assignment' })));
-      }),
-      eirOnly()
-    ]).finally(done); }
+    function sheetSearch() {
+      if (sheetStarted || gen !== state.generation || rec.instantHit) return;
+      sheetStarted = true;
+      Promise.all([
+        find(s.sheet || 'StockDataa', [s.barcode, s.tagId, s.agentId, s.agentName, s.tlName, s.cls, s.agentAllocatedAt, s.bcAllocatedAt], pick(s.barcode, s.tagId), (row, val, txt) => {
+          [val(row, s.barcode) || val(row, s.tagId)].forEach((b) => add(b, (en, k) => en.ff.push({ barcode: k, tagId: val(row, s.tagId), agentId: val(row, s.agentId), agentName: txt(row, s.agentName) || val(row, s.agentId), tlName: txt(row, s.tlName), cls: cls(txt(row, s.cls)), allocated: txt(row, s.agentAllocatedAt) || txt(row, s.bcAllocatedAt), source: 'StockDataa' })));
+        }),
+        find('Tag Assignment', [a.serial, a.tagId, a.agentId, a.agentName, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName, a.allocatedAt], pick(a.serial, a.tagId), (row, val, txt) => {
+          [val(row, a.serial) || val(row, a.tagId)].forEach((b) => add(b, (en, k) => en.gv.push({ barcode: k, tagId: val(row, a.tagId), agentId: val(row, a.agentId), agentName: txt(row, a.agentName) || val(row, a.agentId), tlName: txt(row, a.tlName), cls: cls(txt(row, a.cls)), gvId: txt(row, a.gvUniqueId), gvName: txt(row, a.gvUniqueName), allocated: txt(row, a.allocatedAt), source: 'Tag Assignment' })));
+        }),
+        eirOnly()
+      ]).finally(() => { sheetFinished = true; done(); });
+    }
   }
 
   /** v3.125.14 — Ek tag ke do keys (barcode + tag ID) index me alag entries hain; result me ek hi row dikhao.
@@ -660,7 +687,7 @@ FF.pages = FF.pages || {};
     const idx = state.full || state.light;
     const query = clean(q);
     const out = { q: query, people: [], tags: [], ids: [], heavy: !!(state.full && state.full.fullLoaded), matched: 0 };
-    if (!idx || !query) return out;
+    if (!query) return out;
     const nql = query.toLowerCase();
     const nn = normName(query);
     const ni = normId(query);
@@ -668,14 +695,14 @@ FF.pages = FF.pages || {};
     const wantsTags = barcodeQuery.length >= 4 && /\d/.test(query);
 
     // people by name / TL / id / GV id — 2-gram index avoids scanning every person on each key.
-    if (nn.length >= 2) {
+    if (idx && nn.length >= 2) {
       const candidates = idx.personGrams ? (idx.personGrams.get(nn.slice(0, 2)) || []) : idx.people.values();
       for (const p of candidates) if ((p._searchHay || '').includes(nn)) out.people.push(p);
       out.people.sort((a, b) => (b.bars.size - a.bars.size) || (b.n - a.n));
       if (out.people.length > 60) out.people.length = 60;
     }
     // exact / prefix ID hits — only inspect IDs sharing the first 4 normalized characters.
-    if (ni.length >= 4) {
+    if (idx && ni.length >= 4) {
       const candidates = idx.idBuckets ? (idx.idBuckets.get(ni.slice(0, 4)) || []) : [...idx.ids].map(([id, value]) => ({ id, value }));
       for (const entry of candidates) if (entry.id === ni || entry.id.startsWith(ni)) out.ids.push({ id: entry.id, ...entry.value });
       out.ids.sort((a, b) => a.id.length - b.id.length);
@@ -683,14 +710,14 @@ FF.pages = FF.pages || {};
     }
     // 📞 mobile number (agent + TL) — poora ya aakhri digits, indexed by 5-digit fragments.
     const dq = query.replace(/\D/g, '');
-    if (dq.length >= 5 && dq.length <= 13 && !/[a-z]/i.test(query) && idx.mobiles) {
+    if (dq.length >= 5 && dq.length <= 13 && !/[a-z]/i.test(query) && idx && idx.mobiles) {
       const want = dq.slice(-10);
       const candidates = idx.mobileGrams ? (idx.mobileGrams.get(want.slice(0, 5)) || []) : idx.mobiles.values();
       for (const v of candidates) if (v.mobile === want || v.mobile.includes(want) || want.includes(v.mobile)) out.ids.push({ id: v.mobile, name: v.name, kind: v.kind, tl: v.tl, via: 'Mobile' });
       if (out.ids.length > 40) out.ids.length = 40;
     }
     // barcode / tag / serial — partial barcode (prefix / beech ke digits) bhi.
-    if (wantsTags && idx.bars.size) {
+    if (wantsTags && idx && idx.bars.size) {
       // Seedha key-list scan (2.3 lakh keys ≈ 2-18 ms) — exact / prefix, aur 6+ digit par substring (middle ke digits bhi).
       const keys = idx.barKeys && idx.barKeys.length ? idx.barKeys : [...idx.bars.keys()];
       const substring = ni.length >= 6;
@@ -706,6 +733,7 @@ FF.pages = FF.pages || {};
       const rec = liveLookup(query);
       if (rec) {
         out.livePending = rec.pending;
+        out.liveFailed = !rec.pending && rec.failed > 0;
         const have = new Set(out.tags.map((t) => t.key));
         rec.entries.forEach((en, k) => { if (!have.has(k) && out.tags.length < 120) { out.tags.push(en); have.add(k); } });
         out.tags.sort((a, b) => a.key.length - b.key.length || (b.ff.length + b.gv.length) - (a.ff.length + a.gv.length));
@@ -806,9 +834,6 @@ FF.pages = FF.pages || {};
     if (!state.light) {
       buildLight().catch(() => {});
       warmFull();
-      return query.length >= 2
-        ? [{ kind: 'cls', kindLabel: 'Search', label: `“${query}” search ho raha hai…`, sub: 'index ban raha hai (agents + TLs + IDs)', value: query, none: true }]
-        : [];
     }
 
     let r = null;
@@ -892,9 +917,11 @@ FF.pages = FF.pages || {};
           f ? (clean(f.agentName) ? `FF ${f.agentName}${f.tlName ? ' (TL ' + f.tlName + ')' : ''}` : 'FF stock · agent assign nahi') : 'FF not mapped',
           g ? (clean(g.agentName) ? `GV ${g.agentName}${g.tlName ? ' (TL ' + g.tlName + ')' : ''}` : 'GV stock · agent assign nahi') : 'GV not mapped',
           (f && f.cls) || (g && g.cls) || ''].filter(Boolean).join(' · '),
+        keywords: `${t.key} ${query}`,
         value: t.key, barcode: t.key
       });
     });
+    if (!items.length && !state.light && !r.livePending) items.push({ kind: 'cls', kindLabel: 'Search', label: `“${query}” search ho raha hai…`, sub: 'index ban raha hai (agents + TLs + IDs)', value: query, none: true });
     if (!items.length && r.livePending) items.push({ kind: 'cls', kindLabel: 'Barcode', label: `“${query}” dhoondh raha hu…`, sub: 'barcode / tag search', value: query, none: true });
     if (!items.length && query.length >= 2) items.push({ kind: 'cls', kindLabel: 'Search', label: `“${query}” ke liye kuch nahi mila`, sub: 'Doosra naam / ID / barcode try karo', value: query, none: true });
     return items;
@@ -1124,10 +1151,12 @@ FF.pages = FF.pages || {};
   }
 
   function resultsHtml(res) {
+    if (!res.matched && res.livePending) return U.spinner(`“${res.q}” — barcode dhoondha ja raha hai…`);
+    if (!res.matched && res.liveFailed) return '<div class="ms-empty"><b>Barcode lookup abhi complete nahi hua.</b><p>Connection check karke dobara Enter dabao.</p></div>';
     if (!res.matched) {
       return `<div class="ms-empty"><b>“${esc(res.q)}” ke liye kuch nahi mila</b>
         <p>Naam, TL, agent ID, TL ID, GV ID, barcode ya tag ID se search karo. Spelling ya ID ke kuch digits bhi kaafi hain.</p>
-        ${res.heavy ? '' : (res.livePending ? '<p class="dim small">Barcode dhoondh raha hu…</p>' : '<p class="dim small">Barcode / tag register abhi background me load ho raha hai — barcode ke 4+ digits likho, live search chalega.</p>')}</div>`;
+        ${res.heavy || res.livePending === false ? '' : '<p class="dim small">Barcode ke 4+ digits likho, live search chalega.</p>'}</div>`;
     }
     lastPeople = res.people || [];
     const parts = [];
@@ -1167,14 +1196,14 @@ FF.pages = FF.pages || {};
 
   function openPanel(q, opts) {
     closePanel();
-    const res = typeof q === 'object' && q !== null ? q : search(q);
+    let res = typeof q === 'object' && q !== null ? q : search(q);
     const o = opts || {};
     const wrap = U.h(`<div class="ms-panel" id="ms-panel" role="dialog" aria-modal="true" aria-label="Master search results">
       <div class="ms-panel-backdrop" data-ms-close></div>
       <div class="ms-panel-box">
         <div class="ms-panel-head">
           <div><span class="ms-panel-kicker">🔎 Master search</span><h2>${esc(/^\d{12,20}$/.test(clean(res.q)) ? U.barcode(res.q) : (res.q || o.title || 'Results'))}</h2>
-            <small class="dim">${U.fmt(res.matched)} match · ${res.heavy ? 'barcode register ready ✓' : (res.livePending ? 'barcode live search…' : 'barcode register loading… (live search on)')}</small></div>
+            <small class="dim" data-ms-result-state>${U.fmt(res.matched)} match · ${res.heavy ? 'barcode register ready ✓' : (res.livePending ? 'barcode live search…' : 'barcode register loading… (live search on)')}</small></div>
           <div class="btn-row">
             <button class="btn small" data-ms-csv>⬇ CSV</button>
             <button class="btn small" data-ms-pdf>📄 PDF</button>
@@ -1186,10 +1215,24 @@ FF.pages = FF.pages || {};
     </div>`);
     document.body.appendChild(wrap);
     document.body.classList.add('no-scroll');
-    if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(wrap);
-    inlineSingle(wrap.querySelector('.ms-panel-body'), res);
-    fillDispatch(wrap.querySelector('.ms-panel-body'), res);
-    const box = wrap.querySelector('.ms-panel-box');
+    const body = wrap.querySelector('.ms-panel-body');
+    const paint = () => {
+      body.innerHTML = resultsHtml(res);
+      const status = wrap.querySelector('[data-ms-result-state]');
+      if (status) status.textContent = `${U.fmt(res.matched)} match · ${res.livePending ? 'barcode live search…' : res.liveFailed ? 'lookup incomplete — retry' : 'search complete ✓'}`;
+      if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(wrap);
+      inlineSingle(body, res);
+      fillDispatch(body, res);
+    };
+    paint();
+    let stopWatching = null;
+    if (res.livePending) stopWatching = onIndexReady(() => {
+      if (!wrap.isConnected) { if (stopWatching) stopWatching(); return; }
+      res = search(res.q);
+      paint();
+      if (!res.livePending && stopWatching) stopWatching();
+    });
+    wrap.__msStopWatching = () => { if (stopWatching) stopWatching(); };
     wrap.addEventListener('click', async (e) => {
       if (e.target.closest('[data-ms-close]')) { closePanel(); return; }
       if (e.target.closest('[data-mp-agent]')) { closePanel(); return; }
@@ -1248,12 +1291,12 @@ FF.pages = FF.pages || {};
     // ESC closes (only while this panel is on top)
     const onKey = (ev) => { if (ev.key === 'Escape') { closePanel(); document.removeEventListener('keydown', onKey); } };
     document.addEventListener('keydown', onKey);
-    box.addEventListener('ms:closed', () => document.removeEventListener('keydown', onKey));
+    wrap.addEventListener('ms:closed', () => document.removeEventListener('keydown', onKey));
     return res;
   }
   function closePanel() {
     const el = U.$('#ms-panel');
-    if (el) { el.dispatchEvent(new Event('ms:closed')); el.remove(); }
+    if (el) { if (el.__msStopWatching) el.__msStopWatching(); el.dispatchEvent(new Event('ms:closed')); el.remove(); }
     if (!U.$('.drawer.open') && !U.$('.palette-backdrop:not([hidden])')) document.body.classList.remove('no-scroll');
   }
 
@@ -1264,6 +1307,8 @@ FF.pages = FF.pages || {};
    *  jahan click karte hi uska poora related data (FF + GV) khul jaata hai — koi results list / modal box nahi.
    *  Barcode / tag-ID searches purane panel (tag-level rows) me hi jaate hain. */
   function openSearchPage(q, person) {
+    // Barcode Enter stays on the light tag panel: no profile modules/REPORT load in its way.
+    if (!person && isBarcodeQuery(q)) { state.lastQuery = clean(q); openPanel(q); return true; }
     if (!person && FF.aliases) q = FF.aliases.map(q);   // Assistant / Agent ID (Sheet4) → New ID
     const p = person || {};
     // A selected suggestion is authoritative: route using the selected person's canonical name,
@@ -1330,6 +1375,7 @@ FF.pages = FF.pages || {};
     warmFull();
     suggestApi = U.suggest(input, {
       min: 1, max: 16,
+      submitOnEnter: (q) => normBar(q).length >= 4 && /\d/.test(q),
       items: () => suggestItems(input.value),
       onPick: (it) => {
         // Hard cleanup + suspend current instance so no async refresh can reopen the dropdown.
@@ -1476,6 +1522,7 @@ FF.pages = FF.pages || {};
     state.light = null; state.lightPromise = null;
     state.full = null; state.fullPromise = null; state.fullError = null;
     state.results = null;
+    live.map.clear(); live.order.length = 0;
     emit();
   }
 
@@ -1497,17 +1544,18 @@ FF.pages = FF.pages || {};
     let chFilter = (params && (params.ch || params.channel)) || '';   // '' = dono · 'ff' · 'gv'
     let groups = [];
     let current = null;
+    let runSeq = 0, stopTagWatch = null;
 
     root.innerHTML = `<div class="page msp-page">
       <div class="page-head">
         <div><h1>🔎 Master Search</h1>
-          <p class="sub">GV + First Forward · <b>naam · agent · TL · ID · mobile</b> — agent search par uski poori details + TL ka full team (sab agents aur TL self ka stock/issuance) bhi khulta hai.</p></div>
+          <p class="sub">GV + First Forward · <b>naam · agent · TL · ID · mobile · barcode</b> — agent search par uski poori details + TL ka full team (sab agents aur TL self ka stock/issuance) bhi khulta hai.</p></div>
         <div class="btn-row"><button class="btn small" data-msp-refresh>🔄 Index refresh</button></div>
       </div>
       <div class="card msp-search-card"><div class="card-body">
         <div class="msp-search">
           <span class="msp-ico" aria-hidden="true">🔎</span>
-          <input id="msp-q" class="input" type="search" value="${esc(asked)}" placeholder="Naam / ID / mobile likho… (jaise “Rahul”, “5845036”, 98xxxxxxxx)" autocomplete="off" aria-label="Master search">
+          <input id="msp-q" class="input" type="search" value="${esc(asked)}" placeholder="Naam / ID / mobile / barcode likho… phir Enter dabao" autocomplete="off" aria-label="Master search">
           <button class="btn primary" data-msp-go>Search</button>
         </div>
         <div class="msp-filters">
@@ -1528,7 +1576,7 @@ FF.pages = FF.pages || {};
     const out = U.$('#msp-out', root);
     const quick = U.$('#msp-quick', root);
     const stateEl = U.$('#msp-state', root);
-    const paintState = () => { if (stateEl) stateEl.innerHTML = (state.full && state.full.fullLoaded) ? '<span class="badge green">barcode register ready ✓</span>' : '<span class="badge amber">poora index ban raha hai…</span>'; };
+    const paintState = () => { if (stateEl) stateEl.innerHTML = (state.full && state.full.fullLoaded) ? '<span class="badge green">barcode register ready ✓</span>' : '<span class="badge green">⚡ Barcode live lookup</span>'; };
     paintState();
     onIndexReady(paintState);
 
@@ -2030,6 +2078,8 @@ FF.pages = FF.pages || {};
     };
     function openGroup(g, channelOverride) {
       if (!g || !out) return;
+      ++runSeq;
+      if (stopTagWatch) { stopTagWatch(); stopTagWatch = null; }
       const selected = g.ff && g.gv ? (channelOverride || g._selectedChannel || 'both') : (g.ff ? 'ff' : 'gv');
       g._selectedChannel = selected;
       current = g;
@@ -2115,13 +2165,33 @@ FF.pages = FF.pages || {};
       </div></div>`;
     }
 
-    let runSeq = 0;
+    function showTagResults(res, seq) {
+      const paint = (next) => {
+        out.innerHTML = `<div class="card"><div class="card-body"><h3 class="msp-h">🔖 ID / tag match</h3>${resultsHtml(next)}</div></div>`;
+        fillDispatch(out, next);
+      };
+      paint(res);
+      if (res.livePending) stopTagWatch = onIndexReady(() => {
+        if (seq !== runSeq || !out.isConnected) { stopTagWatch(); stopTagWatch = null; return; }
+        const next = search(res.q);
+        paint(next);
+        if (!next.livePending) { stopTagWatch(); stopTagWatch = null; }
+      });
+    }
     async function run(query, opts) {
       const seq = ++runSeq;
+      if (stopTagWatch) { stopTagWatch(); stopTagWatch = null; }
       const open = !opts || opts.open !== false;
       const q = clean(query);
       if (trendEl) trendEl.hidden = false;     // empty / list states keep the date-wise finder; openGroup hides it (profile has its own chart)
       if (q.length < 2) { out.innerHTML = '<div class="card"><div class="card-body empty">Kam se kam 2 letter / digit type karo.</div></div>'; return; }
+      // Dispatch lookup synchronously on Enter; barcode results must not wait for agent/TL sheets.
+      const immediate = search(q);
+      if (isBarcodeQuery(q) || (immediate.tags.length && !immediate.people.length && !immediate.ids.length)) {
+        showTagResults(immediate, seq);
+        if (!state.light) buildLight().then(() => { if (seq === runSeq && out.isConnected) { paintState(); paintQuick(); } }).catch(() => {});
+        return;
+      }
       out.innerHTML = U.spinner(`“${q}” dhoondha ja raha hai…`);
       try { await buildLight(); } catch { /* index fail — neeche message */ }
       if (seq !== runSeq || !out.isConnected) return;
@@ -2160,7 +2230,7 @@ FF.pages = FF.pages || {};
       groups.sort((a, b) => Number(!!b.gv) - Number(!!a.gv) || Number(!!b.ff) - Number(!!a.ff) || String(a.name).localeCompare(String(b.name)));
       // v3.125.17 — Index abhi aadha (kuch sheets late / Google 429) aur kuch nahi mila → "nahi mila" mat dikhao;
       // index pura hote hi khud dobara search (deep link ?q=…&id=… bhi seedha profile khole).
-      if (!groups.length && state.light && state.light.partial && !(opts && opts.final)) {
+      if (!groups.length && state.light && state.light.partial && !(opts && opts.final) && !res.tags.length && !res.livePending) {
         out.innerHTML = U.spinner(`“${q}” — data aa raha hai, profile khul raha hai…`);
         const off = onIndexReady(() => {
           if (seq !== runSeq) { off(); return; }
@@ -2190,9 +2260,8 @@ FF.pages = FF.pages || {};
         warmFull();
         return;
       }
-      if ((res.ids || []).length || (res.tags || []).length) {
-        out.innerHTML = `<div class="card"><div class="card-body"><h3 class="msp-h">🔖 ID / tag match</h3>${resultsHtml(res)}</div></div>`;
-        fillDispatch(out, res);
+      if ((res.ids || []).length || (res.tags || []).length || res.livePending || res.liveFailed) {
+        showTagResults(res, seq);
         return;
       }
       out.innerHTML = `<div class="card"><div class="card-body empty">“${esc(q)}” ke liye kuch nahi mila — doosra naam / ID / mobile try karo${chFilter ? ' (ya channel filter hatao)' : ''}.</div></div>`;
@@ -2200,6 +2269,7 @@ FF.pages = FF.pages || {};
 
     async function runSelectedPerson(person) {
       const seq = ++runSeq;
+      if (stopTagWatch) { stopTagWatch(); stopTagWatch = null; }
       if (!person) return;
       const q = clean(person.name || person.sub || '');
       if (!q) return;
@@ -2225,6 +2295,7 @@ FF.pages = FF.pages || {};
       try {
         sug = U.suggest(input, {
           min: 1, max: 14,
+          submitOnEnter: (q) => normBar(q).length >= 4 && /\d/.test(q),
           items: () => suggestItems(input.value),
           onPick: (it) => {
             if (!it || it.none) return;
@@ -2248,7 +2319,7 @@ FF.pages = FF.pages || {};
       // Index / REPORT data aate hi khula dropdown refresh (warna "search ho raha hai…" atka rehta).
       let refreshT = 0;
       onIndexReady(() => { clearTimeout(refreshT); refreshT = setTimeout(() => { try { if (sug && sug.refresh && input.isConnected && document.activeElement === input && clean(input.value).length >= 2) sug.refresh(); } catch { /* ignore */ } }, 150); });
-      root.__mspSuggestDestroy = () => { try { if (sug && sug.destroy) sug.destroy(); else if (sug && sug.close) sug.close(); } catch {} };
+      root.__mspSuggestDestroy = () => { if (stopTagWatch) { stopTagWatch(); stopTagWatch = null; } try { if (sug && sug.destroy) sug.destroy(); else if (sug && sug.close) sug.close(); } catch {} };
       // Khaali page par cursor seedha search me; URL me naam ho to focus nahi (warna dropdown report ke upar khul jaata).
       if (!asked) setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 60);
     }

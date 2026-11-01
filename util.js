@@ -824,7 +824,7 @@ window.FF = window.FF || {};
     input.setAttribute('aria-expanded', 'false');
     // Body portal avoids stacking/overflow bugs in cards, drawers and horizontally scrolling tables.
     document.body.appendChild(box);
-    let list = [], active = -1, destroyed = false, suspended = false;
+    let list = [], active = -1, destroyed = false, suspended = false, computedValue = '', inputTimer = null, navigated = false;
     const norm = (s) => String(s || '').toLowerCase();
 
     function place() {
@@ -855,6 +855,7 @@ window.FF = window.FF || {};
       }
     }
     function close() {
+      clearTimeout(inputTimer);
       box.hidden = true; active = -1;
       input.setAttribute('aria-expanded', 'false');
       input.removeAttribute('aria-activedescendant');
@@ -876,7 +877,8 @@ window.FF = window.FF || {};
     function compute() {
       if (destroyed || !input.isConnected) { destroy(); return; }
       if (suspended) { close(); return; }
-      const q = norm(input.value.trim());
+      computedValue = input.value.trim();
+      const q = norm(computedValue);
       if (q.length < o.min) { close(); return; }
       let all = [];
       try { all = typeof o.items === 'function' ? (o.items() || []) : (o.items || []); }
@@ -921,19 +923,33 @@ window.FF = window.FF || {};
         }
       }
       active = list.length ? 0 : -1;
+      navigated = false;
       render();
     }
     function pick(i) {
       const it = list[i]; if (!it) return;
+      clearTimeout(inputTimer);
       input.value = it.inputValue !== undefined ? it.inputValue : it.label;
       close(); o.onPick && o.onPick(it);
     }
-    const onInput = debounce(() => { suspended = false; compute(); }, 80);
+    const onInput = () => {
+      clearTimeout(inputTimer);
+      suspended = false;
+      inputTimer = setTimeout(compute, 80);
+    };
     const onFocus = () => { if (input.value.trim().length >= o.min) compute(); };
     const onKeydown = (e) => {
-      if (box.hidden) { if (e.key === 'Enter' && o.onEnter) { e.preventDefault(); o.onEnter(input.value.trim()); } return; }
-      if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(list.length - 1, active + 1); render(); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); render(); }
+      if (e.isComposing || e.keyCode === 229) return;
+      // A scanner/paste can send Enter before the debounced list catches up. Submit the
+      // CURRENT value, never a stale suggestion or a non-selectable loading/empty row.
+      const q = input.value.trim();
+      const submitQuery = e.key === 'Enter' && !navigated && (typeof o.submitOnEnter === 'function' ? o.submitOnEnter(q) : o.submitOnEnter);
+      if (e.key === 'Enter' && o.onEnter && (box.hidden || q !== computedValue || (list[active] && list[active].none) || submitQuery)) {
+        e.preventDefault(); clearTimeout(inputTimer); close(); o.onEnter(q); return;
+      }
+      if (box.hidden) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); navigated = true; active = Math.min(list.length - 1, active + 1); render(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); navigated = true; active = Math.max(0, active - 1); render(); }
       else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0) pick(active); else if (o.onEnter) { close(); o.onEnter(input.value.trim()); } }
       else if (e.key === 'Escape') { e.preventDefault(); close(); }
       else if (e.key === 'Tab') close();
@@ -960,6 +976,7 @@ window.FF = window.FF || {};
     function destroy() {
       if (destroyed) return;
       destroyed = true;
+      clearTimeout(inputTimer);
       if (api) suggestRegistry.delete(api);
       document.removeEventListener('click', outsideClick);
       window.removeEventListener('resize', viewportChange);
