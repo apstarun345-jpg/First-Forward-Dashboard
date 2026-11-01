@@ -52,7 +52,7 @@ FF.pages = FF.pages || {};
     const variance = actual !== null && calc.expected !== null ? actual - calc.expected : null;
     return { name: getName(r) || getId(r) || 'Unknown agent', id: getId(r) || '', tl: FF.config.isDirectAgent && FF.config.isDirectAgent(r, channel) ? FF.config.directLabel(r, channel) : (getTl(r) || 'Direct / Unmapped'), count, actual, ...calc, variance, status: variance === null ? (calc.expected === null ? 'Rate not configured' : 'Actual payout unavailable') : Math.abs(variance) <= 0.01 ? 'Matches slab' : variance > 0 ? 'More actual than slab' : 'Less actual than slab' };
   });
-  const latestMonth = (rows) => [...new Set((rows || []).map((r) => r.ym).filter(Boolean))].sort().pop() || U.ymKey(new Date());
+  const latestMonth = (rows) => [...new Set((rows || []).map((r) => r.ym).filter(Boolean))].sort().pop() || U.reportYm();
   const directAgent = (row) => {
     const r = row || {};
     if (FF.config.isDirectAgent) {
@@ -759,7 +759,7 @@ FF.pages = FF.pages || {};
     return GV_PERSONAL_CLASSES.includes(cls) ? cls : '';
   };
   function buildGvPersonalCommission(masterRows, monthOverride, issuanceRows) {
-    const month = clean(monthOverride) || U.ymKey(new Date());
+    const month = clean(monthOverride) || U.reportYm();
     const settings = gvPersonalSettings();
     const scoped = (masterRows || []).filter((r) => !month || r.ym === month);
     // The public helper is also used by lightweight integrations that predate the EIR adapter.
@@ -986,7 +986,7 @@ FF.pages = FF.pages || {};
     const issuance = G.issuanceRows ? G.issuanceRows() : [];
     if (!root.isConnected) return;
     const months = G.months ? G.months() : [...new Set(issuance.map((r) => r.ym))].sort();
-    const currentMonth = U.ymKey(new Date());
+    const currentMonth = U.reportYm();
     const month = months.includes(params.month) ? params.month : (months.includes(currentMonth) ? currentMonth : (months.at(-1) || currentMonth));
     const period = ['today', '7', '15', '30', 'month', 'custom'].includes(String(params.period)) ? String(params.period) : 'month';
     const group = ['agent', 'tl', 'class', 'weekday', 'day', 'agentClass'].includes(params.group) ? params.group : 'agentClass';
@@ -2034,7 +2034,7 @@ FF.pages = FF.pages || {};
     await S.need('daily').catch(() => []);
     const gvIssuance = G.issuanceRows ? G.issuanceRows() : [];
     const latestGv = G.latestDate && G.latestDate();
-    const gvMonth = latestGv ? U.ymKey(latestGv) : U.ymKey(new Date());
+    const gvMonth = latestGv ? U.ymKey(latestGv) : U.reportYm();
     const gvEir = new Map();
     gvIssuance.forEach((r) => {
       if (!r.ym || r.ym !== gvMonth) return;
@@ -2056,7 +2056,7 @@ FF.pages = FF.pages || {};
     // issuance nahi aana chahiye — warna GV Master ke against double count hota (dual-channel agents).
     const ffIssu = new Map(), allIssu = new Map();
     const yms = (eirAgents || []).map((r) => r.ym).filter(Boolean).sort();
-    const curYm = yms.includes(U.ymKey(new Date())) ? U.ymKey(new Date()) : (yms.at(-1) || '');
+    const curYm = yms.includes(U.reportYm()) ? U.reportYm() : (yms.at(-1) || '');
     (eirAgents || []).forEach((r) => {
       if (curYm && r.ym !== curYm) return;
       const k = normName(r.name);
@@ -2359,7 +2359,7 @@ FF.pages = FF.pages || {};
     const [daily, stockAgents, gvMaster, gvStockClass, gvReport, gvStockAgents] = await Promise.all([S.need('daily'), S.need('stockAgents'), G.need('master'), G.need('stockClass'), G.need('report'), G.need('stockAgent').catch(() => [])]);
     const gvIssuance = G.issuanceRows ? G.issuanceRows() : [];
     await FF.pages.performance.ensureLoaded();
-    const ffMonths = M.months(daily), ffMonth = ffMonths.at(-1) || U.ymKey(new Date()), gvMonth = latestMonth(gvMaster);
+    const ffMonths = M.months(daily), ffMonth = ffMonths.at(-1) || U.reportYm(), gvMonth = latestMonth(gvMaster);
     // FF side = sirf First Forward channel. EIR me GV Partner ke rows master ID 5845036 (configurable)
     // rakhte hain — unhe FF totals se exclude kiye bina FF + GV combined me double count hota hai.
     const ff = M.summary(daily, ffMonth, null, 'First Forward'), gv = G.summary(gvMonth);
@@ -2557,7 +2557,7 @@ FF.pages = FF.pages || {};
     await S.need('daily').catch(() => []);
     const issuance = G.issuanceRows ? G.issuanceRows() : [];
     const months = [...new Set([...(agentClass || []).map((r) => r.ym), ...issuance.map((r) => r.ym)].filter(Boolean))].sort();
-    const month = months.includes(params.month) ? params.month : (months.at(-1) || U.ymKey(new Date()));
+    const month = months.includes(params.month) ? params.month : (months.at(-1) || U.reportYm());
     const scope = ['all', 'ff', 'gv'].includes(params.scope) ? params.scope : 'all';
     const topN = Math.max(1, Math.min(50, Number(params.top) || 10));
     const q = clean(params.q).toLowerCase();

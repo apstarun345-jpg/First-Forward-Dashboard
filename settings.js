@@ -319,7 +319,7 @@ FF.pages = FF.pages || {};
     const s = {};
     try {
       const pick = (obj, key) => (obj && typeof obj.get === 'function' ? obj.get(key) : null);
-      const mk = U.ymKey(new Date());
+      const mk = U.reportYm();
       const daily = pick(FF.store, 'daily');
       if (Array.isArray(daily) && daily.length) {
         const ffDaily = daily.filter((r) => !r.channel || r.channel === 'First Forward');

@@ -55,7 +55,7 @@ FF.pages = FF.pages || {};
     const span = Math.max(1, Number(o.months) || 2);
     const yms = items.map((r) => r.ym).filter(Boolean).sort();
     const minYm = o.minYm || yms[0] || '';
-    const curYm = o.curYm || yms[yms.length - 1] || U.ymKey(new Date());
+    const curYm = o.curYm || yms[yms.length - 1] || U.reportYm();
     const cutoff = shiftYm(curYm, span - 1);
     const prevYm = U.prevMonthKey(curYm);
     const byAgent = new Map();
@@ -209,7 +209,7 @@ FF.pages = FF.pages || {};
     const nNewFf = all.filter((r) => r.ch === 'ff' && r.isNew).length, nNewGv = all.filter((r) => r.ch === 'gv' && r.isNew).length;
     const kind = (k) => all.filter((r) => r.ev && r.ev.kind === k).length;
     lastNa = all; registerNaLists(); // 📋 v3.31 — KPI drill = wahi list
-    const curYm = (data.ff && data.ff.curYm) || (data.gv && data.gv.curYm) || U.ymKey(new Date());
+    const curYm = (data.ff && data.ff.curYm) || (data.gv && data.gv.curYm) || U.reportYm();
     const cutoff = shiftYm(curYm, months - 1);
     // chart: last 6 months me naye agents (FF + GV alag)
     const six = [5, 4, 3, 2, 1, 0].map((b) => shiftYm(curYm, b));

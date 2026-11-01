@@ -1245,7 +1245,7 @@ window.FF = window.FF || {};
     if (hit && hit.n === rows.length) return hit.v;
     const found = monthsFrom(rows, 'ym').pop();
     if (found && rows && typeof rows === 'object') ymMemo.set(rows, { n: rows.length, v: found });
-    return found || U.ymKey(new Date());
+    return found || U.reportYm();
   };
 
   // ------------------------------------------------------------------ profile builders
@@ -1313,7 +1313,7 @@ window.FF = window.FF || {};
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     const n = norm(p.name);
     // FF reporting always uses the real calendar month pair; EIR may lag by one day, but month identity must not.
-    const curYm = U.ymKey(new Date()), lastYm = U.prevMonthKey(curYm);
+    const curYm = U.reportYm(), lastYm = U.prevMonthKey(curYm);
     const identityIds = new Set([p.sub, a && a.agentId, a && a.id].map((v) => clean(v).replace(/\.0+$/, '').toUpperCase()).filter(Boolean));
     const personId = clean((a && (a.agentId || a.id)) || p.sub).replace(/\.0+$/, '').toUpperCase();
     const rowAgentId = (r) => clean(r.agentId || r.id).replace(/\.0+$/, '').toUpperCase();
@@ -1463,7 +1463,7 @@ window.FF = window.FF || {};
     if (selfA) selfA.classStock = selfClassStock(selfRow || { name: selfA.name, agentId: selfA.id, tlId, tlName: p.name }, stockDetails, 'ff', stockComposition);
     const ac = rowsOf('agentClass'), agRows = rowsOf('agents'), stk = rowsOf('stockAgents');
     // FF reporting always uses the real calendar month pair; EIR may lag by one day, but month identity must not.
-    const curYm = U.ymKey(new Date()), lastYm = U.prevMonthKey(curYm);
+    const curYm = U.reportYm(), lastYm = U.prevMonthKey(curYm);
     const teamClassRows = ac.filter((r) => norm(r.tlName) === n && (!r.channel || /first/i.test(r.channel)));
     const out = {
       kind: 'ff-tl', channel: 'First Forward', ch: 'ff', name: p.name, id: tlId, found: !!underTl.length,
@@ -1606,7 +1606,7 @@ window.FF = window.FF || {};
     const n = norm(p.name);
     // GV REPORT is a live calendar-month report: keep the actual current month even when its
     // first issuance row has not arrived yet, so the full prior month remains visible.
-    const globalCurYm = U.ymKey(new Date());
+    const globalCurYm = U.reportYm();
     const globalLastYm = U.prevMonthKey(globalCurYm);
     const classLedger = gvIssuanceRows();
     const classMine = gvAgentRows(classLedger, n, out.id);
@@ -1642,7 +1642,7 @@ window.FF = window.FF || {};
       stock: { VC4: num(out.stock && out.stock.vc4), VC20: 0, 'VC5+': num(out.stock && out.stock.comm), total: num(out.stock && out.stock.total) }
     };
     // GV Master is authoritative for GV agent issuance; Tag Assignment is authoritative for stock.
-    const curYmTruth = U.ymKey(new Date()), lastYmTruth = U.prevMonthKey(curYmTruth);
+    const curYmTruth = U.reportYm(), lastYmTruth = U.prevMonthKey(curYmTruth);
     // 🧮 v227 — TL view jaisa hi rule (sameGvAgent): row aur agent dono ki id ho to id decide karti hai,
     // warna naam. Pehle id wale agent ki bina-id (sirf naam) rows chhoot jaati thi → agent ka total TL list se kam dikhta tha.
     const myId = clean(out.id).replace(/\.0+$/, '');
@@ -1819,7 +1819,7 @@ window.FF = window.FF || {};
     };
     // TL priority = sabse high agent priority
     out.priority = rowsA.some((r) => r.priority === 'High') ? 'High' : rowsA.some((r) => r.priority === 'Medium') ? 'Medium' : rowsA.length ? 'Low' : '';
-    const globalCurYm = U.ymKey(new Date());
+    const globalCurYm = U.reportYm();
     const globalLastYm = U.prevMonthKey(globalCurYm);
     // GV Master column R (GV TL ID) is the canonical TL team key. Profile and its KPI drill
     // consume this same tagged row set; the broad EIR+Master rollup is fallback only.
@@ -2680,7 +2680,7 @@ window.FF = window.FF || {};
   function issuancePresentation(pr) {
     if (!pr) return null;
     const t = pr.totals || {};
-    const curYm = (pr.months && pr.months.cur) || U.ymKey(new Date());
+    const curYm = (pr.months && pr.months.cur) || U.reportYm();
     const lastYm = (pr.months && pr.months.last) || U.prevMonthKey(curYm);
     const elapsed = Math.max(1, num(pr.projT1 && pr.projT1.days) || U.runRateDays(undefined, pr.ch === 'gv' ? 'gv' : 'ff'));
     const bins = pr.classBins || { cur: blankIssueBins(), last: blankIssueBins(), available: {} };

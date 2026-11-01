@@ -151,7 +151,7 @@ FF.pages = FF.pages || {};
   const digits = (v) => String(v == null ? '' : v).replace(/\D/g, '');
   const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
   const round1 = (v) => Math.round(num(v) * 10) / 10;
-  const ymNow = () => U.ymKey(new Date());
+  const ymNow = () => U.reportYm();
   const ymLast = () => U.prevMonthKey(ymNow());
   const isAdmin = () => !!(FF.auth && FF.auth.user && (FF.auth.isAdmin ? FF.auth.isAdmin() : FF.auth.user.role === 'admin')); // 👁 preview-aware
   const isPublic = () => !!state.publicMode;

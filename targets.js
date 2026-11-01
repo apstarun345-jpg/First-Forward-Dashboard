@@ -15,7 +15,7 @@ FF.pages = FF.pages || {};
     const cols = [['Agent / TL', (r) => `<b>${e(r.name || r.key)}</b>`], ['Source', (r) => e(r.source || r.ch || '—')], ['Last month', (r) => U.fmt(r.last || 0), 1], ['Issuance', (r) => `<b>${U.fmt(r.cur || 0)}</b>`, 1], ['Target', (r) => U.fmt(tgt(r)), 1], ['Achievement', (r) => (tgt(r) ? `${Math.round(((r.cur || 0) / tgt(r)) * 100)}%` : '—'), 1]];
     const make = (name, pick, kicker) => FF.kpiDetail.registerList(name, () => {
       const rows = [...pick()].sort((a, b) => (b.cur || 0) - (a.cur || 0));
-      return { kicker, unit: 'rows', rows, columns: cols, agent: (r) => (r.kind === 'tl' ? null : { name: r.name, id: r.id || '', ch: r.ch || (/gv/i.test(r.source || '') ? 'gv' : 'ff') }), sub: `Issuance <b>${U.fmt(U.sum(rows, (r) => r.cur || 0))}</b> · target <b>${U.fmt(U.sum(rows, (r) => tgt(r)))}</b> · ${e(U.labelYM(lastTargetRows.ym || U.ymKey(new Date())))}` };
+      return { kicker, unit: 'rows', rows, columns: cols, agent: (r) => (r.kind === 'tl' ? null : { name: r.name, id: r.id || '', ch: r.ch || (/gv/i.test(r.source || '') ? 'gv' : 'ff') }), sub: `Issuance <b>${U.fmt(U.sum(rows, (r) => r.cur || 0))}</b> · target <b>${U.fmt(U.sum(rows, (r) => tgt(r)))}</b> · ${e(U.labelYM(lastTargetRows.ym || U.reportYm()))}` };
     });
     make('tg.rows', () => lastTargetRows.rows, 'Targets · agents (filter)');
     make('tg.with', () => lastTargetRows.withT, 'Targets · target set');

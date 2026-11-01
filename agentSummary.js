@@ -66,7 +66,7 @@ FF.pages = FF.pages || {};
       cache = issueBoardCache[channel] = { rows: data.rows, firstYm, byMonth: new Map() };
     }
     const minYm = data.months[0] || '';
-    if (!st.month || !data.months.includes(st.month)) st.month = data.months[data.months.length - 1] || U.ymKey(new Date());
+    if (!st.month || !data.months.includes(st.month)) st.month = data.months[data.months.length - 1] || U.reportYm();
     const build = () => {
       const hit = cache.byMonth.get(st.month); if (hit) return hit.slice();
       const map = new Map();
@@ -343,7 +343,7 @@ FF.pages = FF.pages || {};
     if (!mine.length) return null;
     const byYm = new Map();
     mine.forEach((r) => byYm.set(r.ym, (byYm.get(r.ym) || 0) + (Number(r.n) || 0)));
-    const base = /^\d{4}-\d{2}$/.test(curYm) ? curYm : U.ymKey(new Date());
+    const base = /^\d{4}-\d{2}$/.test(curYm) ? curYm : U.reportYm();
     return Array.from({ length: 6 }, (_, i) => {
       const ym = ymBack(base, 5 - i);
       return { ym, lbl: monthLbl(ym), n: byYm.get(ym) || 0 };

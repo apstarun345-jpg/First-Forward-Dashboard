@@ -342,7 +342,7 @@ window.FF = window.FF || {};
     return {
       ch: 'ff', kind: isTl ? 'tl' : 'agent', name: p.name, id: p.id, tlName: p.tlName, tlId: p.tlId, mobile: p.mobile,
       direct: p.direct, directLabel: p.directLabel, priority: p.priority, activity: p.activityStatus, inactive: p.inactiveDuration,
-      ym: U.ymKey(new Date()), lastYm: p.lastYm || U.prevMonthKey(U.ymKey(new Date())), cards, classes: classes.map((c) => ({ ...c, growth: c.growth })),
+      ym: U.reportYm(), lastYm: p.lastYm || U.prevMonthKey(U.reportYm()), cards, classes: classes.map((c) => ({ ...c, growth: c.growth })),
       months, team: isTl ? (p.agents || []) : null, checks: [], warnings: [],
       ageing: null, ageState: 'idle', totals: { cur: t.curTotal, last: t.lastTotal, stock: t.stockTotal, growth },
       sources: [

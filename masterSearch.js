@@ -1578,7 +1578,7 @@ FF.pages = FF.pages || {};
     function trendHtml() {
       const rows = trendPickRows();
       const months = U.uniq(rows.map((r) => r.ym)).sort().slice(-6);
-      const ym = months.includes(trend.ym) ? trend.ym : (months[months.length - 1] || U.ymKey(new Date()));
+      const ym = months.includes(trend.ym) ? trend.ym : (months[months.length - 1] || U.reportYm());
       trend.ym = ym;
       const inMonth = rows.filter((r) => r.ym === ym);
       const byDay = new Map();
@@ -1924,7 +1924,7 @@ FF.pages = FF.pages || {};
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
           ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
-          ${box('k10', '🎯 Expected this month · Run-rate', miniHtml(expSplit, expTotal, `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.ymKey(new Date())))} days`), '', spec('mtd', m.cur))}
+          ${box('k10', '🎯 Expected this month · Run-rate', miniHtml(expSplit, expTotal, `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.reportYm()))} days`), '', spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
           ${dispBoxHtml(pr, isTl, ch)}
           ${kycBoxHtml(pr, isTl, ch)}
@@ -2366,7 +2366,7 @@ FF.pages = FF.pages || {};
   function kycPaint(box, rows) {
     const main = box.querySelector('.msp-kyc-main'), sub = box.querySelector('.msp-disp-sub');
     if (!main || !sub) return;
-    const cur = FF.util.ymKey(new Date()), last = FF.util.prevMonthKey(cur);
+    const cur = FF.util.reportYm(), last = FF.util.prevMonthKey(cur);
     const M = FF.model, U = FF.util;
     const pk = (ym, g) => (r) => r.ym === ym && (!g || r.group === g);
     const c = M.kycRatio(rows, pk(cur)), l = M.kycRatio(rows, pk(last));
@@ -2490,7 +2490,7 @@ FF.pages = FF.pages || {};
   function reportSpecs(pr, ch) {
     const isTl = /tl$/.test(String(pr.kind || ''));
     const m = pr.months || {};
-    const cur = m.cur || U.ymKey(new Date()), last = m.last || U.prevMonthKey(cur);
+    const cur = m.cur || U.reportYm(), last = m.last || U.prevMonthKey(cur);
     const spec = isTl ? { src: ch, tl: pr.name, tlId: ch === 'gv' ? (pr.id || '') : '' } : { src: ch, agent: pr.name, agentId: pr.id || '' };
     return { isTl, spec, from: `${last}-01`, to: `${cur}-${U.pad2(U.daysInMonth(cur))}`, cur, last };
   }

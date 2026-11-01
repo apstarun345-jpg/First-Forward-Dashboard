@@ -699,7 +699,7 @@ FF.pages = FF.pages || {};
         { raw: r, extraHtml: gvRawRowBlock(r) }
       );
     }
-    const currentYm = U.ymKey(new Date()), previousYm = U.prevMonthKey(currentYm);
+    const currentYm = U.reportYm(), previousYm = U.prevMonthKey(currentYm);
     const profileDrill = (scope, ym) => ({ scope, ym: ym || '', agent: r.agentName, agentId: r.agentId || '', channel: 'gv' });
     const clsRows = Object.entries(r.curByClass || {}).filter(([, v]) => v > 0);
     const lastClsRows = Object.entries(r.lastByClass || {}).filter(([, v]) => v > 0);
@@ -858,7 +858,7 @@ FF.pages = FF.pages || {};
       const host = U.$('#gvp-watch', body);
       if (!host || !FF.perfWatch) return;
       FF.perfWatch.mount(host, {
-        ch: 'gv', title: 'GV Partner', months: { cur: U.ymKey(new Date()), last: U.prevMonthKey(U.ymKey(new Date())) }, recentLabel: 'Today',
+        ch: 'gv', title: 'GV Partner', months: { cur: U.reportYm(), last: U.prevMonthKey(U.reportYm()) }, recentLabel: 'Today',
         allCount: all.length, rows: list.map((r) => ({ n: r.agentName, id: r.agentId, tl: r.tlName, direct: FF.config.isDirectAgent(r, 'gv'), last: r.lastTotal, cur: r.curTotal, g: r.growth, recent: r.todayIssued, stock: r.stockTotal, pri: gvPri(r), inact: gvInact(r), run: r.runrate, ref: r.agentName })),
         onAgent: (name) => { const r = all.find((x) => x.agentName === name); if (r) agentDrawer(r); },
         onTl: (name) => { const r = all.find((x) => x.tlName === name); openGvTlDrawer(name, (r && r.tlId) || ''); }

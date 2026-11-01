@@ -82,7 +82,7 @@ window.FF = window.FF || {};
     if (f.period === 'yesterday') { const y = shiftKey(t, -1); return { from: y, to: y }; }
     if (f.period === 'week') return { from: shiftKey(t, -6), to: t };
     if (f.period === 'all') return { from: '', to: '' };
-    const ym = f.month || U.ymKey(new Date());
+    const ym = f.month || U.reportYm();
     const last = U.daysInMonth(ym);
     return { from: `${ym}-01`, to: `${ym}-${U.pad2(last)}` };
   }

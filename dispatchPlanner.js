@@ -35,7 +35,7 @@ FF.pages = FF.pages || {};
   const CH = { ff: { label: 'First Forward', short: 'FF', icon: '🟦' }, gv: { label: 'GV Partner', short: 'GV', icon: '🟩' } };
   /** 📐 Channel ka run-rate divisor (U.runRateDays — user ki sheet jaisa "aaj − 1", month-aware). */
   const chDays = (ch) => Math.max(1, Number(U.runRateDays(undefined, ch === 'gv' ? 'gv' : 'ff')) || 1);
-  const chBasis = (ch) => (U.channelBasis ? U.channelBasis(ch === 'gv' ? 'gv' : 'ff') : { days: chDays(ch), ym: U.ymKey(new Date()), live: ch === 'gv' });
+  const chBasis = (ch) => (U.channelBasis ? U.channelBasis(ch === 'gv' ? 'gv' : 'ff') : { days: chDays(ch), ym: U.reportYm(), live: ch === 'gv' });
   /** Divisor ka label — list me jo channels hain unke din (FF aur GV alag ho sakte hain). */
   function elText(list) {
     const present = new Set((list || []).map((r) => r.ch));
@@ -120,7 +120,7 @@ FF.pages = FF.pages || {};
     const rows = G.issuanceRows() || [];
     if (!ready) return { ...empty, ready: false };
     const latest = typeof G.latestDate === 'function' ? G.latestDate() : null;
-    const curYm = latest ? U.ymKey(latest) : U.ymKey(new Date());
+    const curYm = latest ? U.ymKey(latest) : U.reportYm();
     const lastYm = U.prevMonthKey(curYm);
     const make = () => new Map();
     const cur = make(), last = make();

@@ -27,7 +27,7 @@ window.FF = window.FF || {};
   const todayKey = () => (G() && G().todayKey ? G().todayKey() : U.dateKey(new Date()));
   // GV Master raw rows have no `key` (only `date`) — derive it so 'today' counts are never silently 0.
   const rowKey = (r) => (r && r.key) || (r && r.date ? U.dateKey(r.date) : '');
-  const curYm = () => U.ymKey(new Date());
+  const curYm = () => U.reportYm();
   const prevYmOf = (ym) => U.prevMonthKey(ym || curYm());
   const daysIn = (ym) => (U.daysInMonth ? U.daysInMonth(ym) : 30);
 

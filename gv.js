@@ -1031,7 +1031,7 @@ window.FF = window.FF || {};
     const eirM = FF.model && eirDaily() ? FF.model.months(eirDaily().filter((r) => r.channel === 'GV Partner')) : [];
     const masM = masterMonths();
     const all = [...new Set([...eirM, ...masM])].filter(Boolean).sort();
-    const cur = all[all.length - 1] || U.ymKey(new Date());
+    const cur = all[all.length - 1] || U.reportYm();
     return prevCalendarYm(cur);
   }
   // v3.78 — perf: this rebuild (tens of thousands of rows) ran on every call; memoise on the identity of

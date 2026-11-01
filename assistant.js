@@ -26,7 +26,7 @@ window.FF = window.FF || {};
   const fmt = (v) => U.fmt(v);
   const T = (hi, en) => (lang === 'en' ? en : hi);
   async function safe(p, fallback) { try { return await p; } catch { return fallback; } }
-  const ymNow = () => U.ymKey(new Date());
+  const ymNow = () => U.reportYm();
   const todayKey = () => U.dateKey(new Date());
   const dayOffsetKey = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return U.dateKey(d); };
 

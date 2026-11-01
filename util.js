@@ -205,7 +205,9 @@ window.FF = window.FF || {};
   function gvBasis(now, force) {
     const today = sod(now);
     const latest = gvLatest(force);
-    const date = latest && latest <= today ? latest : today;
+    let date = latest && latest <= today ? latest : today;
+    // v3.125.28 — Mahine ki 1 tareekh: run-rate ke liye "aaj − 1" = 0 din → pichhla poora mahina hi basis (site ka report month).
+    if (today.getDate() === 1) { const y = new Date(today); y.setDate(0); date = y; }
     const sameMonth = date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth();
     const days = sameMonth ? Math.max(1, today.getDate() - 1) : date.getDate();
     return mkBasis(now, sameMonth ? today : date, { ch: 'gv', live: true, fromData: !!latest, days });
@@ -360,6 +362,15 @@ window.FF = window.FF || {};
     return d ? ymKey(d) : null;
   }
   function ymKey(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; }
+  /** 📅 v3.125.28 — Report date = aaj − lag (EIR / bank report 1 din peeche aati hai). 1 Nov ko report 31 Oct tak → "current month" = October.
+   *  Poori site me "is mahine" ka matlab yahi hai (FF.config.ffIssuanceLagDays, default 1). */
+  function reportDate(now) {
+    const d = now instanceof Date ? new Date(now) : new Date();
+    const lag = Math.max(0, Number(typeof FF !== 'undefined' && FF.config && FF.config.ffIssuanceLagDays != null ? FF.config.ffIssuanceLagDays : 1) || 0);
+    d.setDate(d.getDate() - (Number.isFinite(lag) ? lag : 1));
+    return d;
+  }
+  function reportYm(now) { return ymKey(reportDate(now)); }
   function dateKey(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
   function fromDateKey(key) { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d); }
   function ymParts(key) { const [y, m] = key.split('-').map(Number); return { y, m }; }
@@ -1634,7 +1645,7 @@ window.FF = window.FF || {};
   FF.util = {
     esc, clean, num, fmt, fmtShort, pctOf, growth, fmtPct, fmtSigned, deltaHtml, pctHtml,
     suggestDays, suggestMode, runRateDays, runRate, reportBasis, channelBasis, dataBasis, parseDayLabel, ffCapDate, basisText, projectMonthEnd, dispatchCalc, suggestNet, suggestGross, suggestPair, sugCell, sugText,
-    MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
+    MONTHS, MONTHS_LONG, DAYS, pad2, parseDate, parseMonthKey, ymKey, reportDate, reportYm, dateKey, fromDateKey, ymParts, labelYM, labelDate, labelDateKey,
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,

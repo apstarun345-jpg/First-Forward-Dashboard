@@ -138,7 +138,7 @@ FF.pages = FF.pages || {};
   }
 
   async function loadWow(ym) {
-    const month = ym || U.ymKey(new Date());
+    const month = ym || U.reportYm();
     const [agents, agentClass] = await Promise.all([S.need('agents'), S.need('agentClass')]);
     await Promise.all([S.need('daily').catch(() => []), G.need('master').catch(() => [])]);
     const gvRows = typeof G.issuanceRows === 'function' ? G.issuanceRows() : (typeof G.rows === 'function' ? G.rows() : []);
@@ -286,7 +286,7 @@ FF.pages = FF.pages || {};
   // ================= 🎮 AGENT ARENA PAGE =================
   async function renderArena(root, params) {
     const UI = (FF.insights && FF.insights.ui) || {};
-    const ym = U.ymKey(new Date());
+    const ym = U.reportYm();
     root.innerHTML = UI.head('🎮', 'Agent Arena', 'Levels · badges · monthly challenges · crystal ball — sab kuch live data se', `<a class="btn" href="#/fame">🏆 Wall of Fame</a><a class="btn" href="#/warRoom">🔴 War Room</a>`) +
       `<div id="arena-body">${U.spinner('Arena ready ho raha hai…')}</div>`;
     const body = U.$('#arena-body', root);
@@ -398,7 +398,7 @@ FF.pages = FF.pages || {};
   // ================= 🏆 WALL OF FAME PAGE =================
   async function renderFame(root) {
     const UI = (FF.insights && FF.insights.ui) || {};
-    const ymNow = U.ymKey(new Date());
+    const ymNow = U.reportYm();
     root.innerHTML = UI.head('🏆', 'Wall of Fame', 'Har month ke FF + GV champions · winner card PNG banao aur WhatsApp par bhejo', `<a class="btn" href="#/arena">🎮 Agent Arena</a>`) +
       `<div id="fame-body">${U.spinner('Champions load ho rahe hain…')}</div>`;
     const body = U.$('#fame-body', root);
@@ -449,7 +449,7 @@ FF.pages = FF.pages || {};
 
   // ================= 🔴 WAR ROOM =================
   async function renderWarRoom(root) {
-    const ym = U.ymKey(new Date());
+    const ym = U.reportYm();
     root.innerHTML = `<div class="war-room" id="war-body"><div class="war-loading">🔴 War Room connect ho raha hai…</div></div>`;
     const body = U.$('#war-body', root);
     let timer = null;

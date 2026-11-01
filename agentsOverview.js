@@ -70,7 +70,7 @@ FF.pages = FF.pages || {};
     if ([dailyR, agentsR, agentClassR, masterR, reportR].every((v) => v === null)) { state.sourceErrors.gv = 'GV issuance sources could not be loaded'; return out; }
     const stockRows = stockRowsR || [], report = reportR || [], gm = clsMap(clsR || []);
     // Calendar months (same rule as GV Performance): this month = today's month, last = previous calendar month.
-    const cur = U.ymKey(new Date()), prev = U.prevMonthKey ? U.prevMonthKey(cur) : prevYm(cur);
+    const cur = U.reportYm(), prev = U.prevMonthKey ? U.prevMonthKey(cur) : prevYm(cur);
     // 1) Tag ledger (EIR history + GV Master live) → per agent per month, plus last issuance date.
     const led = { [cur]: new Map(), [prev]: new Map() }, lastDate = new Map();
     const bump = (m, keys, n) => { const seen = new Set(); keys.forEach((k) => { if (!k || seen.has(k)) return; seen.add(k); m.set(k, (m.get(k) || 0) + n); }); };
@@ -242,7 +242,7 @@ FF.pages = FF.pages || {};
       return { ...r, age, target, projection, reasons, score, priority: score >= 5 ? 'High' : score >= 3 ? 'Medium' : 'Review' };
     }).filter((r) => r.reasons.length).sort((a, b) => b.score - a.score || (b.age?.age90 || 0) - (a.age?.age90 || 0) || b.stock - a.stock || a.name.localeCompare(b.name));
   }
-  const followRows = () => followupRows(forCh(state.tab).filter((r) => FF.auth.can(r.ch === 'ff' ? 'sheet:StockDataa' : 'sheet:Tag Assignment')), follow.age, FF.auth.settings?.targets || [], U.ymKey(new Date()), follow.low)
+  const followRows = () => followupRows(forCh(state.tab).filter((r) => FF.auth.can(r.ch === 'ff' ? 'sheet:StockDataa' : 'sheet:Tag Assignment')), follow.age, FF.auth.settings?.targets || [], U.reportYm(), follow.low)
     .filter((r) => follow.reason === 'all' || r.reasons.some((x) => x.toLowerCase().includes(follow.reason)))
     .filter((r) => !follow.q || `${r.name} ${r.id} ${r.tlName} ${r.reasons.join(' ')}`.toLowerCase().includes(follow.q));
   function followHtml() {

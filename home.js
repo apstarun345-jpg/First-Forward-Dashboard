@@ -332,7 +332,7 @@ FF.pages = FF.pages || {};
    * cutoff par rahega taaki current day ko prematurely full day na maana jaye.
    */
   function monthContext(rows) {
-    const curKey = U.ymKey(TODAY());
+    const curKey = U.reportYm(TODAY());
     const prevKey = U.prevMonthKey(curKey);
     const today = TODAY();
     const lagDays = Math.max(1, Number(
@@ -729,8 +729,8 @@ FF.pages = FF.pages || {};
   function stockHtml(ffStock, gvStock, sf) {
     const ff = ffStock || { total: 0, vc4: 0, comm: 0, rows: [] };
     const gv = gvStock || { total: 0, vc4: 0, comm: 0, rows: [] };
-    const ffRate = M.summary(sf.ff, U.ymKey(TODAY())).avgPerDay || 0;
-    const gvRate = M.summary(sf.gv, U.ymKey(TODAY())).avgPerDay || 0;
+    const ffRate = M.summary(sf.ff, U.reportYm(TODAY())).avgPerDay || 0;
+    const gvRate = M.summary(sf.gv, U.reportYm(TODAY())).avgPerDay || 0;
     const cover = (total, rate) => (rate > 0 ? U.fmt(total / rate, true) : '—');
     const bars = C.bars({
       labels: ['VC4', 'Commercial'],
@@ -1338,7 +1338,7 @@ FF.pages = FF.pages || {};
           ${avatar}
           <div>
             <h1 class="home-greeting"><span class="home-greeting-text">${esc(greeting())}</span>, <span class="home-name">${esc(u.name || u.username || 'there')}</span> <span class="home-wave" aria-hidden="true">👋</span></h1>
-            <p class="sub">GV ka aaj ka live data · ${esc(U.labelYM(U.ymKey(TODAY()), true))} ke KPI cards · charts · GV &amp; FF stock</p>
+            <p class="sub">GV ka aaj ka live data · ${esc(U.labelYM(U.reportYm(TODAY()), true))} ke KPI cards · charts · GV &amp; FF stock</p>
             <div class="home-quick-stats" id="home-quick"></div>
           </div>
         </div>
@@ -1447,7 +1447,7 @@ FF.pages = FF.pages || {};
     const stockP = canFf ? S.need('stock', { only: true }).catch(() => null) : Promise.resolve(null);
     const gvStockP = canGv ? G.need('stockClass', { only: true }).catch(() => null) : Promise.resolve(null);
     const gvMasterP = canGv ? G.need('master', { only: true }).catch(() => null) : Promise.resolve(null);
-    const currentTargetYm = U.ymKey(TODAY());
+    const currentTargetYm = U.reportYm(TODAY());
     const savedTargetsForMonth = ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym === currentTargetYm && classTargetsConfigured(t) && ((targetSource(t) === 'ff' && canFf) || (targetSource(t) === 'gv' && canGv)));
     const needsFfTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'ff');
     const needsGvTargetData = savedTargetsForMonth.some((t) => targetSource(t) === 'gv');

@@ -256,7 +256,7 @@ FF.pages = FF.pages || {};
     const daily = dailyR.status === 'fulfilled' ? (dailyR.value || []) : [];
     const gvDaily = daily.filter((r) => r.channel === 'GV Partner');
     const months = U.uniq([...agents.map((a) => a.ym), ...gvDaily.map((a) => a.ym)].filter(Boolean)).sort();
-    const ym = months.includes(params.month) ? params.month : (months[months.length - 1] || U.ymKey(new Date()));
+    const ym = months.includes(params.month) ? params.month : (months[months.length - 1] || U.reportYm());
     const channel = ['all', 'ff', 'gv'].includes(params.channel) ? params.channel : 'all';
     const rows = [];
     if (channel !== 'gv') agents.filter((a) => a.ym === ym && a.channel !== 'GV Partner').forEach((a) => rows.push({ name: a.name, tlName: a.tlName, n: a.n, channel: 'First Forward', direct: FF.config.isDirectAgent(a, 'ff') }));
@@ -300,7 +300,7 @@ FF.pages = FF.pages || {};
     const legacyRowsOverride = typeof G.rows === 'function' && typeof G.masterRows === 'function' && G.rows !== G.masterRows;
     const gvDaily = canonicalGv.length || !legacyRowsOverride ? canonicalGv : master.map((r) => ({ ...r, key: r.date ? U.dateKey(r.date) : '', n: Number(r.n) || 1, type: r.type || r.status || 'ISSUANCE' }));
     const months = U.uniq([...agents.map((a) => a.ym), ...gvDaily.map((r) => r.ym)].filter(Boolean)).sort();
-    const cur = months[months.length - 1] || U.ymKey(new Date());
+    const cur = months[months.length - 1] || U.reportYm();
     const prev = U.prevMonthKey(cur);
 
     // 1) Spike / crash / new star (agent month-over-month, FF + GV combined)
@@ -431,7 +431,7 @@ FF.pages = FF.pages || {};
     const daily = dailyR.status === 'fulfilled' ? (dailyR.value || []) : [];
     const key = normName(name);
     const ffRows = agents.filter((a) => normName(a.name) === key && a.channel !== 'GV Partner');
-    const month = ym || U.uniq(ffRows.map((a) => a.ym)).sort().pop() || U.ymKey(new Date());
+    const month = ym || U.uniq(ffRows.map((a) => a.ym)).sort().pop() || U.reportYm();
     const prev = U.prevMonthKey(month);
     const curN = sum(ffRows.filter((a) => a.ym === month), (a) => a.n);
     const prevN = sum(ffRows.filter((a) => a.ym === prev), (a) => a.n);
@@ -633,7 +633,7 @@ FF.pages = FF.pages || {};
       if (out.length >= 4) break;
     }
     // this month's best day so far + same weekday last week
-    const cur = U.ymKey(today);
+    const cur = U.reportYm(today);
     const monthDays = daily.filter((r) => r.ym === cur && r.channel !== 'GV Partner');
     const byDay = new Map();
     monthDays.forEach((r) => byDay.set(r.day, (byDay.get(r.day) || 0) + (Number(r.n) || 0)));
@@ -749,7 +749,7 @@ FF.pages = FF.pages || {};
         const today = U.dateKey(new Date());
         const ffToday = sum(daily.filter((r) => r.key === today && r.channel !== 'GV Partner'), (r) => r.n);
         const gvToday = sum(daily.filter((r) => r.key === today && r.channel === 'GV Partner'), (r) => r.n);
-        const month = U.ymKey(new Date());
+        const month = U.reportYm();
         const mtd = sum(daily.filter((r) => r.ym === month), (r) => r.n);
         const top = (() => {
           const m = new Map();

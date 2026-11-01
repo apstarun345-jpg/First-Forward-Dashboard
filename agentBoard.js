@@ -215,7 +215,7 @@ window.FF = window.FF || {};
       row.tl = { name: row.name, id: row.id, mobile: row.mobile };
     }
     const team = teamOf(tlPr && tlPr.found ? tlPr : null);
-    const ymCur = (pr.months && pr.months.cur) || U.ymKey(new Date());
+    const ymCur = (pr.months && pr.months.cur) || U.reportYm();
     const ymLast = (pr.months && pr.months.last) || U.prevMonthKey(ymCur);
     return {
       missing: false, ch, tlView, person: person2, pr, tlPr, row, tlRow, tlName, direct, team,

@@ -75,10 +75,10 @@ window.FF = window.FF || {};
   /** Channel ka DATA month (FF kal tak ka data · GV live) — "is month" / "last month" isi se. */
   function dataYm(src) {
     try {
-      const ff = U.channelBasis ? U.channelBasis('ff').ym : U.ymKey(new Date());
-      const gv = U.channelBasis ? U.channelBasis('gv').ym : U.ymKey(new Date());
+      const ff = U.channelBasis ? U.channelBasis('ff').ym : U.reportYm();
+      const gv = U.channelBasis ? U.channelBasis('gv').ym : U.reportYm();
       return src === 'ff' ? ff : src === 'gv' ? gv : (ff > gv ? ff : gv);
-    } catch { return U.ymKey(new Date()); }
+    } catch { return U.reportYm(); }
   }
   const LAST_MONTH_RE = /\b(last|prev(ious)?|pichh?l[ae]|pichhle)\s+(full\s+)?(month|mahin[ae])\b|\blast\s+full\b|\bLM\b/i;
   /** Title me month ka naam (shuru me, ya "<month> issued / total / MTD") → YYYY-MM. "vs Aug" jaisa comparison nahi. */
@@ -240,7 +240,7 @@ window.FF = window.FF || {};
       const ym = spec.ym || U.prevMonthKey(dataYm(spec.src));
       return { from: `${ym}-01`, to: `${ym}-${U.pad2(U.daysInMonth(ym))}` };
     }
-    const ym = spec.ym || ((spec.tl || spec.tlId || spec.agent || spec.agentId) ? dataYm(spec.src) : (latest ? latest.slice(0, 7) : U.ymKey(new Date())));
+    const ym = spec.ym || ((spec.tl || spec.tlId || spec.agent || spec.agentId) ? dataYm(spec.src) : (latest ? latest.slice(0, 7) : U.reportYm()));
     const lastDay = latest && latest.startsWith(ym) ? latest : `${ym}-${U.pad2(U.daysInMonth(ym))}`;
     return { from: `${ym}-01`, to: lastDay };
   }
@@ -391,8 +391,8 @@ window.FF = window.FF || {};
       prof = MP.quick({ kind: isTl ? 'gv-tl' : 'gv-agent', name, sub: id, id, tlSet: new Set(), classMap: new Map(), bars: new Set() });
     } catch { prof = null; }
     if (!prof || !prof.found) return null;
-    const ym = (p && p.from ? p.from.slice(0, 7) : '') || spec.ym || U.ymKey(new Date());
-    const nowYm = (prof.months && prof.months.cur) || U.ymKey(new Date());
+    const ym = (p && p.from ? p.from.slice(0, 7) : '') || spec.ym || U.reportYm();
+    const nowYm = (prof.months && prof.months.cur) || U.reportYm();
     const prevYm = (prof.months && prof.months.last) || U.prevMonthKey(nowYm);
     const periodKey = ym === nowYm ? 'cur' : ym === prevYm ? 'last' : '';
     if (!periodKey) return null;
@@ -549,7 +549,7 @@ window.FF = window.FF || {};
         reconciliationNote = `<div class="kd-reconciliation"><b>GV REPORT ↔ tag-ledger reconciliation</b><span>GV REPORT TL snapshot: <b>${U.fmt(reportTotal)}</b> (VC4 <b>${U.fmt(sheetCtx.fullVc4)}</b> · Commercial <b>${U.fmt(sheetCtx.fullComm)}</b>) · GV Master / EIR detail: <b>${U.fmt(ledgerTot)}</b> · Difference: <b>${difference > 0 ? '+' : ''}${U.fmt(difference)}</b>.</span><small>${memberBreakdown ? `GV REPORT team breakdown: ${memberBreakdown}. ` : ''}${difference ? 'The headline TL card uses the dedicated GV REPORT TL value; class and tag details show the live issuance ledger. A refresh or source-coverage gap can explain the difference.' : 'TL snapshot and tag-level detail currently reconcile.'}</small></div>`;
       }
     } else if (spec.src === 'gv' && spec.tl && !filt && FF.masterProfile && FF.masterProfile.gvTlSnapshot) {
-      const ym = p.from.slice(0, 7), nowYm = U.ymKey(new Date());
+      const ym = p.from.slice(0, 7), nowYm = U.reportYm();
       const snapshots = FF.masterProfile.gvTlSnapshot(spec.tl, spec.tlId);
       const report = ym === nowYm ? snapshots.cur : ym === U.prevMonthKey(nowYm) ? snapshots.last : null;
       if (report) {
@@ -1553,14 +1553,14 @@ window.FF = window.FF || {};
       // 🟩 v3.125.24 — GV agent / TL (Master Search box): GV Master tag IDs → EIR KYC; class tiles + class table.
       if (filter.gv) {
         const rows = await FF.model.loadGvKycMonthly(filter);
-        const cur = U.ymKey(new Date()), m = { cur, last: U.prevMonthKey(cur) };
+        const cur = U.reportYm(), m = { cur, last: U.prevMonthKey(cur) };
         const lbl = { [m.cur]: U.labelYM(m.cur, true), [m.last]: U.labelYM(m.last, true) };
         const note = `<p class="dim small kyc-note">🟩 GV: GV Master ke issued tag IDs (${filter.tl ? 'TL ID' : 'agent ID'} <b>${esc(filter.id)}</b>, last + current month) ko EIR me TAG ID se match karke CUSTOMER_FULL_KYC. Class = GV Master CCH (Settings → GV class map). GV Master issued <b>${U.fmt(rows.issued || 0)}</b> · EIR me mila <b>${U.fmt(rows.matched || 0)}</b>. KYC % = Full ÷ (Full + Not); blank = EIR me KYC khali / tag EIR me nahi.</p>`;
         FF.app.openDrawer({ kicker, title, sub: `GV Master × EIR · ${lbl[m.last]} vs ${lbl[m.cur]}`, body: `${kycTiles(rows, m, lbl)}${note}${kycClassSection(rows, m, lbl)}`, wide: true, replace: true });
         return;
       }
       const rows = await FF.model.loadKycPeople(filter);
-      const cur = U.ymKey(new Date()), m = { cur, last: U.prevMonthKey(cur) };
+      const cur = U.reportYm(), m = { cur, last: U.prevMonthKey(cur) };
       const lbl = { [m.cur]: U.labelYM(m.cur, true), [m.last]: U.labelYM(m.last, true) };
       kycUi.csv = { cur: {}, last: {} }; kycUi.pane = 'cur';
       const scopeAgent = !!filter.agent, scopeTl = !!filter.tl;

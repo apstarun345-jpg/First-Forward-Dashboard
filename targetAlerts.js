@@ -135,7 +135,7 @@ window.FF = window.FF || {};
     const agents = agentsR.status === 'fulfilled' ? agentsR.value : [];
     let latest = null;
     try { const d = FF.model && FF.model.latestDate ? FF.model.latestDate(S.get('daily') || []) : null; const g = G && G.enabled && G.enabled() ? G.latestDate() : null; latest = d && g ? (d > g ? d : g) : (d || g); } catch { /* ignore */ }
-    const ym = latest ? U.ymKey(latest) : U.ymKey(new Date());
+    const ym = latest ? U.ymKey(latest) : U.reportYm();
     const cur = new Map();
     for (const a of agents) { if (a.channel !== 'First Forward' || a.ym !== ym) continue; const k = keyOf('ff', a.name); cur.set(k, (cur.get(k) || 0) + (Number(a.n) || 0)); }
     try { if (G && G.enabled && G.enabled()) G.agentRollup(ym).forEach((a) => cur.set(keyOf('gv', a.agentName), Number(a.total) || 0)); } catch { /* ignore */ }

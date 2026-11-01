@@ -59,7 +59,7 @@
     ]);
     const issuance = FF.gv.issuanceRows ? FF.gv.issuanceRows() : rows;
     const months = FF.gv.months ? FF.gv.months() : [...new Set(issuance.map((r) => r.ym))].sort();
-    const month = months.includes(monthOverride) ? monthOverride : (months[months.length - 1] || U.ymKey(new Date()));
+    const month = months.includes(monthOverride) ? monthOverride : (months[months.length - 1] || U.reportYm());
     out.month = month; out.rows = rows;
     const scoped = rows.filter((r) => r.ym === month);
     const eirScoped = issuance.filter((r) => r.ym === month);
@@ -651,8 +651,8 @@
       safe(() => FF.insights.qualityIssues(), null)
     ]);
     const targets = ((FF.auth.settings && FF.auth.settings.targets) || []).filter((t) => t && t.ym && Number(t.target) > 0);
-    const ym = (FF.pages.performance.months ? FF.pages.performance.months().cur : U.ymKey(new Date())) || U.ymKey(new Date());
-    const curMonth = typeof ym === 'string' ? ym : U.ymKey(new Date());
+    const ym = (FF.pages.performance.months ? FF.pages.performance.months().cur : U.reportYm()) || U.reportYm();
+    const curMonth = typeof ym === 'string' ? ym : U.reportYm();
     const targetFor = (source, agentName) => {
       const key = normName(agentName);
       return sum(targets.filter((t) => t.ym === curMonth && (t.source || 'ff') === source && normName(t.agent) === key), (t) => Number(t.target));

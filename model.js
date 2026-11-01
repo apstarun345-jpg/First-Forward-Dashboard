@@ -483,7 +483,7 @@ window.FF = window.FF || {};
     let projectionTotal = s.total;
     let projectionDays = s.lastDay;
     try {
-      const currentYm = U.ymKey(new Date());
+      const currentYm = U.reportYm();
       if (ym === currentYm && typeof U.channelBasis === 'function') {
         const basis = U.channelBasis(channelOnly || 'ff', { force: true });
         projectionDays = Math.max(1, Number(basis.days) || projectionDays || 1);
@@ -519,7 +519,7 @@ window.FF = window.FF || {};
   /** Rows: [{ ym, channel, group, kyc: 'full'|'not'|'other', n }] — sirf last + current month, filter ke saath (channel / tl / agent). */
   async function loadKycMonthly(filter, opts) {
     const e = FF.config.eir, kc = kycCols(e), kycSel = kc.join(', ');
-    const cur = U.ymKey(new Date()), prev = U.prevMonthKey(cur);
+    const cur = U.reportYm(), prev = U.prevMonthKey(cur);
     const key = `${cur}|${kycSel}|${JSON.stringify(filter || {})}`;
     const hit = kycCache.get(key);
     if (hit && Date.now() - hit.at < 10 * 60e3) return hit.rows;
@@ -550,7 +550,7 @@ window.FF = window.FF || {};
   const gvKycCache = new Map();
   async function loadGvKycMonthly(f, opts) {
     const g = (FF.config.gv && FF.config.gv.master) || {}, e = FF.config.eir, kc = kycCols(e);
-    const cur = U.ymKey(new Date()), prev = U.prevMonthKey(cur);
+    const cur = U.reportYm(), prev = U.prevMonthKey(cur);
     const id = String((f && f.id) || '').trim().replace(/'/g, '');
     if (!id) return [];
     const key = `${cur}|${kc.join(',')}|${f.tl ? 'tl' : 'agent'}|${id}|${FF.config.gvClassMapVersion ? FF.config.gvClassMapVersion() : ''}`;
@@ -701,7 +701,7 @@ window.FF = window.FF || {};
   const kycPeopleCache = new Map();
   async function loadKycPeople(filter, opts) {
     const e = FF.config.eir, kc = kycCols(e), kycSel = kc.join(', ');
-    const cur = U.ymKey(new Date()), prev = U.prevMonthKey(cur);
+    const cur = U.reportYm(), prev = U.prevMonthKey(cur);
     const key = `${cur}|${kycSel}|${JSON.stringify(filter || {})}`;
     const hit = kycPeopleCache.get(key);
     if (hit && Date.now() - hit.at < 10 * 60e3) return hit.rows;

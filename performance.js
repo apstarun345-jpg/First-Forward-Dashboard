@@ -82,7 +82,7 @@ FF.pages = FF.pages || {};
   /** 📐 FF run-rate divisor — util ka month-aware basis (1 tareekh = pichhle month ke poore din), REPORT fallback. */
   const ffDays = () => { try { const b = U.channelBasis ? U.channelBasis('ff') : null; if (b && b.days > 0) return b.days; } catch { /* */ } return Math.max(1, state.daysElapsed || 1); };
   /** FF data month (YYYY-MM) — EIR authoritative month, warna basis ka month. */
-  const curYmKey = () => (state.authoritative && state.authoritative.cur) || (U.channelBasis ? U.channelBasis('ff').ym : U.ymKey(new Date()));
+  const curYmKey = () => (state.authoritative && state.authoritative.cur) || (U.channelBasis ? U.channelBasis('ff').ym : U.reportYm());
   const canContacts = () => FF.auth.can('contacts');
   const mobileHtml = (m) => (m && !/^na$/i.test(m) && canContacts() ? ` · <a href="tel:${esc(m)}">📞 ${esc(m)}</a>` : '');
   const isFfEirRow = (r) => !r || !r.channel || /^first forward$/i.test(clean(r.channel));
@@ -106,7 +106,7 @@ FF.pages = FF.pages || {};
     const daily = dailyRows || S.get('daily') || [];
     const ready = Array.isArray(dailyRows) || Array.isArray(S.get('daily'));
     const latest = daily.length ? FF.model.latestDate(daily.filter(isFfReported)) : null;
-    const cur = latest ? U.ymKey(latest) : (/^\d{4}-\d{2}$/.test(String(state.months.cur)) ? state.months.cur : U.ymKey(new Date()));
+    const cur = latest ? U.ymKey(latest) : (/^\d{4}-\d{2}$/.test(String(state.months.cur)) ? state.months.cur : U.reportYm());
     const last = U.prevMonthKey(cur);
     const byName = new Map(), byTl = new Map();
     const ensure = (map, key) => {
@@ -683,7 +683,7 @@ FF.pages = FF.pages || {};
       const latest = daily.length ? FF.model.latestDate(daily.filter(isFfReported)) : null;
       if (latest) return U.ymKey(latest);
     } catch { /* ignore */ }
-    return U.channelBasis ? U.channelBasis('ff').ym : U.ymKey(new Date());
+    return U.channelBasis ? U.channelBasis('ff').ym : U.reportYm();
   }
   /** 📦 Cover kab khatam hoga — stock ÷ run-rate = din, aaj se us din ka date. */
   function stockOutDate(stock, rate) {
