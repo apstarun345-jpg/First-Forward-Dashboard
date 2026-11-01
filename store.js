@@ -27,14 +27,21 @@ window.FF = window.FF || {};
   // v3.125.51 — kis config (column letters) se dataset bana — settings badle to purana dobara bane.
   const cfgFp = () => { try { const c = FF.config; return JSON.stringify([c.sheetId, c.eir, c.stock, c.report && [c.report.sheet, c.report.gid]]); } catch { return ''; } };
   const builtWith = {};
+  const jobKey = (key, fp) => `${key}\u0000${fp}`;
+  const keyOfJob = (jk) => String(jk).split('\u0000')[0];
   function loadKey(key, fresh) {
-    if (jobs.has(key)) return jobs.get(key);
-    const version = generation;
     const fp = cfgFp();
+    const jk = jobKey(key, fp);
+    if (jobs.has(jk)) return jobs.get(jk);
+    const version = generation;
+    // Settings (column letters) beech me badal gaye → purana result chhodo, naye config ka job lo.
+    const moved = () => version === generation && fp !== cfgFp();
     const p = Promise.resolve().then(() => DATASETS[key].load({ fresh })).then((value) => {
+      if (moved()) return loadKey(key, fresh);
       if (version === generation) { state.data[key] = value; builtWith[key] = fp; delete state.errors[key]; }
       return value;
-    }).catch((err) => {
+    }, (err) => {
+      if (moved()) return loadKey(key, fresh);
       if (version === generation) {
         state.errors[key] = err;
         // 🔁 Any failed load (also page-level `need(key, { only: true })`) joins the background auto-retry.
@@ -43,11 +50,11 @@ window.FF = window.FF || {};
       throw err;
     }).finally(() => {
       if (version !== generation) return;
-      jobs.delete(key);
+      jobs.delete(jk);
       state.progress.done++;
       emit('progress', { key, ...state.progress });
     });
-    jobs.set(key, p);
+    jobs.set(jk, p);
     return p;
   }
   // ⚡ Boot order: pehle wo datasets jo Home/first paint ke liye chahiye, phir baaki.
@@ -124,29 +131,28 @@ window.FF = window.FF || {};
       const keys = Object.keys(state.data).filter((k) => DATASETS[k]);
       if (!keys.length) return;
       const version = generation;
-      await Promise.allSettled(keys.map((k) => (jobs.has(k) ? jobs.get(k) : loadKey(k, false))));
+      await Promise.allSettled(keys.map((k) => loadKey(k, false)));
       if (version !== generation) return;
       state.loadedAt = Date.now();
       emit('refresh', { fresh: true });
       try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
     });
   } catch { /* ignore */ }
-  /** Settings (column letters) aane ke baad: jo datasets purane config se bane, unhe chup-chaap dobara banao. */
+  /** Settings (column letters) aane ke baad: purane config wale (bane hue ya chal rahe) datasets turant naye config se. */
   function onConfig() {
     const fp = cfgFp();
-    const stale = Object.keys(state.data).filter((k) => DATASETS[k] && builtWith[k] !== undefined && builtWith[k] !== fp);
-    const inflight = [...jobs.keys()].filter((k) => DATASETS[k]);
-    if (!stale.length && !inflight.length) return;
+    const keys = new Set([
+      ...Object.keys(state.data).filter((k) => DATASETS[k] && builtWith[k] !== undefined && builtWith[k] !== fp),
+      ...[...jobs.keys()].map(keyOfJob).filter((k) => DATASETS[k])
+    ]);
+    if (!keys.size) return;
     const version = generation;
-    configReload = (async () => {
-      await Promise.allSettled(inflight.map((k) => jobs.get(k)));   // pre-settings in-flight job ka result bhi purane config ka hai
-      const redo = Object.keys(state.data).filter((k) => DATASETS[k] && builtWith[k] !== cfgFp());
-      if (!redo.length || version !== generation) return;
-      await Promise.allSettled(redo.map((k) => loadKey(k, false)));
+    // Naye config wali query ka browser snapshot ho to ye turant mil jaata hai (purani query ka Google wait nahi).
+    configReload = Promise.allSettled([...keys].map((k) => loadKey(k, false))).then(() => {
       if (version !== generation) return;
       emit('refresh', { config: true });
       try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
-    })().finally(() => { configReload = null; });
+    }).finally(() => { configReload = null; });
   }
   let configReload = null;
   /** Drill-downs isse pehle await karein: settings (column letters) aa chuke hon aur unke hisaab se data dobara ban chuka ho. */
