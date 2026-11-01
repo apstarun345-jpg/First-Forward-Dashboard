@@ -1372,7 +1372,7 @@ class HttpError extends Error { constructor(status, message) { super(message); t
 // gviz proxy cache — entry count AUR total bytes dono par cap. Pehle sirf 400 entries ka cap tha, size ka nahi:
 // bade bodies (StockDataa 25k-row pages, GV Master, EIR…) 512 MB wale instance ki heap bhar dete the (measured:
 // ek browsing session ke baad server RSS ~400 MB). Cap se upar jaane par sabse purani entries nikal jaati hain.
-const MAX_CACHE_BYTES = Math.max(8, Number(process.env.CACHE_MAX_MB) || 40) * 1024 * 1024;
+const MAX_CACHE_BYTES = Math.max(8, Number(process.env.CACHE_MAX_MB) || 24) * 1024 * 1024;
 class GvizCache extends Map {
   constructor() { super(); this.bytes = 0; }
   static sizeOf(entry) { return entry && typeof entry.body === 'string' ? entry.body.length : 0; }
@@ -1396,7 +1396,7 @@ const MEM_SOFT_MB = Number(process.env.MEM_SOFT_MB) || 400;
 const MEM_HARD_MB = Number(process.env.MEM_HARD_MB) || 470;
 const memGuard = { lastSoftAt: 0, softCount: 0, peakMB: 0 };
 function rssMB() { return Math.round(process.memoryUsage().rss / 1048576); }
-const MEM_HEAP_SOFT_MB = Number(process.env.MEM_HEAP_SOFT_MB) || 290;
+const MEM_HEAP_SOFT_MB = Number(process.env.MEM_HEAP_SOFT_MB) || 240;
 const MEM_CACHE_TRIM_MB = Number(process.env.MEM_CACHE_TRIM_MB) || 455;   // gc ke baad bhi RSS itna ho tabhi cache ghatao
 function heapMB() { return Math.round(process.memoryUsage().heapUsed / 1048576); }
 /** Soft trim = purani AADHI gviz cache entries hatao (poora cache nahi) + chhote page caches. Pehle har 30s poora cache
