@@ -904,10 +904,15 @@ FF.pages = FF.pages || {};
     .map(([c, n]) => `<span class="ms-pill">${esc(c)} <b>${U.fmt(n)}</b></span>`).join('') || '<span class="dim small">class data nahi</span>';
 
   function tagStatus(t) {
-    return {
-      ff: t.ff[0] ? { text: 'Mapped', tone: 'green' } : { text: 'Not mapped', tone: 'red' },
-      gv: t.gv[0] ? { text: 'Mapped', tone: 'green' } : { text: 'Not mapped', tone: 'red' }
-    };
+    const f = t.ff[0], g = t.gv[0];
+    // Holder = agent / GV naam jiske paas tag assign hai. Dono me koi holder nahi → 🏢 OFFICE STOCK.
+    const held = (r) => !!(r && (clean(r.agentName) || clean(r.agentId) || clean(r.gvName) || clean(r.gvId)));
+    const office = !held(f) && !held(g);
+    const one = (r) => (!r ? { text: 'Not mapped', tone: 'red' } : held(r) ? { text: 'Mapped', tone: 'green' } : { text: 'Stock · assign nahi', tone: 'amber' });
+    const st = { ff: one(f), gv: one(g), office };
+    if (office) { st.ff = f ? { text: '🏢 OFFICE STOCK', tone: 'office' } : st.ff; st.gv = g ? { text: '🏢 OFFICE STOCK', tone: 'office' } : st.gv; }
+    st.t = office ? (f || g ? 'Office stock' : 'Not mapped') : (held(f) && held(g) ? 'FF + GV' : held(f) ? 'FF' : 'GV');
+    return st;
   }
   /** Kundli card ke andar quick stats — mobile · TL · stock · TL stock · priority · suggested (data load hone par). */
   function kundliProfileStats(p) {
@@ -1142,7 +1147,7 @@ FF.pages = FF.pages || {};
         ${res.tags.slice(0, 60).map((t) => {
         const f = t.ff[0] || {}, g = t.gv[0] || {};
         const st = tagStatus(t);
-        return `<tr><td class="ms-barcode-cell" style="white-space:nowrap"><b>${esc(U.barcode(t.key))}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
+        return `<tr${st.office && (f.tagId || g.tagId) ? ' class="ms-office-row"' : ''}><td class="ms-barcode-cell" style="white-space:nowrap"><b>${esc(U.barcode(t.key))}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
             <td>${esc(f.agentName || '—')}${f.agentId ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${esc(tlText(f.tlName, 'ff') || '—')}</td>
             <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
             <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(tlText(g.tlName, 'gv') || '—')}</td>

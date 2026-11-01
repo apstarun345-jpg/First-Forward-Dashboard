@@ -7253,3 +7253,7 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 .msp-kyc-box .kyc-tc .kyc-cnt, .msp-kyc-box .kyc-tc .kyc-cnt b { display: inline; font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; line-height: 1.2; }
 .msp-kyc-box .kyc-thead span { font-size: 10px; }
 .msp-kyc-box .kyc-vlbl { font-size: 12px; }
+
+/* 🏢 Master Search — office stock (FF/GV dono me holder nahi) */
+.badge.office { background: #f59e0b; color: #fff; font-weight: 800; letter-spacing: .03em; box-shadow: 0 0 0 2px #fde68a; }
+tr.ms-office-row td { background: #fffbeb; }
