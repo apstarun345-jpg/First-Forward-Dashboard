@@ -25,7 +25,7 @@ globalThis.document = {
 ['config', 'util', 'model', 'gv', 'store', 'charts'].forEach((f) => require(path.join(ROOT, `${f}.js`)));
 const FF = globalThis.FF;
 const U = FF.util;
-const ym = U.ymKey(new Date());
+const ym = U.reportYm();   // v3.125.28 — site ka "current month" = report date (aaj − 1)
 const prev = U.prevMonthKey(ym);
 
 // REPORT tab ka "Performance In 7 Days" header — d7 = jis din tak ka data aaya.
@@ -103,7 +103,8 @@ test('v3.31 · GV live: run-rate ÷ max(1, aaj − 1) (GV sheet jaisa) · month 
   const savedLatest = FF.gv.latestDate;
   FF.gv.latestDate = () => new Date(2026, 9, 1);                  // aaj ka GV data aa chuka (live)
   let g = U.dataBasis('gv', { now: new Date(2026, 9, 1, 15) });
-  assert.equal(g.days, 1); assert.equal(g.ym, '2026-10'); assert.equal(g.live, true);
+  // v3.125.28 — 1 tareekh = report month abhi pichhla mahina (aaj − 1 = 0 din) → September ka poora mahina.
+  assert.equal(g.days, 30); assert.equal(g.ym, '2026-09'); assert.equal(g.live, true);
   FF.gv.latestDate = () => new Date(2026, 9, 15);
   g = U.dataBasis('gv', { now: new Date(2026, 9, 15, 15) });
   assert.equal(g.days, 14, '15 Oct → aaj − 1 = 14');
@@ -121,7 +122,7 @@ test('v3.31 · runRate / dispatchCalc channel ke basis par', () => {
   const savedLatest = FF.gv.latestDate;
   FF.gv.latestDate = () => new Date(2026, 9, 1);
   assert.equal(U.runRate(300, 'ff'), 10, '300 ÷ 30');
-  assert.equal(U.runRate(3, 'gv'), 3, '3 ÷ 1');
+  assert.equal(U.runRate(3, 'gv'), 0.1, '1 tareekh: 3 ÷ 30 (September ka poora mahina, v3.125.28)');
   const c = U.dispatchCalc({ cur: 300, stock: 50, days: 15, ch: 'ff' });
   assert.equal(c.elapsed, 30); assert.equal(c.rate, 10); assert.equal(c.required, 150); assert.equal(c.net, 100); assert.equal(c.gross, 150);
   U.runRateDays = realDays; FF.gv.latestDate = savedLatest; FF.pages.performance = saved;
@@ -196,8 +197,10 @@ test('channelBasis: FF = kal tak ka data · GV = live aaj', () => {
   assert.equal(ff.days, Math.min(DAY, U.runRateDays()));
   const gv = U.channelBasis('gv', { force: true });
   assert.equal(gv.live, true, 'GV live hai');
-  assert.equal(gv.days, Math.max(1, new Date().getDate() - 1), 'GV sheet jaisa: aaj − 1 (min 1)');
-  assert.equal(gv.back, 0);
+  // 1 tareekh par pichhla poora mahina (v3.125.28), baaki din aaj − 1.
+  const t = new Date(), first = t.getDate() === 1;
+  assert.equal(gv.days, first ? new Date(t.getFullYear(), t.getMonth(), 0).getDate() : Math.max(1, t.getDate() - 1), 'GV sheet jaisa: aaj − 1');
+  assert.equal(gv.back, first ? 1 : 0);
   // GV profile bhi live basis use kare
   const gvP = MP.quick({ kind: 'gv-agent', name: 'Koi', sub: '' });
   assert.equal(gvP, null, 'GV data fixture me nahi hai — skip');
