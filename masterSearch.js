@@ -2227,7 +2227,7 @@ FF.pages = FF.pages || {};
           const tlMob = tlKind ? (q && q.mobile) : tl.mobile;
           return `<div class="msp-det-card ${ch}"><div class="msp-det-h">${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${tlKind ? 'Team Leader' : 'Agent'}</div><div class="msp-det-grid">
             <div class="msp-det-f"><small>${tlKind ? 'TL mobile' : 'Mobile'}</small><b>${mob(q && q.mobile)}</b></div>
-            ${tlKind ? '' : f('TL name', pp.direct ? (pp.directLabel || 'Direct') : tlName)}
+            ${tlKind ? '' : (pp.direct || !tlName ? f('TL name', pp.direct ? (pp.directLabel || 'Direct') : tlName) : `<div class="msp-det-f"><small>TL name</small><b><button type="button" class="mp-link-btn" data-ms-open-tl="1" data-ms-tl-name="${esc(tlName)}" data-ms-tl-id="${esc(tlId || '')}" data-ms-tl-ch="${ch}" title="${esc(tlName)} — Master Search me kholo">${esc(tlName)} ↗</button></b></div>`)}
             ${tlKind ? '' : f('TL ID', tlId, true)}
             ${tlKind ? '' : `<div class="msp-det-f"><small>TL mobile</small><b>${mob(tlMob)}</b></div>`}
             ${q && q.status ? f('Status', q.status) : ''}${q && q.lastActive ? f('Last active', q.lastActive) : ''}
