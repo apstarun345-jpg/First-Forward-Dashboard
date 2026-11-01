@@ -455,6 +455,7 @@ window.FF = window.FF || {};
     state.user = null;
     stopViewAs(); // 👁 preview session ke saath chala jaye
     try { localStorage.removeItem('ff_user'); } catch { /* ignore */ }
+    try { if (FF.data && FF.data.snapshots) FF.data.snapshots.clear(); } catch { /* ignore */ }   // shared device: agla user purana data na dekhe
     if (FF.notifications && FF.notifications.stop) FF.notifications.stop();
     if (FF.liveAssist && FF.liveAssist.stop) FF.liveAssist.stop();
     U.toast('Logged out ✓', 'ok');

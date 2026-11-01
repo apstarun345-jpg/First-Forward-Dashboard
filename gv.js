@@ -324,6 +324,18 @@ window.FF = window.FF || {};
   function retryNow() { scheduleRetry(generation, 0); }
   // Network back / tab visible again → retry failed sheets right away.
   try { if (typeof window !== 'undefined' && window.addEventListener) { window.addEventListener('online', () => { if (Object.keys(state.errors).length) retryNow(); }); document.addEventListener('visibilitychange', () => { if (!document.hidden && Object.keys(state.errors).length && !state.retrying) retryNow(); }); } } catch { /* non-browser */ }
+  try {
+    if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('ff:data-fresh', async () => {
+      const order = ['master', ...Object.keys(state.data).filter((k) => k !== 'master' && LOADERS[k])];
+      const keys = order.filter((k) => state.data[k] !== undefined && LOADERS[k]);
+      if (!keys.length) return;
+      const version = generation;
+      for (const k of keys) { try { await (jobs.has(k) ? jobs.get(k) : loadKey(k, false)); } catch { /* ignore */ } }   // master pehle (report usi par banta hai)
+      if (version !== generation) return;
+      state.loadedAt = Date.now();
+      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key, opts) {

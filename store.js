@@ -114,6 +114,19 @@ window.FF = window.FF || {};
   function retryNow() { scheduleRetry(generation, 0); }
   // Network back / tab visible again → retry failed sheets right away.
   try { if (typeof window !== 'undefined' && window.addEventListener) { window.addEventListener('online', () => { if (Object.keys(state.errors).length) retryNow(); }); document.addEventListener('visibilitychange', () => { if (!document.hidden && Object.keys(state.errors).length && !state.retrying) retryNow(); }); } } catch { /* non-browser */ }
+  // ⚡ v3.125.50 — browser snapshot se turant dikha data; Google ka naya data aate hi (ff:data-fresh) chup-chaap dobara bana kar page update.
+  try {
+    if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('ff:data-fresh', async () => {
+      const keys = Object.keys(state.data).filter((k) => DATASETS[k]);
+      if (!keys.length) return;
+      const version = generation;
+      await Promise.allSettled(keys.map((k) => (jobs.has(k) ? jobs.get(k) : loadKey(k, false))));
+      if (version !== generation) return;
+      state.loadedAt = Date.now();
+      emit('refresh', { fresh: true });
+      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key, opts) {
