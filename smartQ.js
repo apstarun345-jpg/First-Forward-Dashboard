@@ -26,7 +26,7 @@ window.FF = window.FF || {};
         stock: num(a.stockTotal), rate,
         growth: a.growthNum == null ? null : a.growthNum,
         status: clean(a.perfStatus), high: /high growth/i.test(a.perfStatus || ''), de: /de-?growth/i.test(a.perfStatus || ''),
-        lastActive: clean(a.lastActive), need: Math.max(0, Math.ceil(rate * sd - num(a.stockTotal)))
+        proj: num(a.curProjected) || (a.activeDays ? 0 : 0), lastActive: clean(a.lastActive), need: Math.max(0, Math.ceil(rate * sd - num(a.stockTotal)))
       };
     });
   }
@@ -46,6 +46,7 @@ window.FF = window.FF || {};
         stock: num(r.stockTotal), rate,
         growth: r.growth == null || r.growth === '' ? null : num(r.growth),
         status: perf.replace(/^[^A-Za-z]+/, ''), high: /high growth/i.test(perf), de: /de-?growth/i.test(perf),
+        proj: num(r.expected),
         lastActive: num(r.curTotal) > 0 ? 'Active' : (num(r.lastTotal) > 0 ? 'Inactive in month' : 'No issuance'),
         need: Math.max(0, Math.ceil(rate * sd - num(r.stockTotal)))
       };
@@ -59,7 +60,7 @@ window.FF = window.FF || {};
     cur: { k: 'cur', l: 'This month', n: 1 }, last: { k: 'last', l: 'Last month', n: 1 },
     vc4: { k: 'vc4', l: 'VC4', n: 1 }, vc20: { k: 'vc20', l: 'VC20', n: 1 }, vc5: { k: 'vc5', l: 'VC5+', n: 1 },
     stock: { k: 'stock', l: 'Stock', n: 1 }, rate: { k: 'rate', l: '/day', n: 1, d: 1 }, need: { k: 'need', l: 'Dispatch need', n: 1 },
-    growth: { k: 'growth', l: 'Growth %', n: 1, p: 1 }, status: { k: 'status', l: 'Status' }, lastActive: { k: 'lastActive', l: 'Last active' }
+    growth: { k: 'growth', l: 'Growth %', n: 1, p: 1 }, proj: { k: 'proj', l: 'Expected', n: 1 }, agents: { k: 'agents', l: 'Agents', n: 1 }, active: { k: 'active', l: 'Active agents', n: 1 }, inact: { k: 'inact', l: 'Inactive agents', n: 1 }, cover: { k: 'cover', l: 'Cover days', n: 1, d: 1 }, drop: { k: 'drop', l: 'Drop vs last', n: 1 }, status: { k: 'status', l: 'Status' }, lastActive: { k: 'lastActive', l: 'Last active' }
   };
 
   // ------------------------------------------------------------------ question catalog
@@ -100,25 +101,85 @@ window.FF = window.FF || {};
   add({ key: 'direct', title: 'Direct agents list', kw: 'direct agents aps no tl list', n: true,
     run: (rows, n) => rows.filter((r) => r.direct).sort((a, b) => b.cur - a.cur).slice(0, n),
     cols: ['name', 'id', 'cur', 'last', 'stock', 'need'], note: 'Bina TL ke direct agents' });
-  add({ key: 'toptl', title: 'Top TLs (issuance)', kw: 'top tl team leader best issuance', n: true, tl: true,
-    run: (rows, n) => {
-      const m = new Map();
-      rows.filter((r) => r.tl && !r.direct).forEach((r) => {
-        const k = `${r.ch}|${r.tl}`; let o = m.get(k);
-        if (!o) { o = { ch: r.ch, name: r.tl, id: '', tl: '', cur: 0, last: 0, stock: 0, agents: 0 }; m.set(k, o); }
-        o.cur += r.cur; o.last += r.last; o.stock += r.stock; o.agents++;
-      });
-      return [...m.values()].sort((a, b) => b.cur - a.cur).slice(0, n);
-    }, cols: ['name', 'cur', 'last', 'stock'], note: 'TL ke agents ka total' });
+  // ---- TL level: agents ko TL ke hisaab se jodo (direct agents TL nahi gine jaate)
+  function tlRows(rows) {
+    const m = new Map();
+    rows.filter((r) => r.tl && !r.direct).forEach((r) => {
+      const k = `${r.ch}|${r.tl}`; let o = m.get(k);
+      if (!o) { o = { ch: r.ch, name: r.tl, id: '', tl: '', cur: 0, last: 0, proj: 0, stock: 0, need: 0, vc4: 0, vc20: 0, vc5: 0, agents: 0, active: 0, inact: 0 }; m.set(k, o); }
+      o.cur += r.cur; o.last += r.last; o.proj += (r.proj || r.cur); o.stock += r.stock; o.need += r.need;
+      o.vc4 += r.vc4; o.vc20 += r.vc20; o.vc5 += r.vc5; o.agents++;
+      if (r.cur > 0) o.active++; else o.inact++;
+    });
+    const out = [...m.values()];
+    out.forEach((o) => { o.growth = o.last > 0 ? Math.round((o.proj / o.last - 1) * 100) : null; o.drop = o.last - o.cur; });
+    return out;
+  }
+  const tlAdd = (def) => add({ ...def, tl: true, run: (rows, n) => def.run(tlRows(rows), n) });
+  const TLC = ['name', 'agents', 'active', 'inact', 'cur', 'last', 'growth', 'stock'];
+
+  tlAdd({ key: 'toptl', title: 'Top TLs (issuance)', kw: 'top tl tls team leader best issuance zyada', n: true,
+    run: (t, n) => t.filter((x) => x.cur > 0).sort((a, b) => b.cur - a.cur).slice(0, n), cols: TLC, note: 'TL ke agents ka total (this month)' });
+  tlAdd({ key: 'inactivetl', title: 'Inactive TLs', kw: 'inactive tl tls team leader nahi chala zero issuance band', n: true,
+    run: (t, n) => t.filter((x) => x.cur === 0).sort((a, b) => b.last - a.last || b.stock - a.stock).slice(0, n), cols: ['name', 'agents', 'last', 'stock'], note: 'TL ke saare agents ka is month 0 issuance' });
+  tlAdd({ key: 'degrowthtl', title: 'De-growth TLs', kw: 'de growth degrowth tl tls team leader girawat kam decline', n: true,
+    run: (t, n) => t.filter((x) => x.growth != null && x.growth < 0).sort((a, b) => a.growth - b.growth).slice(0, n), cols: ['name', 'agents', 'cur', 'last', 'proj', 'growth', 'stock'], note: 'Expected month-end last month se neeche' });
+  tlAdd({ key: 'highgrowthtl', title: 'High growth TLs', kw: 'high growth tl tls team leader badhat improving', n: true,
+    run: (t, n) => t.filter((x) => x.growth != null && x.growth >= 20).sort((a, b) => b.growth - a.growth).slice(0, n), cols: ['name', 'agents', 'cur', 'last', 'proj', 'growth', 'stock'], note: 'Expected month-end last month se 20%+ upar' });
+  tlAdd({ key: 'stocktl', title: 'Highest stock TLs', kw: 'highest stock tl tls team leader zyada stock maal', n: true,
+    run: (t, n) => t.sort((a, b) => b.stock - a.stock).slice(0, n), cols: ['name', 'agents', 'stock', 'cur', 'last'], note: 'TL ke agents ka total stock' });
+  tlAdd({ key: 'dispatchtl', title: 'Dispatch need · TLs', kw: 'dispatch need tl tls team leader tag bhejne chahiye required', n: true,
+    run: (t, n) => t.filter((x) => x.need > 0).sort((a, b) => b.need - a.need).slice(0, n), cols: ['name', 'agents', 'cur', 'stock', 'need'], note: 'Agents ke dispatch need ka jod' });
+  tlAdd({ key: 'inactagentstl', title: 'TLs with most inactive agents', kw: 'most inactive agents tl tls team leader zyada inactive', n: true,
+    run: (t, n) => t.filter((x) => x.inact > 0).sort((a, b) => b.inact - a.inact).slice(0, n), cols: ['name', 'agents', 'active', 'inact', 'cur', 'last'], note: 'Jinke zyada agents is month inactive hain' });
+  tlAdd({ key: 'lasttl', title: 'Top TLs (last month)', kw: 'top tl tls last month pichla month previous', n: true,
+    run: (t, n) => t.filter((x) => x.last > 0).sort((a, b) => b.last - a.last).slice(0, n), cols: ['name', 'agents', 'last', 'cur', 'growth'], note: 'Last month ke total ke hisaab se' });
+  tlAdd({ key: 'vc4tl', title: 'Top VC4 TLs', kw: 'top vc4 tl tls team leader', n: true,
+    run: (t, n) => t.filter((x) => x.vc4 > 0).sort((a, b) => b.vc4 - a.vc4).slice(0, n), cols: ['name', 'agents', 'vc4', 'cur', 'stock'], note: 'VC4 issuance (this month)' });
+  tlAdd({ key: 'vc20tl', title: 'Top VC20 TLs', kw: 'top vc20 tl tls team leader', n: true,
+    run: (t, n) => t.filter((x) => x.vc20 > 0).sort((a, b) => b.vc20 - a.vc20).slice(0, n), cols: ['name', 'agents', 'vc20', 'cur', 'stock'], note: 'VC20 issuance (this month)' });
+  tlAdd({ key: 'vc5tl', title: 'Top VC5 TLs', kw: 'top vc5 vc6 vc7 vc12 vc16 commercial tl tls team leader', n: true,
+    run: (t, n) => t.filter((x) => x.vc5 > 0).sort((a, b) => b.vc5 - a.vc5).slice(0, n), cols: ['name', 'agents', 'vc5', 'cur', 'stock'], note: 'VC5+ issuance (this month)' });
+  tlAdd({ key: 'bigtl', title: 'Biggest teams (most agents)', kw: 'biggest teams most agents tl tls team leader zyada agents team size', n: true,
+    run: (t, n) => t.sort((a, b) => b.agents - a.agents).slice(0, n), cols: ['name', 'agents', 'active', 'inact', 'cur', 'stock'], note: 'TL ke neeche agents ki ginti' });
+
+  // ---- more agent questions
+  add({ key: 'stockhigh', title: 'Highest stock agents', kw: 'highest stock zyada stock maal most stock agents', n: true,
+    run: (rows, n) => rows.filter((r) => r.stock > 0).sort((a, b) => b.stock - a.stock).slice(0, n),
+    cols: ['name', 'id', 'tl', 'stock', 'cur', 'rate'], note: 'Total stock ke hisaab se' });
+  add({ key: 'deadstock', title: 'Stock but inactive (dead stock)', kw: 'dead stock inactive stock pada hua sleeping idle stock but no issuance', n: true,
+    run: (rows, n) => rows.filter((r) => r.stock > 0 && r.cur === 0).sort((a, b) => b.stock - a.stock).slice(0, n),
+    cols: ['name', 'id', 'tl', 'stock', 'last', 'lastActive'], note: 'Stock hai par is month issuance 0' });
+  add({ key: 'lowcover', title: 'Low stock cover (< 5 days)', kw: 'low stock cover khatam hone wala running out kam stock urgent critical', n: true,
+    run: (rows, n) => rows.filter((r) => r.rate > 0 && r.stock / r.rate < 5).map((r) => ({ ...r, cover: r.stock / r.rate })).sort((a, b) => a.cover - b.cover || b.rate - a.rate).slice(0, n),
+    cols: ['name', 'id', 'tl', 'stock', 'rate', 'cover', 'need'], note: 'Stock / run-rate 5 din se kam' });
+  add({ key: 'lastmonth', title: 'Top agents (last month)', kw: 'top last month pichla month previous best agents', n: true,
+    run: (rows, n) => rows.filter((r) => r.last > 0).sort((a, b) => b.last - a.last).slice(0, n),
+    cols: ['name', 'id', 'tl', 'last', 'cur', 'growth'], note: 'Last month ke total ke hisaab se' });
+  add({ key: 'biggestdrop', title: 'Biggest drop vs last month', kw: 'biggest drop girawat sabse zyada gira ghata decline vs last month', n: true,
+    run: (rows, n) => rows.map((r) => ({ ...r, drop: r.last - r.cur })).filter((r) => r.drop > 0).sort((a, b) => b.drop - a.drop).slice(0, n),
+    cols: ['name', 'id', 'tl', 'last', 'cur', 'drop', 'stock'], note: 'Last month − this month (abhi tak)' });
+  add({ key: 'newagents', title: 'New / reactivated agents', kw: 'new agents naye reactivated restart shuru last month zero', n: true,
+    run: (rows, n) => rows.filter((r) => r.cur > 0 && r.last === 0).sort((a, b) => b.cur - a.cur).slice(0, n),
+    cols: ['name', 'id', 'tl', 'cur', 'vc4', 'stock'], note: 'Last month 0, is month issuance' });
+  add({ key: 'runrate', title: 'Highest run-rate (per day)', kw: 'highest run rate runrate per day daily speed fast', n: true,
+    run: (rows, n) => rows.filter((r) => r.rate > 0).sort((a, b) => b.rate - a.rate).slice(0, n),
+    cols: ['name', 'id', 'tl', 'rate', 'cur', 'stock', 'need'], note: 'Roz ka average issuance' });
+  add({ key: 'noissue2', title: 'No issuance last + this month', kw: 'dead agents 2 months inactive both months no issuance sleeping', n: true,
+    run: (rows, n) => rows.filter((r) => r.cur === 0 && r.last === 0 && r.stock > 0).sort((a, b) => b.stock - a.stock).slice(0, n),
+    cols: ['name', 'id', 'tl', 'stock'], note: 'Dono months 0 par stock pada hai' });
+
   add({ key: 'summary', title: 'Total issuance (this vs last month)', kw: 'total issuance kitna hua summary overall count this month last month', n: false, sum: true,
     run: (rows) => [{ ch: '', name: 'TOTAL', id: '', tl: '', cur: U.sum(rows, (r) => r.cur), last: U.sum(rows, (r) => r.last), vc4: U.sum(rows, (r) => r.vc4), vc20: U.sum(rows, (r) => r.vc20), vc5: U.sum(rows, (r) => r.vc5), stock: U.sum(rows, (r) => r.stock) },
       { ch: '', name: 'Active agents', cur: rows.filter((r) => r.cur > 0).length, last: rows.filter((r) => r.last > 0).length },
-      { ch: '', name: 'Inactive this month', cur: rows.filter((r) => r.cur === 0 && r.last > 0).length }],
+      { ch: '', name: 'Inactive this month', cur: rows.filter((r) => r.cur === 0 && r.last > 0).length },
+      { ch: '', name: 'Direct agents', cur: rows.filter((r) => r.direct).length },
+      { ch: '', name: 'Dispatch need (total)', cur: U.sum(rows, (r) => r.need) }],
     cols: ['name', 'cur', 'last', 'vc4', 'vc20', 'vc5', 'stock'], note: '' });
 
   // ------------------------------------------------------------------ suggestions
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  const TRIGGER = /(inactive|nahi|top|best|high|growth|degrowth|de growth|dispatch|need|direct|vc4|vc20|vc5|vc6|vc7|zero|stock|total|kitna|sawaal|question|\?|tl|summary|bhejne|agents?)/;
+  const TRIGGER = /(sawaal|sawal|questions?|help|all|highest|biggest|dead|low|new|last|run ?rate|inactive|nahi|top|best|high|growth|degrowth|de growth|dispatch|need|direct|vc4|vc20|vc5|vc6|vc7|zero|stock|total|kitna|sawaal|question|\?|tl|summary|bhejne|agents?)/;
   function parseN(q) { const m = /\b(\d{1,3})\b/.exec(q); const n = m ? Number(m[1]) : 0; return n >= 1 && n <= 500 ? n : 10; }
   function chOf(q) {
     const t = ` ${norm(q)} `;
@@ -130,12 +191,15 @@ window.FF = window.FF || {};
     const t = norm(q);
     if (t.length < 2 || /^\d[\d\s-]*$/.test(t)) return [];
     if (!TRIGGER.test(t)) return [];
-    const words = t.split(' ').filter((w) => w.length >= 2 && !/^(gv|ff|agents?|tl|ke|ka|ki|me|ho|hai|of|the|and|aur)$/.test(w) && !/^\d+$/.test(w));
+    const words = t.split(' ').filter((w) => w.length >= 2 && !/^(gv|ff|agents?|tls?|teams?|ke|ka|ki|me|ho|hai|of|the|and|aur|all)$/.test(w) && !/^\d+$/.test(w));
     const wantCh = chOf(q);
     const n = parseN(t);
+    const wantTl = /\b(tls?|team leaders?|teams?)\b/.test(t);
+    if (/^(sawaal|sawal|questions?|help|all questions?|saare sawaal|\?)$/.test(t)) return [{ kind: 'cls', kindLabel: '❓ Sawaal', q: '__catalog', label: 'Saare sawaal dekho (list)', sub: 'Agents · TLs · Stock · Growth — sab ek jagah', value: q }];
     const scored = [];
     Q.forEach((d) => {
       if (wantCh && d.ch !== wantCh) return;
+      if (wantTl !== !!d.tl) return;
       const hay = `${norm(d.title)} ${d.kw} ${d.ch}`;
       let s = 0;
       if (!words.length) s = 1;
@@ -237,5 +301,26 @@ window.FF = window.FF || {};
     });
   }
 
-  FF.smartQ = { suggest, answer, open, close, list: () => Q.map((d) => ({ id: d.id, title: d.title, ch: d.ch })), _rows: { ffRows, gvRows } };
+  function openCatalog() {
+    close();
+    const groups = new Map();
+    Q.forEach((d) => { if (!groups.has(d.key)) groups.set(d.key, { d, chs: [] }); groups.get(d.key).chs.push(d); });
+    const sect = (label, pred) => {
+      const items = [...groups.values()].filter((g) => pred(g.d));
+      return items.length ? `<h3 style="margin:14px 0 6px">${label}</h3>${items.map((g) => `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:5px 0;border-bottom:1px solid var(--line,#e5e7eb)"><span style="flex:1 1 220px"><b>${esc(g.d.title)}</b><br><small class="dim">${esc(g.d.note || '')}</small></span>${g.chs.map((c) => `<button class="btn small" data-sq-run="${esc(c.id)}">${CH_LABEL[c.ch]}</button>`).join('')}</div>`).join('')}` : '';
+    };
+    const html = sect('👤 Agents', (d) => !d.tl && !d.sum) + sect('👥 TLs', (d) => d.tl) + sect('📊 Totals', (d) => d.sum);
+    panel = U.h(`<div class="ms-panel" id="sq-panel" role="dialog" aria-modal="true"><div class="ms-panel-backdrop" data-sq-close></div>
+      <div class="ms-panel-box"><div class="ms-panel-head"><div><span class="ms-panel-kicker">❓ Sawaal</span><h2>Saare sawaal</h2><small class="dim">Button dabao → turant jawab. Search box me "top 20 vc4 gv" jaisa bhi likh sakte ho.</small></div>
+      <div class="btn-row"><button class="btn small" data-sq-close>✕ Close</button></div></div><div class="ms-panel-body">${html}</div></div></div>`);
+    document.body.appendChild(panel);
+    document.body.classList.add('no-scroll');
+    panel.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sq-close]')) { close(); return; }
+      const b = e.target.closest('[data-sq-run]');
+      if (b) open(b.dataset.sqRun, 10);
+    });
+  }
+
+  FF.smartQ = { suggest, answer, open, openCatalog, close, list: () => Q.map((d) => ({ id: d.id, title: d.title, ch: d.ch })), _rows: { ffRows, gvRows } };
 })(window.FF);

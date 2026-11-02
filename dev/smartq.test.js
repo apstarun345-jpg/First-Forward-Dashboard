@@ -32,3 +32,13 @@ test('answers: inactive / top / dispatch / direct', () => {
   assert.deepEqual(Q.answer('vc20|ff').rows.map((r) => r.name), ['A']);
   assert.equal(Q.answer('summary|all').rows[0].cur, 79);
 });
+test('TL questions + stock', () => {
+  assert.ok(Q.suggest('inactive tl').every((x) => /tl|inactive/i.test(x.label)) && Q.suggest('inactive tl')[0].q.startsWith('inactivetl'));
+  assert.ok(Q.suggest('inactive').every((x) => !x.q.startsWith('inactivetl')));
+  assert.equal(Q.suggest('sawaal')[0].q, '__catalog');
+  assert.deepEqual(Q.answer('stockhigh|ff').rows.map((r) => r.name), ['A', 'B']);
+  assert.deepEqual(Q.answer('deadstock|ff').rows.map((r) => r.name), ['B']);
+  assert.deepEqual(Q.answer('toptl|ff').rows.map((r) => r.name), ['T1']);
+  assert.ok(Q.suggest('de growth tls').some((x) => x.q === 'degrowthtl|ff'));
+  assert.ok(Q.suggest('highest stock').some((x) => x.q === 'stockhigh|all'));
+});

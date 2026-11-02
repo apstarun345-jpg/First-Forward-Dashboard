@@ -1486,7 +1486,7 @@ FF.pages = FF.pages || {};
         try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (it.none) return;
-        if (it.q && FF.smartQ) { FF.smartQ.open(it.q, it.qn || 10); return; }
+        if (it.q && FF.smartQ) { if (it.q === '__catalog') FF.smartQ.openCatalog(); else FF.smartQ.open(it.q, it.qn || 10); return; }
         try { remember(it.label || (it.person && it.person.name) || it.barcode); } catch { /* optional */ }
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
         if (it.person && it.person.name) { openSearchPage(it.person.name, it.person); return; }
@@ -1496,7 +1496,7 @@ FF.pages = FF.pages || {};
         try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         const sq = smartQs(q);
-        if (sq.length && !suggestItemsRaw(q).some((it) => it.person || it.barcode)) { FF.smartQ.open(sq[0].q, sq[0].qn || 10); return; }
+        if (sq.length && !suggestItemsRaw(q).some((it) => it.person || it.barcode)) { if (sq[0].q === '__catalog') FF.smartQ.openCatalog(); else FF.smartQ.open(sq[0].q, sq[0].qn || 10); return; }
         if (clean(q).length >= 2) { try { remember(q); } catch { /* optional */ } openSearchPage(q); }
       }
     });
