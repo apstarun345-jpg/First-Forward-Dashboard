@@ -2043,23 +2043,20 @@ FF.pages = FF.pages || {};
       const wd = workedDays(pr, isTl, ch, m.cur);
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
       const tlName = (pr.tl && pr.tl.name) || '';
-      let sug = '';
-      if (pr.direct) {
-        const directPlan = FF.masterProfile && FF.masterProfile.directDispatchPlan ? FF.masterProfile.directDispatchPlan(pr) : null;
-        const directHtml = FF.masterProfile && FF.masterProfile.directDispatchHtml
-          ? FF.masterProfile.directDispatchHtml(pr)
-          : '<span class="dim">Direct-agent run-rate suggestion is loading…</span>';
-        const directTotal = directPlan ? directPlan.totalNet : 0;
-        const directGross = directPlan ? directPlan.totalGross : 0;
-        const directDays = directPlan ? directPlan.days : (d.days || days);
-        sug = box(directTotal > 0 ? 'k7' : 'k4', `🎯 Suggested dispatch · ${U.fmt(directDays)} days`, directHtml,
-          `${esc(pr.directLabel || 'Direct agent')} · priority ${esc(pr.priority || 'Low')} · class-wise · after stock ${U.fmt(directTotal)} · w/o stock ${U.fmt(directGross)}`,
-          spec('mtd', m.cur));
-      } else if (pr.tagRequired) {
-        sug = box('k7', `🏷️ Tags required · ${U.fmt(d.days)} din`, sugPair(num(d.sugVc4) + num(d.sugComm), num(d.sugVc4Gross) + num(d.sugCommGross)), `VC4 ${U.fmt(d.sugVc4)} + Comm ${U.fmt(d.sugComm)} · ${esc(pr.directLabel || 'Direct')} · priority ${esc(pr.priority || '—')}`, spec('mtd', m.cur));
-      } else {
-        sug = box('k4', `🎯 Dispatch need · ${U.fmt(days)} days`, planBody, '', spec('mtd', m.cur));
-      }
+      // 🎯 v3.125.56 — Dispatch = Expected this month (run-rate × mahine ke din) − is mahine issue ho chuke − stock.
+      // Wahi logic jo "Expected this month" box ka hai, class-wise (VC4/VC20 · VC5+). Direct / priority se farak nahi.
+      const expA = num(expSplit.VC4) + num(expSplit.VC20), expB = num(expSplit['VC5+']);
+      const curA = num(curBins.VC4) + num(curBins.VC20), curB = num(curBins['VC5+']);
+      const needLine = (label, exp, cur, stock) => {
+        const left = Math.max(0, exp - cur), need = Math.max(0, left - stock);
+        return { label, exp, cur, stock, left, need };
+      };
+      const dl = [needLine('VC4 / VC20', expA, curA, num(stk.A)), needLine('VC5+', expB, curB, num(stk.B))];
+      const needTotal = dl.reduce((n, x) => n + x.need, 0);
+      const dLine = (x) => `<div class="msp-cls-line"><span class="c1">${esc(x.label)}</span><span class="c2"><span class="msp-hl ${x.need ? 'red' : 'green'}">${x.need ? `dispatch ${U.fmt(x.need)}` : '0'}</span></span><span class="c3 small dim">${U.fmt(x.exp)} − ${U.fmt(x.cur)} − stock ${U.fmt(x.stock)}</span></div>`;
+      const sugBody = `<div class="msp-plan">${dl.map(dLine).join('')}</div><div class="msp-tot"><div class="msp-cls-line msp-tot-line"><span class="c1">Total</span><span class="c2"><span class="msp-hl ${needTotal ? 'red' : 'green'}">${needTotal ? `dispatch ${U.fmt(needTotal)}` : '✅ stock kaafi hai'}</span></span><span class="c3"></span></div></div>`;
+      const sug = box('k4', `🎯 Dispatch chahiye · ${esc(ymLabel(m.cur || U.reportYm()))} end tak`, sugBody,
+        `Expected this month − is mahine issue ho chuke − stock${pr.direct ? ` · ${esc(pr.directLabel || 'Direct')}` : ''}`, spec('mtd', m.cur));
     /** 📈 Growth tile ka neeche wala text: kya compare hua + run-rate + expected month-end vs last month. */
     const growthSub = (p1, m) => {
       const b = (p1 && p1.basis) || {};
