@@ -8703,11 +8703,53 @@ async function handleApi(req, res, url) {
             requested: Number(x.requested ?? x.approved) || 0,
             approved: Number(x.approved) || 0
           })),
-          adminNote: r.adminNote || '', updatedAt: r.updatedAt || r.at || '',
+          adminNote: r.adminNote || '', updatedAt: r.updatedAt || r.at || '', courier: r.courier || '',
           sheetSynced: !!r.sheetSync && !r.sheetSync.error
         };
       })
     };
+  }
+  // ✏️ v3.125.55 — Employee (public link) apni PENDING request ki class-wise qty badal sakta hai.
+  // Approved / dispatched / rejected par lock. Sheet sync sirf Approved par hota hai, isliye yahan koi sheet row nahi badalti.
+  if (p === '/api/public/tag-request/edit' && method === 'POST') {
+    const ip = clientIp(req);
+    if (!publicRateOk(`tagedit:${ip}`, 40, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada edits — thodi der baad try karo.');
+    const body = await readBody(req);
+    const id = shortText(body && body.id, 60);
+    const w = workspaceStore();
+    const row = (w.tagRequests || []).find((r) => r && r.id === id);
+    if (!row || row.source !== 'public-link') throw new HttpError(404, 'Request nahi mili.');
+    if (String(row.status || 'pending').toLowerCase() !== 'pending') throw new HttpError(409, 'Ye request ab pending nahi hai — admin ne aage badha di, edit nahi ho sakti.');
+    const cq = body && body.classQty && typeof body.classQty === 'object' && !Array.isArray(body.classQty) ? body.classQty : null;
+    if (!cq) throw new HttpError(400, 'Quantity bhejo.');
+    const next = (row.rows || []).map((x) => ({ ...x }));
+    const tpl = next[0] || {};
+    const ag = row.agent || {};
+    for (const [clsRaw, qtyRaw] of Object.entries(cq).slice(0, 16)) {
+      const cls = shortText(clsRaw, 12).toUpperCase();
+      if (!/^VC\d{1,2}$/.test(cls)) continue;
+      const qty = Math.max(0, Math.min(5000, Math.round(Number(qtyRaw) || 0)));
+      const hit = next.find((x) => String(x.cls).toUpperCase() === cls);
+      if (hit) { hit.requested = qty; hit.approved = qty; }
+      else if (qty > 0 && next.length < 40) {
+        next.push({ agentId: tpl.agentId || ag.agentId || '', agentName: tpl.agentName || ag.name || '', tl: tpl.tl || ag.tl || '',
+          channel: (tpl.channel || ag.channel) === 'gv' ? 'gv' : 'ff', cls, last: 0, cur: 0, stock: 0, cover: null, priority: '',
+          growth: 0, sugNet: 0, sugGross: 0, requested: qty, approved: qty, remark: 'employee ne edit me joda' });
+      }
+    }
+    const kept = next.filter((x) => (Number(x.approved) || 0) > 0);
+    if (!kept.length) throw new HttpError(400, 'Kam se kam ek class me quantity chahiye.');
+    const before = `${(row.rows || []).map((x) => `${x.cls}×${x.approved}`).join(', ')}`;
+    row.rows = kept;
+    row.total = kept.reduce((n, x) => n + (Number(x.approved) || 0), 0);
+    row.updatedAt = new Date().toISOString();
+    row.editedBy = shortText(body.editedBy, 80) || (row.employee && row.employee.name) || 'employee';
+    row.edits = [...(Array.isArray(row.edits) ? row.edits : []), { at: row.updatedAt, by: row.editedBy, from: before }].slice(-10);
+    await persist('notify');
+    try {
+      recordNotification({ type: 'request', title: '✏️ Tag request edit hui', body: `${row.editedBy}: ${(ag.name || tpl.agentName || 'Agent')} — ${before} → ${kept.map((x) => `${x.cls}×${x.approved}`).join(', ')}`, target: 'admin', meta: { requestId: row.id, link: '#/tagRequest?view=requests' } });
+    } catch { /* optional */ }
+    return sendJson(res, 200, { ok: true, request: tagStatusView(row) });
   }
   if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
     // 🌐 Shared public Employee Link: token is optional/backwards-compatible only.

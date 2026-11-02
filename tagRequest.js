@@ -2338,21 +2338,19 @@ body.colorful .from-hdr { color: #166534; }
   function statusCardHtml(s) {
     const v = STATUS[s.status] || STATUS.pending;
     const at = STEPS.indexOf(s.status);
-    const steps = s.status === 'rejected'
-      ? '<div class="tr-steps"><span class="tr-step done">⏳ Pending</span><span class="tr-step bad">⛔ Rejected</span></div>'
-      : `<div class="tr-steps">${STEPS.map((k, i) => `<span class="tr-step ${i <= at ? 'done' : ''}">${STATUS[k].label}</span>`).join('')}</div>`;
     const cls = (s.classes || []).map((c) => {
       const changed = num(c.requested) !== num(c.approved) && (s.status !== 'pending' || num(c.requested));
       return `<span class="tr-st-cls"><b>${esc(c.cls)}</b> ${changed ? `<s class="dim">${fmt(c.requested)}</s> → <b>${fmt(c.approved)}</b>` : fmt(c.approved)}${c.agent ? ` <small class="dim">${esc(c.agent)}</small>` : ''}</span>`;
     }).join('');
     return `<div class="tr-st-card st-${esc(s.status || 'pending')}">
-      <div class="tr-st-top"><span class="badge ${v.tone}">${v.label}</span><b class="tr-st-agent">${esc(s.agentName || '—')}</b>${s.agents > 1 ? `<small class="dim"> +${s.agents - 1} agents</small>` : ''}<span class="tr-st-total"><b>${fmt(s.total)}</b> tags</span></div>
-      ${steps}
+      <div class="tr-st-top"><b class="tr-st-agent">${esc(s.agentName || '—')}</b>${s.agents > 1 ? `<small class="dim"> +${s.agents - 1} agents</small>` : ''} <span class="badge ${v.tone}">${v.label}</span><span class="tr-st-total"><b>${fmt(s.total)}</b> tags</span></div>
       ${cls ? `<div class="tr-st-classes">${cls}</div>` : ''}
+      ${s.courier ? `<div class="small" style="margin-top:4px">🚚 Courier: <b>${esc(s.courier)}</b>${s.status === 'dispatched' ? '' : ' <span class="dim">(dispatch par isi se jayega)</span>'}</div>` : ''}
       <div class="dim small">📅 ${esc(longDate(s.at))}      <div class="dim small">📦 Items: <b>${esc(itemLabel(s.itemName))}</b></div>
  · ${esc(ago(s.at))}${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : (s.byName ? ` · 👤 entry: ${esc(s.byName)}` : '')} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
       ${s.adminNote ? `<div class="notice green" style="margin-top:8px">💬 Admin note: ${esc(s.adminNote)}</div>` : ''}
-      ${isPublic() && (s.classes || []).length ? `<div style="margin-top:8px"><button type="button" class="btn small" data-tr-again="${esc(s.id)}" title="Fill the form again with this request's agent and quantities">🔁 Request again</button></div>` : ''}
+      ${isPublic() && (s.classes || []).length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${(s.status || 'pending') === 'pending' ? `<button type="button" class="btn small primary" data-tr-edit="${esc(s.id)}" title="Pending request ki quantity badlo">✏️ Edit</button>` : ''}<button type="button" class="btn small" data-tr-again="${esc(s.id)}" title="Fill the form again with this request's agent and quantities">🔁 Request again</button></div>
+      <div class="tr-edit-host" data-tr-edit-host="${esc(s.id)}"></div>` : ''}
     </div>`;
   }
   /** 🔁 v221 — purani request ke agent + qty se form bharo (mobile / address address-book se auto-fill). */
@@ -2490,6 +2488,36 @@ body.colorful .from-hdr { color: #166534; }
       const pool = [].concat((state.employeeSummary && state.employeeSummary.requests) || [], (state.status && state.status.list) || []);
       const s = pool.find((x) => x && x.id === id);
       if (s) repeatRequest(s);
+    }));
+    // ✏️ v3.125.55 — Pending request ko employee khud edit kar sakta hai (class-wise qty).
+    scope.querySelectorAll('[data-tr-edit]').forEach((button) => button.addEventListener('click', () => {
+      const id = button.dataset.trEdit;
+      const pool = [].concat((state.employeeSummary && state.employeeSummary.requests) || [], (state.status && state.status.list) || []);
+      const s = pool.find((x) => x && x.id === id);
+      const host = scope.querySelector(`[data-tr-edit-host="${CSS && CSS.escape ? CSS.escape(id) : id}"]`);
+      if (!s || !host) return;
+      if (host.innerHTML) { host.innerHTML = ''; return; }
+      const have = new Map((s.classes || []).map((c) => [String(c.cls).toUpperCase(), num(c.requested) || num(c.approved)]));
+      const list = [...new Set([...have.keys(), ...CLASS_LIST])];
+      host.innerHTML = `<div class="tr-edit-box" style="margin-top:8px;padding:10px;border:1px dashed var(--line,#cbd5e1);border-radius:10px">
+        <div class="small" style="margin-bottom:6px"><b>✏️ Quantity badlo</b> <span class="dim">(0 = class hatao)</span></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">${list.map((c) => `<label class="small" style="display:flex;flex-direction:column;gap:2px;min-width:70px"><b>${esc(c)}</b><input class="input" type="number" min="0" max="5000" inputmode="numeric" data-tr-edit-cls="${esc(c)}" value="${have.has(c) ? esc(have.get(c)) : ''}" placeholder="0" style="width:80px"></label>`).join('')}</div>
+        <div style="margin-top:8px;display:flex;gap:6px"><button type="button" class="btn small primary" data-tr-edit-save>💾 Save</button><button type="button" class="btn small" data-tr-edit-cancel>Cancel</button><span class="dim small" data-tr-edit-msg></span></div></div>`;
+      host.querySelector('[data-tr-edit-cancel]').addEventListener('click', () => { host.innerHTML = ''; });
+      host.querySelector('[data-tr-edit-save]').addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget, msg = host.querySelector('[data-tr-edit-msg]');
+        const classQty = {};
+        host.querySelectorAll('[data-tr-edit-cls]').forEach((inp) => { const v = String(inp.value || '').trim(); if (v !== '' || have.has(inp.dataset.trEditCls)) classQty[inp.dataset.trEditCls] = Math.max(0, Math.round(num(v))); });
+        if (!Object.values(classQty).some((v) => v > 0)) { msg.textContent = 'Kam se kam ek class me quantity daalo.'; return; }
+        btn.disabled = true; msg.textContent = 'Save ho raha hai…';
+        try {
+          await publicApi('/api/public/tag-request/edit', 'POST', { id, classQty, editedBy: (state.employee && state.employee.name) || '' });
+          U.toast('✅ Request update ho gayi', 'ok');
+          state.employeeSummary = null;
+          await loadEmployeeSummary(true);
+          repaint();
+        } catch (err) { btn.disabled = false; msg.textContent = '⚠️ ' + ((err && err.message) || err); }
+      });
     }));
     scope.querySelectorAll('[data-tr-emp-filter]').forEach((button) => button.addEventListener('click', () => {
       state.employeeHistoryFilter = button.dataset.trEmpFilter || 'all';
