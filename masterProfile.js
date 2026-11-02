@@ -37,6 +37,65 @@ window.FF = window.FF || {};
   const suggest = (avg, stock) => Math.max(0, Math.ceil((Number(avg) || 0) * suggestDays() - (Number(stock) || 0)));
   /** Gross = avg/day × din (bina stock ghataye — pure run-rate requirement). */
   const suggestGro = (avg) => Math.max(0, Math.ceil((Number(avg) || 0) * suggestDays()));
+  /**
+   * Direct-agent tag recommendation. Unlike stock dispatch eligibility, this is driven by
+   * actual class-wise issuance and the T-1 run-rate. A class is shown only when its net need
+   * remains positive after subtracting that class' own stock.
+   */
+  function directDispatchPlan(pr) {
+    const source = Array.isArray(pr && pr.classes) ? pr.classes : [];
+    const channel = pr && pr.ch === 'gv' ? 'gv' : 'ff';
+    let elapsed = 1;
+    try { elapsed = Math.max(1, Number(U.runRateDays ? U.runRateDays(channel) : 1) || 1); } catch { /* keep safe fallback */ }
+    const days = Math.max(1, Number(pr && pr.dispatch && pr.dispatch.days) || suggestDays());
+    const lastDays = Math.max(1, Number(U.daysInMonth && U.daysInMonth(pr && pr.months && pr.months.last)) || 30);
+    const rows = source.map((item) => {
+      const cur = Math.max(0, num(item && item.cur));
+      const last = Math.max(0, num(item && item.last));
+      const stock = Math.max(0, num(item && item.stock));
+      // A class with no MTD issuance falls back to its last-month daily rate, matching the
+      // dashboard's existing dispatch planner. Otherwise use MTD through yesterday only.
+      const useLast = cur <= 0 && last > 0;
+      const issued = useLast ? last : cur;
+      const rateDays = useLast ? lastDays : elapsed;
+      const rate = rateDays > 0 ? issued / rateDays : 0;
+      const gross = Math.max(0, Math.ceil(rate * days));
+      const net = Math.max(0, Math.ceil(rate * days - stock));
+      return {
+        cls: clean(item && item.cls) || 'Other',
+        cur, last, stock, rate, gross, net,
+        basis: useLast ? 'last month' : 'MTD till yesterday'
+      };
+    }).filter((item) => item.net > 0)
+      .sort((a, b) => b.net - a.net || clsRank(a.cls) - clsRank(b.cls));
+    return {
+      days, elapsed, rows,
+      totalNet: rows.reduce((sum, item) => sum + item.net, 0),
+      totalGross: rows.reduce((sum, item) => sum + item.gross, 0),
+      totalStock: rows.reduce((sum, item) => sum + item.stock, 0)
+    };
+  }
+  function directDispatchHtml(pr) {
+    const plan = directDispatchPlan(pr);
+    const meta = `Run-rate: class-wise issuance ÷ ${fmt(plan.elapsed)} days · data till yesterday · ${fmt(plan.days)}-day requirement`;
+    if (!plan.rows.length) {
+      return `<div class="mp-direct-dispatch mp-direct-empty"><b>✅ No tags required right now</b><small>${esc(meta)}</small></div>`;
+    }
+    const lines = plan.rows.map((item) => `<div class="mp-direct-dispatch-row">
+      <span class="mp-direct-dispatch-class"><b>${esc(item.cls)}</b>${item.basis === 'last month' ? '<small>last-month rate</small>' : ''}</span>
+      <span class="mp-direct-dispatch-stock">${fmt(item.stock)}</span>
+      <span class="mp-direct-dispatch-net"><b>${fmt(item.net)}</b></span>
+      <span class="mp-direct-dispatch-gross"><b>${fmt(item.gross)}</b></span>
+    </div>`).join('');
+    return `<div class="mp-direct-dispatch">
+      <div class="mp-direct-dispatch-head"><span>Class</span><span>Stock</span><span>With stock</span><span>Without stock</span></div>
+      ${lines}
+      <div class="mp-direct-dispatch-row mp-direct-dispatch-total">
+        <b>Total</b><b>${fmt(plan.totalStock)}</b><b>${fmt(plan.totalNet)}</b><b>${fmt(plan.totalGross)}</b>
+      </div>
+      <small class="mp-direct-dispatch-meta">${esc(meta)} · 0-need classes hidden</small>
+    </div>`;
+  }
   const sugMode = () => (U.suggestMode ? U.suggestMode() : 'both');
   const canContacts = () => { try { return !FF.auth || FF.auth.can('contacts'); } catch { return true; } };
   const perf = () => (FF.pages && FF.pages.performance) || null;
@@ -2041,11 +2100,23 @@ window.FF = window.FF || {};
   function sugBlock(pr) {
     const d = pr.dispatch || {};
     const isTl = /tl$/.test(pr.kind);
+    if (pr.direct) {
+      const plan = directDispatchPlan(pr);
+      const note = plan.rows.length
+        ? `🏷️ <b>Direct agent tag suggestion</b> — ${esc(pr.directLabel || 'Direct agent')} · priority ${esc(pr.priority || '—')}. Class-wise net need stock ghata kar; sirf positive-need classes listed.`
+        : `✅ ${esc(pr.directLabel || 'Direct agent')} · priority ${esc(pr.priority || 'Low')} — run-rate ke hisaab se abhi kisi class ko tags bhejne ki zarurat nahi.`;
+      return {
+        directPlan: plan,
+        directPlanHtml: directDispatchHtml(pr),
+        vc4: sugPairHtml(plan.totalNet, plan.totalGross),
+        comm: '',
+        note
+      };
+    }
     if (pr.tagRequired) {
       const tagPair = (net, gross) => `<span class="sug-pair sug-pair-tight"><span class="sug-result net"><small>Tag need · after stock</small>${tagChip(net)}</span><span class="sug-result gross"><small>Tags · w/o stock</small><b class="sug-chip wo">🏷️ ${fmt(gross)} tags</b></span></span>`;
       return { vc4: tagPair(d.sugVc4, d.sugVc4Gross || 0), comm: tagPair(d.sugComm, d.sugCommGross || 0), note: `🏷️ <b>TAG REQUIRED</b> — ${esc(pr.directLabel || 'Direct agent')} · stock box nahi jaata, par ${esc(pr.priority)} priority hai to tags chahiye. Suggested ${d.days} din ke run-rate par.` };
     }
-    if (pr.direct) return { vc4: '<span class="dim">No dispatch</span>', comm: '<span class="dim">No dispatch</span>', note: `🚫 ${esc(pr.directLabel || 'Direct agent')} — priority ${esc(pr.priority || 'Low')}: abhi dispatch / tags ki zarurat nahi.` };
     return { vc4: sugPairHtml(d.sugVc4, d.sugVc4Gross || 0), comm: sugPairHtml(d.sugComm, d.sugCommGross || 0), note: isTl ? `TL-level = TL avg/day × ${d.days} din − TL stock = <b>stock ke baad</b> · bina stock = avg/day × ${d.days} · agents ka jod: VC4 <b>${fmt(d.sumAgentVc4)}</b> (w/o ${fmt(d.sumAgentVc4Gross || 0)}) · Comm <b>${fmt(d.sumAgentComm)}</b> (w/o ${fmt(d.sumAgentCommGross || 0)})` : `Suggested = avg/day × ${d.days} din − stock = <b>stock ke baad</b> · bina stock ghataye = avg/day × ${d.days}` };
   }
 
@@ -2414,12 +2485,14 @@ window.FF = window.FF || {};
       ${kpi(isTl ? 'TL stock (total)' : 'Agent Stock', fmt(s.total), `${isTl && ownAgentsChips ? `${ownAgentsChips} · ` : ''}VC4 ${fmt(s.vc4)} · Commercial ${fmt(s.comm)}`, 'k1', stockSpec)}
       ${isTl ? '' : kpi('TL stock', ts.has ? fmt(ts.total) : '—', ts.has ? `${ownAgentsChips ? `${ownAgentsChips} · ` : ''}VC4 ${fmt(ts.vc4)} · Comm ${fmt(ts.comm)}` : (pr.direct ? 'Direct — koi TL nahi' : ''), 'k2', tlStockSpec)}
       ${kpi('Dispatch priority', prioChip(pr.priority), (pr.calc && pr.calc.total.cover != null ? `Cover ${fmt(pr.calc.total.cover, true)} din (all tags)` : (d.cover != null ? `Cover ${fmt(d.cover, true)} din` : '')) + (isTl ? ` · <span class="mp-linkish">agents ki list 👉</span>` : ''), 'k3', isTl ? peopleSpec : stockSpec)}
-      ${kpi(pr.tagRequired ? `Tags required · VC4 · ${d.days} din` : `Suggested VC4 · ${d.days} din`, sg.vc4, `avg ${fmt(d.avgVc4, true)}/day × ${d.days} din${pr.tagRequired ? '' : ` · stock − ${fmt(s.vc4)}`}`, pr.tagRequired ? 'k7' : 'k4', `${curSpec}&group=VC4`)}
-      ${kpi(pr.tagRequired ? 'Tags required · Comm.' : 'Suggested Commercial', sg.comm, `avg ${fmt(d.avgComm, true)}/day${pr.tagRequired ? '' : ` · stock − ${fmt(s.comm)}`}`, pr.tagRequired ? 'k7' : 'k5', `${curSpec}&group=COMM`)}
+      ${pr.direct
+        ? kpi(`🏷️ Suggested tags · ${fmt(d.days)} din`, sg.vc4, `${esc(pr.directLabel || 'Direct agent')} · class-wise · ${fmt(sg.directPlan.totalNet)} tags after stock`, 'k7', curSpec)
+        : `${kpi(pr.tagRequired ? `Tags required · VC4 · ${d.days} din` : `Suggested VC4 · ${d.days} din`, sg.vc4, `avg ${fmt(d.avgVc4, true)}/day × ${d.days} din${pr.tagRequired ? '' : ` · stock − ${fmt(s.vc4)}`}`, pr.tagRequired ? 'k7' : 'k4', `${curSpec}&group=VC4`)}
+          ${kpi(pr.tagRequired ? 'Tags required · Comm.' : 'Suggested Commercial', sg.comm, `avg ${fmt(d.avgComm, true)}/day${pr.tagRequired ? '' : ` · stock − ${fmt(s.comm)}`}`, pr.tagRequired ? 'k7' : 'k5', `${curSpec}&group=COMM`)}`}
       ${kpi('Issued this month', fmt(t.curTotal), `VC4 ${fmt(t.curVc4)} · Comm ${fmt(t.curComm)}`, 'k6', curSpec)}
       ${kpi('Issued last month', fmt(t.lastTotal), `VC4 ${fmt(t.lastVc4)} · Comm ${fmt(t.lastComm)}`, 'k8', lastSpec)}
     </div>`;
-    const stockNotes = `<p class="mp-note ${pr.tagRequired ? 'tag' : ''}">${sg.note}</p>${stockNote}`;
+    const stockNotes = `<p class="mp-note ${pr.direct || pr.tagRequired ? 'tag' : ''}">${sg.note}</p>${sg.directPlanHtml || ''}${stockNote}`;
     // v3.44 — VC4 · VC20 · VC5+ teeno alag rows me (GV me sheet-first, FF me tag-ledger): har cell
     // apni detail kholta hai, aur sheet vs ledger ka farq neeche note me saaf likha rehta hai.
     const summary = groupTableHtml(pr, { cur: curSpec, last: lastSpec, stock: stockSpec });
@@ -3030,5 +3103,5 @@ window.FF = window.FF || {};
     return out;
   }
 
-  FF.masterProfile = { _comparableMtdGrowth: comparableMtdGrowth, _growthBlock: growthBlock, supports, quick, build, buildNow, html, insightRows, groupBinsFor, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
+  FF.masterProfile = { _comparableMtdGrowth: comparableMtdGrowth, _growthBlock: growthBlock, supports, quick, build, buildNow, html, insightRows, groupBinsFor, csvRows, waText, renderInto, open, warm, load, loadFor, onData, isLoaded: () => loadedOnce, invalidate: resetProfileCache, suggest, suggestGro, directDispatchPlan, directDispatchHtml, findFfAgent, findGvAgent, mobileFor, reportDataRow, issuanceCardsHtml, gvTlSnapshot, peopleTableHtml, personFromRow, get suggestDays() { return suggestDays(); }, _buildSoon: buildSoon, _limits: LIMITS };
 })(window.FF);
