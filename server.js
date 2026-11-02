@@ -7728,7 +7728,7 @@ async function handleApi(req, res, url) {
     if (tagSheetStore) return tagSheetStore;
     const url = (process.env.APPS_SCRIPT_URL || '').trim(), secret = (process.env.APPS_SCRIPT_SECRET || '').trim();
     if (!url || !secret) return null;
-    try { tagSheetStore = new AppsScriptStore({ url, secret }); } catch { tagSheetStore = null; }
+    try { tagSheetStore = new AppsScriptStore({ url, secret }); tagSheetStore.timeoutMs = Math.max(tagSheetStore.timeoutMs || 0, Number(process.env.TAG_SHEET_TIMEOUT_MS) || 60000); } catch { tagSheetStore = null; }   // v3.125.61 — sheet append slow ho sakta hai (bada doc)
     return tagSheetStore;
   }
   const tagSheetFieldValue = (field, x, req, event) => {
