@@ -1276,6 +1276,7 @@ function clearLoginFailures(key) { attempts.delete(key); }
 // can still prove ownership. On a successful historical-password match, only the password hash
 // is restored into the CURRENT user record; settings/sessions/other data are untouched.
 // This runs only after a normal password check fails and only on the Apps Script cloud backend.
+const TAG_SHEET_FALLBACK_ID = String(process.env.TAG_SHEET_ID || '1SbDSje9DKXi5vzBWI4TWITPoPfH_OsOzab_p6CpRI5A').trim();
 const pwHistoryCache = { at: 0, data: null, failAt: 0 };
 async function recoverPasswordFromHistory(loginId, password, currentUser) {
   if (!sheetsStore || STORAGE_BACKEND !== 'appsscript' || !currentUser || !password) return false;
@@ -7913,7 +7914,8 @@ async function handleApi(req, res, url) {
       if (cfg.rowMode === 'agent-class-gap' && ri < reqs.length - 1) rows.push(header.map(() => ''));
       return out.rows.length;
     });
-    const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
+    // v3.125.62 — Settings me sheet link na ho to alag "Tag Requests" sheet (purani storage sheet Google size-limit par hai).
+    const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || TAG_SHEET_FALLBACK_ID;
     if (cfg.rowMode === 'agent-class-gap' && rows.length) {
       // Separate submissions bhi visually separate hon: agar last successfully-synced request
       // kisi doosre agent ki thi, to current agent se pehle exactly one blank row bhejo.
@@ -7995,7 +7997,8 @@ async function handleApi(req, res, url) {
         todo.forEach((r) => { r.sheetSync = { at: new Date().toISOString(), event, error: msg }; });
         persist('notify').catch(() => {});
         const delays = [20e3, 60e3, 180e3];
-        if (attempt < delays.length) { await new Promise((ok) => setTimeout(ok, delays[attempt])); return run(attempt + 1); }
+        // v3.125.62 — retry chain ko block nahi karta: nayi approvals turant jaati hain, purani alag timer se retry hoti hain.
+        if (attempt < delays.length) setTimeout(() => { sheetSyncChain = sheetSyncChain.then(() => run(attempt + 1)).catch(() => {}); }, delays[attempt]).unref?.();
       }
     };
     sheetSyncChain = sheetSyncChain.then(() => run(0)).catch(() => {});
