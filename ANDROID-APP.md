@@ -1,5 +1,14 @@
 # 📱 Android app jaisa experience
 
+
+### v3.74 — Device security + offline read-only
+
+- Options → Device security: mobile PWA par fingerprint / Face ID / phone screen-lock verification (WebAuthn platform authenticator).
+- Auto-lock after backgrounding: immediate, 1, 5 or 15 minutes. Manual Lock app now, replace credential and disable (device re-verification required).
+- Device public key + credential ID local IndexedDB me; private key/biometric template phone authenticator se bahar nahi aate.
+- Offline me saved report snapshots view-only; dashboard API writes are blocked and form submissions are not queued/replayed.
+- Full setup and compatibility notes: [NATIVE-MOBILE-EXPERIENCE.md](NATIVE-MOBILE-EXPERIENCE.md).
+
 ## v3.73 — Native Android shell (sabse naya)
 
 Phone / installed app me ab layout Material 3 (Android) jaisa hai — `native-app.js` + `native-shell.css`, sirf `html.mobile-ui` par (desktop bilkul same):
