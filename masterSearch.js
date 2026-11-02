@@ -2043,20 +2043,25 @@ FF.pages = FF.pages || {};
       const wd = workedDays(pr, isTl, ch, m.cur);
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
       const tlName = (pr.tl && pr.tl.name) || '';
-      // 🎯 v3.125.56 — Dispatch = Expected this month (run-rate × mahine ke din) − is mahine issue ho chuke − stock.
-      // Wahi logic jo "Expected this month" box ka hai, class-wise (VC4/VC20 · VC5+). Direct / priority se farak nahi.
+      // 🎯 v3.125.59 — Dispatch = run-rate/day × Settings ke din (Suggested dispatch days) − stock, class-wise.
+      // Run-rate = is mahine ka issuance ÷ din (is mahine kuch nahi to pichhle mahine ka). Direct / priority se farak nahi.
+      const sDays = (U.suggestDays ? U.suggestDays() : 0) || days || 15;
       const expA = num(expSplit.VC4) + num(expSplit.VC20), expB = num(expSplit['VC5+']);
       const curA = num(curBins.VC4) + num(curBins.VC20), curB = num(curBins['VC5+']);
-      const needLine = (label, exp, cur, stock) => {
-        const left = Math.max(0, exp - cur), need = Math.max(0, left - stock);
-        return { label, exp, cur, stock, left, need };
+      const needRow = (label, cur, last, stock, exp) => {
+        let rate = cur / elapsed, basis = '';
+        if (!cur && last) { rate = last / lastDays; basis = 'pichhla mahina'; }
+        const need = Math.ceil(rate * sDays);
+        return { label, rate, basis, need, stock, exp, dispatch: Math.max(0, need - stock) };
       };
-      const dl = [needLine('VC4 / VC20', expA, curA, num(stk.A)), needLine('VC5+', expB, curB, num(stk.B))];
-      const needTotal = dl.reduce((n, x) => n + x.need, 0);
-      const dLine = (x) => `<div class="msp-cls-line"><span class="c1">${esc(x.label)}</span><span class="c2"><span class="msp-hl ${x.need ? 'red' : 'green'}">${x.need ? `dispatch ${U.fmt(x.need)}` : '0'}</span></span><span class="c3 small dim">${U.fmt(x.exp)} − ${U.fmt(x.cur)} − stock ${U.fmt(x.stock)}</span></div>`;
-      const sugBody = `<div class="msp-plan">${dl.map(dLine).join('')}</div><div class="msp-tot"><div class="msp-cls-line msp-tot-line"><span class="c1">Total</span><span class="c2"><span class="msp-hl ${needTotal ? 'red' : 'green'}">${needTotal ? `dispatch ${U.fmt(needTotal)}` : '✅ stock kaafi hai'}</span></span><span class="c3"></span></div></div>`;
-      const sug = box('k4', `🎯 Dispatch chahiye · ${esc(ymLabel(m.cur || U.reportYm()))} end tak`, sugBody,
-        `Expected this month − is mahine issue ho chuke − stock${pr.direct ? ` · ${esc(pr.directLabel || 'Direct')}` : ''}`, spec('mtd', m.cur));
+      const dl = [needRow('VC4 / VC20', curA, num(la.A), num(stk.A), expA), needRow('VC5+', curB, num(la.B), num(stk.B), expB)];
+      const dSum = (k) => dl.reduce((n, x) => n + x[k], 0);
+      const dCell = (n) => `<b class="msp-dt-pill ${n ? 'red' : 'green'}">${U.fmt(n)}</b>`;
+      const sugBody = `<table class="msp-dtable"><thead><tr><th>Class</th><th>Run-rate/day</th><th>Need · ${U.fmt(sDays)} din</th><th>Stock</th><th>Dispatch</th></tr></thead><tbody>
+        ${dl.map((x) => `<tr><td><b>${esc(x.label)}</b></td><td>${U.fmt(x.rate, true)}${x.basis ? ' <small class="dim">*</small>' : ''}</td><td>${U.fmt(x.need)}</td><td>${U.fmt(x.stock)}</td><td>${dCell(x.dispatch)}</td></tr>`).join('')}
+        <tr class="tot"><td>Total</td><td>${U.fmt(dSum('rate'), true)}</td><td>${U.fmt(dSum('need'))}</td><td>${U.fmt(dSum('stock'))}</td><td>${dCell(dSum('dispatch'))}</td></tr></tbody></table>`;
+      const sug = box('k4', `🎯 Dispatch · ${U.fmt(sDays)} din ka`, sugBody,
+        `run-rate × ${U.fmt(sDays)} din (Settings) − stock${dl.some((x) => x.basis) ? ' · * pichhle mahine ka run-rate' : ''} · month-end expected ${U.fmt(expA + expB)}${pr.direct ? ` · ${esc(pr.directLabel || 'Direct')}` : ''}`, spec('mtd', m.cur));
     /** 📈 Growth tile ka neeche wala text: kya compare hua + run-rate + expected month-end vs last month. */
     const growthSub = (p1, m) => {
       const b = (p1 && p1.basis) || {};
