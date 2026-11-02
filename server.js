@@ -1276,16 +1276,25 @@ function clearLoginFailures(key) { attempts.delete(key); }
 // can still prove ownership. On a successful historical-password match, only the password hash
 // is restored into the CURRENT user record; settings/sessions/other data are untouched.
 // This runs only after a normal password check fails and only on the Apps Script cloud backend.
+const pwHistoryCache = { at: 0, data: null, failAt: 0 };
 async function recoverPasswordFromHistory(loginId, password, currentUser) {
   if (!sheetsStore || STORAGE_BACKEND !== 'appsscript' || !currentUser || !password) return false;
   try {
-    const h = await sheetsStore.history({ withData: true });
+    // ⚡ v3.125.58 — login kabhi Apps Script ke slow / timeout par na latke: history max 6 s, aur 3 min cache.
+    const now = Date.now();
+    let h = pwHistoryCache.data && now - pwHistoryCache.at < 3 * 60e3 ? pwHistoryCache.data : null;
+    if (!h) {
+      if (pwHistoryCache.failAt && now - pwHistoryCache.failAt < 2 * 60e3) return false;
+      h = await Promise.race([sheetsStore.history({ withData: true }), new Promise((r) => setTimeout(() => r(null), 6000))]);
+      if (!h) { pwHistoryCache.failAt = Date.now(); return false; }
+      pwHistoryCache.data = h; pwHistoryCache.at = Date.now(); pwHistoryCache.failAt = 0;
+    }
     const entries = (h.entries || [])
       .filter((e) => e && e.kind === 'users' && e.data)
       .sort((a, b) => (Date.parse(b.savedAt) || 0) - (Date.parse(a.savedAt) || 0));
     const input = String(loginId || '').trim();
     const lower = input.toLowerCase();
-    const digits = input.replace(/\\D/g, '');
+    const digits = input.replace(/\D/g, '');
     for (const e of entries.slice(0, 40)) {
       let users = null;
       try { users = sheetsStore.decode('users', { v: e.version, data: e.data }); } catch { continue; }
@@ -1295,7 +1304,7 @@ async function recoverPasswordFromHistory(loginId, password, currentUser) {
         if (String(x.username || '').trim().toLowerCase() === String(currentUser.username || '').trim().toLowerCase()) return true;
         if (lower && x.email && String(x.email).trim().toLowerCase() === lower) return true;
         if (digits.length >= 7 && x.mobile) {
-          const md = String(x.mobile).replace(/\\D/g, '');
+          const md = String(x.mobile).replace(/\D/g, '');
           if (md === digits) return true;
           if (md.length >= 10 && digits.length >= 10 && md.slice(-10) === digits.slice(-10)) return true;
         }
@@ -1303,7 +1312,7 @@ async function recoverPasswordFromHistory(loginId, password, currentUser) {
       });
       if (historical && historical.password && verifyPassword(password, historical.password)) {
         currentUser.password = historical.password;
-        await persist('users');
+        backgroundPersistKinds(['users']);
         console.warn('🔐 Password recovered from APP_STORAGE_HISTORY for an existing account:', currentUser.username);
         logAudit(currentUser, 'password_recovered_from_history', { target: currentUser.username, ip: 'login-recovery', note: 'historical password hash restored' });
         return true;
@@ -5595,8 +5604,9 @@ async function maybeRequireOtp(u, loginId, ip) {
     const ticket = crypto.randomBytes(16).toString('hex');
     otps.set(ticket, { username: u.username, code, exp: Date.now() + 10 * 60e3, tries: 0, ip, loginId });
     if (otps.size > 50) { for (const [k, v] of otps) if (v.exp < Date.now()) otps.delete(k); }
-    await sendMail({ ...cfg, to: u.email }, `🔐 Login OTP ${code} · ${db.settings.brand || 'Dashboard'}`,
-      `Aapka login code: ${code}\n\nYe code 10 min ke liye hai. login ID "${loginId}" · IP ${ip}.\nAgar ye aap nahi the to turant password badal do.`);
+    // ⚡ Mail ka intezaar nahi — OTP screen turant, email peeche se.
+    sendMail({ ...cfg, to: u.email }, `🔐 Login OTP ${code} · ${db.settings.brand || 'Dashboard'}`,
+      `Aapka login code: ${code}\n\nYe code 10 min ke liye hai. login ID "${loginId}" · IP ${ip}.\nAgar ye aap nahi the to turant password badal do.`).catch((err) => console.warn('OTP mail:', err && err.message));
     logAudit(u, 'otp_sent', { target: loginId, ip, note: 'naye IP par OTP email bheja' });
     return { ticket, hint: `Code ${u.email} par bheja gaya (10 min valid)` };
   } catch (err) {
