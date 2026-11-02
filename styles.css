@@ -7257,3 +7257,85 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 /* 🏢 Master Search — office stock (FF/GV dono me holder nahi) */
 .badge.office { background: #f59e0b; color: #fff; font-weight: 800; letter-spacing: .03em; box-shadow: 0 0 0 2px #fde68a; }
 tr.ms-office-row td { background: #fffbeb; }
+
+
+/* 🎯 Direct-agent class-wise tag suggestion — aligned columns, hide zero net-need classes. */
+.mp-direct-dispatch {
+  width: 100%;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #0f766e 22%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, #0f766e 4%, var(--card));
+  font-size: 12px;
+}
+.mp-direct-dispatch-head,
+.mp-direct-dispatch-row {
+  display: grid;
+  grid-template-columns: minmax(76px, 1.25fr) repeat(3, minmax(66px, .9fr));
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+}
+.mp-direct-dispatch-head {
+  color: var(--muted);
+  background: color-mix(in srgb, #0f766e 8%, var(--card));
+  border-bottom: 1px solid var(--line);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .025em;
+  text-align: right;
+}
+.mp-direct-dispatch-head span:first-child { text-align: left; }
+.mp-direct-dispatch-row { border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
+.mp-direct-dispatch-row:last-of-type { border-bottom: 0; }
+.mp-direct-dispatch-row > span,
+.mp-direct-dispatch-row > b { text-align: right; font-variant-numeric: tabular-nums; }
+.mp-direct-dispatch-class { text-align: left !important; display: flex; flex-direction: column; gap: 2px; }
+.mp-direct-dispatch-class small { color: var(--muted); font-size: 9px; font-weight: 650; }
+.mp-direct-dispatch-stock { color: var(--muted); font-weight: 700; }
+.mp-direct-dispatch-net b {
+  display: inline-block;
+  min-width: 36px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: #14532d;
+  background: #dcfce7;
+  font-size: 13px;
+  font-weight: 900;
+}
+.mp-direct-dispatch-gross b {
+  display: inline-block;
+  min-width: 36px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: #075985;
+  background: #e0f2fe;
+  font-size: 13px;
+  font-weight: 900;
+}
+.mp-direct-dispatch-total {
+  background: color-mix(in srgb, #0f766e 8%, var(--card));
+  font-weight: 900;
+}
+.mp-direct-dispatch-total > b:first-child { text-align: left; }
+.mp-direct-dispatch-meta,
+.mp-direct-empty small {
+  display: block;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.mp-direct-empty { padding: 12px; }
+.mp-direct-empty > b { display: block; color: #15803d; font-size: 13px; }
+.mp-direct-empty small { padding: 4px 0 0; }
+@media (max-width: 480px) {
+  .mp-direct-dispatch-head, .mp-direct-dispatch-row {
+    grid-template-columns: minmax(58px, 1.05fr) repeat(3, minmax(54px, .9fr));
+    gap: 4px;
+    padding: 8px 7px;
+  }
+  .mp-direct-dispatch-head { font-size: 9px; }
+  .mp-direct-dispatch-net b, .mp-direct-dispatch-gross b { min-width: 30px; padding: 3px 5px; font-size: 11px; }
+}
