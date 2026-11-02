@@ -2054,14 +2054,33 @@ FF.pages = FF.pages || {};
         const need = Math.ceil(rate * sDays);
         return { label, rate, basis, need, stock, exp, dispatch: Math.max(0, need - stock) };
       };
-      const dl = [needRow('VC4 / VC20', curA, num(la.A), num(stk.A), expA), needRow('VC5+', curB, num(la.B), num(stk.B), expB)];
+      // Class-wise (TVC): VC4/VC20 · VC5 · VC6 · VC7 · VC12 · VC16 — har class ka apna run-rate, need, stock, final.
+      const dl = (() => {
+        const list = Array.isArray(pr.classes) ? pr.classes : [];
+        const nk = (v) => String(v || '').toUpperCase().replace(/\s+/g, '');
+        const groups = (FF.config.tvcGroups || []).map((g) => ({ label: String(g.tvc) === '4' ? 'VC4 / VC20' : `VC${g.tvc}`, set: new Set([...(g.cch || []).map(nk), `VC${g.tvc}`]) }));
+        if (!list.some((x) => num(x.stock) || num(x.cur) || num(x.last)) || !groups.length) {
+          return [needRow('VC4 / VC20', curA, num(la.A), num(stk.A), expA), needRow('VC5+', curB, num(la.B), num(stk.B), expB)];
+        }
+        if (!groups.some((g) => g.set.has('VC20'))) { const g4 = groups.find((g) => g.set.has('VC4')); if (g4) g4.set.add('VC20'); }
+        const rows = groups.map((g) => {
+          let st = 0, cu = 0, l = 0;
+          list.forEach((x) => { if (g.set.has(nk(x.cls))) { st += Math.max(0, num(x.stock)); cu += Math.max(0, num(x.cur)); l += Math.max(0, num(x.last)); } });
+          return needRow(g.label, cu, l, st, 0);
+        });
+        const known = new Set(groups.flatMap((g) => [...g.set]));
+        let st = 0, cu = 0, l = 0;
+        list.forEach((x) => { if (!known.has(nk(x.cls))) { st += Math.max(0, num(x.stock)); cu += Math.max(0, num(x.cur)); l += Math.max(0, num(x.last)); } });
+        if (st || cu || l) rows.push(needRow('Other', cu, l, st, 0));
+        return rows;
+      })();
       const dSum = (k) => dl.reduce((n, x) => n + x[k], 0);
-      const dCell = (n) => `<b class="msp-dt-pill ${n ? 'red' : 'green'}">${U.fmt(n)}</b>`;
-      const sugBody = `<table class="msp-dtable"><thead><tr><th>Class</th><th>Run-rate/day</th><th>Need · ${U.fmt(sDays)} din</th><th>Stock</th><th>Dispatch</th></tr></thead><tbody>
-        ${dl.map((x) => `<tr><td><b>${esc(x.label)}</b></td><td>${U.fmt(x.rate, true)}${x.basis ? ' <small class="dim">*</small>' : ''}</td><td>${U.fmt(x.need)}</td><td>${U.fmt(x.stock)}</td><td>${dCell(x.dispatch)}</td></tr>`).join('')}
-        <tr class="tot"><td>Total</td><td>${U.fmt(dSum('rate'), true)}</td><td>${U.fmt(dSum('need'))}</td><td>${U.fmt(dSum('stock'))}</td><td>${dCell(dSum('dispatch'))}</td></tr></tbody></table>`;
-      const sug = box('k4', `🎯 Dispatch · ${U.fmt(sDays)} din ka`, sugBody,
-        `run-rate × ${U.fmt(sDays)} din (Settings) − stock${dl.some((x) => x.basis) ? ' · * pichhle mahine ka run-rate' : ''} · month-end expected ${U.fmt(expA + expB)}${pr.direct ? ` · ${esc(pr.directLabel || 'Direct')}` : ''}`, spec('mtd', m.cur));
+      const dFinal = (n) => `<span class="msp-dt-pill ${n ? 'red' : 'green'}">${U.fmt(n)}</span>`;
+      const sugBody = `<div class="msp-dtable-wrap"><table class="msp-dtable"><thead><tr><th>Class</th><th>Need</th><th>Stock</th><th>Final</th></tr></thead><tbody>
+        ${dl.map((x) => `<tr${x.need || x.stock ? '' : ' class="zero"'}><td><span class="msp-dt-cls">${esc(x.label)}</span></td><td title="${esc(`${U.fmt(x.rate, true)}/day × ${U.fmt(sDays)} din${x.basis ? ' (pichhle mahine ka run-rate)' : ''}`)}">${U.fmt(x.need)}${x.basis ? '<sup>*</sup>' : ''}</td><td>${U.fmt(x.stock)}</td><td>${dFinal(x.dispatch)}</td></tr>`).join('')}
+        <tr class="tot"><td>Total</td><td>${U.fmt(dSum('need'))}</td><td>${U.fmt(dSum('stock'))}</td><td>${dFinal(dSum('dispatch'))}</td></tr></tbody></table></div>`;
+      const sug = box('k4', `🎯 Dispatch · ${U.fmt(sDays)} din`, sugBody,
+        `Need = run-rate/day × ${U.fmt(sDays)} din (Settings) · Final = Need − Stock${dl.some((x) => x.basis) ? ' · * pichhle mahine ka run-rate' : ''} · month-end expected ${U.fmt(expA + expB)}${pr.direct ? ` · ${esc(pr.directLabel || 'Direct')}` : ''}`, spec('mtd', m.cur));
     /** 📈 Growth tile ka neeche wala text: kya compare hua + run-rate + expected month-end vs last month. */
     const growthSub = (p1, m) => {
       const b = (p1 && p1.basis) || {};

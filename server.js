@@ -7984,6 +7984,8 @@ async function handleApi(req, res, url) {
     const run = async (attempt) => {
       const todo = list.filter((r) => r.status === 'approved' && !isSheetSynced(r));
       if (!todo.length) return;
+      const startedAt = new Date().toISOString();
+      todo.forEach((r) => { r.sheetSyncStartedAt = startedAt; });
       try {
         await pushTagRequestsToSheet(todo, event, true);
         persist('notify').catch(() => {});
@@ -7998,6 +8000,24 @@ async function handleApi(req, res, url) {
     };
     sheetSyncChain = sheetSyncChain.then(() => run(0)).catch(() => {});
     return sheetSyncChain;
+  }
+  // 🧹 v3.125.60 — Sweeper: Approved request jiska Google Sheet entry nahi hua (server restart / Apps Script timeout /
+  // retries khatam) — har 5 min (boot ke 60 s baad pehli baar) dobara bhejo. Pichhle 3 din ki approvals hi.
+  if (!globalThis.__tagSheetSweepOn) {
+    globalThis.__tagSheetSweepOn = true;
+    const sweep = () => {
+      try {
+        if (!tagSheetConfig().enabled) return;
+        const now = Date.now(), cutoff = now - 3 * 864e5;
+        const ts = (v) => Date.parse(v || '') || 0;
+        const rows = (workspaceStore().tagRequests || []).filter((r) => r && r.status === 'approved' && !isSheetSynced(r)
+          && ts(r.updatedAt || r.at) > cutoff && now - ts(r.updatedAt || r.at) > 90e3
+          && !(r.sheetSyncStartedAt && now - ts(r.sheetSyncStartedAt) < 10 * 60e3));
+        if (rows.length) { console.log(`tag-request sheet sweep: ${rows.length} approved request(s) bina sheet entry — bhej rahe hain`); syncApprovedToSheet(rows); }
+      } catch (err) { console.warn('tag-request sheet sweep:', err && err.message); }
+    };
+    const t1 = setTimeout(sweep, 60e3); if (t1.unref) t1.unref();
+    const t2 = setInterval(sweep, 5 * 60e3); if (t2.unref) t2.unref();
   }
   if (p === '/api/tag-requests' && method === 'GET') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');

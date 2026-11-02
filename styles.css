@@ -7339,12 +7339,22 @@ tr.ms-office-row td { background: #fffbeb; }
   .mp-direct-dispatch-head { font-size: 9px; }
   .mp-direct-dispatch-net b, .mp-direct-dispatch-gross b { min-width: 30px; padding: 3px 5px; font-size: 11px; }
 }
-/* 🎯 v3.125.59 — Master Search dispatch box: chhoti saaf table (box ke text jitna size) */
-.msp-dtable { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.3; margin-top: 4px; table-layout: fixed; }
-.msp-dtable th { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; color: var(--muted, #64748b); text-align: right; padding: 4px 6px; border-bottom: 1px solid rgba(100, 116, 139, .25); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.msp-dtable td { text-align: right; padding: 5px 6px; border-bottom: 1px solid rgba(100, 116, 139, .12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 🎯 v3.125.60 — Master Search dispatch box: class-wise colourful table (sheet jaisa), box ke text jitna size */
+.msp-dtable-wrap { width: 100%; overflow-x: auto; margin-top: 6px; border-radius: 10px; border: 1px solid rgba(100, 116, 139, .2); }
+.msp-dtable { width: 100%; border-collapse: collapse; font-size: 12.5px; line-height: 1.35; font-weight: 500; }
+.msp-dtable th { background: linear-gradient(135deg, #fde047, #facc15); color: #422006; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; text-align: right; padding: 6px 10px; white-space: nowrap; }
+.msp-dtable td { text-align: right; padding: 5px 10px; border-top: 1px solid rgba(100, 116, 139, .14); white-space: nowrap; font-size: 12.5px; font-weight: 600; color: var(--text, #0f172a); }
 .msp-dtable th:first-child, .msp-dtable td:first-child { text-align: left; }
-.msp-dtable tr.tot td { font-weight: 800; border-bottom: 0; background: rgba(59, 130, 246, .07); }
-.msp-dt-pill { display: inline-block; min-width: 34px; padding: 1px 8px; border-radius: 999px; font-size: 12px; text-align: center; }
+.msp-dtable tbody tr:nth-child(even):not(.tot) td { background: rgba(250, 204, 21, .07); }
+.msp-dtable tr.zero td { color: var(--muted, #94a3b8); }
+.msp-dtable .msp-dt-cls { font-weight: 800; font-size: 12.5px; }
+.msp-dtable tr.tot td { font-weight: 800; background: rgba(59, 130, 246, .10); border-top: 2px solid rgba(59, 130, 246, .35); }
+.msp-dtable sup { color: #b45309; font-size: 9px; margin-left: 1px; }
+.msp-dtable .msp-dt-pill { display: inline-block; min-width: 30px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 800; line-height: 1.5; text-align: center; }
 .msp-dt-pill.red { background: #fee2e2; color: #b91c1c; }
 .msp-dt-pill.green { background: #dcfce7; color: #15803d; }
+[data-theme="dark"] .msp-dtable th { background: linear-gradient(135deg, #a16207, #ca8a04); color: #fefce8; }
+[data-theme="dark"] .msp-dt-pill.red { background: rgba(239, 68, 68, .22); color: #fecaca; }
+[data-theme="dark"] .msp-dt-pill.green { background: rgba(34, 197, 94, .2); color: #bbf7d0; }
+.mp-kpi .msp-dtable, .mp-kpi .msp-dtable th, .mp-kpi .msp-dtable td, .mp-kpi .msp-dtable span { word-break: normal; overflow-wrap: normal; letter-spacing: normal; }
+.mp-kpi b .msp-dtable-wrap { display: block; font-weight: 500; }
