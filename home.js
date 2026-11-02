@@ -1373,7 +1373,7 @@ FF.pages = FF.pages || {};
     if (custBtn) custBtn.addEventListener('click', () => homeLayout.toggle(root, custBtn));
 
     const quick = U.$('#home-quick', root);
-    if (quick) quick.innerHTML = `<div class="chip-row"><span class="chip on">🟩 GV aaj · GV Master (live)</span><span class="chip">🧾 EIR: FF + GV history</span><span class="chip dim">📦 Stock: StockDataa + Tag Assignment</span></div>`;
+    if (quick) quick.innerHTML = `<div class="chip-row"><span class="chip on channel-badge gv">🟩 GV aaj · GV Master (live)</span><span class="chip">🧾 EIR: FF + GV history</span><span class="chip dim">📦 Stock: StockDataa + Tag Assignment</span></div>`;
 
     // ✅ v3.78 — "Today's work" card: pending Tag Requests + one-click shortcuts (cheap: one small API call).
     try { if (FF.targetAlerts) FF.targetAlerts.mount(U.$('#home-target-alerts', root)); } catch { /* ignore */ }
