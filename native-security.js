@@ -532,8 +532,6 @@ window.FF = window.FF || {};
     }
   }
   function start() {
-    installAuthHooks();
-    installOfflineGuard();
     document.addEventListener('click', (event) => {
       if (event.target && event.target.closest && event.target.closest('#nab-more, #top-more')) setTimeout(addMenuItem, 0);
     }, true);
@@ -561,5 +559,9 @@ window.FF = window.FF || {};
     },
     status: function () { return { enabled: !!(state.config && state.config.enabled), locked: state.locked, username: state.username }; }
   };
+  // Install these hooks synchronously: app.js registers its DOMContentLoaded boot handler earlier.
+  // Wrapping auth.init only from start() would be too late for the first restored-session check.
+  installAuthHooks();
+  installOfflineGuard();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })(window.FF);
