@@ -1,0 +1,278 @@
+/* Clean UI Polish Pack — v3.125.56.
+ * Presentation only: loaded last, scoped to the workspace, no scripts/fonts/frameworks.
+ * Keep theme/branding variables, KPI palettes, data, permissions and navigation intact.
+ * A few scoped !important rules deliberately undo legacy Desk/mobile !important styles.
+ */
+:root {
+  --polish-radius: 16px;
+  --polish-shadow: 0 1px 2px rgb(15 23 42 / 4%), 0 5px 16px -10px rgb(15 23 42 / 12%);
+  --polish-soft: color-mix(in srgb, var(--ink) 3%, var(--card));
+  --polish-action: color-mix(in srgb, var(--brand) 88%, #0f172a);
+  --polish-ff: #1d4ed8;
+  --polish-ff-bg: #eff6ff;
+  --polish-ff-line: #bfdbfe;
+  --polish-gv: #047857;
+  --polish-gv-bg: #ecfdf5;
+  --polish-gv-line: #a7f3d0;
+  --polish-danger: #b91c1c;
+  --polish-danger-bg: #fff1f2;
+  --polish-danger-line: #fecdd3;
+  --polish-office: #92400e;
+  --polish-office-bg: #fffbeb;
+  --polish-office-line: #fcd34d;
+}
+html[data-theme="dark"] {
+  --polish-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+  --polish-action: color-mix(in srgb, var(--brand) 55%, #0f172a);
+  --polish-ff: #93c5fd;
+  --polish-ff-bg: #172b48;
+  --polish-ff-line: #29476c;
+  --polish-gv: #6ee7b7;
+  --polish-gv-bg: #102f2a;
+  --polish-gv-line: #245348;
+  --polish-danger: #fda4af;
+  --polish-danger-bg: #3b1c27;
+  --polish-danger-line: #713344;
+  --polish-office: #fcd34d;
+  --polish-office-bg: #332912;
+  --polish-office-line: #6b5120;
+}
+/* Tag Request intentionally remains a light workspace, including inside a dark shell. */
+html[data-ui-polish="clean"] .main:has(.page-tagRequest) {
+  --polish-soft: color-mix(in srgb, var(--ink) 3%, var(--card));
+  --polish-action: color-mix(in srgb, var(--brand) 60%, #0f172a);
+  --polish-ff: #1d4ed8; --polish-ff-bg: #eff6ff; --polish-ff-line: #bfdbfe;
+  --polish-gv: #047857; --polish-gv-bg: #ecfdf5; --polish-gv-line: #a7f3d0;
+  --polish-danger: #b91c1c; --polish-danger-bg: #fff1f2; --polish-danger-line: #fecdd3;
+  --polish-office: #92400e; --polish-office-bg: #fffbeb; --polish-office-line: #fcd34d;
+}
+
+/* 1. Quieter shell. Do not change the mobile safe-area, navigation or sticky geometry. */
+html[data-ui-polish="clean"] .content > .topbar {
+  background: var(--card);
+  box-shadow: 0 1px 0 var(--line);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-ui-polish="clean"] .sidebar { box-shadow: 1px 0 0 rgb(15 23 42 / 10%); }
+html[data-ui-polish="clean"] .sidebar .nav-item { transition: background-color .14s ease; }
+html[data-ui-polish="clean"] .sidebar .nav-item:hover { transform: none; }
+html[data-ui-polish="clean"] .sidebar .nav-item.active { box-shadow: none !important; }
+html[data-ui-polish="clean"] .sidebar .nav-item.active::before { box-shadow: none; }
+html[data-ui-polish="clean"] .content .top-title {
+  background: none; color: var(--ink); -webkit-text-fill-color: currentColor;
+  font-weight: 700; letter-spacing: -.02em;
+}
+html[data-ui-polish="clean"] .content .master-search-input {
+  border-radius: 10px;
+  box-shadow: none;
+  background: var(--polish-soft);
+}
+html[data-ui-polish="clean"] .content .master-search-input:focus-within {
+  outline: 2px solid var(--brand); outline-offset: 2px;
+}
+
+/* 2. One surface language: restrained borders, a 16px radius and a consistent spacing scale. */
+html[data-ui-polish="clean"] .content .card {
+  border-radius: var(--polish-radius);
+  box-shadow: var(--polish-shadow);
+}
+html[data-ui-polish="clean"] .content .card-head {
+  padding: 16px 18px; gap: 12px; flex-wrap: wrap;
+}
+html[data-ui-polish="clean"] .content .card-head h3 {
+  font-size: 14px; line-height: 1.5; font-weight: 700; letter-spacing: -.015em;
+}
+html[data-ui-polish="clean"] .content .card-head h3 .dim { font-weight: 400; }
+html[data-ui-polish="clean"] .content .card-body { padding: 16px 18px; }
+html[data-ui-polish="clean"] .content .head-actions { gap: 8px; }
+html[data-ui-polish="clean"] .content .page-head {
+  padding: 20px; margin-bottom: 18px; gap: 16px;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--polish-radius);
+  box-shadow: var(--polish-shadow); overflow: visible;
+}
+html[data-ui-polish="clean"] .content .page-head::after { content: none; }
+html[data-ui-polish="clean"] .content .page-head h1 {
+  font-size: clamp(22px, 2.2vw, 28px); line-height: 1.25; letter-spacing: -.035em;
+  background: none !important; color: var(--ink) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+html[data-ui-polish="clean"] .content .page-head :is(.sub, .dim, small, label) { color: var(--muted) !important; }
+html[data-ui-polish="clean"] .content .page-head :is(b, strong) { color: inherit; }
+
+/* Home's greeting becomes a calm surface instead of another competing blue KPI card. */
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 {
+  padding: 22px; gap: 20px; border-radius: var(--polish-radius);
+  background: var(--card) !important; color: var(--ink);
+  border: 1px solid var(--line) !important; box-shadow: var(--polish-shadow) !important;
+  animation: none;
+}
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2::before { background: none !important; }
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 :is(.home-greeting, .home-greeting-text, .home-name) {
+  background: none !important; color: var(--ink) !important; -webkit-text-fill-color: currentColor !important;
+}
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .home-greeting {
+  margin: 0 0 6px; font-size: clamp(22px, 2.3vw, 28px); line-height: 1.3; letter-spacing: -.035em;
+}
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .sub { color: var(--muted) !important; font-weight: 400; }
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .home-hero-side { gap: 8px; }
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .home-stat {
+  padding: 8px 12px; border-radius: 10px;
+  background: var(--polish-soft) !important; color: var(--ink) !important;
+  border: 1px solid var(--line) !important; box-shadow: none !important;
+}
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .home-stat :is(.dim, b) {
+  color: var(--ink) !important; -webkit-text-fill-color: currentColor !important;
+}
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .home-stat .dim { color: var(--muted) !important; opacity: 1; }
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .chip:not(.channel-badge) {
+  background: var(--polish-soft) !important; color: var(--muted) !important;
+  -webkit-text-fill-color: currentColor !important; border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+html[data-ui-polish="clean"] .content .home-avatar.mono-logo {
+  width: 54px; height: 54px; flex: none; font-size: 23px;
+  background: color-mix(in srgb, var(--brand) 8%, var(--card));
+  color: var(--brand); border: 1px solid color-mix(in srgb, var(--brand) 18%, var(--line)); box-shadow: none;
+}
+html[data-ui-polish="clean"] .content .home-wave { animation: none; }
+
+/* Keep the existing coloured KPI palettes and all five-column/mobile grid behaviour.
+ * Remove only ornamental rings, blurred icons and the large jump/glow on hover. */
+html[data-ui-polish="clean"] .content .kpi {
+  border-radius: 14px; box-shadow: 0 2px 5px rgb(15 23 42 / 10%);
+  transition: box-shadow .14s ease;
+}
+html[data-ui-polish="clean"] .content .kpi::before,
+html[data-ui-polish="clean"] .content .kpi::after { content: none; }
+html[data-ui-polish="clean"] .content .kpi:hover { transform: none; box-shadow: 0 3px 8px rgb(15 23 42 / 14%); }
+html[data-ui-polish="clean"] .content .kpi .kpi-icon {
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  box-shadow: none; border: 1px solid rgb(255 255 255 / 24%);
+}
+html[data-ui-polish="clean"] .content :is(.mini-kpi, .mp-kpi, .msp-kpi, .dkpi) { box-shadow: none; }
+html[data-ui-polish="clean"] .content :is(.kpi-value, .mini-value, .msp-kpi > b, .mp-kpi > b) { font-variant-numeric: tabular-nums; }
+
+/* 3. Action hierarchy. Only actual primary actions receive a solid brand fill.
+ * These rules also reset the old white-on-blue header button treatment. */
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .btn {
+  min-height: 38px; border-radius: 9px; line-height: 1.4;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  transition: background-color .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .btn.small { min-height: 30px; }
+html[data-ui-polish="clean"] .content :is(.page-head, .home-hero.v2) .btn:not(.primary):not(.danger) {
+  background: var(--card) !important; color: var(--ink) !important; border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .btn.primary,
+html[data-ui-polish="clean"] .content :is(.page-head, .page-home .home-hero.v2) .btn.primary {
+  background: var(--polish-action) !important; color: #fff !important;
+  border-color: transparent !important; box-shadow: 0 1px 2px rgb(15 23 42 / 12%) !important;
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .btn.danger {
+  background: var(--polish-danger-bg) !important; color: var(--polish-danger) !important; border-color: var(--polish-danger-line) !important;
+}
+html[data-ui-polish="clean"] .content .page-head .seg {
+  background: var(--polish-soft) !important; border-color: var(--line) !important;
+}
+html[data-ui-polish="clean"] .content .page-head .seg-btn {
+  color: var(--muted) !important; background: transparent !important;
+}
+html[data-ui-polish="clean"] .content .page-head .seg-btn.on {
+  color: var(--ink) !important; background: var(--card) !important; box-shadow: var(--polish-shadow);
+}
+html[data-ui-polish="clean"] .content :is(.input, select, textarea) {
+  border-radius: 9px; border-color: var(--line);
+}
+html[data-ui-polish="clean"] .content .page-head :is(.input, select) {
+  background: var(--card) !important; color: var(--ink) !important; border-color: var(--line) !important;
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(.btn, .icon-btn):hover { transform: none; }
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(.btn, .icon-btn):disabled {
+  opacity: .5; cursor: not-allowed; box-shadow: none !important;
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand); outline-offset: 3px;
+}
+@media (hover: hover) and (pointer: fine) {
+  html[data-ui-polish="clean"] .content :is(.page-head, .home-hero.v2) .btn:not(.primary):not(.danger):hover {
+    background: var(--polish-soft) !important; border-color: var(--brand) !important;
+  }
+  html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .btn.primary:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent) !important; }
+}
+
+/* 4. Channel identity is semantic, not the current decorative theme colour.
+ * Explicit FF / GV text stays visible; colour alone never communicates a channel. */
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .channel-badge.ff,
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .msp-pill.ff {
+  --channel-ink: var(--polish-ff); --channel-bg: var(--polish-ff-bg); --channel-line: var(--polish-ff-line);
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .channel-badge.gv,
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .msp-pill.gv {
+  --channel-ink: var(--polish-gv); --channel-bg: var(--polish-gv-bg); --channel-line: var(--polish-gv-line);
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(.channel-badge, .msp-pill.ff, .msp-pill.gv),
+html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .chip.channel-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border: 1px solid var(--channel-line); border-radius: 7px;
+  background: var(--channel-bg) !important; color: var(--channel-ink) !important;
+  -webkit-text-fill-color: currentColor !important; box-shadow: none !important;
+  font-size: 11.5px; font-weight: 700; line-height: 1.4;
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .badge.office {
+  padding: 4px 8px; border: 1px solid var(--polish-office-line); border-radius: 7px;
+  background: var(--polish-office-bg); color: var(--polish-office); box-shadow: none;
+  font-weight: 800; letter-spacing: .02em;
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) tr.ms-office-row td { background: var(--polish-office-bg); }
+
+/* 5. Readable data tables. Preserve scroll wrappers, sticky columns, totals and row states. */
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .table-wrap {
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+  overscroll-behavior-x: contain;
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(.tbl, .data-table) { font-size: 13px; line-height: 1.5; }
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .tbl thead th {
+  padding: 10px 12px; font-size: 11px; line-height: 1.5; font-weight: 700;
+  letter-spacing: .025em; color: var(--muted); background: var(--polish-soft);
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .tbl td { padding: 11px 12px; }
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .tbl.compact :is(td, th) { padding: 8px 10px; }
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(td.num, th.num, td.mono) {
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .tbl tbody tr:focus-within { outline: 2px solid var(--brand); outline-offset: -2px; }
+html[data-ui-polish="clean"][data-density="compact"] :is(.content, .drawer, .ms-panel) .tbl :is(td, th),
+html[data-ui-polish="clean"][data-table-density="compact"] :is(.content, .drawer, .ms-panel) .tbl :is(td, th) { padding: 6px 10px; }
+
+/* Mobile refinements: no fixed widths, no hidden actions, and no changes to bottom navigation. */
+@media (max-width: 760px) {
+  html[data-ui-polish="clean"] .content .card-head { padding: 14px; gap: 10px; }
+  html[data-ui-polish="clean"] .content .card-body { padding: 14px; }
+  html[data-ui-polish="clean"] .content .page-head { padding: 16px; gap: 12px; }
+  html[data-ui-polish="clean"] .content .page-home .home-hero.v2 { padding: 16px; gap: 16px; }
+  html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .home-greeting { font-size: 22px !important; }
+  html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .home-hero-main { align-items: flex-start; gap: 12px; }
+  html[data-ui-polish="clean"] .content .page-home .home-hero.v2 .home-avatar { width: 40px; height: 40px; font-size: 18px; }
+  html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .btn { min-height: 44px; }
+}
+/* Mobile modules use !important type rules. Keep touch controls but remove oversized table text. */
+html[data-ui-polish="clean"].mobile-ui :is(.content, .drawer, .ms-panel) .tbl thead th { font-size: 11.5px !important; }
+html[data-ui-polish="clean"].mobile-ui :is(.content, .drawer, .ms-panel) .tbl td { font-size: 13px !important; }
+html[data-ui-polish="clean"].mobile-ui .content .card-head h3 { font-size: 14px !important; line-height: 1.5 !important; }
+
+/* Reduced motion leaves loading/status feedback intact; only ornamental motion is removed. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(.btn, .icon-btn, .kpi, .page),
+  html[data-ui-polish="clean"] .sidebar .nav-item {
+    transition: none !important; animation: none !important; transform: none !important;
+  }
+}
+@media (forced-colors: active) {
+  html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(.channel-badge, .badge.office) { border-color: CanvasText; }
+}
+@media print {
+  html[data-ui-polish="clean"] .content :is(.card, .page-head, .home-hero.v2) { box-shadow: none !important; }
+}

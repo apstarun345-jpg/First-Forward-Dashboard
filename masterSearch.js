@@ -1177,7 +1177,7 @@ FF.pages = FF.pages || {};
         <span class="ms-avatar ${p.kind.startsWith('gv') ? 'gv' : 'ff'}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
         <div class="ms-kundli-id">
           <b>${esc(p.name)}</b>
-          <small><span class="badge ${p.kind.startsWith('gv') ? 'green' : 'blue'}">${p.kind.startsWith('gv') ? '🟩 GV Partner' : '🟦 First Forward'}</span> <span class="badge ${/tl$/.test(p.kind) ? 'purple' : 'blue'}">${esc(KIND_LABEL[p.kind] || p.kind)}</span>${p.sub ? ` · ID <b class="mono">${esc(p.sub)}</b>` : ''}${GVC.chip(p)}</small>
+          <small><span class="badge ${p.kind.startsWith('gv') ? 'green' : 'blue'} channel-badge ${p.kind.startsWith('gv') ? 'gv' : 'ff'}">${p.kind.startsWith('gv') ? '🟩 GV Partner' : '🟦 First Forward'}</span> <span class="badge ${/tl$/.test(p.kind) ? 'purple' : 'blue'}">${esc(KIND_LABEL[p.kind] || p.kind)}</span>${p.sub ? ` · ID <b class="mono">${esc(p.sub)}</b>` : ''}${GVC.chip(p)}</small>
         </div>
       </div>
       ${strip}
@@ -2186,7 +2186,7 @@ FF.pages = FF.pages || {};
       const person = viewGroup.ff || viewGroup.gv;
       if (trendEl) trendEl.hidden = true;     // the person's own day-wise chart + table now live inside the profile (no 2nd copy)
       const linkedTeams = teamPeopleFor(viewGroup);
-      const pill = (p, cls, label) => (p ? `<span class="msp-pill ${cls}">${label} ${isTlP(p) ? 'TL' : 'Agent'}${p.sub ? ` <b>${esc(p.sub)}</b> <button type="button" class="cp-btn" data-copy="${esc(p.sub)}" title="Copy ID" aria-label="Copy ID">📋</button>` : ''}</span>` : '');
+      const pill = (p, cls, label) => (p ? `<span class="msp-pill ${cls} channel-badge">${label} ${isTlP(p) ? 'TL' : 'Agent'}${p.sub ? ` <b>${esc(p.sub)}</b> <button type="button" class="cp-btn" data-copy="${esc(p.sub)}" title="Copy ID" aria-label="Copy ID">📋</button>` : ''}</span>` : '');
       // 🆕 NEW Agent tag — sirf agents (TL nahi); data aane par bharta hai
       const heroNewTags = (vg) => ['ff', 'gv'].map((c) => { const p = vg[c]; return p && !isTlP(p) ? `<span class="new-agent-slot" data-new-agent="${c}|${esc(p.sub || '')}|${esc(String(p.name || '').replace(/\|/g, ' '))}">${FF.newAgentTag ? FF.newAgentTag.html(c, p.sub, p.name) : ''}</span>` : ''; }).join('');
       const bits = `${pill(viewGroup.ff, 'ff', '🟦 First Forward')}${pill(viewGroup.gv, 'gv', '🟩 GV Partner')}`;
