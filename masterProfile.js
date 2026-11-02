@@ -48,7 +48,8 @@ window.FF = window.FF || {};
     let elapsed = 1;
     try { elapsed = Math.max(1, Number(U.runRateDays ? U.runRateDays(channel) : 1) || 1); } catch { /* keep safe fallback */ }
     const days = Math.max(1, Number(pr && pr.dispatch && pr.dispatch.days) || suggestDays());
-    const lastDays = Math.max(1, Number(U.daysInMonth && U.daysInMonth(pr && pr.months && pr.months.last)) || 30);
+    const lastMonthKey = pr && pr.months && pr.months.last;
+    const lastDays = Math.max(1, lastMonthKey && U.daysInMonth ? Number(U.daysInMonth(lastMonthKey)) || 30 : 30);
     const rows = source.map((item) => {
       const cur = Math.max(0, num(item && item.cur));
       const last = Math.max(0, num(item && item.last));
