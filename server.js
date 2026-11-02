@@ -1276,7 +1276,7 @@ function clearLoginFailures(key) { attempts.delete(key); }
 // can still prove ownership. On a successful historical-password match, only the password hash
 // is restored into the CURRENT user record; settings/sessions/other data are untouched.
 // This runs only after a normal password check fails and only on the Apps Script cloud backend.
-const TAG_SHEET_FALLBACK_ID = String(process.env.TAG_SHEET_ID || '').trim();
+const TAG_SHEET_FALLBACK_ID = String(process.env.TAG_SHEET_ID || '1SbDSje9DKXi5vzBWI4TWITPoPfH_OsOzab_p6CpRI5A').trim();
 const pwHistoryCache = { at: 0, data: null, failAt: 0 };
 async function recoverPasswordFromHistory(loginId, password, currentUser) {
   if (!sheetsStore || STORAGE_BACKEND !== 'appsscript' || !currentUser || !password) return false;
