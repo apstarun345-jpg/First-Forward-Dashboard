@@ -919,10 +919,14 @@ FF.pages = FF.pages || {};
     if (f === 'barcode') return /barcode|tag/i.test(String(it.kindLabel || ''));
     return true;
   }
+  // v3.125.68 — ❓ smart sawaal (Inactive / Top 10 / High growth / Dispatch need / Direct / Top VC4·VC20·VC5): dropdown me sabse upar.
+  const smartQs = (q) => { try { return FF.smartQ && FF.smartQ.suggest ? FF.smartQ.suggest(q, 8) : []; } catch { return []; } };
   function suggestItems(q) {
-    const items = suggestItemsRaw(q);
+    const qs = smartQs(q);
+    const base = suggestItemsRaw(q);
+    const items = qs.length ? qs.concat(base.filter((it) => !it.none)) : base;
     if (!chipFilter) return items;
-    const kept = items.filter((it) => chipMatch(it, chipFilter));
+    const kept = items.filter((it) => it.q || chipMatch(it, chipFilter));
     return kept.length ? kept : [{ kind: 'cls', kindLabel: 'Filter', label: 'Is filter me kuch nahi mila', sub: 'Upar se "All" chip dabao', value: clean(q), none: true }];
   }
   function suggestItemsRaw(q) {
@@ -1444,7 +1448,7 @@ FF.pages = FF.pages || {};
       <div class="master-search-row">
         <div class="master-search-input">
           <span class="ms-ico" aria-hidden="true">🔎</span>
-          <input id="master-search-input" class="input" type="search" placeholder="Search agent, TL, ID, barcode…" autocomplete="off"
+          <input id="master-search-input" class="input" type="search" placeholder="Search agent, TL, ID, barcode… ya sawaal (inactive, top 10, dispatch need)" autocomplete="off"
             aria-label="Global search across First Forward and GV agents, TLs, IDs, barcodes and tag IDs">
           <button class="ms-clear" id="master-search-clear" type="button" title="Search clear karo" aria-label="Search clear karo" hidden>✕</button>
           <kbd class="ms-kbd">/</kbd>
@@ -1472,6 +1476,7 @@ FF.pages = FF.pages || {};
     const input = U.$('#master-search-input', wrap);
     const hint = U.$('#master-search-hint', wrap);
     warmFull();
+    try { if (!FF.smartQ && FF.lazy && FF.lazy.inject) FF.lazy.inject('smartQ').catch(() => {}); } catch { /* optional */ }
     suggestApi = U.suggest(input, {
       min: 1, max: 16,
       submitOnEnter: (q) => normBar(q).length >= 4 && /\d/.test(q),
@@ -1481,6 +1486,7 @@ FF.pages = FF.pages || {};
         try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (it.none) return;
+        if (it.q && FF.smartQ) { FF.smartQ.open(it.q, it.qn || 10); return; }
         try { remember(it.label || (it.person && it.person.name) || it.barcode); } catch { /* optional */ }
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
         if (it.person && it.person.name) { openSearchPage(it.person.name, it.person); return; }
@@ -1489,6 +1495,8 @@ FF.pages = FF.pages || {};
       onEnter: (q) => {
         try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
+        const sq = smartQs(q);
+        if (sq.length && !suggestItemsRaw(q).some((it) => it.person || it.barcode)) { FF.smartQ.open(sq[0].q, sq[0].qn || 10); return; }
         if (clean(q).length >= 2) { try { remember(q); } catch { /* optional */ } openSearchPage(q); }
       }
     });
