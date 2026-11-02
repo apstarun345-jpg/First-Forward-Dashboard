@@ -31,21 +31,25 @@ const agents = [
   perfAgent({ name: 'Ravi Kumar', agentId: 'R101', id: 'R101', tlName: 'TL One', tlId: 'T1', tlMobile: '9000000001', priority: 'High', stockVc4: 10, stockNvc4: 4, stockTotal: 14, curVc4: 90, curNvc4: 30, curTotal: 120, lastVc4: 60, lastNvc4: 20, lastTotal: 80, avgVc4: 6, avgNvc4: 2, tlStockVc4: 50, tlStockNvc4: 20, tlStockTotal: 70, tlPriority: 'High' }),
   perfAgent({ name: 'Priya Sharma', agentId: '9876543210', id: '9876543210', tlName: 'TL One', tlId: 'T1', tlMobile: '9000000001', priority: 'Low', stockVc4: 40, stockNvc4: 16, stockTotal: 56, curVc4: 30, curTotal: 30, avgVc4: 2, avgNvc4: 0, tlStockVc4: 50, tlStockNvc4: 20, tlStockTotal: 70 }),
   perfAgent({ name: 'Direct Dev', agentId: 'D909', id: 'D909', tlName: 'APS', tlId: '', priority: 'High', tlExcluded: true, stockVc4: 3, stockTotal: 3, curVc4: 45, curTotal: 45, avgVc4: 3 }),
-  perfAgent({ name: 'Direct Low', agentId: 'D910', id: 'D910', tlName: 'APS', priority: 'Low', tlExcluded: true, stockVc4: 30, stockTotal: 30, curVc4: 3, curTotal: 3, avgVc4: 0.2 })
+  perfAgent({ name: 'Direct Low', agentId: 'D910', id: 'D910', tlName: 'APS', priority: 'Low', tlExcluded: true, stockVc4: 20, stockNvc4: 50, stockTotal: 70, curVc4: 60, curNvc4: 15, curTotal: 75, avgVc4: 4, avgNvc4: 1 })
 ];
 const agentClass = [
   { ym, channel: 'First Forward', name: 'Ravi Kumar', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 90 },
   { ym, channel: 'First Forward', name: 'Ravi Kumar', tlName: 'TL One', cls: 'VC20', group: 'VC20', n: 30 },
   { ym: prev, channel: 'First Forward', name: 'Ravi Kumar', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 60 },
   { ym: prev, channel: 'First Forward', name: 'Ravi Kumar', tlName: 'TL One', cls: 'VC20', group: 'VC20', n: 20 },
-  { ym, channel: 'First Forward', name: 'Priya Sharma', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 30 }
+  { ym, channel: 'First Forward', name: 'Priya Sharma', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 30 },
+  { ym, channel: 'First Forward', name: 'Direct Low', tlName: 'APS', cls: 'VC4', group: 'VC4', n: 60 },
+  { ym, channel: 'First Forward', name: 'Direct Low', tlName: 'APS', cls: 'VC20', group: 'VC20', n: 15 }
 ];
 const stockAgents = [
   { agentId: 'R101', agentName: 'Ravi Kumar', tlId: 'T1', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 10 },
   { agentId: 'R101', agentName: 'Ravi Kumar', tlId: 'T1', tlName: 'TL One', cls: 'VC20', group: 'VC20', n: 4 },
   // The TL also holds stock under their own agent identity; it is not in the agent REPORT rollup.
   { agentId: 'T1', agentName: 'TL One', tlId: 'T1', tlName: 'TL One', cls: 'VC4', group: 'VC4', n: 5 },
-  { agentId: 'T1', agentName: 'TL One', tlId: 'T1', tlName: 'TL One', cls: 'VC20', group: 'VC20', n: 3 }
+  { agentId: 'T1', agentName: 'TL One', tlId: 'T1', tlName: 'TL One', cls: 'VC20', group: 'VC20', n: 3 },
+  { agentId: 'D910', agentName: 'Direct Low', tlId: '', tlName: 'APS', cls: 'VC4', group: 'VC4', n: 20 },
+  { agentId: 'D910', agentName: 'Direct Low', tlId: '', tlName: 'APS', cls: 'VC20', group: 'VC20', n: 50 }
 ];
 const gvReport = [
   { agentId: 'G001', agentName: 'GV Ramesh', mobile: '9111111111', tlId: 'GT1', tlName: 'GV TL', priority: 'High', stockVc4: 5, stockComm: 1, stockTotal: 6, stockByClass: { VC4: 5 }, curDays: 10, curVc4: 100, curComm: 10, curTotal: 110, lastVc4: 50, lastComm: 5, lastTotal: 55, suggestedDispatch: 0, tlStockVc4: 25, tlStockComm: 5, tlStockTotal: 30, curByClass: { VC4: 100 } },
@@ -100,13 +104,27 @@ test('class-wise issuance table: last month, this month, stock', async () => {
   assert.match(html, /Total<\/b><\/td><td class="num"><b>80<\/b><\/td><td class="num"><b>120<\/b>/);
 });
 
-test('Direct + High/Medium = TAG REQUIRED (FF and GV); Low = no dispatch', async () => {
+test('Direct agents get class-wise tag suggestions from T-1 run-rate regardless of Low priority', async () => {
   const ffHigh = await MP.build(person('ff-agent', 'Direct Dev', 'D909'));
   assert.equal(ffHigh.direct, true); assert.equal(ffHigh.tagRequired, true);
-  assert.equal(ffHigh.dispatch.sugVc4, 42, '3×15−3 = 42 tags');
-  assert.match(MP.html(ffHigh), /TAG REQUIRED/);
+  assert.equal(ffHigh.dispatch.sugVc4, 42, 'legacy aggregate calculation remains available');
+  assert.match(MP.html(ffHigh), /Direct agent tag suggestion/);
+
   const ffLow = await MP.build(person('ff-agent', 'Direct Low', 'D910'));
-  assert.equal(ffLow.tagRequired, false); assert.match(MP.html(ffLow), /No dispatch/);
+  assert.equal(ffLow.direct, true); assert.equal(ffLow.priority, 'Low');
+  assert.equal(ffLow.tagRequired, false, 'priority flag remains separate from direct-tag demand');
+  const plan = MP.directDispatchPlan(ffLow);
+  assert.deepEqual(plan.rows.map((x) => [x.cls, x.stock, x.net, x.gross]), [['VC4', 20, 40, 60]],
+    'VC20 is hidden because its 50 stock covers its 15-tag run-rate requirement');
+  const directHtml = MP.directDispatchHtml(ffLow);
+  assert.match(directHtml, /With stock/); assert.match(directHtml, /Without stock/);
+  assert.match(directHtml, />VC4</); assert.doesNotMatch(directHtml, />VC20</);
+  assert.match(MP.html(ffLow), /Direct agent tag suggestion/);
+
+  const noNeed = MP.directDispatchHtml({ ch: 'ff', dispatch: { days: 15 }, classes: [{ cls: 'VC4', cur: 10, last: 0, stock: 25 }] });
+  assert.match(noNeed, /No tags required right now/);
+  assert.doesNotMatch(noNeed, />VC4</);
+
   const gvMed = await MP.build(person('gv-agent', 'GV Direct', 'G002'));
   assert.equal(gvMed.direct, true); assert.equal(gvMed.tagRequired, true);
   assert.equal(gvMed.dispatch.sugVc4, 38, 'formula: 40 ÷ 15 × 15 − stock 2 (sheet qty ab use nahi hoti)');

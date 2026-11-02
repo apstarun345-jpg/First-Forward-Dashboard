@@ -2044,10 +2044,19 @@ FF.pages = FF.pages || {};
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
       const tlName = (pr.tl && pr.tl.name) || '';
       let sug = '';
-      if (pr.tagRequired) {
+      if (pr.direct) {
+        const directPlan = FF.masterProfile && FF.masterProfile.directDispatchPlan ? FF.masterProfile.directDispatchPlan(pr) : null;
+        const directHtml = FF.masterProfile && FF.masterProfile.directDispatchHtml
+          ? FF.masterProfile.directDispatchHtml(pr)
+          : '<span class="dim">Direct-agent run-rate suggestion is loading…</span>';
+        const directTotal = directPlan ? directPlan.totalNet : 0;
+        const directGross = directPlan ? directPlan.totalGross : 0;
+        const directDays = directPlan ? directPlan.days : (d.days || days);
+        sug = box(directTotal > 0 ? 'k7' : 'k4', `🎯 Suggested dispatch · ${U.fmt(directDays)} days`, directHtml,
+          `${esc(pr.directLabel || 'Direct agent')} · priority ${esc(pr.priority || 'Low')} · class-wise · after stock ${U.fmt(directTotal)} · w/o stock ${U.fmt(directGross)}`,
+          spec('mtd', m.cur));
+      } else if (pr.tagRequired) {
         sug = box('k7', `🏷️ Tags required · ${U.fmt(d.days)} din`, sugPair(num(d.sugVc4) + num(d.sugComm), num(d.sugVc4Gross) + num(d.sugCommGross)), `VC4 ${U.fmt(d.sugVc4)} + Comm ${U.fmt(d.sugComm)} · ${esc(pr.directLabel || 'Direct')} · priority ${esc(pr.priority || '—')}`, spec('mtd', m.cur));
-      } else if (pr.direct) {
-        sug = box('k4', '🎯 Suggested dispatch', '<span class="dim">No dispatch</span>', `🚫 ${esc(pr.directLabel || 'Direct agent')} · priority ${esc(pr.priority || 'Low')} — abhi tags ki zarurat nahi`);
       } else {
         sug = box('k4', `🎯 Dispatch need · ${U.fmt(days)} days`, planBody, '', spec('mtd', m.cur));
       }
