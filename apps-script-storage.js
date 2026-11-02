@@ -176,7 +176,16 @@ export class AppsScriptStore {
     if (!records.users) throw new Error('APP_STORAGE has no users row. Refusing to reset accounts or create a default admin.');
     if (!records.settings) throw new Error('APP_STORAGE has no settings row. Refusing to replace saved settings with defaults.');
     const data = {};
-    for (const kind of present) data[kind] = this.decode(kind, records[kind]);
+    for (const kind of present) {
+      try { data[kind] = this.decode(kind, records[kind]); }
+      catch (err) {
+        // v3.125.66 — settings row adhuri/corrupt (e.g. columns kat gaye) ho to site band na ho: users+sessions safe rakh kar
+        // settings defaults se shuru. Users/notify/sessions ke liye abhi bhi fail-closed.
+        if (kind !== 'settings') throw err;
+        console.error('⚠️ APP_STORAGE settings corrupt/truncated — defaults se start (users safe):', String(err.message || err));
+        data.settings = { __settingsRecoveredAt: new Date().toISOString() };
+      }
+    }
     if (!Array.isArray(data.users) || data.users.length === 0) throw new Error('APP_STORAGE users record is empty/invalid. Refusing to reset accounts.');
     if (!data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings)) throw new Error('APP_STORAGE settings record is empty/invalid. Refusing to replace saved settings with defaults.');
     return data;
