@@ -420,6 +420,10 @@ FF.config = {
     if (s.reportGid !== undefined) { this.report.gid = s.reportGid; const rep = this.tabBy('REPORT'); if (rep) rep.gid = s.reportGid; }
     if (!Array.isArray(this.excludeTls)) this.excludeTls = String(this.excludeTls || '').split(',').map((x) => x.trim()).filter(Boolean);
     this.refreshViews();
+    this._applied = true;
+    // v3.125.51 — login se pehle default column letters se padhe datasets (jaise EIR TL = BA, asli AW) ab sahi columns se dobara.
+    try { if (typeof window !== 'undefined' && window.FF && window.FF.store && window.FF.store.onConfig) window.FF.store.onConfig(); } catch { /* ignore */ }
+    try { if (typeof window !== 'undefined' && window.FF && window.FF.gv && window.FF.gv.onConfig) window.FF.gv.onConfig(); } catch { /* ignore */ }
   }
 };
 FF.configDefaults = { tabs: JSON.parse(JSON.stringify(FF.config.tabs)) };

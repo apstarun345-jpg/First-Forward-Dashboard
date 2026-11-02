@@ -26,7 +26,7 @@ import { personalActivityCalendar } from './personal-calendar.js';
 import { createMappingJobs } from './mapping-job.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
-import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent } from './stock-age.js';
+import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
@@ -3464,7 +3464,8 @@ function ledgerAggAddRow(byCh, e) {
 async function loadLedgerAgg() {
   const srcs = ledgerSources();
   const byCh = { ff: new Map(), gv: new Map() }, errors = {}, counts = {};
-  for (const src of srcs) {
+  // ⚡ v3.125.45 — sources ek saath padho (chhoti sheets; pehle ek-ek karke = 10-30 s)
+  const results = await Promise.all(srcs.map(async (src) => {
     const firstCol = LAYOUT_LETTERS(src.layout)[src.layout === 'gv' ? 6 : 5];
     const tmp = { ff: new Map(), gv: new Map() };   // per attempt — withLedgerLetters may retry the read
     try {
@@ -3478,11 +3479,14 @@ async function loadLedgerAgg() {
         }
       }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 }); });
       counts[src.id] = n;
-      for (const ch of ['ff', 'gv']) for (const [k, rec] of tmp[ch]) if (!byCh[ch].has(k)) byCh[ch].set(k, rec);
+      return tmp;
     } catch (err) {
       errors[src.id] = ledgerErrText(src, err);
+      return null;
     }
-  }
+  }));
+  // Order same as before (pehla source jeetta hai)
+  for (const tmp of results) if (tmp) for (const ch of ['ff', 'gv']) for (const [k, rec] of tmp[ch]) if (!byCh[ch].has(k)) byCh[ch].set(k, rec);
   // rk (dedupe set) load ke baad nahi chahiye — memory bachao
   for (const ch of ['ff', 'gv']) for (const rec of byCh[ch].values()) for (const day of rec.dates.values()) delete day.rk;
   return { byCh, errors, counts };
@@ -3633,7 +3637,23 @@ async function eirAutoDetect(opts) {
   return eirAuto.running;
 }
 
+// ⚡ v3.125.47 — background scans (stock index, dispatch ledger, mapping) ek saath max BG_SCAN_SLOTS Google requests;
+// baaki gviz slots hamesha user ki sheets ke liye khaali (pehle boot par user queries 55 s timeout hoti thi).
+const BG_SCAN_SLOTS = Math.max(1, Math.min(GVIZ_CONCURRENCY - 1, Number(process.env.BG_SCAN_SLOTS) || 2));
+const bgScanGate = { active: 0, queue: [] };
+async function bgScanAcquire() {
+  if (bgScanGate.active < BG_SCAN_SLOTS) { bgScanGate.active++; return; }
+  await new Promise((resolve) => bgScanGate.queue.push(resolve));
+}
+function bgScanRelease() {
+  const next = bgScanGate.queue.shift();
+  if (next) next(); else bgScanGate.active = Math.max(0, bgScanGate.active - 1);
+}
 async function gvizPageServer(params, sheet) {
+  await bgScanAcquire();
+  try { return await gvizPageServerInner(params, sheet); } finally { bgScanRelease(); }
+}
+async function gvizPageServerInner(params, sheet) {
   let lastErr;
   // v3.125.35 — Google sheet slow ho to 15k-row page bhi 45 s se zyada le leta tha ("This operation was aborted") →
   // poora FF stock index khaali. Bade scan pages: 100 s timeout, 3 koshish.
@@ -3747,6 +3767,28 @@ function duplicateScan(source, fresh) {
   return entry;
 }
 
+let barcodeSnapCache = null, barcodeSnapBuild = null;
+/** Stock index → gzip TSV Buffer, chhote tukdon me (peak RAM ~kuch MB, poora 17 MB string kabhi nahi banta). */
+async function buildBarcodeSnapshot(index, canFf, canGv) {
+  const gz = zlib.createGzip({ level: 6 });
+  const out = [];
+  gz.on('data', (b) => out.push(b));
+  const ended = new Promise((resolve, reject) => { gz.on('end', resolve); gz.on('error', reject); });
+  gz.write(`#at\t${index.at}\n`);
+  const sides = [canFf && ['ff', index.ff], canGv && index.gv && ['gv', index.gv]].filter(Boolean);
+  for (const [ch, side] of sides) {
+    let buf = [];
+    const flush = async () => { if (buf.length) { gz.write(buf.join('\n') + '\n'); buf = []; await yieldLoop(); } };
+    if (typeof side.each === 'function') {
+      const total = side.each(() => {}, 0, 0);
+      for (let i = 0; i < total; i += 5000) { side.each((r) => buf.push(snapshotLine(ch, r)), i, i + 5000); await flush(); }
+    } else for (const r of side.raw || []) { buf.push(snapshotLine(ch, r)); if (buf.length >= 5000) await flush(); }
+    await flush();
+  }
+  gz.end();
+  await ended;
+  return Buffer.concat(out);
+}
 async function loadStockAgeIndex() {
   const s = db.settings || {};
   const st = s.stock || {};
@@ -6389,6 +6431,28 @@ async function handleApi(req, res, url) {
     const offset = Math.max(0, Number(q.get('offset')) || 0), limit = q.get('all') === '1' ? 200000 : Math.max(1, Math.min(1000, Number(q.get('limit')) || 300));
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, total: rows.length, offset, rows: rows.slice(offset, offset + limit) }), { 'Cache-Control': 'no-store' });
   }
+  // ⚡ v3.125.40 — Browser snapshot: poora barcode/tag register ek gzip TSV (~3-4 MB). Browser IndexedDB me rakhta hai →
+  // Master Search me barcode / tag type karte hi browser me hi result (server restart / Google slow ho tab bhi).
+  if (p === '/api/barcode-snapshot' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const index = stockAgeState.index;
+    if (!index || !index.ff || index.errors && index.errors.ff) { void stockAgeIndexWithin(0, false).catch(() => {}); return sendJson(res, 200, { ok: true, pending: true }, { 'Cache-Control': 'no-store' }); }
+    const perms = user.role === 'admin' ? null : new Set(user.permissions || []);
+    const canFf = !perms || perms.has('sheet:StockDataa') || perms.has('ff') || perms.has('masterSearch');
+    const canGv = !perms || perms.has('sheet:Tag Assignment') || perms.has('gv') || perms.has('masterSearch');
+    const ck = `${index.at}|${canFf ? 1 : 0}${canGv ? 1 : 0}`;
+    if (!barcodeSnapCache || barcodeSnapCache.key !== ck) {
+      if (!barcodeSnapBuild || barcodeSnapBuild.key !== ck) {
+        const job = buildBarcodeSnapshot(index, canFf, canGv).then((buf) => { barcodeSnapCache = { key: ck, at: index.at, buf }; return barcodeSnapCache; });
+        barcodeSnapBuild = { key: ck, job };
+        job.catch(() => {}).finally(() => { if (barcodeSnapBuild && barcodeSnapBuild.job === job) barcodeSnapBuild = null; });
+      }
+      await barcodeSnapBuild.job;
+    }
+    if (url.searchParams.get('at') === String(barcodeSnapCache.at)) return sendJson(res, 200, { ok: true, same: true, at: barcodeSnapCache.at }, { 'Cache-Control': 'no-store' });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Encoding': 'gzip', 'Content-Length': barcodeSnapCache.buf.length, 'Cache-Control': 'no-store', 'X-Snapshot-At': String(barcodeSnapCache.at) });
+    return res.end(barcodeSnapCache.buf);
+  }
   // ⚡ v3.125.35 — Instant barcode / tag lookup (Master Search): server ke stock-age index (StockDataa + Tag Assignment) se,
   // Google ke paas jaaye bina (~ms). Index abhi ban raha ho to { pending: true } → client sheet query par jaata hai.
   if (p === '/api/barcode-lookup' && method === 'GET') {
@@ -8639,11 +8703,53 @@ async function handleApi(req, res, url) {
             requested: Number(x.requested ?? x.approved) || 0,
             approved: Number(x.approved) || 0
           })),
-          adminNote: r.adminNote || '', updatedAt: r.updatedAt || r.at || '',
+          adminNote: r.adminNote || '', updatedAt: r.updatedAt || r.at || '', courier: r.courier || '',
           sheetSynced: !!r.sheetSync && !r.sheetSync.error
         };
       })
     };
+  }
+  // ✏️ v3.125.55 — Employee (public link) apni PENDING request ki class-wise qty badal sakta hai.
+  // Approved / dispatched / rejected par lock. Sheet sync sirf Approved par hota hai, isliye yahan koi sheet row nahi badalti.
+  if (p === '/api/public/tag-request/edit' && method === 'POST') {
+    const ip = clientIp(req);
+    if (!publicRateOk(`tagedit:${ip}`, 40, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada edits — thodi der baad try karo.');
+    const body = await readBody(req);
+    const id = shortText(body && body.id, 60);
+    const w = workspaceStore();
+    const row = (w.tagRequests || []).find((r) => r && r.id === id);
+    if (!row || row.source !== 'public-link') throw new HttpError(404, 'Request nahi mili.');
+    if (String(row.status || 'pending').toLowerCase() !== 'pending') throw new HttpError(409, 'Ye request ab pending nahi hai — admin ne aage badha di, edit nahi ho sakti.');
+    const cq = body && body.classQty && typeof body.classQty === 'object' && !Array.isArray(body.classQty) ? body.classQty : null;
+    if (!cq) throw new HttpError(400, 'Quantity bhejo.');
+    const next = (row.rows || []).map((x) => ({ ...x }));
+    const tpl = next[0] || {};
+    const ag = row.agent || {};
+    for (const [clsRaw, qtyRaw] of Object.entries(cq).slice(0, 16)) {
+      const cls = shortText(clsRaw, 12).toUpperCase();
+      if (!/^VC\d{1,2}$/.test(cls)) continue;
+      const qty = Math.max(0, Math.min(5000, Math.round(Number(qtyRaw) || 0)));
+      const hit = next.find((x) => String(x.cls).toUpperCase() === cls);
+      if (hit) { hit.requested = qty; hit.approved = qty; }
+      else if (qty > 0 && next.length < 40) {
+        next.push({ agentId: tpl.agentId || ag.agentId || '', agentName: tpl.agentName || ag.name || '', tl: tpl.tl || ag.tl || '',
+          channel: (tpl.channel || ag.channel) === 'gv' ? 'gv' : 'ff', cls, last: 0, cur: 0, stock: 0, cover: null, priority: '',
+          growth: 0, sugNet: 0, sugGross: 0, requested: qty, approved: qty, remark: 'employee ne edit me joda' });
+      }
+    }
+    const kept = next.filter((x) => (Number(x.approved) || 0) > 0);
+    if (!kept.length) throw new HttpError(400, 'Kam se kam ek class me quantity chahiye.');
+    const before = `${(row.rows || []).map((x) => `${x.cls}×${x.approved}`).join(', ')}`;
+    row.rows = kept;
+    row.total = kept.reduce((n, x) => n + (Number(x.approved) || 0), 0);
+    row.updatedAt = new Date().toISOString();
+    row.editedBy = shortText(body.editedBy, 80) || (row.employee && row.employee.name) || 'employee';
+    row.edits = [...(Array.isArray(row.edits) ? row.edits : []), { at: row.updatedAt, by: row.editedBy, from: before }].slice(-10);
+    await persist('notify');
+    try {
+      recordNotification({ type: 'request', title: '✏️ Tag request edit hui', body: `${row.editedBy}: ${(ag.name || tpl.agentName || 'Agent')} — ${before} → ${kept.map((x) => `${x.cls}×${x.approved}`).join(', ')}`, target: 'admin', meta: { requestId: row.id, link: '#/tagRequest?view=requests' } });
+    } catch { /* optional */ }
+    return sendJson(res, 200, { ok: true, request: tagStatusView(row) });
   }
   if (p === '/api/public/tag-request/employee-status' && method === 'GET') {
     // 🌐 Shared public Employee Link: token is optional/backwards-compatible only.
@@ -13201,6 +13307,9 @@ async function start() {
     setTimeout(() => warmPersonalLinks().catch(() => {}), 150e3).unref?.();
     setInterval(() => warmPersonalLinks().catch(() => {}), 10 * 60e3).unref();   // 10 min = gviz cache TTL (5 min par har link ke 3-4 queries dobara jaate the)
     setTimeout(() => maybeMonthlyReport(), 8000);
+    // ⚡ v3.125.45 — Master Search ka 'Last dispatch' box: ledger aggregate boot par hi + har 25 min (user kabhi intezaar na kare)
+    setTimeout(() => ledgerAggregate(false).catch(() => {}), 90e3).unref?.();
+    setInterval(() => ledgerAggregate(true).catch(() => {}), 25 * 60e3).unref?.();
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🕒 v209 — har 15 min sheet row-count check (home khule na khule), taaki "data kab aaya" ka time sahi rahe
     setInterval(() => {

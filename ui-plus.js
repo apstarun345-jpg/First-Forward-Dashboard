@@ -201,6 +201,14 @@
       const h = hits[0], to = String(h.r.a || h.r.b || '').trim();
       return to ? { to, row: h.r, kind: h.k === 'm' ? 'Assistant ID' : 'Agent ID' } : null;
     }
+    /** v3.125.43 — value ke SAARE agents (ek Assistant ID kai agents ki ho sakti hai) → [{ to, row, kind }]. */
+    function hits(value) {
+      if (!alt) return [];
+      const v = norm(value);
+      if (v.length < 4 || !alt.has(v)) return [];
+      const seen = new Set();
+      return alt.get(v).map((h) => ({ to: String(h.r.a || h.r.b || '').trim(), row: h.r, kind: h.k === 'm' ? 'Assistant ID' : 'Agent ID' })).filter((x) => x.to && !seen.has(x.to) && seen.add(x.to));
+    }
     /** Query string ko (agar alias ho to) canonical ID me badlo; warna jaisa tha waisa. */
     const map = (q) => { const r = resolve(q); return r ? r.to : q; };
     /** Sheet4 mobile for an agent (by any ID or name) — '' if unknown / list not loaded. */
@@ -265,7 +273,7 @@
     }, true);
     // data login ke baad lazily load (idle)
     window.addEventListener('ff:data-loaded', () => { setTimeout(() => { load().catch(() => {}); }, 2500); }, { once: true });
-    return { load, resolve, map, of, mobileOf, chipsHtml, paint, _build: build };
+    return { load, resolve, hits, map, of, mobileOf, chipsHtml, paint, _build: build };
   })();
   FF.aliases = Aliases;
   FF.newAgentTag = NewAgent;

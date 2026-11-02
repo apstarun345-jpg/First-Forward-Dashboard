@@ -315,6 +315,16 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
     assert.equal(two.json.requestedTags, 31, '25 + 6');
     assert.equal(two.json.requests[0].agentName, 'Priya Verma', 'nayi request sabse upar (panel isi order me dikhata hai)');
 
+    // 2b) ✏️ v3.125.55 — pending request employee khud edit karta hai (qty badli + nayi class), approved par lock
+    const edited = await jsonCall(server.base, '/api/public/tag-request/edit', 'POST', { id: firstId, classQty: { VC4: 20, VC7: 3 }, editedBy: 'Ramesh Yadav' }, '', '10.7.7.7');
+    assert.equal(edited.res.status, 200, JSON.stringify(edited.json));
+    assert.equal(edited.json.request.total, 23);
+    assert.deepEqual(edited.json.request.classes.map((c) => `${c.cls}:${c.approved}`).sort(), ['VC4:20', 'VC7:3']);
+    const afterEdit = await jsonCall(server.base, '/api/public/tag-request/employee-status?token=' + encodeURIComponent(token));
+    assert.equal(afterEdit.json.requestedTags, 29, '23 + 6 after edit');
+    const resetEdit = await jsonCall(server.base, '/api/public/tag-request/edit', 'POST', { id: firstId, classQty: { VC4: 25, VC7: 0 } }, '', '10.7.7.7');
+    assert.equal(resetEdit.json.request.total, 25, 'qty 0 = class hat gayi');
+
     // 3) admin approve karta hai → employee ke panel me status turant Approved me chala jaata hai
     const approved = await jsonCall(server.base, `/api/tag-requests/${firstId}`, 'PUT', { status: 'approved' }, admin);
     assert.equal(approved.res.status, 200, JSON.stringify(approved.json));
@@ -323,6 +333,8 @@ test('👤 employee-status — apni requests + counts, admin approve par status 
     assert.equal(three.json.pending, 1, 'baaki abhi pending');
     assert.equal(three.json.totalRequests, 2);
     assert.equal(three.json.approvedTags, 25, 'approved tags ka total');
+    const locked = await jsonCall(server.base, '/api/public/tag-request/edit', 'POST', { id: firstId, classQty: { VC4: 5 } }, '', '10.7.7.7');
+    assert.equal(locked.res.status, 409, 'approved request edit nahi hoti');
 
     // 4) 📇 wahi agent dobara → purana address server se mil jaata hai (doosre device par bhi)
     const contact = await jsonCall(server.base, '/api/public/tag-request/contact?agentId=1001&agentName=Rahul%20Sharma&channel=ff');

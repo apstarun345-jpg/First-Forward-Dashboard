@@ -24,13 +24,24 @@ window.FF = window.FF || {};
   /** Load all datasets in parallel. fresh=true bypasses the server cache (Google se naya data). */
   let generation = 0;
   const jobs = new Map();
+  // v3.125.51 — kis config (column letters) se dataset bana — settings badle to purana dobara bane.
+  const cfgFp = () => { try { const c = FF.config; return JSON.stringify([c.sheetId, c.eir, c.stock, c.report && [c.report.sheet, c.report.gid]]); } catch { return ''; } };
+  const builtWith = {};
+  const jobKey = (key, fp) => `${key}\u0000${fp}`;
+  const keyOfJob = (jk) => String(jk).split('\u0000')[0];
   function loadKey(key, fresh) {
-    if (jobs.has(key)) return jobs.get(key);
+    const fp = cfgFp();
+    const jk = jobKey(key, fp);
+    if (jobs.has(jk)) return jobs.get(jk);
     const version = generation;
+    // Settings (column letters) beech me badal gaye → purana result chhodo, naye config ka job lo.
+    const moved = () => version === generation && fp !== cfgFp();
     const p = Promise.resolve().then(() => DATASETS[key].load({ fresh })).then((value) => {
-      if (version === generation) { state.data[key] = value; delete state.errors[key]; }
+      if (moved()) return loadKey(key, fresh);
+      if (version === generation) { state.data[key] = value; builtWith[key] = fp; delete state.errors[key]; }
       return value;
-    }).catch((err) => {
+    }, (err) => {
+      if (moved()) return loadKey(key, fresh);
       if (version === generation) {
         state.errors[key] = err;
         // 🔁 Any failed load (also page-level `need(key, { only: true })`) joins the background auto-retry.
@@ -39,11 +50,11 @@ window.FF = window.FF || {};
       throw err;
     }).finally(() => {
       if (version !== generation) return;
-      jobs.delete(key);
+      jobs.delete(jk);
       state.progress.done++;
       emit('progress', { key, ...state.progress });
     });
-    jobs.set(key, p);
+    jobs.set(jk, p);
     return p;
   }
   // ⚡ Boot order: pehle wo datasets jo Home/first paint ke liye chahiye, phir baaki.
@@ -114,10 +125,48 @@ window.FF = window.FF || {};
   function retryNow() { scheduleRetry(generation, 0); }
   // Network back / tab visible again → retry failed sheets right away.
   try { if (typeof window !== 'undefined' && window.addEventListener) { window.addEventListener('online', () => { if (Object.keys(state.errors).length) retryNow(); }); document.addEventListener('visibilitychange', () => { if (!document.hidden && Object.keys(state.errors).length && !state.retrying) retryNow(); }); } } catch { /* non-browser */ }
+  // ⚡ v3.125.50 — browser snapshot se turant dikha data; Google ka naya data aate hi (ff:data-fresh) chup-chaap dobara bana kar page update.
+  try {
+    if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('ff:data-fresh', async () => {
+      const keys = Object.keys(state.data).filter((k) => DATASETS[k]);
+      if (!keys.length) return;
+      const version = generation;
+      await Promise.allSettled(keys.map((k) => loadKey(k, false)));
+      if (version !== generation) return;
+      state.loadedAt = Date.now();
+      emit('refresh', { fresh: true });
+      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
+  /** Settings (column letters) aane ke baad: purane config wale (bane hue ya chal rahe) datasets turant naye config se. */
+  function onConfig() {
+    const fp = cfgFp();
+    const keys = new Set([
+      ...Object.keys(state.data).filter((k) => DATASETS[k] && builtWith[k] !== undefined && builtWith[k] !== fp),
+      ...[...jobs.keys()].map(keyOfJob).filter((k) => DATASETS[k])
+    ]);
+    if (!keys.size) return;
+    const version = generation;
+    // Naye config wali query ka browser snapshot ho to ye turant mil jaata hai (purani query ka Google wait nahi).
+    configReload = Promise.allSettled([...keys].map((k) => loadKey(k, false))).then(() => {
+      if (version !== generation) return;
+      emit('refresh', { config: true });
+      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+    }).finally(() => { configReload = null; });
+  }
+  let configReload = null;
+  /** Drill-downs isse pehle await karein: settings (column letters) aa chuke hon aur unke hisaab se data dobara ban chuka ho. */
+  async function settled(maxMs = 15000) {
+    const end = Date.now() + maxMs;
+    while (!(FF.config && FF.config._applied) && Date.now() < end && typeof window !== 'undefined' && window.document) await new Promise((r) => setTimeout(r, 150));
+    if (configReload && !(arguments.length > 1 && arguments[1] === 'config-only')) await Promise.race([configReload, new Promise((r) => setTimeout(r, Math.max(0, end - Date.now())))]);
+  }
   function get(key) { return state.data[key]; }
   function error(key) { return state.errors[key]; }
   async function need(key, opts) {
     // A slow unrelated stock/report query must not block this page.
+    // v3.125.54 — purane (login se pehle wale) column letters se bana ho to sirf ye dataset naye config se.
+    if (state.data[key] !== undefined && builtWith[key] !== undefined && builtWith[key] !== cfgFp() && FF.config && FF.config._applied) return loadKey(key, false);
     if (state.data[key] !== undefined) return state.data[key];
     // `{ only: true }` — sirf yehi dataset load karo. Public (bina login) employee form isi ko use
     // karta hai: poora preload wahan bekaar hai aur Google par extra load daalta hai.
@@ -159,5 +208,5 @@ window.FF = window.FF || {};
     return items;
   }
 
-  FF.store = { preload, refresh, retryNow, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
+  FF.store = { onConfig, settled, preload, refresh, retryNow, get, error, need, reset, on, people, suggestions, DATASETS, get state() { return state; }, get loadedAt() { return state.loadedAt; }, get loading() { return state.loading; } };
 })(window.FF);

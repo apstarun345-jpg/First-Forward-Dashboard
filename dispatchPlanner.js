@@ -119,8 +119,11 @@ FF.pages = FF.pages || {};
     const ready = Array.isArray(daily);
     const rows = G.issuanceRows() || [];
     if (!ready) return { ...empty, ready: false };
+    // v3.125.47 — month wahi jo run-rate ke din (chBasis): 1 tareekh ko October ke 31 din + October ki issuance.
+    // Pehle month GV Master ki latest date (aaj, 1 Nov) se aata tha → November ke 9 tags ÷ 31 din = sab "Low".
+    const basis = chBasis('gv');
     const latest = typeof G.latestDate === 'function' ? G.latestDate() : null;
-    const curYm = latest ? U.ymKey(latest) : U.reportYm();
+    const curYm = (basis && basis.ym) || (latest ? U.ymKey(latest) : U.reportYm());
     const lastYm = U.prevMonthKey(curYm);
     const make = () => new Map();
     const cur = make(), last = make();

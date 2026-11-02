@@ -8,6 +8,56 @@ window.FF = window.FF || {};
   const U = FF.util;
   const TTL_MS = Infinity; // no auto expiry — data stays until the ↻ button / browser reload
   const cache = new Map(); // key → { t, promise }
+  /** ⚡ v3.125.50 — persistent sheet snapshot (IndexedDB, per user). Har query ka aakhri accha result. */
+  const PSNAP = {
+    MAX_AGE_MS: 36 * 3600e3, MAX_ROWS: 90000, outstanding: 0, served: 0, timer: null,
+    user() { try { return (FF.auth && FF.auth.user && FF.auth.user.username) || ''; } catch { return ''; } },
+    // Settings (column letters) aane ke baad hi — warna default columns wala galat result save / serve hota.
+    key(k) { const u = PSNAP.user(); return u && FF.config && FF.config._applied && typeof indexedDB !== 'undefined' ? `${u}|${k}` : ''; },
+    db: null,
+    open() {
+      if (PSNAP.db) return PSNAP.db;
+      PSNAP.db = new Promise((resolve) => {
+        try {
+          const rq = indexedDB.open('ffdash-sheets', 1);
+          rq.onupgradeneeded = () => { try { rq.result.createObjectStore('q'); } catch { /* ignore */ } };
+          rq.onsuccess = () => resolve(rq.result);
+          rq.onerror = () => resolve(null);
+          rq.onblocked = () => resolve(null);
+        } catch { resolve(null); }
+      });
+      return PSNAP.db;
+    },
+    async get(k) {
+      try {
+        const db = await PSNAP.open(); if (!db) return null;
+        return await new Promise((resolve) => {
+          try { const r = db.transaction('q', 'readonly').objectStore('q').get(k); r.onsuccess = () => resolve(r.result || null); r.onerror = () => resolve(null); } catch { resolve(null); }
+        });
+      } catch { return null; }
+    },
+    async put(k, table) {
+      try {
+        if (!table || !Array.isArray(table.rows) || table.rows.length > PSNAP.MAX_ROWS) return;
+        const db = await PSNAP.open(); if (!db) return;
+        const plain = { cols: table.cols, rows: table.rows, source: table.source, sheet: table.sheet };
+        db.transaction('q', 'readwrite').objectStore('q').put({ t: Date.now(), table: plain }, k);
+      } catch { /* quota / private mode — ignore */ }
+    },
+    track(p) {
+      PSNAP.outstanding++; PSNAP.served++;
+      p.catch(() => {}).finally(() => {
+        PSNAP.outstanding--;
+        clearTimeout(PSNAP.timer);
+        PSNAP.timer = setTimeout(() => {
+          if (PSNAP.outstanding > 0 || !PSNAP.served) return;
+          PSNAP.served = 0;
+          try { window.dispatchEvent(new CustomEvent('ff:data-fresh')); } catch { /* ignore */ }
+        }, 900);
+      });
+    },
+    async clear() { try { const db = await PSNAP.open(); if (db) db.transaction('q', 'readwrite').objectStore('q').clear(); } catch { /* ignore */ } }
+  };
   // Tiny live endpoints are shared across pages/preloader so multiple renders don't hit Google twice.
   const todayCache = { at: 0, value: null, promise: null };
   const gvTodayCache = { at: 0, value: null, promise: null };
@@ -241,6 +291,7 @@ window.FF = window.FF || {};
     const now = Date.now();
     const hit = cache.get(key);
     if (hit && (hit.pending || (!o.fresh && now - hit.t < TTL_MS))) return hit.promise;
+    const pk = PSNAP.key(key);
 
     const extra = { ...(o.fresh ? { fresh: '1' } : {}), ...(o.priority ? { prio: '1' } : {}), ...(range ? { range } : {}), ...(o.headers !== undefined ? { headers: String(o.headers) } : {}) };
     const attempts = [];
@@ -262,7 +313,7 @@ window.FF = window.FF || {};
     if (!attempts.length && (proxyUrl || directUrl)) attempts.push(proxyUrl || directUrl);
     if (!attempts.length) throw new Error('Sheet source configure nahi hai (proxy/direct dono band hain).');
 
-    const promise = (async () => {
+    const netStart = () => (async () => {
       let lastErr = null;
       let limitRetried = false;
       // 🔁 Auto-retry (v3.32): network hiccup / Google 429-5xx / timeout par chup-chaap 3 try (backoff 0.7s, 1.8s).
@@ -318,6 +369,30 @@ window.FF = window.FF || {};
       }
       throw lastErr || new Error('Fetch failed');
     })();
+    // ⚡ v3.125.50 — browser me pichhla result (IndexedDB) turant do, Google se naya peeche se; aate hi
+    // 'ff:data-fresh' event → store / gv dobara bante hain aur page apne aap update. fresh=1 (↻) par sirf network.
+    let promise;
+    if (pk && !o.fresh && !o.noPersist) {
+      promise = (async () => {
+        const snap = await PSNAP.get(pk);
+        if (snap && snap.table && Date.now() - snap.t < PSNAP.MAX_AGE_MS) {
+          const net = netStart();
+          PSNAP.track(net.then((tbl) => {
+            const e = { t: Date.now(), promise: Promise.resolve(tbl), pending: false };
+            cache.set(key, e);
+            PSNAP.put(pk, tbl);
+            return tbl;
+          }));
+          const table = snap.table; table.stale = true; table.snapAt = snap.t;
+          return table;
+        }
+        const tbl = await netStart();
+        PSNAP.put(pk, tbl);
+        return tbl;
+      })();
+    } else {
+      promise = netStart().then((tbl) => { if (pk && !o.noPersist) PSNAP.put(pk, tbl); return tbl; });
+    }
     const entry = { t: now, promise, pending: true };
     cache.set(key, entry);
     promise.then(() => { entry.pending = false; }, () => { entry.pending = false; });
@@ -395,6 +470,6 @@ window.FF = window.FF || {};
     }
     return { map: out, meta };
   }
-  FF.data = { dispatchLookup, query, today, gvToday, clearCache, status, parseGviz, cellText, identifierText, isIdentifierColumn, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError, RateLimitError, rateLimitPage, rateLimitStatus, markRateLimited,
+  FF.data = { snapshots: PSNAP, dispatchLookup, query, today, gvToday, clearCache, status, parseGviz, cellText, identifierText, isIdentifierColumn, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError, RateLimitError, rateLimitPage, rateLimitStatus, markRateLimited,
     get lastLoadAt() { return lastLoadAt; }, get lastSource() { return lastSource; } };
 })(window.FF);
