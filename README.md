@@ -1,5 +1,13 @@
 # First Forward Dashboard — First Forward + GV Partner (v3.72.0)
 
+## 📱 Native mobile device security + offline read-only mode
+
+- Options → Device security enables a device-only WebAuthn platform lock with required fingerprint / Face ID / screen-lock verification, local signature checks and configurable relock timing.
+- Biometric templates and private keys stay with the device authenticator; only the public key and credential ID are kept locally per dashboard username.
+- Existing PWA navigation, snapshots, push and reconnect sync stay in place. Mobile writes are blocked while offline; no forms are silently replayed.
+- Guide: [NATIVE-MOBILE-EXPERIENCE.md](NATIVE-MOBILE-EXPERIENCE.md).
+
+
 ## ✨ v3.72.0 — 🚦 "Too Many Requests" fix + 📊 FASTag Mapping live counters
 
 - **Google ka HTML error page kabhi UI me nahi:** 429 / "Too Many Requests" (normalize.css wala) page ab
