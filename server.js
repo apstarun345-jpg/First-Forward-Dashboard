@@ -3352,7 +3352,7 @@ function newIdsData(fresh) {
 // ---------------------------------------------------------------------------------------------
 // 👥 v3.125.77 — Multiple Customer ID (Cross Channel): EIR LEGACY_CUSTOMER_ID × month → tag count + issuing agent.
 // Agent naam EIR me khaali ho to GV Master (tag ID / VRN) se agent ID · naam · channel. Customers with ≥ 2 tags.
-const mcState = { at: 0, data: null, promise: null, key: '' };
+const mcState = { at: 0, data: null, promise: null, key: '', progress: '', error: '', errorAt: 0 };
 const mcCell = (r, i) => idCellText(r, i);
 const mcNum = (r, i) => Number(r && r.c && r.c[i] && r.c[i].v) || 0;
 function mcCols() {
@@ -3362,6 +3362,20 @@ function mcCols() {
     agentId: pick('agentId', 'J'), agentName: pick('agentName', 'L'), master: pick('masterId', 'AU'), status: pick('status', 'Z'), type: pick('type', 'P'),
     first: pick('customerFirst', 'AF'), last: pick('customerLast', 'AH'), corp: pick('corpName', 'AI') };
 }
+/** Sequential gviz pages (heavyScanChain ke peeche nahi — stock scan chal raha ho tab bhi chale). onRows(rows, at). */
+async function mcPages(sheetId, sheet, select, where, onRows, label) {
+  const PAGE = 25000;
+  for (let page = 0; page < 40; page++) {
+    mcState.progress = `${label} · page ${page + 1}`;
+    const qp = new URLSearchParams({ id: sheetId, tq: `select ${select.join(', ')}${where ? ` where ${where}` : ''} limit ${PAGE} offset ${page * PAGE}` });
+    const gm = /^gid:(\d+)$/.exec(String(sheet));
+    if (gm) qp.set('gid', gm[1]); else qp.set('sheet', sheet);
+    const { rows, ids } = await gvizPageServer(qp, sheet);
+    const at = (L) => ids.indexOf(L);
+    await onRows(rows, at);
+    if (rows.length < PAGE) break;
+  }
+}
 async function buildMultiCustomer() {
   const s = db.settings || {}, e = s.eir || {};
   const sheetId = String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
@@ -3369,10 +3383,10 @@ async function buildMultiCustomer() {
   const sheet = s.eirSheet || e.sheet || 'EIR';
   const C = mcCols();
   const gvMasterId = String(e.gvMasterId || '5845036');
-  const opts = { pageRows: 25000, window: 2, maxPages: 40 };
   // 1) customer × month counts (Google side group by — chhota result)
   const cust = new Map();
-  await gvizPagesServer(sheetId, sheet, [C.cust, `year(${C.date})`, `month(${C.date})`, `count(${C.tag})`],
+  const t0 = Date.now();
+  await mcPages(sheetId, sheet, [C.cust, `year(${C.date})`, `month(${C.date})`, `count(${C.tag})`],
     `${C.cust} is not null and ${C.date} is not null group by ${C.cust}, year(${C.date}), month(${C.date})`, async (rows) => {
       for (const r of rows) {
         const id = mcCell(r, 0); if (!id) continue;
@@ -3382,10 +3396,12 @@ async function buildMultiCustomer() {
         let o = cust.get(id); if (!o) { o = { id, months: {}, total: 0 }; cust.set(id, o); }
         o.months[ym] = (o.months[ym] || 0) + n; o.total += n;
       }
-    }, opts);
+    }, '1/4 EIR customer × month');
+  const allCust = cust.size;
   for (const [id, o] of cust) if (o.total < 2) cust.delete(id);
+  console.log(`multi-customer: ${allCust} customers, ${cust.size} with 2+ tags (${Math.round((Date.now() - t0) / 1000)} s)`);
   // 2) issuing agent (EIR) — sabse zyada tags wala agent, channel = Master ID se
-  await gvizPagesServer(sheetId, sheet, [C.cust, C.agentId, C.agentName, C.master, `count(${C.tag})`],
+  await mcPages(sheetId, sheet, [C.cust, C.agentId, C.agentName, C.master, `count(${C.tag})`],
     `${C.cust} is not null group by ${C.cust}, ${C.agentId}, ${C.agentName}, ${C.master}`, async (rows) => {
       for (const r of rows) {
         const o = cust.get(mcCell(r, 0)); if (!o) continue;
@@ -3393,17 +3409,17 @@ async function buildMultiCustomer() {
         o.agents = o.agents || [];
         o.agents.push({ id: aid, name: an, ch: idNorm(mid) === idNorm(gvMasterId) ? 'GV' : (mid ? 'FF' : ''), n });
       }
-    }, opts);
+    }, '2/4 issuing agent');
   // 3) jinka agent naam khaali — un tags ke ID / VRN
   const needTag = new Map(), needVrn = new Map();
-  await gvizPagesServer(sheetId, sheet, [C.cust, C.tag, C.vrn], `${C.cust} is not null and (${C.agentName} is null or ${C.agentName} = '')`, async (rows) => {
+  await mcPages(sheetId, sheet, [C.cust, C.tag, C.vrn], `${C.cust} is not null and (${C.agentName} is null or ${C.agentName} = '')`, async (rows) => {
     for (const r of rows) {
       const id = mcCell(r, 0), o = cust.get(id); if (!o) continue;
       const t = idNorm(mcCell(r, 1)), v = idNorm(mcCell(r, 2));
       if (t) needTag.set(t, id); if (v) needVrn.set(v, id);
       o.blank = (o.blank || 0) + 1;
     }
-  }, opts);
+  }, '3/4 blank agent tags');
   // 4) GV Master se lookup (tag ID / VRN → agent)
   const gvFound = new Map();
   const gm = (s.gv && s.gv.master) || {};
@@ -3413,7 +3429,7 @@ async function buildMultiCustomer() {
     const L = { uid: colLetter(gm.uniqueId, 'A'), name: colLetter(gm.agentName, 'B'), vrn: colLetter(gm.vrn, 'E'), tag: colLetter(gm.tagId, 'I'), tl: colLetter(gm.tlName, 'D') };
     const gsheet = /^\d+$/.test(String(gm.gid || '')) ? `gid:${gm.gid}` : (gm.tab || 'GV Master');
     try {
-      await gvizPagesServer(gvSheet, gsheet, [L.uid, L.name, L.vrn, L.tag, L.tl], `${L.uid} is not null`, async (rows, at) => {
+      await mcPages(gvSheet, gsheet, [L.uid, L.name, L.vrn, L.tag, L.tl], `${L.uid} is not null`, async (rows, at) => {
         for (const r of rows) {
           const g = (k) => mcCell(r, at(L[k]));
           const hit = { id: g('uid'), name: g('name'), tl: g('tl') };
@@ -3425,7 +3441,7 @@ async function buildMultiCustomer() {
             const x = m.get(k) || { ...hit, n: 0 }; x.n++; m.set(k, x); gvFound.set(cid, m);
           }
         }
-      }, opts);
+      }, '4/4 GV Master lookup');
     } catch (err) { gvErr = String((err && err.message) || err).slice(0, 160); }
   }
   // 5) final rows
@@ -3453,7 +3469,10 @@ function multiCustomerData(fresh) {
   const stale = have && Date.now() - mcState.at > 30 * 60e3;
   if (have && !fresh && !stale) return Promise.resolve(have);
   if (!mcState.promise) {
-    mcState.promise = buildMultiCustomer().then((d) => { mcState.data = d; mcState.at = Date.now(); mcState.key = key; return d; }).finally(() => { mcState.promise = null; });
+    mcState.error = ''; mcState.progress = 'start';
+    mcState.promise = buildMultiCustomer().then((d) => { mcState.data = d; mcState.at = Date.now(); mcState.key = key; mcState.progress = ''; console.log(`multi-customer ready: ${d.rows.length} rows`); return d; })
+      .catch((err) => { mcState.error = String((err && err.message) || err).slice(0, 300); mcState.errorAt = Date.now(); console.warn('multi-customer build failed:', mcState.error); throw err; })
+      .finally(() => { mcState.promise = null; });
     mcState.promise.catch(() => {});
   }
   return have && !fresh ? Promise.resolve(have) : mcState.promise;
@@ -6560,9 +6579,10 @@ async function handleApi(req, res, url) {
     if (!user) throw new HttpError(401, 'Login required');
     if (user.role !== 'admin' && !(user.permissions || []).includes('multiCustomer')) throw new HttpError(403, 'Multiple Customer ID ka access nahi hai.');
     const fresh = url.searchParams.get('fresh') === '1';
-    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 30000); });
+    if (!fresh && !mcState.promise && !mcState.data && mcState.error && Date.now() - mcState.errorAt < 60000) throw new HttpError(502, `Multiple Customer ID: ${mcState.error}`);
+    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 8000); });
     let data; try { data = await Promise.race([multiCustomerData(fresh), wait]); } catch (err) { throw new HttpError(502, `Multiple Customer ID load nahi hua: ${String((err && err.message) || err).slice(0, 200)}`); } finally { clearTimeout(timer); }
-    if (!data) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 4000 });
+    if (!data) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 4000, progress: mcState.progress || '' });
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ...data }), { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/multi-customer/tags' && method === 'POST') {

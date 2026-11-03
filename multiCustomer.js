@@ -102,7 +102,7 @@ FF.pages = FF.pages || {};
     const mount = state.root && state.root.querySelector('[data-mc-body]'); if (!mount) return;
     const d = state.data;
     if (!d) {
-      mount.innerHTML = `<div class="card"><div class="card-body dim">${state.err ? `❌ ${esc(state.err)}` : '⏳ EIR se customers jode ja rahe hain + GV Master se agent dhoondhe ja rahe hain… (pehli baar 30-90 sec)'}</div></div>`;
+      mount.innerHTML = `<div class="card"><div class="card-body dim">${state.err ? `❌ ${esc(state.err)}` : `⏳ EIR se customers jode ja rahe hain + GV Master se agent dhoondhe ja rahe hain… (pehli baar 1-3 min)${state.progress ? ` · <b>${esc(state.progress)}</b>` : ''}`}</div></div>`;
       return;
     }
     const rows = visible(), s = d.summary || {};
@@ -144,11 +144,12 @@ FF.pages = FF.pages || {};
   async function load(fresh) {
     if (state.busy) return; state.busy = true; state.err = '';
     try {
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 150; i++) {
         const out = await FF.auth.api(`/api/multi-customer${fresh && i === 0 ? '?fresh=1' : ''}`);
         if (out && !out.pending) { state.data = out; break; }
-        await new Promise((r) => setTimeout(r, 4000));
+        state.progress = (out && out.progress) || '';
         paint();
+        await new Promise((r) => setTimeout(r, 3000));
       }
       if (!state.data) state.err = 'Abhi ban raha hai — thodi der baad 🔄 Refresh dabao.';
     } catch (e) { state.err = (e && e.message) || 'Load nahi hua'; }
