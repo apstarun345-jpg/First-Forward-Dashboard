@@ -46,8 +46,9 @@ FF.pages = FF.pages || {};
     const tot = ['TOTAL', ...d.months.map((m) => U.sum(rows, (r) => r.months[m] || 0)), U.sum(rows, (r) => r.total), '', '', '', '', '', ''];
     downloadCsv(`multiple-customer-id-${U.stamp ? U.stamp() : Date.now()}.csv`, header, [...body, tot]);
   }
-  const TAG_HEAD = ['Legacy Customer ID', 'Customer', 'Tag ID', 'VRN', 'Class', 'Issue date', 'Month', 'Type', 'Status', 'Agent ID', 'Agent name', 'TL name', 'Channel'];
-  const tagRow = (t) => [t.customerId, t.customer, t.tagId, t.vrn, t.cls, t.date, t.ym ? ymLabel(t.ym) : '', t.type, t.status, t.agentId, t.agentName, t.tlName || '', t.channel];
+  const TAG_HEAD = ['Legacy Customer ID', 'Customer', 'Tag ID', 'VRN', 'Class', 'Issue date', 'Month', 'Type', 'Status', 'Agent ID', 'Agent name', 'TL name', 'Channel', 'Agent source'];
+  const dShort = (t) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t.iso || ''); return m ? `${m[3]} ${MN[Number(m[2]) - 1]} ${m[1]}` : (t.date || ''); };
+  const tagRow = (t) => [t.customerId, t.customer, t.tagId, t.vrn, t.cls, dShort(t), t.ym ? ymLabel(t.ym) : '', t.type, t.status, t.agentId, t.agentName, t.tlName || '', t.channel, t.agentSource || ''];
   async function fetchTags(ids) { const out = await FF.auth.api('/api/multi-customer/tags', 'POST', { ids }); return (out && out.rows) || []; }
   async function tagCsvAll(btn, opts) {
     const o = opts || {};
@@ -80,8 +81,8 @@ FF.pages = FF.pages || {};
     try {
       const tags = await fetchTags([id]);
       const body = `<div class="mc-drawer-bar"><button class="btn small primary" data-mc-tagcsv="${esc(id)}">⬇ CSV</button><span class="dim small">${U.fmt(tags.length)} tags</span></div>
-        <div class="table-wrap"><table class="tbl compact mc-tbl"><thead><tr>${['#', 'Tag ID', 'VRN', 'Class', 'Issue date', 'Type', 'Status', 'Agent', 'Channel'].map((h) => `<th>${h}</th>`).join('')}</tr></thead>
-        <tbody>${tags.map((t, i) => `<tr><td>${i + 1}</td><td class="mono">${esc(t.tagId)}</td><td class="mono">${esc(t.vrn)}</td><td><span class="cg-tag cg-${esc(String(t.cls).toLowerCase().replace(/[^a-z0-9]/g, ''))}">${esc(t.cls || '—')}</span></td><td>${esc(t.date)}</td><td>${esc(t.type)}</td><td>${esc(t.status)}</td><td>${esc(t.agentName || '—')}${t.agentId ? ` <small class="dim mono">${esc(t.agentId)}</small>` : ''}</td><td>${chBadge(t.channel)}</td></tr>`).join('')}</tbody></table></div>`;
+        <div class="table-wrap mc-dwrap"><table class="tbl compact mc-tbl mc-dtbl"><thead><tr>${['Tag ID', 'VRN', 'Class', 'Issue date', 'Type', 'Status', 'Agent name', 'Agent ID', 'TL name', 'Channel'].map((h) => `<th>${h}</th>`).join('')}</tr></thead>
+        <tbody>${tags.map((t) => `<tr><td class="mono">${esc(t.tagId)}</td><td class="mono">${esc(t.vrn)}</td><td><span class="cg-tag cg-${esc(String(t.cls).toLowerCase().replace(/[^a-z0-9]/g, ''))}">${esc(t.cls || '—')}</span></td><td>${esc(dShort(t))}</td><td>${esc(t.type)}</td><td>${esc(t.status)}</td><td>${t.agentName ? esc(t.agentName) : '<span class="dim">—</span>'}${t.agentSource === 'GV Master' ? ' <small class="mc-src" title="EIR me naam khaali tha — GV Master se mila">GV Master</small>' : ''}</td><td class="mono">${esc(t.agentId || '—')}</td><td>${t.tlName ? esc(t.tlName) : '<span class="dim">—</span>'}</td><td>${chBadge(t.channel)}</td></tr>`).join('')}</tbody></table></div>`;
       open(body);
       state.lastTags = { id, tags };
     } catch (err) { open(`<p class="dim">❌ ${esc((err && err.message) || err)}</p>`); }

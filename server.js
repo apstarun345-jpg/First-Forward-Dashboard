@@ -3430,6 +3430,7 @@ async function buildMultiCustomer() {
   const needAgentTl = new Set();
   for (const o of cust.values()) for (const a of (o.agents || [])) if (a.ch === 'GV' && a.id && !a.tl) needAgentTl.add(idNorm(a.id));
   const gvTlByAgent = new Map();
+  const tagHit = new Map(), vrnHit = new Map();
   if (gvSheet && (needTag.size || needVrn.size || needAgentTl.size)) {
     const L = { uid: colLetter(gm.uniqueId, 'A'), name: colLetter(gm.agentName, 'B'), vrn: colLetter(gm.vrn, 'E'), tag: colLetter(gm.tagId, 'I'), tl: colLetter(gm.tlName, 'D') };
     const gsheet = /^\d+$/.test(String(gm.gid || '')) ? `gid:${gm.gid}` : (gm.tab || 'GV Master');
@@ -3441,6 +3442,7 @@ async function buildMultiCustomer() {
           if (hit.tl && needAgentTl.has(idNorm(hit.id)) && !gvTlByAgent.has(idNorm(hit.id))) gvTlByAgent.set(idNorm(hit.id), hit.tl);
           const t = idNorm(g('tag')), v = idNorm(g('vrn'));
           const c1 = t && needTag.get(t), c2 = v && needVrn.get(v);
+          if (c1) tagHit.set(t, hit); if (c2) vrnHit.set(v, hit);
           for (const cid of [c1, c2]) {
             if (!cid) continue;
             const m = gvFound.get(cid) || new Map(); const k = `${hit.id}|${hit.name}`;
@@ -3465,6 +3467,7 @@ async function buildMultiCustomer() {
   }
   rows.sort((a, b) => b.total - a.total);
   const months = [...new Set(rows.flatMap((r) => Object.keys(r.months)))].sort();
+  mcState.tagHit = tagHit; mcState.vrnHit = vrnHit; mcState.gvTlByAgent = gvTlByAgent;
   return { at: new Date().toISOString(), months, rows, gvError: gvErr, cols: C,
     summary: { customers: rows.length, tags: rows.reduce((t, r) => t + r.total, 0), gvResolved: rows.filter((r) => r.source === 'GV Master').length, blankLeft: rows.filter((r) => !r.agentName).length } };
 }
@@ -3503,13 +3506,42 @@ async function multiCustomerTags(ids) {
   const at = (L) => out.ids.indexOf(L);
   const g = (r, L) => (at(L) >= 0 ? mcCell(r, at(L)) : '');
   const gvMasterId = String(e.gvMasterId || '5845036');
-  return out.rows.map((r) => ({ customerId: g(r, C.cust), tagId: g(r, C.tag), vrn: g(r, C.vrn), cls: g(r, C.cls),
+  const list = out.rows.map((r) => ({ customerId: g(r, C.cust), tagId: g(r, C.tag), vrn: g(r, C.vrn), cls: g(r, C.cls),
     date: (() => { const c = r.c && r.c[at(C.date)]; return c ? (c.f || String(c.v || '')) : ''; })(),
     ym: (() => { const c = r.c && r.c[at(C.date)]; if (!c) return ''; const d = serverDate(c.v) || serverDate(c.f); return d ? String(d).slice(0, 7) : ''; })(),
     tlName: (() => { const t = g(r, C.tlName); return /^(NA|N\/A|#N\/A|-|0)$/i.test(t) ? '' : t; })(),
     type: g(r, C.type), status: g(r, C.status), agentId: g(r, C.agentId), agentName: g(r, C.agentName),
     channel: idNorm(g(r, C.master)) === idNorm(gvMasterId) ? 'GV' : (g(r, C.master) ? 'FF' : ''),
+    iso: (() => { const c = r.c && r.c[at(C.date)]; if (!c) return ''; return serverDate(c.v) || serverDate(c.f) || ''; })(),
     customer: g(r, C.corp) || [g(r, C.first), g(r, C.last)].filter(Boolean).join(' ') }));
+  // EIR me agent naam khaali → GV Master (build cache, warna seedha GV Master query by Tag ID / VRN)
+  const fill = (t, hit) => { if (!hit) return false; t.agentId = hit.id || t.agentId; t.agentName = hit.name || t.agentName; t.tlName = t.tlName || hit.tl || ''; t.channel = 'GV'; t.agentSource = 'GV Master'; return true; };
+  const miss = [];
+  for (const t of list) {
+    if (t.agentName) { t.agentSource = 'EIR'; if (!t.tlName && t.channel === 'GV' && mcState.gvTlByAgent) t.tlName = mcState.gvTlByAgent.get(idNorm(t.agentId)) || ''; continue; }
+    if (fill(t, mcState.tagHit && mcState.tagHit.get(idNorm(t.tagId))) || fill(t, mcState.vrnHit && mcState.vrnHit.get(idNorm(t.vrn)))) continue;
+    miss.push(t);
+  }
+  const gvSheet = String(s.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  if (miss.length && gvSheet) {
+    const gm = (s.gv && s.gv.master) || {};
+    const L = { uid: colLetter(gm.uniqueId, 'A'), name: colLetter(gm.agentName, 'B'), vrn: colLetter(gm.vrn, 'E'), tag: colLetter(gm.tagId, 'I'), tl: colLetter(gm.tlName, 'D') };
+    const safe = (v) => String(v || '').replace(/[^0-9A-Za-z]/g, '');
+    const conds = [];
+    miss.slice(0, 120).forEach((t) => { if (safe(t.tagId)) conds.push(`${L.tag} = '${safe(t.tagId)}'`); if (safe(t.vrn)) conds.push(`${L.vrn} = '${safe(t.vrn)}'`); });
+    if (conds.length) {
+      try {
+        const qp = new URLSearchParams({ id: gvSheet, tq: `select ${L.uid}, ${L.name}, ${L.vrn}, ${L.tag}, ${L.tl} where ${conds.join(' or ')} limit 2000` });
+        if (/^\d+$/.test(String(gm.gid || ''))) qp.set('gid', String(gm.gid)); else qp.set('sheet', gm.tab || 'GV Master');
+        const res = await gvizPageServer(qp, 'GV Master');
+        const ix = (Lt) => res.ids.indexOf(Lt);
+        const byTag = new Map(), byVrn = new Map();
+        res.rows.forEach((r) => { const hit = { id: mcCell(r, ix(L.uid)), name: mcCell(r, ix(L.name)), tl: mcCell(r, ix(L.tl)) }; const tg = idNorm(mcCell(r, ix(L.tag))), vr = idNorm(mcCell(r, ix(L.vrn))); if (tg) byTag.set(tg, hit); if (vr) byVrn.set(vr, hit); });
+        miss.forEach((t) => { fill(t, byTag.get(idNorm(t.tagId))) || fill(t, byVrn.get(idNorm(t.vrn))); });
+      } catch (err) { console.warn('multi-customer tags GV lookup:', String((err && err.message) || err).slice(0, 160)); }
+    }
+  }
+  return list;
 }
 // ---------------------------------------------------------------------------------------------
 // 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet(s): First–Last barcode ranges → interval index.
