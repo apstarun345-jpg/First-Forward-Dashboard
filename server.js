@@ -6573,9 +6573,40 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const ch = String(body && body.ch) === 'gv' ? 'gv' : 'ff';
     const ranges = (Array.isArray(body && body.ranges) ? body.ranges : []).slice(0, 12);
-    const index = await stockAgeIndexWithin(20000, false);
-    if (!index || !index[ch] || typeof index[ch].find !== 'function') return sendJson(res, 200, { ok: true, pending: true });
+    const index = await stockAgeIndexWithin(1500, false);
     const out = [];
+    const fmtBc = (d) => (d.length === 16 ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : d);
+    if (!index || !index[ch] || typeof index[ch].find !== 'function') {
+      // Stock index abhi ban raha hai → seedha sheet se (GV: Tag Assignment range query · FF: StockDataa mapping index)
+      for (const rg of ranges) {
+        const a = String((rg && rg.first) || '').replace(/\D/g, ''), b = String((rg && rg.last) || '').replace(/\D/g, '');
+        if (a.length < 6 || b.length < 6) continue;
+        let lo = BigInt(a), hi = BigInt(b); if (lo > hi) [lo, hi] = [hi, lo];
+        if (hi - lo > 2000n) hi = lo + 2000n;
+        const w = Math.max(a.length, b.length), label = `${rg.first} → ${rg.last}`;
+        const found = new Map();
+        if (ch === 'gv') {
+          const st = db.settings || {}, A = (st.gv && st.gv.assignment) || {};
+          const L = { cls: colLetter(A.cls, 'A'), tag: colLetter(A.tagId, 'B'), ser: colLetter(A.serial, 'C'), stat: colLetter(A.status, 'D'), aid: colLetter(A.agentId, 'E'), an: colLetter(A.agentName, 'F'), tl: colLetter(A.tlName, 'H') };
+          const f1 = fmtBc(lo.toString().padStart(w, '0')), f2 = fmtBc(hi.toString().padStart(w, '0'));
+          const qp = new URLSearchParams({ id: String(st.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${L.cls}, ${L.tag}, ${L.ser}, ${L.stat}, ${L.aid}, ${L.an}, ${L.tl} where ${L.ser} >= '${f1}' and ${L.ser} <= '${f2}' limit 3000` });
+          if (/^\d+$/.test(String(A.gid || ''))) qp.set('gid', String(A.gid)); else qp.set('sheet', A.tab || 'Tag Assignment');
+          const t = await gvizPageServerInner(qp, 'Tag Assignment');
+          t.rows.forEach((r) => { const ser = idCellText(r, 2).replace(/\D/g, ''); if (ser) found.set(ser, { cls: idCellText(r, 0), tagId: idCellText(r, 1), status: idCellText(r, 3), agentId: idCellText(r, 4), agent: idCellText(r, 5).trim(), tl: idCellText(r, 6).trim() }); });
+        } else {
+          const res2 = await mappingStock.lookup([{ type: 'range', first: String(rg.first), last: String(rg.last) }], {});
+          ((res2.results && res2.results[0] && res2.results[0].rows) || []).forEach((x) => { const k = String(x.barcode || '').replace(/\D/g, ''); if (k) found.set(k, { cls: x.vcType, tagId: x.tagId, agentId: x.stockAgentId, agent: x.stockAgentName, tl: x.tlName, status: 'stock' }); });
+        }
+        for (let n = lo; n <= hi; n++) {
+          const d = n.toString().padStart(w, '0'), f = found.get(d);
+          if (!f) { out.push({ barcode: fmtBc(d), status: 'issued', note: `${ch.toUpperCase()} stock list me nahi (issue / bahar)`, range: label }); continue; }
+          const inStock = ch === 'gv' ? !/issu|activ|sold|used|black|hotlist|close/i.test(f.status || '') : true;
+          out.push({ barcode: fmtBc(d), status: inStock ? 'stock' : 'issued', tagId: f.tagId || '', cls: f.cls || '', agent: /not assigned/i.test(f.agentId || '') ? '' : (f.agent || ''), agentId: /not assigned/i.test(f.agentId || '') ? '' : (f.agentId || ''), tl: f.tl || '',
+            note: ch === 'gv' ? `Tag Assignment · ${f.status || ''}` : (f.agent ? 'StockDataa · agent ke paas' : 'StockDataa · office'), range: label });
+        }
+      }
+      return sendJson(res, 200, { ok: true, ch, rows: out, src: 'sheet' }, { 'Cache-Control': 'no-store' });
+    }
     for (const rg of ranges) {
       const a = String((rg && rg.first) || '').replace(/\D/g, ''), b = String((rg && rg.last) || '').replace(/\D/g, '');
       if (a.length < 6 || b.length < 6) continue;
