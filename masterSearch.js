@@ -2689,7 +2689,13 @@ FF.pages = FF.pages || {};
   const dspStCache = new Map();
   async function dspStatusOf(r) {
     const key = `${r.date}|${(r.ranges || []).map((x) => `${x.first}-${x.last}`).join(',')}`;
+    const today = U.dateKey ? U.dateKey(new Date()) : new Date().toISOString().slice(0, 10);
+    const lsKey = `ff_dspst|${today}|${key}`;
     if (!dspStCache.has(key)) {
+      try {
+        const hit = localStorage.getItem(lsKey);
+        if (hit) { const rows = JSON.parse(hit); if (Array.isArray(rows)) { dspStCache.set(key, Promise.resolve(rows)); return rows; } }
+      } catch { /* storage optional */ }
       const job = (async () => {
         if (!FF.barcodeChecker && FF.lazy && FF.lazy.inject) await FF.lazy.inject('barcodeChecker');
         if (!FF.barcodeChecker || !FF.barcodeChecker.checkRange) throw new Error('Barcode checker load nahi hua');
@@ -2699,6 +2705,11 @@ FF.pages = FF.pages || {};
           const part = await FF.barcodeChecker.checkRange(String(x.first), String(x.last));
           part.forEach((row) => rows.push({ ...row, range: `${x.first} → ${x.last}` }));
         }
+        // 💾 din bhar ke liye yaad rakho (roz naya din = naya check). Purane din ki keys hata do.
+        try {
+          for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.startsWith('ff_dspst|') && !k.startsWith(`ff_dspst|${today}|`)) localStorage.removeItem(k); }
+          localStorage.setItem(lsKey, JSON.stringify(rows.map((x) => ({ barcode: x.barcode, k: x.k, tagId: x.tagId, cls: x.cls, agent: x.agent, agentId: x.agentId, tl: x.tl, date: x.date, vrn: x.vrn, note: x.note, range: x.range }))));
+        } catch { /* quota full — sirf memory cache */ }
         return rows;
       })();
       dspStCache.set(key, job); job.catch(() => dspStCache.delete(key));

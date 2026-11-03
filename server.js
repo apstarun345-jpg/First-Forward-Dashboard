@@ -3644,7 +3644,7 @@ async function ledgerDirect(barcodes) {
 // 🚚 Last-dispatch aggregate: sheets ko ek baar stream karke sirf AGENT × DATE ka total / class-wise count rakhte hain
 // (poori row list nahi). Isse Master Search ke dispatch chip par memory ka spike nahi hota (free plan RSS limit).
 const ledgerAggState = { at: 0, promise: null, data: null, key: '' };
-const LEDGER_AGG_TTL = 30 * 60e3;
+const LEDGER_AGG_TTL = 26 * 3600e3;   // v3.125.83 — din me ek baar (raat 1 baje IST) refresh; beech me wahi data
 const aggNm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 function ledgerAggAddRow(byCh, e) {
   const m = byCh[e.ch || 'ff'];
@@ -3682,7 +3682,7 @@ async function loadLedgerAgg() {
           if (e) ledgerAggAddRow({ ff: tmp.ff, gv: tmp.gv }, { ...e, ch: src.ch });
           if (i % 4000 === 3999) await yieldLoop();
         }
-      }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 }); });
+      }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30, priority: true }); });
       counts[src.id] = n;
       return tmp;
     } catch (err) {
@@ -3696,13 +3696,47 @@ async function loadLedgerAgg() {
   for (const ch of ['ff', 'gv']) for (const rec of byCh[ch].values()) for (const day of rec.dates.values()) delete day.rk;
   return { byCh, errors, counts };
 }
+// 💾 v3.125.83 — aggregate disk par bhi (process restart par turant wapas; sheet dobara padhne ki zarurat nahi)
+const LEDGER_AGG_FILE = path.join(process.env.TMPDIR || '/tmp', 'ff-ledger-agg-v1.json');
+function ledgerAggSave(d, key) {
+  try {
+    const out = { v: 1, at: Date.now(), key, errors: d.errors || {}, counts: d.counts || {}, ch: {} };
+    for (const ch of ['ff', 'gv']) {
+      const recs = [], idx = new Map(), keys = [];
+      for (const [k, rec] of d.byCh[ch]) {
+        let i = idx.get(rec);
+        if (i === undefined) { i = recs.length; idx.set(rec, i); recs.push({ agentId: rec.agentId, agent: rec.agent, dates: [...rec.dates.entries()] }); }
+        keys.push([k, i]);
+      }
+      out.ch[ch] = { recs, keys };
+    }
+    writeFileSync(LEDGER_AGG_FILE, JSON.stringify(out));
+  } catch (err) { console.warn('dispatch aggregate save:', err.message); }
+}
+function ledgerAggLoadDisk() {
+  try {
+    if (!existsSync(LEDGER_AGG_FILE)) return false;
+    const j = JSON.parse(readFileSync(LEDGER_AGG_FILE, 'utf8'));
+    if (!j || j.v !== 1 || Date.now() - j.at > LEDGER_AGG_TTL) return false;
+    const byCh = { ff: new Map(), gv: new Map() };
+    for (const ch of ['ff', 'gv']) {
+      const part = j.ch && j.ch[ch]; if (!part) continue;
+      const recs = part.recs.map((r) => ({ agentId: r.agentId, agent: r.agent, dates: new Map(r.dates) }));
+      for (const [k, i] of part.keys) byCh[ch].set(k, recs[i]);
+    }
+    ledgerAggState.data = { byCh, errors: j.errors || {}, counts: j.counts || {} };
+    ledgerAggState.key = j.key; ledgerAggState.at = j.at;
+    console.log(`dispatch aggregate: disk cache se (${Math.round((Date.now() - j.at) / 60e3)} min purana)`);
+    return true;
+  } catch (err) { console.warn('dispatch aggregate disk load:', err.message); return false; }
+}
 function ledgerAggregate(fresh) {
   const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.layout]));
   const have = ledgerAggState.data && ledgerAggState.key === key ? ledgerAggState.data : null;
   const due = have && Date.now() - ledgerAggState.at >= LEDGER_AGG_TTL;
   if (have && !fresh && !due) return Promise.resolve(have);
   if (!ledgerAggState.promise) {
-    ledgerAggState.promise = loadLedgerAgg().then((d) => { ledgerAggState.data = d; ledgerAggState.key = key; ledgerAggState.at = Date.now(); return d; })
+    ledgerAggState.promise = loadLedgerAgg().then((d) => { ledgerAggState.data = d; ledgerAggState.key = key; ledgerAggState.at = Date.now(); ledgerAggSave(d, key); return d; })
       .catch((err) => { console.warn('dispatch aggregate:', err.message); return ledgerAggState.data; })
       .finally(() => { ledgerAggState.promise = null; });
   }
@@ -3908,7 +3942,7 @@ async function gvizPagesServerRaw(sheetId, sheet, letters, where, onPage, extra)
       const gm = /^gid:(\d+)$/.exec(String(sheet));
       if (gm) qp.set('gid', gm[1]); else qp.set('sheet', sheet);
       if (extra && extra.headers) qp.set('headers', String(extra.headers));
-      const job = gvizPageServer(qp, sheet);
+      const job = (extra && extra.priority) ? gvizPageServerInner(qp, sheet) : gvizPageServer(qp, sheet);
       job.catch(() => {});   // aage ke speculative pages fail / beech me ruk jaayein to unhandled rejection nahi
       inflight.set(page, job);
     }
@@ -13593,8 +13627,14 @@ async function start() {
     setInterval(() => warmPersonalLinks().catch(() => {}), 10 * 60e3).unref();   // 10 min = gviz cache TTL (5 min par har link ke 3-4 queries dobara jaate the)
     setTimeout(() => maybeMonthlyReport(), 8000);
     // ⚡ v3.125.45 — Master Search ka 'Last dispatch' box: ledger aggregate boot par hi + har 25 min (user kabhi intezaar na kare)
-    setTimeout(() => ledgerAggregate(false).catch(() => {}), 90e3).unref?.();
-    setInterval(() => ledgerAggregate(true).catch(() => {}), 25 * 60e3).unref?.();
+    // v3.125.83 — boot par disk cache (warna 5 s me sheet se, priority), phir roz raat 1 baje IST ek baar refresh.
+    if (!ledgerAggLoadDisk()) setTimeout(() => ledgerAggregate(false).catch(() => {}), 5e3).unref?.();
+    let ledgerDailyDone = '';
+    setInterval(() => {
+      const ist = new Date(Date.now() + 5.5 * 3600e3);
+      const day = ist.toISOString().slice(0, 10);
+      if (ist.getUTCHours() === 1 && ledgerDailyDone !== day) { ledgerDailyDone = day; ledgerAggregate(true).catch(() => {}); }
+    }, 5 * 60e3).unref?.();
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🕒 v209 — har 15 min sheet row-count check (home khule na khule), taaki "data kab aaya" ka time sahi rahe
     setInterval(() => {
