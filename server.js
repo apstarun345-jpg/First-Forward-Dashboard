@@ -9942,7 +9942,7 @@ async function handleApi(req, res, url) {
       const t = (v) => String(v == null ? '' : v).trim().slice(0, 80);
       patch.crossMerge = {
         enabled: c.enabled !== false, autoName: c.autoName !== false,
-        pairs: (Array.isArray(c.pairs) ? c.pairs : []).slice(0, 500).map((x) => ({ ff: t(x && x.ff), gv: t(x && x.gv) })).filter((x) => x.ff && x.gv),
+        pairs: (Array.isArray(c.pairs) ? c.pairs : []).slice(0, 500).map((x) => ({ ff: t(x && x.ff), gv: t(x && x.gv), ffLabel: t(x && x.ffLabel), gvLabel: t(x && x.gvLabel) })).filter((x) => x.ff && x.gv),
         block: (Array.isArray(c.block) ? c.block : []).slice(0, 500).map(t).filter(Boolean)
       };
     }

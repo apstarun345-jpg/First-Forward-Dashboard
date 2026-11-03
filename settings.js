@@ -1228,8 +1228,16 @@ FF.pages = FF.pages || {};
         <label class="chk"><input type="checkbox" id="cm-enabled" ${cm.enabled !== false ? 'checked' : ''}> FF + GV merge chalu</label><br>
         <label class="chk"><input type="checkbox" id="cm-auto" ${cm.autoName !== false ? 'checked' : ''}> Same naam + same role (TL↔TL, Agent↔Agent) ho to apne aap merge</label>
         <div class="form-grid" style="margin-top:10px">
-          <label class="fld"><span>Pakke jode (naam alag ho tab bhi) — har line: <b>FF naam ya ID = GV naam ya ID</b></span><textarea class="input mono" id="cm-pairs" rows="5" placeholder="UMESH SHARMA = UMESH SHARMA US&#10;APN2405 = 41110975">${esc(pairsTxt)}</textarea></label>
-          <label class="fld"><span>Kabhi merge mat karo (same naam, alag insaan) — har line ek naam ya ID</span><textarea class="input mono" id="cm-block" rows="5" placeholder="RAM KUMAR">${esc((cm.block || []).join('\n'))}</textarea></label>
+          <div class="fld" style="grid-column:1/-1"><span>Pakke jode (naam alag ho tab bhi) — <b>FF</b> aur <b>GV</b> dropdown se chuno → ➕ Jodo</span>
+            <div class="cm-pick">
+              <div class="cm-pick-col"><small>🟦 FF agent / TL</small><input class="input" id="cm-ff" placeholder="FF naam ya ID likho…" autocomplete="off"></div>
+              <div class="cm-pick-col"><small>🟩 GV agent / TL</small><input class="input" id="cm-gv" placeholder="GV naam ya ID likho…" autocomplete="off"></div>
+              <button class="btn" type="button" id="cm-add">➕ Jodo</button>
+            </div>
+            <div id="cm-pair-list" class="cm-pair-list"></div>
+            <textarea id="cm-pairs" hidden>${esc(pairsTxt)}</textarea>
+          </div>
+          <label class="fld" style="grid-column:1/-1"><span>Kabhi merge mat karo (same naam, alag insaan) — har line ek naam ya ID</span><textarea class="input mono" id="cm-block" rows="3" placeholder="RAM KUMAR">${esc((cm.block || []).join('\n'))}</textarea></label>
         </div>
         <div class="save-bar"><button class="btn primary" id="cm-save">💾 Save merge</button><button class="btn" id="cm-scan" type="button">🔍 Same-naam FF + GV list dekho</button><span class="dim small" id="save-msg-crossMerge"></span></div>
         <div id="cm-scan-out" class="small" style="margin-top:8px"></div>`);
@@ -2867,10 +2875,54 @@ FF.pages = FF.pages || {};
           if (btn.dataset.save === 'gvAgentCommission' && FF.masterSearch && FF.masterSearch.reloadCommission) FF.masterSearch.reloadCommission().catch(() => {});
         }, 'Saving…');
       }));
+      // 🔗 pair picker — FF / GV dropdown (Master Search index se)
+      const cmState = { pairs: ((settings.crossMerge || FF.config.crossMerge || {}).pairs || []).map((x) => ({ ...x })), pick: { ff: null, gv: null } };
+      const cmList = U.$('#cm-pair-list', body);
+      const paintPairs = () => {
+        if (!cmList) return;
+        cmList.innerHTML = cmState.pairs.length ? cmState.pairs.map((x, i) => `<div class="cm-pair"><span class="cm-side ff">🟦 ${esc(x.ffLabel || x.ff)}</span><span class="cm-eq">⇄</span><span class="cm-side gv">🟩 ${esc(x.gvLabel || x.gv)}</span><button class="btn small" type="button" data-cm-del="${i}" title="Hatao">✕</button></div>`).join('') : '<div class="dim small">Abhi koi pakka joda nahi — upar se FF aur GV chuno.</div>';
+      };
+      paintPairs();
+      if (cmList) cmList.addEventListener('click', (e) => { const b = e.target.closest('[data-cm-del]'); if (!b) return; cmState.pairs.splice(Number(b.dataset.cmDel), 1); paintPairs(); });
+      const peopleOf = async (ch) => {
+        if (!FF.masterSearch && FF.lazy && FF.lazy.need) await FF.lazy.need('masterSearch');
+        if (FF.masterSearch && !FF.masterSearch.ready) await FF.masterSearch.buildLight().catch(() => {});
+        return ((FF.masterSearch && FF.masterSearch.allPeople && FF.masterSearch.allPeople()) || []).filter((p) => String(p.kind || '').startsWith(ch + '-'));
+      };
+      const cmCache = { ff: null, gv: null };
+      ['ff', 'gv'].forEach((ch) => {
+        const inp = U.$(`#cm-${ch}`, body);
+        if (!inp || !U.suggest) return;
+        inp.addEventListener('focus', () => { if (!cmCache[ch]) peopleOf(ch).then((l) => { cmCache[ch] = l; }).catch(() => {}); });
+        U.suggest(inp, {
+          min: 1, max: 12,
+          items: () => {
+            const q = String(inp.value || '').toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim();
+            const list = cmCache[ch] || [];
+            if (!list.length) { peopleOf(ch).then((l) => { cmCache[ch] = l; }).catch(() => {}); return [{ kind: 'cls', kindLabel: 'Load', label: 'List load ho rahi hai…', none: true, value: '' }]; }
+            const hits = list.filter((p) => String(p.name || '').toUpperCase().includes(q) || String(p.sub || '').toUpperCase().includes(q)).slice(0, 12);
+            return hits.length ? hits.map((p) => ({ kind: ch, kindLabel: /tl$/.test(p.kind) ? `${ch.toUpperCase()} TL` : `${ch.toUpperCase()} Agent`, label: p.name, sub: p.sub ? `ID ${p.sub}` : '', value: p.name, person: p }))
+              : [{ kind: 'cls', kindLabel: '—', label: 'Kuch nahi mila', none: true, value: '' }];
+          },
+          onPick: (it) => { if (it.none || !it.person) return; cmState.pick[ch] = it.person; inp.value = `${it.person.name}${it.person.sub ? ' · ' + it.person.sub : ''} (${/tl$/.test(it.person.kind) ? 'TL' : 'Agent'})`; }
+        });
+      });
+      const cmAdd = U.$('#cm-add', body);
+      if (cmAdd) cmAdd.addEventListener('click', () => {
+        const f = cmState.pick.ff, g = cmState.pick.gv;
+        if (!f || !g) { U.toast('Pehle FF aur GV dono dropdown se chuno', 'warn'); return; }
+        const role = (p) => (/tl$/.test(p.kind) ? 'TL' : 'Agent');
+        const pair = { ff: f.sub || f.name, gv: g.sub || g.name, ffLabel: `${f.name}${f.sub ? ' · ' + f.sub : ''} (${role(f)})`, gvLabel: `${g.name}${g.sub ? ' · ' + g.sub : ''} (${role(g)})` };
+        if (!cmState.pairs.some((x) => x.ff === pair.ff && x.gv === pair.gv)) cmState.pairs.push(pair);
+        cmState.pick = { ff: null, gv: null };
+        U.$('#cm-ff', body).value = ''; U.$('#cm-gv', body).value = '';
+        paintPairs();
+        U.toast('Joda add hua — 💾 Save merge dabao', 'ok');
+      });
       const cmBtn = U.$('#cm-save', body);
       if (cmBtn) cmBtn.addEventListener('click', () => {
         const lines = (id) => String((U.$(id, body) || {}).value || '').split(/\n/).map((x) => x.trim()).filter(Boolean);
-        const pairs = lines('#cm-pairs').map((ln) => { const [a, b] = ln.split('='); return { ff: String(a || '').trim(), gv: String(b || '').trim() }; }).filter((x) => x.ff && x.gv);
+        const pairs = cmState.pairs.filter((x) => x.ff && x.gv);
         const crossMerge = { enabled: !!U.$('#cm-enabled', body).checked, autoName: !!U.$('#cm-auto', body).checked, pairs, block: lines('#cm-block') };
         U.withButtonBusy(cmBtn, async () => { await save({ crossMerge }, U.$('#save-msg-crossMerge', body)); FF.config.crossMerge = { ...FF.config.crossMerge, ...crossMerge }; }, 'Saving…');
       });
