@@ -6567,6 +6567,35 @@ async function handleApi(req, res, url) {
     } catch { /* class inference optional */ }
     return sendJson(res, 200, { ok: true, ch, last: dates[0] || null, recent: dates.slice(0, 8), totalDispatches: dates.length, errors: agg.errors, counts: agg.counts }, { 'Cache-Control': 'no-store' });
   }
+  // 🚚 v3.125.84 — dispatch range → har barcode: Stock (abhi stock list me) ya Issued (stock list se nikal gaya). Stock index se, fast.
+  if (p === '/api/dispatch-status' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const ch = String(body && body.ch) === 'gv' ? 'gv' : 'ff';
+    const ranges = (Array.isArray(body && body.ranges) ? body.ranges : []).slice(0, 12);
+    const index = await stockAgeIndexWithin(20000, false);
+    if (!index || !index[ch] || typeof index[ch].find !== 'function') return sendJson(res, 200, { ok: true, pending: true });
+    const out = [];
+    for (const rg of ranges) {
+      const a = String((rg && rg.first) || '').replace(/\D/g, ''), b = String((rg && rg.last) || '').replace(/\D/g, '');
+      if (a.length < 6 || b.length < 6) continue;
+      let lo = BigInt(a), hi = BigInt(b); if (lo > hi) [lo, hi] = [hi, lo];
+      if (hi - lo > 2000n) hi = lo + 2000n;
+      const w = Math.max(a.length, b.length);
+      const label = `${rg.first} → ${rg.last}`;
+      for (let n = lo; n <= hi; n++) {
+        const d = n.toString().padStart(w, '0');
+        const pretty = d.length === 16 ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : d;
+        const hit = (index[ch].find(d, 3) || []).find((r) => String(r[1] || '').replace(/\D/g, '') === d);
+        if (!hit) { out.push({ barcode: pretty, status: 'issued', note: `${ch.toUpperCase()} stock list me nahi (issue / bahar)`, range: label }); continue; }
+        const inStock = ch === 'gv' ? !!hit[11] : true;
+        out.push({ barcode: pretty, status: inStock ? 'stock' : 'issued', tagId: hit[0] || '', cls: hit[2] || '', agent: hit[4] || '', agentId: hit[5] || '', tl: hit[6] || '',
+          note: ch === 'gv' ? (inStock ? 'Tag Assignment · In stock' : 'Tag Assignment · issued') : (hit[4] ? 'StockDataa · agent ke paas' : 'StockDataa · office'), range: label });
+        if (out.length > 6000) break;
+      }
+    }
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ch, rows: out, at: index.at }), { 'Cache-Control': 'no-store' });
+  }
   // 📨 Agents Complaints Summary — cache se (background me Gmail se refresh hota rehta hai)
   if (p === '/api/complaints' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');

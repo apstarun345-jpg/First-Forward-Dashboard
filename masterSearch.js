@@ -2690,21 +2690,21 @@ FF.pages = FF.pages || {};
   async function dspStatusOf(r) {
     const key = `${r.date}|${(r.ranges || []).map((x) => `${x.first}-${x.last}`).join(',')}`;
     const today = U.dateKey ? U.dateKey(new Date()) : new Date().toISOString().slice(0, 10);
-    const lsKey = `ff_dspst|${today}|${key}`;
+    const lsKey = `ff_dspst|${today}|v2|${r.ch || ''}|${key}`;
     if (!dspStCache.has(key)) {
       try {
         const hit = localStorage.getItem(lsKey);
         if (hit) { const rows = JSON.parse(hit); if (Array.isArray(rows)) { dspStCache.set(key, Promise.resolve(rows)); return rows; } }
       } catch { /* storage optional */ }
       const job = (async () => {
-        if (!FF.barcodeChecker && FF.lazy && FF.lazy.inject) await FF.lazy.inject('barcodeChecker');
-        if (!FF.barcodeChecker || !FF.barcodeChecker.checkRange) throw new Error('Barcode checker load nahi hua');
-        const rows = [];
-        for (const x of (r.ranges || [])) {
-          if (!x.first || !x.last) continue;
-          const part = await FF.barcodeChecker.checkRange(String(x.first), String(x.last));
-          part.forEach((row) => rows.push({ ...row, range: `${x.first} → ${x.last}` }));
+        let res = null;
+        for (let i = 0; i < 20; i++) {
+          res = await FF.auth.api('/api/dispatch-status', 'POST', { ch: r.ch || 'ff', ranges: (r.ranges || []).map((x) => ({ first: x.first, last: x.last })) });
+          if (!(res && res.pending)) break;
+          await new Promise((ok) => setTimeout(ok, 4000));
         }
+        if (!res || res.pending) throw new Error('Stock index abhi ban raha hai');
+        const rows = (res.rows || []).map((x) => ({ ...x, k: x.status === 'stock' ? 'st' : 'iss' }));
         // 💾 din bhar ke liye yaad rakho (roz naya din = naya check). Purane din ki keys hata do.
         try {
           for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.startsWith('ff_dspst|') && !k.startsWith(`ff_dspst|${today}|`)) localStorage.removeItem(k); }
@@ -2718,7 +2718,8 @@ FF.pages = FF.pages || {};
   }
   const dspKind = (k) => (k === 'iss' ? 'issued' : (k === 'st' || k === 'bc') ? 'stock' : 'nf');
   async function fillDispStatus(box, d) {
-    const list = (d.recent || []).slice(0, 5);
+    let sc0 = {}; try { sc0 = JSON.parse(box.dataset.mspDispBox); } catch { /* ignore */ }
+    const list = (d.recent || []).slice(0, 5).map((x) => ({ ...x, ch: d.ch || sc0.ch || 'ff' }));
     box.__dspRows = box.__dspRows || {};
     for (let i = 0; i < list.length; i++) {
       const slot = box.querySelector(`[data-dsp-st="${i}"]`);
@@ -2738,7 +2739,7 @@ FF.pages = FF.pages || {};
     const rows = kind === 'all' ? pack.rows : pack.rows.filter((x) => dspKind(x.k) === kind);
     let sc = {}; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { /* ignore */ }
     const head = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Date', 'VRN', 'Note', 'Dispatch range'];
-    const st = (x) => (dspKind(x.k) === 'issued' ? 'Issued' : dspKind(x.k) === 'stock' ? (x.k === 'bc' ? 'Stock (office)' : 'Stock') : 'Not found');
+    const st = (x) => (dspKind(x.k) === 'issued' ? 'Issued' : 'Stock');
     const data = rows.map((x) => [x.barcode, st(x), x.tagId || '', x.cls || '', x.agent || '', x.agentId || '', x.tl || '', x.date || '', x.vrn || '', x.note || '', x.range || '']);
     const fname = `${sc.title || 'Agent'} - Dispatch ${dispDateY(pack.r.date)} - ${lab.replace(/^\W+\s*/, '')}.csv`;
     const tabs = ['issued', 'stock', 'nf', 'all'].map((k) => `<button type="button" class="btn small${k === kind ? ' primary' : ''}" data-dsp-tab="${idx}|${k}">${{ issued: '✅ Issued', stock: '📦 Stock', nf: '❔ Not found', all: 'All' }[k]} ${U.fmt(k === 'all' ? pack.rows.length : pack.rows.filter((x) => dspKind(x.k) === k).length)}</button>`).join(' ');
