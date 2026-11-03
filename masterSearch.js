@@ -2561,15 +2561,26 @@ FF.pages = FF.pages || {};
     }
     return dispByCache.get(key);
   }
+  // v3.125.70 — last 5 dispatches: date (with year) · total · class-wise pills (VC4 50 · VC5 5) in an aligned grid.
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const dispDateY = (k) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(k || '')); return m ? `${Number(m[3])} ${MON[Number(m[2]) - 1] || ''} ${m[1]}` : dispDate(k); };
+  const dispClassPairs = (clsMap) => {
+    const m = new Map();
+    Object.entries(clsMap || {}).forEach(([c, n]) => {
+      const k = String(c || '').toUpperCase().replace(/\s+/g, '') || 'N/A';
+      m.set(k, (m.get(k) || 0) + (Number(n) || 0));
+    });
+    return [...m.entries()].filter(([, n]) => n > 0).sort((a, b) => dispClsNum(a[0]) - dispClsNum(b[0]));
+  };
+  const dispPills = (cls) => dispClassPairs(cls).map(([c, n]) => `<span class="dsp-pill${c === 'N/A' ? ' na' : ''}"><i>${esc(c === 'N/A' ? 'Class ?' : c)}</i><b>${U.fmt(n)}</b></span>`).join('');
   function dispPaint(box, d) {
     const main = box.querySelector('.msp-disp-main'), sub = box.querySelector('.msp-disp-sub');
     if (!main || !sub) return;
     if (d.none) { main.textContent = '—'; sub.textContent = d.reason || 'Dispatch ledger not set'; return; }
     if (!d.last) { main.textContent = 'No dispatch found'; sub.textContent = 'Not in the Stock sheet under this name / ID'; return; }
-    const chips = dispSplit(d.last.cls).map(([c, n]) => `<span class="msp-hl blue">${esc(c)} ${U.fmt(n)}</span>`).join(' ');
-    main.innerHTML = `${esc(dispDate(d.last.date))} <small class="dim">${esc(dispAgo(d.last.date))}</small>`;
-    const more = (d.recent || []).slice(1, 3).map((r) => `<span class="dim small">${esc(dispDate(r.date))} · ${U.fmt(r.total)}</span>`).join(' · ');
-    sub.innerHTML = `<b>${U.fmt(d.last.total)} tags</b> · ${chips}${more ? `<br>${more}` : ''}`;
+    const list = (d.recent || []).slice(0, 5);
+    main.innerHTML = `${esc(dispDateY(d.last.date))} <small class="dim">${esc(dispAgo(d.last.date))}</small>`;
+    sub.innerHTML = `<div class="dsp-list">${list.map((r, i) => `<div class="dsp-row${i === 0 ? ' first' : ''}"><span class="dsp-date">${esc(dispDateY(r.date))}<small>${esc(dispAgo(r.date))}</small></span><span class="dsp-tot"><b>${U.fmt(r.total)}</b> tags</span><span class="dsp-cls">${dispPills(r.cls) || '<span class="dim small">—</span>'}</span></div>`).join('')}</div>${d.totalDispatches > list.length ? `<div class="dim small dsp-more">+${U.fmt(d.totalDispatches - list.length)} aur · click for all</div>` : ''}`;
   }
   function fillDispBoxes(host) {
     const boxes = host ? host.querySelectorAll('[data-msp-disp-box]') : [];
@@ -2588,7 +2599,7 @@ FF.pages = FF.pages || {};
   function openDispDrawer(box) {
     const d = box.__disp; let sc; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { return; }
     if (!d || !d.recent || !d.recent.length || !FF.app || !FF.app.openDrawer) return;
-    const rows = d.recent.map((r) => `<tr><td>${esc(dispDate(r.date))}<br><small class="dim">${esc(dispAgo(r.date))}</small></td><td class="num"><b>${U.fmt(r.total)}</b></td><td>${dispSplit(r.cls).map(([c, n]) => `<span class="msp-hl blue">${esc(c)} ${U.fmt(n)}</span>`).join(' ')}</td><td class="small">${(r.ranges || []).map((x) => `${esc(x.cls || '')} ${U.fmt(x.qty)}: ${esc(x.first)} → ${esc(x.last)}`).join('<br>')}</td></tr>`).join('');
+    const rows = d.recent.map((r) => `<tr><td>${esc(dispDate(r.date))}<br><small class="dim">${esc(dispAgo(r.date))}</small></td><td class="num"><b>${U.fmt(r.total)}</b></td><td>${dispPills(r.cls)}</td><td class="small">${(r.ranges || []).map((x) => `${esc(x.cls || '')} ${U.fmt(x.qty)}: ${esc(x.first)} → ${esc(x.last)}`).join('<br>')}</td></tr>`).join('');
     FF.app.openDrawer({ kicker: `${sc.ch === 'gv' ? 'GV' : 'FF'} dispatch ledger`, title: `${sc.title} · recent dispatches`, sub: `${U.fmt(d.totalDispatches || d.recent.length)} dispatch dates found · showing latest ${d.recent.length}`, body: `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Date</th><th class="num">Tags</th><th>Class-wise</th><th>Barcode range</th></tr></thead><tbody>${rows}</tbody></table></div>` });
   }
   // ===== 🪪 FASTag KYC box — EIR CUSTOMER_FULL_KYC (TRUE = full KYC, FALSE = not KYC): last + current month, class-wise =====

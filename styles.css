@@ -7178,10 +7178,11 @@ html body .msp-kpi:not(.msp-age-box) > em { width: 100%; }
 
 /* 🚚 Last dispatch box (Master Search) */
 .msp-kpi.msp-disp-box { grid-column: span 2; text-align: left; }
+.msp-kpi.msp-disp-box:not(.msp-kyc-box) { grid-column: span 3; }
 .msp-disp-box .msp-disp-main { font-size: 20px; }
 .msp-disp-box .msp-disp-main small { font-size: 12px; font-weight: 600; margin-left: 4px; }
 .msp-disp-box .msp-disp-sub { font-style: normal; line-height: 1.7; }
-@media (max-width: 720px) { .msp-kpi.msp-disp-box { grid-column: 1 / -1; } }
+@media (max-width: 720px) { .msp-kpi.msp-disp-box, .msp-kpi.msp-disp-box:not(.msp-kyc-box) { grid-column: 1 / -1; } }
 
 /* 🪪 FASTag KYC ratio (Home) — class-wise card + two overall ratio cards */
 
@@ -7358,3 +7359,19 @@ tr.ms-office-row td { background: #fffbeb; }
 [data-theme="dark"] .msp-dt-pill.green { background: rgba(34, 197, 94, .2); color: #bbf7d0; }
 .mp-kpi .msp-dtable, .mp-kpi .msp-dtable th, .mp-kpi .msp-dtable td, .mp-kpi .msp-dtable span { word-break: normal; overflow-wrap: normal; letter-spacing: normal; }
 .mp-kpi b .msp-dtable-wrap { display: block; font-weight: 500; }
+
+/* 🚚 Last 5 dispatches — aligned rows: date · total · class pills */
+.dsp-list { display: grid; gap: 4px; margin-top: 8px; }
+.dsp-row { display: grid; grid-template-columns: 118px 74px 1fr; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; background: rgba(148,163,184,.10); font-size: 13px; }
+.dsp-row.first { background: rgba(37,99,235,.10); }
+.dsp-date { font-weight: 700; display: flex; flex-direction: column; line-height: 1.2; white-space: nowrap; }
+.dsp-date small { font-weight: 500; opacity: .65; font-size: 11px; }
+.dsp-tot { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dsp-tot b { font-size: 15px; }
+.dsp-cls { display: flex; flex-wrap: wrap; gap: 5px; }
+.dsp-pill { display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 9px; border-radius: 999px; background: #dbeafe; color: #1e40af; font-size: 12px; font-variant-numeric: tabular-nums; }
+.dsp-pill i { font-style: normal; font-weight: 700; } .dsp-pill b { font-weight: 800; }
+.dsp-pill.na { background: #fef3c7; color: #92400e; }
+.dsp-more { margin-top: 4px; }
+@media (max-width: 720px) { .dsp-row { grid-template-columns: 1fr auto; } .dsp-cls { grid-column: 1 / -1; } }
+@media (prefers-color-scheme: dark) { .dsp-pill { background: rgba(59,130,246,.22); color: #bfdbfe; } .dsp-pill.na { background: rgba(245,158,11,.2); color: #fde68a; } }
