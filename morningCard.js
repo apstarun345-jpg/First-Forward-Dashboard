@@ -193,7 +193,7 @@ window.FF = window.FF || {};
       if (U.downloadBlob) U.downloadBlob(name, url);
       else {
         const a = document.createElement('a');
-        a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        a.href = url; a.download = ((window.FF && FF.util && FF.util.niceFileName) ? FF.util.niceFileName(name) : name); document.body.appendChild(a); a.click(); a.remove();
       }
       const text = waText(stats);
       const wa = `https://wa.me/?text=${encodeURIComponent(text)}`;

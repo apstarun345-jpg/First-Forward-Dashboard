@@ -261,7 +261,7 @@ FF.pages = FF.pages || {};
       if (U.downloadBlob) U.downloadBlob(name, url);
       else {
         const a = document.createElement('a');
-        a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        a.href = url; a.download = ((window.FF && FF.util && FF.util.niceFileName) ? FF.util.niceFileName(name) : name); document.body.appendChild(a); a.click(); a.remove();
       }
       if (U.toast) U.toast('🎴 Winner card PNG download ho gaya', 'ok');
     } catch { if (U.toast) U.toast('Card nahi ban paya', 'err'); }

@@ -1516,7 +1516,7 @@ window.FF = window.FF || {};
   function saveCsvFile(filename, headers, rows) {
     const text = [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([text + '\r\n'], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const a = document.createElement('a'); a.href = url; a.download = ((window.FF && FF.util && FF.util.niceFileName) ? FF.util.niceFileName(filename) : filename); a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function templateCsv() {
     // Exact API payload shape. Class/Tag ID are filled from StockDataa during lookup.

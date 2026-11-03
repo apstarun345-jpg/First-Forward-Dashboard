@@ -104,7 +104,7 @@ window.FF = window.FF || {};
     // Defensive fallback when pdf.js is used standalone in tests/isolated pages.
     const url = URL.createObjectURL(file);
     const a = document.createElement('a');
-    a.href = url; a.download = filename || 'report.pdf'; a.rel = 'noopener';
+    a.href = url; a.download = ((window.FF && FF.util && FF.util.niceFileName) ? FF.util.niceFileName(filename || 'report.pdf') : filename || 'report.pdf'); a.rel = 'noopener';
     document.body.appendChild(a);
     try { a.click(); } finally {
       setTimeout(() => { try { a.remove(); } catch {} try { URL.revokeObjectURL(url); } catch {} }, 6000);

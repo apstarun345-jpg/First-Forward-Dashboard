@@ -697,8 +697,40 @@ window.FF = window.FF || {};
       if (done) downloadUiTimer = setTimeout(() => { if (downloadUi) downloadUi.style.display = 'none'; }, 900);
     } catch { /* download must never fail because UI feedback failed */ }
   }
+  // 📁 v3.125.81 — har download ka naam saaf + matlab wala: "<kiska> - <kya> - <date>.csv".
+  // Context = khula drawer (title + filter) ya page ka title; file naam me pehle se ho to dobara nahi jodte.
+  let dlContextOverride = '';
+  function downloadContext() {
+    if (dlContextOverride) return dlContextOverride;
+    try {
+      const dr = document.getElementById('drawer');
+      if (dr && dr.classList.contains('open')) {
+        const t = (document.getElementById('drawer-title') || {}).textContent || '';
+        if (t.trim()) return t.trim();
+      }
+      const h = document.querySelector('.page-head h1, .page h1');
+      return h ? String(h.textContent || '').trim() : '';
+    } catch { return ''; }
+  }
+  const fileSafe = (v) => String(v || '').replace(/[\\/:*?"<>|#%{}~\u0000-\u001f]+/g, ' ').replace(/\s*·\s*/g, ' - ').replace(/\s+/g, ' ').trim();
+  function niceFileName(filename) {
+    const raw = String(filename || 'download');
+    const m = /^(.*?)(\.[A-Za-z0-9]{2,5})?$/.exec(raw);
+    let base = fileSafe(m[1]), ext = m[2] || '';
+    // purane slug naam (kpi-tags-…, home-2026-…) ko padhne layak: dash → space sirf jab koi space na ho
+    if (!/\s/.test(base)) base = base.replace(/(?<=[A-Za-z])-(?=[A-Za-z])/g, ' ');
+    const ctxRaw = downloadContext();
+    const ctx = fileSafe(String(ctxRaw).replace(/\s*·\s*(GV|FF)\s+(agent|TL)\s*$/i, ''));
+    const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const key = norm(ctx).slice(0, 14);
+    if (ctx && key && !norm(base).includes(key)) base = `${ctx} - ${base}`;
+    base = base.replace(/\s+/g, ' ').replace(/^[-_ ]+|[-_ ]+$/g, '').slice(0, 150) || 'download';
+    return base + ext;
+  }
+  /** Ek call ke liye context set karo (jaise "Dilip Kumar - Chassis"). */
+  function withDownloadContext(ctx, fn) { dlContextOverride = String(ctx || ''); try { return fn(); } finally { dlContextOverride = ''; } }
   function downloadBlob(filename, blob) {
-    const name = String(filename || 'download');
+    const name = niceFileName(filename);
     if (!blob) throw new Error('Download file data nahi mila');
     downloadStatus('Downloading…', name, false);
 
@@ -1683,7 +1715,7 @@ window.FF = window.FF || {};
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,
-    $, $$, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, downloadStart, downloadYield, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    $, $$, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, niceFileName, withDownloadContext, downloadStart, downloadYield, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
     multiSelect, asValueSet, valueSetLabel,

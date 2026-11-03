@@ -1439,7 +1439,7 @@ window.FF = window.FF || {};
     d.tables.forEach((t) => {
       out.push([], [t.title], t.head, ...t.rows);
     });
-    U.downloadCsv(`${U.slug(d.title || 'drawer')}-${U.stamp()}.csv`, ['Section / Field', 'Value / Col 2', 'Col 3', 'Col 4', 'Col 5', 'Col 6', 'Col 7', 'Col 8'], out);
+    U.downloadCsv(`${d.title || 'drawer'} - ${U.stamp()}.csv`, ['Section / Field', 'Value / Col 2', 'Col 3', 'Col 4', 'Col 5', 'Col 6', 'Col 7', 'Col 8'], out);
     U.toast('Drawer CSV downloaded ✓', 'ok');
   }
   async function exportDrawerPdf(btn) {
@@ -1705,7 +1705,7 @@ window.FF = window.FF || {};
       toolbar.querySelector('[data-table-columns]').addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
       toolbar.querySelector('[data-table-export]').addEventListener('click', () => {
         if (!FF.auth.can('export')) { U.toast('Download permission nahi hai', 'err'); return; }
-        const rows = U.tableToRows(table); U.downloadCsv(`${U.slug(current.page || 'table')}-${U.stamp()}.csv`, rows[0] || [], rows.slice(1)); U.toast('Table CSV downloaded ✓', 'ok');
+        const rows = U.tableToRows(table); const sec = (() => { try { const box = table.closest('section, .card, .kd-sec, .kd-block'); const h = box && box.querySelector('h2, h3, h4, .card-head'); return String((h && h.textContent) || '').replace(/[^\w\s+&()-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60); } catch { return ''; } })(); U.downloadCsv(`${sec || current.page || 'table'} - ${U.stamp()}.csv`, rows[0] || [], rows.slice(1)); U.toast('Table CSV downloaded ✓', 'ok');
       });
       const colBtn = toolbar.querySelector('[data-table-columns]');
       const applyCols = () => {

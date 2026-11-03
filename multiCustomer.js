@@ -36,7 +36,7 @@ FF.pages = FF.pages || {};
     const fix = (v) => (/^\d{12,}$/.test(String(v || '')) ? `="${v}"` : v);
     const text = [header, ...rows].map((r) => r.map((v) => csvCell(fix(v))).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = ((window.FF && FF.util && FF.util.niceFileName) ? FF.util.niceFileName(name) : name); document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
   }
   function summaryCsv(only) {

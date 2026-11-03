@@ -288,7 +288,7 @@ window.FF = window.FF || {};
       if (e.target.closest('[data-sq-close]')) { document.removeEventListener('ff:data-fresh', onData); close(); return; }
       if (e.target.closest('[data-sq-csv]') && cur) {
         const blob = new Blob(['﻿' + csv(cur)], { type: 'text/csv;charset=utf-8' });
-        const aEl = document.createElement('a'); aEl.href = URL.createObjectURL(blob); aEl.download = `${title.replace(/[^\w]+/g, '_')}.csv`; aEl.click();
+        const aEl = document.createElement('a'); aEl.href = URL.createObjectURL(blob); aEl.download = ((window.FF && FF.util && FF.util.niceFileName) ? FF.util.niceFileName(`${title.replace(/[^\w]+/g, '_')}.csv`) : `${title.replace(/[^\w]+/g, '_')}.csv`); aEl.click();
         setTimeout(() => URL.revokeObjectURL(aEl.href), 4000);
         return;
       }

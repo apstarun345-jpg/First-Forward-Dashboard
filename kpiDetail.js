@@ -49,6 +49,24 @@ window.FF = window.FF || {};
     return { label: list.map((x) => FILTERS[x].label).join(' + '), fn: (r) => list.every((x) => FILTERS[x].fn(r)) };
   }
   const state = { spec: null, rows: null, raw: null, rawQuery: '', history: [] };
+  // 📁 v3.125.81 — file naam: "<agent / TL / title> - <kya: Chassis / VC4 / Replacement / All issuance> - <from_to>.csv"
+  function kdFileName(kind, ext) {
+    const sp = state.spec || {}, p = state.period || {};
+    const who = sp.agent || sp.tl || (U.$('#drawer-title') || {}).textContent || sp.title || 'KPI';
+    const what = [];
+    const filt = filterOf(sp.f); if (filt) what.push(filt.label);
+    if (sp.group) what.push(String(sp.group).replace(/^COMM$/i, 'Commercial'));
+    if (sp.cls) what.push(String(sp.cls).replace(/,/g, '+'));
+    if (sp.vrnKind) what.push({ chassis: 'Chassis', wrong: 'Wrong VRN', new: 'New VRN' }[sp.vrnKind] || sp.vrnKind);
+    if (sp.vrnBucket) what.push(sp.vrnBucket);
+    if (sp.type === 'REPLACEMENT') what.push('Replacement'); else if (sp.type === 'NOT_REPLACEMENT') what.push('Issuance');
+    if (sp.scope === 'stock') what.push('Stock');
+    if (sp.date) what.push(sp.date);
+    if (!what.length) what.push(sp.scope === 'stock' ? 'Stock' : 'All issuance');
+    const when = p.from && p.to ? (p.from === p.to ? p.from : `${p.from}_to_${p.to}`) : U.stamp();
+    const clean = (v) => String(v || '').replace(/\s*·\s*(GV|FF) (agent|TL)\s*$/i, '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return `${[clean(who), clean([...new Set(what)].join(' + ')), kind].filter(Boolean).join(' - ')} - ${when}.${ext}`;
+  }
 
   // ---- 📅 month helpers (v3.31) -------------------------------------------------------------
   /** "Sep" · "September" · "Sep 2026" · "September-26" · "2026-09" · "2026-09-30" → "YYYY-MM".
@@ -1356,7 +1374,7 @@ window.FF = window.FF || {};
     if (!state.rows) return;
     const cur = state.rows, tot = total(cur);
     const sheet = (name, m) => ({ name, header: [name, 'Count', 'Share %'], rows: [...m.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, v, Math.round((v / (tot || 1)) * 1000) / 10]) });
-    FF.xlsx.download(`kpi-breakdown-${state.period.from}_${state.period.to}.xlsx`, [
+    FF.xlsx.download(kdFileName('Breakdown', 'xlsx'), [
       sheet('Class', tally(cur, (r) => r.cls)), sheet('Channel', tally(cur, (r) => r.channel)), sheet('Type', tally(cur, (r) => r.type)), sheet('VRN type', tally(cur, (r) => vrnBucket(r.vrnType))),
       { name: 'Day-wise', header: ['Date', 'Total', 'VC4', 'Commercial', 'GV', 'Replacement'], rows: [...new Set(cur.map((r) => r.key))].sort().map((k) => { const rs = cur.filter((r) => r.key === k); const t = total(rs), v = total(rs.filter((r) => r.group === 'VC4')); return [k, t, v, t - v, total(rs.filter((r) => r.channel === 'GV Partner')), total(rs.filter((r) => r.type === 'REPLACEMENT'))]; }) }
     ]);
@@ -1398,8 +1416,8 @@ window.FF = window.FF || {};
     if (e.target.closest('[data-kd-sheetrows-csv]') || e.target.closest('[data-kd-sheetrows-xlsx]')) {
       const out = state.sheetRows;
       if (!out) return;
-      if (e.target.closest('[data-kd-sheetrows-xlsx]')) FF.xlsx.download(`sheet-rows-${U.stamp()}.xlsx`, [{ name: 'Sheet rows', header: out.header, rows: out.rows.map((r) => r.map((v) => (/^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v))) }]);
-      else U.downloadCsv(`sheet-rows-${U.stamp()}.csv`, out.header, out.rows);
+      if (e.target.closest('[data-kd-sheetrows-xlsx]')) FF.xlsx.download(kdFileName('Sheet rows', 'xlsx'), [{ name: 'Sheet rows', header: out.header, rows: out.rows.map((r) => r.map((v) => (/^-?\d+(\.\d+)?$/.test(v) && v.length < 15 ? Number(v) : v))) }]);
+      else U.downloadCsv(kdFileName('Sheet rows', 'csv'), out.header, out.rows);
       return;
     }
     if (e.target.closest('[data-kd-raw]')) {
@@ -1409,8 +1427,8 @@ window.FF = window.FF || {};
       try { await loadRaw(); btn.remove(); renderRaw(''); } catch (err) { if (el) el.innerHTML = U.errorBox(err); btn.disabled = false; btn.textContent = '↻ Retry'; }
       return;
     }
-    if (e.target.closest('[data-kd-xlsx]') && state.raw) { FF.xlsx.download(`kpi-tags-${state.period.from}_${state.period.to}.xlsx`, [{ name: 'Tags', header: RAW_HEAD, rows: state.raw }]); return; }
-    if (e.target.closest('[data-kd-csv]') && state.raw) { U.downloadCsv(`kpi-tags-${state.period.from}_${state.period.to}.csv`, RAW_HEAD, state.raw); return; }
+    if (e.target.closest('[data-kd-xlsx]') && state.raw) { FF.xlsx.download(kdFileName('Tags', 'xlsx'), [{ name: 'Tags', header: RAW_HEAD, rows: state.raw }]); return; }
+    if (e.target.closest('[data-kd-csv]') && state.raw) { U.downloadCsv(kdFileName('Tags', 'csv'), RAW_HEAD, state.raw); return; }
     if (e.target.closest('[data-kd-summary-xlsx]')) { summaryExport(); return; }
     const tagRow = e.target.closest('[data-kd-tag]');
     if (tagRow && state.spec) { open({ ...state.spec, tagId: tagRow.dataset.kdTag, scope: 'day', date: tagRow.dataset.kdTagDate, title: `Tag ${tagRow.dataset.kdTag}` }); return; }
