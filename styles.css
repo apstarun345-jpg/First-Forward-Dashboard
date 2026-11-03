@@ -7375,3 +7375,9 @@ tr.ms-office-row td { background: #fffbeb; }
 .dsp-more { margin-top: 4px; }
 @media (max-width: 720px) { .dsp-row { grid-template-columns: 1fr auto; } .dsp-cls { grid-column: 1 / -1; } }
 @media (prefers-color-scheme: dark) { .dsp-pill { background: rgba(59,130,246,.22); color: #bfdbfe; } .dsp-pill.na { background: rgba(245,158,11,.2); color: #fde68a; } }
+
+/* 📦 TL ke under stock — TVC-wise list */
+.tlc-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 14px; margin: 6px auto 4px; max-width: 220px; }
+.tlc-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; padding: 1px 6px; border-radius: 6px; background: rgba(14,165,233,.10); font-variant-numeric: tabular-nums; }
+.tlc-row i { font-style: normal; font-weight: 700; opacity: .85; } .tlc-row b { font-weight: 800; }
+.tlc-row.zero { opacity: .45; background: transparent; }

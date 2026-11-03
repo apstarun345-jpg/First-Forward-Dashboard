@@ -2137,7 +2137,7 @@ FF.pages = FF.pages || {};
           ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${stockMix}${(isTl && ownAgents) || c.cover != null ? `<span class="msp-mini-tail">${isTl && ownAgents ? `${ownAgents}` : ''}${isTl && ownAgents && c.cover != null ? ' · ' : ''}${c.cover != null ? `run-rate ${U.fmt(c.rate, true)}/day` : ''}</span>` : ''}`, spec('stock'))}
           ${isTl
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
-    : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}${pr.tl && pr.tl.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.tl.id)}` : ''}` : '')}
+    : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${tlClsRows(ts)}<span class="msp-mini-tail">${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}</span>` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}${pr.tl && pr.tl.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.tl.id)}` : ''}` : '')}
           ${dayChip}
           ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${curMix}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span></span>`, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
@@ -2525,6 +2525,22 @@ FF.pages = FF.pages || {};
     const g = (FF.config.tvcGroups || []).find((x) => `VC${x.tvc}` === k || (x.cch || []).some((c) => String(c).toUpperCase().replace(/\s+/g, '') === k));
     return g ? (String(g.tvc) === '4' ? 'VC4/20' : `VC${g.tvc}`) : (k || '—');
   };
+  // v3.125.70 — TL ke under stock: total upar, neeche TVC-wise (VC4 · VC5 · VC6 · VC7 · VC12 · VC16).
+  function tlClsRows(ts) {
+    const rows = ts && ts.classRows;
+    if (!rows || !rows.length) return ts && (ts.vc4 || ts.comm) ? `<div class="tlc-list"><span class="tlc-row"><i>VC4</i><b>${U.fmt(ts.vc4 || 0)}</b></span><span class="tlc-row"><i>VC5+</i><b>${U.fmt(ts.comm || 0)}</b></span></div>` : '';
+    const groups = (FF.config && FF.config.tvcGroups) || [];
+    const sums = new Map(groups.map((g) => [`VC${g.tvc}`, 0]));
+    let other = 0;
+    rows.forEach((r) => {
+      const k = String(r.cls || '').toUpperCase().replace(/\s+/g, '');
+      const g = groups.find((x) => `VC${x.tvc}` === k || (x.cch || []).some((c) => String(c).toUpperCase().replace(/\s+/g, '') === k));
+      if (g) sums.set(`VC${g.tvc}`, (sums.get(`VC${g.tvc}`) || 0) + (Number(r.n) || 0)); else other += Number(r.n) || 0;
+    });
+    const items = [...sums.entries()].sort((a, b) => Number(a[0].slice(2)) - Number(b[0].slice(2)));
+    if (other) items.push(['Other', other]);
+    return `<div class="tlc-list">${items.map(([k, n]) => `<span class="tlc-row${n ? '' : ' zero'}"><i>${esc(k)}</i><b>${U.fmt(n)}</b></span>`).join('')}</div>`;
+  }
   const dispClsNum = (c) => { const m = /\d+/.exec(String(c)); return m ? Number(m[0]) : 999; };
   const dispSplit = (clsMap) => {
     const m = new Map();

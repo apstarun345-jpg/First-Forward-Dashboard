@@ -1424,7 +1424,7 @@ window.FF = window.FF || {};
     attachLinkedTl(out, light);
     if (a && !out.direct && a.tlName && (!FF.config.isRealTl || FF.config.isRealTl(a.tlName))) {
       const teamStock = tlStockComposition('ff', a.tlName, a.tlId, ffPeopleLookup().rows, stk, stk);
-      out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
+      out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents, classRows: teamStock.classRows };
     }
     if (light) return out;
     out.classes = classTable((eirRows.length ? eirRows : acMine()), stk.filter((r) => {
@@ -1634,7 +1634,7 @@ window.FF = window.FF || {};
     }
     if (r && !out.direct && r.tlName && (!FF.config.isRealTl || FF.config.isRealTl(r.tlName))) {
       const teamStock = tlStockComposition('gv', r.tlName, r.tlId, gvPeopleLookup().rows, gvRows('stockAgent'), gvRows('stockAgentClass'));
-      out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents };
+      out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents, classRows: teamStock.classRows };
     }
     // 📦 GV individual-agent card must use the same Tag Assignment stock source as the clicked class-wise detail.
     // GV REPORT row snapshots can legitimately show 0/stale stock while stockAgent has the live holder rows.
