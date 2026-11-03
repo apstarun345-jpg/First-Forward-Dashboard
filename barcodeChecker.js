@@ -391,6 +391,6 @@ FF.pages = FF.pages || {};
     });
   }
 
-  FF.barcodeChecker = { expandRange, tagInfer, parseMulti, makeRow, paintResults, visible, copyText, _state: state };
+  FF.barcodeChecker = { expandRange, tagInfer, parseMulti, makeRow, paintResults, visible, copyText, checkRange, _state: state };
   FF.pages.barcodeChecker = { title: 'Barcode Checker', render };
 })(window.FF);

@@ -2683,14 +2683,76 @@ FF.pages = FF.pages || {};
     if (!d.last) { main.textContent = 'No dispatch found'; sub.textContent = 'Not in the Stock sheet under this name / ID'; return; }
     const list = (d.recent || []).slice(0, 5);
     main.innerHTML = `${esc(dispDateY(d.last.date))} <small class="dim">${esc(dispAgo(d.last.date))}</small>`;
-    sub.innerHTML = `<div class="dsp-list">${list.map((r, i) => `<div class="dsp-row${i === 0 ? ' first' : ''}"><span class="dsp-date">${esc(dispDateY(r.date))}<small>${esc(dispAgo(r.date))}</small></span><span class="dsp-tot"><b>${U.fmt(r.total)}</b> tags</span><span class="dsp-cls">${dispPills(r.cls) || '<span class="dim small">—</span>'}</span></div>`).join('')}</div>${d.totalDispatches > list.length ? `<div class="dim small dsp-more">+${U.fmt(d.totalDispatches - list.length)} aur · click for all</div>` : ''}`;
+    sub.innerHTML = `<div class="dsp-list">${list.map((r, i) => `<div class="dsp-row${i === 0 ? ' first' : ''}"><span class="dsp-date">${esc(dispDateY(r.date))}<small>${esc(dispAgo(r.date))}</small></span><span class="dsp-tot"><b>${U.fmt(r.total)}</b> tags</span><span class="dsp-cls">${dispPills(r.cls) || '<span class="dim small">—</span>'}</span><span class="dsp-st" data-dsp-st="${i}">${(r.ranges || []).length ? '<span class="dim small">⏳ issued / stock…</span>' : ''}</span></div>`).join('')}</div>${d.totalDispatches > list.length ? `<div class="dim small dsp-more">+${U.fmt(d.totalDispatches - list.length)} aur · click for all</div>` : ''}`;
+  }
+  // v3.125.82 — har dispatch: first–last barcode expand → kitne ISSUED (EIR me) aur kitne abhi STOCK me.
+  const dspStCache = new Map();
+  async function dspStatusOf(r) {
+    const key = `${r.date}|${(r.ranges || []).map((x) => `${x.first}-${x.last}`).join(',')}`;
+    if (!dspStCache.has(key)) {
+      const job = (async () => {
+        if (!FF.barcodeChecker && FF.lazy && FF.lazy.inject) await FF.lazy.inject('barcodeChecker');
+        if (!FF.barcodeChecker || !FF.barcodeChecker.checkRange) throw new Error('Barcode checker load nahi hua');
+        const rows = [];
+        for (const x of (r.ranges || [])) {
+          if (!x.first || !x.last) continue;
+          const part = await FF.barcodeChecker.checkRange(String(x.first), String(x.last));
+          part.forEach((row) => rows.push({ ...row, range: `${x.first} → ${x.last}` }));
+        }
+        return rows;
+      })();
+      dspStCache.set(key, job); job.catch(() => dspStCache.delete(key));
+    }
+    return dspStCache.get(key);
+  }
+  const dspKind = (k) => (k === 'iss' ? 'issued' : (k === 'st' || k === 'bc') ? 'stock' : 'nf');
+  async function fillDispStatus(box, d) {
+    const list = (d.recent || []).slice(0, 5);
+    box.__dspRows = box.__dspRows || {};
+    for (let i = 0; i < list.length; i++) {
+      const slot = box.querySelector(`[data-dsp-st="${i}"]`);
+      if (!slot || !(list[i].ranges || []).length) continue;
+      try {
+        const rows = await dspStatusOf(list[i]);
+        box.__dspRows[i] = { rows, r: list[i] };
+        const c = { issued: 0, stock: 0, nf: 0 }; rows.forEach((x) => { c[dspKind(x.k)]++; });
+        if (!slot.isConnected) return;
+        slot.innerHTML = `<button type="button" class="dsp-sb iss" data-dsp-open="${i}|issued" title="EIR me issue ho chuke — click = list + CSV"><i>Issued</i><b>${U.fmt(c.issued)}</b></button><button type="button" class="dsp-sb stk" data-dsp-open="${i}|stock" title="Abhi stock me — click = list + CSV"><i>Stock</i><b>${U.fmt(c.stock)}</b></button>${c.nf ? `<button type="button" class="dsp-sb nf" data-dsp-open="${i}|nf" title="Na stock me, na EIR me"><i>?</i><b>${U.fmt(c.nf)}</b></button>` : ''}`;
+      } catch (err) { if (slot.isConnected) slot.innerHTML = `<span class="dim small" title="${esc(String((err && err.message) || err))}">issued / stock —</span>`; }
+    }
+  }
+  function openDspStatus(box, idx, kind) {
+    const pack = box.__dspRows && box.__dspRows[idx]; if (!pack) return;
+    const lab = { issued: '✅ Issued', stock: '📦 Stock', nf: '❔ Not found', all: 'All' }[kind] || kind;
+    const rows = kind === 'all' ? pack.rows : pack.rows.filter((x) => dspKind(x.k) === kind);
+    let sc = {}; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { /* ignore */ }
+    const head = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Date', 'VRN', 'Note', 'Dispatch range'];
+    const st = (x) => (dspKind(x.k) === 'issued' ? 'Issued' : dspKind(x.k) === 'stock' ? (x.k === 'bc' ? 'Stock (office)' : 'Stock') : 'Not found');
+    const data = rows.map((x) => [x.barcode, st(x), x.tagId || '', x.cls || '', x.agent || '', x.agentId || '', x.tl || '', x.date || '', x.vrn || '', x.note || '', x.range || '']);
+    const fname = `${sc.title || 'Agent'} - Dispatch ${dispDateY(pack.r.date)} - ${lab.replace(/^\W+\s*/, '')}.csv`;
+    const tabs = ['issued', 'stock', 'nf', 'all'].map((k) => `<button type="button" class="btn small${k === kind ? ' primary' : ''}" data-dsp-tab="${idx}|${k}">${{ issued: '✅ Issued', stock: '📦 Stock', nf: '❔ Not found', all: 'All' }[k]} ${U.fmt(k === 'all' ? pack.rows.length : pack.rows.filter((x) => dspKind(x.k) === k).length)}</button>`).join(' ');
+    const body = `<div class="btn-row" style="margin-bottom:8px">${tabs}<button type="button" class="btn small" data-dsp-csv>⬇ CSV</button></div>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${data.map((r) => `<tr>${r.map((v, j) => `<td${j === 0 || j === 2 ? ' class="mono"' : ''}>${j === 1 ? `<span class="dsp-sb ${v === 'Issued' ? 'iss' : v.startsWith('Stock') ? 'stk' : 'nf'}"><i>${esc(v)}</i></span>` : esc(v)}</td>`).join('')}</tr>`).join('') || '<tr><td colspan="11" class="dim">Koi barcode nahi</td></tr>'}</tbody></table></div>`;
+    if (!FF.app || !FF.app.openDrawer) return;
+    FF.app.openDrawer({ kicker: `${sc.ch === 'gv' ? 'GV' : 'FF'} dispatch · ${dispDateY(pack.r.date)}`, title: `${sc.title || ''} · ${lab}`, sub: `${U.fmt(pack.r.total)} tags dispatch · ${U.fmt(rows.length)} ${lab.replace(/^\W+\s*/, '').toLowerCase()}`, body, wide: true });
+    const dr = document.getElementById('drawer-body');
+    if (dr) {
+      const h = (e) => {
+        const c = e.target.closest && e.target.closest('[data-dsp-csv]');
+        if (c) { U.downloadCsv(fname, head, data); return; }
+        const t = e.target.closest && e.target.closest('[data-dsp-tab]');
+        if (t) { const [i2, k2] = t.dataset.dspTab.split('|'); openDspStatus(box, Number(i2), k2); }
+      };
+      if (dr.__dspH) dr.removeEventListener('click', dr.__dspH);
+      dr.__dspH = h; dr.addEventListener('click', h);
+    }
   }
   function fillDispBoxes(host) {
     const boxes = host ? host.querySelectorAll('[data-msp-disp-box]') : [];
     boxes.forEach((box) => {
       if (box.__dispDone) return; box.__dispDone = true;
       let sc; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { return; }
-      dispFetch(sc).then((d) => { if (box.isConnected) { box.__disp = d; dispPaint(box, d); } }).catch((err) => {
+      dispFetch(sc).then((d) => { if (box.isConnected) { box.__disp = d; dispPaint(box, d); fillDispStatus(box, d).catch(() => {}); } }).catch((err) => {
         if (!box.isConnected) return;
         const sub = box.querySelector('.msp-disp-sub'), main = box.querySelector('.msp-disp-main');
         box.__dispDone = false;
@@ -3003,6 +3065,8 @@ FF.pages = FF.pages || {};
     if (dl) { e.preventDefault(); e.stopPropagation(); const box = dl.closest('[data-msp-age]'); if (box) downloadAgeAll(box).catch((err) => U.toast(String((err && err.message) || err), 'err')); return; }
     const kbox = t.closest('[data-msp-kyc-box]');
     if (kbox) { e.preventDefault(); e.stopPropagation(); try { const sp = JSON.parse(kbox.dataset.mspKycBox); if (FF.kycDetail) FF.kycDetail.open({ title: `${sp.t} · FASTag KYC`, filter: sp.f }); } catch { /* ignore */ } return; }
+    const dso = t.closest('[data-dsp-open]');
+    if (dso) { e.preventDefault(); e.stopPropagation(); const b = dso.closest('[data-msp-disp-box]'); const [i, k] = dso.dataset.dspOpen.split('|'); if (b) openDspStatus(b, Number(i), k); return; }
     const dbox = t.closest('[data-msp-disp-box]');
     if (dbox) { e.preventDefault(); e.stopPropagation(); openDispDrawer(dbox); return; }
     const row = t.closest('[data-msp-age-b]');
