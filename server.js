@@ -164,6 +164,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'fastagMapping', label: 'GV Partner · FASTag Mapping (admin-only API mapping)', group: 'GV Partner' },
   { key: 'agentsOverview', label: 'Reports · GV & FF Agents Summary (stock agents · direct/TL · active/inactive)', group: 'Reports' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
+  { key: 'multiCustomer', label: 'Cross-channel · Multiple Customer ID (EIR customer × month · issuing agent)', group: 'Cross Channel' },
   { key: 'aiAnalyst', label: 'Management · AI Business Analyst (GV + FF review)', group: 'Management' },
   { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
   { key: 'ffAgentSummary', label: 'First Forward · Agent / TL Summary (share / PDF)', group: 'First Forward' },
@@ -3349,6 +3350,141 @@ function newIdsData(fresh) {
   return have && !fresh ? Promise.resolve(have) : newIdsState.promise;   // purana turant, refresh peeche
 }
 // ---------------------------------------------------------------------------------------------
+// 👥 v3.125.77 — Multiple Customer ID (Cross Channel): EIR LEGACY_CUSTOMER_ID × month → tag count + issuing agent.
+// Agent naam EIR me khaali ho to GV Master (tag ID / VRN) se agent ID · naam · channel. Customers with ≥ 2 tags.
+const mcState = { at: 0, data: null, promise: null, key: '' };
+const mcCell = (r, i) => idCellText(r, i);
+const mcNum = (r, i) => Number(r && r.c && r.c[i] && r.c[i].v) || 0;
+function mcCols() {
+  const s = db.settings || {}, e = s.eir || {}, f = eirAuto.found || {};
+  const pick = (k, d) => colLetter(e[k] || f[k], d);
+  return { cust: pick('legacyCustomerId', 'AD'), tag: pick('tagId', 'A'), vrn: pick('vrn', 'B'), cls: pick('cls', 'D'), date: pick('date', 'AA'),
+    agentId: pick('agentId', 'J'), agentName: pick('agentName', 'L'), master: pick('masterId', 'AU'), status: pick('status', 'Z'), type: pick('type', 'P'),
+    first: pick('customerFirst', 'AF'), last: pick('customerLast', 'AH'), corp: pick('corpName', 'AI') };
+}
+async function buildMultiCustomer() {
+  const s = db.settings || {}, e = s.eir || {};
+  const sheetId = String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  if (!sheetId) throw new Error('Main sheet set nahi hai.');
+  const sheet = s.eirSheet || e.sheet || 'EIR';
+  const C = mcCols();
+  const gvMasterId = String(e.gvMasterId || '5845036');
+  const opts = { pageRows: 25000, window: 2, maxPages: 40 };
+  // 1) customer × month counts (Google side group by — chhota result)
+  const cust = new Map();
+  await gvizPagesServer(sheetId, sheet, [C.cust, `year(${C.date})`, `month(${C.date})`, `count(${C.tag})`],
+    `${C.cust} is not null and ${C.date} is not null group by ${C.cust}, year(${C.date}), month(${C.date})`, async (rows) => {
+      for (const r of rows) {
+        const id = mcCell(r, 0); if (!id) continue;
+        const y = mcNum(r, 1), m = r.c && r.c[2] && r.c[2].v, n = mcNum(r, 3);
+        if (!y || m === null || m === undefined || !n) continue;
+        const ym = `${y}-${String(Number(m) + 1).padStart(2, '0')}`;
+        let o = cust.get(id); if (!o) { o = { id, months: {}, total: 0 }; cust.set(id, o); }
+        o.months[ym] = (o.months[ym] || 0) + n; o.total += n;
+      }
+    }, opts);
+  for (const [id, o] of cust) if (o.total < 2) cust.delete(id);
+  // 2) issuing agent (EIR) — sabse zyada tags wala agent, channel = Master ID se
+  await gvizPagesServer(sheetId, sheet, [C.cust, C.agentId, C.agentName, C.master, `count(${C.tag})`],
+    `${C.cust} is not null group by ${C.cust}, ${C.agentId}, ${C.agentName}, ${C.master}`, async (rows) => {
+      for (const r of rows) {
+        const o = cust.get(mcCell(r, 0)); if (!o) continue;
+        const aid = mcCell(r, 1), an = mcCell(r, 2), mid = mcCell(r, 3), n = mcNum(r, 4);
+        o.agents = o.agents || [];
+        o.agents.push({ id: aid, name: an, ch: idNorm(mid) === idNorm(gvMasterId) ? 'GV' : (mid ? 'FF' : ''), n });
+      }
+    }, opts);
+  // 3) jinka agent naam khaali — un tags ke ID / VRN
+  const needTag = new Map(), needVrn = new Map();
+  await gvizPagesServer(sheetId, sheet, [C.cust, C.tag, C.vrn], `${C.cust} is not null and (${C.agentName} is null or ${C.agentName} = '')`, async (rows) => {
+    for (const r of rows) {
+      const id = mcCell(r, 0), o = cust.get(id); if (!o) continue;
+      const t = idNorm(mcCell(r, 1)), v = idNorm(mcCell(r, 2));
+      if (t) needTag.set(t, id); if (v) needVrn.set(v, id);
+      o.blank = (o.blank || 0) + 1;
+    }
+  }, opts);
+  // 4) GV Master se lookup (tag ID / VRN → agent)
+  const gvFound = new Map();
+  const gm = (s.gv && s.gv.master) || {};
+  const gvSheet = String(s.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  let gvErr = '';
+  if (gvSheet && (needTag.size || needVrn.size)) {
+    const L = { uid: colLetter(gm.uniqueId, 'A'), name: colLetter(gm.agentName, 'B'), vrn: colLetter(gm.vrn, 'E'), tag: colLetter(gm.tagId, 'I'), tl: colLetter(gm.tlName, 'D') };
+    const gsheet = /^\d+$/.test(String(gm.gid || '')) ? `gid:${gm.gid}` : (gm.tab || 'GV Master');
+    try {
+      await gvizPagesServer(gvSheet, gsheet, [L.uid, L.name, L.vrn, L.tag, L.tl], `${L.uid} is not null`, async (rows, at) => {
+        for (const r of rows) {
+          const g = (k) => mcCell(r, at(L[k]));
+          const hit = { id: g('uid'), name: g('name'), tl: g('tl') };
+          const t = idNorm(g('tag')), v = idNorm(g('vrn'));
+          const c1 = t && needTag.get(t), c2 = v && needVrn.get(v);
+          for (const cid of [c1, c2]) {
+            if (!cid) continue;
+            const m = gvFound.get(cid) || new Map(); const k = `${hit.id}|${hit.name}`;
+            const x = m.get(k) || { ...hit, n: 0 }; x.n++; m.set(k, x); gvFound.set(cid, m);
+          }
+        }
+      }, opts);
+    } catch (err) { gvErr = String((err && err.message) || err).slice(0, 160); }
+  }
+  // 5) final rows
+  const rows = [];
+  for (const o of cust.values()) {
+    const named = (o.agents || []).filter((a) => a.name).sort((a, b) => b.n - a.n);
+    const gv = gvFound.get(o.id) ? [...gvFound.get(o.id).values()].sort((a, b) => b.n - a.n) : [];
+    let agentId = '', agentName = '', channel = '', source = '';
+    if (named.length) { agentId = named[0].id; agentName = named[0].name; channel = named[0].ch || 'FF'; source = 'EIR'; }
+    else if (gv.length) { agentId = gv[0].id; agentName = gv[0].name; channel = 'GV'; source = 'GV Master'; }
+    else { const any = (o.agents || []).sort((a, b) => b.n - a.n)[0]; agentId = any ? any.id : ''; channel = any && any.ch ? any.ch : ''; source = 'EIR (naam khaali)'; }
+    const chans = new Set([...(o.agents || []).map((a) => a.ch).filter(Boolean), ...(gv.length ? ['GV'] : [])]);
+    rows.push({ id: o.id, months: o.months, total: o.total, agentId, agentName, channel: chans.size > 1 ? 'FF + GV' : (channel || '—'), source,
+      agents: new Set([...named.map((a) => a.id || a.name), ...gv.map((a) => a.id || a.name)]).size, blank: o.blank || 0 });
+  }
+  rows.sort((a, b) => b.total - a.total);
+  const months = [...new Set(rows.flatMap((r) => Object.keys(r.months)))].sort();
+  return { at: new Date().toISOString(), months, rows, gvError: gvErr, cols: C,
+    summary: { customers: rows.length, tags: rows.reduce((t, r) => t + r.total, 0), gvResolved: rows.filter((r) => r.source === 'GV Master').length, blankLeft: rows.filter((r) => !r.agentName).length } };
+}
+function multiCustomerData(fresh) {
+  const s = db.settings || {};
+  const key = JSON.stringify([s.sheetId, s.eirSheet, s.gvSheetId, mcCols()]);
+  const have = mcState.data && mcState.key === key ? mcState.data : null;
+  const stale = have && Date.now() - mcState.at > 30 * 60e3;
+  if (have && !fresh && !stale) return Promise.resolve(have);
+  if (!mcState.promise) {
+    mcState.promise = buildMultiCustomer().then((d) => { mcState.data = d; mcState.at = Date.now(); mcState.key = key; return d; }).finally(() => { mcState.promise = null; });
+    mcState.promise.catch(() => {});
+  }
+  return have && !fresh ? Promise.resolve(have) : mcState.promise;
+}
+/** Ek (ya kai) customer ke tag-level EIR rows. */
+async function multiCustomerTags(ids) {
+  const s = db.settings || {}, e = s.eir || {};
+  const sheetId = String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const sheet = s.eirSheet || e.sheet || 'EIR';
+  const C = mcCols();
+  const want = [...new Set(ids.map((x) => String(x || '').replace(/[^0-9A-Za-z]/g, '')).filter(Boolean))].slice(0, 40);
+  if (!want.length) return [];
+  const cond = want.map((id) => `${C.cust} = '${id}'`).concat(want.filter((id) => /^\d{1,15}$/.test(id)).map((id) => `${C.cust} = ${id}`)).join(' or ');
+  const sel = [C.cust, C.tag, C.vrn, C.cls, C.date, C.type, C.status, C.agentId, C.agentName, C.master, C.first, C.last, C.corp];
+  const q = new URLSearchParams({ id: sheetId, sheet, tq: `select ${[...new Set(sel)].join(', ')} where ${cond} limit 5000` });
+  let out;
+  try { out = await gvizPageServer(q, sheet); }
+  catch (err) {   // text-only compare (numeric compare galat type par error deta hai)
+    const q2 = new URLSearchParams({ id: sheetId, sheet, tq: `select ${[...new Set(sel)].join(', ')} where ${want.map((id) => `${C.cust} = '${id}'`).join(' or ')} limit 5000` });
+    out = await gvizPageServer(q2, sheet);
+  }
+  const at = (L) => out.ids.indexOf(L);
+  const g = (r, L) => (at(L) >= 0 ? mcCell(r, at(L)) : '');
+  const gvMasterId = String(e.gvMasterId || '5845036');
+  return out.rows.map((r) => ({ customerId: g(r, C.cust), tagId: g(r, C.tag), vrn: g(r, C.vrn), cls: g(r, C.cls),
+    date: (() => { const c = r.c && r.c[at(C.date)]; return c ? (c.f || String(c.v || '')) : ''; })(),
+    type: g(r, C.type), status: g(r, C.status), agentId: g(r, C.agentId), agentName: g(r, C.agentName),
+    channel: idNorm(g(r, C.master)) === idNorm(gvMasterId) ? 'GV' : (g(r, C.master) ? 'FF' : ''),
+    customer: g(r, C.corp) || [g(r, C.first), g(r, C.last)].filter(Boolean).join(' ') }));
+}
+// ---------------------------------------------------------------------------------------------
 // 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet(s): First–Last barcode ranges → interval index.
 const LEDGER_TTL = 30 * 60e3;   // Google gviz rate-limit (429) se bachne ke liye 30 min
 const ledgerState = { at: 0, index: null, promise: null, key: '', errors: {}, counts: {}, retryAt: 0, good: {} };   // good = source id → last successful rows (fail hone par purana data rahe)
@@ -3583,7 +3719,8 @@ const EIR_HEADER_MAP = {
   assistId: ['TAG_ISSUING_AGENT_ASSISTANT_ID'], assistLegacyId: ['TAG_ISSUING_AGENT_ASSISTANT_LEGACY_ID'], assistName: ['TAG_ISSUING_AGENT_ASSISTANT_NAME'],
   kycMode: ['KYC_MODE'], kyc: ['CUSTOMER_FULL_KYC'], kyc2: ['IS_FULL_KYC'],
   masterId: ['MASTER ID'], tlId: ['TL ID'], gvId: ['GV ID'], gvName: ['GV NAME'], gvTl: ['TL NAME'], tlName: ['TL NAME FF'],
-  vrnType: ['VRN TYPE'], monthName: ['MONTH NAME'], regNumber: ['REGNUMBER']
+  vrnType: ['VRN TYPE'], monthName: ['MONTH NAME'], regNumber: ['REGNUMBER'],
+  legacyCustomerId: ['LEGACY_CUSTOMER_ID'], customerFirst: ['CUSTOMER_FIRST_NAME'], customerLast: ['CUSTOMER_LAST_NAME'], corpName: ['CORP_CUSTOMER_NAME']
 };
 const EIR_REQUIRED_KEYS = ['tagId', 'cls', 'date', 'masterId'];
 const EIR_GV_FALLBACK = { gvId: 'agentId', gvName: 'agentName', gvTl: 'tlName' };
@@ -6417,6 +6554,24 @@ async function handleApi(req, res, url) {
     if (!complaintsAllowed(user)) throw new HttpError(403, 'Complaints access nahi hai.');
     try { await complaintsSvc.sync({ full: true }); } catch (err) { return sendJson(res, 200, { ok: false, error: String((err && err.message) || err), meta: complaintsSvc.meta() }); }
     return sendJson(res, 200, { ok: true, meta: complaintsSvc.meta() }, { 'Cache-Control': 'no-store' });
+  }
+  // 👥 Multiple Customer ID (Cross Channel)
+  if (p === '/api/multi-customer' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (user.role !== 'admin' && !(user.permissions || []).includes('multiCustomer')) throw new HttpError(403, 'Multiple Customer ID ka access nahi hai.');
+    const fresh = url.searchParams.get('fresh') === '1';
+    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 30000); });
+    let data; try { data = await Promise.race([multiCustomerData(fresh), wait]); } catch (err) { throw new HttpError(502, `Multiple Customer ID load nahi hua: ${String((err && err.message) || err).slice(0, 200)}`); } finally { clearTimeout(timer); }
+    if (!data) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 4000 });
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ...data }), { 'Cache-Control': 'no-store' });
+  }
+  if (p === '/api/multi-customer/tags' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (user.role !== 'admin' && !(user.permissions || []).includes('multiCustomer')) throw new HttpError(403, 'Multiple Customer ID ka access nahi hai.');
+    const body = await readBody(req);
+    const ids = Array.isArray(body && body.ids) ? body.ids : [body && body.id];
+    const rows = await multiCustomerTags(ids);
+    return sendJson(res, 200, { ok: true, rows }, { 'Cache-Control': 'no-store' });
   }
   // 🆕 New IDs: EIR me issuance karne wale agents jinki ID Agent master (Sheet4 col A) me nahi hai.
   if (p === '/api/new-ids' && method === 'GET') {
