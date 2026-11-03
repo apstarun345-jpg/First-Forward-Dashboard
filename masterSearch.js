@@ -2022,6 +2022,16 @@ FF.pages = FF.pages || {};
         o[big] += expTotal - used;   // total hamesha match
         return o;
       })();
+      // Expected month-end, class-wise: this-month class mix ko expected total par scale karo (total hamesha match).
+      const expGrid = (() => {
+        const cm = clsSums(pr.classes, 'cur', true);
+        const sum = Object.values(cm).reduce((a2, b2) => a2 + b2, 0);
+        if (!sum || !expTotal) return '';
+        const o = {}; let used = 0, big = null;
+        Object.keys(cm).forEach((k) => { o[k] = Math.round(expTotal * cm[k] / sum); used += o[k]; if (!big || cm[k] > cm[big]) big = k; });
+        o[big] += expTotal - used;
+        return clsGrid(o, CLS7);
+      })();
       const dayChip = (() => {
         try {
           const nk = normName(pr.name), pid = normName(pr.id || '');
@@ -2039,13 +2049,16 @@ FF.pages = FF.pages || {};
             label = 'Yesterday'; icon = '🕘'; tail = 'FF EIR data';
           }
           const vals = { VC4: 0, VC20: 0, 'VC5+': 0 }; let total = 0;
+          const byCls = [];
           rows.forEach((r) => {
             const k = String(r.key || U.dateKey(r.date || r.d || new Date(0)));
             if (k !== key || !same(r)) return;
             const n = Number(r.n) || 0; total += n;
             vals[r.group === 'VC4' ? 'VC4' : r.group === 'VC20' ? 'VC20' : 'VC5+'] += n;
+            byCls.push({ cls: r.cls || r.group, n });
           });
-          return box('k13', `${icon} ${label} · ${esc(U.labelDateKey ? U.labelDateKey(key) : key)}`, miniHtml(vals, total, tail), '', `${spec('day', '')}&date=${encodeURIComponent(key)}`);
+          const grid = clsOr(clsSums(byCls, 'n', true), CLS7, total, vcTiles(vals));
+          return box('k13', `${icon} ${label} · ${esc(U.labelDateKey ? U.labelDateKey(key) : key)}`, U.fmt(total), `${grid}<span class="msp-mini-tail">${esc(tail)}</span>`, `${spec('day', '')}&date=${encodeURIComponent(key)}`);
         } catch { return ''; }
       })();
       const wd = workedDays(pr, isTl, ch, m.cur);
@@ -2085,7 +2098,7 @@ FF.pages = FF.pages || {};
       const dSum = (k) => dl.reduce((n, x) => n + x[k], 0);
       const dFinal = (n) => `<span class="msp-dt-pill ${n ? 'red' : 'green'}">${U.fmt(n)}</span>`;
       const sugBody = `<div class="msp-dtable-wrap"><table class="msp-dtable"><thead><tr><th>Class</th><th>Need</th><th>Stock</th><th>Final</th></tr></thead><tbody>
-        ${dl.map((x) => `<tr${x.need || x.stock ? '' : ' class="zero"'}><td><span class="msp-dt-cls">${esc(x.label)}</span></td><td title="${esc(`${U.fmt(x.rate, true)}/day × ${U.fmt(sDays)} din${x.basis ? ' (pichhle mahine ka run-rate)' : ''}`)}">${U.fmt(x.need)}${x.basis ? '<sup>*</sup>' : ''}</td><td>${U.fmt(x.stock)}</td><td>${dFinal(x.dispatch)}</td></tr>`).join('')}
+        ${dl.map((x) => `<tr${x.need || x.stock ? '' : ' class="zero"'}><td><span class="msp-dt-cls cg-tag cg-${((/VC\d+/i.exec(String(x.label)) || ['other'])[0]).toLowerCase()}">${esc(x.label)}</span></td><td title="${esc(`${U.fmt(x.rate, true)}/day × ${U.fmt(sDays)} din${x.basis ? ' (pichhle mahine ka run-rate)' : ''}`)}">${U.fmt(x.need)}${x.basis ? '<sup>*</sup>' : ''}</td><td>${U.fmt(x.stock)}</td><td>${dFinal(x.dispatch)}</td></tr>`).join('')}
         <tr class="tot"><td>Total</td><td>${U.fmt(dSum('need'))}</td><td>${U.fmt(dSum('stock'))}</td><td>${dFinal(dSum('dispatch'))}</td></tr></tbody></table></div>`;
       const sug = box('k4', `🎯 Dispatch · ${U.fmt(sDays)} din`, sugBody,
         `Need = run-rate/day × ${U.fmt(sDays)} din (Settings) · Final = Need − Stock${dl.some((x) => x.basis) ? ' · * pichhle mahine ka run-rate' : ''} · month-end expected ${U.fmt(expA + expB)}${pr.direct ? ` · ${esc(pr.directLabel || 'Direct')}` : ''}`, spec('mtd', m.cur));
@@ -2133,18 +2146,18 @@ FF.pages = FF.pages || {};
           <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL summary' : 'Agent summary'}</h3>
           <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
           <div class="card-right">${ch === 'gv' ? GVC.chip({ kind: isTl ? 'gv_tl' : 'gv_agent', sub: pr.id, id: pr.id, channel: 'gv' }) : ''}${prioChip(worst === 'None' ? prioEff : worst)}</div></div>
-        <div class="card-body"><div class="mp-kpis msp-kpis">
-          ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${stockMix}${(isTl && ownAgents) || c.cover != null ? `<span class="msp-mini-tail">${isTl && ownAgents ? `${ownAgents}` : ''}${isTl && ownAgents && c.cover != null ? ' · ' : ''}${c.cover != null ? `run-rate ${U.fmt(c.rate, true)}/day` : ''}</span>` : ''}`, spec('stock'))}
+        <div class="card-body"><div class="mp-kpis msp-kpis msp-uni">
+          ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${clsOr(clsSums(pr.classes, 'stock', false), TVC6, s.total, stockMix)}${(isTl && ownAgents) || c.cover != null ? `<span class="msp-mini-tail">${isTl && ownAgents ? `${ownAgents}` : ''}${isTl && ownAgents && c.cover != null ? ' · ' : ''}${c.cover != null ? `run-rate ${U.fmt(c.rate, true)}/day` : ''}</span>` : ''}`, spec('stock'))}
           ${isTl
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
     : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${tlClsRows(ts)}<span class="msp-mini-tail">${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}</span>` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}${pr.tl && pr.tl.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.tl.id)}` : ''}` : '')}
           ${dayChip}
-          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${curMix}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span></span>`, spec('mtd', m.cur))}
-          ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), lastMix, spec('month', m.last))}
+          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${clsOr(clsSums(pr.classes, 'cur', true), CLS7, t.curTotal, curMix)}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span></span>`, spec('mtd', m.cur))}
+          ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), clsOr(clsSums(pr.classes, 'last', true), CLS7, t.lastTotal, lastMix), spec('month', m.last))}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
           ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
-          ${box('k10', '🎯 Expected this month · Run-rate', miniHtml(expSplit, expTotal, `run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.reportYm()))} days`), '', spec('mtd', m.cur))}
+          ${box('k10', '🎯 Expected this month · Run-rate', U.fmt(expTotal), `${expGrid || (expTotal ? vcTiles(expSplit) : clsGrid({}, CLS7, true))}<span class="msp-mini-tail">run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.reportYm()))} days</span>`, spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
           ${dispBoxHtml(pr, isTl, ch)}
           ${kycBoxHtml(pr, isTl, ch)}
@@ -2525,21 +2538,40 @@ FF.pages = FF.pages || {};
     const g = (FF.config.tvcGroups || []).find((x) => `VC${x.tvc}` === k || (x.cch || []).some((c) => String(c).toUpperCase().replace(/\s+/g, '') === k));
     return g ? (String(g.tvc) === '4' ? 'VC4/20' : `VC${g.tvc}`) : (k || '—');
   };
-  // v3.125.70 — TL ke under stock: total upar, neeche TVC-wise (VC4 · VC5 · VC6 · VC7 · VC12 · VC16).
+  // v3.125.72 — class-wise colourful grid (har class ka pakka rang, poori Master Search me same).
+  const CLS7 = ['VC4', 'VC20', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16'];
+  const TVC6 = ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16'];
+  const normCls = (v) => String(v || '').toUpperCase().replace(/\s+/g, '');
+  function clsKeyOf(raw, keep20) {
+    const k = normCls(raw);
+    if (k === 'VC20') return keep20 ? 'VC20' : 'VC4';
+    if (k === 'VC4') return 'VC4';
+    const g = ((FF.config && FF.config.tvcGroups) || []).find((x) => `VC${x.tvc}` === k || (x.cch || []).some((c) => normCls(c) === k));
+    if (g) return String(g.tvc) === '4' ? (keep20 && k === 'VC20' ? 'VC20' : 'VC4') : `VC${g.tvc}`;
+    return CLS7.includes(k) ? k : 'Other';
+  }
+  /** list = [{cls, <field>}] → { VC4: n, … } (keep20 = VC20 alag rakho). */
+  function clsSums(list, field, keep20) {
+    const o = {};
+    (Array.isArray(list) ? list : []).forEach((x) => { const n = Math.max(0, Number(x && x[field]) || 0); if (!n) return; const k = clsKeyOf(x.cls, keep20); o[k] = (o[k] || 0) + n; });
+    return o;
+  }
+  const clsKnown = (map, keys) => keys.some((k) => Number(map && map[k]) > 0);
+  function clsGrid(map, keys, force) {
+    if (!force && (!map || !clsKnown(map, keys))) return '';
+    map = map || {};
+    const items = keys.map((k) => [k, Number(map[k]) || 0]);
+    if (Number(map.Other) > 0) items.push(['Other', Number(map.Other)]);
+    return `<div class="cg cg-n${items.length}">${items.map(([k, n]) => `<span class="cg-c cg-${k.toLowerCase()}${n ? '' : ' z'}"><i>${esc(k)}</i><b>${U.fmt(n)}</b></span>`).join('')}</div>`;
+  }
+  /** Class grid; data na ho to: total > 0 → purana mix (fallback), total 0 → saari classes 0 (same layout). */
+  const clsOr = (map, keys, total, fallback) => clsGrid(map, keys) || (Number(total) > 0 ? fallback : clsGrid({}, keys, true));
   function tlClsRows(ts) {
     const rows = ts && ts.classRows;
-    if (!rows || !rows.length) return ts && (ts.vc4 || ts.comm) ? `<div class="tlc-list"><span class="tlc-row"><i>VC4</i><b>${U.fmt(ts.vc4 || 0)}</b></span><span class="tlc-row"><i>VC5+</i><b>${U.fmt(ts.comm || 0)}</b></span></div>` : '';
-    const groups = (FF.config && FF.config.tvcGroups) || [];
-    const sums = new Map(groups.map((g) => [`VC${g.tvc}`, 0]));
-    let other = 0;
-    rows.forEach((r) => {
-      const k = String(r.cls || '').toUpperCase().replace(/\s+/g, '');
-      const g = groups.find((x) => `VC${x.tvc}` === k || (x.cch || []).some((c) => String(c).toUpperCase().replace(/\s+/g, '') === k));
-      if (g) sums.set(`VC${g.tvc}`, (sums.get(`VC${g.tvc}`) || 0) + (Number(r.n) || 0)); else other += Number(r.n) || 0;
-    });
-    const items = [...sums.entries()].sort((a, b) => Number(a[0].slice(2)) - Number(b[0].slice(2)));
-    if (other) items.push(['Other', other]);
-    return `<div class="tlc-list">${items.map(([k, n]) => `<span class="tlc-row${n ? '' : ' zero'}"><i>${esc(k)}</i><b>${U.fmt(n)}</b></span>`).join('')}</div>`;
+    const map = clsSums((rows || []).map((r) => ({ cls: r.cls, n: r.n })), 'n', false);
+    const g = clsGrid(map, TVC6);
+    if (g) return g;
+    return ts && (ts.vc4 || ts.comm) ? clsGrid({ VC4: ts.vc4 || 0, Other: ts.comm || 0 }, ['VC4']) : '';
   }
   const dispClsNum = (c) => { const m = /\d+/.exec(String(c)); return m ? Number(m[0]) : 999; };
   const dispSplit = (clsMap) => {

@@ -7381,3 +7381,40 @@ tr.ms-office-row td { background: #fffbeb; }
 .tlc-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; padding: 1px 6px; border-radius: 6px; background: rgba(14,165,233,.10); font-variant-numeric: tabular-nums; }
 .tlc-row i { font-style: normal; font-weight: 700; opacity: .85; } .tlc-row b { font-weight: 800; }
 .tlc-row.zero { opacity: .45; background: transparent; }
+
+/* ===== v3.125.72 — Master Search summary: same-size boxes, left aligned, class-wise colourful grids ===== */
+.cg-vc4 { --cg: #2563eb; } .cg-vc20 { --cg: #7c3aed; } .cg-vc5 { --cg: #ea580c; } .cg-vc6 { --cg: #db2777; }
+.cg-vc7 { --cg: #0d9488; } .cg-vc12 { --cg: #16a34a; } .cg-vc16 { --cg: #ca8a04; } .cg-other { --cg: #64748b; }
+.cg { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 5px; margin-top: 6px; width: 100%; }
+.cg-c { --cg: #64748b; display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding: 4px 8px 5px; border-radius: 9px;
+  background: color-mix(in srgb, var(--cg) 12%, transparent); border-left: 3px solid var(--cg); min-width: 0; }
+.cg-c.cg-vc4 { --cg: #2563eb; } .cg-c.cg-vc20 { --cg: #7c3aed; } .cg-c.cg-vc5 { --cg: #ea580c; } .cg-c.cg-vc6 { --cg: #db2777; }
+.cg-c.cg-vc7 { --cg: #0d9488; } .cg-c.cg-vc12 { --cg: #16a34a; } .cg-c.cg-vc16 { --cg: #ca8a04; } .cg-c.cg-other { --cg: #64748b; }
+html body .cg-c i { font-style: normal; font-size: 10.5px; font-weight: 800; letter-spacing: .03em; color: var(--cg); line-height: 1.2; }
+html body .cg-c b { display: block; font-size: 15px !important; font-weight: 800; line-height: 1.2; margin: 0 !important; color: var(--ink, inherit); font-variant-numeric: tabular-nums; }
+.cg-c.z { opacity: .45; }
+.cg-tag { display: inline-block; padding: 1px 8px; border-radius: 7px; font-weight: 800; color: var(--cg, #334155); background: color-mix(in srgb, var(--cg, #64748b) 14%, transparent); }
+
+html body .mp-kpis.msp-kpis.msp-uni { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); grid-auto-rows: minmax(196px, auto); gap: 12px; align-items: stretch; grid-auto-flow: row dense; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi { display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; text-align: left;
+  padding: 12px 14px; border-radius: 14px; border-top-width: 4px; min-height: 0; gap: 2px; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi > small { text-align: left; font-size: 11px; font-weight: 800; letter-spacing: .04em; margin: 0 0 2px; justify-content: space-between; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi > b { text-align: left; font-size: 26px; font-weight: 900; line-height: 1.1; margin: 2px 0 4px; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi.k3 > b, html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi.k4 > b { font-size: 13px; font-weight: 500; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi > em { text-align: left; margin-top: 0; padding-top: 0; font-size: 11.5px; line-height: 1.35; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi .msp-mini-tail { display: block; margin-top: 8px; text-align: left; font-size: 11.5px; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi.k4, html body .mp-kpis.msp-kpis.msp-uni > .msp-age-box,
+html body .mp-kpis.msp-kpis.msp-uni > .msp-disp-box { grid-column: span 2; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi .msp-dtable td:first-child { text-align: left; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi .msp-disp-main { text-align: left; }
+@media (max-width: 800px) {
+  html body .mp-kpis.msp-kpis.msp-uni { grid-template-columns: 1fr; grid-auto-rows: auto; }
+  html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi.k4, html body .mp-kpis.msp-kpis.msp-uni > .msp-age-box, html body .mp-kpis.msp-kpis.msp-uni > .msp-disp-box { grid-column: 1 / -1; }
+}
+@media (prefers-color-scheme: dark) { .cg-c { background: color-mix(in srgb, var(--cg) 22%, transparent); } }
+.cg.cg-n6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cg.cg-n7, .cg.cg-n8 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cg.cg-n7 .cg-c, .cg.cg-n8 .cg-c { padding: 4px 6px 5px; }
+html body .mp-kpis.msp-kpis.msp-uni > .msp-kpi > small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body .cg-c b { white-space: nowrap; overflow-wrap: normal !important; word-break: normal !important; }
+html body .cg.cg-n7 .cg-c b, html body .cg.cg-n8 .cg-c b { font-size: 13.5px !important; }
