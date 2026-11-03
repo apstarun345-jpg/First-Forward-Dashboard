@@ -145,7 +145,7 @@ window.FF = window.FF || {};
     const height = opts.height || 220;
     const n = labels.length;
     const every = opts.labelEvery || (n > 40 ? 5 : n > 20 ? 2 : 1);
-    const showValues = opts.showValues !== undefined ? opts.showValues : n <= 16;
+    const showValues = opts.showValues !== undefined ? opts.showValues : n <= 45;
     // 🌈 v224 — ek hi series wale class charts (VC4 · VC5 · …) har bar alag rang me; har bar par halka gradient
     const classy = series.length === 1 && opts.multicolor !== false && n > 1 && n <= 12 && labels.every((l) => /^(N?VC\s?\d+\+?|all|comm)/i.test(String(l)));
     const cols = labels.map((label, i) => {
@@ -159,7 +159,7 @@ window.FF = window.FF || {};
       const tip = opts.tips && opts.tips[i] ? opts.tips[i] : `<b>${esc(opts.tipLabels ? opts.tipLabels[i] : label)}</b><br>${series.length > 1 ? series.map((s) => `<i style="background:${s.color}"></i>${esc(s.name)}: <b>${fmtVal(s.values[i] || 0, opts.format)}</b>`).join('<br>') + '<br>' : ''}Total: <b>${fmtVal(total, opts.format)}</b>`;
       const hl = opts.highlight === i ? ' hl' : '';
       return `<div class="vcol${hl}" data-tip="${esc(tip)}" ${opts.onClickAttr ? opts.onClickAttr(i) : ''}>
-        <div class="vcol-bars">${showValues && total > 0 ? `<div class="vcol-val">${U.fmtShort(total)}</div>` : ''}<div class="vcol-stack" style="height:${max ? Math.max(total > 0 ? 1.5 : 0, (total / max) * 100) : 0}%">${segs}</div></div>
+        <div class="vcol-bars">${showValues && total > 0 ? `<div class="vcol-val">${total >= 100000 ? U.fmtShort(total) : U.fmt(total)}</div>` : ''}<div class="vcol-stack" style="height:${max ? Math.max(total > 0 ? 1.5 : 0, (total / max) * 100) : 0}%">${segs}</div></div>
         <div class="vcol-label">${i % every === 0 ? esc(label) : ''}</div></div>`;
     }).join('');
     const grid = [1, 0.75, 0.5, 0.25, 0].map((f) => `<div class="vgrid-line"><span>${U.fmtShort(max * f)}</span></div>`).join('');
@@ -167,7 +167,7 @@ window.FF = window.FF || {};
     const minPlotWidth = Math.max(0, Number(opts.minPlotWidth) || 0);
     const plotStyle = minPlotWidth ? ` style="min-width:${minPlotWidth}px"` : '';
     specs.set(cid, { kind: 'bars', opts: { ...opts, series } });
-    return `<div class="chart-shot" data-cid="${cid}"><div class="vbars${minPlotWidth ? ' scroll-x' : ''}" style="--h:${height}px"><div class="vbars-plot"${plotStyle}><div class="vgrid">${grid}</div><div class="vbars-cols">${cols}</div></div>${series.length > 1 || opts.legendAlways ? legend(series) : ''}</div></div>`;
+    return `<div class="chart-shot" data-cid="${cid}"><div class="vbars${minPlotWidth ? ' scroll-x' : ''}${n > 24 ? ' dense' : ''}" style="--h:${height}px"><div class="vbars-plot"${plotStyle}><div class="vgrid">${grid}</div><div class="vbars-cols">${cols}</div></div>${series.length > 1 || opts.legendAlways ? legend(series) : ''}</div></div>`;
   }
 
   /** Horizontal bars. opts: { items:[{label, sub, value, compare, color, tip, attr}], max, format, compareLabel } */

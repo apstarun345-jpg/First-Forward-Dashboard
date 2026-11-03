@@ -7514,3 +7514,7 @@ html body .msp-kpi .dsp-sb b, .dsp-sb b { display: block !important; font-size: 
 .dsp-sb.iss { background: #dcfce7; color: #166534; } .dsp-sb.stk { background: #dbeafe; color: #1e40af; } .dsp-sb.nf { background: #fef3c7; color: #92400e; }
 .dsp-sb:hover { filter: brightness(.95); }
 @media (max-width: 720px) { html body .msp-kpi.msp-disp-box .dsp-row { grid-template-columns: 1fr auto; } }
+/* v3.125.86 — bar ke upar total count (31 din wale chart me bhi) */
+.vcol-val { color: var(--ink, #0f172a); font-variant-numeric: tabular-nums; }
+.vbars.dense .vcol-val { font-size: 9px; letter-spacing: -.02em; }
+@media (max-width: 900px) { .vbars.dense .vcol-val { font-size: 8px; writing-mode: vertical-rl; transform: rotate(180deg); margin-bottom: 3px; } }

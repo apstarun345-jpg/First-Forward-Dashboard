@@ -285,7 +285,7 @@ FF.pages = FF.pages || {};
     });
     const bars = series.length && daily.keys.length ? C.bars({
       labels: daily.labels, tipLabels: daily.tipLabels, tips: chartTips, height: 220, series,
-      showValues: daily.keys.length <= 14, labelEvery, legendAlways: true,
+      showValues: daily.keys.length <= 62, labelEvery, legendAlways: true,
       minPlotWidth: plotWidth
     }) : '';
     const groupButtons = (dim, options) => {
