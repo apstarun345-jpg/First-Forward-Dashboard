@@ -1005,6 +1005,23 @@ FF.pages = FF.pages || {};
       });
     });
 
+    // 🔗 FF + GV merged option (same insaan dono platform par) — sabse upar
+    try {
+      const mergedItems = [], seenM = new Set();
+      filteredPeople.slice(0, 14).forEach((rawP) => {
+        const p = canonicalPerson(rawP, state.full || state.light);
+        const q = partnerFor(p);
+        if (!q) return;
+        const ff = /^ff/.test(p.kind) ? p : q, gv = ff === p ? q : p;
+        const key = `${personKey(ff)}§${personKey(gv)}`;
+        if (seenM.has(key)) return; seenM.add(key);
+        const role = /tl$/.test(ff.kind) || /tl$/.test(gv.kind) ? 'TL' : 'Agent';
+        mergedItems.push({ kind: 'cls', kindLabel: `🔗 FF + GV ${role}`, label: ff.name === gv.name ? ff.name : `${ff.name} + ${gv.name}`,
+          sub: [`🟦 FF${ff.sub ? ' ' + ff.sub : ''}`, `🟩 GV${gv.sub ? ' ' + gv.sub : ''}`, 'dono platform ka issuance ek saath'].join(' · '),
+          value: ff.name, merged: { ff, gv } });
+      });
+      if (mergedItems.length) items.unshift(...mergedItems.slice(0, 4));
+    } catch { /* merge optional */ }
     (r.ids || []).slice(0, 6).forEach((v) => items.push({
       kind: 'cls', kindLabel: KIND_LABEL[v.kind] || 'ID', label: `${v.name} · ${v.id}`,
       sub: [`ID ${v.id}`, v.tl ? `TL ${v.tl}` : '', v.via ? `🤝 ${v.via} match` : ''].filter(Boolean).join(' · '), value: v.name, personKey: `${v.kind}|${normName(v.name)}`
@@ -1097,6 +1114,13 @@ FF.pages = FF.pages || {};
     </div>`;
   }
   const SR = () => (FF.searchReport && FF.searchReport.groupPeople ? FF.searchReport : null);
+  // 🔗 v3.125.75 — FF + GV merge: search results me doosre channel ka partner bhi jodo (Settings → FF + GV merge).
+  function partnerFor(p) { try { const sr = SR(); return sr && sr.partnerOf ? sr.partnerOf(p, allPeople()) : null; } catch { return null; } }
+  function withPartners(people) {
+    const out = [...(people || [])], seen = new Set(out);
+    (people || []).slice(0, 30).forEach((p) => { const q = partnerFor(p); if (q && !seen.has(q)) { seen.add(q); out.push(q); } });
+    return out;
+  }
   /** Agent search par usi channel ka TL resolve karo — naam preferred, dono GV Master TL IDs fall back. */
   function linkedTlFor(agent) {
     const idx = state.full || state.light;
@@ -1411,6 +1435,12 @@ FF.pages = FF.pages || {};
     // Barcode Enter stays on the light tag panel: no profile modules/REPORT load in its way.
     if (!person && isBarcodeQuery(q)) { state.lastQuery = clean(q); openPanel(q); return true; }
     if (!person && FF.aliases) q = FF.aliases.map(q);   // Assistant / Agent ID (Sheet4) → New ID
+    if (person && person.merged) {
+      const m = person.merged; state.mergedPick = m;
+      const params = { q: clean(m.ff.name), mg: '1' };
+      try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', params); return true; } } catch {}
+      try { location.hash = `#/masterSearch?q=${encodeURIComponent(params.q)}&mg=1`; return true; } catch { return false; }
+    }
     const p = person || {};
     // A selected suggestion is authoritative: route using the selected person's canonical name,
     // not the stale/free-typed query text. This prevents URL q=one-name + id=another-person mismatches.
@@ -1486,6 +1516,7 @@ FF.pages = FF.pages || {};
         try { if (suggestApi && suggestApi.suspend) suggestApi.suspend(); } catch {}
         try { if (suggestApi && suggestApi.close) suggestApi.close(); } catch {}
         if (it.none) return;
+        if (it.merged) { try { remember(it.label); } catch { /* optional */ } openSearchPage(it.merged.ff.name, { merged: it.merged }); return; }
         if (it.q && FF.smartQ) { if (it.q === '__catalog') FF.smartQ.openCatalog(); else FF.smartQ.open(it.q, it.qn || 10); return; }
         try { remember(it.label || (it.person && it.person.name) || it.barcode); } catch { /* optional */ }
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
@@ -1649,6 +1680,7 @@ FF.pages = FF.pages || {};
     const asked = clean((params && (params.q || params.name)) || '');
     const askedId = clean((params && (params.id || params.agentId || params.tlId)) || '');
     let chFilter = (params && (params.ch || params.channel)) || '';   // '' = dono · 'ff' · 'gv'
+    const wantMerged = !!(params && String(params.mg) === '1');
     let groups = [];
     let current = null;
     let runSeq = 0, stopTagWatch = null;
@@ -2362,7 +2394,8 @@ FF.pages = FF.pages || {};
         exactRequestedPerson = cands.find((p) => normName(p.name) === qn) || cands.find((p) => isTlP(p)) || cands[0] || null;
       }
       const channelPeople = exactRequestedPerson ? [exactRequestedPerson] : (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
-      const people = preferNameMatches(channelPeople, q);
+      const people0 = preferNameMatches(channelPeople, q);
+      const people = chFilter ? people0 : withPartners(people0);
       const sr = SR();
       groups = sr ? sr.groupPeople(people) : people.map(fallbackGroup);
       // Exact-name cross-channel match: keep one group with a visible FF/GV chooser so
@@ -2405,6 +2438,8 @@ FF.pages = FF.pages || {};
             else if (matchId(exactIdGroup.ff)) exactIdChannel = 'ff';
           }
         }
+        const mergedG = wantMerged ? groups.find((g) => g.ff && g.gv) : null;
+        if (mergedG) { openGroup(mergedG, 'both'); warmFull(); return; }
         const preferred = exactIdGroup || (chFilter && groups.find((g) => !!g[chFilter])) || groups[0];
         if (open || groups.length === 1) openGroup(preferred, exactIdChannel || undefined); else chipsOnly();
         warmFull();
@@ -2437,6 +2472,23 @@ FF.pages = FF.pages || {};
       try { warmFull(); } catch {}
     }
 
+    async function runMerged(m) {
+      ++runSeq;
+      if (!m || !m.ff || !m.gv) return;
+      if (input) input.value = clean(m.ff.name);
+      try { await buildLight(); } catch { /* ignore */ }
+      if (!out.isConnected) return;
+      const idx = state.full || state.light;
+      const ff = canonicalPerson(m.ff, idx) || m.ff, gv = canonicalPerson(m.gv, idx) || m.gv;
+      const sr = SR();
+      const gp = sr && sr.groupPeople ? (sr.groupPeople([ff, gv]).find((g) => g.ff && g.gv) || { key: `${personKey(ff)}§${personKey(gv)}`, name: ff.name, ff, gv }) : null;
+      if (!gp) return;
+      if (!gp.ff || !gp.gv) { gp.ff = ff; gp.gv = gv; }
+      groups = [gp];
+      openGroup(gp, 'both');
+      try { warmFull(); } catch {}
+    }
+
     if (input) {
       // 🔎 v3.52 — type karte hi suggestion dropdown (topbar wale search jaisa): agent / TL / ID /
       // mobile / barcode — har item ke saath stock · MTD · suggested. Pick → usi ka poora data.
@@ -2453,6 +2505,8 @@ FF.pages = FF.pages || {};
             // onIndexReady / async refresh from reopening the exact same dropdown.
             try { if (sug && sug.suspend) sug.suspend(); } catch {}
             try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(sug); } catch {}
+            if (it.merged) { runMerged(it.merged); return; }
+            if (it.q && FF.smartQ) { if (it.q === '__catalog') FF.smartQ.openCatalog(); else FF.smartQ.open(it.q, it.qn || 10); return; }
             if (it.barcode) { run(it.barcode); return; }
             const person = it.person ? canonicalPerson(it.person, state.full || state.light) : null;
             if (person) { runSelectedPerson(person); return; }
@@ -2514,7 +2568,8 @@ FF.pages = FF.pages || {};
       const tags = e.target.closest('[data-ms-tags]');
       if (tags && FF.app && FF.app.navigate) { FF.app.navigate('masterStock', { q: tags.dataset.msTags }); return; }
     });
-    if (asked) run(asked);
+    if (asked && wantMerged && state.mergedPick && normName(state.mergedPick.ff.name) === normName(asked)) { const m = state.mergedPick; state.mergedPick = null; runMerged(m); }
+    else if (asked) run(asked);
     else { buildLight().then(() => { paintState(); paintQuick(); }).catch(() => {}); }
   }
 
@@ -3047,7 +3102,7 @@ FF.pages = FF.pages || {};
   }
 
   FF.masterSearch = {
-    buildLight, buildFull, warmFull, barcodeSuggest, invalidate, search, preferNameMatches, suggestItems, resultsHtml, openPanel, closePanel,
+    buildLight, buildFull, warmFull, barcodeSuggest, allPeople, invalidate, search, preferNameMatches, suggestItems, resultsHtml, openPanel, closePanel,
     mountTopbar, openSearchPage, onIndexReady, personByKey, linkedTlFor, teamPeopleFor, _limits: LIMITS,
     gvc: GVC,
     reloadCommission() { GVC.data = null; GVC.failAt = 0; return GVC.load(true); },

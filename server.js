@@ -9936,6 +9936,16 @@ async function handleApi(req, res, url) {
       Object.keys(cfg).forEach((k) => delete cfg[k]);
       Object.assign(cfg, out);
     }
+    if (patch.crossMerge !== undefined) {
+      const c = patch.crossMerge;
+      if (!c || typeof c !== 'object' || Array.isArray(c)) throw new HttpError(400, 'crossMerge object hona chahiye.');
+      const t = (v) => String(v == null ? '' : v).trim().slice(0, 80);
+      patch.crossMerge = {
+        enabled: c.enabled !== false, autoName: c.autoName !== false,
+        pairs: (Array.isArray(c.pairs) ? c.pairs : []).slice(0, 500).map((x) => ({ ff: t(x && x.ff), gv: t(x && x.gv) })).filter((x) => x.ff && x.gv),
+        block: (Array.isArray(c.block) ? c.block : []).slice(0, 500).map(t).filter(Boolean)
+      };
+    }
     if (patch.tvcGroups !== undefined) {
       if (!Array.isArray(patch.tvcGroups)) throw new HttpError(400, 'tvcGroups list hona chahiye.');
       const seen = new Set();

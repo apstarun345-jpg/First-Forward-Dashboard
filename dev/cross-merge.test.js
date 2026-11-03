@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+globalThis.window = globalThis;
+const clean = (v) => String(v == null ? '' : v).trim();
+globalThis.FF = { util: { esc: String, clean, fmt: String, sum: () => 0 }, config: { crossMerge: { enabled: true, autoName: true, pairs: [], block: [] } }, masterProfile: { supports: () => true } };
+require(path.join(ROOT, 'searchReport.js'));
+const SR = FF.searchReport;
+const ffTl = { kind: 'ff-tl', name: 'UMESH SHARMA', sub: 'APN1' };
+const gvTl = { kind: 'gv-tl', name: 'Umesh Sharma', sub: '41110975' };
+const gvAg = { kind: 'gv-agent', name: 'UMESH SHARMA', sub: '555' };
+test('auto same-name same-role merge', () => {
+  assert.equal(SR.mergeOk(ffTl, gvTl), true);
+  assert.equal(SR.mergeOk(ffTl, gvAg), false);
+  const g = SR.groupPeople([ffTl, gvTl]);
+  assert.equal(g.length, 1); assert.ok(g[0].ff && g[0].gv);
+  assert.equal(SR.partnerOf(ffTl, [gvAg, gvTl]), gvTl);
+});
+test('block + pairs + off', () => {
+  FF.config.crossMerge.block = ['UMESH SHARMA'];
+  assert.equal(SR.mergeOk(ffTl, gvTl), false);
+  FF.config.crossMerge.pairs = [{ ff: 'APN1', gv: '555' }];
+  assert.equal(SR.mergeOk(ffTl, gvAg), true);
+  FF.config.crossMerge.enabled = false;
+  assert.equal(SR.mergeOk(ffTl, gvAg), false);
+  assert.equal(SR.groupPeople([ffTl, gvTl]).length, 2);
+});

@@ -7454,3 +7454,11 @@ html body .msp-kpi.msp-disp-box .dsp-more { margin-top: 3px; font-size: 11px; }
 .dsp-pill.cg-vc7 { --cg: #0d9488; } .dsp-pill.cg-vc12 { --cg: #16a34a; } .dsp-pill.cg-vc16 { --cg: #ca8a04; }
 /* KYC box bhi compact */
 html body .msp-kpi.msp-kyc-box .kyc-vrow { font-size: 12px; gap: 6px; }
+/* v3.125.75 — FF + GV combined tables: clean alignment, no overlap */
+.sr-combined .table-wrap { overflow-x: auto; }
+.sr-tbl { font-variant-numeric: tabular-nums; font-size: 13px; }
+.sr-tbl th, .sr-tbl td { padding: 6px 10px; vertical-align: middle; }
+.sr-tbl td.num, .sr-tbl th.num { text-align: right; }
+.sr-tbl td:first-child { min-width: 150px; }
+.sr-tbl td.sr-sum { background: color-mix(in srgb, #f59e0b 9%, transparent); }
+.sr-tbl .cg-tag { font-size: 12px; }

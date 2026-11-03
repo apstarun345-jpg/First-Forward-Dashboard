@@ -1220,6 +1220,20 @@ FF.pages = FF.pages || {};
         <p class="dim small">Har line: <b>TVC : CCH classes</b> (comma separated). Tag Request ke class-wise grid me count <b>TVC ke hisaab se</b> dikhega, aur us TVC ke saare CCH ka count usi me judega. Jo CCH yahan nahi hai wo "Other" me jayega.</p>
         <textarea class="input mono" id="tvc-groups-text" rows="7" placeholder="4 : VC4, VC20">${esc(((settings.tvcGroups && settings.tvcGroups.length) ? settings.tvcGroups : FF.config.tvcGroups || []).map((g) => g.tvc + ' : ' + (g.cch || []).join(', ')).join('\n'))}</textarea>
         <div class="save-bar"><button class="btn primary" id="tvc-groups-save">💾 Save TVC mapping</button><span class="dim small" id="save-msg-tvcGroups"></span></div>`)}
+      ${(() => {
+        const cm = { enabled: true, autoName: true, pairs: [], block: [], ...(settings.crossMerge || FF.config.crossMerge || {}) };
+        const pairsTxt = (cm.pairs || []).map((x) => `${x.ff || ''} = ${x.gv || ''}`).join('\n');
+        return section('🔗 FF + GV merge <span class="dim">(same insaan dono platform par)</span>', `
+        <p class="dim small">Jo TL / agent <b>First Forward aur GV dono</b> me kaam karte hain, Master Search me unka ek <b>🔗 FF + GV</b> option aata hai — dono platform ka issuance, stock aur class-wise ek table me. Alag-alag FF / GV option bhi rehte hain.</p>
+        <label class="chk"><input type="checkbox" id="cm-enabled" ${cm.enabled !== false ? 'checked' : ''}> FF + GV merge chalu</label><br>
+        <label class="chk"><input type="checkbox" id="cm-auto" ${cm.autoName !== false ? 'checked' : ''}> Same naam + same role (TL↔TL, Agent↔Agent) ho to apne aap merge</label>
+        <div class="form-grid" style="margin-top:10px">
+          <label class="fld"><span>Pakke jode (naam alag ho tab bhi) — har line: <b>FF naam ya ID = GV naam ya ID</b></span><textarea class="input mono" id="cm-pairs" rows="5" placeholder="UMESH SHARMA = UMESH SHARMA US&#10;APN2405 = 41110975">${esc(pairsTxt)}</textarea></label>
+          <label class="fld"><span>Kabhi merge mat karo (same naam, alag insaan) — har line ek naam ya ID</span><textarea class="input mono" id="cm-block" rows="5" placeholder="RAM KUMAR">${esc((cm.block || []).join('\n'))}</textarea></label>
+        </div>
+        <div class="save-bar"><button class="btn primary" id="cm-save">💾 Save merge</button><button class="btn" id="cm-scan" type="button">🔍 Same-naam FF + GV list dekho</button><span class="dim small" id="save-msg-crossMerge"></span></div>
+        <div id="cm-scan-out" class="small" style="margin-top:8px"></div>`);
+      })()}
       ${section('➕ Naya tab jodo <span class="dim">(optional)</span>', `
         <p class="dim small">Dono Google Sheets me koi naya tab ho to yahan add karke user ko access de sakte ho.</p>
         <div class="form-grid"><label class="fld"><span>Tab id (permission key)</span><input class="input" id="nt-id" placeholder="e.g. GV Tag Status"></label>
@@ -2853,6 +2867,29 @@ FF.pages = FF.pages || {};
           if (btn.dataset.save === 'gvAgentCommission' && FF.masterSearch && FF.masterSearch.reloadCommission) FF.masterSearch.reloadCommission().catch(() => {});
         }, 'Saving…');
       }));
+      const cmBtn = U.$('#cm-save', body);
+      if (cmBtn) cmBtn.addEventListener('click', () => {
+        const lines = (id) => String((U.$(id, body) || {}).value || '').split(/\n/).map((x) => x.trim()).filter(Boolean);
+        const pairs = lines('#cm-pairs').map((ln) => { const [a, b] = ln.split('='); return { ff: String(a || '').trim(), gv: String(b || '').trim() }; }).filter((x) => x.ff && x.gv);
+        const crossMerge = { enabled: !!U.$('#cm-enabled', body).checked, autoName: !!U.$('#cm-auto', body).checked, pairs, block: lines('#cm-block') };
+        U.withButtonBusy(cmBtn, async () => { await save({ crossMerge }, U.$('#save-msg-crossMerge', body)); FF.config.crossMerge = { ...FF.config.crossMerge, ...crossMerge }; }, 'Saving…');
+      });
+      const cmScan = U.$('#cm-scan', body);
+      if (cmScan) cmScan.addEventListener('click', async () => {
+        const outEl = U.$('#cm-scan-out', body);
+        outEl.innerHTML = 'Index load ho raha hai…';
+        try {
+          if (!FF.masterSearch && FF.lazy && FF.lazy.need) await FF.lazy.need('masterSearch');
+          await FF.masterSearch.buildLight();
+          const all = FF.masterSearch.allPeople ? FF.masterSearch.allPeople() : [];
+          const norm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+          const isTl = (k) => /tl$/.test(String(k || ''));
+          const gvBy = new Map();
+          all.filter((p) => /^gv/.test(p.kind)).forEach((p) => { const k = `${norm(p.name)}|${isTl(p.kind)}`; if (!gvBy.has(k)) gvBy.set(k, p); });
+          const hits = all.filter((p) => /^ff/.test(p.kind)).map((p) => [p, gvBy.get(`${norm(p.name)}|${isTl(p.kind)}`)]).filter(([, g]) => g);
+          outEl.innerHTML = hits.length ? `<b>${hits.length}</b> same-naam FF + GV mile:<div class="table-wrap" style="max-height:260px;overflow:auto"><table class="tbl compact"><thead><tr><th>Naam</th><th>Role</th><th>FF ID</th><th>GV ID</th></tr></thead><tbody>${hits.slice(0, 300).map(([f, g]) => `<tr><td>${esc(f.name)}</td><td>${isTl(f.kind) ? 'TL' : 'Agent'}</td><td class="mono">${esc(f.sub || '')}</td><td class="mono">${esc(g.sub || '')}</td></tr>`).join('')}</tbody></table></div>` : 'Koi same-naam FF + GV nahi mila — pakke jode upar likho.';
+        } catch (err) { outEl.textContent = String((err && err.message) || err); }
+      });
       const tvcBtn = U.$('#tvc-groups-save', body);
       if (tvcBtn) tvcBtn.addEventListener('click', () => {
         const rows = String(U.$('#tvc-groups-text', body).value || '').split(/\n/).map((ln) => {

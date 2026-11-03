@@ -133,6 +133,8 @@ FF.config = {
   // Empty lists keep existing VCLASS/CLASS fallback.
   gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
   gvAgentCommission: { enabled: true, label: 'VC4', suffix: '/tag', currency: '₹' },
+  // 🔗 v3.125.75 — FF + GV merge: same insaan dono platform par (Settings → FF + GV merge).
+  crossMerge: { enabled: true, autoName: true, pairs: [], block: [] },
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],
   gv: {
     master: {
@@ -380,6 +382,7 @@ FF.config = {
     if (s.gvClassCch) this.gvClassCch = { ...this.gvClassCch, ...s.gvClassCch, groups: { ...(this.gvClassCch && this.gvClassCch.groups), ...(s.gvClassCch.groups || {}) } };
     if (s.gvAgentCommission) this.gvAgentCommission = { ...this.gvAgentCommission, ...s.gvAgentCommission };
     if (Array.isArray(s.tvcGroups) && s.tvcGroups.length) this.tvcGroups = s.tvcGroups;
+    if (s.crossMerge && typeof s.crossMerge === 'object') this.crossMerge = { ...this.crossMerge, ...s.crossMerge };
     if (s.direct) this.direct = { ...this.direct, ...s.direct };
     if (s.vrnRules) this.vrnRuleSet = s.vrnRules;
     if (s.kpiColors) { this.kpiColors = s.kpiColors; this.applyKpiColors(); }

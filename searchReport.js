@@ -34,6 +34,37 @@ window.FF = window.FF || {};
     const A = new Set(identityIds(a));
     return A.size > 0 && identityIds(b).some((id) => A.has(id));
   }
+  // 🔗 v3.125.75 — FF + GV merge rules (Settings → FF + GV merge):
+  //   pairs: [{ ff: 'naam ya ID', gv: 'naam ya ID' }] — hamesha merge (naam alag ho tab bhi)
+  //   autoName: dono channel me bilkul same naam + same role (TL↔TL, Agent↔Agent) → merge
+  //   block: naam / ID jo kabhi merge na ho (same naam, alag insaan)
+  const normKey = (v) => U.clean(v).toUpperCase().replace(/\.0+$/, '').replace(/[^A-Z0-9]/g, '');
+  const mergeCfg = () => { const c = (FF.config && FF.config.crossMerge) || {}; return { enabled: c.enabled !== false, autoName: c.autoName !== false, pairs: Array.isArray(c.pairs) ? c.pairs : [], block: Array.isArray(c.block) ? c.block : [] }; };
+  const keysOf = (p) => new Set([normKey(p && p.name), normKey(p && p.sub), normKey(p && p.id), ...identityIds(p)].filter(Boolean));
+  const matchesSpec = (p, spec) => { const k = normKey(spec); return !!k && keysOf(p).has(k); };
+  function blocked(p) { const c = mergeCfg(); return c.block.some((b) => matchesSpec(p, b)); }
+  /** a (ek channel) aur b (doosra channel) ek hi insaan hain? */
+  function mergeOk(a, b) {
+    const c = mergeCfg();
+    if (!c.enabled || !a || !b || chOf(a.kind) === chOf(b.kind)) return false;
+    const ff = chOf(a.kind) === 'ff' ? a : b, gv = ff === a ? b : a;
+    if (c.pairs.some((x) => x && matchesSpec(ff, x.ff) && matchesSpec(gv, x.gv))) return true;
+    if (blocked(a) || blocked(b)) return false;
+    if (identitiesLinked(a, b)) return true;
+    return c.autoName && normName(a.name) === normName(b.name) && isTlKind(a.kind) === isTlKind(b.kind);
+  }
+  /** p ka doosre channel wala partner (list = saare people). TL ko agent se pehle. */
+  function partnerOf(p, list) {
+    if (!p || !mergeCfg().enabled) return null;
+    const other = chOf(p.kind) === 'ff' ? 'gv' : 'ff';
+    let best = null;
+    for (const q of list || []) {
+      if (!q || chOf(q.kind) !== other || !mergeOk(p, q)) continue;
+      if (!best || (isTlKind(q.kind) && !isTlKind(best.kind))) best = q;
+      if (best && isTlKind(best.kind) === isTlKind(p.kind)) break;
+    }
+    return best;
+  }
   function groupPeople(people) {
     const groups = [];
     (people || []).forEach((p) => {
@@ -45,7 +76,7 @@ window.FF = window.FF || {};
         if (isTlKind(p.kind) && !isTlKind(sameChannel[ch].kind)) sameChannel[ch] = p;
         return;
       }
-      const linked = groups.find((g) => normName(g.name) === name && g[other] && identitiesLinked(p, g[other]));
+      const linked = groups.find((g) => !g[ch] && g[other] && ((normName(g.name) === name && identitiesLinked(p, g[other])) || mergeOk(p, g[other])));
       if (linked) { linked[ch] = p; return; }
       groups.push({ key: `${name}|${ch}|${identityIds(p)[0] || name}`, name: p.name, ff: ch === 'ff' ? p : null, gv: ch === 'gv' ? p : null });
     });
@@ -145,7 +176,7 @@ window.FF = window.FF || {};
       const scope = which === 'stock' ? 'stock' : which;
       return cellHtml(n, specOf(pr, scope, `&cls=${encodeURIComponent(c)}`), `${pr.channel} · ${c}`);
     };
-    const classBody = classes.map((c) => `<tr><td><b>${esc(c)}</b></td>${classCell(f, cf, c, 'last', 'month')}${classCell(v, cg, c, 'last', 'month')}${classCell(f, cf, c, 'cur', 'mtd')}${classCell(v, cg, c, 'cur', 'mtd')}${classCell(f, cf, c, 'stock', 'stock')}${classCell(v, cg, c, 'stock', 'stock')}<td class="num sr-sum"><b>${fmt(val(cf, c, 'stock') + val(cg, c, 'stock'))}</b></td></tr>`).join('');
+    const classBody = classes.map((c) => `<tr><td><span class="cg-tag cg-${esc(String(c).toLowerCase().replace(/[^a-z0-9]/g, ''))}">${esc(c)}</span></td>${classCell(f, cf, c, 'last', 'month')}${classCell(v, cg, c, 'last', 'month')}${classCell(f, cf, c, 'cur', 'mtd')}${classCell(v, cg, c, 'cur', 'mtd')}${classCell(f, cf, c, 'stock', 'stock')}${classCell(v, cg, c, 'stock', 'stock')}<td class="num sr-sum"><b>${fmt(val(cf, c, 'stock') + val(cg, c, 'stock'))}</b></td></tr>`).join('');
     const colSum = (map, k) => U.sum(classes, (c) => val(map, c, k));
     const classFoot = `<tr class="row-total"><td>Total</td><td class="num">${fmt(colSum(cf, 'last'))}</td><td class="num">${fmt(colSum(cg, 'last'))}</td><td class="num">${fmt(colSum(cf, 'cur'))}</td><td class="num">${fmt(colSum(cg, 'cur'))}</td><td class="num">${fmt(colSum(cf, 'stock'))}</td><td class="num">${fmt(colSum(cg, 'stock'))}</td><td class="num sr-sum"><b>${fmt(colSum(cf, 'stock') + colSum(cg, 'stock'))}</b></td></tr>`;
     const classTable = classes.length
@@ -211,5 +242,5 @@ window.FF = window.FF || {};
     return { show };
   }
 
-  FF.searchReport = { groupPeople, render, combinedHtml, groupKey, channelsOf };
+  FF.searchReport = { groupPeople, render, combinedHtml, groupKey, channelsOf, partnerOf, mergeOk };
 })(window.FF);
