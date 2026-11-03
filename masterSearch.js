@@ -2615,12 +2615,12 @@ FF.pages = FF.pages || {};
   const dispClassPairs = (clsMap) => {
     const m = new Map();
     Object.entries(clsMap || {}).forEach(([c, n]) => {
-      const k = String(c || '').toUpperCase().replace(/\s+/g, '') || 'N/A';
+      const k0 = String(c || '').toUpperCase().replace(/\s+/g, ''); const k = !k0 || k0 === '—' || k0 === '-' ? 'N/A' : k0;
       m.set(k, (m.get(k) || 0) + (Number(n) || 0));
     });
     return [...m.entries()].filter(([, n]) => n > 0).sort((a, b) => dispClsNum(a[0]) - dispClsNum(b[0]));
   };
-  const dispPills = (cls) => dispClassPairs(cls).map(([c, n]) => `<span class="dsp-pill${c === 'N/A' ? ' na' : ''}"><i>${esc(c === 'N/A' ? 'Class ?' : c)}</i><b>${U.fmt(n)}</b></span>`).join('');
+  const dispPills = (cls) => dispClassPairs(cls).map(([c, n]) => `<span class="dsp-pill cg-${c === 'N/A' ? 'other na' : c.toLowerCase()}"><i>${esc(c === 'N/A' ? 'Class ?' : c)}</i><b>${U.fmt(n)}</b></span>`).join('');
   function dispPaint(box, d) {
     const main = box.querySelector('.msp-disp-main'), sub = box.querySelector('.msp-disp-sub');
     if (!main || !sub) return;

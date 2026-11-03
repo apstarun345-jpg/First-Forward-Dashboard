@@ -6308,6 +6308,33 @@ async function handleApi(req, res, url) {
       days.set(d, o);
     }
     const dates = [...days.values()].sort((x, y) => String(y.date).localeCompare(String(x.date)));
+    // v3.125.74 — ledger me class khaali ('—') ho to range ke first barcode se stock index me class dhoondho.
+    try {
+      const top = dates.slice(0, 8).filter((o) => o.cls['—'] > 0);
+      if (top.length) {
+        const index = await stockAgeIndexWithin(4000, false);
+        const look = (bc) => {
+          const d = String(bc || '').replace(/\D/g, ''); if (d.length < 6) return '';
+          for (const c of [ch, ch === 'ff' ? 'gv' : 'ff']) {
+            const ix = index && index[c];
+            if (!ix || typeof ix.find !== 'function') continue;
+            const hit = (ix.find(d, 1) || [])[0];
+            if (hit && hit[2]) return String(hit[2]).toUpperCase().replace(/\s+/g, '');
+          }
+          return '';
+        };
+        for (const o of top) {
+          for (const r of o.ranges) {
+            if (r.cls && r.cls !== '—') continue;
+            const c = look(r.first) || look(r.last);
+            if (!c) continue;
+            const q = Math.min(Number(r.qty) || 0, o.cls['—'] || 0); if (!q) continue;
+            o.cls['—'] -= q; if (!o.cls['—']) delete o.cls['—'];
+            o.cls[c] = (o.cls[c] || 0) + q; r.cls = c; r.inferred = true;
+          }
+        }
+      }
+    } catch { /* class inference optional */ }
     return sendJson(res, 200, { ok: true, ch, last: dates[0] || null, recent: dates.slice(0, 8), totalDispatches: dates.length, errors: agg.errors, counts: agg.counts }, { 'Cache-Control': 'no-store' });
   }
   // 📨 Agents Complaints Summary — cache se (background me Gmail se refresh hota rehta hai)

@@ -7434,3 +7434,23 @@ html body .mp-kpis.msp-kpis.msp-uni .msp-age-row b { font-size: 13px; min-width:
 html body .mp-kpis.msp-kpis.msp-uni .dsp-row { padding: 4px 8px; grid-template-columns: 104px 64px 1fr; }
 @media (max-width: 1100px) { html body .mp-kpis.msp-kpis.msp-uni { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { html body .mp-kpis.msp-kpis.msp-uni { grid-template-columns: 1fr; } html body .mp-kpis.msp-kpis.msp-uni > * { grid-column: 1 / -1 !important; } }
+/* v3.125.74 — Last dispatch box compact + class-coloured pills (mp-kpi b ke bade font ko override) */
+html body .msp-kpi.msp-disp-box .msp-disp-main { font-size: 16px !important; margin: 0 0 2px !important; text-align: left !important; }
+html body .msp-kpi.msp-disp-box .msp-disp-main small { display: inline; font-size: 11.5px; margin-left: 6px; }
+html body .msp-kpi.msp-disp-box > em.msp-disp-sub { text-align: left !important; padding-top: 0 !important; margin-top: 2px !important; }
+html body .msp-kpi.msp-disp-box .dsp-list { gap: 3px; margin-top: 4px; }
+html body .msp-kpi.msp-disp-box .dsp-row { grid-template-columns: 92px 58px 1fr; gap: 8px; padding: 3px 8px; border-radius: 8px; font-size: 12px; min-height: 0; }
+html body .msp-kpi.msp-disp-box .dsp-date { font-size: 12px; flex-direction: row; align-items: baseline; gap: 6px; }
+html body .msp-kpi.msp-disp-box .dsp-date small { display: none; }
+html body .msp-kpi.msp-disp-box .dsp-row b { display: inline !important; font-size: 13px !important; margin: 0 !important; line-height: 1.3; }
+html body .msp-kpi.msp-disp-box .dsp-tot { font-size: 11px; color: var(--muted); }
+html body .msp-kpi.msp-disp-box .dsp-tot b { color: var(--ink, inherit); }
+html body .msp-kpi.msp-disp-box .dsp-pill { padding: 1px 8px; gap: 4px; font-size: 11.5px; line-height: 1.4; color: var(--cg); background: color-mix(in srgb, var(--cg) 14%, transparent); border: 0; }
+html body .msp-kpi.msp-disp-box .dsp-pill i { font-weight: 800; }
+html body .msp-kpi.msp-disp-box .dsp-pill b { font-size: 12px !important; color: var(--ink, inherit); }
+html body .dsp-pill.na { --cg: #b45309; }
+html body .msp-kpi.msp-disp-box .dsp-more { margin-top: 3px; font-size: 11px; }
+.dsp-pill { --cg: #64748b; } .dsp-pill.cg-vc4 { --cg: #2563eb; } .dsp-pill.cg-vc20 { --cg: #7c3aed; } .dsp-pill.cg-vc5 { --cg: #ea580c; } .dsp-pill.cg-vc6 { --cg: #db2777; }
+.dsp-pill.cg-vc7 { --cg: #0d9488; } .dsp-pill.cg-vc12 { --cg: #16a34a; } .dsp-pill.cg-vc16 { --cg: #ca8a04; }
+/* KYC box bhi compact */
+html body .msp-kpi.msp-kyc-box .kyc-vrow { font-size: 12px; gap: 6px; }
