@@ -10,7 +10,7 @@ FF.pages = FF.pages || {};
   const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const ymLabel = (ym) => { const [y, m] = String(ym).split('-'); return `${MN[Number(m) - 1] || m} ${String(y).slice(2)}`; };
   const PAGE = 300;
-  const state = { root: null, data: null, err: '', busy: false, q: '', ch: '', min: 2, sort: { key: 'total', dir: 'desc' }, shown: PAGE };
+  const state = { root: null, data: null, err: '', busy: false, q: '', ch: '', min: 2, sort: { key: 'total', dir: 'desc' }, shown: PAGE, sel: new Set() };
 
   // ------------------------------------------------------------------ filter + sort
   function visible() {
@@ -18,7 +18,7 @@ FF.pages = FF.pages || {};
     const q = state.q.trim().toLowerCase();
     let rows = d.rows.filter((r) => r.total >= state.min
       && (!state.ch || (state.ch === 'none' ? !r.agentName : r.channel === state.ch))
-      && (!q || [r.id, r.agentName, r.agentId].some((v) => String(v || '').toLowerCase().includes(q))));
+      && (!q || [r.id, r.agentName, r.agentId, r.tlName].some((v) => String(v || '').toLowerCase().includes(q))));
     const { key, dir } = state.sort, sgn = dir === 'asc' ? 1 : -1;
     const val = (r) => (key.startsWith('m:') ? (r.months[key.slice(2)] || 0) : r[key]);
     rows = rows.slice().sort((a, b) => {
@@ -39,19 +39,21 @@ FF.pages = FF.pages || {};
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
   }
-  function summaryCsv() {
-    const d = state.data, rows = visible(); if (!d) return;
-    const header = ['Legacy Customer ID', ...d.months.map(ymLabel), 'Total tags', 'Agent name', 'Agent ID', 'Channel', 'Agent source', 'Agents count'];
-    const body = rows.map((r) => [r.id, ...d.months.map((m) => r.months[m] || 0), r.total, r.agentName, r.agentId, r.channel, r.source, r.agents]);
-    const tot = ['TOTAL', ...d.months.map((m) => U.sum(rows, (r) => r.months[m] || 0)), U.sum(rows, (r) => r.total), '', '', '', '', ''];
+  function summaryCsv(only) {
+    const d = state.data, rows = only || visible(); if (!d) return;
+    const header = ['Legacy Customer ID', ...d.months.map(ymLabel), 'Total tags', 'Agent name', 'Agent ID', 'TL name', 'Channel', 'Agent source', 'Agents count'];
+    const body = rows.map((r) => [r.id, ...d.months.map((m) => r.months[m] || 0), r.total, r.agentName, r.agentId, r.tlName || '', r.channel, r.source, r.agents]);
+    const tot = ['TOTAL', ...d.months.map((m) => U.sum(rows, (r) => r.months[m] || 0)), U.sum(rows, (r) => r.total), '', '', '', '', '', ''];
     downloadCsv(`multiple-customer-id-${U.stamp ? U.stamp() : Date.now()}.csv`, header, [...body, tot]);
   }
-  const TAG_HEAD = ['Legacy Customer ID', 'Customer', 'Tag ID', 'VRN', 'Class', 'Issue date', 'Type', 'Status', 'Agent ID', 'Agent name', 'Channel'];
-  const tagRow = (t) => [t.customerId, t.customer, t.tagId, t.vrn, t.cls, t.date, t.type, t.status, t.agentId, t.agentName, t.channel];
+  const TAG_HEAD = ['Legacy Customer ID', 'Customer', 'Tag ID', 'VRN', 'Class', 'Issue date', 'Month', 'Type', 'Status', 'Agent ID', 'Agent name', 'TL name', 'Channel'];
+  const tagRow = (t) => [t.customerId, t.customer, t.tagId, t.vrn, t.cls, t.date, t.ym ? ymLabel(t.ym) : '', t.type, t.status, t.agentId, t.agentName, t.tlName || '', t.channel];
   async function fetchTags(ids) { const out = await FF.auth.api('/api/multi-customer/tags', 'POST', { ids }); return (out && out.rows) || []; }
-  async function tagCsvAll(btn) {
-    const rows = visible().slice(0, 1200);
-    if (!rows.length) return;
+  async function tagCsvAll(btn, opts) {
+    const o = opts || {};
+    const src = o.rows || visible();
+    const rows = (o.ym ? src.filter((r) => r.months[o.ym]) : src).slice(0, 1200);
+    if (!rows.length) { U.toast('Koi customer nahi', 'warn'); return; }
     const all = [];
     const label = btn.textContent;
     try {
@@ -61,8 +63,10 @@ FF.pages = FF.pages || {};
         const part = await fetchTags(rows.slice(i, i + 40).map((r) => r.id));
         all.push(...part);
       }
-      downloadCsv(`multiple-customer-eir-tags-${U.stamp ? U.stamp() : Date.now()}.csv`, TAG_HEAD, all.map(tagRow));
-      if (visible().length > rows.length) U.toast(`Pehle ${rows.length} customers ke tags download hue — filter laga kar baaki lo`, 'warn');
+      const keep = o.ym ? all.filter((t) => t.ym === o.ym) : all;
+      downloadCsv(`multiple-customer-eir-tags${o.ym ? '-' + o.ym : ''}${o.tag ? '-' + o.tag : ''}-${U.stamp ? U.stamp() : Date.now()}.csv`, TAG_HEAD, keep.map(tagRow));
+      U.toast(`${U.fmt(keep.length)} tags download hue`, 'ok');
+      if (src.length > rows.length) U.toast(`Pehle ${rows.length} customers ke tags download hue — filter laga kar baaki lo`, 'warn');
     } catch (err) { U.toast(String((err && err.message) || err), 'err'); }
     finally { btn.disabled = false; btn.textContent = label; }
   }
@@ -128,13 +132,14 @@ FF.pages = FF.pages || {};
           <button class="btn primary" data-mc-csv>⬇ CSV (summary)</button>
           <button class="btn" data-mc-tagall>⬇ EIR tag-level CSV</button>
           <button class="btn" data-mc-refresh>🔄 Refresh</button>
+          ${state.sel.size ? `<span class="mc-selbar"><b>${U.fmt(state.sel.size)} selected</b><button class="btn small primary" data-mc-seltags>⬇ Selected tags CSV</button><button class="btn small" data-mc-selsum>⬇ Selected summary CSV</button><button class="btn small" data-mc-selclear>✕ Clear</button></span>` : ''}
           <span class="dim small">${U.fmt(rows.length)} customers · ${U.fmt(U.sum(rows, (r) => r.total))} tags · ${esc(new Date(d.at).toLocaleTimeString('en-IN'))}</span>
         </div>
         ${d.gvError ? `<p class="small" style="color:#b45309">⚠️ GV Master lookup: ${esc(d.gvError)}</p>` : ''}
         <div class="table-wrap mc-wrap"><table class="tbl compact mc-tbl">
-          <thead><tr><th>#</th>${headCell('id', 'Legacy Customer ID')}${months.map((m) => headCell(`m:${m}`, esc(ymLabel(m)), true)).join('')}${headCell('total', 'Total', true)}${headCell('agentName', 'Agent name')}${headCell('agentId', 'Agent ID')}${headCell('channel', 'Channel')}${headCell('source', 'Source')}</tr></thead>
-          <tbody>${rows.slice(0, state.shown).map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.id)}</td>${months.map((m) => `<td class="num">${r.months[m] ? U.fmt(r.months[m]) : '<span class="dim">·</span>'}</td>`).join('')}<td class="num"><button type="button" class="mc-total" data-mc-open="${esc(r.id)}" title="Tags dekho">${U.fmt(r.total)}</button></td><td>${r.agentName ? esc(r.agentName) : '<span class="dim">—</span>'}${r.agents > 1 ? ` <small class="mc-more" title="Is customer ke tags ${r.agents} agents ne issue kiye">+${r.agents - 1}</small>` : ''}</td><td class="mono">${esc(r.agentId || '—')}</td><td>${chBadge(r.channel)}</td><td class="small dim">${esc(r.source)}</td></tr>`).join('')}</tbody>
-          <tfoot><tr class="mc-foot"><td></td><td>Total</td>${totals.map((t) => `<td class="num">${U.fmt(t)}</td>`).join('')}<td class="num">${U.fmt(U.sum(rows, (r) => r.total))}</td><td colspan="4"></td></tr></tfoot>
+          <thead><tr><th class="mc-chk"><input type="checkbox" data-mc-all title="Sab (dikhne wale) select" ${rows.length && rows.slice(0, state.shown).every((r) => state.sel.has(r.id)) ? 'checked' : ''}></th><th>#</th>${headCell('id', 'Legacy Customer ID')}${months.map((m) => headCell(`m:${m}`, esc(ymLabel(m)), true)).join('')}${headCell('total', 'Total', true)}${headCell('agentName', 'Agent name')}${headCell('agentId', 'Agent ID')}${headCell('tlName', 'TL name')}${headCell('channel', 'Channel')}${headCell('source', 'Source')}</tr></thead>
+          <tbody>${rows.slice(0, state.shown).map((r, i) => `<tr class="${state.sel.has(r.id) ? 'mc-on' : ''}"><td class="mc-chk"><input type="checkbox" data-mc-pick="${esc(r.id)}" ${state.sel.has(r.id) ? 'checked' : ''}></td><td class="dim">${i + 1}</td><td class="mono">${esc(r.id)}</td>${months.map((m) => `<td class="num">${r.months[m] ? U.fmt(r.months[m]) : '<span class="dim">·</span>'}</td>`).join('')}<td class="num"><button type="button" class="mc-total" data-mc-open="${esc(r.id)}" title="Tags dekho">${U.fmt(r.total)}</button></td><td>${r.agentName ? esc(r.agentName) : '<span class="dim">—</span>'}${r.agents > 1 ? ` <small class="mc-more" title="Is customer ke tags ${r.agents} agents ne issue kiye">+${r.agents - 1}</small>` : ''}</td><td class="mono">${esc(r.agentId || '—')}</td><td>${r.tlName ? esc(r.tlName) : '<span class="dim">—</span>'}</td><td>${chBadge(r.channel)}</td><td class="small dim">${esc(r.source)}</td></tr>`).join('')}</tbody>
+          <tfoot><tr class="mc-foot"><td></td><td></td><td>Total <small class="dim">click = CSV</small></td>${totals.map((t, i) => `<td class="num">${t ? `<button type="button" class="mc-ftot" data-mc-ym="${esc(months[i])}" title="${esc(ymLabel(months[i]))} ke saare tags — CSV">${U.fmt(t)}</button>` : '0'}</td>`).join('')}<td class="num"><button type="button" class="mc-ftot all" data-mc-ym="" title="Saare tags — CSV">${U.fmt(U.sum(rows, (r) => r.total))}</button></td><td colspan="5"></td></tr></tfoot>
         </table></div>
         ${rows.length > state.shown ? `<div style="text-align:center;margin-top:10px"><button class="btn" data-mc-more>⬇ Aur ${U.fmt(Math.min(PAGE, rows.length - state.shown))} dikhao (${U.fmt(rows.length - state.shown)} baaki)</button></div>` : ''}
         <p class="dim small" style="margin-top:8px">Total par click = us customer ke saare EIR tags. Agent: EIR ka issuing agent (sabse zyada tags wala); naam khaali ho to GV Master (Tag ID / VRN) se.</p>
@@ -167,6 +172,8 @@ FF.pages = FF.pages || {};
       clearTimeout(state.qt); state.qt = setTimeout(() => { const pos = e.target.selectionStart; paint(); const inp = root.querySelector('[data-mc-q]'); if (inp) { inp.focus(); try { inp.setSelectionRange(pos, pos); } catch { /* ignore */ } } }, 250);
     });
     root.addEventListener('change', (e) => {
+      if (e.target.matches('[data-mc-pick]')) { const id = e.target.dataset.mcPick; if (e.target.checked) state.sel.add(id); else state.sel.delete(id); paint(); return; }
+      if (e.target.matches('[data-mc-all]')) { visible().slice(0, state.shown).forEach((r) => { if (e.target.checked) state.sel.add(r.id); else state.sel.delete(r.id); }); paint(); return; }
       if (e.target.matches('[data-mc-ch]')) { state.ch = e.target.value; state.shown = PAGE; paint(); }
       if (e.target.matches('[data-mc-min]')) { state.min = Number(e.target.value) || 2; state.shown = PAGE; paint(); }
     });
@@ -174,6 +181,11 @@ FF.pages = FF.pages || {};
       const th = e.target.closest('[data-mc-sort]');
       if (th) { const k = th.dataset.mcSort; state.sort = state.sort.key === k ? { key: k, dir: state.sort.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: /^(id|agentName|agentId|channel|source)$/.test(k) ? 'asc' : 'desc' }; paint(); return; }
       const op = e.target.closest('[data-mc-open]'); if (op) { openCustomer(op.dataset.mcOpen); return; }
+      const ft = e.target.closest('[data-mc-ym]'); if (ft) { tagCsvAll(ft, { ym: ft.dataset.mcYm || '' }); return; }
+      const selRows = () => (state.data ? state.data.rows.filter((r) => state.sel.has(r.id)) : []);
+      const st = e.target.closest('[data-mc-seltags]'); if (st) { tagCsvAll(st, { rows: selRows(), tag: 'selected' }); return; }
+      if (e.target.closest('[data-mc-selsum]')) { summaryCsv(selRows()); return; }
+      if (e.target.closest('[data-mc-selclear]')) { state.sel.clear(); paint(); return; }
       if (e.target.closest('[data-mc-more]')) { state.shown += PAGE; paint(); return; }
       if (e.target.closest('[data-mc-csv]')) { summaryCsv(); return; }
       const ta = e.target.closest('[data-mc-tagall]'); if (ta) { tagCsvAll(ta); return; }

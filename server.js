@@ -3360,7 +3360,7 @@ function mcCols() {
   const pick = (k, d) => colLetter(e[k] || f[k], d);
   return { cust: pick('legacyCustomerId', 'AD'), tag: pick('tagId', 'A'), vrn: pick('vrn', 'B'), cls: pick('cls', 'D'), date: pick('date', 'AA'),
     agentId: pick('agentId', 'J'), agentName: pick('agentName', 'L'), master: pick('masterId', 'AU'), status: pick('status', 'Z'), type: pick('type', 'P'),
-    first: pick('customerFirst', 'AF'), last: pick('customerLast', 'AH'), corp: pick('corpName', 'AI') };
+    first: pick('customerFirst', 'AF'), last: pick('customerLast', 'AH'), corp: pick('corpName', 'AI'), tlName: pick('tlName', 'AW') };
 }
 /** Sequential gviz pages (heavyScanChain ke peeche nahi — stock scan chal raha ho tab bhi chale). onRows(rows, at). */
 async function mcPages(sheetId, sheet, select, where, onRows, label) {
@@ -3401,13 +3401,14 @@ async function buildMultiCustomer() {
   for (const [id, o] of cust) if (o.total < 2) cust.delete(id);
   console.log(`multi-customer: ${allCust} customers, ${cust.size} with 2+ tags (${Math.round((Date.now() - t0) / 1000)} s)`);
   // 2) issuing agent (EIR) — sabse zyada tags wala agent, channel = Master ID se
-  await mcPages(sheetId, sheet, [C.cust, C.agentId, C.agentName, C.master, `count(${C.tag})`],
-    `${C.cust} is not null group by ${C.cust}, ${C.agentId}, ${C.agentName}, ${C.master}`, async (rows) => {
+  await mcPages(sheetId, sheet, [C.cust, C.agentId, C.agentName, C.master, C.tlName, `count(${C.tag})`],
+    `${C.cust} is not null group by ${C.cust}, ${C.agentId}, ${C.agentName}, ${C.master}, ${C.tlName}`, async (rows) => {
       for (const r of rows) {
         const o = cust.get(mcCell(r, 0)); if (!o) continue;
-        const aid = mcCell(r, 1), an = mcCell(r, 2), mid = mcCell(r, 3), n = mcNum(r, 4);
+        const aid = mcCell(r, 1), an = mcCell(r, 2), mid = mcCell(r, 3), tl = mcCell(r, 4), n = mcNum(r, 5);
         o.agents = o.agents || [];
-        o.agents.push({ id: aid, name: an, ch: idNorm(mid) === idNorm(gvMasterId) ? 'GV' : (mid ? 'FF' : ''), n });
+        const okTl = tl && !/^(NA|N\/A|#N\/A|-|0)$/i.test(tl) ? tl : '';
+        o.agents.push({ id: aid, name: an, ch: idNorm(mid) === idNorm(gvMasterId) ? 'GV' : (mid ? 'FF' : ''), tl: okTl, n });
       }
     }, '2/4 issuing agent');
   // 3) jinka agent naam khaali — un tags ke ID / VRN
@@ -3425,7 +3426,11 @@ async function buildMultiCustomer() {
   const gm = (s.gv && s.gv.master) || {};
   const gvSheet = String(s.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
   let gvErr = '';
-  if (gvSheet && (needTag.size || needVrn.size)) {
+  // GV agents (EIR me naam hai) ka TL bhi GV Master se
+  const needAgentTl = new Set();
+  for (const o of cust.values()) for (const a of (o.agents || [])) if (a.ch === 'GV' && a.id && !a.tl) needAgentTl.add(idNorm(a.id));
+  const gvTlByAgent = new Map();
+  if (gvSheet && (needTag.size || needVrn.size || needAgentTl.size)) {
     const L = { uid: colLetter(gm.uniqueId, 'A'), name: colLetter(gm.agentName, 'B'), vrn: colLetter(gm.vrn, 'E'), tag: colLetter(gm.tagId, 'I'), tl: colLetter(gm.tlName, 'D') };
     const gsheet = /^\d+$/.test(String(gm.gid || '')) ? `gid:${gm.gid}` : (gm.tab || 'GV Master');
     try {
@@ -3433,6 +3438,7 @@ async function buildMultiCustomer() {
         for (const r of rows) {
           const g = (k) => mcCell(r, at(L[k]));
           const hit = { id: g('uid'), name: g('name'), tl: g('tl') };
+          if (hit.tl && needAgentTl.has(idNorm(hit.id)) && !gvTlByAgent.has(idNorm(hit.id))) gvTlByAgent.set(idNorm(hit.id), hit.tl);
           const t = idNorm(g('tag')), v = idNorm(g('vrn'));
           const c1 = t && needTag.get(t), c2 = v && needVrn.get(v);
           for (const cid of [c1, c2]) {
@@ -3449,12 +3455,12 @@ async function buildMultiCustomer() {
   for (const o of cust.values()) {
     const named = (o.agents || []).filter((a) => a.name).sort((a, b) => b.n - a.n);
     const gv = gvFound.get(o.id) ? [...gvFound.get(o.id).values()].sort((a, b) => b.n - a.n) : [];
-    let agentId = '', agentName = '', channel = '', source = '';
-    if (named.length) { agentId = named[0].id; agentName = named[0].name; channel = named[0].ch || 'FF'; source = 'EIR'; }
-    else if (gv.length) { agentId = gv[0].id; agentName = gv[0].name; channel = 'GV'; source = 'GV Master'; }
+    let agentId = '', agentName = '', channel = '', source = '', tlName = '';
+    if (named.length) { agentId = named[0].id; agentName = named[0].name; channel = named[0].ch || 'FF'; source = 'EIR'; tlName = named[0].tl || (channel === 'GV' ? gvTlByAgent.get(idNorm(agentId)) || '' : ''); }
+    else if (gv.length) { agentId = gv[0].id; agentName = gv[0].name; channel = 'GV'; source = 'GV Master'; tlName = gv[0].tl || ''; }
     else { const any = (o.agents || []).sort((a, b) => b.n - a.n)[0]; agentId = any ? any.id : ''; channel = any && any.ch ? any.ch : ''; source = 'EIR (naam khaali)'; }
     const chans = new Set([...(o.agents || []).map((a) => a.ch).filter(Boolean), ...(gv.length ? ['GV'] : [])]);
-    rows.push({ id: o.id, months: o.months, total: o.total, agentId, agentName, channel: chans.size > 1 ? 'FF + GV' : (channel || '—'), source,
+    rows.push({ id: o.id, months: o.months, total: o.total, agentId, agentName, tlName, channel: chans.size > 1 ? 'FF + GV' : (channel || '—'), source,
       agents: new Set([...named.map((a) => a.id || a.name), ...gv.map((a) => a.id || a.name)]).size, blank: o.blank || 0 });
   }
   rows.sort((a, b) => b.total - a.total);
@@ -3486,7 +3492,7 @@ async function multiCustomerTags(ids) {
   const want = [...new Set(ids.map((x) => String(x || '').replace(/[^0-9A-Za-z]/g, '')).filter(Boolean))].slice(0, 40);
   if (!want.length) return [];
   const cond = want.map((id) => `${C.cust} = '${id}'`).concat(want.filter((id) => /^\d{1,15}$/.test(id)).map((id) => `${C.cust} = ${id}`)).join(' or ');
-  const sel = [C.cust, C.tag, C.vrn, C.cls, C.date, C.type, C.status, C.agentId, C.agentName, C.master, C.first, C.last, C.corp];
+  const sel = [C.cust, C.tag, C.vrn, C.cls, C.date, C.type, C.status, C.agentId, C.agentName, C.master, C.first, C.last, C.corp, C.tlName];
   const q = new URLSearchParams({ id: sheetId, sheet, tq: `select ${[...new Set(sel)].join(', ')} where ${cond} limit 5000` });
   let out;
   try { out = await gvizPageServer(q, sheet); }
@@ -3499,6 +3505,8 @@ async function multiCustomerTags(ids) {
   const gvMasterId = String(e.gvMasterId || '5845036');
   return out.rows.map((r) => ({ customerId: g(r, C.cust), tagId: g(r, C.tag), vrn: g(r, C.vrn), cls: g(r, C.cls),
     date: (() => { const c = r.c && r.c[at(C.date)]; return c ? (c.f || String(c.v || '')) : ''; })(),
+    ym: (() => { const c = r.c && r.c[at(C.date)]; if (!c) return ''; const d = serverDate(c.v) || serverDate(c.f); return d ? String(d).slice(0, 7) : ''; })(),
+    tlName: (() => { const t = g(r, C.tlName); return /^(NA|N\/A|#N\/A|-|0)$/i.test(t) ? '' : t; })(),
     type: g(r, C.type), status: g(r, C.status), agentId: g(r, C.agentId), agentName: g(r, C.agentName),
     channel: idNorm(g(r, C.master)) === idNorm(gvMasterId) ? 'GV' : (g(r, C.master) ? 'FF' : ''),
     customer: g(r, C.corp) || [g(r, C.first), g(r, C.last)].filter(Boolean).join(' ') }));
