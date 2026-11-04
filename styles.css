@@ -7518,3 +7518,4 @@ html body .msp-kpi .dsp-sb b, .dsp-sb b { display: block !important; font-size: 
 .vcol-val { color: var(--ink, #0f172a); font-variant-numeric: tabular-nums; }
 .vbars.dense .vcol-val { font-size: 9px; letter-spacing: -.02em; }
 @media (max-width: 900px) { .vbars.dense .vcol-val { font-size: 8px; writing-mode: vertical-rl; transform: rotate(180deg); margin-bottom: 3px; } }
+.table-fold-more { display: block; margin: 8px auto 4px; }

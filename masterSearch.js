@@ -517,7 +517,9 @@ FF.pages = FF.pages || {};
       });
     }
   };
-  const allPeople = () => [...((state.full || state.light || {}).people || new Map()).values()];
+  // ⚡ v3.125.88 — har call par 3,700 ka naya array nahi (suggest me 14+ baar bulaya jaata tha)
+  const apCache = { m: null, n: -1, list: [] };
+  const allPeople = () => { const m = (state.full || state.light || {}).people; if (!m) return []; if (apCache.m !== m || apCache.n !== m.size) { apCache.m = m; apCache.n = m.size; apCache.list = [...m.values()]; } return apCache.list; };
   const personByKey = (key) => ((state.full || state.light || {}).people || new Map()).get(key) || null;
   const personKey = (p) => `${p.kind}|${normName(p.name)}|${normId(p.sub || p.id || [...(p.ids || [])][0] || '')}`;
 

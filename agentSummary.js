@@ -249,7 +249,15 @@ FF.pages = FF.pages || {};
     }
     // Canonical KPI enrichment: Summary search chips/list must show the same identity + stock + MTD/last
     // values as Master Search / masterProfile, not a stale GV REPORT snapshot.
-    return [...map.values()].map((p) => {
+    // ⚡ v3.125.88 — har person ka MP.quick() ek saath = 1 s+ ka freeze. Ab chhote tukdon me (UI atakta nahi).
+    const plist = [...map.values()], enriched = [];
+    let sliceT = performance.now();
+    for (let i = 0; i < plist.length; i++) {
+      if (performance.now() - sliceT > 24) { await new Promise((r) => setTimeout(r, 0)); sliceT = performance.now(); }
+      enriched.push(enrichPerson(plist[i]));
+    }
+    return enriched.sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock));
+    function enrichPerson(p) {
       const base = { ...p, altIds: [...(p.altIds || [])] };
       try {
         const q = MP() && MP().quick ? MP().quick({
@@ -272,7 +280,7 @@ FF.pages = FF.pages || {};
         }
       } catch { /* keep lightweight fallback */ }
       return base;
-    }).sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock));
+    }
   }
 
   // ---- v3.34 speed: caches (stale-while-revalidate) ------------------------------------------------

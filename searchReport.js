@@ -54,12 +54,37 @@ window.FF = window.FF || {};
     return c.autoName && normName(a.name) === normName(b.name) && isTlKind(a.kind) === isTlKind(b.kind);
   }
   /** p ka doosre channel wala partner (list = saare people). TL ko agent se pehle. */
+  // ⚡ v3.125.88 — har keystroke par 3,700 logon ka scan (90 ms+) nahi: list ka ek baar index (naam / ID → people).
+  let pIdx = null;
+  function partnerIndex(list) {
+    const c = mergeCfg();
+    const sig = `${list.length}|${c.enabled}|${c.autoName}|${JSON.stringify(c.pairs)}|${JSON.stringify(c.block)}`;
+    if (pIdx && pIdx.sig === sig && pIdx.first === list[0] && pIdx.last === list[list.length - 1]) return pIdx;
+    const byKey = { ff: new Map(), gv: new Map() };
+    const put = (ch, k, q) => { if (!k) return; const m = byKey[ch]; const a = m.get(k); if (a) a.push(q); else m.set(k, [q]); };
+    for (const q of list) {
+      if (!q) continue;
+      const ch = chOf(q.kind);
+      put(ch, `N|${normName(q.name)}`, q);
+      keysOf(q).forEach((k) => put(ch, `K|${k}`, q));
+    }
+    pIdx = { sig, byKey, first: list[0], last: list[list.length - 1] };
+    return pIdx;
+  }
   function partnerOf(p, list) {
-    if (!p || !mergeCfg().enabled) return null;
+    const c = mergeCfg();
+    if (!p || !c.enabled || !list || !list.length) return null;
     const other = chOf(p.kind) === 'ff' ? 'gv' : 'ff';
+    const ix = partnerIndex(list).byKey[other];
+    const cands = new Set();
+    (ix.get(`N|${normName(p.name)}`) || []).forEach((q) => cands.add(q));
+    identityIds(p).forEach((k) => (ix.get(`K|${k}`) || []).forEach((q) => cands.add(q)));
+    // pakke jode: is person se match karne wale pair ka doosra side
+    const mine = chOf(p.kind);
+    c.pairs.forEach((x) => { if (!x) return; const myS = mine === 'ff' ? x.ff : x.gv, otS = mine === 'ff' ? x.gv : x.ff; if (matchesSpec(p, myS)) (ix.get(`K|${normKey(otS)}`) || []).forEach((q) => cands.add(q)); });
     let best = null;
-    for (const q of list || []) {
-      if (!q || chOf(q.kind) !== other || !mergeOk(p, q)) continue;
+    for (const q of cands) {
+      if (!mergeOk(p, q)) continue;
       if (!best || (isTlKind(q.kind) && !isTlKind(best.kind))) best = q;
       if (best && isTlKind(best.kind) === isTlKind(p.kind)) break;
     }

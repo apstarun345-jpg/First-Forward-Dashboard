@@ -1668,8 +1668,30 @@ window.FF = window.FF || {};
     style.textContent = [...ccRules.values()].join('\n');
   }
 
+  // ⚡ v3.125.88 — bahut lambi tables (300+ rows) pehle 150 rows dikhati hain, baaki "Aur dikhao" se —
+  // poori 700-1000 rows ek saath layout/paint karne se page atakta tha. CSV / search ke liye rows DOM me hi rehti hain.
+  function foldLongTables(root) {
+    root.querySelectorAll('table').forEach((table) => {
+      const body = table.tBodies && table.tBodies[0];
+      if (!body || table.dataset.noFold !== undefined || table.__folded) return;
+      const rows = body.rows;
+      if (rows.length <= 300) return;
+      table.__folded = true;
+      const SHOW = 150;
+      for (let i = SHOW; i < rows.length; i++) rows[i].hidden = true;
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'btn small table-fold-more';
+      const left = () => [...rows].filter((r) => r.hidden).length;
+      const label = () => { const n = left(); btn.textContent = n ? `⬇ Aur ${Math.min(300, n).toLocaleString('en-IN')} rows dikhao (${n.toLocaleString('en-IN')} baaki)` : ''; btn.hidden = !n; };
+      btn.addEventListener('click', () => { let k = 0; for (const r of rows) { if (r.hidden) { r.hidden = false; if (++k >= 300) break; } } label(); });
+      label();
+      const host = table.closest('.table-wrap') || table;
+      host.insertAdjacentElement('afterend', btn);
+    });
+  }
   function enhanceTables(root) {
     if (!root || !root.querySelectorAll) return;
+    try { foldLongTables(root); } catch { /* fold optional */ }
     polishBarcodes(root);
     setTableDensity(tableDensity());
     root.querySelectorAll('.table-wrap').forEach((wrap) => {
