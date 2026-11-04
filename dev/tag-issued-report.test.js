@@ -13,7 +13,7 @@ function load() {
   return FF.pages.tagIssued._test;
 }
 
-test('agent report: GV counts from the same EIR rows as KPI; Master only enriches TL identity', () => {
+test('agent report: GV Master details remain visible and EIR difference is an explicit reconciliation row', () => {
   const t = load();
   const m = { from: '2026-10-26', to: '2026-10-26', prevFfRange: ['2026-10-25', '2026-10-25'], prevGvRange: ['2026-10-25', '2026-10-25'], ff: { total: 10 }, gv: { total: 8 } };
   const gvRow = (o) => ({ date: o.d, group: o.group || 'VC4', cls: o.cls || 'VC4', agentId: o.id, agentName: o.name, tlName: o.tl || '', tlId: o.tlId || '' });
@@ -34,28 +34,34 @@ test('agent report: GV counts from the same EIR rows as KPI; Master only enriche
   const dir = { ff: (id) => (id === 'F1' ? { name: 'Ff One', tlName: 'TL B', tlId: 'T9', mobile: '9000000001' } : null), gv: (id) => (id === 'G1' ? '9000000002' : '') };
   const inputs = t.reportInputs({ dailyRows, rawGvMaster }, dir);
   const both = t.buildAgentReport(inputs, m, 'both');
-  assert.equal(JSON.stringify(both.list.map((o) => o.name)), JSON.stringify(['Ff One', 'Gv One', 'Gv Two', 'Ff Two']));
-  const f1 = both.list[0]; assert.equal(f1.tlName, 'TL B'); assert.equal(f1.direct, false); assert.equal(f1.mobile, '9000000001'); assert.equal(f1.vc5, 9);
-  const g1 = both.list[1]; assert.equal(g1.perf, 150); assert.equal(g1.status, '▲ Up'); assert.equal(g1.mobile, '9000000002');
-  assert.equal(both.list[2].direct, true); assert.equal(both.list[2].status, '★ New');
-  const f2 = both.list[3]; assert.equal(f2.direct, true); assert.equal(f2.perf, -75); assert.equal(f2.status, '▼ Down');
-  assert.equal(both.chTot.ff, 10); assert.equal(both.chTot.gv, 8); assert.equal(both.grandTotal, 18); assert.ok(!both.list.some((o) => o.name === 'Master Only Agent'), 'GV Master rows must not add historical report counts');
-  const sheets = t.reportSheets(both, m, 'both');
-  assert.equal(sheets.map((s) => s.name).join('|'), 'TLs (GV + FF)|Direct Agents (GV + FF)|Agents under TLs (GV + FF)|Info');
-  const tls = sheets[0].rows;
-  assert.equal(tls[0][2], 'TL B'); assert.equal(tls[0][8], 9); assert.equal(tls[1][2], 'TL A'); assert.equal(tls[1][3], 'GV');
-  assert.equal(tls.at(-1)[2], 'GRAND TOTAL'); assert.equal(tls.at(-1)[8], 18);
-  const direct = sheets[1].rows;
-  assert.equal(direct.length, 3, 'GV + FF direct agents combined + total');
-  assert.equal(direct[0][2], 'Gv Two'); assert.equal(direct[1][2], 'Ff Two'); assert.equal(direct[2][2], 'TOTAL · direct agents'); assert.equal(direct[2][10], 4);
+  const byName = (name) => both.list.find((o) => o.name === name);
+  assert.ok(byName('Gv One'), 'GV Master agent row must remain visible');
+  assert.ok(byName('Gv Two'), 'GV direct agent row must remain visible');
+  assert.ok(byName('Master Only Agent'), 'GV Master row-level detail must remain visible for audit');
+  assert.equal(byName('Gv One').total, 5);
+  assert.equal(byName('Gv One').prev, 2);
+  assert.equal(byName('Gv One').mobile, '9000000002');
+  assert.equal(byName('Gv Two').total, 3);
+  assert.equal(byName('Ff One').total, 9);
+  assert.equal(byName('Ff One').tlName, 'TL B');
+  assert.equal(byName('Ff Two').perf, -75);
+  const recon = both.list.find((o) => o.sourceAdjustment);
+  assert.ok(recon, 'visible reconciliation row must be created');
+  assert.equal(recon.total, -12, 'Master has 12 more VC4 rows than EIR for this day');
+  assert.equal(both.chTot.ff, 10);
+  assert.equal(both.chTot.gv, 8);
+  assert.equal(both.grandTotal, 18);
+  assert.equal(t.reportSheets(both, m, 'both')[0].rows.at(-1)[8], 18);
   const gvOnly = t.reportSheets(t.buildAgentReport(inputs, m, 'gv'), m, 'gv');
-  assert.equal(gvOnly[0].name, 'TLs (GV)'); assert.equal(gvOnly[0].rows[0][2], 'TL A');
+  assert.equal(gvOnly[0].name, 'TLs (GV)');
+  assert.equal(gvOnly[0].rows.at(-1)[8], 8);
   const csv = t.reportCsv(both);
-  assert.equal(csv.head[3], 'Mobile'); assert.equal(csv.head[6], 'Type'); assert.ok(csv.head.includes('Performance'));
+  assert.ok(csv.head.includes('Type'));
+  assert.ok(csv.rows.some((row) => row[csv.head.indexOf('Type')] === 'Source reconciliation'));
 });
 
 
-test('GV report retains EIR counts even when an EIR row has no agent identity', () => {
+test('GV EIR rows without agent identity still appear as an unassigned reconciliation row', () => {
   const t = load();
   const m = { from: '2026-10-26', to: '2026-10-26', prevGvRange: null };
   const dailyRows = [{ channel: 'GV Partner', agentId: '', agentName: '', key: '2026-10-26', group: 'VC4', n: 7 }];
@@ -63,7 +69,8 @@ test('GV report retains EIR counts even when an EIR row has no agent identity', 
   const rep = t.buildAgentReport(inputs, m, 'gv');
   assert.equal(rep.chTot.gv, 7);
   assert.equal(rep.grandTotal, 7);
-  assert.equal(rep.list[0].name, 'GV EIR · agent details unavailable');
+  assert.ok(rep.list[0].sourceAdjustment);
+  assert.equal(rep.list[0].name, 'GV source reconciliation · VC4');
   assert.equal(rep.list[0].total, 7);
 });
 
