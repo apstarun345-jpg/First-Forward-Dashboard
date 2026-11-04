@@ -197,13 +197,20 @@ FF.pages = FF.pages || {};
     const ffShare = pct(ffV, sum), gvShare = pct(gvV, sum);
     const ofTotal = k.key === 'total' ? null : U.pctOf(sum, m.ff.total + m.gv.total);
     const ffD = dirOf(ffV, ffP), gvD = dirOf(gvV, gvP), sumD = dirOf(sum, sumP);
-    const row = (cls, name, v, share, prev, d, na, src) => `<div class="tix-row ${cls}" data-kpi="${esc(specFor(m, src, k.f))}" data-kpi-title="${esc(`${name} · ${k.short}`)}" role="button" tabindex="0" title="Click karo — ${esc(name)} ki rows">
+    const row = (cls, name, v, share, prev, d, na, src) => {
+      const oldRange = src === 'ff' ? m.prevFf2Range : m.prevGv2Range;
+      const oldValue = src === 'ff' ? ffP2 : gvP2;
+      const priorRange = src === 'ff' ? m.prevFfRange : m.prevGvRange;
+      const prior = priorRange ? rangeLabel(priorRange[0], priorRange[1]) : 'range unavailable';
+      const earlier = oldRange ? rangeLabel(oldRange[0], oldRange[1]) : '2 periods ago';
+      return `<div class="tix-row ${cls}" data-kpi="${esc(specFor(m, src, k.f))}" data-kpi-title="${esc(`${name} · ${k.short}`)}" role="button" tabindex="0" title="Click karo — ${esc(name)} ki rows">
         <span class="tix-dot"></span><span class="tix-name">${name}</span><b class="tix-num">${U.fmt(v)}</b><span class="tix-pct">${sum ? U.fmtPct(share, 0) : '—'}</span><span class="tix-gr">${na ? growthBadge(v, prev, na) : drvBadge(growthBadge(v, prev, na), src, k.key, dirOf(v, prev))}</span>
-        <span class="tix-prev">prev ${na ? '—' : U.fmt(prev)}${na ? '' : ` · ${U.fmt(src === 'ff' ? ffP2 : gvP2)}`}</span></div>`;
+        <span class="tix-prev">${na ? 'Previous: —' : `Previous (${esc(prior)}): ${U.fmt(prev)} · Earlier (${esc(earlier)}): ${U.fmt(oldValue)}`}</span></div>`;
+    };
     return `<div class="tix-card ${d2(sumD)}" style="--accent:${k.accent}" data-kpi="${esc(specFor(m, 'both', k.f))}" data-kpi-title="${esc(`${k.label} · ${rangeLabel(m.from, m.to)}`)}" role="button" tabindex="0" title="Click karo — is number ki rows">
       <div class="tix-card-top"><span class="tix-title"><span class="tix-ico">${k.icon}</span>${esc(k.label)}${k.sub ? `<small>${esc(k.sub)}</small>` : ''}</span>${ofTotal === null ? '' : `<span class="tix-chip" title="Total issuance me is class ka hissa">${U.fmtPct(ofTotal, 0)} of total</span>`}</div>
       <div class="tix-big"><span class="tix-big-n">${U.fmt(sum)}</span><span class="tix-big-g">${drvBadge(growthBadge(sum, sumP), 'all', k.key, sumD)}</span></div>
-      <div class="tix-bigsub">FF + GV combined · prev ${U.fmt(sumP)} · ${esc(prev2Label(m))} ${U.fmt(sumP2)}</div>
+      <div class="tix-bigsub">Current: ${esc(rangeLabel(m.from, m.to))} · Previous: ${U.fmt(sumP)} (${esc(periodRangeLabel(m.prevFfRange, m.prevGvRange))}) · Earlier: ${U.fmt(sumP2)} (${esc(periodRangeLabel(m.prevFf2Range, m.prevGv2Range))})</div>
       <div class="tix-split" title="FF vs GV share">${sum ? `<i class="ff" style="width:${ffShare.toFixed(1)}%"></i><i class="gv" style="width:${gvShare.toFixed(1)}%"></i>` : ''}</div>
       ${row('ff', 'First Forward', ffV, ffShare, ffP, ffD, ffNA, 'ff')}
       ${row('gv', 'GV Partner', gvV, gvShare, gvP, gvD, gvNA, 'gv')}
@@ -211,6 +218,12 @@ FF.pages = FF.pages || {};
     </div>`;
   }
   const d2 = (d) => (d === 'up' ? 'is-up' : d === 'down' ? 'is-down' : '');
+  const periodRangeLabel = (ffRange, gvRange) => {
+    const differs = ffRange && gvRange && (ffRange[0] !== gvRange[0] || ffRange[1] !== gvRange[1]);
+    if (differs) return `FF ${rangeLabel(ffRange[0], ffRange[1])} / GV ${rangeLabel(gvRange[0], gvRange[1])}`;
+    const r = ffRange || gvRange;
+    return r ? rangeLabel(r[0], r[1]) : 'range unavailable';
+  };
   const prev2Label = (m) => { const r = m.prevGv2Range || m.prevFf2Range; return r ? rangeLabel(r[0], r[1]) : 'prev-2'; };
 
   // ---------------------------------------------------------------- sections
@@ -795,8 +808,10 @@ FF.pages = FF.pages || {};
       { name: both ? 'Agents under TLs (GV + FF)' : `Agents under TLs (${REPORTS[which][1]})`, header: AG_HEAD, rows: agRows(tlAgents, 'TOTAL · agents under TLs'), filterRows: tlAgents.length + 1 },
       { name: 'Info', header: ['Item', 'Value'], rows: [
         ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to} (${months.length} months: ${months.map(monLabel).join(', ')})`],
-        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total]] : []),
-        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total]] : []),
+        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
+        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
+        ['Report total − KPI total', rep.grandTotal - (which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total)],
+        ['Why totals can differ', 'FF report and KPI both use EIR. GV agent report uses GV Master; the KPI uses GV EIR (master ID 5845036). Timing or source mismatches can therefore create a difference.'],
         ['Avg / month', `Average of ${avgBase.length} ${full.length ? 'full ' : ''}month(s): ${avgBase.map(monLabel).join(', ')}`],
         [cmpH, `${monLabel(A)} total vs ${monLabel(B)} total (latest ${full.length >= 2 ? 'full ' : ''}month vs the month before) · (${monLabel(A)} − ${monLabel(B)}) ÷ ${monLabel(B)} × 100`],
         ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in the earlier month) · ✖ No issuance now'],
@@ -828,8 +843,10 @@ FF.pages = FF.pages || {};
       { name: 'Info', header: ['Item', 'Value'], rows: [
         ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to}`],
         ['Previous period (FF)', m.prevFfRange ? `${m.prevFfRange[0]} to ${m.prevFfRange[1]}` : '—'], ['Previous period (GV)', m.prevGvRange ? `${m.prevGvRange[0]} to ${m.prevGvRange[1]}` : '—'],
-        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total]] : []),
-        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total]] : []),
+        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
+        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
+        ['Report total − KPI total', rep.grandTotal - (which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total)],
+        ['Why totals can differ', 'FF report and KPI both use EIR. GV agent report uses GV Master; the KPI uses GV EIR (master ID 5845036). Timing or source mismatches can therefore create a difference.'],
         ['Performance %', '(Total − Prev total) ÷ Prev total × 100, previous period of the same length'],
         ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in previous period) · ✖ No issuance now'],
         ['Share %', 'Share of the report grand total'], ['Sorted', 'Highest to lowest total'],
@@ -1045,9 +1062,13 @@ FF.pages = FF.pages || {};
       const sheets = reportSheets(rep, m, which);
       const tabs = sheets.map((sh, i) => `<button type="button" class="tix-chipbtn${i === 0 ? ' active' : ''}" data-rep-tab="${i}">${esc(sh.name)}${(sh.name === 'Info' || sh.name === 'Month-wise summary') ? '' : ` <small>${U.fmt(sh.rows.filter((r) => typeof r[0] === 'number').length)}</small>`}</button>`).join('');
       const ch = (k) => (which === 'both' || which === k ? `<span class="badge ${k === 'gv' ? 'green' : 'blue'}">${k === 'gv' ? '🟩 GV' : '🟦 FF'} ${U.fmt(rep.chTot[k])}</span>` : '');
+      const kpiTotal = which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total;
+      const sourceDelta = rep.grandTotal - kpiTotal;
+      const sourceBasis = which === 'ff' ? 'FF EIR report vs FF EIR KPI' : which === 'gv' ? 'GV Master report vs GV EIR KPI' : 'FF EIR + GV Master report vs FF EIR + GV EIR KPI';
       const body = `<div class="tix-rep" id="tix-rep">
-        <div class="tix-rep-top">${ch('ff')}${ch('gv')}<span class="badge indigo">Total ${U.fmt(rep.grandTotal)}</span><span class="badge">${U.fmt(rep.list.length)} agents</span>
+        <div class="tix-rep-top">${ch('ff')}${ch('gv')}<span class="badge indigo">Report total ${U.fmt(rep.grandTotal)}</span><span class="badge">${U.fmt(rep.list.length)} agents</span>
           <input type="search" class="input tix-rep-q" placeholder="Filter: agent, TL, ID, mobile…" aria-label="Filter rows"></div>
+        <p class="dim small">Source check · KPI total (EIR): <b>${U.fmt(kpiTotal)}</b> · Report total: <b>${U.fmt(rep.grandTotal)}</b> · Difference (report − KPI): <b>${sourceDelta > 0 ? '+' : ''}${U.fmt(sourceDelta)}</b><br>${esc(sourceBasis)}. GV uses GV Master in agent report, while the KPI uses GV EIR; timing/source differences can change the total.</p>
         <div class="tix-presets tix-rep-tabs">${tabs}</div>
         ${sheets.map((sh, i) => `<div class="tix-rep-pane" data-rep-pane="${i}"${i ? ' hidden' : ''}>${repTable(sh)}</div>`).join('')}
       </div>`;
