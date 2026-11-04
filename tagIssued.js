@@ -598,45 +598,83 @@ FF.pages = FF.pages || {};
   const perfCell = (cur, prev) => { const p = perfPct(cur, prev); return p === null ? '' : p; };
 
   /**
-   * Agent-level rows for the report, in one shape: { ch, id, name, tlName, tlId, direct, mobile, group, dateKey, n }.
-   * GV  → GV Master (row per tag, with agent + supervisor) — the EIR GV rows carry no agent / TL.
-   * FF  → EIR (same rows as the card); TL / mobile from the FF REPORT agent list (ID, Sheet4 aliases, then name).
+   * Agent-level report inputs use the same date-filtered daily rows as the KPI card.
+   * GV Master is only an identity/TL lookup for GV EIR rows; it never contributes tag counts.
+   * Today’s GV rows already contain the same live Master replacement used by channelRows().
    */
   function reportInputs(rows, dir) {
-    const out = [];
-    for (const r of rows.dailyRows || []) {
-      if (r.channel === 'GV Partner') continue;
+    const out = [], daily = rows.dailyRows || [];
+    const rawGv = rows.rawGvMaster || ((G && typeof G.masterRows === 'function' ? G.masterRows() : null) || []);
+    const gvPeople = new Map(), gvPeopleName = new Map(), gvTls = new Map();
+
+    // Master enriches EIR identity and preserves the special rule: a TL's own issuance
+    // remains under that TL when other agents report to the same GV TL ID.
+    for (const r of rawGv) {
+      if (!r) continue;
+      const id = nid(r.agentId), name = nname(r.agentName);
+      const person = id ? (gvPeople.get(id) || { name: '', tlName: '', tlId: '', directAgent: false }) : null;
+      if (person) {
+        if (!person.name && r.agentName) person.name = U.clean(r.agentName);
+        if (!person.tlName && r.tlName) person.tlName = U.clean(r.tlName);
+        if (!person.tlId) person.tlId = U.clean(r.gvTlId || r.tlId || r.supervisorId);
+        person.directAgent = person.directAgent || r.directAgent === true;
+        gvPeople.set(id, person);
+        if (name && !gvPeopleName.has(name)) gvPeopleName.set(name, person);
+      }
+      for (const t of [r.gvTlId, r.tlId, r.supervisorId]) {
+        const k = nid(t);
+        if (k && k !== id && !gvTls.has(k)) gvTls.set(k, U.clean(r.tlName));
+      }
+    }
+
+    for (const r of daily) {
+      if (!r) continue;
+      const dateKey = r.key || (r.date ? U.dateKey(r.date) : '');
+      const n = r.n === undefined ? 1 : (Number(r.n) || 0);
+      if (!dateKey || !n) continue;
+
+      if (r.channel === 'GV Partner') {
+        const id = U.clean(r.agentId || r.id);
+        const name0 = U.clean(r.agentName || r.name);
+        const meta = gvPeople.get(nid(id)) || gvPeopleName.get(nname(name0)) || {};
+        const name = name0 || meta.name || (id ? `Agent ${id}` : 'GV EIR · agent details unavailable');
+        const selfTl = gvTls.has(nid(id)) ? nid(id) : '';
+        let tlId = U.clean(meta.tlId || r.tlId);
+        let tlName = U.clean(meta.tlName || r.tlName);
+        let direct = false;
+
+        if (selfTl) {
+          direct = false;
+          tlId = id;
+          tlName = gvTls.get(selfTl) || name;
+        } else {
+          direct = meta.directAgent === true;
+          if (!direct) {
+            try { direct = !!FF.config.isDirectAgent({ tlName, tlId, agentName: name, agentId: id }, 'gv'); } catch (e) { /* keep */ }
+          }
+          if (direct) tlName = (!id && !name0) ? 'GV EIR · agent details unavailable' : FF.config.directLabel({ tlName, tlId, agentName: name, agentId: id }, 'gv');
+          else if (!tlName && tlId) tlName = `TL ${tlId}`;
+        }
+        out.push({
+          ch: 'gv', id, name, tlName, tlId: direct ? '' : tlId, direct,
+          mobile: dir.gv(id, name0 || meta.name), group: r.group || 'VC4',
+          dateKey, n, selfTl: !!selfTl
+        });
+        continue;
+      }
+
       const id = U.clean(r.agentId || r.id), name0 = U.clean(r.agentName || r.name);
       const hit = dir.ff(id, name0);
       const name = name0 || (hit && hit.name) || (id ? `Agent ${id}` : '(No agent in EIR)');
       const tlName = hit ? U.clean(hit.tlName) : '', tlId = hit ? U.clean(hit.tlId) : '';
       let direct = !tlName;
       if (!direct) { try { direct = !!FF.config.isDirectAgent({ tlName, tlId, agentName: name, agentId: id }, 'ff'); } catch (e) { /* keep */ } }
-      out.push({ ch: 'ff', id, name, tlName: direct ? (hit ? FF.config.directLabel({ tlName, agentName: name, agentId: id }, 'ff') : 'No TL (not in REPORT)') : tlName, tlId: direct ? '' : tlId, direct, mobile: (hit && hit.mobile) || '', group: r.group, dateKey: r.key || (r.date ? U.dateKey(r.date) : ''), n: r.n === undefined ? 1 : (Number(r.n) || 0) });
-    }
-    const rawGv = rows.rawGvMaster || ((G && typeof G.masterRows === 'function' ? G.masterRows() : null) || []);
-    // v3.125.93 — GV TL ki APNI issued rows (agent ID = TL ID; TL column khaali / kisi aur TL ka) TL ke total me.
-    // Pehle ye "direct" ban kar TL sheet se bahar ho jaati thi (APS010606 Rakesh: 129 ki jagah 56).
-    const gvTls = new Map();
-    for (const r of rawGv) {
-      if (!r) continue;
-      // sirf asli TL: jiske neeche koi DOOSRA agent bhi ho (akela self-supervised agent direct hi rehta hai)
-      for (const t of [r.gvTlId, r.tlId, r.supervisorId]) { const k = nid(t); if (k && k !== nid(r.agentId) && !gvTls.has(k)) gvTls.set(k, U.clean(r.tlName)); }
-    }
-    for (const r of rawGv) {
-      if (!r || !r.date) continue;
-      const selfTl = gvTls.has(nid(r.agentId)) ? nid(r.agentId) : '';
-      if (selfTl) {
-        const name = U.clean(r.agentName) || gvTls.get(selfTl) || `TL ${r.agentId}`;
-        out.push({ ch: 'gv', id: U.clean(r.agentId), name, tlName: gvTls.get(selfTl) || name, tlId: U.clean(r.agentId), direct: false, mobile: dir.gv(r.agentId, r.agentName), group: r.group || (M.classGroup ? M.classGroup(r.cls) : 'VC4'), dateKey: U.dateKey(r.date), n: 1, selfTl: true });
-        continue;
-      }
-      let direct = false;
-      try { direct = !!FF.config.isDirectAgent(r, 'gv'); } catch (e) { /* keep */ }
-      const tlName = U.clean(r.tlName);
-      if (!tlName) direct = true;
-      const name = U.clean(r.agentName) || (r.agentId ? `Agent ${r.agentId}` : '(No agent in GV Master)');
-      out.push({ ch: 'gv', id: U.clean(r.agentId), name, tlName: direct ? FF.config.directLabel(r, 'gv') : tlName, tlId: direct ? '' : U.clean(r.tlId || r.supervisorId || r.gvTlId || ''), direct, mobile: dir.gv(r.agentId, r.agentName), group: r.group || (M.classGroup ? M.classGroup(r.cls) : 'VC4'), dateKey: U.dateKey(r.date), n: 1 });
+      out.push({
+        ch: 'ff', id, name,
+        tlName: direct ? (hit ? FF.config.directLabel({ tlName, agentName: name, agentId: id }, 'ff') : 'No TL (not in REPORT)') : tlName,
+        tlId: direct ? '' : tlId, direct, mobile: (hit && hit.mobile) || '',
+        group: r.group, dateKey, n
+      });
     }
     return out;
   }
@@ -809,16 +847,16 @@ FF.pages = FF.pages || {};
       { name: 'Info', header: ['Item', 'Value'], rows: [
         ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to} (${months.length} months: ${months.map(monLabel).join(', ')})`],
         ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
-        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
+        ...(which !== 'ff' ? [['GV total (report, EIR rows)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
         ['Report total − KPI total', rep.grandTotal - (which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total)],
-        ['Why totals can differ', 'FF report and KPI both use EIR. GV agent report uses GV Master; the KPI uses GV EIR (master ID 5845036). Timing or source mismatches can therefore create a difference.'],
+        ['Source alignment', 'The report and Total Issued KPI use the same date-filtered daily rows. GV Master enriches agent/TL identity only; it does not add or replace historical report counts. Today’s GV live replacement remains the same as the KPI.'],
         ['Avg / month', `Average of ${avgBase.length} ${full.length ? 'full ' : ''}month(s): ${avgBase.map(monLabel).join(', ')}`],
         [cmpH, `${monLabel(A)} total vs ${monLabel(B)} total (latest ${full.length >= 2 ? 'full ' : ''}month vs the month before) · (${monLabel(A)} − ${monLabel(B)}) ÷ ${monLabel(B)} × 100`],
         ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in the earlier month) · ✖ No issuance now'],
         ['Month columns', 'Every month in the range: VC4 / VC20 / VC5+ / Total (green = month total)'],
         ['Month-wise summary', 'Growth % is vs the previous month; a partial month (range cut) is not compared'],
         ['Share %', 'Share of the report grand total'], ['Sorted', 'Highest to lowest total'],
-        ['Sources', 'FF: EIR (same rows as the card), TL + mobile from FF REPORT. GV: GV Master (agent + TL per tag), mobile from GV REPORT.'],
+        ['Sources', 'FF: EIR daily rows (same as KPI); TL + mobile enriched from FF REPORT. GV: EIR daily rows (same as KPI); agent/TL identity enriched from GV Master and mobile from GV REPORT.'],
         ['Generated', new Date().toLocaleString('en-IN')]] }
     ];
   }
@@ -844,13 +882,13 @@ FF.pages = FF.pages || {};
         ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to}`],
         ['Previous period (FF)', m.prevFfRange ? `${m.prevFfRange[0]} to ${m.prevFfRange[1]}` : '—'], ['Previous period (GV)', m.prevGvRange ? `${m.prevGvRange[0]} to ${m.prevGvRange[1]}` : '—'],
         ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
-        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
+        ...(which !== 'ff' ? [['GV total (report, EIR rows)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
         ['Report total − KPI total', rep.grandTotal - (which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total)],
-        ['Why totals can differ', 'FF report and KPI both use EIR. GV agent report uses GV Master; the KPI uses GV EIR (master ID 5845036). Timing or source mismatches can therefore create a difference.'],
+        ['Source alignment', 'The report and Total Issued KPI use the same date-filtered daily rows. GV Master enriches agent/TL identity only; it does not add or replace historical report counts. Today’s GV live replacement remains the same as the KPI.'],
         ['Performance %', '(Total − Prev total) ÷ Prev total × 100, previous period of the same length'],
         ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in previous period) · ✖ No issuance now'],
         ['Share %', 'Share of the report grand total'], ['Sorted', 'Highest to lowest total'],
-        ['Sources', 'FF: EIR (same rows as the card), TL + mobile from FF REPORT. GV: GV Master (agent + TL per tag), mobile from GV REPORT.'],
+        ['Sources', 'FF: EIR daily rows (same as KPI); TL + mobile enriched from FF REPORT. GV: EIR daily rows (same as KPI); agent/TL identity enriched from GV Master and mobile from GV REPORT.'],
         ['Generated', new Date().toLocaleString('en-IN')]] }
     ];
   }
@@ -1064,11 +1102,11 @@ FF.pages = FF.pages || {};
       const ch = (k) => (which === 'both' || which === k ? `<span class="badge ${k === 'gv' ? 'green' : 'blue'}">${k === 'gv' ? '🟩 GV' : '🟦 FF'} ${U.fmt(rep.chTot[k])}</span>` : '');
       const kpiTotal = which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total;
       const sourceDelta = rep.grandTotal - kpiTotal;
-      const sourceBasis = which === 'ff' ? 'FF EIR report vs FF EIR KPI' : which === 'gv' ? 'GV Master report vs GV EIR KPI' : 'FF EIR + GV Master report vs FF EIR + GV EIR KPI';
+      const sourceBasis = which === 'ff' ? 'FF EIR report vs FF EIR KPI' : which === 'gv' ? 'GV EIR report vs GV EIR KPI' : 'FF EIR + GV EIR report vs FF EIR + GV EIR KPI';
       const body = `<div class="tix-rep" id="tix-rep">
         <div class="tix-rep-top">${ch('ff')}${ch('gv')}<span class="badge indigo">Report total ${U.fmt(rep.grandTotal)}</span><span class="badge">${U.fmt(rep.list.length)} agents</span>
           <input type="search" class="input tix-rep-q" placeholder="Filter: agent, TL, ID, mobile…" aria-label="Filter rows"></div>
-        <p class="dim small">Source check · KPI total (EIR): <b>${U.fmt(kpiTotal)}</b> · Report total: <b>${U.fmt(rep.grandTotal)}</b> · Difference (report − KPI): <b>${sourceDelta > 0 ? '+' : ''}${U.fmt(sourceDelta)}</b><br>${esc(sourceBasis)}. GV uses GV Master in agent report, while the KPI uses GV EIR; timing/source differences can change the total.</p>
+        <p class="dim small">Source check · KPI total (EIR): <b>${U.fmt(kpiTotal)}</b> · Report total: <b>${U.fmt(rep.grandTotal)}</b> · Difference (report − KPI): <b>${sourceDelta > 0 ? '+' : ''}${U.fmt(sourceDelta)}</b><br>${esc(sourceBasis)}. The report uses the same EIR daily rows as the KPI. GV Master is only used to enrich agent/TL identity; it does not contribute historical tag counts.</p>
         <div class="tix-presets tix-rep-tabs">${tabs}</div>
         ${sheets.map((sh, i) => `<div class="tix-rep-pane" data-rep-pane="${i}"${i ? ' hidden' : ''}>${repTable(sh)}</div>`).join('')}
       </div>`;
