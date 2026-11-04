@@ -3746,9 +3746,9 @@ async function ledgerDirectAgent(ch, body) {
         const aCol = lt[Lx.agent], iCol = lt[Lx.agentId];
         const conds = [...(aCol ? names.map((n) => `upper(${aCol}) contains '${n}'`) : []), ...(iCol ? ids.map((i) => `upper(${iCol}) = '${i}'`) : [])];
         if (!conds.length) return;
-        const qp = new URLSearchParams({ id: String(src.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${lt.join(', ')} where ${conds.join(' or ')} limit 2000`, headers: '1' });
+        const qp = new URLSearchParams({ id: String(src.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${lt.join(', ')} where ${conds.join(' or ')} order by ${lt[0]} desc limit 200`, headers: '1' });
         qp.set('gid', String(src.gid));
-        const t = await gvizPageServerInner(qp, src.label);
+        const t = await gvizPageServerInner(qp, src.label);   // limit 200 = gviz priority lane (bade scans ke peeche nahi)
         let n = 0;
         for (const r of t.rows) { const e = ledgerEntry(r, lt, src, ++n); if (e) ledgerAggAddRow(byCh, { ...e, ch: src.ch }); }
         counts[src.id] = n;
