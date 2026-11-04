@@ -488,7 +488,7 @@ FF.pages = FF.pages || {};
     const g = (o.delta / o.prev) * 100; // within ±2% counts as "same"
     return g > 2 ? 'up' : g < -2 ? 'down' : 'same';
   };
-  const typeLabel = (o) => (DRV.level === 'tls' ? (o.direct ? 'Direct agents' : 'TL team') : (o.direct ? 'Direct agent' : 'Agent under TL'));
+  const typeLabel = (o) => (DRV.level === 'tls' ? (o.direct ? 'Direct agents' : 'TL team') : (o.sourceAdjustment ? 'Source reconciliation' : o.direct ? 'Direct agent' : 'Agent under TL'));
 
   function drvBadge(html, ch, key, dir) {
     return `<span class="tix-drvlink" data-drv="${ch}" data-drvcls="${key}" data-drvdir="${dir}" role="button" tabindex="0" title="Click — who caused this change (agents / TLs)">${html}</span>`;
@@ -598,71 +598,18 @@ FF.pages = FF.pages || {};
   const perfCell = (cur, prev) => { const p = perfPct(cur, prev); return p === null ? '' : p; };
 
   /**
-   * Agent-level report inputs use the same date-filtered daily rows as the KPI card.
-   * GV Master is only an identity/TL lookup for GV EIR rows; it never contributes tag counts.
-   * Today’s GV rows already contain the same live Master replacement used by channelRows().
+   * GV agent/TL detail remains sourced from GV Master (one row per tag).
+   * EIR daily aggregates are authoritative for the KPI total; the per-date/class
+   * difference is displayed as an explicit, unassigned reconciliation row.
+   * FF continues to use EIR daily rows, exactly like its KPI.
    */
   function reportInputs(rows, dir) {
     const out = [], daily = rows.dailyRows || [];
     const rawGv = rows.rawGvMaster || ((G && typeof G.masterRows === 'function' ? G.masterRows() : null) || []);
-    const gvPeople = new Map(), gvPeopleName = new Map(), gvTls = new Map();
 
-    // Master enriches EIR identity and preserves the special rule: a TL's own issuance
-    // remains under that TL when other agents report to the same GV TL ID.
-    for (const r of rawGv) {
-      if (!r) continue;
-      const id = nid(r.agentId), name = nname(r.agentName);
-      const person = id ? (gvPeople.get(id) || { name: '', tlName: '', tlId: '', directAgent: false }) : null;
-      if (person) {
-        if (!person.name && r.agentName) person.name = U.clean(r.agentName);
-        if (!person.tlName && r.tlName) person.tlName = U.clean(r.tlName);
-        if (!person.tlId) person.tlId = U.clean(r.gvTlId || r.tlId || r.supervisorId);
-        person.directAgent = person.directAgent || r.directAgent === true;
-        gvPeople.set(id, person);
-        if (name && !gvPeopleName.has(name)) gvPeopleName.set(name, person);
-      }
-      for (const t of [r.gvTlId, r.tlId, r.supervisorId]) {
-        const k = nid(t);
-        if (k && k !== id && !gvTls.has(k)) gvTls.set(k, U.clean(r.tlName));
-      }
-    }
-
+    // First Forward agent details: EIR counts + FF REPORT directory enrichment.
     for (const r of daily) {
-      if (!r) continue;
-      const dateKey = r.key || (r.date ? U.dateKey(r.date) : '');
-      const n = r.n === undefined ? 1 : (Number(r.n) || 0);
-      if (!dateKey || !n) continue;
-
-      if (r.channel === 'GV Partner') {
-        const id = U.clean(r.agentId || r.id);
-        const name0 = U.clean(r.agentName || r.name);
-        const meta = gvPeople.get(nid(id)) || gvPeopleName.get(nname(name0)) || {};
-        const name = name0 || meta.name || (id ? `Agent ${id}` : 'GV EIR · agent details unavailable');
-        const selfTl = gvTls.has(nid(id)) ? nid(id) : '';
-        let tlId = U.clean(meta.tlId || r.tlId);
-        let tlName = U.clean(meta.tlName || r.tlName);
-        let direct = false;
-
-        if (selfTl) {
-          direct = false;
-          tlId = id;
-          tlName = gvTls.get(selfTl) || name;
-        } else {
-          direct = meta.directAgent === true || (!tlName && !tlId);
-          if (!direct) {
-            try { direct = !!FF.config.isDirectAgent({ tlName, tlId, agentName: name, agentId: id }, 'gv'); } catch (e) { /* keep */ }
-          }
-          if (direct) tlName = (!id && !name0) ? 'GV EIR · agent details unavailable' : FF.config.directLabel({ tlName, tlId, agentName: name, agentId: id }, 'gv');
-          else if (!tlName && tlId) tlName = `TL ${tlId}`;
-        }
-        out.push({
-          ch: 'gv', id, name, tlName, tlId: direct ? '' : tlId, direct,
-          mobile: dir.gv(id, name0 || meta.name), group: r.group || 'VC4',
-          dateKey, n, selfTl: !!selfTl
-        });
-        continue;
-      }
-
+      if (!r || r.channel === 'GV Partner') continue;
       const id = U.clean(r.agentId || r.id), name0 = U.clean(r.agentName || r.name);
       const hit = dir.ff(id, name0);
       const name = name0 || (hit && hit.name) || (id ? `Agent ${id}` : '(No agent in EIR)');
@@ -673,12 +620,77 @@ FF.pages = FF.pages || {};
         ch: 'ff', id, name,
         tlName: direct ? (hit ? FF.config.directLabel({ tlName, agentName: name, agentId: id }, 'ff') : 'No TL (not in REPORT)') : tlName,
         tlId: direct ? '' : tlId, direct, mobile: (hit && hit.mobile) || '',
-        group: r.group, dateKey, n
+        group: r.group, dateKey: r.key || (r.date ? U.dateKey(r.date) : ''),
+        n: r.n === undefined ? 1 : (Number(r.n) || 0)
+      });
+    }
+
+    // GV Master supplies real GV agent/TL rows and TL self-issuance attribution.
+    const gvTls = new Map();
+    for (const r of rawGv) {
+      if (!r) continue;
+      for (const t of [r.gvTlId, r.tlId, r.supervisorId]) {
+        const k = nid(t);
+        if (k && k !== nid(r.agentId) && !gvTls.has(k)) gvTls.set(k, U.clean(r.tlName));
+      }
+    }
+    const gvMasterByDayClass = new Map();
+    for (const r of rawGv) {
+      if (!r || !r.date) continue;
+      const dateKey = U.dateKey(r.date);
+      const group = r.group || (M.classGroup ? M.classGroup(r.cls) : 'VC4');
+      const bucket = `${dateKey}|${group}`;
+      gvMasterByDayClass.set(bucket, (gvMasterByDayClass.get(bucket) || 0) + 1);
+
+      const selfTl = gvTls.has(nid(r.agentId)) ? nid(r.agentId) : '';
+      if (selfTl) {
+        const name = U.clean(r.agentName) || gvTls.get(selfTl) || `TL ${r.agentId}`;
+        out.push({
+          ch: 'gv', id: U.clean(r.agentId), name, tlName: gvTls.get(selfTl) || name,
+          tlId: U.clean(r.agentId), direct: false, mobile: dir.gv(r.agentId, r.agentName),
+          group, dateKey, n: 1, selfTl: true
+        });
+        continue;
+      }
+      let direct = false;
+      try { direct = !!FF.config.isDirectAgent(r, 'gv'); } catch (e) { /* keep */ }
+      const tlName = U.clean(r.tlName);
+      if (!tlName) direct = true;
+      const name = U.clean(r.agentName) || (r.agentId ? `Agent ${r.agentId}` : '(No agent in GV Master)');
+      out.push({
+        ch: 'gv', id: U.clean(r.agentId), name,
+        tlName: direct ? FF.config.directLabel(r, 'gv') : tlName,
+        tlId: direct ? '' : U.clean(r.tlId || r.supervisorId || r.gvTlId || ''),
+        direct, mobile: dir.gv(r.agentId, r.agentName), group, dateKey, n: 1
+      });
+    }
+
+    // Reconcile every GV date × class bucket. Positive = EIR tags missing in Master;
+    // negative = Master rows not present in EIR. Never assign this difference to an agent.
+    const gvEirByDayClass = new Map();
+    for (const r of daily) {
+      if (!r || r.channel !== 'GV Partner') continue;
+      const dateKey = r.key || (r.date ? U.dateKey(r.date) : '');
+      const n = r.n === undefined ? 1 : (Number(r.n) || 0);
+      if (!dateKey || !n) continue;
+      const group = r.group || 'VC4';
+      const bucket = `${dateKey}|${group}`;
+      gvEirByDayClass.set(bucket, (gvEirByDayClass.get(bucket) || 0) + n);
+    }
+    const buckets = new Set([...gvEirByDayClass.keys(), ...gvMasterByDayClass.keys()]);
+    for (const bucket of buckets) {
+      const [dateKey, group] = bucket.split('|');
+      const delta = (gvEirByDayClass.get(bucket) || 0) - (gvMasterByDayClass.get(bucket) || 0);
+      if (!delta) continue;
+      out.push({
+        ch: 'gv', id: `GV-EIR-RECON-${group}`,
+        name: `GV source reconciliation · ${group}`,
+        tlName: 'Source reconciliation · not an agent', tlId: '',
+        direct: true, mobile: '', group, dateKey, n: delta, sourceAdjustment: true
       });
     }
     return out;
   }
-
   /** Per-agent records (current period = the card's dates; previous = like-for-like range). */
   function buildAgentReport(inputs, m, which) {
     const per = { ff: { cur: [m.from, m.to], prev: m.prevFfRange, prev2: m.prevFf2Range }, gv: { cur: [m.from, m.to], prev: m.prevGvRange, prev2: m.prevGv2Range } };
@@ -692,7 +704,7 @@ FF.pages = FF.pages || {};
       const inPrev2 = !!pp.prev2 && within(r.dateKey, pp.prev2[0], pp.prev2[1]);
       if (!inCur && !inPrev && !inPrev2) continue;
       const key = `${r.ch}|${nid(r.id) || nname(r.name)}`;
-      const o = out.get(key) || { ch: r.ch, id: r.id, name: r.name, tlName: r.tlName, tlId: r.tlId, direct: r.direct, mobile: r.mobile || '', vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0, mon: {} };
+      const o = out.get(key) || { ch: r.ch, id: r.id, name: r.name, tlName: r.tlName, tlId: r.tlId, direct: r.direct, mobile: r.mobile || '', sourceAdjustment: !!r.sourceAdjustment, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0, mon: {} };
       if (!o.mobile && r.mobile) o.mobile = r.mobile;
       if (inCur) {
         o[g3(r)] += r.n; o.total += r.n;
@@ -714,6 +726,7 @@ FF.pages = FF.pages || {};
     const prevNA = { ff: !!(per.ff.prev && (!first.ff || first.ff > per.ff.prev[0])), gv: !!(per.gv.prev && (!first.gv || first.gv > per.gv.prev[0])) };
     return { list, grandTotal, chTot, prevNA, first, months: [...months].filter((x) => /^\d{4}-\d{2}$/.test(x)).sort() };
   }
+  const sourceAdjustmentTotal = (rep, ch) => (rep.list || []).reduce((n, o) => n + (o.ch === ch && o.sourceAdjustment ? o.total : 0), 0);
 
   /** One row per real TL (both channels together), highest → lowest. */
   function tlPivot(list) {
@@ -847,16 +860,16 @@ FF.pages = FF.pages || {};
       { name: 'Info', header: ['Item', 'Value'], rows: [
         ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to} (${months.length} months: ${months.map(monLabel).join(', ')})`],
         ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
-        ...(which !== 'ff' ? [['GV total (report, EIR rows)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
+        ...(which !== 'ff' ? [['GV detail total (GV Master)', rep.chTot.gv - sourceAdjustmentTotal(rep, 'gv')], ['GV EIR reconciliation (unassigned)', sourceAdjustmentTotal(rep, 'gv')], ['GV total (report, reconciled to EIR)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
         ['Report total − KPI total', rep.grandTotal - (which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total)],
-        ['Source alignment', 'The report and Total Issued KPI use the same date-filtered daily rows. GV Master enriches agent/TL identity only; it does not add or replace historical report counts. Today’s GV live replacement remains the same as the KPI.'],
+        ['Source alignment', 'GV agent/TL detail comes from GV Master. A per-date/class source-reconciliation row equals GV EIR daily count minus GV Master count, so the GV report total matches the EIR KPI. This adjustment is unassigned and is not attributed to any agent. Today’s GV live replacement is included.'],
         ['Avg / month', `Average of ${avgBase.length} ${full.length ? 'full ' : ''}month(s): ${avgBase.map(monLabel).join(', ')}`],
         [cmpH, `${monLabel(A)} total vs ${monLabel(B)} total (latest ${full.length >= 2 ? 'full ' : ''}month vs the month before) · (${monLabel(A)} − ${monLabel(B)}) ÷ ${monLabel(B)} × 100`],
         ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in the earlier month) · ✖ No issuance now'],
         ['Month columns', 'Every month in the range: VC4 / VC20 / VC5+ / Total (green = month total)'],
         ['Month-wise summary', 'Growth % is vs the previous month; a partial month (range cut) is not compared'],
         ['Share %', 'Share of the report grand total'], ['Sorted', 'Highest to lowest total'],
-        ['Sources', 'FF: EIR daily rows (same as KPI); TL + mobile enriched from FF REPORT. GV: EIR daily rows (same as KPI); agent/TL identity enriched from GV Master and mobile from GV REPORT.'],
+        ['Sources', 'FF: EIR daily rows (same as KPI); TL + mobile enriched from FF REPORT. GV: GV Master agent/TL detail + visible per-date/class reconciliation to GV EIR KPI; mobile from GV REPORT.'],
         ['Generated', new Date().toLocaleString('en-IN')]] }
     ];
   }
@@ -882,20 +895,20 @@ FF.pages = FF.pages || {};
         ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to}`],
         ['Previous period (FF)', m.prevFfRange ? `${m.prevFfRange[0]} to ${m.prevFfRange[1]}` : '—'], ['Previous period (GV)', m.prevGvRange ? `${m.prevGvRange[0]} to ${m.prevGvRange[1]}` : '—'],
         ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
-        ...(which !== 'ff' ? [['GV total (report, EIR rows)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
+        ...(which !== 'ff' ? [['GV detail total (GV Master)', rep.chTot.gv - sourceAdjustmentTotal(rep, 'gv')], ['GV EIR reconciliation (unassigned)', sourceAdjustmentTotal(rep, 'gv')], ['GV total (report, reconciled to EIR)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
         ['Report total − KPI total', rep.grandTotal - (which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total)],
-        ['Source alignment', 'The report and Total Issued KPI use the same date-filtered daily rows. GV Master enriches agent/TL identity only; it does not add or replace historical report counts. Today’s GV live replacement remains the same as the KPI.'],
+        ['Source alignment', 'GV agent/TL detail comes from GV Master. A per-date/class source-reconciliation row equals GV EIR daily count minus GV Master count, so the GV report total matches the EIR KPI. This adjustment is unassigned and is not attributed to any agent. Today’s GV live replacement is included.'],
         ['Performance %', '(Total − Prev total) ÷ Prev total × 100, previous period of the same length'],
         ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in previous period) · ✖ No issuance now'],
         ['Share %', 'Share of the report grand total'], ['Sorted', 'Highest to lowest total'],
-        ['Sources', 'FF: EIR daily rows (same as KPI); TL + mobile enriched from FF REPORT. GV: EIR daily rows (same as KPI); agent/TL identity enriched from GV Master and mobile from GV REPORT.'],
+        ['Sources', 'FF: EIR daily rows (same as KPI); TL + mobile enriched from FF REPORT. GV: GV Master agent/TL detail + visible per-date/class reconciliation to GV EIR KPI; mobile from GV REPORT.'],
         ['Generated', new Date().toLocaleString('en-IN')]] }
     ];
   }
   /** Flat CSV: every agent (TL agents + direct agents), highest → lowest. */
   function reportCsv(rep) {
     const months = (rep.months && rep.months.length > 1) ? rep.months : [];
-    return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6), ...monHead(months)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); if ((rep.prevNA || {})[o.ch]) { r[11] = ''; r[12] = ''; r[13] = ''; r[14] = ''; r[15] = 'n/a · prev data not loaded'; } return [...r.slice(0, 6), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6), ...monCells(o.mon, months)]; }) };
+    return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6), ...monHead(months)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); if ((rep.prevNA || {})[o.ch]) { r[11] = ''; r[12] = ''; r[13] = ''; r[14] = ''; r[15] = 'n/a · prev data not loaded'; } return [...r.slice(0, 6), o.sourceAdjustment ? 'Source reconciliation' : o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6), ...monCells(o.mon, months)]; }) };
   }
   /** FF REPORT (TL / mobile by agent) + GV REPORT (mobile). Best effort, bounded wait. */
   async function reportDirectory() {
@@ -1102,11 +1115,11 @@ FF.pages = FF.pages || {};
       const ch = (k) => (which === 'both' || which === k ? `<span class="badge ${k === 'gv' ? 'green' : 'blue'}">${k === 'gv' ? '🟩 GV' : '🟦 FF'} ${U.fmt(rep.chTot[k])}</span>` : '');
       const kpiTotal = which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total;
       const sourceDelta = rep.grandTotal - kpiTotal;
-      const sourceBasis = which === 'ff' ? 'FF EIR report vs FF EIR KPI' : which === 'gv' ? 'GV EIR report vs GV EIR KPI' : 'FF EIR + GV EIR report vs FF EIR + GV EIR KPI';
+      const sourceBasis = which === 'ff' ? 'FF EIR report vs FF EIR KPI' : which === 'gv' ? 'GV Master detail + EIR reconciliation vs GV EIR KPI' : 'FF EIR + (GV Master detail + EIR reconciliation) vs FF EIR + GV EIR KPI';
       const body = `<div class="tix-rep" id="tix-rep">
         <div class="tix-rep-top">${ch('ff')}${ch('gv')}<span class="badge indigo">Report total ${U.fmt(rep.grandTotal)}</span><span class="badge">${U.fmt(rep.list.length)} agents</span>
           <input type="search" class="input tix-rep-q" placeholder="Filter: agent, TL, ID, mobile…" aria-label="Filter rows"></div>
-        <p class="dim small">Source check · KPI total (EIR): <b>${U.fmt(kpiTotal)}</b> · Report total: <b>${U.fmt(rep.grandTotal)}</b> · Difference (report − KPI): <b>${sourceDelta > 0 ? '+' : ''}${U.fmt(sourceDelta)}</b><br>${esc(sourceBasis)}. The report uses the same EIR daily rows as the KPI. GV Master is only used to enrich agent/TL identity; it does not contribute historical tag counts.</p>
+        <p class="dim small">Source check · KPI total (EIR): <b>${U.fmt(kpiTotal)}</b> · Report total: <b>${U.fmt(rep.grandTotal)}</b> · Difference (report − KPI): <b>${sourceDelta > 0 ? '+' : ''}${U.fmt(sourceDelta)}</b><br>${esc(sourceBasis)}. GV agent/TL detail comes from GV Master. A visible per-date/class reconciliation line uses GV EIR minus GV Master and is not assigned to an agent, keeping the GV total aligned with the KPI.</p>
         <div class="tix-presets tix-rep-tabs">${tabs}</div>
         ${sheets.map((sh, i) => `<div class="tix-rep-pane" data-rep-pane="${i}"${i ? ' hidden' : ''}>${repTable(sh)}</div>`).join('')}
       </div>`;
