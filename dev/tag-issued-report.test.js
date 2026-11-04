@@ -40,6 +40,18 @@ test('agent report: GV counts from the same EIR rows as KPI; Master only enriche
   assert.equal(both.list[2].direct, true); assert.equal(both.list[2].status, '★ New');
   const f2 = both.list[3]; assert.equal(f2.direct, true); assert.equal(f2.perf, -75); assert.equal(f2.status, '▼ Down');
   assert.equal(both.chTot.ff, 10); assert.equal(both.chTot.gv, 8); assert.equal(both.grandTotal, 18); assert.ok(!both.list.some((o) => o.name === 'Master Only Agent'), 'GV Master rows must not add historical report counts');
+
+test('GV report retains EIR counts even when an EIR row has no agent identity', () => {
+  const t = load();
+  const m = { from: '2026-10-26', to: '2026-10-26', prevGvRange: null };
+  const dailyRows = [{ channel: 'GV Partner', agentId: '', agentName: '', key: '2026-10-26', group: 'VC4', n: 7 }];
+  const inputs = t.reportInputs({ dailyRows, rawGvMaster: [] }, { ff: () => null, gv: () => '' });
+  const rep = t.buildAgentReport(inputs, m, 'gv');
+  assert.equal(rep.chTot.gv, 7);
+  assert.equal(rep.grandTotal, 7);
+  assert.equal(rep.list[0].name, 'GV EIR · agent details unavailable');
+  assert.equal(rep.list[0].total, 7);
+});
   const sheets = t.reportSheets(both, m, 'both');
   assert.equal(sheets.map((s) => s.name).join('|'), 'TLs (GV + FF)|Direct Agents (GV + FF)|Agents under TLs (GV + FF)|Info');
   const tls = sheets[0].rows;
