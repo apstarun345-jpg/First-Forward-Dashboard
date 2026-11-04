@@ -1346,6 +1346,7 @@ FF.pages = FF.pages || {};
           <div class="home-stat"><span class="dim">Data loaded</span><b id="home-loaded">${S.loadedAt || G.loadedAt ? U.timeLabel(S.loadedAt || G.loadedAt) : '—'}</b></div>
           <div class="home-stat"><span class="dim">Sync</span><b id="home-sync">${FF.preloader && FF.preloader.done ? 'All sheets ready ✓' : 'Background sync…'}</b></div>
           <button class="btn primary" data-action="refresh">↻ Refresh</button>
+          ${FF.auth.can('refresh') ? '<button class="btn" data-action="force-refresh" title="Server + browser ka poora cache saaf karke saari sheets (EIR, StockDataa, Tag Assignment, GV Master, stock index, dispatch) dobara padho">⚡ Force refresh</button>' : ''}
           ${FF.auth.can('aiAnalyst') ? '<a class="btn aa-home-btn" href="#/aiAnalyst" title="GV + FF poora review — growth, down, kya karein">🧠 AI Business Analyst</a>' : ''}
           <button class="btn" id="home-morning-card" title="Boss ke liye WhatsApp Good-Morning card (PNG)">📲 Morning Card</button>
           <a class="btn" href="#/tagIssued">🏷️ Tag Issued →</a>

@@ -4197,6 +4197,7 @@ const stockAgeKey = () => JSON.stringify([db.settings.sheetId, db.settings.gvShe
 function startStockAgeBuild(key) {
   if (stockAgeState.promise && stockAgeState.key === key) return stockAgeState.promise;
   stockAgeState.key = key;
+  try { stockAgeState.verSig = dailyTabs().filter((t) => t.label !== 'EIR').map((t) => dailySig(t.key)).join('|'); } catch { /* optional */ }
   stockAgeState.startedAt = Date.now();
   const job = loadStockAgeIndex().then((next) => {
     if (stockAgeState.key !== key) return next;   // settings beech me badal gayi — is result ko store mat karo
@@ -4437,7 +4438,11 @@ async function stockAgeIndex(fresh) {
   const have = stockAgeState.index && stockAgeState.key === key ? stockAgeState.index : null;
   if (have && !fresh) {
     const partial = !!(have.errors && Object.keys(have.errors).length);
-    const due = Date.now() - stockAgeState.at >= STOCK_AGE_TTL || (partial && Date.now() >= stockAgeState.retryAt);
+    // v3.125.101 — stock sheets ka version pata ho to sirf badalne par (max 26 h); warna purana 30-min TTL
+    const vs = dailyTabs().filter((t) => t.label !== 'EIR').map((t) => dailySig(t.key)).join('|');
+    const verKnown = vs && !vs.split('|').some((x) => !x);
+    if (verKnown && String(stockAgeState.verSig || '').split('|').some((x) => !x)) stockAgeState.verSig = vs;   // index version pata hone se pehle bana tha — dobara mat banao
+    const due = (verKnown ? (stockAgeState.verSig !== vs || Date.now() - stockAgeState.at >= DAILY_MAX_MS) : Date.now() - stockAgeState.at >= STOCK_AGE_TTL) || (partial && Date.now() >= stockAgeState.retryAt) || stockAgeState.at < forceRefreshAt;
     if (due && !stockAgeState.promise) startStockAgeBuild(key).catch(() => {});
     return have;
   }
@@ -5786,7 +5791,8 @@ async function upstreamOnce(url) {
 }
 /** Cache me daalo (dedupe + cap ke saath). */
 function remember(url, body, status) {
-  const entry = { at: Date.now(), body, status };
+  const k = dailyKeyOfUrl(url);
+  const entry = { at: Date.now(), body, status, ver: k ? dailySig(k) : '' };
   cache.set(url, entry);
   if (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
   return entry;
@@ -5817,6 +5823,75 @@ function perfNote(params, cacheTag, ms) {
   PERF.set(key, p);
   if (PERF.size > PERF_LIMIT) PERF.delete(PERF.keys().next().value);
 }
+// 🗓️ v3.125.101 — DAILY sheets (EIR · StockDataa · Tag Assignment): din me ek baar data aata hai, to cache tab tak
+// rakho jab tak sheet me naya data na aaye (har 10 min row-count check; max 26 h). GV Master + baaki tabs: purana
+// 10-min cache. Pehle har 10 min poore EIR/StockDataa queries + har 30 min poora stock index dobara = Google load,
+// memory spikes, slow pages.
+const DAILY_MAX_MS = 26 * 3600e3;
+const dailyVer = new Map();           // `${sheetId}|${tab}` → { sig, changedAt, checkedAt }
+let dailyCheckRunning = null, forceRefreshAt = 0;
+const cleanId = (v) => String(v || '').replace(/[^A-Za-z0-9_-]/g, '');
+function dailyTabs() {
+  const s = db.settings || {};
+  const ff = cleanId(s.sheetId) || DEFAULT_SHEET_ID, gv = cleanId(s.gvSheetId);
+  const tabs = (Array.isArray(s.tabs) && s.tabs.length) ? s.tabs : DEFAULT_TABS;
+  const gidOf = (name) => { const t = tabs.find((x) => x && x.tab === name); return t && /^\d+$/.test(String(t.gid || '')) ? String(t.gid) : ''; };
+  const A = (s.gv && s.gv.assignment) || {};
+  const list = [
+    { label: 'EIR', id: ff, tab: s.eirSheet || 'EIR', gid: gidOf(s.eirSheet || 'EIR') },
+    { label: 'StockDataa', id: ff, tab: s.stockSheet || 'StockDataa', gid: gidOf(s.stockSheet || 'StockDataa') },
+    ...(gv ? [{ label: 'Tag Assignment', id: gv, tab: A.tab || 'Tag Assignment', gid: /^\d+$/.test(String(A.gid || '')) ? String(A.gid) : gidOf(A.tab || 'Tag Assignment') }] : [])
+  ];
+  return list.map((t) => ({ ...t, key: `${t.id}|${t.tab}` }));
+}
+/** gviz URL kis daily tab ka hai (nahi to null). */
+function dailyKeyOfUrl(url) {
+  try {
+    const u = new URL(url);
+    const id = (u.pathname.match(/\/d\/([A-Za-z0-9_-]+)/) || [])[1] || '';
+    const sheet = u.searchParams.get('sheet') || '', gid = u.searchParams.get('gid') || '';
+    const hit = dailyTabs().find((t) => t.id === id && ((sheet && sheet === t.tab) || (gid && t.gid && gid === t.gid)));
+    return hit ? hit.key : null;
+  } catch { return null; }
+}
+const dailySig = (key) => { const v = key && dailyVer.get(key); return v ? v.sig : ''; };
+async function checkDailyVersions(reason) {
+  if (dailyCheckRunning) return dailyCheckRunning;
+  dailyCheckRunning = (async () => {
+    const changed = [];
+    for (const t of dailyTabs()) {
+      try {
+        const qp = new URLSearchParams({ id: t.id, tq: 'select count(A)' });
+        if (t.gid) qp.set('gid', t.gid); else qp.set('sheet', t.tab);
+        const r = await gvizPageServerInner(qp, t.tab);
+        const c = r.rows && r.rows[0] && r.rows[0].c && r.rows[0].c[0];
+        const n = c && Number(c.v);
+        if (!Number.isFinite(n)) continue;
+        const sig = String(n), prev = dailyVer.get(t.key);
+        dailyVer.set(t.key, { sig, changedAt: prev && prev.sig === sig ? prev.changedAt : Date.now(), checkedAt: Date.now(), rows: n, label: t.label });
+        if (prev && prev.sig !== sig) changed.push(t);
+      } catch { /* agli baar */ }
+    }
+    if (changed.length) {
+      console.log(`🗓️ daily data aaya (${reason || 'check'}): ${changed.map((t) => `${t.label} → ${dailyVer.get(t.key).sig} rows`).join(', ')}`);
+      // us tab ki cached queries peeche se naye data se bhar do (pehla user purana na dekhe)
+      const keys = new Set(changed.map((t) => t.key));
+      const urls = [...cache.keys()].filter((u) => keys.has(dailyKeyOfUrl(u))).slice(0, 40);
+      for (const u of urls) { await refreshCache(u); await yieldLoop(); }
+      // stock tab badla → stock index (ageing / dispatch status) naya
+      if (changed.some((t) => t.label !== 'EIR')) { try { stockAgeIndex(true).catch(() => {}); } catch { /* optional */ } }
+    }
+    return changed;
+  })().finally(() => { dailyCheckRunning = null; });
+  return dailyCheckRunning;
+}
+/** Cache entry abhi bhi theek hai? Daily tab: jab tak sheet ka version same (max 26 h); baaki: settings wala cacheMs. */
+function cacheFresh(url, hit) {
+  if (hit.at < forceRefreshAt) return false;
+  const k = dailyKeyOfUrl(url);
+  if (k && dailySig(k)) return hit.ver === dailySig(k) && Date.now() - hit.at < DAILY_MAX_MS;
+  return Date.now() - hit.at < cacheMs();
+}
 async function handleGviz(req, res, params) {
   const fresh = params.get('fresh') === '1';
   const url = upstreamUrl(params);
@@ -5828,7 +5903,7 @@ async function handleGviz(req, res, params) {
   const hit = cache.get(url);
   markHot(url);
   if (hit && !fresh) {
-    if (Date.now() - hit.at < cacheMs()) { perfNote(params, 'HIT', 0); return sendCached(req, res, hit, 'HIT'); }
+    if (cacheFresh(url, hit)) { perfNote(params, 'HIT', 0); return sendCached(req, res, hit, 'HIT'); }
     // ⚡ Stale-while-revalidate: expired entry turant serve karo, naya data peeche se aa jayega.
     void refreshCache(url);
     perfNote(params, 'STALE', 0);
@@ -6631,6 +6706,20 @@ async function handleApi(req, res, url) {
   }
   // 📦 Last dispatch of an agent / TL — every ledger row (IDFC Stock Sheet FF / GV Stock Sheet) addressed to that person:
   // which date the tags went out and how many of each class. Same ledger as the Barcode Checker.
+  // ⚡ v3.125.101 — Home → "Force refresh": server ka poora sheet cache + stock index + dispatch data dobara
+  if (p === '/api/data/force-refresh' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (user.role !== 'admin' && !(user.permissions || []).includes('refresh')) throw new HttpError(403, 'Force refresh ki permission nahi hai.');
+    const wait = 2 * 60e3 - (Date.now() - forceRefreshAt);
+    if (wait > 0) return sendJson(res, 200, { ok: true, already: true, waitSec: Math.ceil(wait / 1000), message: 'Abhi-abhi force refresh hua hai — thodi der baad.' });
+    forceRefreshAt = Date.now();
+    console.log(`⚡ force refresh by ${user.username}`);
+    dailyVer.clear();
+    checkDailyVersions('force').catch(() => {});
+    setTimeout(() => { try { stockAgeIndex(false).catch(() => {}); } catch { /* optional */ } }, 20e3).unref?.();   // pehle user ki sheets, phir bada stock scan
+    setTimeout(() => { ledgerAggregate(true).catch(() => {}); }, 60e3).unref?.();
+    return sendJson(res, 200, { ok: true, at: new Date(forceRefreshAt).toISOString() }, { 'Cache-Control': 'no-store' });
+  }
   if (p === '/api/dispatch-by' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
     const body = await readBody(req);
@@ -13825,6 +13914,9 @@ async function start() {
       // pehle sheet snapshot (tez); na mile / purana ho tabhi poora scan
       ledgerAggSnapLoad().then((ok) => { if (!ok) ledgerAggregate(false).catch(() => {}); }).catch(() => ledgerAggregate(false).catch(() => {}));
     }
+    // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
+    setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
+    setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();
     let ledgerDailyDone = '';
     setInterval(() => {
       const ist = new Date(Date.now() + 5.5 * 3600e3);

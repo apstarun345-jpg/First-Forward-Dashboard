@@ -1339,6 +1339,20 @@ window.FF = window.FF || {};
     U.toast(errors.length ? 'Some sheets could not update. Retry refresh.' : 'Data updated ✓', errors.length ? 'warn' : 'ok');
   }
 
+  /** ⚡ v3.125.101 — poora data dobara: server cache + stock index + dispatch, browser ke saved sheets bhi saaf. */
+  async function forceRefresh() {
+    if (refreshing) return;
+    U.toast('⚡ Force refresh — saari sheets dobara aa rahi hain (1-2 min)…');
+    try {
+      const r = await FF.auth.api('/api/data/force-refresh', 'POST', {});
+      if (r && r.already) U.toast(r.message || 'Abhi-abhi refresh hua hai', 'warn');
+    } catch (err) { U.toast(`Server refresh: ${err.message || err}`, 'warn'); }
+    try { if (FF.data && FF.data.snapshots && FF.data.snapshots.clear) await FF.data.snapshots.clear(); } catch { /* optional */ }
+    try { if (FF.data && FF.data.clearCache) FF.data.clearCache(); } catch { /* optional */ }
+    try { Object.keys(localStorage).filter((k) => /^ff_dspst\|/.test(k)).forEach((k) => localStorage.removeItem(k)); } catch { /* private mode */ }
+    await refresh();
+  }
+
   // ---- drawer ----
   let drawerStack = [];
   let activeDrawerSnap = null;
@@ -2058,6 +2072,7 @@ window.FF = window.FF || {};
       if (act) {
         const a = act.dataset.action;
         if (a === 'refresh') refresh();
+        else if (a === 'force-refresh') forceRefresh();
         else if (a === 'export') exportCard(act);
         else if (a === 'clear-filters') updateParams({ tl: '', agent: '' });
         else if (a === 'focus-mode') updateFocusMode();
