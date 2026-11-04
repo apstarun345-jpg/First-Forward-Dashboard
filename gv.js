@@ -913,8 +913,12 @@ window.FF = window.FF || {};
   function masterTlRows(tlId, tlName) {
     const wantedId = identityId(tlId), wantedName = identityName(tlName);
     if (wantedId) {
-      const byId = rows().filter((r) => masterTlIds(r).includes(wantedId));
-      if (byId.length) return byId;
+      // v3.125.87 — TL ki apni issued rows (agent ID = TL ID, TL column khaali / doosra) bhi TL ke total me.
+      const all = rows();
+      const byId = all.filter((r) => masterTlIds(r).includes(wantedId));
+      const ownIds = new Set(byId);
+      const own = all.filter((r) => !ownIds.has(r) && identityId(r.agentId) === wantedId);
+      if (byId.length || own.length) return byId.concat(own);
     }
     if (!wantedName) return [];
     return rows().filter((r) => identityName(r.tlName) === wantedName);

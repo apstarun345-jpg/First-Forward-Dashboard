@@ -132,7 +132,10 @@ window.FF = window.FF || {};
     const id = identityOf(spec);
     const ix = index();
     if (id.isTl) {
-      const direct = mergeLookups(lookup(ix.ledger.byTlId, id.ids), lookup(ix.ledger.byTlName, id.names));
+      // v3.125.87 — TL ki APNI issued rows bhi (GV Master me A = TL ki ID, par TL column khaali ya kisi aur TL ka) —
+      // pehle sirf "TL ID = is TL" wali rows aati thi, to TL ka khud ka issuance chhoot jaata tha (Sumit Dixit Oct: 60 dikhta, sahi 104).
+      const own = spec.id ? lookup(ix.ledger.byAgentId, [idKey(spec.id)]) : [];
+      const direct = mergeLookups(mergeLookups(lookup(ix.ledger.byTlId, id.ids), lookup(ix.ledger.byTlName, id.names)), own);
       if (direct.length) return direct;
       if (G() && G().tlIssuanceRows) {
         const rows = G().tlIssuanceRows(spec.id || '', spec.name || '');
