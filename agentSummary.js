@@ -75,7 +75,8 @@ FF.pages = FF.pages || {};
         const k = keyOf(r); if (!k) continue;
         const { name, id, key } = k;
         let o = map.get(key);
-        if (!o) { o = { name, id, tl: clean(r.tlName) || '', isNew: st.month > minYm && cache.firstYm.get(key) === st.month, vc4: 0, vc20: 0, vc5p: 0, total: 0, replacement: 0, chassis: 0, wrongVrn: 0 }; map.set(key, o); }
+        if (!o) { o = { name, id, tl: clean(r.tlName) || '', tlIds: new Set(), isNew: st.month > minYm && cache.firstYm.get(key) === st.month, vc4: 0, vc20: 0, vc5p: 0, total: 0, replacement: 0, chassis: 0, wrongVrn: 0 }; map.set(key, o); }
+        [r.gvTlId, r.tlId, r.supervisorId].forEach((t) => { const k = idKey(t); if (k) o.tlIds.add(k); });
         const n = Number(r.n) || 1;
         o.total += n; o[data.grp(r)] += n;
         if (isChassis(r)) o.chassis += n;
@@ -88,7 +89,13 @@ FF.pages = FF.pages || {};
     };
     const paint = () => {
       let list = build();
-      if (st.tl) { const tk = norm(st.tl); list = list.filter((r) => norm(r.tl) === tk || norm(r.name) === tk); }
+      // v3.125.94 — TL ki ID ho to ID se hi (same naam ka doosra agent / Direct agent nahi judta); warna TL naam se.
+      if (st.tl) {
+        const tk = norm(st.tl), tid = idKey(st.tlId || '');
+        list = tid
+          ? list.filter((r) => idKey(r.id) === tid || (r.tlIds && r.tlIds.has(tid)))
+          : list.filter((r) => norm(r.tl) === tk || (norm(r.name) === tk && (!r.tl || norm(r.tl) === tk)));
+      }
       const tot = list.reduce((a, r) => { ISSUE_COLS.forEach(([k]) => { a[k] = (a[k] || 0) + r[k]; }); return a; }, {});
       const nNew = list.filter((r) => r.isNew).length;
       if (st.onlyNew) list = list.filter((r) => r.isNew);
@@ -111,7 +118,7 @@ FF.pages = FF.pages || {};
           <tbody>${shown.map((r, i) => `<tr class="clickable" data-ib-pick="${esc(r.name)}" data-ib-id="${esc(r.id)}" title="Open ${esc(r.name)}'s full summary"><td>${i + 1}</td><td><b>${esc(r.name)}</b>${r.isNew ? ' <span class="ib-new" title="First issuance this month">NEW</span>' : ''}${r.id ? ` <small class="dim">${esc(r.id)}</small>` : ''}</td><td class="dim">${esc(r.tl || '—')}</td>${cols.map(([k]) => `<td class="num ${k === 'total' ? 'ib-total' : ''}">${r[k] ? fmt(r[k]) : '<span class="dim">0</span>'}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length + 3}" class="empty">${st.onlyNew ? 'No new agents' : 'No issuance'} in ${esc(U.labelYM(st.month))}.</td></tr>`}</tbody></table></div>
           ${list.length > shown.length ? `<div style="text-align:center;margin-top:8px"><button class="btn small" data-ib-more>⬇ Show all ${fmt(list.length)} agents</button></div>` : ''}
         </div>`;
-      const ct = host.querySelector('[data-ib-cleartl]'); if (ct) ct.addEventListener('click', () => { st.tl = ''; st.limit = 100; paint(); });
+      const ct = host.querySelector('[data-ib-cleartl]'); if (ct) ct.addEventListener('click', () => { st.tl = ''; st.tlId = ''; st.limit = 100; paint(); });
       const mo = host.querySelector('[data-ib-month]'); if (mo) mo.addEventListener('change', () => { st.month = mo.value; st.limit = 100; paint(); });
       const qi = host.querySelector('[data-ib-q]'); if (qi) { let t = 0; qi.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { st.q = qi.value; const pos = qi.selectionStart; paint(); const n = host.querySelector('[data-ib-q]'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch { /* ignore */ } } }, 200); }); }
       host.querySelectorAll('[data-ib-new]').forEach((b) => b.addEventListener('click', () => { st.onlyNew = !st.onlyNew; st.limit = 100; paint(); }));
@@ -131,11 +138,11 @@ FF.pages = FF.pages || {};
     paint();
   }
   /** TL searched → board shows only that TL's agents ('' = everyone). */
-  function setIssueBoardTl(channel, tlName) {
+  function setIssueBoardTl(channel, tlName, tlId) {
     const st = issueBoardState[channel]; if (!st) return;
-    const v = clean(tlName);
-    if (st.tl === v) return;
-    st.tl = v; st.limit = 100;
+    const v = clean(tlName), vid = clean(tlId || '');
+    if (st.tl === v && (st.tlId || '') === vid) return;
+    st.tl = v; st.tlId = vid; st.limit = 100;
     const p = issueBoardPaint[channel];
     if (p && p.host && p.host.isConnected) { try { p.paint(); } catch { /* repaint best effort */ } }
   }

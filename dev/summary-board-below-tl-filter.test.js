@@ -12,7 +12,7 @@ test('issuance board is rendered after the report body', async () => {
 
 test('issue board: TL filter + clear button', async () => {
   const src = await fs.readFile(new URL('../agentSummary.js', import.meta.url), 'utf8');
-  assert.match(src, /if \(st\.tl\) \{ const tk = norm\(st\.tl\); list = list\.filter\(/, 'rows filtered by TL before totals');
+  assert.match(src, /if \(st\.tl\) \{\s*const tk = norm\(st\.tl\), tid = idKey\(st\.tlId \|\| ''\);\s*list = tid/, 'rows filtered by TL ID (fallback name) before totals');
   assert.match(src, /data-ib-cleartl/, 'show-all button');
   assert.match(src, /FF\.issueBoard = \{ mount: mountIssueBoard, setTl: setIssueBoardTl \}/);
 });

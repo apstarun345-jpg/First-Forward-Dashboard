@@ -760,7 +760,7 @@ window.FF = window.FF || {};
         if (!person) return;
         const seq = ++pickSeq;
         S.person = person;
-        try { if (FF.issueBoard && FF.issueBoard.setTl) FF.issueBoard.setTl(ch, /tl$/.test(String(person.kind || '')) ? person.name : ''); } catch { /* optional */ }
+        try { if (FF.issueBoard && FF.issueBoard.setTl) FF.issueBoard.setTl(ch, /tl$/.test(String(person.kind || '')) ? person.name : '', /tl$/.test(String(person.kind || '')) ? (person.id || person.sub || '') : ''); } catch { /* optional */ }
         drop.hidden = true;
         if (qEl) qEl.value = person.name;
         body.innerHTML = U.spinner(`${person.name} ka report ban raha hai…`);
