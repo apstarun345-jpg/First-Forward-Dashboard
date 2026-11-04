@@ -13803,6 +13803,7 @@ async function start() {
   appReady = true;
   bootState.stage = 'ready';
   bootState.error = null;
+  notifyImpSig = notifyImportantSig();   // v3.125.100 — boot par storage wala notify hi baseline (warna pehla save fail hone par lazy mode kabhi chalu nahi hota)
   console.log('✅ Durable storage loaded — dashboard is ready.');
     console.log(`First Forward Dashboard → http://0.0.0.0:${server.address().port}`);
     console.log(`Sheet ${db.settings.sheetId} · cache ${cacheMs() / 1000}s · storage ${sheetsStore ? `Google Sheets / encrypted APP_STORAGE (${STORAGE_BACKEND})` : DATA_DIR} · users ${db.users.length} · push ${vapidKeys ? `${pushSubs().length} device(s), VAPID from ${vapidSource}, TTL ${PUSH_TTL}s` : 'DISABLED (no VAPID key)'}${GVIZ_BASE !== 'https://docs.google.com' ? ` · upstream ${GVIZ_BASE}` : ''}`);
