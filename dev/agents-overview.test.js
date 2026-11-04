@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const code = fs.readFileSync(new URL('../agentsOverview.js', import.meta.url), 'utf8');
 function boot(perf, gvStock, gvReport, roll) {
-  const U = { esc: (s) => String(s), clean: (s) => String(s == null ? '' : s).trim(), fmt: (n) => String(n), sum: (a, f) => a.reduce((s, x) => s + f(x), 0), ymKey: () => '2026-10', stamp: () => 'x', spinner: () => '', errorBox: () => '' };
+  const U = { esc: (s) => String(s), clean: (s) => String(s == null ? '' : s).trim(), fmt: (n) => String(n), sum: (a, f) => a.reduce((s, x) => s + f(x), 0), ymKey: () => '2026-10', reportYm: () => '2026-10', stamp: () => 'x', spinner: () => '', errorBox: () => '' };
   const FF = {
     util: U, pages: { performance: { ensureLoaded: async () => {}, agents: () => perf } },
     config: { isDirectAgent: (r) => /APS/i.test(r.tlName || '') || r.directAgent === true },

@@ -124,6 +124,8 @@ test('kpiDetail: list provider — card ki ginti = list ki ginti, rows clickable
 });
 
 test('kpiDetail: agent row click usi period (month / range) par — "is mahine" par nahi', async () => {
+  // test harness me settings kabhi "settle" nahi hoti — 15 s wait na ho (v3.125.51 se issuanceRows settled() ka intezaar karta hai)
+  FF.store.settled = async () => {};
   opened.length = 0;
   await K.open({ scope: 'month', ym: '2026-08', src: 'ff', title: 'Aug' });
   const handler = (docListeners.click || [])[0];
@@ -132,7 +134,7 @@ test('kpiDetail: agent row click usi period (month / range) par — "is mahine" 
   const target = { closest: (sel) => (sel === '[data-kd-agent]' ? row : null) };
   opened.length = 0;
   await handler({ target, preventDefault() {} });
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, 60));
   const spec = opened.map((o) => o.title).join(' | ');
   assert.match(spec, /Ravi/);
   const final = opened[opened.length - 1];

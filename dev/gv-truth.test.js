@@ -22,6 +22,8 @@ globalThis.location = { hash: '#/gvAgentSummary', href: '' };
 const FF = globalThis.FF;
 const U = FF.util;
 FF.auth = { can: () => true, settings: {}, isAdmin: () => true, user: { username: 'u' } };
+// Ye test GV REPORT *sheet* ka cross-check jaanchta hai (v3.125.46 se default report site khud banati hai).
+FF.config.gv = { ...(FF.config.gv || {}), report: { ...((FF.config.gv && FF.config.gv.report) || {}), source: 'sheet' } };
 
 const ym = U.ymKey(new Date());
 const lastYm = U.prevMonthKey(ym);

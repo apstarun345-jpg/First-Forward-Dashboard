@@ -89,8 +89,8 @@ test('👥 employee link TL — ek box-strip + ek class table + footer me total 
   const panel = TR._test.tlPanelHtml({ isTl: true, name: 'TL One', channel: 'ff' });
   assert.ok(panel.includes('tr-boxes') && !panel.includes('tr-tl-kpis') && !panel.includes('tr-tlk'), 'purane 🚗/🚚 KPI cells nahi');
   assert.match(panel, /📦 Stock · TL total<\/small><b>14<\/b><em>VC4 8 · VC20 2 · VC5\+ 4/, 'stock box: total 14 + class mix');
-  assert.match(panel, /Last month · September 2026<\/small><b>70<\/b>/, 'last month box');
-  assert.match(panel, /Current MTD · October 2026<\/small><b>8<\/b>/, 'MTD box');
+  assert.match(panel, /Last month · [A-Z][a-z]+ \d{4}<\/small><b>70<\/b>/, 'last month box');   // month label aaj ki report date se (date-fixture free)
+  assert.match(panel, /Current MTD · [A-Z][a-z]+ \d{4}<\/small><b>8<\/b>/, 'MTD box');
   assert.ok(panel.includes('🎯 Suggested qty') && panel.includes('sug-chip wo') && panel.includes('🚦 Priority'), 'suggested (dono) + priority');
   assert.ok((panel.match(/tr-class-tbl/g) || []).length === 1, 'class table sirf ek');
   const foot = panel.slice(panel.indexOf('<tfoot>'), panel.indexOf('</tfoot>'));

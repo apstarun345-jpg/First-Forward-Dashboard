@@ -11,7 +11,7 @@ function setup(canExport = true) {
   const tags = Array.from({ length: 5631 }, (_, i) => ({ tagId: `TAG-${i}`, barcode: String(900000 + i), cls: 'VC4', bucket: 'GV only', gvAgent: 'Agent', age: '', remark: 'Not In FF Stock' }));
   const host = { innerHTML: '', querySelector: () => null, addEventListener() {} };
   const FF = {
-    util: { esc: (v) => String(v ?? ''), fmt: (v) => Number(v).toLocaleString('en-IN'), ymKey: () => '2026-10', dateKey: () => '2026-10-29', asValueSet: (v) => new Set(v || []), spinner: () => 'loading', toast() {} },
+    util: { esc: (v) => String(v ?? ''), fmt: (v) => Number(v).toLocaleString('en-IN'), ymKey: () => '2026-10', reportYm: () => '2026-10', dateKey: () => '2026-10-29', asValueSet: (v) => new Set(v || []), spinner: () => 'loading', toast() {} },
     model: { summary: () => ({}) }, store: {}, gv: {}, charts: { bars: () => '', donut: () => '' },
     auth: { can: (p) => p === 'export' && canExport, api: async (url) => { calls.push(url); return { total: tags.length, rows: tags }; } },
     app: { openDrawer: (opts) => { drawers.push(opts); return host; } }, pages: {}

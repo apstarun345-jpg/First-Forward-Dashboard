@@ -13,7 +13,7 @@ const prevMonthKey = (k) => { const [y, m] = k.split('-').map(Number); return m 
 const cur = ymKey(now), last = prevMonthKey(cur);
 const kycOf = vm.runInNewContext(`${/const kycOf = [^\n]+/.exec(model)[0]}; kycOf`);
 const FF = {
-  util: { esc: (v) => String(v ?? ''), fmt: (n) => String(n), ymKey, prevMonthKey, labelYM: (k) => k, spinner: () => 'spin', errorBox: (e) => String(e), stamp: () => 'x', downloadCsv() {} },
+  util: { esc: (v) => String(v ?? ''), fmt: (n) => String(n), ymKey, reportYm: () => cur, prevMonthKey, labelYM: (k) => k, spinner: () => 'spin', errorBox: (e) => String(e), stamp: () => 'x', downloadCsv() {} },
   config: {}, pages: {}, auth: { can: () => true },
   app: { openDrawer: (o) => drawers.push(o) },
   model: { loadKycPeople: async () => [
