@@ -4160,6 +4160,7 @@ async function loadStockAgeIndex() {
   const [y, m, d] = dateKeyNow().split('-').map(Number);
   const opts = { todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.', gvOutWords: (s.gvStockStatus && Array.isArray(s.gvStockStatus.outStock) && s.gvStockStatus.outStock.length ? s.gvStockStatus.outStock : ['ISSUE', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE']), compact: process.env.STOCK_AGE_COMPACT !== '0' };
   let builder = createStockAgeBuilder(opts);
+  const rec = STOCK_SNAP_ON ? stockSnapRecorder() : { add() {}, drop() {}, finish: () => Promise.reject(new Error('off')) };   // v3.125.102 — input rows ka gzip TSV (restart par seconds me index)
   // v3.122 — memory: FF pehle poora padho, phir GV page-by-page seedha builder me (pehle poora GV buffer hota tha: ~50 MB extra peak).
   const ffJob = (async () => {
     const letters = [...new Set(Object.values(ffL).filter(Boolean))];
@@ -4167,7 +4168,8 @@ async function loadStockAgeIndex() {
     await gvizPagesServer(s.sheetId, s.stockSheet || 'StockDataa', letters, ffWhere, async (rows, at) => {
       const ix = Object.fromEntries(Object.entries(ffL).map(([k, L]) => [k, L ? at(L) : -1]));
       for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
-        builder.addFf(rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ id: pick(row, ix.id), tagId: pickId(row, ix.tagId), barcode: pickId(row, ix.barcode), cls: pick(row, ix.cls), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) })));
+        const part = rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ id: pick(row, ix.id), tagId: pickId(row, ix.tagId), barcode: pickId(row, ix.barcode), cls: pick(row, ix.cls), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) }));
+        builder.addFf(part); rec.add('f', part, FF_SNAP_FIELDS);
         await yieldLoop();
       }
     });
@@ -4182,15 +4184,105 @@ async function loadStockAgeIndex() {
       await gvizPagesServer(s.gvSheetId, A.tab || 'Tag Assignment', letters, gvWhere, async (rows, at) => {
         const ix = Object.fromEntries(Object.entries(gvL).map(([k, L]) => [k, L ? at(L) : -1]));
         for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
-          builder.addGv(rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ cls: pick(row, ix.cls), tagId: pickId(row, ix.tagId), serial: pickId(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) })));
+          const part = rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ cls: pick(row, ix.cls), tagId: pickId(row, ix.tagId), serial: pickId(row, ix.serial), status: pick(row, ix.status), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), tlId: pick(row, ix.tlId), tlName: pick(row, ix.tlName), date: pick(row, ix.date) }));
+          builder.addGv(part); rec.add('g', part, GV_SNAP_FIELDS);
           await yieldLoop();
         }
       });
     } catch (err) { errors.gv = err.message; }
   }
   const index = builder.finish();
-  if (Object.keys(errors).length) index.errors = errors;
+  if (Object.keys(errors).length) { index.errors = errors; rec.drop(); }
+  else if (STOCK_SNAP_ON) rec.finish().then((gz) => stockSnapSave(gz)).catch((err) => console.warn('stock snapshot:', String(err && err.message || err).slice(0, 160)));
   return index;
+}
+// 📦 v3.125.102 — Stock index snapshot: StockDataa + Tag Assignment ki zaroori columns (gzip TSV) → /tmp + storage sheet
+// ka CACHE_STOCK tab. Deploy / restart par sheet scan (kai minute) ki jagah snapshot se index seconds me.
+const FF_SNAP_FIELDS = ['tagId', 'barcode', 'cls', 'bcDate', 'agentId', 'agentName', 'agentDate', 'tl'];
+const GV_SNAP_FIELDS = ['cls', 'tagId', 'serial', 'status', 'agentId', 'agentName', 'tlId', 'tlName', 'date'];
+const STOCK_SNAP_FILE = path.join(process.env.TMPDIR || '/tmp', 'ff-stock-snap-v1.gz');
+const STOCK_SNAP_TAB = 'CACHE_STOCK';
+const STOCK_SNAP_ON = process.env.STOCK_SNAP ? process.env.STOCK_SNAP !== '0' : !!process.env.RENDER;   // local tests me band (purana snapshot test data na bigade)
+const snapCell = (v) => String(v == null ? '' : v).replace(/[\t\n\r]/g, ' ');
+function stockSnapRecorder() {
+  let gz = zlib.createGzip({ level: 6 }); const bufs = []; let dead = false;
+  gz.on('data', (b) => bufs.push(b)); gz.on('error', () => { dead = true; });
+  return {
+    add(kind, part, fields) { if (dead) return; gz.write(part.map((r) => `${kind}\t${fields.map((f) => snapCell(r[f])).join('\t')}`).join('\n') + '\n'); },
+    drop() { dead = true; try { gz.destroy(); } catch { /* ignore */ } },
+    finish() { return new Promise((resolve, reject) => { if (dead) return reject(new Error('dropped')); gz.on('end', () => resolve(Buffer.concat(bufs))); gz.end(); }); }
+  };
+}
+const stockSnapVerSig = () => { try { return dailyTabs().filter((t) => t.label !== 'EIR').map((t) => dailySig(t.key)).join('|'); } catch { return ''; } };
+async function stockSnapSave(gz) {
+  const meta = { v: 1, kind: 'stock', at: Date.now(), key: stockAgeKey(), ver: stockSnapVerSig(), bytes: gz.length };
+  try { writeFileSync(STOCK_SNAP_FILE, gz); writeFileSync(`${STOCK_SNAP_FILE}.json`, JSON.stringify(meta)); } catch { /* optional */ }
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return;
+  const b64 = gz.toString('base64');
+  const parts = []; for (let i = 0; i < b64.length; i += SNAP_CHUNK) parts.push(b64.slice(i, i + SNAP_CHUNK));
+  if (parts.length > 600) { console.warn(`stock snapshot: ${Math.round(b64.length / 1048576)} MB — sheet ke liye bada, sirf /tmp`); return; }
+  const prevN = stockSnapLastParts;
+  // pehle data rows (20 ek call me), phir header — beech me crash ho to purana header naye adhure data ko point na kare
+  try {
+    await sheetsStore.call('writecells', { spreadsheetId: '', tab: STOCK_SNAP_TAB, column: 'A', writes: [{ row: 1, value: '' }] });
+    for (let i = 0; i < parts.length; i += 20) {
+      await sheetsStore.call('writecells', { spreadsheetId: '', tab: STOCK_SNAP_TAB, column: 'A', writes: parts.slice(i, i + 20).map((v, j) => ({ row: i + j + 2, value: v })) });
+    }
+    const extra = []; for (let r = parts.length + 2; r < Math.max(prevN, parts.length) + 2 + 3; r++) extra.push({ row: r, value: '' });
+    await sheetsStore.call('writecells', { spreadsheetId: '', tab: STOCK_SNAP_TAB, column: 'A', writes: [{ row: 1, value: JSON.stringify({ ...meta, n: parts.length }) }, ...extra] });
+    stockSnapLastParts = parts.length;
+    console.log(`stock snapshot: saved (${parts.length} chunk, ${Math.round(gz.length / 1024)} KB gzip)`);
+  } catch (err) { console.warn('stock snapshot save:', String(err && err.message || err).slice(0, 200)); }
+}
+let stockSnapLastParts = 0, stockSnapLoading = null;
+/** Snapshot (pehle /tmp, phir sheet) se index banao. true = index ready. */
+function stockSnapLoad() {
+  if (!STOCK_SNAP_ON) return Promise.resolve(false);
+  if (stockSnapLoading) return stockSnapLoading;
+  stockSnapLoading = (async () => {
+    let gz = null, meta = null;
+    try {
+      if (existsSync(STOCK_SNAP_FILE) && existsSync(`${STOCK_SNAP_FILE}.json`)) { meta = JSON.parse(readFileSync(`${STOCK_SNAP_FILE}.json`, 'utf8')); gz = readFileSync(STOCK_SNAP_FILE); }
+    } catch { gz = null; meta = null; }
+    if ((!gz || !meta) && sheetsStore && typeof sheetsStore.call === 'function') {
+      try {
+        const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: STOCK_SNAP_TAB, startRow: 1, columns: ['A'] });
+        const rows = (out && out.rows) || [];
+        meta = JSON.parse((rows[0] && rows[0][0]) || 'null');
+        if (meta && meta.n) { gz = Buffer.from(rows.slice(1, 1 + meta.n).map((r) => r[0] || '').join(''), 'base64'); stockSnapLastParts = meta.n; }
+      } catch (err) { console.warn('stock snapshot read:', String(err && err.message || err).slice(0, 160)); }
+    }
+    if (!gz || !meta || meta.kind !== 'stock' || meta.key !== stockAgeKey() || Date.now() - meta.at > DAILY_MAX_MS) return false;
+    if (stockAgeState.index) return true;
+    const s = db.settings || {};
+    const [y, m, d] = dateKeyNow().split('-').map(Number);
+    const builder = createStockAgeBuilder({ todayDay: Date.UTC(y, m - 1, d) / 86400e3, masterId: (s.eir && s.eir.gvMasterId) || '5845036', parkedTl: (s.eir && s.eir.gvChannelTl) || 'ApnaPayment Pvt. Ltd.', gvOutWords: (s.gvStockStatus && Array.isArray(s.gvStockStatus.outStock) && s.gvStockStatus.outStock.length ? s.gvStockStatus.outStock : ['ISSUE', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE']), compact: process.env.STOCK_AGE_COMPACT !== '0' });
+    const text = zlib.gunzipSync(gz).toString('utf8'); gz = null;
+    const toObj = (cells, fields) => { const o = {}; fields.forEach((f, i) => { o[f] = cells[i + 1] || ''; }); return o; };
+    let ffB = [], gvB = [], pos = 0, nf = 0, ng = 0;
+    // FF poora pehle, phir GV (builder ko GV ki umr StockDataa se chahiye) — file me isi order me likha hai
+    while (pos < text.length) {
+      let nl = text.indexOf('\n', pos); if (nl < 0) nl = text.length;
+      const line = text.slice(pos, nl); pos = nl + 1;
+      if (!line) continue;
+      const cells = line.split('\t');
+      if (cells[0] === 'f') { ffB.push(toObj(cells, FF_SNAP_FIELDS)); nf++; if (ffB.length >= STOCK_AGE_CHUNK) { builder.addFf(ffB); ffB = []; await yieldLoop(); } }
+      else if (cells[0] === 'g') { if (ffB.length) { builder.addFf(ffB); ffB = []; } gvB.push(toObj(cells, GV_SNAP_FIELDS)); ng++; if (gvB.length >= STOCK_AGE_CHUNK) { builder.addGv(gvB); gvB = []; await yieldLoop(); } }
+    }
+    if (ffB.length) builder.addFf(ffB);
+    if (gvB.length) builder.addGv(gvB);
+    if (stockAgeState.index) return true;   // beech me asli scan pura ho gaya
+    stockAgeState.index = builder.finish();
+    stockAgeState.key = stockAgeKey();
+    stockAgeState.at = meta.at;
+    stockAgeState.verSig = meta.ver || '';
+    if (!existsSync(STOCK_SNAP_FILE)) { try { writeFileSync(STOCK_SNAP_FILE, zlib.gzipSync(text)); writeFileSync(`${STOCK_SNAP_FILE}.json`, JSON.stringify(meta)); } catch { /* optional */ } }
+    console.log(`stock index: snapshot se (${Math.round((Date.now() - meta.at) / 60e3)} min purana · FF ${nf} · GV ${ng})`);
+    setImmediate(() => { try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ } });
+    return true;
+  })().catch((err) => { console.warn('stock snapshot load:', String(err && err.message || err).slice(0, 160)); return false; })
+    .finally(() => { stockSnapLoading = null; });
+  return stockSnapLoading;
 }
 const stockAgeKey = () => JSON.stringify([db.settings.sheetId, db.settings.gvSheetId, db.settings.stockSheet, db.settings.stock, db.settings.gv && db.settings.gv.assignment]);
 /** Naya index banao (single-flight). Purana accha index ho to adhure / fail result se replace nahi hota. */
@@ -4434,6 +4526,7 @@ async function complaintsMailTick() {
 function complaintsAllowed(user) { return !!user && (user.role === 'admin' || (user.permissions || []).includes('complaints')); }
 
 async function stockAgeIndex(fresh) {
+  if (!fresh && !stockAgeState.index && stockSnapLoading) await stockSnapLoading;   // snapshot aa raha hai — double scan nahi
   const key = stockAgeKey();
   const have = stockAgeState.index && stockAgeState.key === key ? stockAgeState.index : null;
   if (have && !fresh) {
@@ -13938,7 +14031,9 @@ async function start() {
     if (CLOUD_BACKEND) setTimeout(() => recoveryHint().catch(() => {}), 20000).unref?.();
     // 🧓 Stock ageing index pehle se bana lo (pehla user 1-2 min intezaar na kare). Render par default ON; STOCK_AGE_WARM=0 se band.
     const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
-    if (warmStockAge) setTimeout(() => stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)), 45e3).unref();   // pehle user ke Home loads (EIR/StockDataa) ke baad
+    // 📦 v3.125.102 — pehle snapshot (seconds); na mile tab 45 s baad poora scan
+    const snapP = stockSnapLoad();
+    if (warmStockAge) setTimeout(() => { Promise.resolve(snapP).then((ok) => { if (!ok) stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)); }); }, 45e3).unref();   // pehle user ke Home loads (EIR/StockDataa) ke baad
     // 🔗 FASTag Mapping ka StockDataa lookup index bhi pehle se garam rakho — pehla Quick Map instant ho.
     // v3.72: boot ke 25 s ke bajaye 6 s baad shuru, aur fail (jaise Google rate limit) hone par
     // 30 s / 2 min / 5 min ke gaps me dobara — pehla user "sheet load nahi ho rahi" me na atke.
