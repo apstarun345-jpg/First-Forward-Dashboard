@@ -13,20 +13,23 @@ function load() {
   return FF.pages.tagIssued._test;
 }
 
-test('agent report: GV from GV Master, FF TL from REPORT, TLs + direct sheets, performance', () => {
+test('agent report: GV counts from the same EIR rows as KPI; Master only enriches TL identity', () => {
   const t = load();
   const m = { from: '2026-10-26', to: '2026-10-26', prevFfRange: ['2026-10-25', '2026-10-25'], prevGvRange: ['2026-10-25', '2026-10-25'], ff: { total: 10 }, gv: { total: 8 } };
-  const gvRow = (o) => ({ date: o.d, group: 'VC4', cls: 'VC4', agentId: o.id, agentName: o.name, tlName: o.tl || '', tlId: o.tlId || '' });
+  const gvRow = (o) => ({ date: o.d, group: o.group || 'VC4', cls: o.cls || 'VC4', agentId: o.id, agentName: o.name, tlName: o.tl || '', tlId: o.tlId || '' });
   const rawGvMaster = [
     ...Array(5).fill(0).map(() => gvRow({ d: '2026-10-26', id: 'G1', name: 'Gv One', tl: 'TL A', tlId: 'T1' })),
     ...Array(2).fill(0).map(() => gvRow({ d: '2026-10-25', id: 'G1', name: 'Gv One', tl: 'TL A', tlId: 'T1' })),
-    ...Array(3).fill(0).map(() => ({ ...gvRow({ d: '2026-10-26', id: 'G2', name: 'Gv Two' }), group: 'VC20' }))
+    ...Array(3).fill(0).map(() => ({ ...gvRow({ d: '2026-10-26', id: 'G2', name: 'Gv Two' }), group: 'VC20' })),
+    ...Array(12).fill(0).map(() => gvRow({ d: '2026-10-26', id: 'MASTER-ONLY', name: 'Master Only Agent' }))
   ];
   const dailyRows = [
     { channel: 'First Forward', agentId: 'F1', agentName: 'Ff One', key: '2026-10-26', group: 'VC5+', n: 9 },
     { channel: 'First Forward', agentId: 'F2', agentName: 'Ff Two', key: '2026-10-26', group: 'VC4', n: 1 },
     { channel: 'First Forward', agentId: 'F2', agentName: 'Ff Two', key: '2026-10-25', group: 'VC4', n: 4 },
-    { channel: 'GV Partner', agentId: '', agentName: '', key: '2026-10-26', group: 'VC4', n: 8 }   // EIR GV rows are not used for agent detail
+    { channel: 'GV Partner', agentId: 'G1', agentName: 'Gv One', tlName: 'TL A', tlId: 'T1', key: '2026-10-26', group: 'VC4', n: 5 },
+    { channel: 'GV Partner', agentId: 'G1', agentName: 'Gv One', tlName: 'TL A', tlId: 'T1', key: '2026-10-25', group: 'VC4', n: 2 },
+    { channel: 'GV Partner', agentId: 'G2', agentName: 'Gv Two', key: '2026-10-26', group: 'VC20', n: 3 }
   ];
   const dir = { ff: (id) => (id === 'F1' ? { name: 'Ff One', tlName: 'TL B', tlId: 'T9', mobile: '9000000001' } : null), gv: (id) => (id === 'G1' ? '9000000002' : '') };
   const inputs = t.reportInputs({ dailyRows, rawGvMaster }, dir);
@@ -36,7 +39,7 @@ test('agent report: GV from GV Master, FF TL from REPORT, TLs + direct sheets, p
   const g1 = both.list[1]; assert.equal(g1.perf, 150); assert.equal(g1.status, '▲ Up'); assert.equal(g1.mobile, '9000000002');
   assert.equal(both.list[2].direct, true); assert.equal(both.list[2].status, '★ New');
   const f2 = both.list[3]; assert.equal(f2.direct, true); assert.equal(f2.perf, -75); assert.equal(f2.status, '▼ Down');
-  assert.equal(both.chTot.ff, 10); assert.equal(both.chTot.gv, 8);
+  assert.equal(both.chTot.ff, 10); assert.equal(both.chTot.gv, 8); assert.equal(both.grandTotal, 18); assert.ok(!both.list.some((o) => o.name === 'Master Only Agent'), 'GV Master rows must not add historical report counts');
   const sheets = t.reportSheets(both, m, 'both');
   assert.equal(sheets.map((s) => s.name).join('|'), 'TLs (GV + FF)|Direct Agents (GV + FF)|Agents under TLs (GV + FF)|Info');
   const tls = sheets[0].rows;
@@ -49,6 +52,19 @@ test('agent report: GV from GV Master, FF TL from REPORT, TLs + direct sheets, p
   assert.equal(gvOnly[0].name, 'TLs (GV)'); assert.equal(gvOnly[0].rows[0][2], 'TL A');
   const csv = t.reportCsv(both);
   assert.equal(csv.head[3], 'Mobile'); assert.equal(csv.head[6], 'Type'); assert.ok(csv.head.includes('Performance'));
+});
+
+
+test('GV report retains EIR counts even when an EIR row has no agent identity', () => {
+  const t = load();
+  const m = { from: '2026-10-26', to: '2026-10-26', prevGvRange: null };
+  const dailyRows = [{ channel: 'GV Partner', agentId: '', agentName: '', key: '2026-10-26', group: 'VC4', n: 7 }];
+  const inputs = t.reportInputs({ dailyRows, rawGvMaster: [] }, { ff: () => null, gv: () => '' });
+  const rep = t.buildAgentReport(inputs, m, 'gv');
+  assert.equal(rep.chTot.gv, 7);
+  assert.equal(rep.grandTotal, 7);
+  assert.equal(rep.list[0].name, 'GV EIR · agent details unavailable');
+  assert.equal(rep.list[0].total, 7);
 });
 
 test('Tag Issued toolbar has the Report dropdown with GV / FF / GV+FF', () => {
