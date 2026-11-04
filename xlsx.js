@@ -58,6 +58,32 @@ window.FF = window.FF || {};
     if (typeof value === 'boolean') return `<c r="${ref}" t="b"${style ? ` s="${style}"` : ''}><v>${value ? 1 : 0}</v></c>`;
     return `<c r="${ref}" t="inlineStr"${style ? ` s="${style}"` : ''}><is><t xml:space="preserve">${xmlEsc(value)}</t></is></c>`;
   }
+  /* 🎨 v3.125.98 — optional named styles (sheet.styleOf(rowIdx, colIdx, value) / sheet.headStyleOf(colIdx) → name).
+     Ids 0-3 built-in (normal, header, date, datetime). Fill colours ARGB. */
+  const FILL = ['FFFEF3C7', 'FFDCFCE7', 'FFEFF6FF', 'FFFDF2F8', 'FFE5E7EB', 'FF1F2937', 'FF0F766E', 'FFB45309', 'FFF3F4F6', 'FF1D4ED8', 'FFECFDF5', 'FFFEF2F2', 'FFF5F3FF'];
+  const FILLID = (argb) => 3 + FILL.indexOf(argb);   // 0 none, 1 gray125, 2 header indigo
+  // fonts: 0 normal, 1 bold white, 2 bold, 3 bold green, 4 bold red, 5 gray, 6 bold dark
+  const NAMED = {
+    num:        { font: 0, fill: 0, fmt: 3 },
+    total:      { font: 2, fill: FILLID('FFFEF3C7'), fmt: 3 },     // Total column — amber tint
+    monTotal:   { font: 6, fill: FILLID('FFDCFCE7'), fmt: 3 },     // month Total — green tint
+    monA:       { font: 0, fill: FILLID('FFEFF6FF'), fmt: 3 },     // month class cols (alternate tints)
+    monB:       { font: 0, fill: FILLID('FFFDF2F8'), fmt: 3 },
+    rowTotal:   { font: 2, fill: FILLID('FFE5E7EB'), fmt: 3 },
+    rowGrand:   { font: 1, fill: FILLID('FF1F2937'), fmt: 3 },
+    up:         { font: 3, fill: FILLID('FFECFDF5'), fmt: 0 },
+    down:       { font: 4, fill: FILLID('FFFEF2F2'), fmt: 0 },
+    flat:       { font: 5, fill: 0, fmt: 0 },
+    pct:        { font: 0, fill: 0, fmt: 0 },
+    prev:       { font: 5, fill: FILLID('FFF3F4F6'), fmt: 3 },
+    hMonth:     { font: 1, fill: FILLID('FF0F766E'), fmt: 0 },
+    hTotal:     { font: 1, fill: FILLID('FFB45309'), fmt: 0 },
+    hPerf:      { font: 1, fill: FILLID('FF1D4ED8'), fmt: 0 },
+    hPrev:      { font: 1, fill: FILLID('FF1F2937'), fmt: 0 },
+    label:      { font: 2, fill: FILLID('FFF5F3FF'), fmt: 0 }
+  };
+  const NAMED_KEYS = Object.keys(NAMED);
+  const styleId = (name) => { const i = NAMED_KEYS.indexOf(name); return i < 0 ? 0 : 4 + i; };
   function sheetXml(sheet) {
     const header = sheet.header || [];
     const rows = sheet.rows || [];
@@ -66,8 +92,14 @@ window.FF = window.FF || {};
     const cols = widths.length ? `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` : '';
     let body = '';
     let r = 1;
-    if (header.length) { body += `<row r="${r}">${header.map((v, c) => cellXml(v, r, c, 1)).join('')}</row>`; r++; }
-    for (const row of rows) { body += `<row r="${r}">${row.map((v, c) => cellXml(v, r, c, 0)).join('')}</row>`; r++; }
+    const hs = typeof sheet.headStyleOf === 'function' ? sheet.headStyleOf : null;
+    const cs = typeof sheet.styleOf === 'function' ? sheet.styleOf : null;
+    if (header.length) { body += `<row r="${r}">${header.map((v, c) => cellXml(v, r, c, (hs && hs(c, v)) ? styleId(hs(c, v)) : 1)).join('')}</row>`; r++; }
+    rows.forEach((row, ri) => {
+      // styled rows: khaali cells bhi fill ho (total row poori rangeen dikhe)
+      body += `<row r="${r}">${row.map((v, c) => { const st = cs ? cs(ri, c, v) : ''; const id = st ? styleId(st) : 0; if (id && (v === '' || v === null || v === undefined) && /^row/.test(st)) return `<c r="${colName(c)}${r}" s="${id}"/>`; return cellXml(v, r, c, id); }).join('')}</row>`;
+      r++;
+    });
     const lastCol = colName(Math.max(0, header.length - 1));
     const dim = `A1:${lastCol}${Math.max(1, r - 1)}`;
     // filterRows: limit the header auto-filter to the first N rows (e.g. pivot only, excluding
@@ -77,6 +109,19 @@ window.FF = window.FF || {};
   }
   const safeName = (n, i) => (String(n || `Sheet${i + 1}`).replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 31) || `Sheet${i + 1}`);
 
+  function stylesXml() {
+    const fonts = ['<font><sz val="11"/><name val="Calibri"/></font>', '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>',
+      '<font><b/><sz val="11"/><name val="Calibri"/></font>', '<font><b/><sz val="11"/><color rgb="FF15803D"/><name val="Calibri"/></font>',
+      '<font><b/><sz val="11"/><color rgb="FFB91C1C"/><name val="Calibri"/></font>', '<font><sz val="11"/><color rgb="FF6B7280"/><name val="Calibri"/></font>',
+      '<font><b/><sz val="11"/><color rgb="FF14532D"/><name val="Calibri"/></font>'];
+    const fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>', '<fill><patternFill patternType="solid"><fgColor rgb="FF4F46E5"/><bgColor indexed="64"/></patternFill></fill>',
+      ...FILL.map((c) => `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor indexed="64"/></patternFill></fill>`)];
+    const xf = (font, fill, fmt) => `<xf numFmtId="${fmt}" fontId="${font}" fillId="${fill}" borderId="${fill > 2 ? 1 : 0}" xfId="0"${font ? ' applyFont="1"' : ''}${fill ? ' applyFill="1"' : ''}${fmt ? ' applyNumberFormat="1"' : ''}${fill > 2 ? ' applyBorder="1"' : ''}/>`;
+    const xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>', '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>',
+      '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>', '<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>',
+      ...NAMED_KEYS.map((k) => xf(NAMED[k].font, NAMED[k].fill, NAMED[k].fmt))];
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="dd\\/mm\\/yyyy"/><numFmt numFmtId="165" formatCode="dd\\/mm\\/yyyy\\ hh:mm"/></numFmts><fonts count="${fonts.length}">${fonts.join('')}</fonts><fills count="${fills.length}">${fills.join('')}</fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFE5E7EB"/></left><right style="thin"><color rgb="FFE5E7EB"/></right><top style="thin"><color rgb="FFE5E7EB"/></top><bottom style="thin"><color rgb="FFE5E7EB"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${xfs.join('')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  }
   /** sheets: [{ name, header: [], rows: [[]] }] */
   function build(sheets) {
     const names = []; sheets.forEach((s, i) => { let n = safeName(s.name, i); let k = 2; while (names.includes(n)) n = `${n.slice(0, 28)} ${k++}`; names.push(n); });
@@ -85,7 +130,7 @@ window.FF = window.FF || {};
       { name: '_rels/.rels', data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`) },
       { name: 'xl/workbook.xml', data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${names.map((n, i) => `<sheet name="${xmlEsc(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`) },
       { name: 'xl/_rels/workbook.xml.rels', data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`) },
-      { name: 'xl/styles.xml', data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="dd\/mm\/yyyy"/><numFmt numFmtId="165" formatCode="dd\/mm\/yyyy\ hh:mm"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF4F46E5"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`) }
+      { name: 'xl/styles.xml', data: enc.encode(stylesXml()) }
     ];
     sheets.forEach((s, i) => files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, data: enc.encode(sheetXml(s)) }));
     return zip(files);

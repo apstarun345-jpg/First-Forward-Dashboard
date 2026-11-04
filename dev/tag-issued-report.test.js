@@ -76,9 +76,12 @@ test('agent report: custom multi-month range adds month-wise VC4 / VC20 / VC5+ c
   assert.equal(JSON.stringify(rep.months), JSON.stringify(['2026-09', '2026-10', '2026-11']));
   const sheets = t.reportSheets(rep, m, 'ff');
   assert.equal(sheets[0].name, 'Month-wise summary');
-  assert.equal(JSON.stringify(sheets[0].rows[0].slice(2)), JSON.stringify(['FF', 5, 0, 0, 5]));
+  assert.equal(JSON.stringify(sheets[0].rows[0].slice(2, 7)), JSON.stringify(['FF', 5, 0, 0, 5]));
   const tl = sheets[1];
   assert.ok(tl.header.includes('Sep 26 VC4') && tl.header.includes('Nov 26 Total'));
   const i = tl.header.indexOf('Oct 26 VC20'); assert.equal(tl.rows[0][i], 2);
+  assert.ok(tl.header.includes('Oct 26 vs Sep 26 %'));   // Nov partial → last two full months compared
+  assert.equal(tl.rows[0][tl.header.indexOf('Oct 26 vs Sep 26 %')], -60);
+  assert.equal(typeof tl.styleOf, 'function');
   const csv = t.reportCsv(rep); assert.equal(csv.rows[0][csv.head.indexOf('Nov 26 VC5+')], 1);
 });

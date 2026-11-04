@@ -631,7 +631,8 @@ FF.pages = FF.pages || {};
   /** Per-agent records (current period = the card's dates; previous = like-for-like range). */
   function buildAgentReport(inputs, m, which) {
     const per = { ff: { cur: [m.from, m.to], prev: m.prevFfRange, prev2: m.prevFf2Range }, gv: { cur: [m.from, m.to], prev: m.prevGvRange, prev2: m.prevGv2Range } };
-    const out = new Map(), months = new Set();
+    const out = new Map(), months = new Set(), first = { ff: '', gv: '' };
+    for (const r of inputs) { const k = String(r.dateKey || ''); if (k && (!first[r.ch] || k < first[r.ch])) first[r.ch] = k; }
     for (const r of inputs) {
       if (which !== 'both' && which !== r.ch) continue;
       const pp = per[r.ch];
@@ -658,7 +659,9 @@ FF.pages = FF.pages || {};
     for (const o of list) { o.change = o.total - o.prev; o.perf = perfPct(o.total, o.prev); o.status = perfStatus(o.total, o.prev); o.share = grandTotal ? r1((o.total / grandTotal) * 100) : 0; }
     list.sort((a, b) => b.total - a.total || b.prev - a.prev || String(a.name).localeCompare(String(b.name)));
     const chTot = { ff: 0, gv: 0 }; list.forEach((o) => { chTot[o.ch] += o.total; });
-    return { list, grandTotal, chTot, months: [...months].filter((x) => /^\d{4}-\d{2}$/.test(x)).sort() };
+    // prev period ka data load hi nahi hua (sabse purani row prev ke shuru se baad ki) → n/a
+    const prevNA = { ff: !!(per.ff.prev && (!first.ff || first.ff > per.ff.prev[0])), gv: !!(per.gv.prev && (!first.gv || first.gv > per.gv.prev[0])) };
+    return { list, grandTotal, chTot, prevNA, first, months: [...months].filter((x) => /^\d{4}-\d{2}$/.test(x)).sort() };
   }
 
   /** One row per real TL (both channels together), highest → lowest. */
@@ -692,31 +695,117 @@ FF.pages = FF.pages || {};
   const monHead = (months) => months.flatMap((ym) => [`${monLabel(ym)} VC4`, `${monLabel(ym)} VC20`, `${monLabel(ym)} VC5+`, `${monLabel(ym)} Total`]);
   const monCells = (mon, months) => months.flatMap((ym) => { const v = (mon || {})[ym] || {}; return [v.vc4 || 0, v.vc20 || 0, v.vc5 || 0, v.total || 0]; });
   const monSum = (list) => { const t = {}; for (const o of list) for (const [ym, v] of Object.entries(o.mon || {})) { const x = t[ym] || (t[ym] = { vc4: 0, vc20: 0, vc5: 0, total: 0 }); x.vc4 += v.vc4; x.vc20 += v.vc20; x.vc5 += v.vc5; x.total += v.total; } return t; };
+  const ymDays = (ym) => new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0)).getUTCDate();
+  const fullMonth = (ym, from, to) => from <= `${ym}-01` && to >= `${ym}-${String(ymDays(ym)).padStart(2, '0')}`;
+  /** Report sheets. 2+ months → month-wise layout (Prev columns ki jagah month-over-month analysis), 1 period → classic.
+   *  Har sheet par Excel styles: Total / month-total columns rangeen, total rows grey, grand total dark, performance green/red. */
   function reportSheets(rep, m, which) {
     const months = (rep.months && rep.months.length > 1) ? rep.months : [];
-    const sheets = reportSheets0(rep, m, which);
-    if (!months.length) return sheets;
-    const addMon = (sh, lists) => {
-      sh.header = [...sh.header, ...monHead(months)];
-      sh.rows = sh.rows.map((row, i) => { const l = lists[i]; return [...row, ...(l === null ? Array(months.length * 4).fill('') : monCells(l, months))]; });
+    const sheets = months.length ? reportSheetsMonthly(rep, m, which, months) : reportSheets0(rep, m, which);
+    if (!months.length) blankMissingPrev(sheets, rep);
+    sheets.forEach(styleSheet);
+    return sheets;
+  }
+  /** Prev period ka data load hi nahi (EIR window chhota) → 0 nahi, khaali + "n/a" (galat ▲ New / +5000% nahi). */
+  function blankMissingPrev(sheets, rep) {
+    const na = rep.prevNA || {};
+    if (!na.ff && !na.gv) return;
+    for (const sh of sheets) {
+      const H = sh.header, ci = H.indexOf('Channel');
+      const cols = ['Prev-2 total', 'Prev total', 'Change', 'Performance %'].map((h) => H.indexOf(h)).filter((i) => i >= 0), pi = H.indexOf('Performance');
+      if (!cols.length) continue;
+      sh.rows.forEach((row) => {
+        if (row.every((x) => x === '')) return;
+        const ch = ci >= 0 ? String(row[ci]) : '';
+        const hit = ch === 'FF' ? na.ff : ch === 'GV' ? na.gv : (na.ff || na.gv);
+        if (!hit) return;
+        cols.forEach((i) => { row[i] = ''; });
+        if (pi >= 0) row[pi] = 'n/a · prev data not loaded';
+      });
+    }
+  }
+  function styleSheet(sh) {
+    const H = sh.header;
+    const isMonCol = (h) => /^[A-Z][a-z]{2} \d{2} (VC4|VC20|VC5\+|Total)$/.test(h);
+    const monIdx = (h) => { const k = h.slice(0, 6); return [...new Set(H.filter(isMonCol).map((x) => x.slice(0, 6)))].indexOf(k); };
+    const labelCol = 2;
+    sh.headStyleOf = (c) => { const h = H[c] || ''; return isMonCol(h) ? (/Total$/.test(h) ? 'hTotal' : 'hMonth') : /^Total$|^Avg/.test(h) ? 'hTotal' : /Performance|vs .* %|^Growth/.test(h) ? 'hPerf' : /^Prev|^Change/.test(h) ? 'hPrev' : ''; };
+    sh.styleOf = (ri, c, v) => {
+      const row = sh.rows[ri] || [], h = H[c] || '';
+      const lab = `${row[labelCol] || ''} ${row[0] || ''}`;
+      if (/GRAND TOTAL/.test(lab)) return 'rowGrand';
+      if (/TOTAL/.test(lab) || (sh.name === 'Month-wise summary' && row[2] === 'GV + FF')) return 'rowTotal';
+      if (h === 'Performance' || /^Growth$/.test(h)) return /Up|New|▲/.test(v) ? 'up' : /Down|No issuance|▼/.test(v) ? 'down' : v ? 'flat' : '';
+      if (/Performance %|vs .* %|Growth %/.test(h)) return typeof v === 'number' ? (v > 0 ? 'up' : v < 0 ? 'down' : 'flat') : '';
+      if (h === 'Total') return 'total';
+      if (/^Avg/.test(h)) return 'total';
+      if (isMonCol(h)) return /Total$/.test(h) ? 'monTotal' : (monIdx(h) % 2 ? 'monB' : 'monA');
+      if (/^Prev|^Change/.test(h)) return 'prev';
+      return typeof v === 'number' ? 'num' : '';
     };
+  }
+  /** Multi-month report: classes + Total + Avg/month + last full month vs month before + Share, phir har mahine ke columns. */
+  function reportSheetsMonthly(rep, m, which, months) {
+    const full = months.filter((ym) => fullMonth(ym, m.from, m.to));
+    const cmp = full.length >= 2 ? full.slice(-2) : months.slice(-2);   // [B, A]
+    const [B, A] = cmp;
+    const avgBase = full.length ? full : months;
+    const avgOf = (mon) => Math.round(avgBase.reduce((a, ym) => a + (((mon || {})[ym] || {}).total || 0), 0) / avgBase.length);
+    const vA = (mon) => (((mon || {})[A] || {}).total || 0), vB = (mon) => (((mon || {})[B] || {}).total || 0);
+    const cmpH = `${monLabel(A)} vs ${monLabel(B)} %`, cmpS = 'Performance';
+    const tail = (mon, total) => [total, avgOf(mon), perfCell(vA(mon), vB(mon)), perfStatus(vA(mon), vB(mon)), rep.grandTotal ? r1((total / rep.grandTotal) * 100) : 0];
     const tlAgents = rep.list.filter((o) => !o.direct), direct = rep.list.filter((o) => o.direct);
     const piv = tlPivot(rep.list);
-    addMon(sheets[0], [...piv.map((x) => x.mon), null, monSum(tlAgents), monSum(direct), monSum(rep.list)]);
-    addMon(sheets[1], [...direct.map((o) => o.mon), ...(direct.length ? [monSum(direct)] : [])]);
-    addMon(sheets[2], [...tlAgents.map((o) => o.mon), ...(tlAgents.length ? [monSum(tlAgents)] : [])]);
-    // naya pehla sheet: Month-wise summary
-    const chs = which === 'both' ? ['ff', 'gv'] : [which];
-    const rows = [];
-    for (const ym of months) {
-      const per = chs.map((ch) => { const v = monSum(rep.list.filter((o) => o.ch === ch))[ym] || { vc4: 0, vc20: 0, vc5: 0, total: 0 }; return [ch, v]; });
-      for (const [ch, v] of per) rows.push([monLabel(ym), ym, chName(ch), v.vc4, v.vc20, v.vc5, v.total]);
-      if (per.length > 1) { const s = per.reduce((a, [, v]) => ({ vc4: a.vc4 + v.vc4, vc20: a.vc20 + v.vc20, vc5: a.vc5 + v.vc5, total: a.total + v.total }), { vc4: 0, vc20: 0, vc5: 0, total: 0 }); rows.push([monLabel(ym), ym, 'GV + FF', s.vc4, s.vc20, s.vc5, s.total]); }
-    }
-    const all = monSum(rep.list); const g = months.reduce((a, ym) => { const v = all[ym] || {}; return { vc4: a.vc4 + (v.vc4 || 0), vc20: a.vc20 + (v.vc20 || 0), vc5: a.vc5 + (v.vc5 || 0), total: a.total + (v.total || 0) }; }, { vc4: 0, vc20: 0, vc5: 0, total: 0 });
-    rows.push(['', '', '', '', '', '', ''], ['GRAND TOTAL', `${m.from} to ${m.to}`, chs.length > 1 ? 'GV + FF' : chName(chs[0]), g.vc4, g.vc20, g.vc5, g.total]);
-    sheets.unshift({ name: 'Month-wise summary', header: ['Month', 'YYYY-MM', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total'], rows });
-    return sheets;
+    const both = which === 'both';
+    const active = (l) => l.filter((o) => o.total > 0).length;
+    const TL_HEAD = ['Rank', 'TL ID', 'TL Name', 'Channel', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', `Avg / month (${avgBase.length})`, cmpH, cmpS, 'Share %', ...monHead(months)];
+    const tlLine = (label, list) => { const t = sumOf(list), mon = monSum(list); return ['', '', label, '', active(list), t.vc4, t.vc20, t.vc5, ...tail(mon, t.total), ...monCells(mon, months)]; };
+    const tlRows = [...piv.map((x, i) => [i + 1, x.id, x.name, chName(x.ch), x.agents, x.vc4, x.vc20, x.vc5, ...tail(x.mon, x.total), ...monCells(x.mon, months)]),
+      Array(TL_HEAD.length).fill(''), tlLine('TOTAL · all TLs (agents under TLs)', tlAgents), tlLine('TOTAL · direct agents', direct), tlLine('GRAND TOTAL', rep.list)];
+    const AG_HEAD = ['Rank', 'Agent ID', 'Agent Name', 'Mobile', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', `Avg / month (${avgBase.length})`, cmpH, cmpS, 'Share %', ...monHead(months)];
+    const agRows = (list, label) => {
+      const rows = list.map((o, i) => [i + 1, o.id, o.name, o.mobile || '', o.tlName, o.tlId, chName(o.ch), o.vc4, o.vc20, o.vc5, ...tail(o.mon, o.total), ...monCells(o.mon, months)]);
+      if (list.length) { const t = sumOf(list), mon = monSum(list); rows.push(['', '', label, '', '', '', '', t.vc4, t.vc20, t.vc5, ...tail(mon, t.total), ...monCells(mon, months)]); }
+      return rows;
+    };
+    // Month-wise summary: har mahine × channel, pichhle mahine se change / growth
+    const chs = both ? ['ff', 'gv'] : [which];
+    const SUM_HEAD = ['Month', 'Period', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'VC4 %', 'Commercial (VC20+VC5+)', 'Change vs prev month', 'Growth %', 'Growth', 'Days', 'Per day'];
+    const sumRows = [];
+    const per = {}; chs.forEach((ch) => { per[ch] = monSum(rep.list.filter((o) => o.ch === ch)); }); per.all = monSum(rep.list);
+    const dOf = (ym) => { const a = m.from > `${ym}-01` ? m.from : `${ym}-01`, last = `${ym}-${String(ymDays(ym)).padStart(2, '0')}`, b = m.to < last ? m.to : last; return [a, b, dayCount(a, b)]; };
+    const lineFor = (ym, i, key, chLabel) => {
+      const v = per[key][ym] || { vc4: 0, vc20: 0, vc5: 0, total: 0 };
+      const pv = i > 0 ? ((per[key][months[i - 1]] || {}).total || 0) : null;
+      const [a, b, d] = dOf(ym);
+      const partial = !fullMonth(ym, m.from, m.to);
+      return [`${monLabel(ym)}${partial ? ' (partial)' : ''}`, `${a} → ${b}`, chLabel, v.vc4, v.vc20, v.vc5, v.total, v.total ? r1((v.vc4 / v.total) * 100) : 0, v.vc20 + v.vc5,
+        pv === null ? '' : v.total - pv, pv === null || partial ? '' : perfCell(v.total, pv), pv === null ? '—' : partial ? 'partial month' : perfStatus(v.total, pv), d, d ? r1(v.total / d) : 0];
+    };
+    months.forEach((ym, i) => {
+      chs.forEach((ch) => sumRows.push(lineFor(ym, i, ch, chName(ch))));
+      if (both) sumRows.push(lineFor(ym, i, 'all', 'GV + FF'));
+    });
+    const g = sumOf(rep.list), gd = dayCount(m.from, m.to);
+    sumRows.push(Array(SUM_HEAD.length).fill(''), ['GRAND TOTAL', `${m.from} → ${m.to}`, both ? 'GV + FF' : chName(which), g.vc4, g.vc20, g.vc5, g.total, g.total ? r1((g.vc4 / g.total) * 100) : 0, g.vc20 + g.vc5, '', '', '', gd, gd ? r1(g.total / gd) : 0]);
+    return [
+      { name: 'Month-wise summary', header: SUM_HEAD, rows: sumRows },
+      { name: both ? 'TLs (GV + FF)' : `TLs (${REPORTS[which][1]})`, header: TL_HEAD, rows: tlRows, filterRows: piv.length + 1 },
+      { name: both ? 'Direct Agents (GV + FF)' : `Direct Agents (${REPORTS[which][1]})`, header: AG_HEAD, rows: agRows(direct, 'TOTAL · direct agents'), filterRows: direct.length + 1 },
+      { name: both ? 'Agents under TLs (GV + FF)' : `Agents under TLs (${REPORTS[which][1]})`, header: AG_HEAD, rows: agRows(tlAgents, 'TOTAL · agents under TLs'), filterRows: tlAgents.length + 1 },
+      { name: 'Info', header: ['Item', 'Value'], rows: [
+        ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to} (${months.length} months: ${months.map(monLabel).join(', ')})`],
+        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total]] : []),
+        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total]] : []),
+        ['Avg / month', `Average of ${avgBase.length} ${full.length ? 'full ' : ''}month(s): ${avgBase.map(monLabel).join(', ')}`],
+        [cmpH, `${monLabel(A)} total vs ${monLabel(B)} total (latest ${full.length >= 2 ? 'full ' : ''}month vs the month before) · (${monLabel(A)} − ${monLabel(B)}) ÷ ${monLabel(B)} × 100`],
+        ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in the earlier month) · ✖ No issuance now'],
+        ['Month columns', 'Every month in the range: VC4 / VC20 / VC5+ / Total (green = month total)'],
+        ['Month-wise summary', 'Growth % is vs the previous month; a partial month (range cut) is not compared'],
+        ['Share %', 'Share of the report grand total'], ['Sorted', 'Highest to lowest total'],
+        ['Sources', 'FF: EIR (same rows as the card), TL + mobile from FF REPORT. GV: GV Master (agent + TL per tag), mobile from GV REPORT.'],
+        ['Generated', new Date().toLocaleString('en-IN')]] }
+    ];
   }
   function reportSheets0(rep, m, which) {
     const tlAgents = rep.list.filter((o) => !o.direct), direct = rep.list.filter((o) => o.direct);
@@ -751,7 +840,7 @@ FF.pages = FF.pages || {};
   /** Flat CSV: every agent (TL agents + direct agents), highest → lowest. */
   function reportCsv(rep) {
     const months = (rep.months && rep.months.length > 1) ? rep.months : [];
-    return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6), ...monHead(months)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); return [...r.slice(0, 6), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6), ...monCells(o.mon, months)]; }) };
+    return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6), ...monHead(months)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); if ((rep.prevNA || {})[o.ch]) { r[11] = ''; r[12] = ''; r[13] = ''; r[14] = ''; r[15] = 'n/a · prev data not loaded'; } return [...r.slice(0, 6), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6), ...monCells(o.mon, months)]; }) };
   }
   /** FF REPORT (TL / mobile by agent) + GV REPORT (mobile). Best effort, bounded wait. */
   async function reportDirectory() {

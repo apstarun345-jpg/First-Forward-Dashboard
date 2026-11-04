@@ -3744,13 +3744,24 @@ async function ledgerDirectAgent(ch, body) {
     try {
       await withLedgerLetters(src, async (lt) => {
         const aCol = lt[Lx.agent], iCol = lt[Lx.agentId];
-        const conds = [...(aCol ? names.map((n) => `upper(${aCol}) contains '${n}'`) : []), ...(iCol ? ids.map((i) => `upper(${iCol}) = '${i}'`) : [])];
-        if (!conds.length) return;
-        const qp = new URLSearchParams({ id: String(src.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${lt.join(', ')} where ${conds.join(' or ')} order by ${lt[0]} desc limit 200`, headers: '1' });
-        qp.set('gid', String(src.gid));
-        const t = await gvizPageServerInner(qp, src.label);   // limit 200 = gviz priority lane (bade scans ke peeche nahi)
-        let n = 0;
-        for (const r of t.rows) { const e = ledgerEntry(r, lt, src, ++n); if (e) ledgerAggAddRow(byCh, { ...e, ch: src.ch }); }
+        // har condition alag query (ek column number-type ho to upper() poori query fail kar deta tha)
+        const tries = [];
+        if (aCol) names.forEach((n) => tries.push([`upper(${aCol}) contains '${n}'`, `${aCol} contains '${n}'`]));
+        if (iCol) ids.forEach((i) => tries.push([`${iCol} = '${i}'`, ...(/^\d+$/.test(i) ? [`${iCol} = ${i}`] : [])]));
+        let n = 0, ok = 0, lastErr = null;
+        const seen = new Set();
+        for (const alts of tries) {
+          for (const cond of alts) {
+            try {
+              const qp = new URLSearchParams({ id: String(src.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${lt.join(', ')} where ${cond} order by ${lt[0]} desc limit 200`, headers: '1' });
+              qp.set('gid', String(src.gid));
+              const t = await gvizPageServerInner(qp, src.label);   // limit 200 = gviz priority lane (bade scans ke peeche nahi)
+              for (const r of t.rows) { const sig = JSON.stringify(r.c || r); if (seen.has(sig)) continue; seen.add(sig); const e = ledgerEntry(r, lt, src, ++n); if (e) ledgerAggAddRow(byCh, { ...e, ch: src.ch }); }
+              ok++; break;
+            } catch (err) { lastErr = err; if (/NO_COLUMN/i.test(String(err && err.message))) throw err; }
+          }
+        }
+        if (!ok && lastErr) throw lastErr;
         counts[src.id] = n;
       });
     } catch (err) { errors[src.id] = ledgerErrText(src, err); }
@@ -3758,7 +3769,7 @@ async function ledgerDirectAgent(ch, body) {
   for (const c of ['ff', 'gv']) for (const rec of byCh[c].values()) for (const day of rec.dates.values()) delete day.rk;
   const d = { byCh, errors, counts, direct: true };
   if (ledgerDirectAgentCache.size > 300) ledgerDirectAgentCache.clear();
-  ledgerDirectAgentCache.set(ck, { at: Date.now(), d });
+  if (!Object.keys(errors).length) ledgerDirectAgentCache.set(ck, { at: Date.now(), d });
   return d;
 }
 function ledgerAggregate(fresh) {
