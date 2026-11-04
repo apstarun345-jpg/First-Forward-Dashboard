@@ -648,7 +648,7 @@ FF.pages = FF.pages || {};
           tlId = id;
           tlName = gvTls.get(selfTl) || name;
         } else {
-          direct = meta.directAgent === true;
+          direct = meta.directAgent === true || (!tlName && !tlId);
           if (!direct) {
             try { direct = !!FF.config.isDirectAgent({ tlName, tlId, agentName: name, agentId: id }, 'gv'); } catch (e) { /* keep */ }
           }
