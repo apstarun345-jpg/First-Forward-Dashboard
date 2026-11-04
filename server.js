@@ -24,7 +24,7 @@ import { createMappingStock, sheetIdFrom, identifierText, expandIdentifierNumber
 import { createDuplicateBarcodeCollector } from './duplicate-barcode.js';
 import { personalActivityCalendar } from './personal-calendar.js';
 import { createMappingJobs } from './mapping-job.js';
-import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS } from './dispatch-ledger.js';
+import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS, LAYOUTS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
@@ -3730,13 +3730,45 @@ function ledgerAggLoadDisk() {
     return true;
   } catch (err) { console.warn('dispatch aggregate disk load:', err.message); return false; }
 }
+const ledgerDirectAgentCache = new Map();
+async function ledgerDirectAgent(ch, body) {
+  const q = (v) => String(v || '').toUpperCase().replace(/'/g, '').replace(/\s+/g, ' ').trim();
+  const names = (Array.isArray(body && body.names) ? body.names : [body && body.name]).map(q).filter((x) => x.length >= 3).slice(0, 3);
+  const ids = (Array.isArray(body && body.ids) ? body.ids : [body && body.id]).map(q).filter((x) => x.length >= 3).slice(0, 3);
+  const ck = `${ch}|${names.join(',')}|${ids.join(',')}`;
+  const hit = ledgerDirectAgentCache.get(ck);
+  if (hit && Date.now() - hit.at < 30 * 60e3) return hit.d;
+  const byCh = { ff: new Map(), gv: new Map() }, errors = {}, counts = {};
+  await Promise.all(ledgerSources().filter((x) => x.ch === ch).map(async (src) => {
+    const Lx = LAYOUTS[src.layout] || LAYOUTS.ff;
+    try {
+      await withLedgerLetters(src, async (lt) => {
+        const aCol = lt[Lx.agent], iCol = lt[Lx.agentId];
+        const conds = [...(aCol ? names.map((n) => `upper(${aCol}) contains '${n}'`) : []), ...(iCol ? ids.map((i) => `upper(${iCol}) = '${i}'`) : [])];
+        if (!conds.length) return;
+        const qp = new URLSearchParams({ id: String(src.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${lt.join(', ')} where ${conds.join(' or ')} limit 2000`, headers: '1' });
+        qp.set('gid', String(src.gid));
+        const t = await gvizPageServerInner(qp, src.label);
+        let n = 0;
+        for (const r of t.rows) { const e = ledgerEntry(r, lt, src, ++n); if (e) ledgerAggAddRow(byCh, { ...e, ch: src.ch }); }
+        counts[src.id] = n;
+      });
+    } catch (err) { errors[src.id] = ledgerErrText(src, err); }
+  }));
+  for (const c of ['ff', 'gv']) for (const rec of byCh[c].values()) for (const day of rec.dates.values()) delete day.rk;
+  const d = { byCh, errors, counts, direct: true };
+  if (ledgerDirectAgentCache.size > 300) ledgerDirectAgentCache.clear();
+  ledgerDirectAgentCache.set(ck, { at: Date.now(), d });
+  return d;
+}
 function ledgerAggregate(fresh) {
   const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.layout]));
   const have = ledgerAggState.data && ledgerAggState.key === key ? ledgerAggState.data : null;
   const due = have && Date.now() - ledgerAggState.at >= LEDGER_AGG_TTL;
   if (have && !fresh && !due) return Promise.resolve(have);
   if (!ledgerAggState.promise) {
-    ledgerAggState.promise = loadLedgerAgg().then((d) => { ledgerAggState.data = d; ledgerAggState.key = key; ledgerAggState.at = Date.now(); ledgerAggSave(d, key); return d; })
+    const t0 = Date.now(); console.log('dispatch aggregate: sheet se load shuru');
+    ledgerAggState.promise = loadLedgerAgg().then((d) => { console.log(`dispatch aggregate: ready ${Math.round((Date.now() - t0) / 1000)} s · rows ${JSON.stringify(d.counts)}${Object.keys(d.errors || {}).length ? ` · errors ${JSON.stringify(d.errors).slice(0, 300)}` : ''}`); ledgerAggState.data = d; ledgerAggState.key = key; ledgerAggState.at = Date.now(); ledgerAggSave(d, key); return d; })
       .catch((err) => { console.warn('dispatch aggregate:', err.message); return ledgerAggState.data; })
       .finally(() => { ledgerAggState.promise = null; });
   }
@@ -6521,8 +6553,10 @@ async function handleApi(req, res, url) {
     const ids = (Array.isArray(body && body.ids) ? body.ids : [body && body.id]).map(nm).filter((x) => x.length >= 3);
     if (!names.length && !ids.length) throw new HttpError(400, 'Name or ID needed.');
     if (!ledgerSources().some((x) => x.ch === ch)) return sendJson(res, 200, { ok: true, none: true, reason: 'Dispatch ledger sheet is not configured for this channel (Settings → Dispatch ledger).', recent: [], last: null }, { 'Cache-Control': 'no-store' });
-    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 25000); });
+    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), ledgerAggState.data ? 25000 : 4000); });
     let agg; try { agg = await Promise.race([ledgerAggregate(false), wait]); } finally { clearTimeout(timer); }
+    // v3.125.97 — aggregate abhi ban raha (deploy ke baad /tmp khaali) → sirf is agent ki rows seedha sheet se (chhota query)
+    if (!agg) { try { agg = await ledgerDirectAgent(ch, body); } catch (err) { console.warn('dispatch direct:', err.message); } }
     if (!agg) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 });
     const m = agg.byCh[ch] || new Map();
     const recs = new Set();

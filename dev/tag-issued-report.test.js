@@ -62,3 +62,23 @@ test('Report chips after Custom open the same report on screen', () => {
   assert.match(src, /if \(rv\) \{ openReportView\(rv\.dataset\.repView\); return; \}/);
   assert.match(src, /async function makeReport\(which\)/);
 });
+
+test('agent report: custom multi-month range adds month-wise VC4 / VC20 / VC5+ columns + summary sheet', () => {
+  const t = load();
+  const m = { from: '2026-09-01', to: '2026-11-03', prevFfRange: null, prevGvRange: null, ff: { total: 0 }, gv: { total: 0 } };
+  const dailyRows = [
+    { channel: 'First Forward', agentId: 'F1', agentName: 'Ff One', key: '2026-09-10', group: 'VC4', n: 5 },
+    { channel: 'First Forward', agentId: 'F1', agentName: 'Ff One', key: '2026-10-10', group: 'VC20', n: 2 },
+    { channel: 'First Forward', agentId: 'F1', agentName: 'Ff One', key: '2026-11-02', group: 'VC5+', n: 1 }
+  ];
+  const dir = { ff: () => ({ name: 'Ff One', tlName: 'TL B', tlId: 'T9' }), gv: () => '' };
+  const rep = t.buildAgentReport(t.reportInputs({ dailyRows, rawGvMaster: [] }, dir), m, 'ff');
+  assert.equal(JSON.stringify(rep.months), JSON.stringify(['2026-09', '2026-10', '2026-11']));
+  const sheets = t.reportSheets(rep, m, 'ff');
+  assert.equal(sheets[0].name, 'Month-wise summary');
+  assert.equal(JSON.stringify(sheets[0].rows[0].slice(2)), JSON.stringify(['FF', 5, 0, 0, 5]));
+  const tl = sheets[1];
+  assert.ok(tl.header.includes('Sep 26 VC4') && tl.header.includes('Nov 26 Total'));
+  const i = tl.header.indexOf('Oct 26 VC20'); assert.equal(tl.rows[0][i], 2);
+  const csv = t.reportCsv(rep); assert.equal(csv.rows[0][csv.head.indexOf('Nov 26 VC5+')], 1);
+});

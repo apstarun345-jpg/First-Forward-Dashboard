@@ -631,7 +631,7 @@ FF.pages = FF.pages || {};
   /** Per-agent records (current period = the card's dates; previous = like-for-like range). */
   function buildAgentReport(inputs, m, which) {
     const per = { ff: { cur: [m.from, m.to], prev: m.prevFfRange, prev2: m.prevFf2Range }, gv: { cur: [m.from, m.to], prev: m.prevGvRange, prev2: m.prevGv2Range } };
-    const out = new Map();
+    const out = new Map(), months = new Set();
     for (const r of inputs) {
       if (which !== 'both' && which !== r.ch) continue;
       const pp = per[r.ch];
@@ -640,9 +640,15 @@ FF.pages = FF.pages || {};
       const inPrev2 = !!pp.prev2 && within(r.dateKey, pp.prev2[0], pp.prev2[1]);
       if (!inCur && !inPrev && !inPrev2) continue;
       const key = `${r.ch}|${nid(r.id) || nname(r.name)}`;
-      const o = out.get(key) || { ch: r.ch, id: r.id, name: r.name, tlName: r.tlName, tlId: r.tlId, direct: r.direct, mobile: r.mobile || '', vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0 };
+      const o = out.get(key) || { ch: r.ch, id: r.id, name: r.name, tlName: r.tlName, tlId: r.tlId, direct: r.direct, mobile: r.mobile || '', vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0, mon: {} };
       if (!o.mobile && r.mobile) o.mobile = r.mobile;
-      if (inCur) { o[g3(r)] += r.n; o.total += r.n; }
+      if (inCur) {
+        o[g3(r)] += r.n; o.total += r.n;
+        // v3.125.97 — month-wise split (custom range me har mahine ka VC4 / VC20 / VC5+)
+        const ym = String(r.dateKey).slice(0, 7); months.add(ym);
+        const mm = o.mon[ym] || (o.mon[ym] = { vc4: 0, vc20: 0, vc5: 0, total: 0 });
+        mm[g3(r)] += r.n; mm.total += r.n;
+      }
       if (inPrev) o.prev += r.n;
       if (inPrev2) o.prev2 += r.n;
       out.set(key, o);
@@ -652,7 +658,7 @@ FF.pages = FF.pages || {};
     for (const o of list) { o.change = o.total - o.prev; o.perf = perfPct(o.total, o.prev); o.status = perfStatus(o.total, o.prev); o.share = grandTotal ? r1((o.total / grandTotal) * 100) : 0; }
     list.sort((a, b) => b.total - a.total || b.prev - a.prev || String(a.name).localeCompare(String(b.name)));
     const chTot = { ff: 0, gv: 0 }; list.forEach((o) => { chTot[o.ch] += o.total; });
-    return { list, grandTotal, chTot };
+    return { list, grandTotal, chTot, months: [...months].filter((x) => /^\d{4}-\d{2}$/.test(x)).sort() };
   }
 
   /** One row per real TL (both channels together), highest → lowest. */
@@ -661,8 +667,9 @@ FF.pages = FF.pages || {};
     for (const o of list) {
       if (o.direct) continue;
       const key = `${o.ch}|${nid(o.tlId) || nname(o.tlName)}`;
-      const x = map.get(key) || { ch: o.ch, name: o.tlName, id: o.tlId, agents: 0, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0 };
+      const x = map.get(key) || { ch: o.ch, name: o.tlName, id: o.tlId, agents: 0, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0, mon: {} };
       if (!x.id && o.tlId) x.id = o.tlId;
+      for (const [ym, v] of Object.entries(o.mon || {})) { const t = x.mon[ym] || (x.mon[ym] = { vc4: 0, vc20: 0, vc5: 0, total: 0 }); t.vc4 += v.vc4; t.vc20 += v.vc20; t.vc5 += v.vc5; t.total += v.total; }
       x.agents += o.total > 0 ? 1 : 0; x.vc4 += o.vc4; x.vc20 += o.vc20; x.vc5 += o.vc5; x.total += o.total; x.prev += o.prev; x.prev2 += o.prev2 || 0;
       map.set(key, x);
     }
@@ -679,7 +686,39 @@ FF.pages = FF.pages || {};
     const tail = [t.vc4, t.vc20, t.vc5, t.total, t.prev2, t.prev, t.total - t.prev, perfCell(t.total, t.prev), perfStatus(t.total, t.prev), ''];
     return [...Array(width - tail.length).fill(''), ...tail].map((v, k) => (k === 2 ? label : v));
   };
+  // month-wise columns: sirf jab range 2+ mahine ki ho
+  const MON_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monLabel = (ym) => `${MON_SHORT[Number(ym.slice(5, 7)) - 1] || ym} ${ym.slice(2, 4)}`;
+  const monHead = (months) => months.flatMap((ym) => [`${monLabel(ym)} VC4`, `${monLabel(ym)} VC20`, `${monLabel(ym)} VC5+`, `${monLabel(ym)} Total`]);
+  const monCells = (mon, months) => months.flatMap((ym) => { const v = (mon || {})[ym] || {}; return [v.vc4 || 0, v.vc20 || 0, v.vc5 || 0, v.total || 0]; });
+  const monSum = (list) => { const t = {}; for (const o of list) for (const [ym, v] of Object.entries(o.mon || {})) { const x = t[ym] || (t[ym] = { vc4: 0, vc20: 0, vc5: 0, total: 0 }); x.vc4 += v.vc4; x.vc20 += v.vc20; x.vc5 += v.vc5; x.total += v.total; } return t; };
   function reportSheets(rep, m, which) {
+    const months = (rep.months && rep.months.length > 1) ? rep.months : [];
+    const sheets = reportSheets0(rep, m, which);
+    if (!months.length) return sheets;
+    const addMon = (sh, lists) => {
+      sh.header = [...sh.header, ...monHead(months)];
+      sh.rows = sh.rows.map((row, i) => { const l = lists[i]; return [...row, ...(l === null ? Array(months.length * 4).fill('') : monCells(l, months))]; });
+    };
+    const tlAgents = rep.list.filter((o) => !o.direct), direct = rep.list.filter((o) => o.direct);
+    const piv = tlPivot(rep.list);
+    addMon(sheets[0], [...piv.map((x) => x.mon), null, monSum(tlAgents), monSum(direct), monSum(rep.list)]);
+    addMon(sheets[1], [...direct.map((o) => o.mon), ...(direct.length ? [monSum(direct)] : [])]);
+    addMon(sheets[2], [...tlAgents.map((o) => o.mon), ...(tlAgents.length ? [monSum(tlAgents)] : [])]);
+    // naya pehla sheet: Month-wise summary
+    const chs = which === 'both' ? ['ff', 'gv'] : [which];
+    const rows = [];
+    for (const ym of months) {
+      const per = chs.map((ch) => { const v = monSum(rep.list.filter((o) => o.ch === ch))[ym] || { vc4: 0, vc20: 0, vc5: 0, total: 0 }; return [ch, v]; });
+      for (const [ch, v] of per) rows.push([monLabel(ym), ym, chName(ch), v.vc4, v.vc20, v.vc5, v.total]);
+      if (per.length > 1) { const s = per.reduce((a, [, v]) => ({ vc4: a.vc4 + v.vc4, vc20: a.vc20 + v.vc20, vc5: a.vc5 + v.vc5, total: a.total + v.total }), { vc4: 0, vc20: 0, vc5: 0, total: 0 }); rows.push([monLabel(ym), ym, 'GV + FF', s.vc4, s.vc20, s.vc5, s.total]); }
+    }
+    const all = monSum(rep.list); const g = months.reduce((a, ym) => { const v = all[ym] || {}; return { vc4: a.vc4 + (v.vc4 || 0), vc20: a.vc20 + (v.vc20 || 0), vc5: a.vc5 + (v.vc5 || 0), total: a.total + (v.total || 0) }; }, { vc4: 0, vc20: 0, vc5: 0, total: 0 });
+    rows.push(['', '', '', '', '', '', ''], ['GRAND TOTAL', `${m.from} to ${m.to}`, chs.length > 1 ? 'GV + FF' : chName(chs[0]), g.vc4, g.vc20, g.vc5, g.total]);
+    sheets.unshift({ name: 'Month-wise summary', header: ['Month', 'YYYY-MM', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total'], rows });
+    return sheets;
+  }
+  function reportSheets0(rep, m, which) {
     const tlAgents = rep.list.filter((o) => !o.direct), direct = rep.list.filter((o) => o.direct);
     const piv = tlPivot(rep.list);
     const TL_HEAD = ['Rank', 'TL ID', 'TL Name', 'Channel', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev-2 total', 'Prev total', 'Change', 'Performance %', 'Performance', 'Share %'];
@@ -711,7 +750,8 @@ FF.pages = FF.pages || {};
   }
   /** Flat CSV: every agent (TL agents + direct agents), highest → lowest. */
   function reportCsv(rep) {
-    return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); return [...r.slice(0, 6), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6)]; }) };
+    const months = (rep.months && rep.months.length > 1) ? rep.months : [];
+    return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6), ...monHead(months)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); return [...r.slice(0, 6), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6), ...monCells(o.mon, months)]; }) };
   }
   /** FF REPORT (TL / mobile by agent) + GV REPORT (mobile). Best effort, bounded wait. */
   async function reportDirectory() {
@@ -914,7 +954,7 @@ FF.pages = FF.pages || {};
       let m, rep;
       try { ({ m, rep } = await makeReport(which)); } catch (err) { FF.app.openDrawer({ kicker: '📊 Report', title, body: U.errorBox(err), wide: true, replace: true }); return; }
       const sheets = reportSheets(rep, m, which);
-      const tabs = sheets.map((sh, i) => `<button type="button" class="tix-chipbtn${i === 0 ? ' active' : ''}" data-rep-tab="${i}">${esc(sh.name)}${sh.name === 'Info' ? '' : ` <small>${U.fmt(sh.rows.filter((r) => typeof r[0] === 'number').length)}</small>`}</button>`).join('');
+      const tabs = sheets.map((sh, i) => `<button type="button" class="tix-chipbtn${i === 0 ? ' active' : ''}" data-rep-tab="${i}">${esc(sh.name)}${(sh.name === 'Info' || sh.name === 'Month-wise summary') ? '' : ` <small>${U.fmt(sh.rows.filter((r) => typeof r[0] === 'number').length)}</small>`}</button>`).join('');
       const ch = (k) => (which === 'both' || which === k ? `<span class="badge ${k === 'gv' ? 'green' : 'blue'}">${k === 'gv' ? '🟩 GV' : '🟦 FF'} ${U.fmt(rep.chTot[k])}</span>` : '');
       const body = `<div class="tix-rep" id="tix-rep">
         <div class="tix-rep-top">${ch('ff')}${ch('gv')}<span class="badge indigo">Total ${U.fmt(rep.grandTotal)}</span><span class="badge">${U.fmt(rep.list.length)} agents</span>

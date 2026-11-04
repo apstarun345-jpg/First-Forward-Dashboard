@@ -2169,13 +2169,13 @@ FF.pages = FF.pages || {};
       const growthNum = (pr.growthNum !== null && pr.growthNum !== undefined && Number.isFinite(Number(pr.growthNum))) ? Number(pr.growthNum) : null;
       // v3.125.96 — do growth: last month se (sheet/runrate wala) + last-se-last month se (expected month-end vs us mahine ka total)
       const g2 = (() => {
-        const expT = (p1 && Number(p1.total)) || 0;
+        const expT = Number(expTotal) || (p1 && Number(p1.total)) || 0;
         if (!last2.tot || !expT) return null;
         return ((expT - last2.tot) / last2.tot) * 100;
       })();
       const growthPill = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? '<span class="dim">—</span>' : U.pctHtml(v, { decimals: 0 }));
       const growth2Html = `<span class="msp-g2"><span class="msp-g2-row"><small>vs ${esc(m.last ? ymLabel(m.last).split(' ')[0] : 'last')}</small>${growthPill(growthNum)}</span><span class="msp-g2-row"><small>vs ${esc(last2.ym2 ? ymLabel(last2.ym2).split(' ')[0] : 'prev-2')}</small>${growthPill(g2)}</span></span>`;
-      const growth2Sub = last2.ym2 ? ` · ${esc(ymLabel(last2.ym2))}: ${U.fmt(last2.tot)}${p1 && p1.total ? ` → expected ${U.fmt(p1.total)}` : ''}` : '';
+      const growth2Sub = last2.ym2 ? ` · ${esc(ymLabel(last2.ym2))}: ${U.fmt(last2.tot)}${expTotal ? ` → expected ${U.fmt(expTotal)}` : ''}` : '';
       const growthHtml = (growthNum === null || growthNum === undefined || !Number.isFinite(Number(growthNum))) ? '<span class="dim">—</span>' : U.pctHtml(growthNum, { decimals: 0 });
       const notFound = pr.found === false
         ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — stock / priority sheet se nahi aa paaye (naam ki spelling check karo); issuance tag-ledger (EIR) se hai.</p>` : '';
