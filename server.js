@@ -10372,6 +10372,51 @@ async function handleApi(req, res, url) {
     }
   }
   // 2) Sheet history se ek purani save wapas lao
+  // 🛟 v3.125.104 — notify record ki purani save se jo ABHI nahi hai wo wapas jodo (kuch delete / overwrite nahi):
+  // push devices, VAPID (agar abhi koi device nahi), workspace (views, notes, tag requests…), watch flags, notifications.
+  if (p === '/api/storage/history/restore-notify' && method === 'POST') {
+    requireAdmin(user);
+    const store = cloudStore();
+    const body = await readBody(req);
+    const at = String((body && body.at) || '').trim();
+    if (!at) throw new HttpError(400, 'at required');
+    let snap;
+    try { snap = await store.snapshotData(at, ['notify']); } catch (err) { throw new HttpError(502, `History read fail: ${err.message}`); }
+    const old = snap.data && snap.data.notify;
+    if (!old || typeof old !== 'object') throw new HttpError(404, `Us save me notify record nahi mila${snap.locked && snap.locked.notify ? ` (${snap.locked.notify})` : ''}.`);
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {}, push: [] };
+    const cur = db.notify, report = {};
+    const idOf = (x) => (x && typeof x === 'object' ? (x.id || x.endpoint || x.key || x.at || JSON.stringify(x).slice(0, 200)) : String(x));
+    const unionArr = (a, b) => { const have = new Set((a || []).map(idOf)); const add = (b || []).filter((x) => !have.has(idOf(x))); return { arr: [...(a || []), ...add], added: add.length }; };
+    // push devices + VAPID: abhi koi device nahi aur purani save me VAPID hai → wahi VAPID wapas (purane subscriptions phir chalenge)
+    const curPush = Array.isArray(cur.push) ? cur.push : [];
+    if (!curPush.length && old.vapid && old.vapid.publicKey && old.vapid.privateKey) {
+      try { applyVapid(old.vapid.publicKey, old.vapid.privateKey); cur.vapid = old.vapid; vapidSource = 'durable'; vapidDurable = true; writeVapidFile(); report.vapid = 'restored'; } catch (err) { report.vapid = `skip: ${err.message}`; }
+    }
+    if (Array.isArray(old.push)) { const u = unionArr(curPush, old.push); cur.push = u.arr; report.push = u.added; }
+    for (const k of ['items', 'audit', 'pushLog', 'plLog']) if (Array.isArray(old[k])) { const u = unionArr(cur[k], old[k]); cur[k] = u.arr; report[k] = u.added; }
+    // workspace: har key — array = union, object = missing keys, baaki = sirf agar abhi khaali
+    if (old.workspace && typeof old.workspace === 'object') {
+      cur.workspace = cur.workspace && typeof cur.workspace === 'object' ? cur.workspace : {};
+      const w = cur.workspace, wr = {};
+      for (const [k, v] of Object.entries(old.workspace)) {
+        if (Array.isArray(v)) { const u = unionArr(Array.isArray(w[k]) ? w[k] : [], v); w[k] = u.arr; if (u.added) wr[k] = u.added; }
+        else if (v && typeof v === 'object') { const o = w[k] && typeof w[k] === 'object' ? w[k] : {}; let n = 0; for (const [kk, vv] of Object.entries(v)) if (!(kk in o)) { o[kk] = vv; n++; } w[k] = o; if (n) wr[k] = n; }
+        else if (w[k] === undefined || w[k] === null || w[k] === '') { w[k] = v; wr[k] = 1; }
+      }
+      report.workspace = wr;
+    }
+    // watch (digest / monthly report "bhej diya" flags etc.) + baaki top-level: missing keys hi
+    for (const [k, v] of Object.entries(old)) {
+      if (['push', 'vapid', 'items', 'audit', 'pushLog', 'plLog', 'workspace'].includes(k)) continue;
+      if (v && typeof v === 'object' && !Array.isArray(v)) { const o = cur[k] && typeof cur[k] === 'object' && !Array.isArray(cur[k]) ? cur[k] : {}; let n = 0; for (const [kk, vv] of Object.entries(v)) if (!(kk in o)) { o[kk] = vv; n++; } cur[k] = o; if (n) report[k] = n; }
+      else if (cur[k] === undefined) { cur[k] = v; report[k] = 'added'; }
+    }
+    if (typeof tagReqBaselineSync === 'function') tagReqBaselineSync();
+    await persist('notify', { force: true });
+    console.log(`🛟 notify restore from ${snap.at} by ${user.username}: ${JSON.stringify(report).slice(0, 400)}`);
+    return sendJson(res, 200, { ok: true, at: snap.at, report, push: (cur.push || []).length });
+  }
   if (p === '/api/storage/history/restore' && method === 'POST') {
     requireAdmin(user);
     const store = cloudStore();
@@ -13877,7 +13922,15 @@ async function start() {
     // v3.125.90 — Apps Script kabhi slow hota hai (timeout) → poori site 503 par atak jaati thi. Transient error par
     // 4 baar tak dobara (15 / 30 / 45 s); decrypt / data-protection errors par turant ruko (data safe).
     for (let attempt = 1; ; attempt++) {
-      try { stored = await sheetsStore.read(); break; }
+      try {
+        stored = await sheetsStore.read();
+        // 🛡️ v3.125.104 — users hain par notify record gayab = doosra instance usi waqt notify likh raha tha (rows beech me).
+        // Aise me khaali notify se start karna = push devices, VAPID, workspace sab kho jaata (4 Nov 13:16 wala incident). Dobara padho.
+        if (stored && Array.isArray(stored.users) && stored.users.length && !stored.notify && attempt < 5) {
+          const e = new Error('notify record missing (read during a write) — re-reading'); e.retry = true; throw e;
+        }
+        break;
+      }
       catch (err) {
         const transient = err && (err.retry || /timeout|aborted|ECONN|ETIMEDOUT|fetch failed|socket|HTTP 5\d\d|429/i.test(String(err.message || err)));
         if (!transient || attempt >= 5) throw err;
@@ -14098,7 +14151,8 @@ bootPromise.catch((err) => {
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
     // Personal-link activity feed: write the pending tail before the process goes away (deploys).
-    try { if (plFlushTimer) { clearTimeout(plFlushTimer); plFlushTimer = null; db.notify.plLog = plActivityLog.slice(-500); } persist('notify', { force: true }).catch(() => {}); } catch { /* best effort */ }
+    // v3.125.104 — notify sirf tab likho jab sach me kuch baaki ho (har deploy par likhne se naya instance beech ka adhura record padh leta tha)
+    try { let dirty = !!notifyLazyTimer; if (plFlushTimer) { clearTimeout(plFlushTimer); plFlushTimer = null; db.notify.plLog = plActivityLog.slice(-500); dirty = true; } if (dirty) persist('notify', { force: true }).catch(() => {}); } catch { /* best effort */ }
     if (sheetsStore && sheetsStore.drain) sheetsStore.drain().catch(() => {});
     server.close(async () => {
       await Promise.allSettled([...writeQueue.values()]);
