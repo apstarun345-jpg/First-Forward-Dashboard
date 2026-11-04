@@ -588,8 +588,22 @@ FF.pages = FF.pages || {};
       out.push({ ch: 'ff', id, name, tlName: direct ? (hit ? FF.config.directLabel({ tlName, agentName: name, agentId: id }, 'ff') : 'No TL (not in REPORT)') : tlName, tlId: direct ? '' : tlId, direct, mobile: (hit && hit.mobile) || '', group: r.group, dateKey: r.key || (r.date ? U.dateKey(r.date) : ''), n: r.n === undefined ? 1 : (Number(r.n) || 0) });
     }
     const rawGv = rows.rawGvMaster || ((G && typeof G.masterRows === 'function' ? G.masterRows() : null) || []);
+    // v3.125.93 — GV TL ki APNI issued rows (agent ID = TL ID; TL column khaali / kisi aur TL ka) TL ke total me.
+    // Pehle ye "direct" ban kar TL sheet se bahar ho jaati thi (APS010606 Rakesh: 129 ki jagah 56).
+    const gvTls = new Map();
+    for (const r of rawGv) {
+      if (!r) continue;
+      // sirf asli TL: jiske neeche koi DOOSRA agent bhi ho (akela self-supervised agent direct hi rehta hai)
+      for (const t of [r.gvTlId, r.tlId, r.supervisorId]) { const k = nid(t); if (k && k !== nid(r.agentId) && !gvTls.has(k)) gvTls.set(k, U.clean(r.tlName)); }
+    }
     for (const r of rawGv) {
       if (!r || !r.date) continue;
+      const selfTl = gvTls.has(nid(r.agentId)) ? nid(r.agentId) : '';
+      if (selfTl) {
+        const name = U.clean(r.agentName) || gvTls.get(selfTl) || `TL ${r.agentId}`;
+        out.push({ ch: 'gv', id: U.clean(r.agentId), name, tlName: gvTls.get(selfTl) || name, tlId: U.clean(r.agentId), direct: false, mobile: dir.gv(r.agentId, r.agentName), group: r.group || (M.classGroup ? M.classGroup(r.cls) : 'VC4'), dateKey: U.dateKey(r.date), n: 1, selfTl: true });
+        continue;
+      }
       let direct = false;
       try { direct = !!FF.config.isDirectAgent(r, 'gv'); } catch (e) { /* keep */ }
       const tlName = U.clean(r.tlName);
