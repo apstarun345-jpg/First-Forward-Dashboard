@@ -2377,17 +2377,22 @@ window.FF = window.FF || {};
 
     // Home ka render (bootGate) apne SAARE sections ke real data ke saath paint hone ke baad hi
     // resolve hota hai (home.js) — splash hatate hi poora Home bhara hua dikhe, koi spinner nahi.
+    // ⚡ v3.125.88 — search bar / bell / KPI drawer Home ke SAARE data ka intezaar na karein (pehle 40 s+ tak
+    // topbar search hi nahi aata tha jab koi sheet slow ho). 2.5 s baad shell extras shuru (idempotent).
+    const shellEarly = setTimeout(() => { try { startShellExtras(); } catch { /* later call retries */ } }, 2500);
     await renderCurrent({ bootGate: true });
+    void shellEarly;   // early timer chalne do — startShellExtras idempotent hai
 
     // Release the short boot animation — upar wale data fetches isi animation ke neeche chal chuke hain.
     bootSetMessage('Workspace ready ✓', 'Your dashboard data is loaded.');
     await releaseWorkspaceBoot();
 
-    maybeOnboarding();
+    // v3.125.88 — inme se kisi ka error baaki boot (search bar, bell, KPI drawer) ko rok deta tha.
+    try { maybeOnboarding(); } catch (err) { console.warn('onboarding', err && err.message); }
     // Directly show the rendered Home/workspace after the boot animation. Do not add a second
     // welcome/waiting overlay here — it made users wait twice before seeing the dashboard.
-    registerServiceWorker(); // push notifications ke liye SW pehle ready ho
-    liveShareChip();
+    try { registerServiceWorker(); } catch (err) { console.warn('sw', err && err.message); } // push notifications ke liye SW pehle ready ho
+    try { liveShareChip(); } catch (err) { console.warn('liveShareChip', err && err.message); }
     // 🐚 Bell · KPI drill drawer · search · assistant · office bell · live assist → first paint ke
     //    baad waves me (pehle ye sab login se pehle eager load hote the → pehla paint slow).
     startShellExtras();
