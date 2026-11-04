@@ -251,9 +251,9 @@ FF.pages = FF.pages || {};
     // values as Master Search / masterProfile, not a stale GV REPORT snapshot.
     // ⚡ v3.125.88 — har person ka MP.quick() ek saath = 1 s+ ka freeze. Ab chhote tukdon me (UI atakta nahi).
     const plist = [...map.values()], enriched = [];
-    let sliceT = performance.now();
+    let sliceT = Date.now();
     for (let i = 0; i < plist.length; i++) {
-      if (performance.now() - sliceT > 24) { await new Promise((r) => setTimeout(r, 0)); sliceT = performance.now(); }
+      if (Date.now() - sliceT > 24) { await new Promise((r) => setTimeout(r, 0)); sliceT = Date.now(); }
       enriched.push(enrichPerson(plist[i]));
     }
     return enriched.sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock));
