@@ -13545,7 +13545,18 @@ async function start() {
     // AppsScriptStore.call() already performs bounded retry/backoff. Do NOT wrap read() in
     // another retry loop here — the old 5 × (4 internal attempts × 30s) could hold Render in
     // "Service is starting" for several minutes and trigger unhealthy/restart loops.
-    stored = await sheetsStore.read();
+    // v3.125.90 — Apps Script kabhi slow hota hai (timeout) → poori site 503 par atak jaati thi. Transient error par
+    // 4 baar tak dobara (15 / 30 / 45 s); decrypt / data-protection errors par turant ruko (data safe).
+    for (let attempt = 1; ; attempt++) {
+      try { stored = await sheetsStore.read(); break; }
+      catch (err) {
+        const transient = err && (err.retry || /timeout|aborted|ECONN|ETIMEDOUT|fetch failed|socket|HTTP 5\d\d|429/i.test(String(err.message || err)));
+        if (!transient || attempt >= 5) throw err;
+        bootState.stage = `storage:retry ${attempt}`;
+        console.warn(`APP_STORAGE read attempt ${attempt} failed (${String(err.message || err).slice(0, 120)}) — retrying…`);
+        await new Promise((r) => setTimeout(r, 15000 * attempt));
+      }
+    }
     if (!stored) {
       // 🛡️ Render safety: an empty cloud store must NEVER silently become a fresh admin.
       // Render free instances are ephemeral; if APP_STORAGE is empty and this process has no local
@@ -13737,6 +13748,8 @@ bootPromise.catch((err) => {
   appReady = false;
   try { server.close(); } catch {}
   process.exitCode = 1;
+  // Process zinda reh kar 503 deta rehta tha (timers ki wajah se exit nahi hota) — exit karo taaki Render restart kare.
+  setTimeout(() => process.exit(1), 3000).unref?.();
 });
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
