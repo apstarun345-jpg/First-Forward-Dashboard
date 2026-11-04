@@ -133,13 +133,18 @@ FF.pages = FF.pages || {};
     const gvComparable = gvTo >= from;
     const prevGv = gvComparable ? prevRange(from, gvTo) : prevRange(from, to);
     const prevFf = ffComparable ? prevRange(from, ffTo) : null;
+    // v3.125.95 — pichhle se pichhla period bhi (Nov → Oct + Sep)
+    const prevGv2 = prevGv ? prevRange(prevGv[0], prevGv[1]) : null;
+    const prevFf2 = prevFf ? prevRange(prevFf[0], prevFf[1]) : null;
     return {
       from, to, days: dayCount(from, to), ffTo, ffPending, ffComparable, ffThrough, gvTo, gvPending, gvComparable, gvThrough,
-      prevGvRange: prevGv, prevFfRange: prevFf,
+      prevGvRange: prevGv, prevFfRange: prevFf, prevGv2Range: prevGv2, prevFf2Range: prevFf2,
       ff: scan(rows.ffRows, from, to),
       gv: scan(rows.gvRows, from, to),
       ffPrev: prevFf ? scan(rows.ffRows, prevFf[0], prevFf[1]) : scan([], '', ''),
-      gvPrev: gvComparable && prevGv ? scan(rows.gvRows, prevGv[0], prevGv[1]) : scan([], '', '')
+      gvPrev: gvComparable && prevGv ? scan(rows.gvRows, prevGv[0], prevGv[1]) : scan([], '', ''),
+      ffPrev2: prevFf2 ? scan(rows.ffRows, prevFf2[0], prevFf2[1]) : scan([], '', ''),
+      gvPrev2: gvComparable && prevGv2 ? scan(rows.gvRows, prevGv2[0], prevGv2[1]) : scan([], '', '')
     };
   }
 
@@ -187,17 +192,18 @@ FF.pages = FF.pages || {};
     const ffV = m.ff[k.key], gvV = m.gv[k.key];
     const ffP = m.ffPrev[k.key], gvP = m.gvPrev[k.key];
     const sum = ffV + gvV, sumP = ffP + gvP;
+    const ffP2 = m.ffPrev2 ? m.ffPrev2[k.key] : 0, gvP2 = m.gvPrev2 ? m.gvPrev2[k.key] : 0, sumP2 = ffP2 + gvP2;
     const ffNA = !m.ffComparable, gvNA = !m.gvComparable;
     const ffShare = pct(ffV, sum), gvShare = pct(gvV, sum);
     const ofTotal = k.key === 'total' ? null : U.pctOf(sum, m.ff.total + m.gv.total);
     const ffD = dirOf(ffV, ffP), gvD = dirOf(gvV, gvP), sumD = dirOf(sum, sumP);
     const row = (cls, name, v, share, prev, d, na, src) => `<div class="tix-row ${cls}" data-kpi="${esc(specFor(m, src, k.f))}" data-kpi-title="${esc(`${name} · ${k.short}`)}" role="button" tabindex="0" title="Click karo — ${esc(name)} ki rows">
         <span class="tix-dot"></span><span class="tix-name">${name}</span><b class="tix-num">${U.fmt(v)}</b><span class="tix-pct">${sum ? U.fmtPct(share, 0) : '—'}</span><span class="tix-gr">${na ? growthBadge(v, prev, na) : drvBadge(growthBadge(v, prev, na), src, k.key, dirOf(v, prev))}</span>
-        <span class="tix-prev">prev ${na ? '—' : U.fmt(prev)}</span></div>`;
+        <span class="tix-prev">prev ${na ? '—' : U.fmt(prev)}${na ? '' : ` · ${U.fmt(src === 'ff' ? ffP2 : gvP2)}`}</span></div>`;
     return `<div class="tix-card ${d2(sumD)}" style="--accent:${k.accent}" data-kpi="${esc(specFor(m, 'both', k.f))}" data-kpi-title="${esc(`${k.label} · ${rangeLabel(m.from, m.to)}`)}" role="button" tabindex="0" title="Click karo — is number ki rows">
       <div class="tix-card-top"><span class="tix-title"><span class="tix-ico">${k.icon}</span>${esc(k.label)}${k.sub ? `<small>${esc(k.sub)}</small>` : ''}</span>${ofTotal === null ? '' : `<span class="tix-chip" title="Total issuance me is class ka hissa">${U.fmtPct(ofTotal, 0)} of total</span>`}</div>
       <div class="tix-big"><span class="tix-big-n">${U.fmt(sum)}</span><span class="tix-big-g">${drvBadge(growthBadge(sum, sumP), 'all', k.key, sumD)}</span></div>
-      <div class="tix-bigsub">FF + GV combined · prev ${U.fmt(sumP)}</div>
+      <div class="tix-bigsub">FF + GV combined · prev ${U.fmt(sumP)} · ${esc(prev2Label(m))} ${U.fmt(sumP2)}</div>
       <div class="tix-split" title="FF vs GV share">${sum ? `<i class="ff" style="width:${ffShare.toFixed(1)}%"></i><i class="gv" style="width:${gvShare.toFixed(1)}%"></i>` : ''}</div>
       ${row('ff', 'First Forward', ffV, ffShare, ffP, ffD, ffNA, 'ff')}
       ${row('gv', 'GV Partner', gvV, gvShare, gvP, gvD, gvNA, 'gv')}
@@ -205,6 +211,7 @@ FF.pages = FF.pages || {};
     </div>`;
   }
   const d2 = (d) => (d === 'up' ? 'is-up' : d === 'down' ? 'is-down' : '');
+  const prev2Label = (m) => { const r = m.prevGv2Range || m.prevFf2Range; return r ? rangeLabel(r[0], r[1]) : 'prev-2'; };
 
   // ---------------------------------------------------------------- sections
   function trendWindow(m) {
@@ -243,10 +250,15 @@ FF.pages = FF.pages || {};
     const cmpLabels = ['Total', 'VC4', 'VC20', 'VC5+', 'Commercial'];
     const keys = ['total', 'vc4', 'vc20', 'vc5p', 'comm'];
     const prevName = m.prevGvRange ? `Prev ${rangeLabel(m.prevGvRange[0], m.prevGvRange[1])}` : 'Prev';
-    const ffCmp = C.bars({ labels: cmpLabels, height: 220, legendAlways: true, series: [
-      { name: m.ffComparable ? 'Prev' : 'Prev (T+1)', values: keys.map((k) => ffPrev[k]), color: '#c7d2fe' }, { name: 'Selected', values: keys.map((k) => ff[k]), color: FF_COLOR }] });
-    const gvCmp = C.bars({ labels: cmpLabels, height: 220, legendAlways: true, series: [
-      { name: m.gvComparable ? 'Prev' : 'Prev (T+1)', values: keys.map((k) => gvPrev[k]), color: '#99f6e4' }, { name: 'Selected', values: keys.map((k) => gv[k]), color: GV_COLOR }] });
+    // v3.125.95 — 3 period (prev-2 · prev · selected) side-by-side horizontal bars (stacked nahi)
+    const r2 = m.prevGv2Range || m.prevFf2Range, r1 = m.prevGvRange || m.prevFfRange;
+    const pl = [r2 ? rangeLabel(r2[0], r2[1]) : 'Prev-2', r1 ? rangeLabel(r1[0], r1[1]) : 'Prev', rangeLabel(m.from, m.to)];
+    const triBars = (sets, colors) => {
+      const max = Math.max(1, ...keys.flatMap((k) => sets.map((x) => x[k] || 0)));
+      return `<div class="tri-bars"><div class="tri-legend">${pl.map((l, i) => `<span><i style="background:${colors[i]}"></i>${esc(l)}</span>`).join('')}</div>${keys.map((k, ki) => `<div class="tri-row"><span class="tri-lbl">${esc(cmpLabels[ki])}</span><div class="tri-set">${sets.map((x, i) => `<div class="tri-bar"><i style="width:${(((x[k] || 0) / max) * 100).toFixed(1)}%;background:${colors[i]}"></i><b>${U.fmt(x[k] || 0)}</b></div>`).join('')}</div></div>`).join('')}</div>`;
+    };
+    const ffCmp = triBars([m.ffPrev2 || {}, ffPrev, ff], ['#c7d2fe', '#818cf8', FF_COLOR]);
+    const gvCmp = triBars([m.gvPrev2 || {}, gvPrev, gv], ['#99f6e4', '#2dd4bf', GV_COLOR]);
     const growthBars = C.hbars({ valueLabel: 'Selected', compareLabel: 'Prev', items: KPIS.map((k) => ({
       label: k.short, sub: `FF ${U.fmt(ff[k.key])} · GV ${U.fmt(gv[k.key])}`, value: ff[k.key] + gv[k.key], compare: ffPrev[k.key] + gvPrev[k.key], color: k.accent })) });
     return `
@@ -261,8 +273,8 @@ FF.pages = FF.pages || {};
       <div class="grid g-2">
         ${card(`🔁 Selected vs ${esc(prevName)} · Combined`, growthBars, '<span class="dim small">bar = selected, line = pichhla period</span>')}
         <div class="tix-stack">
-          ${card('🟦 First Forward · prev vs selected', ffCmp, `<span class="badge indigo">${U.fmt(ff.total)} tags</span>`)}
-          ${card('🟩 GV Partner · prev vs selected', gvCmp, `<span class="badge teal">${U.fmt(gv.total)} tags</span>`)}
+          ${card('🟦 First Forward · 3 period', ffCmp, `<span class="badge indigo">${U.fmt(ff.total)} tags</span>`)}
+          ${card('🟩 GV Partner · 3 period', gvCmp, `<span class="badge teal">${U.fmt(gv.total)} tags</span>`)}
         </div>
       </div>`;
   }
@@ -332,12 +344,13 @@ FF.pages = FF.pages || {};
     const all = U.uniq([...Object.keys(ff.byClass), ...Object.keys(gv.byClass), ...Object.keys(ffPrev.byClass), ...Object.keys(gvPrev.byClass)]).sort((a, b) => (parseInt(a.replace(/\D/g, ''), 10) || 999) - (parseInt(b.replace(/\D/g, ''), 10) || 999));
     const rows = all.map((c) => {
       const a = ff.byClass[c] || 0, ap = ffPrev.byClass[c] || 0, b = gv.byClass[c] || 0, bp = gvPrev.byClass[c] || 0;
+      const a2 = (m.ffPrev2 && m.ffPrev2.byClass[c]) || 0, b2 = (m.gvPrev2 && m.gvPrev2.byClass[c]) || 0;
       return `<tr><td><b>${esc(c)}</b> <small class="dim">${esc(M.classGroup(c))}</small></td>
-        <td class="num"><b>${U.fmt(a)}</b></td><td class="num">${m.ffComparable ? U.fmt(ap) : '—'}</td><td>${growthBadge(a, ap, !m.ffComparable)}</td>
-        <td class="num"><b>${U.fmt(b)}</b></td><td class="num">${m.gvComparable ? U.fmt(bp) : '—'}</td><td>${growthBadge(b, bp, !m.gvComparable)}</td>
-        <td class="num"><b>${U.fmt(a + b)}</b></td><td class="num">${U.fmt(ap + bp)}</td><td>${growthBadge(a + b, ap + bp)}</td></tr>`;
+        <td class="num"><b>${U.fmt(a)}</b></td><td class="num">${m.ffComparable ? U.fmt(ap) : '—'}</td><td class="num dim">${m.ffComparable ? U.fmt(a2) : '—'}</td><td>${growthBadge(a, ap, !m.ffComparable)}</td>
+        <td class="num"><b>${U.fmt(b)}</b></td><td class="num">${m.gvComparable ? U.fmt(bp) : '—'}</td><td class="num dim">${m.gvComparable ? U.fmt(b2) : '—'}</td><td>${growthBadge(b, bp, !m.gvComparable)}</td>
+        <td class="num"><b>${U.fmt(a + b)}</b></td><td class="num">${U.fmt(ap + bp)}</td><td class="num dim">${U.fmt(a2 + b2)}</td><td>${growthBadge(a + b, ap + bp)}</td></tr>`;
     }).join('');
-    return `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">FF</th><th class="num">FF prev</th><th>FF Δ</th><th class="num">GV</th><th class="num">GV prev</th><th>GV Δ</th><th class="num">Total</th><th class="num">Total prev</th><th>Total Δ</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="empty">Is range me koi data nahi</td></tr>'}</tbody></table></div>`;
+    return `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Class</th><th class="num">FF</th><th class="num">FF prev</th><th class="num">FF prev-2</th><th>FF Δ</th><th class="num">GV</th><th class="num">GV prev</th><th class="num">GV prev-2</th><th>GV Δ</th><th class="num">Total</th><th class="num">Total prev</th><th class="num">Total prev-2</th><th>Total Δ</th></tr></thead><tbody>${rows || '<tr><td colspan="13" class="empty">Is range me koi data nahi</td></tr>'}</tbody></table></div>`;
   }
 
   /** 🩺 Kaun si sheet ka data kab tak aaya — EIR T+1 me 1 din purana normal hai. */
@@ -415,7 +428,7 @@ FF.pages = FF.pages || {};
   const within = (key, a, b) => !!a && key >= a && key <= b;
 
   function loadDriverRows(m) {
-    const starts = [m.from, m.prevGvRange && m.prevGvRange[0], m.prevFfRange && m.prevFfRange[0]].filter(Boolean).sort();
+    const starts = [m.from, m.prevGvRange && m.prevGvRange[0], m.prevFfRange && m.prevFfRange[0], m.prevGv2Range && m.prevGv2Range[0], m.prevFf2Range && m.prevFf2Range[0]].filter(Boolean).sort();
     const from = starts[0], to = m.to, ck = `${from}|${to}`;
     if (!DRV.cache.has(ck) || DRV.cache.get(ck).failed) {
       const pr = M.loadRangePeople(from, to).then((rows) => ({ rows })).catch((err) => ({ rows: [], failed: true, err }));
@@ -428,8 +441,8 @@ FF.pages = FF.pages || {};
   /** rows → one record per agent (or per TL) with current + previous period numbers (like-for-like, same as the KPI cards). */
   function aggregateDrivers(rows, m) {
     const per = {
-      ff: { cur: [m.from, m.ffTo], prev: m.prevFfRange },
-      gv: { cur: [m.from, m.gvTo], prev: m.prevGvRange }
+      ff: { cur: [m.from, m.ffTo], prev: m.prevFfRange, prev2: m.prevFf2Range },
+      gv: { cur: [m.from, m.gvTo], prev: m.prevGvRange, prev2: m.prevGv2Range }
     };
     const out = new Map();
     for (const r of rows) {
@@ -439,7 +452,8 @@ FF.pages = FF.pages || {};
       const pp = per[chKey];
       const inCur = within(r.dateKey, pp.cur[0], pp.cur[1]);
       const inPrev = pp.prev && within(r.dateKey, pp.prev[0], pp.prev[1]);
-      if (!inCur && !inPrev) continue;
+      const inPrev2 = pp.prev2 && within(r.dateKey, pp.prev2[0], pp.prev2[1]);
+      if (!inCur && !inPrev && !inPrev2) continue;
       const direct = isDirectRow(r);
       let key, name, id, tl;
       if (DRV.level === 'tls') {
@@ -448,8 +462,8 @@ FF.pages = FF.pages || {};
       } else {
         key = `${chKey}|${r.id || r.name}`; name = r.name; id = r.id || ''; tl = direct ? FF.config.directLabel(r, chKey) : r.tlName;
       }
-      const o = out.get(key) || { key, name, id, tl, ch: chKey, direct, cur: 0, prev: 0, agents: new Set() };
-      if (inCur) o.cur += r.n; if (inPrev) o.prev += r.n;
+      const o = out.get(key) || { key, name, id, tl, ch: chKey, direct, cur: 0, prev: 0, prev2: 0, agents: new Set() };
+      if (inCur) o.cur += r.n; if (inPrev) o.prev += r.n; if (inPrev2) o.prev2 += r.n;
       o.agents.add(r.id || r.name);
       out.set(key, o);
     }
@@ -515,7 +529,7 @@ FF.pages = FF.pages || {};
       <td>${i + 1}</td><td><b>${esc(o.name)}</b>${o.id ? ` <small class="mono dim">${esc(o.id)}</small>` : ''}${DRV.level === 'tls' && !o.direct ? ` <small class="dim">${U.fmt(o.agents)} agents</small>` : ''}</td>
       <td><span class="badge ${o.ch === 'gv' ? 'teal' : 'indigo'}">${o.ch === 'gv' ? 'GV' : 'FF'}</span></td>
       <td>${esc(typeLabel(o))}</td><td>${esc(o.tl || '—')}</td>
-      <td class="num">${U.fmt(o.prev)}</td><td class="num"><b>${U.fmt(o.cur)}</b></td>
+      <td class="num dim">${U.fmt(o.prev2 || 0)}</td><td class="num">${U.fmt(o.prev)}</td><td class="num"><b>${U.fmt(o.cur)}</b></td>
       <td class="num tix-d ${tone(o.delta)}"><b>${dsign(o.delta)}</b></td><td class="num">${gtxt(o.growth)}</td><td>${stBadge(o)}</td></tr>`).join('');
     const statusChips = DRV.dir === 'last' ? `<span class="tix-drv-sep"></span>${[['dw', 'Down + same'], ['all', 'All 15']].map(([id, l]) => `<button type="button" class="tix-chipbtn ${DRV.status === id ? 'active' : ''}" data-drv-set="status:${id}">${l}</button>`).join('')}` : '';
     return `<div class="tix-drv-bar">
@@ -530,7 +544,7 @@ FF.pages = FF.pages || {};
       <div class="tix-drv-tabs">${tb('down', '🔻 Down')}${tb('up', '🔺 Up')}${tb('last', '🏅 Last period top 15')}${tb('now', '🏆 Now top 15')}${statusChips}
         <button class="btn small" type="button" data-drv-csv style="margin-left:auto">⬇ CSV</button></div>
       <h4 class="tix-drv-title">${title}</h4>
-      ${view.length ? `<div class="table-wrap"><table class="tbl compact tix-drvtbl"><thead><tr><th>#</th><th>${DRV.level === 'tls' ? 'TL / team' : 'Agent'}</th><th>Ch</th><th>Type</th><th>TL</th><th class="num">Last</th><th class="num">Now</th><th class="num">Change</th><th class="num">%</th><th>Status</th></tr></thead><tbody>${trs}</tbody></table></div>`
+      ${view.length ? `<div class="table-wrap"><table class="tbl compact tix-drvtbl"><thead><tr><th>#</th><th>${DRV.level === 'tls' ? 'TL / team' : 'Agent'}</th><th>Ch</th><th>Type</th><th>TL</th><th class="num" title="Pichhle se pichhla period">Last-2</th><th class="num">Last</th><th class="num">Now</th><th class="num">Change</th><th class="num">%</th><th>Status</th></tr></thead><tbody>${trs}</tbody></table></div>`
         : '<div class="empty">Nothing to show for this filter.</div>'}
       <small class="dim">Source: FF = EIR sheet, GV = GV Master (agent / TL names) — like-for-like days as in the KPI cards. Click a name to open the full summary.</small>`;
   }
@@ -616,19 +630,21 @@ FF.pages = FF.pages || {};
 
   /** Per-agent records (current period = the card's dates; previous = like-for-like range). */
   function buildAgentReport(inputs, m, which) {
-    const per = { ff: { cur: [m.from, m.to], prev: m.prevFfRange }, gv: { cur: [m.from, m.to], prev: m.prevGvRange } };
+    const per = { ff: { cur: [m.from, m.to], prev: m.prevFfRange, prev2: m.prevFf2Range }, gv: { cur: [m.from, m.to], prev: m.prevGvRange, prev2: m.prevGv2Range } };
     const out = new Map();
     for (const r of inputs) {
       if (which !== 'both' && which !== r.ch) continue;
       const pp = per[r.ch];
       const inCur = within(r.dateKey, pp.cur[0], pp.cur[1]);
       const inPrev = !!pp.prev && within(r.dateKey, pp.prev[0], pp.prev[1]);
-      if (!inCur && !inPrev) continue;
+      const inPrev2 = !!pp.prev2 && within(r.dateKey, pp.prev2[0], pp.prev2[1]);
+      if (!inCur && !inPrev && !inPrev2) continue;
       const key = `${r.ch}|${nid(r.id) || nname(r.name)}`;
-      const o = out.get(key) || { ch: r.ch, id: r.id, name: r.name, tlName: r.tlName, tlId: r.tlId, direct: r.direct, mobile: r.mobile || '', vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 };
+      const o = out.get(key) || { ch: r.ch, id: r.id, name: r.name, tlName: r.tlName, tlId: r.tlId, direct: r.direct, mobile: r.mobile || '', vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0 };
       if (!o.mobile && r.mobile) o.mobile = r.mobile;
       if (inCur) { o[g3(r)] += r.n; o.total += r.n; }
       if (inPrev) o.prev += r.n;
+      if (inPrev2) o.prev2 += r.n;
       out.set(key, o);
     }
     const list = [...out.values()];
@@ -645,9 +661,9 @@ FF.pages = FF.pages || {};
     for (const o of list) {
       if (o.direct) continue;
       const key = `${o.ch}|${nid(o.tlId) || nname(o.tlName)}`;
-      const x = map.get(key) || { ch: o.ch, name: o.tlName, id: o.tlId, agents: 0, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 };
+      const x = map.get(key) || { ch: o.ch, name: o.tlName, id: o.tlId, agents: 0, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0 };
       if (!x.id && o.tlId) x.id = o.tlId;
-      x.agents += o.total > 0 ? 1 : 0; x.vc4 += o.vc4; x.vc20 += o.vc20; x.vc5 += o.vc5; x.total += o.total; x.prev += o.prev;
+      x.agents += o.total > 0 ? 1 : 0; x.vc4 += o.vc4; x.vc20 += o.vc20; x.vc5 += o.vc5; x.total += o.total; x.prev += o.prev; x.prev2 += o.prev2 || 0;
       map.set(key, x);
     }
     const grand = list.reduce((a, o) => a + o.total, 0);
@@ -655,20 +671,20 @@ FF.pages = FF.pages || {};
       .sort((a, b) => b.total - a.total || b.prev - a.prev || String(a.name).localeCompare(String(b.name)));
   }
   const chName = (ch) => (ch === 'gv' ? 'GV' : 'FF');
-  const AGENT_HEAD = ['Rank', 'Agent ID', 'Agent Name', 'Mobile', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance %', 'Performance', 'Share %'];
-  const agentRow = (o, i) => [i + 1, o.id, o.name, o.mobile || '', o.tlName, o.tlId, chName(o.ch), o.vc4, o.vc20, o.vc5, o.total, o.prev, o.change, perfCell(o.total, o.prev), o.status, o.share];
-  const sumOf = (list) => list.reduce((a, o) => ({ vc4: a.vc4 + o.vc4, vc20: a.vc20 + o.vc20, vc5: a.vc5 + o.vc5, total: a.total + o.total, prev: a.prev + o.prev }), { vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0 });
+  const AGENT_HEAD = ['Rank', 'Agent ID', 'Agent Name', 'Mobile', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev-2 total', 'Prev total', 'Change', 'Performance %', 'Performance', 'Share %'];
+  const agentRow = (o, i) => [i + 1, o.id, o.name, o.mobile || '', o.tlName, o.tlId, chName(o.ch), o.vc4, o.vc20, o.vc5, o.total, o.prev2 || 0, o.prev, o.change, perfCell(o.total, o.prev), o.status, o.share];
+  const sumOf = (list) => list.reduce((a, o) => ({ vc4: a.vc4 + o.vc4, vc20: a.vc20 + o.vc20, vc5: a.vc5 + o.vc5, total: a.total + o.total, prev: a.prev + o.prev, prev2: a.prev2 + (o.prev2 || 0) }), { vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0 });
   const totalRow = (label, list, width) => {
     const t = sumOf(list);
-    const tail = [t.vc4, t.vc20, t.vc5, t.total, t.prev, t.total - t.prev, perfCell(t.total, t.prev), perfStatus(t.total, t.prev), ''];
+    const tail = [t.vc4, t.vc20, t.vc5, t.total, t.prev2, t.prev, t.total - t.prev, perfCell(t.total, t.prev), perfStatus(t.total, t.prev), ''];
     return [...Array(width - tail.length).fill(''), ...tail].map((v, k) => (k === 2 ? label : v));
   };
   function reportSheets(rep, m, which) {
     const tlAgents = rep.list.filter((o) => !o.direct), direct = rep.list.filter((o) => o.direct);
     const piv = tlPivot(rep.list);
-    const TL_HEAD = ['Rank', 'TL ID', 'TL Name', 'Channel', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev total', 'Change', 'Performance %', 'Performance', 'Share %'];
-    const tlRows = piv.map((x, i) => [i + 1, x.id, x.name, chName(x.ch), x.agents, x.vc4, x.vc20, x.vc5, x.total, x.prev, x.total - x.prev, perfCell(x.total, x.prev), x.status, x.share]);
-    const line = (label, list, agentsN) => { const t = sumOf(list); return ['', '', label, '', agentsN, t.vc4, t.vc20, t.vc5, t.total, t.prev, t.total - t.prev, perfCell(t.total, t.prev), perfStatus(t.total, t.prev), rep.grandTotal ? r1((t.total / rep.grandTotal) * 100) : 0]; };
+    const TL_HEAD = ['Rank', 'TL ID', 'TL Name', 'Channel', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev-2 total', 'Prev total', 'Change', 'Performance %', 'Performance', 'Share %'];
+    const tlRows = piv.map((x, i) => [i + 1, x.id, x.name, chName(x.ch), x.agents, x.vc4, x.vc20, x.vc5, x.total, x.prev2 || 0, x.prev, x.total - x.prev, perfCell(x.total, x.prev), x.status, x.share]);
+    const line = (label, list, agentsN) => { const t = sumOf(list); return ['', '', label, '', agentsN, t.vc4, t.vc20, t.vc5, t.total, t.prev2, t.prev, t.total - t.prev, perfCell(t.total, t.prev), perfStatus(t.total, t.prev), rep.grandTotal ? r1((t.total / rep.grandTotal) * 100) : 0]; };
     const active = (l) => l.filter((o) => o.total > 0).length;
     const blank = Array(TL_HEAD.length).fill('');
     const tlSheetRows = [...tlRows, blank,
