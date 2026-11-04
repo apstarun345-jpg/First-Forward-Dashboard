@@ -38,7 +38,8 @@ test('agent report: GV from GV Master, FF TL from REPORT, TLs + direct sheets, p
   const f2 = both.list[3]; assert.equal(f2.direct, true); assert.equal(f2.perf, -75); assert.equal(f2.status, '▼ Down');
   assert.equal(both.chTot.ff, 10); assert.equal(both.chTot.gv, 8);
   const sheets = t.reportSheets(both, m, 'both');
-  assert.equal(sheets.map((s) => s.name).join('|'), 'TLs (GV + FF)|Direct Agents (GV + FF)|Agents under TLs (GV + FF)|Info');
+  // v3.125.99 — 'Source check' sheet: report total vs KPI card (EIR) + "no agent in EIR" bucket
+  assert.equal(sheets.map((s) => s.name).join('|'), 'TLs (GV + FF)|Direct Agents (GV + FF)|Agents under TLs (GV + FF)|Source check|Info');
   const tls = sheets[0].rows;
   assert.equal(tls[0][2], 'TL B'); assert.equal(tls[0][8], 9); assert.equal(tls[1][2], 'TL A'); assert.equal(tls[1][3], 'GV');
   assert.equal(tls.at(-1)[2], 'GRAND TOTAL'); assert.equal(tls.at(-1)[8], 18);

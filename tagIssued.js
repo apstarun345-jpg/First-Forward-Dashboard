@@ -115,7 +115,10 @@ FF.pages = FF.pages || {};
     }));
     let masterLatest = '';
     for (const r of masterRows) if (r.key > masterLatest) masterLatest = r.key;
-    return { ffRows, gvRows, gvLatest, ffLatest, masterRows, masterLatest, gvMasterRows, dailyRows };
+    // 🧾 EIR GV rows jinka agent identity EIR me hi khaali hai (live / purani rows) — report inhe alag bucket
+    // me dikhata hai taaki report total KPI card (EIR) se match kare.
+    const gvEirRows = rawMaster.length ? gvRows.filter((r) => !U.clean(r.agentId) && !U.clean(r.agentName)) : [];
+    return { ffRows, gvRows, gvLatest, ffLatest, masterRows, masterLatest, gvMasterRows, gvEirRows, dailyRows };
   }
 
   /** Dono channels ka current + previous period (FF T+1: FF like-for-like). */
@@ -417,7 +420,21 @@ FF.pages = FF.pages || {};
       const tl = FF.config.isDirectAgent(r, 'gv') ? FF.config.directLabel(r, 'gv') : (r.tlName || 'Unassigned');
       gvTlMap.set(tl, (gvTlMap.get(tl) || 0) + n);
     });
-    const top = (sel) => [...gvAgentMap].sort((a, b) => sel(b[1]) - sel(a[1])).slice(0, rankCount);
+    // 🧾 card ka GV number = GV Master + EIR ki un rows ka jinka agent GV Master me nahi (aaj live / blank).
+    // Warna "upar 15,899, neeche agents ka jod 15,674" jaisa fark dikhta tha. Ye remainder ek alag
+    // labelled row me dikhta hai — kisi agent ke naam par nahi chadhaaya jaata.
+    const inRange = (r) => { const k = r.key || (r.date ? U.dateKey(r.date) : ''); return k && k >= m.from && k <= m.to; };
+    const masterDates = new Set(rows.gvMasterRows.filter(inRange).map((r) => U.dateKey(r.date || r.d || new Date(0))));
+    let gvNoAgent = { total: 0, vc4: 0, comm: 0 };
+    for (const r of rows.gvEirRows || []) {
+      if (!inRange(r)) continue;
+      const k = U.dateKey(r.date || r.d || new Date(0));
+      if (masterDates.has(k)) continue;   // GV Master me already hai
+      const n = r.n === undefined ? 1 : (Number(r.n) || 0);
+      gvNoAgent.total += n; if (r.group === 'VC4') gvNoAgent.vc4 += n; else gvNoAgent.comm += n;
+    }
+    const withNoAgent = (list, sel) => (gvNoAgent[sel] ? [...list, [NO_AGENT, { total: gvNoAgent.total, vc4: gvNoAgent.vc4, comm: gvNoAgent.comm }]] : list);
+    const top = (sel) => [...withNoAgent([...gvAgentMap], sel)].sort((a, b) => sel(b[1]) - sel(a[1])).slice(0, rankCount);
     const ffMonths = new Set(rows.ffRows.filter((r) => (r.key || '') >= m.from && (r.key || '') <= m.to).map((r) => r.ym));
     const ffAgentTotals = new Map();
     (S.get('agents') || []).forEach((a) => { if (a.channel === 'First Forward' && ffMonths.has(a.ym)) ffAgentTotals.set(a.name, (ffAgentTotals.get(a.name) || 0) + a.n); });
@@ -425,7 +442,7 @@ FF.pages = FF.pages || {};
     const hb = (list, sel, valueLabel, off) => C.hbars({ valueLabel, items: list.map(([name, o], i) => ({ label: name, sub: sel === 'total' ? `VC4 ${U.fmt(o.vc4)} · Commercial ${U.fmt(o.comm)}` : '', value: o[sel], color: C.PALETTE[(i + off) % C.PALETTE.length] })) });
     return `<div class="grid g-2">${card('🏆 Top GV agents', hb(top((o) => o.total), 'total', 'Tags', 0))}${card('⭐ Top First Forward agents', `${C.hbars({ valueLabel: 'Tags', items: topFf.map(([name, n], i) => ({ label: name, value: n, color: C.PALETTE[i % C.PALETTE.length] })) })}<small class="dim">FF agent source month-level hai — partial month me poora month judta hai.</small>`)}</div>
       <div class="grid g-2">${card('Top GV VC4 agents', hb(top((o) => o.vc4), 'vc4', 'VC4 tags', 0))}${card('Top GV Commercial agents', hb(top((o) => o.comm), 'comm', 'Commercial tags', 3))}</div>
-      ${card('🏢 Top GV teams / supervisors', C.hbars({ valueLabel: 'Tags', items: U.topEntries(gvTlMap, rankCount).map(([name, n], i) => ({ label: name, value: n, color: C.PALETTE[(i + 5) % C.PALETTE.length] })) }))}`;
+      ${card('🏢 Top GV teams / supervisors', `${C.hbars({ valueLabel: 'Tags', items: U.topEntries(gvNoAgent.total ? new Map([...gvTlMap, ['No agent in EIR', (gvTlMap.get('No agent in EIR') || 0) + gvNoAgent.total]]) : gvTlMap, rankCount).map(([name, n], i) => ({ label: name, value: n, color: C.PALETTE[(i + 5) % C.PALETTE.length] })) })}${gvNoAgent.total ? `<small class="dim">${U.fmt(gvNoAgent.total)} tags have no agent in EIR (GV Master me agent nahi) — card ke GV total me ye alag row se aate hain.</small>` : ''}`)}`;
   }
 
 
@@ -593,6 +610,10 @@ FF.pages = FF.pages || {};
   const nid = (v) => String(v == null ? '' : v).replace(/\.0+$/, '').replace(/\s+/g, '').toUpperCase();
   const nname = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().toUpperCase();
   const perfPct = (cur, prev) => (prev ? r1(((cur - prev) / prev) * 100) : null);
+  // 🧾 EIR GV rows jinka agent identity khaali hai (live rows / purane rows). Ye KPI card me ginte hain, isliye
+  // report grand total se match karne ke liye inhe alag bucket me dikhaya jaata hai (chhupaya nahi jaata).
+  // Agent-wise sheet me inki apni row nahi hoti — warna ek hi number do jagah (double count) dikhta hai.
+  const NO_AGENT = '(No agent in EIR)';
   /** Plain-words performance next to the % (vs the previous period of the same length). */
   const perfStatus = (cur, prev) => (!prev && !cur ? '—' : !prev ? '★ New' : !cur ? '✖ No issuance now' : cur > prev ? '▲ Up' : cur < prev ? '▼ Down' : '= Same');
   const perfCell = (cur, prev) => { const p = perfPct(cur, prev); return p === null ? '' : p; };
@@ -608,13 +629,30 @@ FF.pages = FF.pages || {};
       if (r.channel === 'GV Partner') continue;
       const id = U.clean(r.agentId || r.id), name0 = U.clean(r.agentName || r.name);
       const hit = dir.ff(id, name0);
-      const name = name0 || (hit && hit.name) || (id ? `Agent ${id}` : '(No agent in EIR)');
+      const name = name0 || (hit && hit.name) || (id ? `Agent ${id}` : NO_AGENT);
       const tlName = hit ? U.clean(hit.tlName) : '', tlId = hit ? U.clean(hit.tlId) : '';
       let direct = !tlName;
       if (!direct) { try { direct = !!FF.config.isDirectAgent({ tlName, tlId, agentName: name, agentId: id }, 'ff'); } catch (e) { /* keep */ } }
+      if (!id && !hit) {
+        // Agent identity hi nahi (EIR row blank) — card me ye tag ginte hain, isliye report me bhi ginte hain,
+        // par ek hi clear bucket me (agent "Unknown" ke naam par nahi).
+        out.push({ ch: 'ff', id: '', name: NO_AGENT, tlName: 'No agent in EIR', tlId: '', direct: false, noIdent: true, mobile: '', group: r.group, dateKey: r.key || (r.date ? U.dateKey(r.date) : ''), n: r.n === undefined ? 1 : (Number(r.n) || 0) });
+        continue;
+      }
       out.push({ ch: 'ff', id, name, tlName: direct ? (hit ? FF.config.directLabel({ tlName, agentName: name, agentId: id }, 'ff') : 'No TL (not in REPORT)') : tlName, tlId: direct ? '' : tlId, direct, mobile: (hit && hit.mobile) || '', group: r.group, dateKey: r.key || (r.date ? U.dateKey(r.date) : ''), n: r.n === undefined ? 1 : (Number(r.n) || 0) });
     }
     const rawGv = rows.rawGvMaster || ((G && typeof G.masterRows === 'function' ? G.masterRows() : null) || []);
+    // 🧾 EIR ki GV rows jinka agent GV Master me nahi mila / identity khaali hai (jaise aaj ki live rows).
+    // KPI card (EIR) inhe ginta hai — isliye report grand total me bhi ginte hain, warna "report 15,674 vs
+    // card 15,899" jaisa fark bina wajah dikhta hai. Ye rows agent-wise sheet me nahi jaati.
+    const masterHas = new Set();
+    for (const r of rawGv) { const k = nid(r && r.date ? U.dateKey(r.date) : ''); if (k) masterHas.add(k); }
+    for (const r of (rows.gvEirRows || [])) {
+      if (!r || r.channel !== 'GV Partner') continue;
+      const key = U.dateKey(r.date || r.d || new Date(0));
+      if (!key || key === '1970-01-01' || masterHas.has(key)) continue;   // GV Master ki row already aa rahi hai
+      out.push({ ch: 'gv', id: '', name: NO_AGENT, tlName: 'No agent in EIR', tlId: '', direct: false, noIdent: true, mobile: '', group: r.group || (M.classGroup ? M.classGroup(r.cls) : 'VC4'), dateKey: key, n: r.n === undefined ? 1 : (Number(r.n) || 0) });
+    }
     // v3.125.93 — GV TL ki APNI issued rows (agent ID = TL ID; TL column khaali / kisi aur TL ka) TL ke total me.
     // Pehle ye "direct" ban kar TL sheet se bahar ho jaati thi (APS010606 Rakesh: 129 ki jagah 56).
     const gvTls = new Map();
@@ -645,6 +683,13 @@ FF.pages = FF.pages || {};
   function buildAgentReport(inputs, m, which) {
     const per = { ff: { cur: [m.from, m.to], prev: m.prevFfRange, prev2: m.prevFf2Range }, gv: { cur: [m.from, m.to], prev: m.prevGvRange, prev2: m.prevGv2Range } };
     const out = new Map(), months = new Set(), first = { ff: '', gv: '' };
+    // din-wise total per channel/month — partial mahine ko pichhle mahine ke SAME dinon se compare karne ke liye
+    const dayTot = { ff: {}, gv: {} };
+    const bumpDay = (ch, key, n) => {
+      const ym = key.slice(0, 7), d = Number(key.slice(8, 10));
+      const b = ((dayTot[ch][ym] || (dayTot[ch][ym] = {}))[d] || 0) + n;
+      dayTot[ch][ym][d] = b;
+    };
     for (const r of inputs) { const k = String(r.dateKey || ''); if (k && (!first[r.ch] || k < first[r.ch])) first[r.ch] = k; }
     for (const r of inputs) {
       if (which !== 'both' && which !== r.ch) continue;
@@ -654,7 +699,7 @@ FF.pages = FF.pages || {};
       const inPrev2 = !!pp.prev2 && within(r.dateKey, pp.prev2[0], pp.prev2[1]);
       if (!inCur && !inPrev && !inPrev2) continue;
       const key = `${r.ch}|${nid(r.id) || nname(r.name)}`;
-      const o = out.get(key) || { ch: r.ch, id: r.id, name: r.name, tlName: r.tlName, tlId: r.tlId, direct: r.direct, mobile: r.mobile || '', vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0, mon: {} };
+      const o = out.get(key) || { ch: r.ch, id: r.id, name: r.name, tlName: r.tlName, tlId: r.tlId, direct: r.direct, noIdent: !!r.noIdent, mobile: r.mobile || '', vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0, mon: {} };
       if (!o.mobile && r.mobile) o.mobile = r.mobile;
       if (inCur) {
         o[g3(r)] += r.n; o.total += r.n;
@@ -662,6 +707,7 @@ FF.pages = FF.pages || {};
         const ym = String(r.dateKey).slice(0, 7); months.add(ym);
         const mm = o.mon[ym] || (o.mon[ym] = { vc4: 0, vc20: 0, vc5: 0, total: 0 });
         mm[g3(r)] += r.n; mm.total += r.n;
+        bumpDay(r.ch, String(r.dateKey), r.n);
       }
       if (inPrev) o.prev += r.n;
       if (inPrev2) o.prev2 += r.n;
@@ -669,19 +715,25 @@ FF.pages = FF.pages || {};
     }
     const list = [...out.values()];
     const grandTotal = list.reduce((a, o) => a + o.total, 0);
-    for (const o of list) { o.change = o.total - o.prev; o.perf = perfPct(o.total, o.prev); o.status = perfStatus(o.total, o.prev); o.share = grandTotal ? r1((o.total / grandTotal) * 100) : 0; }
+    for (const o of list) {
+      // 'no agent' bucket: agent-wise sheet me nahi (ek hi number do jagah na gine) — TL lines / totals me ginta hai.
+      if (o.noIdent) o.noSheet = true;
+      o.change = o.total - o.prev; o.perf = perfPct(o.total, o.prev); o.status = perfStatus(o.total, o.prev); o.share = grandTotal ? r1((o.total / grandTotal) * 100) : 0;
+    }
     list.sort((a, b) => b.total - a.total || b.prev - a.prev || String(a.name).localeCompare(String(b.name)));
     const chTot = { ff: 0, gv: 0 }; list.forEach((o) => { chTot[o.ch] += o.total; });
+    // no-agent bucket ka per-channel split (KPI card vs report ka fark seedha yahin se samajh aata hai)
+    const noIdent = { ff: 0, gv: 0 }; list.forEach((o) => { if (o.noIdent) noIdent[o.ch] += o.total; });
     // prev period ka data load hi nahi hua (sabse purani row prev ke shuru se baad ki) → n/a
     const prevNA = { ff: !!(per.ff.prev && (!first.ff || first.ff > per.ff.prev[0])), gv: !!(per.gv.prev && (!first.gv || first.gv > per.gv.prev[0])) };
-    return { list, grandTotal, chTot, prevNA, first, months: [...months].filter((x) => /^\d{4}-\d{2}$/.test(x)).sort() };
+    return { list, grandTotal, chTot, noIdent, prevNA, first, dayTot, months: [...months].filter((x) => /^\d{4}-\d{2}$/.test(x)).sort() };
   }
 
   /** One row per real TL (both channels together), highest → lowest. */
   function tlPivot(list) {
     const map = new Map();
     for (const o of list) {
-      if (o.direct) continue;
+      if (o.direct || o.noIdent) continue;   // 'no agent in EIR' bucket TL ranking me nahi (alag bucket hai)
       const key = `${o.ch}|${nid(o.tlId) || nname(o.tlName)}`;
       const x = map.get(key) || { ch: o.ch, name: o.tlName, id: o.tlId, agents: 0, vc4: 0, vc20: 0, vc5: 0, total: 0, prev: 0, prev2: 0, mon: {} };
       if (!x.id && o.tlId) x.id = o.tlId;
@@ -710,12 +762,42 @@ FF.pages = FF.pages || {};
   const monSum = (list) => { const t = {}; for (const o of list) for (const [ym, v] of Object.entries(o.mon || {})) { const x = t[ym] || (t[ym] = { vc4: 0, vc20: 0, vc5: 0, total: 0 }); x.vc4 += v.vc4; x.vc20 += v.vc20; x.vc5 += v.vc5; x.total += v.total; } return t; };
   const ymDays = (ym) => new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0)).getUTCDate();
   const fullMonth = (ym, from, to) => from <= `${ym}-01` && to >= `${ym}-${String(ymDays(ym)).padStart(2, '0')}`;
+  /** 🔎 Source check sheet — report total vs KPI card (EIR) ka fark, bucket-wise. Report ka grand total
+   *  KPI se match karta hai; jo rows kisi agent ke naam par nahi hain wo is sheet me saaf dikhte hain. */
+  function sourceSheet(rep, m, which) {
+    const kpi = which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total;
+    const na = rep.noIdent || { ff: 0, gv: 0 };
+    const row = (ch) => {
+      const rep0 = rep.chTot[ch] || 0, kpi0 = ch === 'ff' ? m.ff.total : m.gv.total;
+      return [chName(ch), kpi0, rep0, na[ch] || 0, rep0 - (na[ch] || 0), rep0 - kpi0];
+    };
+    const rows = [];
+    if (which !== 'gv') rows.push(row('ff'));
+    if (which !== 'ff') rows.push(row('gv'));
+    rows.push(['GV + FF', kpi, rep.grandTotal, (na.ff || 0) + (na.gv || 0), rep.grandTotal - ((na.ff || 0) + (na.gv || 0)), rep.grandTotal - kpi]);
+    return {
+      name: 'Source check', filterRows: rows.length,
+      header: ['Channel', 'KPI card (EIR)', 'Report total', 'of which: no agent in EIR', 'Named agents (report)', 'Difference (report − KPI)'],
+      rows,
+      notes: [
+        ['KPI card', 'Total Issued card — EIR daily rows (GV = EIR master ID 5845036).'],
+        ['Report (FF)', 'Same EIR rows; agent / TL / mobile from FF REPORT.'],
+        ['Report (GV)', 'GV Master ledger (agent + TL per tag) + EIR ki wo rows jinka agent GV Master me nahi mila.'],
+        ['No agent in EIR', 'Rows that carry no agent identity in EIR (live rows of today / blank rows). They count in the totals but have no agent-wise row, so they are listed here instead of being silently dropped.'],
+        ['Difference', '0 = report and KPI card agree. A non-zero value means one source is behind (timing) — check Data check → GV EIR vs GV Master.'],
+        ['Generated', new Date().toLocaleString('en-IN')]
+      ]
+    };
+  }
   /** Report sheets. 2+ months → month-wise layout (Prev columns ki jagah month-over-month analysis), 1 period → classic.
    *  Har sheet par Excel styles: Total / month-total columns rangeen, total rows grey, grand total dark, performance green/red. */
   function reportSheets(rep, m, which) {
     const months = (rep.months && rep.months.length > 1) ? rep.months : [];
     const sheets = months.length ? reportSheetsMonthly(rep, m, which, months) : reportSheets0(rep, m, which);
     if (!months.length) blankMissingPrev(sheets, rep);
+    // Source check sheet hamesha last ke pehle (Info ke saath) — report total vs KPI card yahin verify hota hai.
+    const infoAt = sheets.findIndex((sh) => sh.name === 'Info');
+    if (infoAt >= 0) sheets.splice(infoAt, 0, sourceSheet(rep, m, which));
     sheets.forEach(styleSheet);
     return sheets;
   }
@@ -767,14 +849,16 @@ FF.pages = FF.pages || {};
     const vA = (mon) => (((mon || {})[A] || {}).total || 0), vB = (mon) => (((mon || {})[B] || {}).total || 0);
     const cmpH = `${monLabel(A)} vs ${monLabel(B)} %`, cmpS = 'Performance';
     const tail = (mon, total) => [total, avgOf(mon), perfCell(vA(mon), vB(mon)), perfStatus(vA(mon), vB(mon)), rep.grandTotal ? r1((total / rep.grandTotal) * 100) : 0];
-    const tlAgents = rep.list.filter((o) => !o.direct), direct = rep.list.filter((o) => o.direct);
+    // Agent-wise rows: 'no agent' bucket alag sheet/total me jaata hai (yahin nahi) — double count na ho.
+    const tlAgents = rep.list.filter((o) => !o.direct && !o.noSheet), direct = rep.list.filter((o) => o.direct);
     const piv = tlPivot(rep.list);
     const both = which === 'both';
     const active = (l) => l.filter((o) => o.total > 0).length;
     const TL_HEAD = ['Rank', 'TL ID', 'TL Name', 'Channel', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', `Avg / month (${avgBase.length})`, cmpH, cmpS, 'Share %', ...monHead(months)];
     const tlLine = (label, list) => { const t = sumOf(list), mon = monSum(list); return ['', '', label, '', active(list), t.vc4, t.vc20, t.vc5, ...tail(mon, t.total), ...monCells(mon, months)]; };
     const tlRows = [...piv.map((x, i) => [i + 1, x.id, x.name, chName(x.ch), x.agents, x.vc4, x.vc20, x.vc5, ...tail(x.mon, x.total), ...monCells(x.mon, months)]),
-      Array(TL_HEAD.length).fill(''), tlLine('TOTAL · all TLs (agents under TLs)', tlAgents), tlLine('TOTAL · direct agents', direct), tlLine('GRAND TOTAL', rep.list)];
+      Array(TL_HEAD.length).fill(''), tlLine('TOTAL · all TLs (agents under TLs)', tlAgents), tlLine('TOTAL · direct agents', direct),
+      tlLine('TOTAL · no agent in EIR (counted, no agent row)', rep.list.filter((o) => o.noIdent)), tlLine('GRAND TOTAL', rep.list)];
     const AG_HEAD = ['Rank', 'Agent ID', 'Agent Name', 'Mobile', 'TL Name', 'TL ID', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', `Avg / month (${avgBase.length})`, cmpH, cmpS, 'Share %', ...monHead(months)];
     const agRows = (list, label) => {
       const rows = list.map((o, i) => [i + 1, o.id, o.name, o.mobile || '', o.tlName, o.tlId, chName(o.ch), o.vc4, o.vc20, o.vc5, ...tail(o.mon, o.total), ...monCells(o.mon, months)]);
@@ -783,24 +867,48 @@ FF.pages = FF.pages || {};
     };
     // Month-wise summary: har mahine × channel, pichhle mahine se change / growth
     const chs = both ? ['ff', 'gv'] : [which];
-    const SUM_HEAD = ['Month', 'Period', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'VC4 %', 'Commercial (VC20+VC5+)', 'Change vs prev month', 'Growth %', 'Growth', 'Days', 'Per day'];
+    const SUM_HEAD = ['Month', 'Period', 'Channel', 'VC4', 'VC20', 'VC5+', 'Total', 'VC4 %', 'Commercial (VC20+VC5+)', 'Change', 'Growth %', 'Growth', 'Days', 'Per day', 'Compared with', 'Comparison total'];
     const sumRows = [];
     const per = {}; chs.forEach((ch) => { per[ch] = monSum(rep.list.filter((o) => o.ch === ch)); }); per.all = monSum(rep.list);
     const dOf = (ym) => { const a = m.from > `${ym}-01` ? m.from : `${ym}-01`, last = `${ym}-${String(ymDays(ym)).padStart(2, '0')}`, b = m.to < last ? m.to : last; return [a, b, dayCount(a, b)]; };
+    // Change / Growth sirf full mahine ke beech — partial mahine (jaise Nov 1–3) ko poore mahine se compare karna
+    // galat picture deta hai (Nov −26,604 jaisa). Isliye partial month ki row chhoti hoti hai aur wo comparison
+    // us mahine ke "same days last month" se hota hai (Weekday/Days column ke saath).
+    const partialOf = (ym) => !fullMonth(ym, m.from, m.to);
+    const sameDaysPrev = (ym) => {
+      const [a, b, d] = dOf(ym);
+      const pm = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 2, 1);
+      const pYm = `${pm.getFullYear()}-${String(pm.getMonth() + 1).padStart(2, '0')}`;
+      const last = Math.min(d, ymDays(pYm));
+      return { ym: pYm, from: `${pYm}-01`, to: `${pYm}-${String(last).padStart(2, '0')}`, days: last, from0: a, to0: b };
+    };
+    // kisi bhi channel (ya 'all') ka mahine ke din 1..upto tak ka jod — din-wise totals se
+    const daysSum = (key, ym, upto) => {
+      const add = (ch) => {
+        const b = ((rep.dayTot || {})[ch] || {})[ym] || {};
+        let n = 0;
+        for (const [d, v] of Object.entries(b)) if (Number(d) <= upto) n += v;
+        return n;
+      };
+      return key === 'all' ? add('ff') + add('gv') : add(key);
+    };
     const lineFor = (ym, i, key, chLabel) => {
       const v = per[key][ym] || { vc4: 0, vc20: 0, vc5: 0, total: 0 };
-      const pv = i > 0 ? ((per[key][months[i - 1]] || {}).total || 0) : null;
       const [a, b, d] = dOf(ym);
-      const partial = !fullMonth(ym, m.from, m.to);
-      return [`${monLabel(ym)}${partial ? ' (partial)' : ''}`, `${a} → ${b}`, chLabel, v.vc4, v.vc20, v.vc5, v.total, v.total ? r1((v.vc4 / v.total) * 100) : 0, v.vc20 + v.vc5,
-        pv === null ? '' : v.total - pv, pv === null || partial ? '' : perfCell(v.total, pv), pv === null ? '—' : partial ? 'partial month' : perfStatus(v.total, pv), d, d ? r1(v.total / d) : 0];
+      const partial = partialOf(ym);
+      const cmp = partial ? sameDaysPrev(ym) : null;
+      const pv = cmp ? daysSum(key, cmp.ym, cmp.days) : (i > 0 ? ((per[key][months[i - 1]] || {}).total || 0) : null);
+      const cmpLabel = cmp ? `${monLabel(cmp.ym)} · 1–${cmp.days}` : (i > 0 ? monLabel(months[i - 1]) : '');
+      return [`${monLabel(ym)}${partial ? ` (partial · 1–${d})` : ''}`, `${a} → ${b}`, chLabel, v.vc4, v.vc20, v.vc5, v.total, v.total ? r1((v.vc4 / v.total) * 100) : 0, v.vc20 + v.vc5,
+        pv === null ? '' : v.total - pv, pv === null ? '' : perfCell(v.total, pv), pv === null ? '—' : perfStatus(v.total, pv),
+        d, d ? r1(v.total / d) : 0, cmpLabel, pv === null ? '' : pv];
     };
     months.forEach((ym, i) => {
       chs.forEach((ch) => sumRows.push(lineFor(ym, i, ch, chName(ch))));
       if (both) sumRows.push(lineFor(ym, i, 'all', 'GV + FF'));
     });
     const g = sumOf(rep.list), gd = dayCount(m.from, m.to);
-    sumRows.push(Array(SUM_HEAD.length).fill(''), ['GRAND TOTAL', `${m.from} → ${m.to}`, both ? 'GV + FF' : chName(which), g.vc4, g.vc20, g.vc5, g.total, g.total ? r1((g.vc4 / g.total) * 100) : 0, g.vc20 + g.vc5, '', '', '', gd, gd ? r1(g.total / gd) : 0]);
+    sumRows.push(Array(SUM_HEAD.length).fill(''), ['GRAND TOTAL', `${m.from} → ${m.to}`, both ? 'GV + FF' : chName(which), g.vc4, g.vc20, g.vc5, g.total, g.total ? r1((g.vc4 / g.total) * 100) : 0, g.vc20 + g.vc5, '', '', '', gd, gd ? r1(g.total / gd) : 0, '', '']);
     return [
       { name: 'Month-wise summary', header: SUM_HEAD, rows: sumRows },
       { name: both ? 'TLs (GV + FF)' : `TLs (${REPORTS[which][1]})`, header: TL_HEAD, rows: tlRows, filterRows: piv.length + 1 },
@@ -808,22 +916,23 @@ FF.pages = FF.pages || {};
       { name: both ? 'Agents under TLs (GV + FF)' : `Agents under TLs (${REPORTS[which][1]})`, header: AG_HEAD, rows: agRows(tlAgents, 'TOTAL · agents under TLs'), filterRows: tlAgents.length + 1 },
       { name: 'Info', header: ['Item', 'Value'], rows: [
         ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to} (${months.length} months: ${months.map(monLabel).join(', ')})`],
-        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
-        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
+        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF of which: no agent in EIR', (rep.noIdent || {}).ff || 0], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
+        ...(which !== 'ff' ? [['GV total (report: GV Master + EIR no-agent rows)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV of which: no agent in EIR', (rep.noIdent || {}).gv || 0], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
         ['Report total − KPI total', rep.grandTotal - (which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total)],
-        ['Why totals can differ', 'FF report and KPI both use EIR. GV agent report uses GV Master; the KPI uses GV EIR (master ID 5845036). Timing or source mismatches can therefore create a difference.'],
+        ['Why totals can differ', 'Both sides now cover the same rows: GV agent report = GV Master + the EIR GV rows that GV Master does not have yet (today\'s live rows). Those identity-less rows are listed in the "Source check" sheet as "no agent in EIR" and are counted in the totals, so the report grand total matches the KPI card.'],
         ['Avg / month', `Average of ${avgBase.length} ${full.length ? 'full ' : ''}month(s): ${avgBase.map(monLabel).join(', ')}`],
         [cmpH, `${monLabel(A)} total vs ${monLabel(B)} total (latest ${full.length >= 2 ? 'full ' : ''}month vs the month before) · (${monLabel(A)} − ${monLabel(B)}) ÷ ${monLabel(B)} × 100`],
         ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in the earlier month) · ✖ No issuance now'],
         ['Month columns', 'Every month in the range: VC4 / VC20 / VC5+ / Total (green = month total)'],
-        ['Month-wise summary', 'Growth % is vs the previous month; a partial month (range cut) is not compared'],
+        ['Month-wise summary', 'Change / Growth is vs the month before. A partial month (range cut, e.g. Nov 1–3) is compared with the SAME days of the month before (see "Compared with" / "Comparison total"), never with that full month — "Per day" is the right yardstick there.'],
         ['Share %', 'Share of the report grand total'], ['Sorted', 'Highest to lowest total'],
-        ['Sources', 'FF: EIR (same rows as the card), TL + mobile from FF REPORT. GV: GV Master (agent + TL per tag), mobile from GV REPORT.'],
+        ['Sources', 'FF: EIR (same rows as the card), TL + mobile from FF REPORT. GV: GV Master (agent + TL per tag) + EIR GV rows GV Master does not have yet; mobile from GV REPORT.'],
         ['Generated', new Date().toLocaleString('en-IN')]] }
     ];
   }
   function reportSheets0(rep, m, which) {
-    const tlAgents = rep.list.filter((o) => !o.direct), direct = rep.list.filter((o) => o.direct);
+    // Agent-wise rows: 'no agent' bucket alag sheet/total me jaata hai (yahin nahi) — double count na ho.
+    const tlAgents = rep.list.filter((o) => !o.direct && !o.noSheet), direct = rep.list.filter((o) => o.direct);
     const piv = tlPivot(rep.list);
     const TL_HEAD = ['Rank', 'TL ID', 'TL Name', 'Channel', 'Agents (active)', 'VC4', 'VC20', 'VC5+', 'Total', 'Prev-2 total', 'Prev total', 'Change', 'Performance %', 'Performance', 'Share %'];
     const tlRows = piv.map((x, i) => [i + 1, x.id, x.name, chName(x.ch), x.agents, x.vc4, x.vc20, x.vc5, x.total, x.prev2 || 0, x.prev, x.total - x.prev, perfCell(x.total, x.prev), x.status, x.share]);
@@ -833,6 +942,7 @@ FF.pages = FF.pages || {};
     const tlSheetRows = [...tlRows, blank,
       line('TOTAL · all TLs (agents under TLs)', tlAgents, active(tlAgents)),
       line('TOTAL · direct agents', direct, active(direct)),
+      line('TOTAL · no agent in EIR (counted, no agent row)', rep.list.filter((o) => o.noIdent), active(rep.list.filter((o) => o.noIdent))),
       line('GRAND TOTAL', rep.list, active(rep.list))];
     const withTotal = (list, label) => { const rows = list.map(agentRow); if (list.length) rows.push(totalRow(label, list, AGENT_HEAD.length)); return rows; };
     const both = which === 'both';
@@ -843,21 +953,21 @@ FF.pages = FF.pages || {};
       { name: 'Info', header: ['Item', 'Value'], rows: [
         ['Report', REPORTS[which][0]], ['Period', `${m.from} to ${m.to}`],
         ['Previous period (FF)', m.prevFfRange ? `${m.prevFfRange[0]} to ${m.prevFfRange[1]}` : '—'], ['Previous period (GV)', m.prevGvRange ? `${m.prevGvRange[0]} to ${m.prevGvRange[1]}` : '—'],
-        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
-        ...(which !== 'ff' ? [['GV total (report, GV Master)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
+        ...(which !== 'gv' ? [['FF total (report)', rep.chTot.ff], ['FF total (Total Issued card)', m.ff.total], ['FF of which: no agent in EIR', (rep.noIdent || {}).ff || 0], ['FF source difference (report − KPI)', rep.chTot.ff - m.ff.total]] : []),
+        ...(which !== 'ff' ? [['GV total (report: GV Master + EIR no-agent rows)', rep.chTot.gv], ['GV total (Total Issued card, EIR)', m.gv.total], ['GV of which: no agent in EIR', (rep.noIdent || {}).gv || 0], ['GV source difference (report − KPI)', rep.chTot.gv - m.gv.total]] : []),
         ['Report total − KPI total', rep.grandTotal - (which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total)],
-        ['Why totals can differ', 'FF report and KPI both use EIR. GV agent report uses GV Master; the KPI uses GV EIR (master ID 5845036). Timing or source mismatches can therefore create a difference.'],
+        ['Why totals can differ', 'Both sides now cover the same rows: GV agent report = GV Master + the EIR GV rows that GV Master does not have yet (today\'s live rows). Those identity-less rows are listed in the "Source check" sheet as "no agent in EIR" and are counted in the totals, so the report grand total matches the KPI card.'],
         ['Performance %', '(Total − Prev total) ÷ Prev total × 100, previous period of the same length'],
         ['Performance', '▲ Up · ▼ Down · = Same · ★ New (nothing in previous period) · ✖ No issuance now'],
         ['Share %', 'Share of the report grand total'], ['Sorted', 'Highest to lowest total'],
-        ['Sources', 'FF: EIR (same rows as the card), TL + mobile from FF REPORT. GV: GV Master (agent + TL per tag), mobile from GV REPORT.'],
+        ['Sources', 'FF: EIR (same rows as the card), TL + mobile from FF REPORT. GV: GV Master (agent + TL per tag) + EIR GV rows GV Master does not have yet; mobile from GV REPORT.'],
         ['Generated', new Date().toLocaleString('en-IN')]] }
     ];
   }
   /** Flat CSV: every agent (TL agents + direct agents), highest → lowest. */
   function reportCsv(rep) {
     const months = (rep.months && rep.months.length > 1) ? rep.months : [];
-    return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6), ...monHead(months)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); if ((rep.prevNA || {})[o.ch]) { r[11] = ''; r[12] = ''; r[13] = ''; r[14] = ''; r[15] = 'n/a · prev data not loaded'; } return [...r.slice(0, 6), o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6), ...monCells(o.mon, months)]; }) };
+    return { head: [...AGENT_HEAD.slice(0, 6), 'Type', ...AGENT_HEAD.slice(6), ...monHead(months)], rows: rep.list.map((o, i) => { const r = agentRow(o, i); if ((rep.prevNA || {})[o.ch]) { r[11] = ''; r[12] = ''; r[13] = ''; r[14] = ''; r[15] = 'n/a · prev data not loaded'; } return [...r.slice(0, 6), o.noIdent ? 'No agent in EIR' : o.direct ? 'Direct agent' : 'Agent under TL', ...r.slice(6), ...monCells(o.mon, months)]; }) };
   }
   /** FF REPORT (TL / mobile by agent) + GV REPORT (mobile). Best effort, bounded wait. */
   async function reportDirectory() {
@@ -1064,11 +1174,13 @@ FF.pages = FF.pages || {};
       const ch = (k) => (which === 'both' || which === k ? `<span class="badge ${k === 'gv' ? 'green' : 'blue'}">${k === 'gv' ? '🟩 GV' : '🟦 FF'} ${U.fmt(rep.chTot[k])}</span>` : '');
       const kpiTotal = which === 'ff' ? m.ff.total : which === 'gv' ? m.gv.total : m.ff.total + m.gv.total;
       const sourceDelta = rep.grandTotal - kpiTotal;
-      const sourceBasis = which === 'ff' ? 'FF EIR report vs FF EIR KPI' : which === 'gv' ? 'GV Master report vs GV EIR KPI' : 'FF EIR + GV Master report vs FF EIR + GV EIR KPI';
+      const naTot = (rep.noIdent || { ff: 0, gv: 0 });
+      const naText = (which === 'ff' ? naTot.ff : which === 'gv' ? naTot.gv : (naTot.ff || 0) + (naTot.gv || 0)) || 0;
+      const sourceBasis = which === 'ff' ? 'FF EIR report vs FF EIR KPI' : which === 'gv' ? 'GV Master report + EIR no-agent rows vs GV EIR KPI' : 'FF EIR + GV Master (+ EIR no-agent rows) report vs FF EIR + GV EIR KPI';
       const body = `<div class="tix-rep" id="tix-rep">
         <div class="tix-rep-top">${ch('ff')}${ch('gv')}<span class="badge indigo">Report total ${U.fmt(rep.grandTotal)}</span><span class="badge">${U.fmt(rep.list.length)} agents</span>
           <input type="search" class="input tix-rep-q" placeholder="Filter: agent, TL, ID, mobile…" aria-label="Filter rows"></div>
-        <p class="dim small">Source check · KPI total (EIR): <b>${U.fmt(kpiTotal)}</b> · Report total: <b>${U.fmt(rep.grandTotal)}</b> · Difference (report − KPI): <b>${sourceDelta > 0 ? '+' : ''}${U.fmt(sourceDelta)}</b><br>${esc(sourceBasis)}. GV uses GV Master in agent report, while the KPI uses GV EIR; timing/source differences can change the total.</p>
+        <p class="dim small">Source check · KPI total (EIR): <b>${U.fmt(kpiTotal)}</b> · Report total: <b>${U.fmt(rep.grandTotal)}</b> · Difference (report − KPI): <b>${sourceDelta > 0 ? '+' : ''}${U.fmt(sourceDelta)}</b>${naText ? ` · of which <b>${U.fmt(naText)}</b> rows have no agent in EIR` : ''}<br>${esc(sourceBasis)}. GV Master rows + EIR rows whose agent is not in GV Master (today's live rows) are both counted, so the report total matches the card; the identity-less ones are listed in the “Source check” sheet.</p>
         <div class="tix-presets tix-rep-tabs">${tabs}</div>
         ${sheets.map((sh, i) => `<div class="tix-rep-pane" data-rep-pane="${i}"${i ? ' hidden' : ''}>${repTable(sh)}</div>`).join('')}
       </div>`;
