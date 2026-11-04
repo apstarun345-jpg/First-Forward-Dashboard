@@ -3750,16 +3750,21 @@ async function ledgerDirectAgent(ch, body) {
         if (iCol) ids.forEach((i) => tries.push([`${iCol} = '${i}'`, ...(/^\d+$/.test(i) ? [`${iCol} = ${i}`] : [])]));
         let n = 0, ok = 0, lastErr = null;
         const seen = new Set();
-        for (const alts of tries) {
+        // conditions parallel (har ek apne alternates me sequential) — pehle sab line se = 20+ s
+        const results = await Promise.all(tries.map(async (alts) => {
           for (const cond of alts) {
             try {
-              const qp = new URLSearchParams({ id: String(src.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${lt.join(', ')} where ${cond} order by ${lt[0]} desc limit 200`, headers: '1' });
+              const qp = new URLSearchParams({ id: String(src.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${lt.join(', ')} where ${cond} limit 3000`, headers: '1' });
               qp.set('gid', String(src.gid));
-              const t = await gvizPageServerInner(qp, src.label);   // limit 200 = gviz priority lane (bade scans ke peeche nahi)
-              for (const r of t.rows) { const sig = JSON.stringify(r.c || r); if (seen.has(sig)) continue; seen.add(sig); const e = ledgerEntry(r, lt, src, ++n); if (e) ledgerAggAddRow(byCh, { ...e, ch: src.ch }); }
-              ok++; break;
+              const pu = upstreamUrl(qp); GVIZ_PRIORITY_URLS.add(pu); if (GVIZ_PRIORITY_URLS.size > 300) GVIZ_PRIORITY_URLS.delete(GVIZ_PRIORITY_URLS.values().next().value);   // priority lane
+              return (await gvizPageServerInner(qp, src.label)).rows;
             } catch (err) { lastErr = err; if (/NO_COLUMN/i.test(String(err && err.message))) throw err; }
           }
+          return null;
+        }));
+        for (const rows of results) {
+          if (!rows) continue; ok++;
+          for (const r of rows) { const sig = JSON.stringify(r.c || r); if (seen.has(sig)) continue; seen.add(sig); const e = ledgerEntry(r, lt, src, ++n); if (e) ledgerAggAddRow(byCh, { ...e, ch: src.ch }); }
         }
         if (!ok && lastErr) throw lastErr;
         counts[src.id] = n;
