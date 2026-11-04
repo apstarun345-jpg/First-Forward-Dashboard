@@ -220,6 +220,7 @@ test('server: gviz proxy cache bytes par capped (CACHE_MAX_MB) — bade bodies m
 
 test('Master Search barcode API: warm lookups use only the compact index; common formats match instantly', withApp({}, { STOCK_AGE_PAGE_ROWS: '50' }, async ({ app, up }) => {
   await until(() => app.get('/api/stock-age'), (v) => !v.pending);   // pehla build poora (dheemi machine par pending aata tha → baad ke reads gine jaate the)
+  await new Promise((r) => setTimeout(r, 1500));   // build ke aage-ke speculative page requests (window prefetch) bhi land ho jaayein
   // daily-version "select count(A)" check (har 10 min, boot ke 40 s baad) scan nahi hai — sirf data reads gino
   const reads = () => up.log.filter((e) => !/^select count\(/i.test(e.tq)).length;
   const before = reads();

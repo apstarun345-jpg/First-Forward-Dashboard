@@ -518,12 +518,55 @@ window.FF = window.FF || {};
   const kycCols = (e) => [e.kyc || 'AK', e.kyc2].filter(Boolean);
   const kycCache = new Map();
   /** Rows: [{ ym, channel, group, kyc: 'full'|'not'|'other', n }] — sirf last + current month, filter ke saath (channel / tl / agent). */
+  /** ⚡ v3.125.105 — SAARE agents / TLs ka KYC ek hi query me (month-wise group): server cache EIR badalne tak same,
+   *  browser me bhi saved → kisi bhi agent / TL ka KYC box turant (pehle har search par alag EIR query). */
+  let kycAllP = null, kycAllKey = '';
+  function loadKycAll(opts) {
+    const e = FF.config.eir, kc = kycCols(e), kycSel = kc.join(', ');
+    const cur = U.reportYm(), prev = U.prevMonthKey(cur);
+    const key = `${cur}|${kycSel}|${e.agentName}|${e.gvName}|${e.tlName}`;
+    if (kycAllP && kycAllKey === key) return kycAllP;
+    kycAllKey = key;
+    const tq = `select year(${e.date}), month(${e.date}), ${e.cls}, ${kycSel}, ${e.masterId}, ${e.tlName}, ${e.agentName}, ${e.gvName}, count(${e.tagId}) where ${e.date} >= date '${prev}-01' group by year(${e.date}), month(${e.date}), ${e.cls}, ${kycSel}, ${e.masterId}, ${e.tlName}, ${e.agentName}, ${e.gvName}`;
+    kycAllP = D.query(e.sheet, tq, opts).then((t) => {
+      const k = kc.length, out = [];
+      for (const r of t.rows) {
+        const y = D.cellNumber(r[0]), mo = D.cellNumber(r[1]), n = D.cellNumber(r[7 + k]);
+        if (!y || mo === null || mo === undefined || !n) continue;
+        const ym = `${y}-${String(Number(mo) + 1).padStart(2, '0')}`;   // gviz month() 0-based
+        if (ym !== cur && ym !== prev) continue;
+        out.push({ ym, cls: D.cellText(r[2]), kyc: kycPick(D.cellText(r[3]), k > 1 ? D.cellText(r[4]) : ''), master: D.cellText(r[3 + k]), tl: D.cellText(r[4 + k]), agent: D.cellText(r[5 + k]), gvName: D.cellText(r[6 + k]), n });
+      }
+      return out;
+    });
+    kycAllP.catch(() => { kycAllP = null; });
+    return kycAllP;
+  }
   async function loadKycMonthly(filter, opts) {
     const e = FF.config.eir, kc = kycCols(e), kycSel = kc.join(', ');
     const cur = U.reportYm(), prev = U.prevMonthKey(cur);
     const key = `${cur}|${kycSel}|${JSON.stringify(filter || {})}`;
     const hit = kycCache.get(key);
     if (hit && Date.now() - hit.at < 10 * 60e3) return hit.rows;
+    // sirf agent / TL filter (koi channel / wrongVrn nahi) → saare-agents wale data se filter (turant)
+    const f = filter || {};
+    if ((f.agent || f.tl) && !f.channel && !f.wrongVrn && Object.keys(f).every((x) => ['agent', 'tl'].includes(x))) {
+      try {
+        const all = await loadKycAll(opts);
+        const agg = new Map();
+        for (const r of all) {
+          if (f.tl && r.tl !== f.tl) continue;
+          if (f.agent && r.agent !== f.agent && r.gvName !== f.agent) continue;
+          const channel = channelOf(r.master, r.tl), group = classGroup(r.cls);
+          const gk = `${r.ym}|${channel}|${group}|${r.kyc}`;
+          const o = agg.get(gk) || { ym: r.ym, channel, group, kyc: r.kyc, n: 0 };
+          o.n += r.n; agg.set(gk, o);
+        }
+        const rows = [...agg.values()];
+        kycCache.set(key, { at: Date.now(), rows });
+        return rows;
+      } catch { /* bada query fail → purana per-agent query */ }
+    }
     const where = `${whereClause(filter)} and ${e.date} >= date '${prev}-01'`;
     const tq = `select ${e.date}, ${e.cls}, ${kycSel}, ${e.masterId}, ${e.tlName}, count(${e.tagId}) where ${where} group by ${e.date}, ${e.cls}, ${kycSel}, ${e.masterId}, ${e.tlName}`;
     const t = await D.query(e.sheet, tq, opts);
@@ -730,5 +773,5 @@ window.FF = window.FF || {};
     return rows;
   }
 
-  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, loadGvKycMonthly, loadKycPeople, kycRatio, kycClassHtml, gvDayForecast, timeToMins, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
+  FF.model = { classGroup, channelOf, eirOnlyDaily, loadDaily, loadWrongVrn, loadAgentDailyClass, loadAgents, loadStatus, loadStock, loadStockAgents, loadAgentClassMonthly, loadKycMonthly, loadKycAll, loadGvKycMonthly, loadKycPeople, kycRatio, kycClassHtml, gvDayForecast, timeToMins, loadRangePeople, loadStockMovements, loadStockRows, loadStockAgentTypes, loadStockAging, months, latestDate, dailySeries, summary, byDim };
 })(window.FF);

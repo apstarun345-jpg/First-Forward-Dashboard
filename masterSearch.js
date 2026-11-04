@@ -2757,6 +2757,13 @@ FF.pages = FF.pages || {};
     for (let i = 0; i < list.length; i++) {
       const slot = box.querySelector(`[data-dsp-st="${i}"]`);
       if (!slot || !(list[i].ranges || []).length) continue;
+      // v3.125.105 — server ne count saath bhej diya (stock index se, din me ek baar) → turant; list click par hi
+      if (list[i].st) {
+        const c = list[i].st;
+        box.__dspRows[i] = { lazy: true, r: list[i] };
+        slot.innerHTML = `<button type="button" class="dsp-sb iss" data-dsp-open="${i}|issued" title="Stock list se nikal chuke (issue) — click = list + CSV"><i>Issued</i><b>${U.fmt(c.issued)}</b></button><button type="button" class="dsp-sb stk" data-dsp-open="${i}|stock" title="Abhi stock me — click = list + CSV"><i>Stock</i><b>${U.fmt(c.stock)}</b></button>`;
+        continue;
+      }
       try {
         const rows = await dspStatusOf(list[i]);
         box.__dspRows[i] = { rows, r: list[i] };
@@ -2768,6 +2775,11 @@ FF.pages = FF.pages || {};
   }
   function openDspStatus(box, idx, kind) {
     const pack = box.__dspRows && box.__dspRows[idx]; if (!pack) return;
+    if (pack.lazy) {   // count server se aaya tha — barcode list ab lao
+      if (FF.app && FF.app.openDrawer) FF.app.openDrawer({ kicker: 'Dispatch', title: 'Barcode list', body: U.spinner('Barcodes la rahe hain…'), wide: true, loading: true });
+      dspStatusOf(pack.r).then((rows) => { box.__dspRows[idx] = { rows, r: pack.r }; openDspStatus(box, idx, kind); }).catch((err) => { if (FF.app && FF.app.openDrawer) FF.app.openDrawer({ kicker: 'Dispatch', title: 'Barcode list', body: U.errorBox(err), wide: true, replace: true }); });
+      return;
+    }
     const lab = { issued: '✅ Issued', stock: '📦 Stock', nf: '❔ Not found', all: 'All' }[kind] || kind;
     const rows = kind === 'all' ? pack.rows : pack.rows.filter((x) => dspKind(x.k) === kind);
     let sc = {}; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { /* ignore */ }
@@ -2872,6 +2884,8 @@ FF.pages = FF.pages || {};
     setTimeout(() => { if (box.isConnected) { box[flag] = false; fill(host); } }, [8000, 20000, 35000, 60000][n - 1]);
     return true;
   }
+  // ⚡ v3.125.105 — saare agents ka KYC ek baar peeche se (pehla search bhi turant)
+  setTimeout(() => { try { if (FF.auth && FF.auth.user && FF.model && FF.model.loadKycAll) FF.model.loadKycAll().catch(() => {}); } catch { /* optional */ } }, 8000);
   function fillKycBoxes(host) {
     const boxes = host ? host.querySelectorAll('[data-msp-kyc-box]') : [];
     boxes.forEach((box) => {

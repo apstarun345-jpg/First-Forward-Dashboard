@@ -3743,6 +3743,59 @@ function ledgerAggLoadDisk() {
     return true;
   } catch (err) { console.warn('dispatch aggregate disk load:', err.message); return false; }
 }
+// 🔢 v3.125.105 — stock index se prefix → sorted serial numbers (+ class, in-stock). Dispatch range ka issued/stock
+// count binary search se (pehle har barcode par poori key-string me indexOf = 2000 × MBs, isliye "⏳ issued / stock…" atakta tha),
+// aur ledger me class khaali ho to range / paas ke serial ki class.
+const serialIdxState = { at: -1, data: null };
+function stockSerialIndex(index) {
+  if (!index) return null;
+  if (serialIdxState.at === index.at && serialIdxState.data) return serialIdxState.data;
+  const out = {};
+  for (const ch of ['ff', 'gv']) {
+    const node = index[ch]; if (!node) continue;
+    const tmp = new Map(), classes = [], cIdx = new Map();
+    const add = (r) => {
+      const b = parseBarcode(r && r[1]); if (!b || !Number.isFinite(b.n)) return;
+      const c = String(r[2] || '').toUpperCase().replace(/\s+/g, '');
+      let ci = cIdx.get(c); if (ci === undefined) { ci = classes.length; classes.push(c); cIdx.set(c, ci); }
+      const st = ch === 'gv' ? (r[11] ? 1 : 0) : 1;
+      let t = tmp.get(b.pfx); if (!t) { t = []; tmp.set(b.pfx, t); }
+      t.push(b.n, ci, st);
+    };
+    if (typeof node.each === 'function') node.each(add); else (node.raw || []).forEach(add);
+    const map = new Map();
+    for (const [pfx, flat] of tmp) {
+      const n = flat.length / 3, order = Array.from({ length: n }, (_, i) => i).sort((a, b) => flat[a * 3] - flat[b * 3]);
+      const ser = new Int32Array(n), cls = new Uint16Array(n), cum = new Int32Array(n + 1);
+      order.forEach((o, i) => { ser[i] = flat[o * 3]; cls[i] = flat[o * 3 + 1]; cum[i + 1] = cum[i] + flat[o * 3 + 2]; });
+      map.set(pfx, { ser, cls, cum });
+    }
+    out[ch] = { map, classes };
+  }
+  serialIdxState.at = index.at; serialIdxState.data = out;
+  return out;
+}
+const lowerBound = (arr, x) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] < x) lo = m + 1; else hi = m; } return lo; };
+/** Range (first..last) → { size, stock, cls } us channel ke stock index se. */
+function rangeStockInfo(sidx, ch, first, last, qty) {
+  const a = parseBarcode(first); if (!a || !sidx || !sidx[ch]) return null;
+  const b = parseBarcode(last);
+  let lo = a.n, hi = b && b.pfx === a.pfx && b.n >= a.n ? b.n : a.n + Math.max(0, (Number(qty) || 1) - 1);
+  if (hi - lo > 200000) hi = lo + 200000;
+  const e = sidx[ch].map.get(a.pfx);
+  const size = hi - lo + 1;
+  if (!e) return { size, stock: 0, cls: '' };
+  const i = lowerBound(e.ser, lo), j = lowerBound(e.ser, hi + 1);
+  const stock = e.cum[j] - e.cum[i];
+  // class: range ke andar ka koi tag, warna sabse paas wala serial (5000 ke andar)
+  let cls = '';
+  if (j > i) cls = sidx[ch].classes[e.cls[i]];
+  else {
+    const cand = [i - 1, i].filter((k) => k >= 0 && k < e.ser.length).map((k) => [k, Math.min(Math.abs(e.ser[k] - lo), Math.abs(e.ser[k] - hi))]).sort((x, y) => x[1] - y[1])[0];
+    if (cand && cand[1] <= 5000) cls = sidx[ch].classes[e.cls[cand[0]]];
+  }
+  return { size, stock, cls: /^VC\d+$/.test(cls) ? cls : '' };
+}
 const ledgerDirectAgentCache = new Map();
 async function ledgerDirectAgent(ch, body) {
   const q = (v) => String(v || '').toUpperCase().replace(/'/g, '').replace(/\s+/g, ' ').trim();
@@ -4277,6 +4330,7 @@ function stockSnapLoad() {
     stockAgeState.at = meta.at;
     stockAgeState.verSig = meta.ver || '';
     if (!existsSync(STOCK_SNAP_FILE)) { try { writeFileSync(STOCK_SNAP_FILE, zlib.gzipSync(text)); writeFileSync(`${STOCK_SNAP_FILE}.json`, JSON.stringify(meta)); } catch { /* optional */ } }
+    setTimeout(() => { try { stockSerialIndex(stockAgeState.index); } catch { /* optional */ } }, 2000).unref?.();
     console.log(`stock index: snapshot se (${Math.round((Date.now() - meta.at) / 60e3)} min purana · FF ${nf} · GV ${ng})`);
     setImmediate(() => { try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ } });
     return true;
@@ -4303,6 +4357,7 @@ function startStockAgeBuild(key) {
     }
     stockAgeState.index = index;
     stockAgeState.at = Date.now();
+    setTimeout(() => { try { stockSerialIndex(stockAgeState.index); } catch { /* optional */ } }, 2000).unref?.();   // dispatch issued/stock pehle se taiyaar
     setImmediate(() => { try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ } });   // old index + parse garbage → turant free
     const failed = !!(err.ff || err.gv);
     stockAgeState.error = failed ? [err.ff && `FF: ${err.ff}`, err.gv && `GV: ${err.gv}`].filter(Boolean).join(' · ') : '';
@@ -6867,6 +6922,32 @@ async function handleApi(req, res, url) {
       days.set(d, o);
     }
     const dates = [...days.values()].sort((x, y) => String(y.date).localeCompare(String(x.date)));
+    // v3.125.105 — har dispatch: issued / stock count (stock index ke serials se, turant) + khaali class bharo
+    try {
+      const index0 = await stockAgeIndexWithin(3000, false);
+      const sidx = index0 ? stockSerialIndex(index0) : null;
+      if (sidx) {
+        for (const o of dates.slice(0, 8)) {
+          let stock = 0, size = 0, ok = 0;
+          for (const r of o.ranges) {
+            const chs = [ch, ch === 'ff' ? 'gv' : 'ff'];
+            let info = rangeStockInfo(sidx, ch, r.first, r.last, r.qty);
+            if (info) { stock += info.stock; size += info.size; ok++; }
+            if (!r.cls || r.cls === '—') {
+              let c = info && info.cls;
+              if (!c) { const alt = rangeStockInfo(sidx, chs[1], r.first, r.last, r.qty); c = alt && alt.cls; }
+              if (c) {
+                const q = Math.min(Number(r.qty) || 0, o.cls['—'] || 0);
+                if (q) { o.cls['—'] -= q; if (!o.cls['—']) delete o.cls['—']; o.cls[c] = (o.cls[c] || 0) + q; }
+                r.cls = c; r.inferred = true;
+              }
+            }
+          }
+          // ranges (max 6 saved) poora dispatch cover karein tabhi count dikhao
+          if (ok && ok === o.ranges.length && size >= (o.total || 0) * 0.98) o.st = { stock: Math.min(stock, o.total || stock), issued: Math.max(0, (o.total || size) - stock), at: index0.at };
+        }
+      }
+    } catch (err) { console.warn('dispatch issued/stock:', String(err && err.message || err).slice(0, 120)); }
     // v3.125.74 — ledger me class khaali ('—') ho to range ke first barcode se stock index me class dhoondho.
     try {
       const top = dates.slice(0, 8).filter((o) => o.cls['—'] > 0);
