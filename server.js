@@ -488,7 +488,20 @@ async function notifyGuardRun() {
   }
   notifyTagBaseline = tagReqCount();
 }
-function persist(kind) {
+// ⚡ v3.125.99 — notify me do tarah ka data: (a) user ka kaam — tag requests / workspace / push / watch → turant save;
+// (b) auto notifications / audit / activity log → har 5 min ek baar (pehle ~har minute 0.8 MB Apps Script write = storage timeouts).
+const NOTIFY_LAZY_MS = Math.max(30e3, Number(process.env.NOTIFY_LAZY_MS) || 5 * 60e3);
+let notifyImpSig = '', notifyLazyTimer = null;
+const notifyImportantSig = () => { try { const n = db.notify || {}; return JSON.stringify([n.workspace || null, n.push || null, n.watch || null]); } catch { return ''; } };
+function persist(kind, opts) {
+  if (kind === 'notify' && sheetsStore && !(opts && opts.force) && notifyImpSig && notifyImportantSig() === notifyImpSig) {
+    if (!notifyLazyTimer) {
+      notifyLazyTimer = setTimeout(() => { notifyLazyTimer = null; persist('notify', { force: true }).catch(() => {}); }, NOTIFY_LAZY_MS);
+      if (notifyLazyTimer.unref) notifyLazyTimer.unref();
+    }
+    return Promise.resolve();
+  }
+  if (kind === 'notify' && notifyLazyTimer) { clearTimeout(notifyLazyTimer); notifyLazyTimer = null; }   // abhi poora save ho raha hai
   const file = FILES[kind];
   const prev = writeQueue.get(kind) || Promise.resolve();
   // Apps Script store batches + orders writes itself, so don't serialise (each call would wait seconds).
@@ -508,7 +521,7 @@ function persist(kind) {
         await fs.rename(tmp, file);
       }
       durableSnapshots.set(kind, snapshot);
-      if (kind === 'notify') { notifyTagBaseline = tagReqCount(); notifyLastWriteAt = Date.now(); }
+      if (kind === 'notify') { notifyTagBaseline = tagReqCount(); notifyLastWriteAt = Date.now(); try { const sn = JSON.parse(snapshot) || {}; notifyImpSig = JSON.stringify([sn.workspace || null, sn.push || null, sn.watch || null]); } catch { notifyImpSig = ''; } }
       storageFailures.delete(kind);
     } catch (err) {
       const cause = String(err && err.message || '').slice(0, 300);
@@ -3777,6 +3790,64 @@ async function ledgerDirectAgent(ch, body) {
   if (!Object.keys(errors).length) ledgerDirectAgentCache.set(ck, { at: Date.now(), d });
   return d;
 }
+// 🌙 v3.125.99 — dispatch aggregate ka compact snapshot storage spreadsheet ke "CACHE_SNAPSHOT" tab me (Apps Script).
+// Deploy / restart par /tmp khaali hota hai → pehle 7 min sheet scan; ab snapshot se ~10-20 s me wapas.
+const SNAP_TAB = 'CACHE_SNAPSHOT', SNAP_CHUNK = 45000;
+function ledgerAggCompact(d) {
+  const out = { v: 1, ch: {} };
+  for (const ch of ['ff', 'gv']) {
+    const recs = [], idx = new Map(), keys = [];
+    for (const [k, rec] of d.byCh[ch]) {
+      let i = idx.get(rec);
+      if (i === undefined) {
+        i = recs.length; idx.set(rec, i);
+        const dates = [...rec.dates.entries()].sort((a, b) => String(b[0]).localeCompare(String(a[0]))).slice(0, 10)   // UI ko sirf aakhri 8 chahiye
+          .map(([dt, day]) => [dt, { total: day.total, cls: day.cls, ranges: (day.ranges || []).slice(0, 6), status: day.status || '' }]);
+        recs.push([rec.agentId, rec.agent, dates]);
+      }
+      keys.push([k, i]);
+    }
+    out.ch[ch] = { recs, keys };
+  }
+  return out;
+}
+async function ledgerAggSnapSave(d, key) {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return;
+  try {
+    const body = zlib.gzipSync(Buffer.from(JSON.stringify({ ...ledgerAggCompact(d), errors: d.errors || {}, counts: d.counts || {} }))).toString('base64');
+    const parts = []; for (let i = 0; i < body.length; i += SNAP_CHUNK) parts.push(body.slice(i, i + SNAP_CHUNK));
+    if (parts.length > 400) { console.warn('dispatch snapshot: bahut bada, skip'); return; }
+    const head = JSON.stringify({ v: 1, kind: 'ledgerAgg', at: Date.now(), key, n: parts.length });
+    const writes = [{ row: 1, value: head }, ...parts.map((v, i) => ({ row: i + 2, value: v })), ...Array.from({ length: 5 }, (_, j) => ({ row: parts.length + 2 + j, value: '' }))];
+    await sheetsStore.call('writecells', { spreadsheetId: '', tab: SNAP_TAB, column: 'A', writes });
+    console.log(`dispatch snapshot: saved (${parts.length} chunk, ${Math.round(body.length / 1024)} KB)`);
+  } catch (err) { console.warn('dispatch snapshot save:', String(err && err.message || err).slice(0, 200)); }
+}
+async function ledgerAggSnapLoad() {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return false;
+  try {
+    const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: SNAP_TAB, startRow: 1, columns: ['A'] });
+    const rows = (out && out.rows) || [];
+    const head = JSON.parse((rows[0] && rows[0][0]) || 'null');
+    if (!head || head.kind !== 'ledgerAgg' || Date.now() - head.at > LEDGER_AGG_TTL) return false;
+    const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.layout]));
+    if (head.key !== key) return false;
+    const body = rows.slice(1, 1 + head.n).map((r) => r[0] || '').join('');
+    const j = JSON.parse(zlib.gunzipSync(Buffer.from(body, 'base64')).toString('utf8'));
+    const byCh = { ff: new Map(), gv: new Map() };
+    for (const ch of ['ff', 'gv']) {
+      const part = j.ch && j.ch[ch]; if (!part) continue;
+      const recs = part.recs.map(([agentId, agent, dates]) => ({ agentId, agent, dates: new Map(dates) }));
+      for (const [k, i] of part.keys) byCh[ch].set(k, recs[i]);
+    }
+    if (ledgerAggState.data && ledgerAggState.at > head.at) return true;   // beech me fresh load aa gaya
+    ledgerAggState.data = { byCh, errors: j.errors || {}, counts: j.counts || {} };
+    ledgerAggState.key = key; ledgerAggState.at = head.at;
+    ledgerAggSave(ledgerAggState.data, key);   // /tmp me bhi (agla restart aur tez)
+    console.log(`dispatch aggregate: sheet snapshot se (${Math.round((Date.now() - head.at) / 60e3)} min purana)`);
+    return true;
+  } catch (err) { console.warn('dispatch snapshot load:', String(err && err.message || err).slice(0, 200)); return false; }
+}
 function ledgerAggregate(fresh) {
   const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.layout]));
   const have = ledgerAggState.data && ledgerAggState.key === key ? ledgerAggState.data : null;
@@ -3784,7 +3855,7 @@ function ledgerAggregate(fresh) {
   if (have && !fresh && !due) return Promise.resolve(have);
   if (!ledgerAggState.promise) {
     const t0 = Date.now(); console.log('dispatch aggregate: sheet se load shuru');
-    ledgerAggState.promise = loadLedgerAgg().then((d) => { console.log(`dispatch aggregate: ready ${Math.round((Date.now() - t0) / 1000)} s · rows ${JSON.stringify(d.counts)}${Object.keys(d.errors || {}).length ? ` · errors ${JSON.stringify(d.errors).slice(0, 300)}` : ''}`); ledgerAggState.data = d; ledgerAggState.key = key; ledgerAggState.at = Date.now(); ledgerAggSave(d, key); return d; })
+    ledgerAggState.promise = loadLedgerAgg().then((d) => { console.log(`dispatch aggregate: ready ${Math.round((Date.now() - t0) / 1000)} s · rows ${JSON.stringify(d.counts)}${Object.keys(d.errors || {}).length ? ` · errors ${JSON.stringify(d.errors).slice(0, 300)}` : ''}`); ledgerAggState.data = d; ledgerAggState.key = key; ledgerAggState.at = Date.now(); ledgerAggSave(d, key); if (Object.keys(d.counts || {}).length) ledgerAggSnapSave(d, key).catch(() => {}); return d; })
       .catch((err) => { console.warn('dispatch aggregate:', err.message); return ledgerAggState.data; })
       .finally(() => { ledgerAggState.promise = null; });
   }
@@ -13749,7 +13820,10 @@ async function start() {
     setTimeout(() => maybeMonthlyReport(), 8000);
     // ⚡ v3.125.45 — Master Search ka 'Last dispatch' box: ledger aggregate boot par hi + har 25 min (user kabhi intezaar na kare)
     // v3.125.83 — boot par disk cache (warna 5 s me sheet se, priority), phir roz raat 1 baje IST ek baar refresh.
-    if (!ledgerAggLoadDisk()) setTimeout(() => ledgerAggregate(false).catch(() => {}), 5e3).unref?.();
+    if (!ledgerAggLoadDisk()) {
+      // pehle sheet snapshot (tez); na mile / purana ho tabhi poora scan
+      ledgerAggSnapLoad().then((ok) => { if (!ok) ledgerAggregate(false).catch(() => {}); }).catch(() => ledgerAggregate(false).catch(() => {}));
+    }
     let ledgerDailyDone = '';
     setInterval(() => {
       const ist = new Date(Date.now() + 5.5 * 3600e3);
@@ -13804,7 +13878,7 @@ bootPromise.catch((err) => {
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
     // Personal-link activity feed: write the pending tail before the process goes away (deploys).
-    try { if (plFlushTimer) { clearTimeout(plFlushTimer); plFlushTimer = null; db.notify.plLog = plActivityLog.slice(-500); persist('notify').catch(() => {}); } } catch { /* best effort */ }
+    try { if (plFlushTimer) { clearTimeout(plFlushTimer); plFlushTimer = null; db.notify.plLog = plActivityLog.slice(-500); } persist('notify', { force: true }).catch(() => {}); } catch { /* best effort */ }
     if (sheetsStore && sheetsStore.drain) sheetsStore.drain().catch(() => {});
     server.close(async () => {
       await Promise.allSettled([...writeQueue.values()]);
