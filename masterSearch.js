@@ -2720,7 +2720,9 @@ FF.pages = FF.pages || {};
   const dspStCache = new Map();
   async function dspStatusOf(r) {
     const key = `${r.date}|${(r.ranges || []).map((x) => `${x.first}-${x.last}`).join(',')}`;
-    const today = U.dateKey ? U.dateKey(new Date()) : new Date().toISOString().slice(0, 10);
+    let today = U.dateKey ? U.dateKey(new Date()) : new Date().toISOString().slice(0, 10);
+    // v3.125.103 — din ki jagah stock data ka version: stock sheet badle tabhi naya check, warna saved result
+    try { const v = await Promise.race([FF.data.versions(), new Promise((_, no) => setTimeout(() => no(new Error('t')), 2500))]); if (v && v.v && v.v.stock && !/^0\|/.test(v.v.stock)) today = `s${String(v.v.stock).replace(/[|]/g, '_')}`; } catch { /* din wala key */ }
     const lsKey = `ff_dspst|${today}|v2|${r.ch || ''}|${key}`;
     if (!dspStCache.has(key)) {
       try {
@@ -2821,7 +2823,26 @@ FF.pages = FF.pages || {};
   function kycFetch(f) {
     const key = JSON.stringify(f);
     if (!kycByCache.has(key)) {
-      const p = f && f.gv ? FF.model.loadGvKycMonthly(f) : FF.model.loadKycMonthly(f);
+      // v3.125.103 — KYC sirf EIR badalne par dobara: browser me EIR version ke saath saved result
+      const p = (async () => {
+        let ver = '';
+        try { const v = await Promise.race([FF.data.versions(), new Promise((_, no) => setTimeout(() => no(new Error('t')), 2500))]); ver = (v && v.v && v.v.eir && !/^\|/.test(v.v.eir)) ? v.v.eir : ''; } catch { /* no version */ }
+        const lsKey = ver ? `ff_kyc|${ver}|${key}` : '';
+        if (lsKey) {
+          try {
+            const hit = JSON.parse(localStorage.getItem(lsKey) || 'null');
+            if (hit && Array.isArray(hit.rows)) { const rows = hit.rows; if (hit.issued !== undefined) { rows.issued = hit.issued; rows.matched = hit.matched; } return rows; }
+          } catch { /* storage optional */ }
+        }
+        const rows = await (f && f.gv ? FF.model.loadGvKycMonthly(f) : FF.model.loadKycMonthly(f));
+        if (lsKey && Array.isArray(rows)) {
+          try {
+            for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.startsWith('ff_kyc|') && !k.startsWith(`ff_kyc|${ver}|`)) localStorage.removeItem(k); }
+            localStorage.setItem(lsKey, JSON.stringify({ rows: [...rows], issued: rows.issued, matched: rows.matched }));
+          } catch { /* quota */ }
+        }
+        return rows;
+      })();
       kycByCache.set(key, p); p.catch(() => kycByCache.delete(key));
     }
     return kycByCache.get(key);

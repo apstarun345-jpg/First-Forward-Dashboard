@@ -5960,9 +5960,14 @@ async function checkDailyVersions(reason) {
         const c = r.rows && r.rows[0] && r.rows[0].c && r.rows[0].c[0];
         const n = c && Number(c.v);
         if (!Number.isFinite(n)) continue;
-        const sig = String(n), prev = dailyVer.get(t.key);
-        dailyVer.set(t.key, { sig, changedAt: prev && prev.sig === sig ? prev.changedAt : Date.now(), checkedAt: Date.now(), rows: n, label: t.label });
+        // v3.125.103 — pichhla version settings me saved (restart ke baad bhi "kab aaya" sahi + beech ka badlav pakda jaaye)
+        const saved = (db.settings && db.settings.dailyVer && db.settings.dailyVer[t.key]) || null;
+        const sig = String(n), prev = dailyVer.get(t.key) || (saved ? { sig: saved.sig, changedAt: saved.changedAt } : null);
+        dailyVer.set(t.key, { sig, changedAt: prev && prev.sig === sig ? (prev.changedAt || Date.now()) : Date.now(), checkedAt: Date.now(), rows: n, label: t.label });
         if (prev && prev.sig !== sig) changed.push(t);
+        if (!saved || saved.sig !== sig) {
+          try { db.settings.dailyVer = { ...(db.settings.dailyVer || {}), [t.key]: { sig, changedAt: dailyVer.get(t.key).changedAt } }; persist('settings').catch(() => {}); } catch { /* optional */ }
+        }
       } catch { /* agli baar */ }
     }
     if (changed.length) {
@@ -6799,6 +6804,27 @@ async function handleApi(req, res, url) {
   }
   // 📦 Last dispatch of an agent / TL — every ledger row (IDFC Stock Sheet FF / GV Stock Sheet) addressed to that person:
   // which date the tags went out and how many of each class. Same ledger as the Barcode Checker.
+  // 🗓️ v3.125.103 — site par kis time ka data hai (Home table + browser caches ka version)
+  if (p === '/api/data/versions' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const iso = (ms) => (ms ? new Date(ms).toISOString() : '');
+    const tabs = dailyTabs().map((t) => { const v = dailyVer.get(t.key) || {}; return { name: t.label, tab: t.tab, rows: v.rows ?? null, changedAt: iso(v.changedAt), checkedAt: iso(v.checkedAt), sig: v.sig || '' }; });
+    const sigOf = (label) => (tabs.find((t) => t.name === label) || {}).sig || '';
+    const stockAt = stockAgeState.index ? (stockAgeState.at || 0) : 0;
+    const out = {
+      ok: true, now: new Date().toISOString(), checkEveryMin: 10, forceRefreshAt: iso(forceRefreshAt),
+      sheets: tabs,
+      derived: [
+        { name: 'Stock ageing · dispatch issued/stock', basis: 'StockDataa + Tag Assignment', at: iso(stockAt), building: !!stockAgeState.promise },
+        { name: 'Last dispatch (dispatch ledger)', basis: 'Dispatch sheets · roz raat 1 baje', at: iso(ledgerAggState.data ? ledgerAggState.at : 0), building: !!ledgerAggState.promise },
+        { name: 'KYC ratio', basis: 'EIR', at: (tabs.find((t) => t.name === 'EIR') || {}).changedAt || '' },
+        { name: 'GV Master (aaj ka live)', basis: 'har 10 min', at: '' }
+      ],
+      // browser caches isi se invalid hote hain (data badla to naya, warna din bhar same)
+      v: { eir: `${sigOf('EIR')}|${forceRefreshAt}`, stock: `${stockAt}|${forceRefreshAt}`, dispatch: `${ledgerAggState.at || 0}|${forceRefreshAt}` }
+    };
+    return sendJson(res, 200, out, { 'Cache-Control': 'no-store' });
+  }
   // ⚡ v3.125.101 — Home → "Force refresh": server ka poora sheet cache + stock index + dispatch data dobara
   if (p === '/api/data/force-refresh' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -14006,6 +14032,12 @@ async function start() {
     if (!ledgerAggLoadDisk()) {
       // pehle sheet snapshot (tez); na mile / purana ho tabhi poora scan
       ledgerAggSnapLoad().then((ok) => { if (!ok) ledgerAggregate(false).catch(() => {}); }).catch(() => ledgerAggregate(false).catch(() => {}));
+    }
+    // ⏰ v3.125.103 — Render free 15 min traffic na ho to so jaata hai → subah sheet update ho tab bhi koi check nahi.
+    // Har 10 min apne public URL par chhota ping (KEEP_AWAKE=0 se band). Free plan ke 750 ghante/mahina me ek service 24×7 aa jaati hai.
+    const selfUrl = String(process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+    if (selfUrl && process.env.KEEP_AWAKE !== '0') {
+      setInterval(() => { fetch(`${selfUrl}/api/version`, { headers: { 'User-Agent': 'ff-keepawake' } }).catch(() => {}); }, 10 * 60e3).unref();
     }
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();

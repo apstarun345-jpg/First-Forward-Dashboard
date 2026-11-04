@@ -470,6 +470,15 @@ window.FF = window.FF || {};
     }
     return { map: out, meta };
   }
-  FF.data = { snapshots: PSNAP, dispatchLookup, query, today, gvToday, clearCache, status, parseGviz, cellText, identifierText, isIdentifierColumn, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError, RateLimitError, rateLimitPage, rateLimitStatus, markRateLimited,
+  // 🗓️ v3.125.103 — server ke data versions (EIR / stock / dispatch). Browser caches isi par chalte hain:
+  // version same = din bhar wahi saved result (dobara calculate nahi), sheet me naya data aaya = naya.
+  const verState = { at: 0, p: null };
+  function versions(fresh) {
+    if (!fresh && verState.p && Date.now() - verState.at < 3 * 60e3) return verState.p;
+    verState.at = Date.now();
+    verState.p = (FF.auth && FF.auth.api ? FF.auth.api('/api/data/versions', 'GET') : Promise.reject(new Error('no auth'))).catch((err) => { verState.at = 0; throw err; });
+    return verState.p;
+  }
+  FF.data = { versions, snapshots: PSNAP, dispatchLookup, query, today, gvToday, clearCache, status, parseGviz, cellText, identifierText, isIdentifierColumn, cellNumber, cellDate, textRows, looksLikeEIR, lit, QueryError, RateLimitError, rateLimitPage, rateLimitStatus, markRateLimited,
     get lastLoadAt() { return lastLoadAt; }, get lastSource() { return lastSource; } };
 })(window.FF);

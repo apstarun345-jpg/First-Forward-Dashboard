@@ -220,7 +220,9 @@ test('server: gviz proxy cache bytes par capped (CACHE_MAX_MB) — bade bodies m
 
 test('Master Search barcode API: warm lookups use only the compact index; common formats match instantly', withApp({}, { STOCK_AGE_PAGE_ROWS: '50' }, async ({ app, up }) => {
   await app.get('/api/stock-age');
-  const before = up.log.length;
+  // daily-version "select count(A)" check (har 10 min, boot ke 40 s baad) scan nahi hai — sirf data reads gino
+  const reads = () => up.log.filter((e) => !/^select count\(/i.test(e.tq)).length;
+  const before = reads();
   for (const q of ['608116-011-0000003', '6081160110000003', '6,081,160,110,000,003', '6.081160110000003E+15', '6081160110000003.0']) {
     const data = await app.get(`/api/barcode-lookup?q=${encodeURIComponent(q)}`);
     assert.equal(data.ok, true); assert.equal(data.pending, false);
@@ -228,7 +230,7 @@ test('Master Search barcode API: warm lookups use only the compact index; common
   }
   const gv = await app.get('/api/barcode-lookup?q=GVX4');
   assert.ok(gv.rows.some((r) => r.ch === 'gv' && r.tagId === 'GVX4'), 'alphanumeric tag ID is not reduced to digits');
-  assert.equal(up.log.length, before, 'no additional sheet reads for warm barcode searches');
+  assert.equal(reads(), before, 'no additional sheet reads for warm barcode searches');
   const anon = await fetch(`${app.base}/api/barcode-lookup?q=6081160110000003`, { headers: { 'X-Forwarded-Proto': 'https' } });
   assert.equal(anon.status, 401, 'lookup remains login protected');
 }));

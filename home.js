@@ -1191,6 +1191,28 @@ FF.pages = FF.pages || {};
   }
 
   // 📌 Admin: work assigned to team links (from GV & FF Agents Summary) + how many of those agents have a target set.
+  /** 🗓️ v3.125.103 — "Site par kis time ka data": har sheet / bana hua data kab update hua (server se). */
+  function mountDataVersions(el) {
+    if (!el || !FF.data || !FF.data.versions) return;
+    const t = (iso) => {
+      if (!iso) return '<span class="dim">—</span>';
+      const d = new Date(iso); if (Number.isNaN(d.getTime())) return '<span class="dim">—</span>';
+      const mins = Math.round((Date.now() - d.getTime()) / 60e3);
+      const ago = mins < 1 ? 'abhi' : mins < 60 ? `${mins} min pehle` : mins < 48 * 60 ? `${Math.round(mins / 60)} ghante pehle` : `${Math.round(mins / 1440)} din pehle`;
+      return `<b>${esc(d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }))}</b> <small class="dim">${ago}</small>`;
+    };
+    const paint = (v) => {
+      const rows = [
+        ...(v.sheets || []).map((x) => `<tr><td>📗 <b>${esc(x.name)}</b> <small class="dim">sheet</small></td><td>${t(x.changedAt)}</td><td class="num">${x.rows == null ? '—' : U.fmt(x.rows)}</td><td>${t(x.checkedAt)}</td></tr>`),
+        ...(v.derived || []).map((x) => `<tr><td>⚙️ ${esc(x.name)} <small class="dim">${esc(x.basis || '')}</small></td><td>${x.building ? '⏳ ban raha hai…' : x.basis === 'har 10 min' ? '<span class="dim">live · har 10 min</span>' : t(x.at)}</td><td class="num">—</td><td>—</td></tr>`)
+      ].join('');
+      el.innerHTML = `<section class="card dv-card"><div class="card-head"><div><h3>🗓️ Site par kis time ka data hai</h3><span class="dim small">EIR · StockDataa · Tag Assignment din me ek baar badalte hain — server har ${esc(String(v.checkEveryMin || 10))} min rows ginta hai, naya data aate hi site khud update · baaki din wahi saved data${v.forceRefreshAt ? ` · last ⚡ force refresh ${t(v.forceRefreshAt)}` : ''}</span></div><div class="card-right"><button class="btn small" data-dv-reload>↻</button></div></div>
+        <div class="table-wrap"><table class="tbl compact dv-tbl"><thead><tr><th>Data</th><th>Site par is time ka (naya data aaya)</th><th class="num">Rows</th><th>Aakhri check</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+      const b = el.querySelector('[data-dv-reload]'); if (b) b.addEventListener('click', () => load(true));
+    };
+    const load = (fresh) => FF.data.versions(fresh).then((v) => { if (el.isConnected && v) paint(v); }).catch(() => { if (el.isConnected) el.innerHTML = ''; });
+    load(false);
+  }
   async function mountAssignCard(el) {
     if (!el || !FF.auth || !FF.auth.user || FF.auth.user.role !== 'admin' || typeof FF.auth.api !== 'function') return;
     let links = [], targets = [];
@@ -1364,11 +1386,13 @@ FF.pages = FF.pages || {};
       <div id="home-stock">${U.spinner('Stock (StockDataa + Tag Assignment)…')}</div>
       <div id="home-stock-map"></div>
       <div id="home-freshness"></div>
+      <div id="home-data-versions"></div>
       <p class="foot-note">🟩 GV aaj = <b>GV Master sheet</b> (live) · 🧾 Issuance history = <b>EIR</b> (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF) · 📦 Stock = <b>StockDataa</b> (FF) + <b>Tag Assignment</b> (GV) · 🟦 FF ka issuance T+1 aata hai · 🔎 Global search top bar par hai · full profile/results Management → Master Search me.</p>`;
 
     // ⚙ v3.79 — Customize Home: reorder / hide sections, saved per user on this device.
     homeLayout.apply(root);
     freshness.mount(root, false);
+    mountDataVersions(U.$('#home-data-versions', root));
     root.addEventListener('click', (ev) => { const b = ev.target && ev.target.closest && ev.target.closest('[data-fresh-refresh]'); if (b) { freshness.mount(root, true); return; } const d = ev.target && ev.target.closest && ev.target.closest('[data-fresh-dismiss]'); if (d) freshness.dismiss(root); });
     const custBtn = U.$('#home-customize', root);
     if (custBtn) custBtn.addEventListener('click', () => homeLayout.toggle(root, custBtn));
