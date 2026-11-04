@@ -2066,6 +2066,25 @@ FF.pages = FF.pages || {};
         o[big] += expTotal - used;
         return clsGrid(o, CLS7);
       })();
+      // v3.125.95/96 — pichhle se pichhla mahina (Nov → Sep): box + growth dono me
+      const last2 = (() => {
+        const ym2 = m.last && U.prevMonthKey ? U.prevMonthKey(m.last) : '';
+        if (!ym2) return { ym2: '', tot: 0, map: {} };
+        const pid = normId(pr.id || pr.sub || ''), pn = normName(pr.name);
+        let rows = [];
+        try {
+          if (ch === 'gv') {
+            rows = ((FF.gv && FF.gv.issuanceRows && FF.gv.issuanceRows()) || []).filter((r) => r.ym === ym2 && (isTl
+              ? ((pid && (normId(r.tlId) === pid || normId(r.gvTlId) === pid || normId(r.agentId) === pid)) || (!pid && normName(r.tlName) === pn))
+              : (pid ? normId(r.agentId) === pid : normName(r.agentName) === pn)));
+          } else {
+            rows = ((FF.store && FF.store.get && FF.store.get('agentClass')) || []).filter((r) => r.ym === ym2 && r.channel !== 'GV Partner' && (isTl ? normName(r.tlName) === pn : normName(r.name) === pn));
+          }
+        } catch { rows = []; }
+        const tot = rows.reduce((a2, r) => a2 + (Number(r.n) || 1), 0);
+        return { ym2, tot, map: clsSums(rows.map((r) => ({ cls: r.cls || r.group, n: Number(r.n) || 1 })), 'n', true) };
+      })();
+      const last2Box = last2.ym2 ? box('k8 k8b', `📅 ${esc(ymLabel(last2.ym2))}`, U.fmt(last2.tot), clsOr(last2.map, CLS7, last2.tot, ''), spec('month', last2.ym2)) : '';
       const dayChip = (() => {
         try {
           const nk = normName(pr.name), pid = normName(pr.id || '');
@@ -2148,6 +2167,15 @@ FF.pages = FF.pages || {};
       return parts.join(' · ');
     };
       const growthNum = (pr.growthNum !== null && pr.growthNum !== undefined && Number.isFinite(Number(pr.growthNum))) ? Number(pr.growthNum) : null;
+      // v3.125.96 — do growth: last month se (sheet/runrate wala) + last-se-last month se (expected month-end vs us mahine ka total)
+      const g2 = (() => {
+        const expT = (p1 && Number(p1.total)) || 0;
+        if (!last2.tot || !expT) return null;
+        return ((expT - last2.tot) / last2.tot) * 100;
+      })();
+      const growthPill = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? '<span class="dim">—</span>' : U.pctHtml(v, { decimals: 0 }));
+      const growth2Html = `<span class="msp-g2"><span class="msp-g2-row"><small>vs ${esc(m.last ? ymLabel(m.last).split(' ')[0] : 'last')}</small>${growthPill(growthNum)}</span><span class="msp-g2-row"><small>vs ${esc(last2.ym2 ? ymLabel(last2.ym2).split(' ')[0] : 'prev-2')}</small>${growthPill(g2)}</span></span>`;
+      const growth2Sub = last2.ym2 ? ` · ${esc(ymLabel(last2.ym2))}: ${U.fmt(last2.tot)}${p1 && p1.total ? ` → expected ${U.fmt(p1.total)}` : ''}` : '';
       const growthHtml = (growthNum === null || growthNum === undefined || !Number.isFinite(Number(growthNum))) ? '<span class="dim">—</span>' : U.pctHtml(growthNum, { decimals: 0 });
       const notFound = pr.found === false
         ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — stock / priority sheet se nahi aa paaye (naam ki spelling check karo); issuance tag-ledger (EIR) se hai.</p>` : '';
@@ -2188,27 +2216,10 @@ FF.pages = FF.pages || {};
           ${dayChip}
           ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${clsOr(clsSums(pr.classes, 'cur', true), CLS7, t.curTotal, curMix)}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span></span>`, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), clsOr(clsSums(pr.classes, 'last', true), CLS7, t.lastTotal, lastMix), spec('month', m.last))}
-          ${(() => {   // v3.125.95 — pichhle se pichhla mahina (Nov → Sep) bhi, class-wise
-            const ym2 = m.last && U.prevMonthKey ? U.prevMonthKey(m.last) : '';
-            if (!ym2) return '';
-            const pid = normId(pr.id || pr.sub || ''), pn = normName(pr.name);
-            let rows = [];
-            try {
-              if (ch === 'gv') {
-                rows = ((FF.gv && FF.gv.issuanceRows && FF.gv.issuanceRows()) || []).filter((r) => r.ym === ym2 && (isTl
-                  ? ((pid && (normId(r.tlId) === pid || normId(r.gvTlId) === pid || normId(r.agentId) === pid)) || (!pid && normName(r.tlName) === pn))
-                  : (pid ? normId(r.agentId) === pid : normName(r.agentName) === pn)));
-              } else {
-                rows = ((FF.store && FF.store.get && FF.store.get('agentClass')) || []).filter((r) => r.ym === ym2 && r.channel !== 'GV Partner' && (isTl ? normName(r.tlName) === pn : normName(r.name) === pn));
-              }
-            } catch { rows = []; }
-            const tot = rows.reduce((a, r) => a + (Number(r.n) || 1), 0);
-            const map = clsSums(rows.map((r) => ({ cls: r.cls || r.group, n: Number(r.n) || 1 })), 'n', true);
-            return box('k8 k8b', `📅 ${esc(ymLabel(ym2))}`, U.fmt(tot), clsOr(map, CLS7, tot, ''), spec('month', ym2));
-          })()}
+          ${last2Box}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
-          ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
+          ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growth2Html, growthSub(p1, m) + growth2Sub, spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
           ${box('k10', '🎯 Expected this month · Run-rate', U.fmt(expTotal), `${expGrid || (expTotal ? vcTiles(expSplit) : clsGrid({}, CLS7, true))}<span class="msp-mini-tail">run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.reportYm()))} days</span>`, spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
           ${dispBoxHtml(pr, isTl, ch)}

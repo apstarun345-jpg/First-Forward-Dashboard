@@ -7530,3 +7530,8 @@ html body .msp-kpi .dsp-sb b, .dsp-sb b { display: block !important; font-size: 
 .tri-bar i { display: block; height: 9px; border-radius: 5px; min-width: 2px; }
 .tri-bar b { font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; }
 html body .msp-kpi.k8b { border-top-color: #94a3b8; background: color-mix(in srgb, #94a3b8 7%, var(--card)); }
+/* v3.125.96 — Growth box: do growth (last month + month before) */
+.msp-g2 { display: grid; gap: 4px; }
+.msp-g2-row { display: flex; align-items: baseline; gap: 8px; }
+.msp-g2-row small { min-width: 74px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+html body .msp-kpi.k0 .msp-g2-row .delta, html body .msp-kpi.k0 .msp-g2-row span:not(.dim) { font-size: 20px; font-weight: 900; }
