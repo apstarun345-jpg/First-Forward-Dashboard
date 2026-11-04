@@ -262,6 +262,8 @@ window.FF = window.FF || {};
       card({ key: 'last', icon: '📅', tone: 'g3', label: `Last month · ${lastYm}`, value: lt.last.total, unit: 'tags',
         sub: `${clsSplitSub(lt.last.byClass)}<br>growth <span class="gs-growth ${growthTone(growth)}">${pct(growth)}</span>`,
         check: checkOf(1), why: 'GV Master ledger (final) · GV REPORT sirf cross-check', explain: `${lastYm} ki tag rows. Sheet me ${sh.lastAvailable ? fmt(sh.last) : 'blank'} likha hai.` }),
+      ...(lt.last2 ? [card({ key: 'last2', icon: '🗓️', tone: 'g9', label: `Month before · ${t.last2Ym || ''}`, value: lt.last2.total, unit: 'tags',
+        sub: `${clsSplitSub(lt.last2.byClass)}`, why: 'GV Master ledger (final)', explain: `${t.last2Ym || ''} ki tag rows (pichhle se pichhla mahina).` })] : []),
       card({ key: 'today', icon: '⚡', tone: 'g10', label: 'Today issued', value: lt.today.total, unit: 'tags',
         sub: lt.today.total ? `VC4 ${fmt(lt.today.vc4)} · Comm ${fmt(lt.today.comm)}` : 'aaj koi tag nahi',
         why: 'GV Master ka aaj ka data (live)', explain: 'Aaj ki tag rows — GV ki sheet live chalti hai, isliye EIR se pehle GV Master.' }),
@@ -334,6 +336,14 @@ window.FF = window.FF || {};
     const cards = [
       card({ key: 'cur', icon: '🏷️', tone: 'g1', label: `Issuance · ${p.curYm || 'MTD'}`, value: t.curTotal, unit: 'tags', sub: clsSplitSub(byOf(classes, 'cur')), why: 'EIR ledger (First Forward sheet)', explain: 'EIR ki tag rows ka jod. Click = day-wise aur class-wise detail.' }),
       card({ key: 'last', icon: '📅', tone: 'g3', label: `Last month · ${p.lastYm || 'prev'}`, value: t.lastTotal, unit: 'tags', sub: `${clsSplitSub(byOf(classes, 'last'))}<br>${val(growth)}`, why: 'EIR ledger + REPORT sheet cross-check', explain: `Pichhle mahine ke tag.` }),
+      ...(() => {   // v3.125.95 — pichhle se pichhla mahina (FF: EIR daily)
+        const ym2 = p.lastYm && U.prevMonthKey ? U.prevMonthKey(p.lastYm) : '';
+        if (!ym2) return [];
+        const dr = (FF.store.get('daily') || []).filter((r) => r.channel !== 'GV Partner' && r.ym === ym2 && personMatch(r, { name: (person && person.name) || spec.name || "", id: (person && (person.id || person.sub)) || spec.id || "" }, isTl));
+        const by = {}; let tot = 0;
+        dr.forEach((r) => { const n = Number(r.n) || 0; tot += n; const c = r.cls || r.group || 'NA'; by[c] = (by[c] || 0) + n; });
+        return [card({ key: 'last2', icon: '🗓️', tone: 'g9', label: `Month before · ${ym2}`, value: tot, unit: 'tags', sub: clsSplitSub(by), why: 'EIR (First Forward)', explain: `${ym2} ki issuance (pichhle se pichhla mahina).` })];
+      })(),
       card({ key: 'expected', icon: '🎯', tone: 'g7', label: 'Expected (month-end)', value: p.expected, unit: 'tags', sub: `Runrate <b>${fmt(p.runRate, true)}</b>/din`, why: 'Runrate se projection', explain: 'Aaj tak ka issuance ÷ din × month ke din.', drill: { scope: 'days', title: `🎯 Expected month-end · ${fmt(p.expected)} (din-wise basis)`, basis: `Run-rate ${fmt(p.runRate, true)}/din × month ke din = ${fmt(p.expected)}` } }),
       card({ key: 'stock', icon: '📦', tone: 'g5', label: 'Stock in hand', value: t.stockTotal, unit: 'tags', sub: `${isTl && p.tlStock && p.tlStock.own ? `TL ke paas <b>${fmt(p.tlStock.own.total)}</b> + agents <b>${fmt(p.tlStock.agents ? p.tlStock.agents.total : 0)}</b> · ` : ''}VC4 <b>${fmt(t.stockVc4)}</b> · Comm <b>${fmt(t.stockComm)}</b>`, why: 'StockDataa (inventory sheet)', explain: 'Field me pada stock — StockDataa ki tag rows.' }),
       card({ key: 'today', icon: '⚡', tone: 'g10', label: 'Today (EIR)', value: FF.store && FF.store.get ? (FF.store.get('daily') || []).filter((r) => r.key === U.dateKey(new Date()) && r.channel !== 'GV Partner' && personMatch(r, person, isTl)).reduce((n, r) => n + (Number(r.n) || 0), 0) : '—', unit: 'tags', why: 'EIR aaj ki rows', explain: 'First Forward ka issuance T+1 aata hai — aaj ka data kal poora hota hai.' }),
@@ -498,7 +508,7 @@ window.FF = window.FF || {};
     }
     const tk = U.dateKey(new Date());
     const daily = (FF.store.get('daily') || []).filter((r) => r.channel !== 'GV Partner' && personMatch(r, v.person, isTl));
-    const ym = scope === 'last' ? v.rep.p.lastYm : v.ym;
+    const ym = scope === 'last' ? v.rep.p.lastYm : scope === 'last2' ? (U.prevMonthKey ? U.prevMonthKey(v.rep.p.lastYm) : '') : v.ym;
     const rows = scope === 'today' ? daily.filter((r) => r.key === tk) : daily.filter((r) => r.ym === ym);
     const total = rows.reduce((n, r) => n + (Number(r.n) || 0), 0);
     return {
@@ -844,7 +854,7 @@ window.FF = window.FF || {};
         if (sw && FF.app && FF.app.navigate) { FF.app.navigate(`${sw.dataset.gsSwitch}AgentSummary`, { name: S.person ? S.person.name : '' }); return; }
         const kpi = e.target.closest('[data-gs-kpi]');
         if (kpi && kpi.dataset.gsKpi === 'comm') return;
-        if (kpi && S.view) { const k = S.view.cards.find((c) => c.key === kpi.dataset.gsKpi); if (k) openDrill(k.drill || { scope: k.key === 'stock' ? 'stock' : k.key === 'last' ? 'last' : k.key === 'today' ? 'today' : 'cur' }); return; }
+        if (kpi && S.view) { const k = S.view.cards.find((c) => c.key === kpi.dataset.gsKpi); if (k) openDrill(k.drill || { scope: k.key === 'stock' ? 'stock' : k.key === 'last' ? 'last' : k.key === 'last2' ? 'last2' : k.key === 'today' ? 'today' : 'cur' }); return; }
         const dn = e.target.closest('[data-gs-dscope]');
         if (dn && S.view) { const sc = dn.dataset.gsDscope, dc = dn.dataset.gsDcls; const ym = sc === 'last' ? S.view.lastYm : sc === 'stock' ? 'stock' : S.view.ym; openDrill({ scope: sc, cls: dc, fromDonut: true, title: `${dc} · ${ym} · ${S.view.name}` }); return; }
         const cls = e.target.closest('[data-gs-cls]');

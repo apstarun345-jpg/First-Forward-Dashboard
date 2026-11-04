@@ -392,12 +392,13 @@ window.FF = window.FF || {};
     const all = ledgerFor(spec);
     const curRows = all.filter((r) => r.ym === ym);
     const lastRows = all.filter((r) => r.ym === prevYmOf(ym));
+    const last2Rows = all.filter((r) => r.ym === prevYmOf(prevYmOf(ym)));   // v3.125.95 — pichhle se pichhla mahina
     const tk = todayKey();
     const todayRows = all.filter((r) => (r.key ? r.key === tk : r.date && U.dateKey(r.date) === tk));
     const monthSet = [...new Set(all.map((r) => r.ym).filter(Boolean))].sort();
     const ledger = {
-      cur: monthStat(curRows), last: monthStat(lastRows), today: monthStat(todayRows),
-      months: monthSet, rows: { cur: curRows, last: lastRows, today: todayRows, all }
+      cur: monthStat(curRows), last: monthStat(lastRows), last2: monthStat(last2Rows), today: monthStat(todayRows),
+      months: monthSet, rows: { cur: curRows, last: lastRows, last2: last2Rows, today: todayRows, all }
     };
     const sheet = sheetFor(spec);
     const stock = stockFor(spec);
@@ -437,7 +438,7 @@ window.FF = window.FF || {};
       direct: ledgerTl ? false : !!spec.direct, ledgerTl,
       tlName: spec.tlName || (ledgerTl && ledgerTl.name) || (sheet && !isTl ? sheet.tlName : '') || stock.tlName || '',
       tlId: spec.tlId || (ledgerTl && ledgerTl.id) || (sheet && sheet.tlId) || stock.tlId || '',
-      ym, lastYm: prevYmOf(ym), ledger, sheet, stock, eir, checks, warnings, source: 'GV Master (final) · Tag Assignment (stock) · GV REPORT (cross-check)',
+      ym, lastYm: prevYmOf(ym), last2Ym: prevYmOf(prevYmOf(ym)), ledger, sheet, stock, eir, checks, warnings, source: 'GV Master (final) · Tag Assignment (stock) · GV REPORT (cross-check)',
       generatedAt: Date.now()
     };
   }
@@ -591,9 +592,9 @@ window.FF = window.FF || {};
         raw: rows, truth: p
       };
     }
-    const base = scope === 'last' ? p.ledger.rows.last : scope === 'today' ? p.ledger.rows.today : p.ledger.rows.cur;
+    const base = scope === 'last' ? p.ledger.rows.last : scope === 'last2' ? (p.ledger.rows.last2 || []) : scope === 'today' ? p.ledger.rows.today : p.ledger.rows.cur;
     const rows = cls ? base.filter((r) => (U.clean(r.cls) || 'NA').toUpperCase() === cls) : base;
-    const label = scope === 'last' ? `Last month (${p.lastYm})` : scope === 'today' ? `Today (${todayKey()})` : `Is mahine (${p.ym})`;
+    const label = scope === 'last' ? `Last month (${p.lastYm})` : scope === 'last2' ? `Month before (${p.last2Ym || ''})` : scope === 'today' ? `Today (${todayKey()})` : `Is mahine (${p.ym})`;
     const total = rows.reduce((n, r) => n + (Number(r.n) || 1), 0);
     return {
       title: `🏷️ ${label} · ${who}${cls ? ` · ${cls}` : ''}`, source: 'GV Master (GV Partner sheet)',

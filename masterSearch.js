@@ -2188,6 +2188,24 @@ FF.pages = FF.pages || {};
           ${dayChip}
           ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${clsOr(clsSums(pr.classes, 'cur', true), CLS7, t.curTotal, curMix)}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span></span>`, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), clsOr(clsSums(pr.classes, 'last', true), CLS7, t.lastTotal, lastMix), spec('month', m.last))}
+          ${(() => {   // v3.125.95 — pichhle se pichhla mahina (Nov → Sep) bhi, class-wise
+            const ym2 = m.last && U.prevMonthKey ? U.prevMonthKey(m.last) : '';
+            if (!ym2) return '';
+            const pid = normId(pr.id || pr.sub || ''), pn = normName(pr.name);
+            let rows = [];
+            try {
+              if (ch === 'gv') {
+                rows = ((FF.gv && FF.gv.issuanceRows && FF.gv.issuanceRows()) || []).filter((r) => r.ym === ym2 && (isTl
+                  ? ((pid && (normId(r.tlId) === pid || normId(r.gvTlId) === pid || normId(r.agentId) === pid)) || (!pid && normName(r.tlName) === pn))
+                  : (pid ? normId(r.agentId) === pid : normName(r.agentName) === pn)));
+              } else {
+                rows = ((FF.store && FF.store.get && FF.store.get('agentClass')) || []).filter((r) => r.ym === ym2 && r.channel !== 'GV Partner' && (isTl ? normName(r.tlName) === pn : normName(r.name) === pn));
+              }
+            } catch { rows = []; }
+            const tot = rows.reduce((a, r) => a + (Number(r.n) || 1), 0);
+            const map = clsSums(rows.map((r) => ({ cls: r.cls || r.group, n: Number(r.n) || 1 })), 'n', true);
+            return box('k8 k8b', `📅 ${esc(ymLabel(ym2))}`, U.fmt(tot), clsOr(map, CLS7, tot, ''), spec('month', ym2));
+          })()}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
           ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growthHtml, growthSub(p1, m), spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
