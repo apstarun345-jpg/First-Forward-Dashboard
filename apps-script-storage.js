@@ -15,7 +15,7 @@ const MAX_BYTES = 12 * 1024 * 1024;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class AppsScriptStore {
-  constructor({ url, secret, fetchImpl = globalThis.fetch, wait = sleep, batchDelay = 350, slowKinds = { notify: 4000 } } = {}) {
+  constructor({ url, secret, fetchImpl = globalThis.fetch, wait = sleep, batchDelay = 350, slowKinds = { notify: Number(process.env.NOTIFY_SAVE_MS) || 4000 } } = {}) {
     const allowLocal = process.env.APPS_SCRIPT_ALLOW_LOCAL === '1'; // tests / local mock only
     if (!/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(url || '') && !(allowLocal && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(url || ''))) {
       throw new Error('APPS_SCRIPT_URL must be the deployed Apps Script web-app URL (https://script.google.com/macros/s/…/exec).');

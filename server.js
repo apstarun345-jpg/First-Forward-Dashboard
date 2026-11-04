@@ -671,7 +671,7 @@ function recordNotification({ type = 'info', title, body, target = 'admin', meta
   }
   const item = { id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`, type, title: en(String(title || 'Notification')).slice(0, 120), body: en(String(body || '')).slice(0, 800), target, ...(routeKey ? { routeKey, audience } : {}), meta, createdAt: new Date().toISOString() };
   notifyItems().push(item);
-  if (notifyItems().length > 500) db.notify.items = notifyItems().slice(-500);
+  if (notifyItems().length > 250) db.notify.items = notifyItems().slice(-250);   // v3.125.92 — storage chhota (Apps Script slow / size limit)
   persist('notify');
   pushFanout(item); // 🔔 instant web push — app band ho tab bhi
   return item;
@@ -690,7 +690,7 @@ function recordNotification({ type = 'info', title, body, target = 'admin', meta
         note: String(detail.note || '').slice(0, 200),
         ip: String(detail.ip || '').slice(0, 60)
       });
-      if (db.notify.audit.length > 400) db.notify.audit = db.notify.audit.slice(-400);
+      if (db.notify.audit.length > 200) db.notify.audit = db.notify.audit.slice(-200);
       persist('notify').catch(() => {});
     } catch { /* audit never breaks the main action */ }
   }
@@ -1092,7 +1092,7 @@ function plLogFlushSoon() {
   if (plFlushTimer) return;
   plFlushTimer = setTimeout(() => {
     plFlushTimer = null;
-    try { db.notify.plLog = plActivityLog.slice(-500); persist('notify').catch(() => {}); } catch { /* best effort */ }
+    try { db.notify.plLog = plActivityLog.slice(-250); persist('notify').catch(() => {}); } catch { /* best effort */ }
   }, Number(process.env.PL_LOG_FLUSH_MS) || 15e3);
   if (plFlushTimer.unref) plFlushTimer.unref();
 }
@@ -13652,7 +13652,7 @@ async function start() {
   const storedNotify = stored.notify && typeof stored.notify === 'object' ? stored.notify : {};
   // `vapid` + `pushLog` bhi durable hain — inke bina har restart par nayi VAPID key banti thi aur
   // phone ke notification panel me push aana band ho jaata tha (subscriptions 403 par reject hoti thin).
-  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-500) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null, workspace: storedNotify.workspace && typeof storedNotify.workspace === 'object' ? storedNotify.workspace : { views: [], notes: [] }, plLog: Array.isArray(storedNotify.plLog) ? storedNotify.plLog.slice(-500) : [] };
+  db.notify = { items: Array.isArray(storedNotify.items) ? storedNotify.items.slice(-250) : [], watch: storedNotify.watch && typeof storedNotify.watch === 'object' ? storedNotify.watch : {}, push: Array.isArray(storedNotify.push) ? storedNotify.push.slice(-300) : [], pushLog: Array.isArray(storedNotify.pushLog) ? storedNotify.pushLog.slice(-40) : [], vapid: storedNotify.vapid && typeof storedNotify.vapid === 'object' ? storedNotify.vapid : null, workspace: storedNotify.workspace && typeof storedNotify.workspace === 'object' ? storedNotify.workspace : { views: [], notes: [] }, plLog: Array.isArray(storedNotify.plLog) ? storedNotify.plLog.slice(-500) : [] };
   if (stored.__autoRecoveredHistoryAt) {
     console.warn('🛟 AUTO_RECOVER_HISTORY applied:', stored.__autoRecoveredHistoryAt);
     await Promise.all(['users', 'settings', 'resets', 'notify'].map((kind) => persist(kind)));
