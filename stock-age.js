@@ -303,6 +303,8 @@ export function compactRaw(c) {
   });
   /** Har row par fn(row, i) — sirf ek row parse hoti hai (snapshot export ke liye; .raw cold rehta hai). */
   Object.defineProperty(c, 'each', { configurable: true, enumerable: false, value(fn, from = 0, to = count) { for (let i = from; i < Math.min(to, count); i++) fn(rowAt(i), i); return count; } });
+  Object.defineProperty(c, 'at', { configurable: true, enumerable: false, value: (i) => (i >= 0 && i < count ? rowAt(i) : null) });
+  Object.defineProperty(c, 'count', { configurable: true, enumerable: false, value: count });
   Object.defineProperty(c, 'rawBytes', { value: text.length + keys.length, enumerable: true, configurable: true });
   return c;
 }
@@ -362,7 +364,8 @@ export function createStockAgeBuilder({ compact = false, todayDay, masterId = '5
       const parked = (masterDigits && agentDigits === masterDigits) || (parkedTlNorm && normName(r.tl) === parkedTlNorm) || (!agentDigits && !agentName);
       addAge(parked ? ff.parked : ff.field, g, age);
       ff.total++;
-      ff.raw.push([tagId, str(r.barcode), same(normCls(r.cls)), day, agentName, same(str(r.agentId)), same(str(r.tl)), age, aKey, tKey, src]);
+      // v3.125.106 — FASTag Mapping bhi isi copy se: [11] row id · [12] inventory · [13] tag type · [14] BC date · [15] agent date (asli text)
+      ff.raw.push([tagId, str(r.barcode), same(normCls(r.cls)), day, agentName, same(str(r.agentId)), same(str(r.tl)), age, aKey, tKey, src, str(r.id), same(str(r.name)), same(str(r.tagType)), str(r.bcDate), str(r.agentDate)]);
     }
   }
   /** GV (Tag Assignment) rows — saare FF rows add hone ke BAAD (umr StockDataa match se aati hai). */

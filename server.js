@@ -20,7 +20,7 @@ import { sheetsStoreFromEnv } from './sheets-storage.js';
 import { appsScriptStoreFromEnv, AppsScriptStore } from './apps-script-storage.js';
 import { sendMail, mailConfigured, diagnoseMail, mailHint, availableProviders, resolveProviders, resetMailMemo, MAIL_PROVIDERS, splitRecipients } from './mailer.js';
 import { DEFAULT_DISPATCH_EMAIL, normalizeDispatchEmail, buildDispatchPlan, dispatchEmailContent } from './dispatch-email.js';
-import { createMappingStock, sheetIdFrom, identifierText, expandIdentifierNumber } from './mapping-stock.js';
+import { createMappingStock, sheetIdFrom, identifierText, expandIdentifierNumber, idKey as mappingIdKey, compareBarcode } from './mapping-stock.js';
 import { createDuplicateBarcodeCollector } from './duplicate-barcode.js';
 import { personalActivityCalendar } from './personal-calendar.js';
 import { createMappingJobs } from './mapping-job.js';
@@ -3754,21 +3754,21 @@ function stockSerialIndex(index) {
   for (const ch of ['ff', 'gv']) {
     const node = index[ch]; if (!node) continue;
     const tmp = new Map(), classes = [], cIdx = new Map();
-    const add = (r) => {
+    const add = (r, rowNo) => {
       const b = parseBarcode(r && r[1]); if (!b || !Number.isFinite(b.n)) return;
       const c = String(r[2] || '').toUpperCase().replace(/\s+/g, '');
       let ci = cIdx.get(c); if (ci === undefined) { ci = classes.length; classes.push(c); cIdx.set(c, ci); }
       const st = ch === 'gv' ? (r[11] ? 1 : 0) : 1;
       let t = tmp.get(b.pfx); if (!t) { t = []; tmp.set(b.pfx, t); }
-      t.push(b.n, ci, st);
+      t.push(b.n, ci, st, rowNo);
     };
     if (typeof node.each === 'function') node.each(add); else (node.raw || []).forEach(add);
     const map = new Map();
     for (const [pfx, flat] of tmp) {
-      const n = flat.length / 3, order = Array.from({ length: n }, (_, i) => i).sort((a, b) => flat[a * 3] - flat[b * 3]);
-      const ser = new Int32Array(n), cls = new Uint16Array(n), cum = new Int32Array(n + 1);
-      order.forEach((o, i) => { ser[i] = flat[o * 3]; cls[i] = flat[o * 3 + 1]; cum[i + 1] = cum[i] + flat[o * 3 + 2]; });
-      map.set(pfx, { ser, cls, cum });
+      const n = flat.length / 4, order = Array.from({ length: n }, (_, i) => i).sort((a, b) => flat[a * 4] - flat[b * 4]);
+      const ser = new Int32Array(n), cls = new Uint16Array(n), cum = new Int32Array(n + 1), row = new Int32Array(n);
+      order.forEach((o, i) => { ser[i] = flat[o * 4]; cls[i] = flat[o * 4 + 1]; cum[i + 1] = cum[i] + flat[o * 4 + 2]; row[i] = flat[o * 4 + 3]; });
+      map.set(pfx, { ser, cls, cum, row });
     }
     out[ch] = { map, classes };
   }
@@ -4206,7 +4206,7 @@ async function loadStockAgeIndex() {
   const st = s.stock || {};
   const A = (s.gv && s.gv.assignment) || {};
   const errors = {};
-  const ffL = { id: colLetter(st.id, 'A'), tagId: colLetter(st.tagId, 'C'), barcode: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), bcDate: colLetter(st.bcAllocatedAt, 'G'), agentId: colLetter(st.agentId, 'H'), agentName: colLetter(st.agentName, 'I'), agentDate: colLetter(st.agentAllocatedAt, 'J'), tl: colLetter(st.tlName, 'K') };
+  const ffL = { id: colLetter(st.id, 'A'), name: colLetter(st.name, 'B'), tagId: colLetter(st.tagId, 'C'), barcode: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), tagType: colLetter(st.tagType, 'F'), bcDate: colLetter(st.bcAllocatedAt, 'G'), agentId: colLetter(st.agentId, 'H'), agentName: colLetter(st.agentName, 'I'), agentDate: colLetter(st.agentAllocatedAt, 'J'), tl: colLetter(st.tlName, 'K') };
   const gvL = { cls: colLetter(A.cls, 'A'), tagId: colLetter(A.tagId, 'B'), serial: colLetter(A.serial, 'C'), status: colLetter(A.status, 'D'), agentId: colLetter(A.agentId, 'E'), agentName: colLetter(A.agentName, 'F'), tlId: colLetter(A.tlId, 'G'), tlName: colLetter(A.tlName, 'H'), date: colLetter(A.allocatedAt, '') };
   const pick = (row, idx) => (idx >= 0 ? serverCell(row, idx) : '');
   const pickId = (row, idx) => (idx >= 0 ? identifierText(row && row.c && row.c[idx]) : '');
@@ -4221,7 +4221,7 @@ async function loadStockAgeIndex() {
     await gvizPagesServer(s.sheetId, s.stockSheet || 'StockDataa', letters, ffWhere, async (rows, at) => {
       const ix = Object.fromEntries(Object.entries(ffL).map(([k, L]) => [k, L ? at(L) : -1]));
       for (let i = 0; i < rows.length; i += STOCK_AGE_CHUNK) {
-        const part = rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ id: pick(row, ix.id), tagId: pickId(row, ix.tagId), barcode: pickId(row, ix.barcode), cls: pick(row, ix.cls), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) }));
+        const part = rows.slice(i, i + STOCK_AGE_CHUNK).map((row) => ({ id: pick(row, ix.id), name: pick(row, ix.name), tagId: pickId(row, ix.tagId), barcode: pickId(row, ix.barcode), cls: pick(row, ix.cls), tagType: pick(row, ix.tagType), bcDate: pick(row, ix.bcDate), agentId: pick(row, ix.agentId), agentName: pick(row, ix.agentName), agentDate: pick(row, ix.agentDate), tl: pick(row, ix.tl) }));
         builder.addFf(part); rec.add('f', part, FF_SNAP_FIELDS);
         await yieldLoop();
       }
@@ -4251,7 +4251,7 @@ async function loadStockAgeIndex() {
 }
 // 📦 v3.125.102 — Stock index snapshot: StockDataa + Tag Assignment ki zaroori columns (gzip TSV) → /tmp + storage sheet
 // ka CACHE_STOCK tab. Deploy / restart par sheet scan (kai minute) ki jagah snapshot se index seconds me.
-const FF_SNAP_FIELDS = ['tagId', 'barcode', 'cls', 'bcDate', 'agentId', 'agentName', 'agentDate', 'tl'];
+const FF_SNAP_FIELDS = ['tagId', 'barcode', 'cls', 'bcDate', 'agentId', 'agentName', 'agentDate', 'tl', 'id', 'name', 'tagType'];
 const GV_SNAP_FIELDS = ['cls', 'tagId', 'serial', 'status', 'agentId', 'agentName', 'tlId', 'tlName', 'date'];
 const STOCK_SNAP_FILE = path.join(process.env.TMPDIR || '/tmp', 'ff-stock-snap-v1.gz');
 const STOCK_SNAP_TAB = 'CACHE_STOCK';
@@ -4268,7 +4268,7 @@ function stockSnapRecorder() {
 }
 const stockSnapVerSig = () => { try { return dailyTabs().filter((t) => t.label !== 'EIR').map((t) => dailySig(t.key)).join('|'); } catch { return ''; } };
 async function stockSnapSave(gz) {
-  const meta = { v: 1, kind: 'stock', at: Date.now(), key: stockAgeKey(), ver: stockSnapVerSig(), bytes: gz.length };
+  const meta = { v: 2, kind: 'stock', at: Date.now(), key: stockAgeKey(), ver: stockSnapVerSig(), bytes: gz.length };
   try { writeFileSync(STOCK_SNAP_FILE, gz); writeFileSync(`${STOCK_SNAP_FILE}.json`, JSON.stringify(meta)); } catch { /* optional */ }
   if (!sheetsStore || typeof sheetsStore.call !== 'function') return;
   const b64 = gz.toString('base64');
@@ -4305,7 +4305,7 @@ function stockSnapLoad() {
         if (meta && meta.n) { gz = Buffer.from(rows.slice(1, 1 + meta.n).map((r) => r[0] || '').join(''), 'base64'); stockSnapLastParts = meta.n; }
       } catch (err) { console.warn('stock snapshot read:', String(err && err.message || err).slice(0, 160)); }
     }
-    if (!gz || !meta || meta.kind !== 'stock' || meta.key !== stockAgeKey() || Date.now() - meta.at > DAILY_MAX_MS) return false;
+    if (!gz || !meta || meta.kind !== 'stock' || meta.v !== 2 || meta.key !== stockAgeKey() || Date.now() - meta.at > DAILY_MAX_MS) return false;
     if (stockAgeState.index) return true;
     const s = db.settings || {};
     const [y, m, d] = dateKeyNow().split('-').map(Number);
@@ -4616,19 +4616,81 @@ function stockAgeStatus() {
 // 🔗 FASTag Mapping (v3.71) — StockDataa ka server-side lookup index (barcode / tag ID / range).
 // Browser ab gviz pages nahi kheenchta ("paged barcode lookup failed near row 5001" band).
 // ---------------------------------------------------------------------------------------------
-const mappingStock = createMappingStock({
-  getConfig: () => {
-    const s = db.settings || {}, st = s.stock || {};
-    return {
-      sheetId: s.sheetId, sheet: s.stockSheet || 'StockDataa',
-      letters: { id: colLetter(st.id, 'A'), name: colLetter(st.name, 'B'), tagId: colLetter(st.tagId, 'C'), barcode: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), tagType: colLetter(st.tagType, 'F'), bcAt: colLetter(st.bcAllocatedAt, 'G'), agentId: colLetter(st.agentId, 'H'), agentName: colLetter(st.agentName, 'I'), agentAt: colLetter(st.agentAllocatedAt, 'J'), tl: colLetter(st.tlName, 'K') }
-    };
-  },
-  loadPages: (sheetId, sheet, letters, where, onPage) => gvizPagesServer(sheetId, sheet, letters, where, onPage),
-  normalizeVcType: (v) => normalizeVcType(v),
-  // Rate-limit cooldown ke dauran forced rebuild nahi (warna Google par aur requests jaati aur 429 badhta).
-  allowRefresh: () => !gvizCooldownActive()
-});
+// 🧠 v3.125.106 — FASTag Mapping ab ALAG StockDataa copy nahi banata: stock ageing wala hi index (ek copy, snapshot-backed,
+// sheet badalne par hi naya). Pehle mapping apni poori copy + byBarcode / byTag Maps rakhta tha (~60-80 MB extra).
+const mappingStock = (() => {
+  const keyOf = (v) => mappingIdKey(v);
+  const strip = (k) => (/^\d+$/.test(k) ? k.replace(/^0+(?=\d)/, '') : k);
+  const ffNode = (ix) => ix && ix.ff;
+  const rowAt = (node, i) => (typeof node.at === 'function' ? node.at(i) : (node.raw || [])[i]);
+  const rowCount = (node) => (typeof node.count === 'number' ? node.count : (node.raw || []).length);
+  const toStock = (r) => ({
+    stockRowId: r[11] || '', inventoryName: r[12] || '', tagId: r[0] || '', barcode: r[1] || '', serialNo: r[1] || '',
+    vcType: normalizeVcType(r[2]), tagType: r[13] || '', barcodeAllocatedAt: r[14] || '', stockAgentId: r[5] || '',
+    stockAgentName: r[4] || '', agentAllocatedAt: r[15] || '', tlName: r[6] || ''
+  });
+  const scan = (node, fn) => { if (typeof node.each === 'function') node.each(fn); else (node.raw || []).forEach(fn); };
+  function byKey(node, value, field) {
+    const k = strip(keyOf(value)); if (!k) return [];
+    const out = [];
+    if (typeof node.find === 'function') {
+      const needle = /^\d+$/.test(k) ? k : k.toUpperCase();
+      for (const r of node.find(needle, 60)) if (strip(keyOf(r[field])) === k) out.push(r);
+      return out;
+    }
+    scan(node, (r) => { if (strip(keyOf(r[field])) === k) out.push(r); });
+    return out;
+  }
+  function resolve(ix, item) {
+    const node = ffNode(ix);
+    if (!node) return { rows: [], error: 'StockDataa index abhi ready nahi.' };
+    const type = item.type === 'range' || (item.first && item.last) ? 'range' : (item.tagId ? 'tagId' : 'barcode');
+    if (type === 'range') {
+      const from = String(item.first || '').trim(), to = String(item.last || '').trim();
+      if (!from || !to) return { rows: [], error: 'First / Last barcode required.' };
+      if (compareBarcode(from, to) > 0) return { rows: [], error: 'First barcode last se bada hai.' };
+      const a = parseBarcode(from), b = parseBarcode(to);
+      const sidx = stockSerialIndex(ix);
+      let rows = [];
+      if (a && b && a.pfx === b.pfx && sidx && sidx.ff) {
+        const e = sidx.ff.map.get(a.pfx);
+        if (e) {
+          const i = lowerBound(e.ser, a.n), j = lowerBound(e.ser, b.n + 1);
+          if (j - i > 20000) return { rows: [], error: `Is range me ${j - i} tags hain (max 20000). Range ko chhote parts me baant dein.` };
+          for (let k = i; k < j; k++) { const r = rowAt(node, e.row[k]); if (r) rows.push(r); }
+        }
+      } else {
+        scan(node, (r) => { if (rows.length <= 20000 && r[1] && compareBarcode(r[1], from) >= 0 && compareBarcode(r[1], to) <= 0) rows.push(r); });
+        if (rows.length > 20000) return { rows: [], error: 'Range me 20000+ tags — chhota karein.' };
+      }
+      return { rows: rows.map(toStock), matchedBy: 'Barcode range' };
+    }
+    if (type === 'tagId') {
+      let hits = byKey(node, item.tagId, 0);
+      const bc = String(item.barcode || item.serialNo || '').trim();
+      if (hits.length && bc) { const bk = strip(keyOf(bc)); hits = hits.filter((r) => strip(keyOf(r[1])) === bk); }
+      return { rows: hits.map(toStock), matchedBy: 'Tag ID' };
+    }
+    return { rows: byKey(node, item.barcode || item.serialNo, 1).map(toStock), matchedBy: 'Barcode' };
+  }
+  async function ensure({ fresh = false } = {}) { return stockAgeIndex(!!fresh); }
+  const ffFailed = (ix) => !!(ix && ix.errors && ix.errors.ff && !(ix.ff && rowCount(ix.ff)));
+  async function lookup(items, { fresh = false } = {}) {
+    let ix = await stockAgeIndex(!!fresh);
+    // FF scan fail (Google rate limit etc.) aur koi purani copy nahi → saaf error (0 rows "nahi mila" jaisa galat nahi)
+    if (ffFailed(ix) && !fresh) ix = await stockAgeIndex(true);   // koi copy hi nahi → banao (gviz layer khud cooldown ka intezaar karti hai)
+    if (ffFailed(ix)) { const e = new Error(`StockDataa index nahi bana: ${String(ix.errors.ff).slice(0, 200)}`); e.status = 502; throw e; }
+    const out = items.map((item, index) => ({ index, ...resolve(ix, item) }));
+    return { results: out, meta: { rows: ix && ix.ff ? rowCount(ix.ff) : 0, ageSec: stockAgeState.at ? Math.round((Date.now() - stockAgeState.at) / 1000) : null, refreshed: !!fresh } };
+  }
+  const status = () => {
+    const ix = stockAgeState.index;
+    const ready = !!(ix && ix.ff) && !ffFailed(ix), rows = ix && ix.ff ? rowCount(ix.ff) : 0;
+    return { ready, building: !!stockAgeState.promise, rows, ageSec: ix ? Math.round((Date.now() - stockAgeState.at) / 1000) : null, error: stockAgeState.error || '', build: ready ? { pages: rows ? 1 : 0, rows, done: true, failed: false } : null, shared: true };
+  };
+  return { ensure, lookup, status, _resolve: resolve };
+})();
+
 
 // ---------------------------------------------------------------------------------------------
 // 🚨 Unusual Activity — tag-level VRN scan (v3.37), SERVER SIDE.
@@ -7004,7 +7066,10 @@ async function handleApi(req, res, url) {
           const t = await gvizPageServerInner(qp, 'Tag Assignment');
           t.rows.forEach((r) => { const ser = idCellText(r, 2).replace(/\D/g, ''); if (ser) found.set(ser, { cls: idCellText(r, 0), tagId: idCellText(r, 1), status: idCellText(r, 3), agentId: idCellText(r, 4), agent: idCellText(r, 5).trim(), tl: idCellText(r, 6).trim() }); });
         } else {
-          const res2 = await mappingStock.lookup([{ type: 'range', first: String(rg.first), last: String(rg.last) }], {});
+          // v3.125.106 — FF mapping ab isi stock index par hai; index nahi bana to pending (client 4 s baad dobara)
+          return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 4000 }, { 'Cache-Control': 'no-store' });
+          // eslint-disable-next-line no-unreachable
+          const res2 = { results: [] };
           ((res2.results && res2.results[0] && res2.results[0].rows) || []).forEach((x) => { const k = String(x.barcode || '').replace(/\D/g, ''); if (k) found.set(k, { cls: x.vcType, tagId: x.tagId, agentId: x.stockAgentId, agent: x.stockAgentName, tl: x.tlName, status: 'stock' }); });
         }
         for (let n = lo; n <= hi; n++) {
