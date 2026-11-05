@@ -2761,6 +2761,17 @@ FF.pages = FF.pages || {};
       if (list[i].st) {
         const c = list[i].st;
         box.__dspRows[i] = { lazy: true, r: list[i] };
+        // v3.125.107 — class-wise: har class ka Issued / Stock, aakhri column Total
+        const cls = Object.entries(list[i].stCls || {}).filter(([, v]) => v && v.total > 0).sort((a, b) => dispClsNum(a[0]) - dispClsNum(b[0]));
+        if (cls.length) {
+          const cell = (k, kind, v, cl) => `<td><button type="button" class="dsp-cell ${kind === 'issued' ? 'iss' : 'stk'}" data-dsp-open="${i}|${kind}|${esc(k)}" title="${esc(cl)} · ${kind === 'issued' ? 'issue ho chuke' : 'abhi stock me'} — click = list + CSV">${U.fmt(v)}</button></td>`;
+          slot.classList.add('dsp-st-tbl');
+          slot.innerHTML = `<table class="dsp-ctbl"><thead><tr><th></th>${cls.map(([k]) => `<th><span class="dsp-pill cg-${k === 'N/A' ? 'other na' : k.toLowerCase()}"><i>${esc(k === 'N/A' ? 'Class ?' : k)}</i></span></th>`).join('')}<th class="tot">Total</th></tr></thead><tbody>
+            <tr><th class="iss">Issued</th>${cls.map(([k, v]) => cell(k, 'issued', v.issued, k)).join('')}${cell('', 'issued', c.issued, 'Total').replace('<td>', '<td class="tot">')}</tr>
+            <tr><th class="stk">Stock</th>${cls.map(([k, v]) => cell(k, 'stock', v.stock, k)).join('')}${cell('', 'stock', c.stock, 'Total').replace('<td>', '<td class="tot">')}</tr>
+          </tbody></table>`;
+          continue;
+        }
         slot.innerHTML = `<button type="button" class="dsp-sb iss" data-dsp-open="${i}|issued" title="Stock list se nikal chuke (issue) — click = list + CSV"><i>Issued</i><b>${U.fmt(c.issued)}</b></button><button type="button" class="dsp-sb stk" data-dsp-open="${i}|stock" title="Abhi stock me — click = list + CSV"><i>Stock</i><b>${U.fmt(c.stock)}</b></button>`;
         continue;
       }
@@ -2773,15 +2784,20 @@ FF.pages = FF.pages || {};
       } catch (err) { if (slot.isConnected) slot.innerHTML = `<span class="dim small" title="${esc(String((err && err.message) || err))}">issued / stock —</span>`; }
     }
   }
-  function openDspStatus(box, idx, kind) {
+  function openDspStatus(box, idx, kind, clsF) {
     const pack = box.__dspRows && box.__dspRows[idx]; if (!pack) return;
     if (pack.lazy) {   // count server se aaya tha — barcode list ab lao
       if (FF.app && FF.app.openDrawer) FF.app.openDrawer({ kicker: 'Dispatch', title: 'Barcode list', body: U.spinner('Barcodes la rahe hain…'), wide: true, loading: true });
-      dspStatusOf(pack.r).then((rows) => { box.__dspRows[idx] = { rows, r: pack.r }; openDspStatus(box, idx, kind); }).catch((err) => { if (FF.app && FF.app.openDrawer) FF.app.openDrawer({ kicker: 'Dispatch', title: 'Barcode list', body: U.errorBox(err), wide: true, replace: true }); });
+      dspStatusOf(pack.r).then((rows) => { box.__dspRows[idx] = { rows, r: pack.r }; openDspStatus(box, idx, kind, clsF); }).catch((err) => { if (FF.app && FF.app.openDrawer) FF.app.openDrawer({ kicker: 'Dispatch', title: 'Barcode list', body: U.errorBox(err), wide: true, replace: true }); });
       return;
     }
-    const lab = { issued: '✅ Issued', stock: '📦 Stock', nf: '❔ Not found', all: 'All' }[kind] || kind;
-    const rows = kind === 'all' ? pack.rows : pack.rows.filter((x) => dspKind(x.k) === kind);
+    const lab0 = { issued: '✅ Issued', stock: '📦 Stock', nf: '❔ Not found', all: 'All' }[kind] || kind;
+    // v3.125.107 — class cell click → sirf us class ki dispatch ranges
+    const normC = (c) => (c && c !== '—' ? String(c).toUpperCase() : 'N/A');
+    const rangeSet = clsF ? new Set((pack.r.ranges || []).filter((r) => normC(r.cls) === clsF).map((r) => `${r.first} → ${r.last}`)) : null;
+    const base = rangeSet ? pack.rows.filter((x) => rangeSet.has(x.range)) : pack.rows;
+    const lab = clsF ? `${lab0} · ${clsF === 'N/A' ? 'Class ?' : clsF}` : lab0;
+    const rows = kind === 'all' ? base : base.filter((x) => dspKind(x.k) === kind);
     let sc = {}; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { /* ignore */ }
     const head = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Date', 'VRN', 'Note', 'Dispatch range'];
     const st = (x) => (dspKind(x.k) === 'issued' ? 'Issued' : 'Stock');
@@ -3144,7 +3160,7 @@ FF.pages = FF.pages || {};
     const kbox = t.closest('[data-msp-kyc-box]');
     if (kbox) { e.preventDefault(); e.stopPropagation(); try { const sp = JSON.parse(kbox.dataset.mspKycBox); if (FF.kycDetail) FF.kycDetail.open({ title: `${sp.t} · FASTag KYC`, filter: sp.f }); } catch { /* ignore */ } return; }
     const dso = t.closest('[data-dsp-open]');
-    if (dso) { e.preventDefault(); e.stopPropagation(); const b = dso.closest('[data-msp-disp-box]'); const [i, k] = dso.dataset.dspOpen.split('|'); if (b) openDspStatus(b, Number(i), k); return; }
+    if (dso) { e.preventDefault(); e.stopPropagation(); const b = dso.closest('[data-msp-disp-box]'); const [i, k, c] = dso.dataset.dspOpen.split('|'); if (b) openDspStatus(b, Number(i), k, c || ''); return; }
     const dbox = t.closest('[data-msp-disp-box]');
     if (dbox) { e.preventDefault(); e.stopPropagation(); openDispDrawer(dbox); return; }
     const row = t.closest('[data-msp-age-b]');

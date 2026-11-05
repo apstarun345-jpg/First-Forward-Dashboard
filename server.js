@@ -6991,10 +6991,11 @@ async function handleApi(req, res, url) {
       if (sidx) {
         for (const o of dates.slice(0, 8)) {
           let stock = 0, size = 0, ok = 0;
+          const byCls = {};   // v3.125.107 — class-wise issued / stock
           for (const r of o.ranges) {
             const chs = [ch, ch === 'ff' ? 'gv' : 'ff'];
             let info = rangeStockInfo(sidx, ch, r.first, r.last, r.qty);
-            if (info) { stock += info.stock; size += info.size; ok++; }
+            if (info) { stock += info.stock; size += info.size; ok++; r._st = info.stock; r._size = Number(r.qty) || info.size; }
             if (!r.cls || r.cls === '—') {
               let c = info && info.cls;
               if (!c) { const alt = rangeStockInfo(sidx, chs[1], r.first, r.last, r.qty); c = alt && alt.cls; }
@@ -7006,7 +7007,17 @@ async function handleApi(req, res, url) {
             }
           }
           // ranges (max 6 saved) poora dispatch cover karein tabhi count dikhao
-          if (ok && ok === o.ranges.length && size >= (o.total || 0) * 0.98) o.st = { stock: Math.min(stock, o.total || stock), issued: Math.max(0, (o.total || size) - stock), at: index0.at };
+          if (ok && ok === o.ranges.length && size >= (o.total || 0) * 0.98) {
+            o.st = { stock: Math.min(stock, o.total || stock), issued: Math.max(0, (o.total || size) - stock), at: index0.at };
+            for (const r of o.ranges) {
+              const c = (r.cls && r.cls !== '—') ? String(r.cls).toUpperCase() : 'N/A';
+              const x = byCls[c] || (byCls[c] = { total: 0, issued: 0, stock: 0 });
+              const st0 = Math.min(r._st || 0, r._size || 0);
+              x.total += r._size || 0; x.stock += st0; x.issued += Math.max(0, (r._size || 0) - st0);
+            }
+            o.stCls = byCls;
+          }
+          for (const r of o.ranges) { delete r._st; delete r._size; }
         }
       }
     } catch (err) { console.warn('dispatch issued/stock:', String(err && err.message || err).slice(0, 120)); }
