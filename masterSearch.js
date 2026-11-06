@@ -2848,16 +2848,17 @@ FF.pages = FF.pages || {};
     return `<div class="mp-kpi msp-kpi k12 msp-iss-box" data-msp-iss-box="${esc(JSON.stringify(sc))}"><small>📊 Daily issuance · ${ch === 'gv' ? 'GV Partner' : 'First Forward'}</small><div class="msp-iss-body"><span class="dim small">Loading…</span></div></div>`;
   }
   function issRowsFor(sc) {
+    const gv = sc.ch === 'gv', nk = normName(sc.name), id = normName(sc.id);
+    if (gv) {
+      // v3.125.114 — GV: GV module ki EIR rows (agent / TL IDs GV Master se resolve) — summary boxes wale hi numbers
+      let rows = [];
+      try { rows = (FF.gv && FF.gv.issuanceRows ? FF.gv.issuanceRows() : []) || []; } catch { rows = []; }
+      if (sc.isTl) return rows.filter((r) => (id && (normName(r.tlId) === id || normName(r.gvTlId) === id || normName(r.agentId) === id)) || (!id && normName(r.tlName) === nk));
+      return rows.filter((r) => (id && normName(r.agentId) === id) || normName(r.agentName) === nk);
+    }
     let rows = (FF.store && FF.store.get && FF.store.get('daily')) || [];
     try { if (FF.filters && FF.filters.dropLaggedFf) rows = FF.filters.dropLaggedFf(rows); } catch { /* optional */ }
-    const gv = sc.ch === 'gv', nk = normName(sc.name), id = normName(sc.id);
-    rows = rows.filter((r) => (gv ? r.channel === 'GV Partner' : r.channel !== 'GV Partner'));
-    if (gv && sc.isTl) {
-      // GV TL: EIR me GV TL ka naam nahi — GV Master se us TL ke agents ki IDs
-      const ids = new Set(id ? [id] : []);
-      try { for (const r of (FF.gv && FF.gv.issuanceRows ? FF.gv.issuanceRows() : [])) if (id && (normName(r.gvTlId) === id || normName(r.tlId) === id)) ids.add(normName(r.agentId)); } catch { /* optional */ }
-      return rows.filter((r) => ids.has(normName(r.agentId)));
-    }
+    rows = rows.filter((r) => r.channel !== 'GV Partner');
     if (sc.isTl) return rows.filter((r) => normName(r.tlName) === nk || (id && normName(r.agentId) === id));
     return rows.filter((r) => normName(r.agentName) === nk || (id && normName(r.agentId) === id));
   }
@@ -2867,7 +2868,7 @@ FF.pages = FF.pages || {};
     const cur = U.reportYm(), m1 = U.prevMonthKey(cur), m2 = U.prevMonthKey(m1);
     const yms = [cur, m1, m2];
     const ym = yms.includes(box.__issYm) ? box.__issYm : cur;
-    if (!box.__issRows) box.__issRows = issRowsFor(sc);
+    if (!box.__issRows || !box.__issRows.length) box.__issRows = issRowsFor(sc);   // khaali = data abhi load ho raha ho sakta hai — agli baar phir dekho
     const rows = box.__issRows;
     const n = U.daysInMonth(ym);
     const days = Array.from({ length: n }, (_, i) => ({ total: 0, vc4: 0, vc20: 0, vc5p: 0, rep: 0, chs: 0 }));
