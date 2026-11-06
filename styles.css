@@ -7568,3 +7568,16 @@ html body .msp-kpi.msp-disp-box .dsp-row:has(.dsp-st-tbl) .dsp-cls { display: no
 .msp-iss-chip.vc5p { background: rgba(16,185,129,.14); color: #047857; } .msp-iss-chip.rep { background: rgba(236,72,153,.12); color: #be185d; }
 .msp-iss-chip.chs { background: rgba(14,165,233,.13); color: #0369a1; } .msp-iss-chip.tot { background: #1e293b; color: #fff; }
 @media (prefers-color-scheme: dark) { .msp-iss-chip.vc4 { color: #a5b4fc; } .msp-iss-chip.vc20 { color: #fcd34d; } .msp-iss-chip.vc5p { color: #6ee7b7; } .msp-iss-chip.rep { color: #f9a8d4; } .msp-iss-chip.chs { color: #7dd3fc; } .msp-iss-chip.tot { background: #e2e8f0; color: #0f172a; } }
+
+/* v3.125.115 — Daily issuance: run-rate table */
+.msp-rr-wrap { margin: 4px 0 8px; overflow-x: auto; }
+.msp-rr { border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 460px; }
+.msp-rr th, .msp-rr td { padding: 4px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid rgba(148,163,184,.22); }
+.msp-rr thead th { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; font-weight: 800; background: rgba(148,163,184,.10); }
+.msp-rr thead th:first-child, .msp-rr tbody th { text-align: left; }
+.msp-rr tbody th { font-weight: 800; }
+.msp-rr tr.vc4 th { color: #4338ca; } .msp-rr tr.vc20 th { color: #b45309; } .msp-rr tr.vc5p th { color: #047857; }
+.msp-rr tr.tot th, .msp-rr tr.tot td { font-weight: 800; background: rgba(15,23,42,.05); border-bottom: 0; }
+.msp-rr .up { color: #16a34a; font-weight: 700; } .msp-rr .down { color: #dc2626; font-weight: 700; }
+.msp-rr-wrap .dim.small { margin-top: 3px; }
+@media (prefers-color-scheme: dark) { .msp-rr tr.vc4 th { color: #a5b4fc; } .msp-rr tr.vc20 th { color: #fcd34d; } .msp-rr tr.vc5p th { color: #6ee7b7; } .msp-rr tr.tot th, .msp-rr tr.tot td { background: rgba(255,255,255,.06); } }

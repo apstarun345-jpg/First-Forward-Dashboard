@@ -2891,8 +2891,27 @@ FF.pages = FF.pages || {};
       series: [{ name: sc.ch === 'gv' ? 'GV Partner · GV' : 'First Forward · FF', values: days.map((d) => d.total), color: sc.ch === 'gv' ? '#0d9488' : '#6366f1' }]
     }) : '';
     const active = days.filter((d) => d.total > 0).length;
+    // v3.125.115 — Run-rate table: per day (calendar din) + month-end expected; pichhle mahine ke per-day se tulna
+    const today = new Date();
+    const isCur = ym === U.reportYm();
+    const elapsed = isCur ? Math.max(1, Math.min(n, sc.ch === 'gv' ? today.getDate() : today.getDate() - 1)) : n;
+    const prevYm = U.prevMonthKey(ym), pn = U.daysInMonth(prevYm);
+    const prevSum = { vc4: 0, vc20: 0, vc5p: 0, total: 0 };
+    for (const r of rows) { if (r.ym !== prevYm) continue; const q = Number(r.n) || 0; prevSum.total += q; if (r.group === 'VC4') prevSum.vc4 += q; else if (r.group === 'VC20') prevSum.vc20 += q; else prevSum.vc5p += q; }
+    const rr = (v, d) => (d ? v / d : 0);
+    const f1 = (v) => (v >= 10 ? U.fmt(Math.round(v)) : (Math.round(v * 10) / 10).toFixed(1));
+    const rrRow = (cls, label, k) => {
+      const v = sum(k), rate = rr(v, elapsed), prate = rr(prevSum[k], pn);
+      const ch = prate ? Math.round(((rate - prate) / prate) * 100) : null;
+      const chHtml = ch === null ? '<span class="dim">—</span>' : `<span class="${ch >= 0 ? 'up' : 'down'}">${ch >= 0 ? '▲' : '▼'} ${Math.abs(ch)}%</span>`;
+      return `<tr class="${cls}"><th>${label}</th><td>${U.fmt(v)}</td><td><b>${f1(rate)}</b></td>${isCur ? `<td><b>${U.fmt(Math.round(rate * n))}</b></td>` : ''}<td>${f1(prate)}</td><td>${chHtml}</td></tr>`;
+    };
+    const rrTable = `<div class="msp-rr-wrap"><table class="msp-rr"><thead><tr><th>Run-rate</th><th>Issued</th><th>Per day</th>${isCur ? '<th>Expected month-end</th>' : ''}<th>${esc(mName(prevYm))} per day</th><th>vs ${esc(mName(prevYm))}</th></tr></thead><tbody>
+      ${rrRow('vc4', 'VC4', 'vc4')}${rrRow('vc20', 'VC20', 'vc20')}${rrRow('vc5p', 'VC5+', 'vc5p')}${rrRow('tot', 'Total', 'total')}
+    </tbody></table><div class="dim small">Per day = issued ÷ ${elapsed} din${isCur ? ` (1–${elapsed} ${esc(mName(ym))}${sc.ch === 'gv' ? '' : ' · FF data T+1'})` : ''} · ${esc(mName(prevYm))} = poora mahina ÷ ${pn} din</div></div>`;
     const chip = (cls, k, v) => `<span class="msp-iss-chip ${cls}"><i>${k}</i><b>${U.fmt(v)}</b></span>`;
     body.innerHTML = `<div class="msp-iss-head"><div class="msp-iss-tabs">${tabs}</div><div class="msp-iss-chips">${chip('vc4', 'VC4', sum('vc4'))}${chip('vc20', 'VC20', sum('vc20'))}${chip('vc5p', 'VC5+', sum('vc5p'))}${chip('rep', '🔁 Replace', sum('rep'))}${chip('chs', '🔧 Chassis', sum('chs'))}${chip('tot', `Total · ${active} din`, sum('total'))}</div></div>
+      ${rrTable}
       ${sum('total') ? chart : `<div class="dim small" style="padding:18px 4px">${esc(mName(ym))} ${y} me koi issuance nahi.</div>`}`;
     void m;
   }
