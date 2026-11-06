@@ -2845,7 +2845,7 @@ FF.pages = FF.pages || {};
   // ===== 📊 v3.125.112 — Roz ka issuance (agent / TL): current · last · before-last month, hover = VC4 / VC20 / VC5+ / Replacement / Chassis =====
   function issBoxHtml(pr, isTl, ch) {
     const sc = { ch, isTl: !!isTl, name: pr.name || '', id: String(pr.id || pr.sub || '').trim() };
-    return `<div class="mp-kpi msp-kpi k12 msp-iss-box" data-msp-iss-box="${esc(JSON.stringify(sc))}"><small>📊 Roz ka issuance · ${ch === 'gv' ? 'GV Partner' : 'First Forward'}</small><div class="msp-iss-body"><span class="dim small">Loading…</span></div></div>`;
+    return `<div class="mp-kpi msp-kpi k12 msp-iss-box" data-msp-iss-box="${esc(JSON.stringify(sc))}"><small>📊 Daily issuance · ${ch === 'gv' ? 'GV Partner' : 'First Forward'}</small><div class="msp-iss-body"><span class="dim small">Loading…</span></div></div>`;
   }
   function issRowsFor(sc) {
     let rows = (FF.store && FF.store.get && FF.store.get('daily')) || [];
