@@ -6052,7 +6052,16 @@ function dailyTabs() {
     { label: 'StockDataa', id: ff, tab: s.stockSheet || 'StockDataa', gid: gidOf(s.stockSheet || 'StockDataa') },
     ...(gv ? [{ label: 'Tag Assignment', id: gv, tab: A.tab || 'Tag Assignment', gid: /^\d+$/.test(String(A.gid || '')) ? String(A.gid) : gidOf(A.tab || 'Tag Assignment') }] : [])
   ];
-  return list.map((t) => ({ ...t, key: `${t.id}|${t.tab}` }));
+  // v3.125.108 — version sirf row-count nahi: StockDataa ki rows ki ginti din bhar same reh sakti hai (tags andar-bahar),
+  // isliye har tab ke "badlav" wale columns: EIR = tag count + latest issue date; StockDataa = barcode count + latest
+  // agent allocation; Tag Assignment = tag count + jitne tags par agent laga hai.
+  const st = s.stock || {}, e = s.eir || {};
+  const sigCols = {
+    EIR: [`count(${colLetter(e.tagId, 'A')})`, `max(${colLetter(e.date, 'AA')})`],
+    StockDataa: [`count(${colLetter(st.barcode, 'D')})`, `max(${colLetter(st.agentAllocatedAt, 'J')})`, `count(${colLetter(st.agentId, 'H')})`],
+    'Tag Assignment': [`count(${colLetter(A.tagId, 'B')})`, `count(${colLetter(A.agentId, 'E')})`]
+  };
+  return list.map((t) => ({ ...t, key: `${t.id}|${t.tab}`, sigCols: sigCols[t.label] || ['count(A)'] }));
 }
 /** gviz URL kis daily tab ka hai (nahi to null). */
 function dailyKeyOfUrl(url) {
@@ -6071,15 +6080,20 @@ async function checkDailyVersions(reason) {
     const changed = [];
     for (const t of dailyTabs()) {
       try {
-        const qp = new URLSearchParams({ id: t.id, tq: 'select count(A)' });
-        if (t.gid) qp.set('gid', t.gid); else qp.set('sheet', t.tab);
-        const r = await gvizPageServerInner(qp, t.tab);
-        const c = r.rows && r.rows[0] && r.rows[0].c && r.rows[0].c[0];
-        const n = c && Number(c.v);
-        if (!Number.isFinite(n)) continue;
+        const run = async (cols) => {
+          const qp = new URLSearchParams({ id: t.id, tq: `select ${cols.join(', ')}` });
+          if (t.gid) qp.set('gid', t.gid); else qp.set('sheet', t.tab);
+          const r = await gvizPageServerInner(qp, t.tab);
+          const cells = (r.rows && r.rows[0] && r.rows[0].c) || [];
+          return cells.map((c) => (c ? String(c.f != null ? c.f : c.v) : ''));
+        };
+        let vals;
+        try { vals = await run(t.sigCols); } catch { vals = await run(['count(A)']); }   // column galat ho to purana tareeka
+        const n = Number(String(vals[0] || '').replace(/[^\d.]/g, ''));
+        if (!Number.isFinite(n) || !vals[0]) continue;
         // v3.125.103 — pichhla version settings me saved (restart ke baad bhi "kab aaya" sahi + beech ka badlav pakda jaaye)
         const saved = (db.settings && db.settings.dailyVer && db.settings.dailyVer[t.key]) || null;
-        const sig = String(n), prev = dailyVer.get(t.key) || (saved ? { sig: saved.sig, changedAt: saved.changedAt } : null);
+        const sig = vals.join('|'), prev = dailyVer.get(t.key) || (saved ? { sig: saved.sig, changedAt: saved.changedAt } : null);
         dailyVer.set(t.key, { sig, changedAt: prev && prev.sig === sig ? (prev.changedAt || Date.now()) : Date.now(), checkedAt: Date.now(), rows: n, label: t.label });
         if (prev && prev.sig !== sig) changed.push(t);
         if (!saved || saved.sig !== sig) {
@@ -6088,7 +6102,7 @@ async function checkDailyVersions(reason) {
       } catch { /* agli baar */ }
     }
     if (changed.length) {
-      console.log(`🗓️ daily data aaya (${reason || 'check'}): ${changed.map((t) => `${t.label} → ${dailyVer.get(t.key).sig} rows`).join(', ')}`);
+      console.log(`🗓️ daily data aaya (${reason || 'check'}): ${changed.map((t) => `${t.label} → ${dailyVer.get(t.key).rows} rows (${dailyVer.get(t.key).sig})`).join(', ')}`);
       // us tab ki cached queries peeche se naye data se bhar do (pehla user purana na dekhe)
       const keys = new Set(changed.map((t) => t.key));
       const urls = [...cache.keys()].filter((u) => keys.has(dailyKeyOfUrl(u))).slice(0, 40);
