@@ -4348,8 +4348,10 @@ function startStockAgeBuild(key) {
   // 🧠 v3.125.109 — purana index + naya scan saath = 470 MB+ → memory guard restart → boot par phir rebuild (6 Nov loop).
   // Memory zyada ho to scan se pehle purana index chhod do (beech me requests "pending"; fail par /tmp snapshot wapas).
   try {
+    if (typeof globalThis.gc === 'function') globalThis.gc();   // snapshot load ka kachra pehle saaf, phir naapo
     const rssMb = process.memoryUsage().rss / 1048576;
-    if (stockAgeState.index && rssMb > Number(process.env.STOCK_REBUILD_DROP_MB || 230)) {
+    // purana index rakhna behtar (scan me kai minute — beech me sab "pending"); sirf sach me tight ho tab chhodo
+    if (stockAgeState.index && rssMb > Number(process.env.STOCK_REBUILD_DROP_MB || 320)) {
       console.log(`stock index: rebuild se pehle purana index chhoda (rss ${Math.round(rssMb)} MB)`);
       stockAgeState.index = null; serialIdxState.data = null; serialIdxState.at = -1;
       if (typeof globalThis.gc === 'function') globalThis.gc();
