@@ -4353,7 +4353,8 @@ function startStockAgeBuild(key) {
     // purana index rakhna behtar (scan me kai minute — beech me sab "pending"); sirf sach me tight ho tab chhodo
     if (stockAgeState.index && rssMb > Number(process.env.STOCK_REBUILD_DROP_MB || 320)) {
       console.log(`stock index: rebuild se pehle purana index chhoda (rss ${Math.round(rssMb)} MB)`);
-      stockAgeState.index = null; serialIdxState.data = null; serialIdxState.at = -1;
+      try { stockSerialIndex(stockAgeState.index); } catch { /* optional */ }   // chhodne se pehle chhota count-index bana lo
+      stockAgeState.index = null;   // serial index (chhota, ~5 MB) rakho — dispatch Issued / Stock rebuild ke dauran bhi turant
       if (typeof globalThis.gc === 'function') globalThis.gc();
     }
   } catch { /* optional */ }
@@ -7019,8 +7020,8 @@ async function handleApi(req, res, url) {
     const dates = [...days.values()].sort((x, y) => String(y.date).localeCompare(String(x.date)));
     // v3.125.105 — har dispatch: issued / stock count (stock index ke serials se, turant) + khaali class bharo
     try {
-      const index0 = await stockAgeIndexWithin(3000, false);
-      const sidx = index0 ? stockSerialIndex(index0) : null;
+      const index0 = await stockAgeIndexWithin(1500, false);
+      const sidx = index0 ? stockSerialIndex(index0) : serialIdxState.data;   // rebuild chal raha → pichhla saved count-index
       if (sidx) {
         for (const o of dates.slice(0, 8)) {
           let stock = 0, size = 0, ok = 0;
@@ -7041,7 +7042,7 @@ async function handleApi(req, res, url) {
           }
           // ranges (max 6 saved) poora dispatch cover karein tabhi count dikhao
           if (ok && ok === o.ranges.length && size >= (o.total || 0) * 0.98) {
-            o.st = { stock: Math.min(stock, o.total || stock), issued: Math.max(0, (o.total || size) - stock), at: index0.at };
+            o.st = { stock: Math.min(stock, o.total || stock), issued: Math.max(0, (o.total || size) - stock), at: index0 ? index0.at : serialIdxState.at };
             for (const r of o.ranges) {
               const c = (r.cls && r.cls !== '—') ? String(r.cls).toUpperCase() : 'N/A';
               const x = byCls[c] || (byCls[c] = { total: 0, issued: 0, stock: 0 });
