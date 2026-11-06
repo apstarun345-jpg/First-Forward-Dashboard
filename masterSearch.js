@@ -2224,6 +2224,7 @@ FF.pages = FF.pages || {};
           ${ageBoxHtml(pr, isTl, ch)}
           ${dispBoxHtml(pr, isTl, ch)}
           ${kycBoxHtml(pr, isTl, ch)}
+          ${issBoxHtml(pr, isTl, ch)}
           ${ch === 'gv' ? GVC.boxHtml(pr, isTl) : ''}
         </div>${notFound}</div></section>${donutBlock}`;
     }
@@ -2244,6 +2245,7 @@ FF.pages = FF.pages || {};
           fillAgeBoxes(host);
           fillDispBoxes(host);
           fillKycBoxes(host);
+          fillIssBoxes(host);
         }
       };
       REPORT_CTX.name = g.name; REPORT_CTX.prs = {};
@@ -2840,6 +2842,76 @@ FF.pages = FF.pages || {};
     const rows = d.recent.map((r) => `<tr><td>${esc(dispDate(r.date))}<br><small class="dim">${esc(dispAgo(r.date))}</small></td><td class="num"><b>${U.fmt(r.total)}</b></td><td>${dispPills(r.cls)}</td><td class="small">${(r.ranges || []).map((x) => `${esc(x.cls || '')} ${U.fmt(x.qty)}: ${esc(x.first)} → ${esc(x.last)}`).join('<br>')}</td></tr>`).join('');
     FF.app.openDrawer({ kicker: `${sc.ch === 'gv' ? 'GV' : 'FF'} dispatch ledger`, title: `${sc.title} · recent dispatches`, sub: `${U.fmt(d.totalDispatches || d.recent.length)} dispatch dates found · showing latest ${d.recent.length}`, body: `<div class="table-wrap"><table class="tbl compact"><thead><tr><th>Date</th><th class="num">Tags</th><th>Class-wise</th><th>Barcode range</th></tr></thead><tbody>${rows}</tbody></table></div>` });
   }
+  // ===== 📊 v3.125.112 — Roz ka issuance (agent / TL): current · last · before-last month, hover = VC4 / VC20 / VC5+ / Replacement / Chassis =====
+  function issBoxHtml(pr, isTl, ch) {
+    const sc = { ch, isTl: !!isTl, name: pr.name || '', id: String(pr.id || pr.sub || '').trim() };
+    return `<div class="mp-kpi msp-kpi k12 msp-iss-box" data-msp-iss-box="${esc(JSON.stringify(sc))}"><small>📊 Roz ka issuance · ${ch === 'gv' ? 'GV Partner' : 'First Forward'}</small><div class="msp-iss-body"><span class="dim small">Loading…</span></div></div>`;
+  }
+  function issRowsFor(sc) {
+    let rows = (FF.store && FF.store.get && FF.store.get('daily')) || [];
+    try { if (FF.filters && FF.filters.dropLaggedFf) rows = FF.filters.dropLaggedFf(rows); } catch { /* optional */ }
+    const gv = sc.ch === 'gv', nk = normName(sc.name), id = normName(sc.id);
+    rows = rows.filter((r) => (gv ? r.channel === 'GV Partner' : r.channel !== 'GV Partner'));
+    if (gv && sc.isTl) {
+      // GV TL: EIR me GV TL ka naam nahi — GV Master se us TL ke agents ki IDs
+      const ids = new Set(id ? [id] : []);
+      try { for (const r of (FF.gv && FF.gv.issuanceRows ? FF.gv.issuanceRows() : [])) if (id && (normName(r.gvTlId) === id || normName(r.tlId) === id)) ids.add(normName(r.agentId)); } catch { /* optional */ }
+      return rows.filter((r) => ids.has(normName(r.agentId)));
+    }
+    if (sc.isTl) return rows.filter((r) => normName(r.tlName) === nk || (id && normName(r.agentId) === id));
+    return rows.filter((r) => normName(r.agentName) === nk || (id && normName(r.agentId) === id));
+  }
+  function issRender(box) {
+    let sc; try { sc = JSON.parse(box.dataset.mspIssBox); } catch { return; }
+    const body = box.querySelector('.msp-iss-body'); if (!body) return;
+    const cur = U.reportYm(), m1 = U.prevMonthKey(cur), m2 = U.prevMonthKey(m1);
+    const yms = [cur, m1, m2];
+    const ym = yms.includes(box.__issYm) ? box.__issYm : cur;
+    if (!box.__issRows) box.__issRows = issRowsFor(sc);
+    const rows = box.__issRows;
+    const n = U.daysInMonth(ym);
+    const days = Array.from({ length: n }, (_, i) => ({ total: 0, vc4: 0, vc20: 0, vc5p: 0, rep: 0, chs: 0 }));
+    for (const r of rows) {
+      if (r.ym !== ym || !(r.day >= 1 && r.day <= n)) continue;
+      const d = days[r.day - 1], q = Number(r.n) || 0;
+      d.total += q;
+      if (r.group === 'VC4') d.vc4 += q; else if (r.group === 'VC20') d.vc20 += q; else d.vc5p += q;
+      if (String(r.type || '').toUpperCase() === 'REPLACEMENT') d.rep += q;
+      if (/chassis/i.test(r.vrnType || '')) d.chs += q;
+    }
+    const sum = (k) => days.reduce((a, d) => a + d[k], 0);
+    const mName = (k) => { const { y, m } = U.ymParts(k); return new Date(y, m - 1, 1).toLocaleString('en-IN', { month: 'short' }); };
+    const tabs = yms.map((k) => `<button type="button" class="msp-iss-tab ${k === ym ? 'on' : ''}" data-iss-ym="${k}">${esc(mName(k))} ${esc(k.slice(0, 4))}</button>`).join('');
+    const { y, m } = U.ymParts(ym);
+    const lab = (i) => `${String(i + 1).padStart(2, '0')} ${mName(ym)}`;
+    const tips = days.map((d, i) => `<b>${esc(lab(i))}</b><br>VC4: <b>${U.fmt(d.vc4)}</b><br>VC20: <b>${U.fmt(d.vc20)}</b><br>VC5+: <b>${U.fmt(d.vc5p)}</b><br>🔁 Replacement: <b>${U.fmt(d.rep)}</b><br>🔧 Chassis: <b>${U.fmt(d.chs)}</b><br>Total: <b>${U.fmt(d.total)}</b>`);
+    const chart = FF.charts ? FF.charts.bars({
+      labels: days.map((_, i) => String(i + 1)), tipLabels: days.map((_, i) => lab(i)), tips, height: 190, showValues: true, labelEvery: n > 20 ? 3 : 1,
+      series: [{ name: sc.ch === 'gv' ? 'GV Partner · GV' : 'First Forward · FF', values: days.map((d) => d.total), color: sc.ch === 'gv' ? '#0d9488' : '#6366f1' }]
+    }) : '';
+    const active = days.filter((d) => d.total > 0).length;
+    const chip = (cls, k, v) => `<span class="msp-iss-chip ${cls}"><i>${k}</i><b>${U.fmt(v)}</b></span>`;
+    body.innerHTML = `<div class="msp-iss-head"><div class="msp-iss-tabs">${tabs}</div><div class="msp-iss-chips">${chip('vc4', 'VC4', sum('vc4'))}${chip('vc20', 'VC20', sum('vc20'))}${chip('vc5p', 'VC5+', sum('vc5p'))}${chip('rep', '🔁 Replace', sum('rep'))}${chip('chs', '🔧 Chassis', sum('chs'))}${chip('tot', `Total · ${active} din`, sum('total'))}</div></div>
+      ${sum('total') ? chart : `<div class="dim small" style="padding:18px 4px">${esc(mName(ym))} ${y} me koi issuance nahi.</div>`}`;
+    void m;
+  }
+  function fillIssBoxes(host) {
+    const boxes = host ? host.querySelectorAll('[data-msp-iss-box]') : [];
+    boxes.forEach((box) => {
+      const go = () => { try { issRender(box); } catch (err) { const b = box.querySelector('.msp-iss-body'); if (b) b.innerHTML = `<span class="dim small">${esc(String((err && err.message) || err))}</span>`; } };
+      const daily = FF.store && FF.store.get && FF.store.get('daily');
+      if (daily && daily.length) go();
+      else if (FF.store && FF.store.need) Promise.resolve(FF.store.need('daily')).then(() => { box.__issRows = null; go(); }).catch(go);
+      else go();
+    });
+  }
+  document.addEventListener('click', (e) => {
+    const tb = e.target && e.target.closest && e.target.closest('[data-iss-ym]');
+    if (!tb) return;
+    const box = tb.closest('[data-msp-iss-box]'); if (!box) return;
+    e.preventDefault(); e.stopPropagation();
+    box.__issYm = tb.dataset.issYm; issRender(box);
+  }, true);
   // ===== 🪪 FASTag KYC box — EIR CUSTOMER_FULL_KYC (TRUE = full KYC, FALSE = not KYC): last + current month, class-wise =====
   const kycByCache = new Map();
   const kycPct = (p) => (p === null || p === undefined ? '—' : `${p.toFixed(1)}%`);
