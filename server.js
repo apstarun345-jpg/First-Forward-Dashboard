@@ -4345,10 +4345,26 @@ function startStockAgeBuild(key) {
   stockAgeState.key = key;
   try { stockAgeState.verSig = dailyTabs().filter((t) => t.label !== 'EIR').map((t) => dailySig(t.key)).join('|'); } catch { /* optional */ }
   stockAgeState.startedAt = Date.now();
+  // 🧠 v3.125.109 — purana index + naya scan saath = 470 MB+ → memory guard restart → boot par phir rebuild (6 Nov loop).
+  // Memory zyada ho to scan se pehle purana index chhod do (beech me requests "pending"; fail par /tmp snapshot wapas).
+  try {
+    const rssMb = process.memoryUsage().rss / 1048576;
+    if (stockAgeState.index && rssMb > Number(process.env.STOCK_REBUILD_DROP_MB || 230)) {
+      console.log(`stock index: rebuild se pehle purana index chhoda (rss ${Math.round(rssMb)} MB)`);
+      stockAgeState.index = null; serialIdxState.data = null; serialIdxState.at = -1;
+      if (typeof globalThis.gc === 'function') globalThis.gc();
+    }
+  } catch { /* optional */ }
   const job = loadStockAgeIndex().then((next) => {
     if (stockAgeState.key !== key) return next;   // settings beech me badal gayi — is result ko store mat karo
     const prev = stockAgeState.index;
     const err = next.errors || {};
+    if (!prev && (err.ff || err.gv) && STOCK_SNAP_ON) {
+      stockAgeState.error = [err.ff && `FF: ${err.ff}`, err.gv && `GV: ${err.gv}`].filter(Boolean).join(' · ');
+      stockAgeState.retryAt = Date.now() + STOCK_AGE_ERROR_RETRY_MS;
+      // purana chhoda tha aur scan fail → kal wala snapshot (kuch nahi se behtar)
+      return stockSnapLoad().then((ok) => (ok && stockAgeState.index ? stockAgeState.index : next));
+    }
     let index = next;
     if (prev) {
       // Fail hui side ke liye purana (accha) data rakho — Google ke ek blip par ageing blank / adhuri na ho.
@@ -4590,7 +4606,7 @@ async function stockAgeIndex(fresh) {
     const vs = dailyTabs().filter((t) => t.label !== 'EIR').map((t) => dailySig(t.key)).join('|');
     const verKnown = vs && !vs.split('|').some((x) => !x);
     if (verKnown && String(stockAgeState.verSig || '').split('|').some((x) => !x)) stockAgeState.verSig = vs;   // index version pata hone se pehle bana tha — dobara mat banao
-    const due = (verKnown ? (stockAgeState.verSig !== vs || Date.now() - stockAgeState.at >= DAILY_MAX_MS) : Date.now() - stockAgeState.at >= STOCK_AGE_TTL) || (partial && Date.now() >= stockAgeState.retryAt) || stockAgeState.at < forceRefreshAt;
+    const due = ((verKnown ? (stockAgeState.verSig !== vs || Date.now() - stockAgeState.at >= DAILY_MAX_MS) : Date.now() - stockAgeState.at >= STOCK_AGE_TTL) && Date.now() >= (stockAgeState.retryAt || 0)) || (partial && Date.now() >= stockAgeState.retryAt) || stockAgeState.at < forceRefreshAt;
     if (due && !stockAgeState.promise) startStockAgeBuild(key).catch(() => {});
     return have;
   }
@@ -6108,7 +6124,8 @@ async function checkDailyVersions(reason) {
       const urls = [...cache.keys()].filter((u) => keys.has(dailyKeyOfUrl(u))).slice(0, 40);
       for (const u of urls) { await refreshCache(u); await yieldLoop(); }
       // stock tab badla → stock index (ageing / dispatch status) naya
-      if (changed.some((t) => t.label !== 'EIR')) { try { stockAgeIndex(true).catch(() => {}); } catch { /* optional */ } }
+      // false = due logic (index ka verSig vs abhi ka) — snapshot pehle se naya ho to dobara scan nahi (restart loop se bachao)
+      if (changed.some((t) => t.label !== 'EIR')) { try { stockAgeIndex(false).catch(() => {}); } catch { /* optional */ } }
     }
     return changed;
   })().finally(() => { dailyCheckRunning = null; });
@@ -7088,6 +7105,8 @@ async function handleApi(req, res, url) {
           const f1 = fmtBc(lo.toString().padStart(w, '0')), f2 = fmtBc(hi.toString().padStart(w, '0'));
           const qp = new URLSearchParams({ id: String(st.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${L.cls}, ${L.tag}, ${L.ser}, ${L.stat}, ${L.aid}, ${L.an}, ${L.tl} where ${L.ser} >= '${f1}' and ${L.ser} <= '${f2}' limit 3000` });
           if (/^\d+$/.test(String(A.gid || ''))) qp.set('gid', String(A.gid)); else qp.set('sheet', A.tab || 'Tag Assignment');
+          // v3.125.109 — index ban raha ho tab Google se seedha range query (stock scan ke saath) = 429; pending lautao
+          if (stockAgeState.promise) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 5000, message: 'Stock data naya ban raha hai…' }, { 'Cache-Control': 'no-store' });
           const t = await gvizPageServerInner(qp, 'Tag Assignment');
           t.rows.forEach((r) => { const ser = idCellText(r, 2).replace(/\D/g, ''); if (ser) found.set(ser, { cls: idCellText(r, 0), tagId: idCellText(r, 1), status: idCellText(r, 3), agentId: idCellText(r, 4), agent: idCellText(r, 5).trim(), tl: idCellText(r, 6).trim() }); });
         } else {
