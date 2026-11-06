@@ -7536,24 +7536,25 @@ html body .msp-kpi.k8b { border-top-color: #94a3b8; background: color-mix(in srg
 .msp-g2-row small { min-width: 74px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 html body .msp-kpi.k0 .msp-g2-row .delta, html body .msp-kpi.k0 .msp-g2-row span:not(.dim) { font-size: 20px; font-weight: 900; }
 
-/* v3.125.107 — Last dispatch: class-wise Issued / Stock mini table (Total last) */
-html body .msp-kpi.msp-disp-box .dsp-row:has(.dsp-st-tbl) { grid-template-columns: 92px 58px minmax(0, 1fr); }
-.dsp-st.dsp-st-tbl { grid-column: 1 / -1; justify-content: flex-start; overflow-x: auto; max-width: 100%; }
-.dsp-ctbl { border-collapse: separate; border-spacing: 3px 2px; font-size: 12px; }
+/* v3.125.107/.113 — Last dispatch: class-wise Issued / Stock — compact, ek hi line me (pills ki jagah table header) */
+html body .msp-kpi.msp-disp-box .dsp-row:has(.dsp-st-tbl) { grid-template-columns: 96px 70px minmax(0, 1fr); align-items: center; padding-top: 4px; padding-bottom: 4px; row-gap: 0; }
+html body .msp-kpi.msp-disp-box .dsp-row:has(.dsp-st-tbl) .dsp-cls { display: none; }
+.dsp-st.dsp-st-tbl { grid-column: auto; justify-content: flex-start; overflow-x: auto; max-width: 100%; margin: 0; }
+.dsp-ctbl { border-collapse: separate; border-spacing: 2px 1px; font-size: 11px; line-height: 1.2; }
 .dsp-ctbl th, .dsp-ctbl td { padding: 0; text-align: center; white-space: nowrap; }
-.dsp-ctbl thead th { font-weight: 700; }
-.dsp-ctbl thead th .dsp-pill { font-size: 10.5px; padding: 1px 7px; }
-.dsp-ctbl tbody th { text-align: left; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; padding-right: 6px; }
+.dsp-ctbl thead th { font-weight: 800; font-size: 9.5px; padding-bottom: 1px; }
+.dsp-ctbl thead th .dsp-pill { font-size: 9.5px; padding: 0 5px; background: none !important; box-shadow: none !important; }
+.dsp-ctbl tbody th { text-align: left; font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; padding-right: 4px; }
 .dsp-ctbl tbody th.iss { color: #15803d; } .dsp-ctbl tbody th.stk { color: #1d4ed8; }
-.dsp-cell { border: 0; cursor: pointer; font: inherit; font-weight: 800; min-width: 44px; padding: 2px 8px; border-radius: 7px; }
-.dsp-cell.iss { background: rgba(22,163,74,.12); color: #166534; }
-.dsp-cell.stk { background: rgba(37,99,235,.12); color: #1e40af; }
-.dsp-cell:hover { filter: brightness(.95); outline: 1px solid currentColor; }
-.dsp-ctbl .tot { padding-left: 6px; border-left: 2px solid rgba(148,163,184,.45); }
-.dsp-ctbl thead th.tot { font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: #334155; }
-.dsp-ctbl td.tot .dsp-cell { box-shadow: inset 0 0 0 1.5px currentColor; }
+.dsp-cell { border: 0; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; min-width: 30px; padding: 0 5px; line-height: 16px; border-radius: 5px; }
+.dsp-cell.iss { background: rgba(22,163,74,.11); color: #166534; }
+.dsp-cell.stk { background: rgba(37,99,235,.11); color: #1e40af; }
+.dsp-cell:hover { outline: 1px solid currentColor; }
+.dsp-ctbl .tot { padding-left: 4px; border-left: 1.5px solid rgba(148,163,184,.45); }
+.dsp-ctbl thead th.tot { font-size: 9px; text-transform: uppercase; letter-spacing: .03em; color: #334155; }
+.dsp-ctbl td.tot .dsp-cell { box-shadow: inset 0 0 0 1px currentColor; }
+@media (max-width: 720px) { html body .msp-kpi.msp-disp-box .dsp-row:has(.dsp-st-tbl) { grid-template-columns: 1fr auto; } .dsp-st.dsp-st-tbl { grid-column: 1 / -1; } }
 @media (prefers-color-scheme: dark) { .dsp-cell.iss { color: #86efac; } .dsp-cell.stk { color: #93c5fd; } .dsp-ctbl thead th.tot { color: #cbd5e1; } }
-
 /* v3.125.112 — Master Search: roz ka issuance chart (3 months) */
 .msp-iss-box { grid-column: 1 / -1; }
 .msp-iss-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; margin: 6px 0 4px; }

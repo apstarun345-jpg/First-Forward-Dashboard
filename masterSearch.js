@@ -2669,7 +2669,7 @@ FF.pages = FF.pages || {};
   };
   const dispDate = (k) => { try { return U.labelDateKey ? U.labelDateKey(k) : k; } catch { return k; } };
   const dispAgo = (k) => {
-    try { const d = U.fromDateKey(k), n = Math.round((new Date().setHours(0, 0, 0, 0) - d.getTime()) / 864e5); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago`; } catch { return ''; }
+    try { if (!/^\d{4}-\d{2}-\d{2}/.test(String(k || ''))) return 'sheet me date nahi'; const d = U.fromDateKey(k), n = Math.round((new Date().setHours(0, 0, 0, 0) - d.getTime()) / 864e5); return !Number.isFinite(n) ? '' : n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago`; } catch { return ''; }
   };
   function dispSpecOf(pr, isTl, ch) {
     const names = [pr.name], ids = [pr.id].filter(Boolean);
@@ -2699,7 +2699,7 @@ FF.pages = FF.pages || {};
   }
   // v3.125.70 — last 5 dispatches: date (with year) · total · class-wise pills (VC4 50 · VC5 5) in an aligned grid.
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const dispDateY = (k) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(k || '')); return m ? `${Number(m[3])} ${MON[Number(m[2]) - 1] || ''} ${m[1]}` : dispDate(k); };
+  const dispDateY = (k) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(k || '')); return m ? `${Number(m[3])} ${MON[Number(m[2]) - 1] || ''} ${m[1]}` : 'Date ?'; };
   const dispClassPairs = (clsMap) => {
     const m = new Map();
     Object.entries(clsMap || {}).forEach(([c, n]) => {
