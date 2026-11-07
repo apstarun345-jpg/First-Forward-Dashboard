@@ -3101,17 +3101,20 @@ FF.pages = FF.pages || {};
     return { isTl, spec, from: `${last}-01`, to: `${cur}-${U.pad2(U.daysInMonth(cur))}`, cur, last };
   }
   /** Data jutao (cache) — profile khulte hi peeche shuru, click par turant. */
-  function reportData(ch, pr) {
-    const key = `rep|${ch}|${pr.name}|${pr.id || ''}`;
+  function reportData(ch, pr, needStock = true) {
+    const key = `rep|${ch}|${pr.name}|${pr.id || ''}|${needStock ? 's' : 'n'}`;
     if (REPORT_CTX.cache.has(key)) return REPORT_CTX.cache.get(key);
     const r = reportSpecs(pr, ch);
     const sc = ageScopeOfPr(pr, r.isTl, ch);
+    // v3.125.117 — stock sirf jab report me chahiye; aur server ka stock data ban raha ho to 25 s se zyada intezaar nahi
+    // (pehle "Current month issuance" bhi stock ke liye atak jaati thi — button "Building…" par)
+    const stockP = (needStock && FF.stockAge) ? Promise.race([stockTagsFor(sc).catch(() => []), new Promise((res) => setTimeout(() => res(Object.assign([], { timedOut: true })), 25000))]) : Promise.resolve([]);
     const job = Promise.all([
-      FF.stockAge ? stockTagsFor(sc).catch(() => []) : Promise.resolve([]),
+      stockP,
       (FF.kpiDetail && FF.kpiDetail.rawRowsFor ? FF.kpiDetail.rawRowsFor(r.spec, { from: r.from, to: r.to }) : Promise.resolve([])).catch(() => [])
     ]).then(([stock, issue]) => ({ ...r, stock, issue, sc }));
     REPORT_CTX.cache.set(key, job);
-    job.catch(() => REPORT_CTX.cache.delete(key));
+    job.then((d) => { if (d && d.stock && d.stock.timedOut) REPORT_CTX.cache.delete(key); }, () => REPORT_CTX.cache.delete(key));   // adhura (stock ban raha tha) cache mat rakho
     setTimeout(() => REPORT_CTX.cache.delete(key), 10 * 60e3);
     return job;
   }
@@ -3128,7 +3131,9 @@ FF.pages = FF.pages || {};
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Ban raha hai…'; }
     try {
       if (FF.lazy && FF.lazy.shellNeed) await FF.lazy.shellNeed(['kpiDetail', 'stockAge']);
-      const sets = await Promise.all(chans.map((c) => reportData(c, REPORT_CTX.prs[c]).then((d) => ({ ch: c, pr: REPORT_CTX.prs[c], d }))));
+      const needStock = !parts || parts.includes('stock');
+      const sets = await Promise.all(chans.map((c) => reportData(c, REPORT_CTX.prs[c], needStock).then((d) => ({ ch: c, pr: REPORT_CTX.prs[c], d }))));
+      if (needStock && sets.some((x) => x.d.stock && x.d.stock.timedOut)) U.toast('Stock data server par abhi ban raha hai — report bina stock list ke; 2-3 min baad dobara lo', 'warn');
       const sheets = [];
       const two = sets.length > 1;
       const sfx = (ch) => (two ? (ch === 'gv' ? ' GV' : ' FF') : '');

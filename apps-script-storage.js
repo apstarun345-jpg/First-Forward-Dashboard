@@ -64,12 +64,12 @@ export class AppsScriptStore {
     }
   }
 
-  async call(action, extra = {}) {
+  async call(action, extra = {}, opts = {}) {
     let lastErr;
-    const maxAttempts = this.attempts || 3;
+    const maxAttempts = opts.attempts || this.attempts || 3;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      const timer = setTimeout(() => controller.abort(), opts.timeoutMs || this.timeoutMs);   // v3.125.117 — bade snapshot reads ko zyada samay
       try {
         const response = await this.fetch(this.url, {
           method: 'POST', redirect: 'follow', signal: controller.signal,

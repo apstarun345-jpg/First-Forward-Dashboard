@@ -3879,7 +3879,7 @@ async function ledgerAggSnapSave(d, key) {
 async function ledgerAggSnapLoad() {
   if (!sheetsStore || typeof sheetsStore.call !== 'function') return false;
   try {
-    const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: SNAP_TAB, startRow: 1, columns: ['A'] });
+    const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: SNAP_TAB, startRow: 1, columns: ['A'] }, { timeoutMs: 60e3, attempts: 3 });
     const rows = (out && out.rows) || [];
     const head = JSON.parse((rows[0] && rows[0][0]) || 'null');
     if (!head || head.kind !== 'ledgerAgg' || Date.now() - head.at > LEDGER_AGG_TTL) return false;
@@ -4299,7 +4299,7 @@ function stockSnapLoad() {
     } catch { gz = null; meta = null; }
     if ((!gz || !meta) && sheetsStore && typeof sheetsStore.call === 'function') {
       try {
-        const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: STOCK_SNAP_TAB, startRow: 1, columns: ['A'] });
+        const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: STOCK_SNAP_TAB, startRow: 1, columns: ['A'] }, { timeoutMs: 90e3, attempts: 3 });
         const rows = (out && out.rows) || [];
         meta = JSON.parse((rows[0] && rows[0][0]) || 'null');
         if (meta && meta.n) { gz = Buffer.from(rows.slice(1, 1 + meta.n).map((r) => r[0] || '').join(''), 'base64'); stockSnapLastParts = meta.n; }
