@@ -60,7 +60,7 @@ window.FF = window.FF || {};
   }
   /* 🎨 v3.125.98 — optional named styles (sheet.styleOf(rowIdx, colIdx, value) / sheet.headStyleOf(colIdx) → name).
      Ids 0-3 built-in (normal, header, date, datetime). Fill colours ARGB. */
-  const FILL = ['FFFEF3C7', 'FFDCFCE7', 'FFEFF6FF', 'FFFDF2F8', 'FFE5E7EB', 'FF1F2937', 'FF0F766E', 'FFB45309', 'FFF3F4F6', 'FF1D4ED8', 'FFECFDF5', 'FFFEF2F2', 'FFF5F3FF'];
+  const FILL = ['FFFEF3C7', 'FFDCFCE7', 'FFEFF6FF', 'FFFDF2F8', 'FFE5E7EB', 'FF1F2937', 'FF0F766E', 'FFB45309', 'FFF3F4F6', 'FF1D4ED8', 'FFECFDF5', 'FFFEF2F2', 'FFF5F3FF', 'FFF8FAFC', 'FF7C3AED', 'FFEDE9FE'];
   const FILLID = (argb) => 3 + FILL.indexOf(argb);   // 0 none, 1 gray125, 2 header indigo
   // fonts: 0 normal, 1 bold white, 2 bold, 3 bold green, 4 bold red, 5 gray, 6 bold dark
   const NAMED = {
@@ -80,8 +80,42 @@ window.FF = window.FF || {};
     hTotal:     { font: 1, fill: FILLID('FFB45309'), fmt: 0 },
     hPerf:      { font: 1, fill: FILLID('FF1D4ED8'), fmt: 0 },
     hPrev:      { font: 1, fill: FILLID('FF1F2937'), fmt: 0 },
-    label:      { font: 2, fill: FILLID('FFF5F3FF'), fmt: 0 }
+    label:      { font: 2, fill: FILLID('FFF5F3FF'), fmt: 0 },
+    zeb:        { font: 0, fill: FILLID('FFF8FAFC'), fmt: 0 },     // zebra (har doosri row)
+    zebNum:     { font: 0, fill: FILLID('FFF8FAFC'), fmt: 3 },
+    cls:        { font: 0, fill: FILLID('FFEDE9FE'), fmt: 3 },     // class columns (VC4, VC20 …)
+    hCls:       { font: 1, fill: FILLID('FF7C3AED'), fmt: 0 }
   };
+  /* 🎨 v3.125.116 — har download rangeen: jis sheet ne apne styles nahi diye unhe auto-style
+     (header colour column ke type se, TOTAL / GRAND TOTAL rows, Total column, class columns, % / growth ▲▼, zebra rows). */
+  const RX_CLS = /^(vc ?\d+|vc5\+|vc ?20\+?|vc4)$/i;
+  const RX_TOT = /^(total|grand total|kul|sum)\b|\btotal$/i;
+  const RX_PCT = /(%|growth|change|vs |perf|diff)/i;
+  const RX_PREV = /^(prev|last|pichhl)/i;
+  const RX_ID = /(\bid\b|mobile|phone|barcode|serial|pincode|\bpin\b|\bcode\b|tag ?id|vrn|chassis no|\bno\.?$|number|rank|year|^#$|^s\.? ?no)/i;
+  function autoStyle(sheet) {
+    if (!sheet || sheet.plain || typeof sheet.styleOf === 'function' || typeof sheet.headStyleOf === 'function') return sheet;
+    const H = (sheet.header || []).map((h) => String(h == null ? '' : h).trim());
+    if (!H.length) return sheet;
+    const kind = H.map((h) => (RX_ID.test(h) ? 'id' : RX_CLS.test(h) ? 'cls' : RX_TOT.test(h) ? 'tot' : RX_PCT.test(h) ? 'pct' : RX_PREV.test(h) ? 'prev' : ''));
+    const labelOf = (row) => row.slice(0, 4).map((v) => String(v == null ? '' : v)).join(' ');
+    sheet.headStyleOf = (c) => ({ cls: 'hCls', tot: 'hTotal', pct: 'hPerf', prev: 'hPrev' }[kind[c]] || '');
+    sheet.styleOf = (ri, c, v) => {
+      const row = sheet.rows[ri] || [];
+      const lab = labelOf(row);
+      if (/GRAND TOTAL/i.test(lab)) return 'rowGrand';
+      if (/(^|\s)(TOTAL|Total|SUBTOTAL|Kul)(\b|\s|·|:)/.test(lab)) return 'rowTotal';
+      const k = kind[c];
+      if (k === 'pct') { const n = typeof v === 'number' ? v : parseFloat(String(v || '').replace(/[^\d.-]/g, '')); if (/▲|up/i.test(String(v))) return 'up'; if (/▼|down/i.test(String(v))) return 'down'; if (Number.isFinite(n) && v !== '') return n > 0 ? 'up' : n < 0 ? 'down' : 'flat'; return ''; }
+      if (k === 'tot') return 'total';
+      if (k === 'cls') return 'cls';
+      if (k === 'prev') return 'prev';
+      const z = ri % 2 === 1;
+      if (k === 'id') return z ? 'zeb' : '';   // IDs / mobile / barcode par 1,234 wala comma nahi
+      return typeof v === 'number' ? (z ? 'zebNum' : 'num') : (z ? 'zeb' : '');
+    };
+    return sheet;
+  }
   const NAMED_KEYS = Object.keys(NAMED);
   const styleId = (name) => { const i = NAMED_KEYS.indexOf(name); return i < 0 ? 0 : 4 + i; };
   function sheetXml(sheet) {
@@ -124,6 +158,7 @@ window.FF = window.FF || {};
   }
   /** sheets: [{ name, header: [], rows: [[]] }] */
   function build(sheets) {
+    (sheets || []).forEach(autoStyle);
     const names = []; sheets.forEach((s, i) => { let n = safeName(s.name, i); let k = 2; while (names.includes(n)) n = `${n.slice(0, 28)} ${k++}`; names.push(n); });
     const files = [
       { name: '[Content_Types].xml', data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`) },
