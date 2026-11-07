@@ -1187,16 +1187,8 @@ window.FF = window.FF || {};
 
 
   // ---------- 🤖 Animated robot (FAB + header + hero) — state: idle / listening / thinking / speaking ----------
-  const robotSvg = (cls) => `<svg class="ff-robot ${cls || ''}" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-    <line class="rb-ant-stem" x1="32" y1="9" x2="32" y2="15" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
-    <circle class="rb-ant" cx="32" cy="7" r="3.4"/>
-    <rect class="rb-ear" x="5" y="29" width="6" height="12" rx="3"/><rect class="rb-ear" x="53" y="29" width="6" height="12" rx="3"/>
-    <rect class="rb-head" x="9" y="15" width="46" height="38" rx="14"/>
-    <rect class="rb-face" x="14" y="22" width="36" height="24" rx="10"/>
-    <g class="rb-eyes"><ellipse class="rb-eye" cx="25" cy="32" rx="3.6" ry="4.6"/><ellipse class="rb-eye" cx="39" cy="32" rx="3.6" ry="4.6"/></g>
-    <path class="rb-mouth" d="M25 40 Q32 45 39 40" fill="none" stroke-width="2.6" stroke-linecap="round"/>
-    <g class="rb-wave"><rect x="22" y="38" width="3" height="4" rx="1.5"/><rect x="27" y="36" width="3" height="8" rx="1.5"/><rect x="32" y="35" width="3" height="10" rx="1.5"/><rect x="37" y="36" width="3" height="8" rx="1.5"/></g>
-  </svg>`;
+  // 🤖 v3.125.120 — naya robot icon (image); state animation CSS se (.ask-fab[data-state] img.ff-robot)
+  const robotSvg = (cls) => `<img class="ff-robot ${cls || ''}" src="./robot.png?v=1" alt="" aria-hidden="true" draggable="false">`;
   const STATE_TXT = () => ({
     idle: T('Online · bolo ya likho', 'Online · speak or type'),
     listening: T('Sun raha hoon… boliye', 'Listening… go ahead'),
@@ -1254,6 +1246,7 @@ window.FF = window.FF || {};
         <button class="ask-ico" data-act="voice" title="🎛 Voice Studio — default voices / meri awaaz">🎛️</button>
         <button class="ask-ico${convMode ? ' on' : ''}" data-act="conv" title="${convMode ? '🎧 Hands-free ON — jawab ke baad khud sunta hai' : '🎧 Hands-free mode chalu karo (Alexa-style)'}">🎧</button>
         <button class="ask-ico" data-act="speak" title="Jawab bol kar sunao (on/off)">🔊</button>
+        <button class="ask-ico" data-act="mascot" title="🤖 Robot dost — abhi update dikhao (site par ghoom kar board par batata hai)">🤖</button>
         <button class="ask-ico" data-act="close" title="Band karo">✕</button></div>
       <div class="ask-log" aria-live="polite"></div>
       <div class="ask-chips">${(CHIP_Q[lang] || CHIP_Q.hi).map(([q, label]) => `<button data-q="${esc(q)}">${esc(label)}</button>`).join('')}</div>
@@ -1277,6 +1270,11 @@ window.FF = window.FF || {};
     wrap.querySelector('[data-act="close"]').addEventListener('click', () => { wrap.hidden = true; });
     wrap.querySelector('[data-act="lang"]').addEventListener('click', () => setLang(lang === 'en' ? 'hi' : 'en'));
     wrap.querySelector('[data-act="voice"]').addEventListener('click', () => openVoiceStudio());
+    wrap.querySelector('[data-act="mascot"]').addEventListener('click', async () => {
+      wrap.hidden = true;
+      try { if (!FF.mascot && FF.lazy && FF.lazy.inject) await FF.lazy.inject('mascot'); } catch { /* optional */ }
+      if (FF.mascot) FF.mascot.now();
+    });
     wrap.querySelector('[data-act="speak"]').addEventListener('click', (e) => {
       speakOn = !speakOn;
       e.currentTarget.textContent = speakOn ? '🔊' : '🔇';
