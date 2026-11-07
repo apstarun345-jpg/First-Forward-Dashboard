@@ -4609,7 +4609,7 @@ async function stockAgeIndex(fresh) {
     const vs = dailyTabs().filter((t) => t.label !== 'EIR').map((t) => dailySig(t.key)).join('|');
     const verKnown = vs && !vs.split('|').some((x) => !x);
     if (verKnown && String(stockAgeState.verSig || '').split('|').some((x) => !x)) stockAgeState.verSig = vs;   // index version pata hone se pehle bana tha — dobara mat banao
-    const due = ((verKnown ? (stockAgeState.verSig !== vs || Date.now() - stockAgeState.at >= DAILY_MAX_MS) : Date.now() - stockAgeState.at >= STOCK_AGE_TTL) && Date.now() >= (stockAgeState.retryAt || 0)) || (partial && Date.now() >= stockAgeState.retryAt) || stockAgeState.at < forceRefreshAt;
+    const due = ((verKnown ? (stockAgeState.verSig !== vs || Date.now() - stockAgeState.at >= DAILY_MAX_MS) : Date.now() - stockAgeState.at >= (stockAgeState.verSig ? DAILY_MAX_MS : STOCK_AGE_TTL)) && Date.now() >= (stockAgeState.retryAt || 0)) || (partial && Date.now() >= stockAgeState.retryAt) || stockAgeState.at < forceRefreshAt;
     if (due && !stockAgeState.promise) startStockAgeBuild(key).catch(() => {});
     return have;
   }
@@ -6092,7 +6092,9 @@ function dailyKeyOfUrl(url) {
     return hit ? hit.key : null;
   } catch { return null; }
 }
-const dailySig = (key) => { const v = key && dailyVer.get(key); return v ? v.sig : ''; };
+// v3.125.118 — boot par (pehla 10-min check aane se pehle) settings me saved version — warna snapshot ka index
+// "version pata nahi → 30 min TTL" se turant dobara scan hone lagta tha (7 Nov).
+const dailySig = (key) => { const v = key && dailyVer.get(key); if (v) return v.sig; const sv = key && db.settings && db.settings.dailyVer && db.settings.dailyVer[key]; return sv ? sv.sig : ''; };
 async function checkDailyVersions(reason) {
   if (dailyCheckRunning) return dailyCheckRunning;
   dailyCheckRunning = (async () => {
