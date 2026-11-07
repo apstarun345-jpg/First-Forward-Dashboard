@@ -60,7 +60,7 @@ window.FF = window.FF || {};
   }
   /* 🎨 v3.125.98 — optional named styles (sheet.styleOf(rowIdx, colIdx, value) / sheet.headStyleOf(colIdx) → name).
      Ids 0-3 built-in (normal, header, date, datetime). Fill colours ARGB. */
-  const FILL = ['FFFEF3C7', 'FFDCFCE7', 'FFEFF6FF', 'FFFDF2F8', 'FFE5E7EB', 'FF1F2937', 'FF0F766E', 'FFB45309', 'FFF3F4F6', 'FF1D4ED8', 'FFECFDF5', 'FFFEF2F2', 'FFF5F3FF', 'FFF8FAFC', 'FF7C3AED', 'FFEDE9FE'];
+  const FILL = ['FFFEF3C7', 'FFDCFCE7', 'FFEFF6FF', 'FFFDF2F8', 'FFE5E7EB', 'FF1F2937', 'FF0F766E', 'FFB45309', 'FFF3F4F6', 'FF1D4ED8', 'FFECFDF5', 'FFFEF2F2', 'FFF5F3FF', 'FFF8FAFC', 'FF7C3AED', 'FFEDE9FE', 'FFEA580C', 'FFFFEDD5', 'FFE0E7FF'];
   const FILLID = (argb) => 3 + FILL.indexOf(argb);   // 0 none, 1 gray125, 2 header indigo
   // fonts: 0 normal, 1 bold white, 2 bold, 3 bold green, 4 bold red, 5 gray, 6 bold dark
   const NAMED = {
@@ -84,7 +84,10 @@ window.FF = window.FF || {};
     zeb:        { font: 0, fill: FILLID('FFF8FAFC'), fmt: 0 },     // zebra (har doosri row)
     zebNum:     { font: 0, fill: FILLID('FFF8FAFC'), fmt: 3 },
     cls:        { font: 0, fill: FILLID('FFEDE9FE'), fmt: 3 },     // class columns (VC4, VC20 …)
-    hCls:       { font: 1, fill: FILLID('FF7C3AED'), fmt: 0 }
+    hCls:       { font: 1, fill: FILLID('FF7C3AED'), fmt: 0 },
+    hAge:       { font: 1, fill: FILLID('FFEA580C'), fmt: 0 },
+    age:        { font: 0, fill: FILLID('FFFFEDD5'), fmt: 3 },
+    section:    { font: 2, fill: FILLID('FFE0E7FF'), fmt: 0 }      // Summary ke "🟦 First Forward · Agent" jaise section rows
   };
   /* 🎨 v3.125.116 — har download rangeen: jis sheet ne apne styles nahi diye unhe auto-style
      (header colour column ke type se, TOTAL / GRAND TOTAL rows, Total column, class columns, % / growth ▲▼, zebra rows). */
@@ -92,23 +95,27 @@ window.FF = window.FF || {};
   const RX_TOT = /^(total|grand total|kul|sum)\b|\btotal$/i;
   const RX_PCT = /(%|growth|change|vs |perf|diff)/i;
   const RX_PREV = /^(prev|last|pichhl)/i;
+ const RX_AGE = /^age\b|ageing|mahin|months? ?\+|^date nahi/i;
+  const RX_CLSV = /^(class|tag class|vc type|vehicle class|cls)$/i;
   const RX_ID = /(\bid\b|mobile|phone|barcode|serial|pincode|\bpin\b|\bcode\b|tag ?id|vrn|chassis no|\bno\.?$|number|rank|year|^#$|^s\.? ?no)/i;
   function autoStyle(sheet) {
     if (!sheet || sheet.plain || typeof sheet.styleOf === 'function' || typeof sheet.headStyleOf === 'function') return sheet;
     const H = (sheet.header || []).map((h) => String(h == null ? '' : h).trim());
     if (!H.length) return sheet;
-    const kind = H.map((h) => (RX_ID.test(h) ? 'id' : RX_CLS.test(h) ? 'cls' : RX_TOT.test(h) ? 'tot' : RX_PCT.test(h) ? 'pct' : RX_PREV.test(h) ? 'prev' : ''));
+    const kind = H.map((h) => (RX_ID.test(h) ? 'id' : RX_CLSV.test(h) ? 'cls' : RX_AGE.test(h) ? 'age' : RX_CLS.test(h) ? 'cls' : RX_TOT.test(h) ? 'tot' : RX_PCT.test(h) ? 'pct' : RX_PREV.test(h) ? 'prev' : ''));
     const labelOf = (row) => row.slice(0, 4).map((v) => String(v == null ? '' : v)).join(' ');
-    sheet.headStyleOf = (c) => ({ cls: 'hCls', tot: 'hTotal', pct: 'hPerf', prev: 'hPrev' }[kind[c]] || '');
+    sheet.headStyleOf = (c) => ({ cls: 'hCls', tot: 'hTotal', pct: 'hPerf', prev: 'hPrev', age: 'hAge' }[kind[c]] || '');
     sheet.styleOf = (ri, c, v) => {
       const row = sheet.rows[ri] || [];
       const lab = labelOf(row);
       if (/GRAND TOTAL/i.test(lab)) return 'rowGrand';
       if (/(^|\s)(TOTAL|Total|SUBTOTAL|Kul)(\b|\s|·|:)/.test(lab)) return 'rowTotal';
+      if (/^[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/u.test(String(row[0] || '')) && row.filter((x) => x !== '' && x != null).length <= 2) return 'section';
       const k = kind[c];
       if (k === 'pct') { const n = typeof v === 'number' ? v : parseFloat(String(v || '').replace(/[^\d.-]/g, '')); if (/▲|up/i.test(String(v))) return 'up'; if (/▼|down/i.test(String(v))) return 'down'; if (Number.isFinite(n) && v !== '') return n > 0 ? 'up' : n < 0 ? 'down' : 'flat'; return ''; }
       if (k === 'tot') return 'total';
       if (k === 'cls') return 'cls';
+      if (k === 'age') return 'age';
       if (k === 'prev') return 'prev';
       const z = ri % 2 === 1;
       if (k === 'id') return z ? 'zeb' : '';   // IDs / mobile / barcode par 1,234 wala comma nahi

@@ -3104,6 +3104,8 @@ FF.pages = FF.pages || {};
   function reportData(ch, pr, needStock = true) {
     const key = `rep|${ch}|${pr.name}|${pr.id || ''}|${needStock ? 's' : 'n'}`;
     if (REPORT_CTX.cache.has(key)) return REPORT_CTX.cache.get(key);
+    // v3.125.119 — profile khulte hi pehle se bani (stock wali) report issuance-only download me bhi kaam aaye → turant
+    if (!needStock) { const full = REPORT_CTX.cache.get(`rep|${ch}|${pr.name}|${pr.id || ''}|s`); if (full) return full; }
     const r = reportSpecs(pr, ch);
     const sc = ageScopeOfPr(pr, r.isTl, ch);
     // v3.125.117 — stock sirf jab report me chahiye; aur server ka stock data ban raha ho to 25 s se zyada intezaar nahi
