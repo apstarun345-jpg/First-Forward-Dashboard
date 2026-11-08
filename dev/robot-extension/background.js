@@ -1,0 +1,45 @@
+// Gems Robot — relay: dashboard tab (brain) → jo tab abhi saamne hai (robot.js).
+const DASH = 'https://first-forward-dashboard.onrender.com/';
+const DAY = 24 * 3600e3;
+const isDash = (u) => String(u || '').startsWith(DASH);
+const ensureAlarm = () => chrome.alarms.create('pull', { periodInMinutes: 0.5 });
+chrome.runtime.onInstalled.addListener(ensureAlarm);
+chrome.runtime.onStartup.addListener(ensureAlarm);
+async function activeTab() { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return t; }
+async function dashTab() { const ts = await chrome.tabs.query({ url: `${DASH}*` }); return ts[0]; }
+async function getHist() { const { hist } = await chrome.storage.local.get('hist'); return (Array.isArray(hist) ? hist : []).filter((h) => Date.now() - h.at < DAY); }
+async function addHist(it) {
+  if (!it || it.fun) return;
+  const sig = `${it.key}|${it.head}|${it.big || ''}`;
+  const a = (await getHist()).filter((h) => h.sig !== sig);
+  a.unshift({ sig, at: Date.now(), icon: it.icon, title: it.title, head: it.head, big: it.big || '', q: it.q || '', mood: it.mood });
+  await chrome.storage.local.set({ hist: a.slice(0, 60) });
+}
+async function toFront(msg) {
+  const t = await activeTab();
+  if (t && t.id != null && !isDash(t.url)) chrome.tabs.sendMessage(t.id, msg).catch(() => {});
+}
+// har 30 sec: dashboard peeche ho to usse agli khabar maango
+chrome.alarms.onAlarm.addListener(async (a) => {
+  if (a.name !== 'pull') return;
+  const t = await activeTab(); if (!t || isDash(t.url)) return;
+  const d = await dashTab(); if (d) chrome.tabs.sendMessage(d.id, { type: 'pull' }).catch(() => {});
+  else toFront({ type: 'nodash' });
+});
+chrome.runtime.onMessage.addListener((m, sender, reply) => {
+  if (!m || !m.type) return;
+  if (m.type === 'show') { addHist(m.item).then(() => toFront({ type: 'show', item: m.item })); }
+  else if (m.type === 'open') {
+    (async () => {
+      const d = await dashTab();
+      if (d) { await chrome.tabs.update(d.id, { active: true }); await chrome.windows.update(d.windowId, { focused: true }); if (m.q) chrome.tabs.sendMessage(d.id, { type: 'open', q: m.q }).catch(() => {}); }
+      else chrome.tabs.create({ url: DASH + (m.q && m.q[0] === '#' ? m.q : '') });
+    })();
+  } else if (m.type === 'hist') { getHist().then(reply); return true; }
+  else if (m.type === 'status') { dashTab().then((d) => reply({ dash: !!d })); return true; }
+});
+// icon click → dashboard kholo
+chrome.action.onClicked.addListener(async () => {
+  const d = await dashTab();
+  if (d) { chrome.tabs.update(d.id, { active: true }); chrome.windows.update(d.windowId, { focused: true }); } else chrome.tabs.create({ url: DASH });
+});

@@ -742,6 +742,7 @@
     if (it.cls) el.classList.add(it.cls);
     board.classList.add('in');
     if (!it.fun) histAdd(it); // masti/jokes history me nahi
+    toExt(it);
     await wait(350);
     let reason = '';
     const ended = new Promise((res) => { skip = (why) => { reason = why || 'skip'; res(); }; });
@@ -928,6 +929,29 @@
     timerWin = tw();
     timer = timerWin.setTimeout(tick, ms == null ? gapMs() : ms);
   }
+  // 🧩 Chrome extension "Gems Robot" laga ho → baaki saare tabs par sirf robot (bina window); ye tab dimaag
+  const extOn = () => document.documentElement.dataset.ffRobotExt === '1';
+  function toExt(it) {
+    if (!extOn() || !it) return;
+    const slim = { key: it.key, mood: it.mood, icon: it.icon, title: it.title, head: it.head, view: it.view, big: it.big, prog: it.prog, foot: it.foot, q: it.q, fun: !!it.fun, stay: it.stay,
+      rows: (it.rows || []).slice(0, 7).map((r) => ({ name: r.name, sub: r.sub, val: r.val, w: r.w, tone: r.tone })) };
+    try { window.postMessage({ source: 'ff-robot-page', msg: { type: 'show', item: slim } }, location.origin); } catch { /* ignore */ }
+  }
+  let extTurn = 0;
+  window.addEventListener('message', (e) => {
+    if (e.source !== window || !e.data || e.data.source !== 'ff-robot-ext' || !e.data.msg) return;
+    const m = e.data.msg;
+    if (m.type === 'open') { runQ(m.q || ''); return; }
+    if (m.type === 'pull') {
+      if (!cfg.on || !allowed() || cfg.snoozeDay === today() || pipWin) return;
+      extTurn += 1;
+      const it = nextItem(false) || (cfg.fun !== false && extTurn % 2 ? joke() : null);
+      if (!it) return;
+      if (!it.fun) { histAdd(it); dot(true); }
+      toExt(it);
+      if (cfg.sound) say(it.say);
+    }
+  });
   let lastNote = 0;
   async function notifyHidden() {
     try {
@@ -948,7 +972,7 @@
   // 📌 site par pehla click → robot apne aap pop-out window me (browser click ke bina window kholne nahi deta)
   function armAutoPip() {
     const go = () => {
-      if (!cfg.on || !allowed() || cfg.autoPip === false || pipWin || pipClosedByUser || !pipOk()) return;
+      if (!cfg.on || !allowed() || cfg.autoPip === false || pipWin || pipClosedByUser || !pipOk() || extOn()) return; // extension hai to window ki zarurat nahi
       popOut();
     };
     const once = (e) => {
@@ -968,6 +992,7 @@
     applyOn();
     if (busy || mode === 'hist') return schedule(4e3);
     // 🔔 site ka tab peeche (dusra tab / WhatsApp) aur pop-out nahi → system notification se update
+    if (!force && document.hidden && !pipWin && extOn()) return schedule(30e3); // extension har 30 sec "pull" karta hai
     if (!force && document.hidden && !pipWin && cfg.on && allowed() && cfg.notify !== false && cfg.snoozeDay !== today()) { await notifyHidden(); return schedule(60e3); }
     if (!force && blocked()) return schedule(15e3);
     if (!FF.smartQ && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('smartQ'); } catch { /* optional */ } }
