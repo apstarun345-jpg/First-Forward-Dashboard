@@ -4981,21 +4981,48 @@ async function robotEirRows() {
     const gvTlName = String(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').trim().toLowerCase();
     const gv = master ? isGvPersonalRow(master) : String(serverCell(row, 4) || '').trim().toLowerCase() === gvTlName;
     // GV: naam AX → warna L → warna GV ID (AW); naam na ho tab bhi total me gino
-    const name = (gv ? (serverCell(row, 5) || serverCell(row, 3) || (serverCell(row, 7) ? `GV ${serverCell(row, 7)}` : '')) : (serverCell(row, 3) || serverCell(row, 5))).trim() || (gv ? 'GV (naam nahi)' : 'FF (naam nahi)');
+    let name = (gv ? serverCell(row, 5) : (serverCell(row, 3) || serverCell(row, 5))).trim();
+    const pseudo = !name || (gv && /apnapayment/i.test(name)); // EIR me GV agent ka naam nahi → sirf total me
+    if (!name) name = gv ? 'GV' : 'FF';
     if (gv && !robotBrain.gvSample) robotBrain.gvSample = JSON.stringify((row.c || []).map((x) => (x ? x.v : null)));
     const b = classBucket(serverCell(row, 1));
-    rows.push({ date, ch: gv ? 'gv' : 'ff', name, tl: String(serverCell(row, gv ? 6 : 4) || '').trim(), cls: b === 'VC4' ? 'vc4' : b === 'VC20' ? 'vc20' : 'vc5', n: serverNumber(serverCell(row, 8)) || 0 });
+    rows.push({ date, ch: gv ? 'gv' : 'ff', name, tl: String(serverCell(row, gv ? 6 : 4) || '').trim(), cls: b === 'VC4' ? 'vc4' : b === 'VC20' ? 'vc20' : 'vc5', n: serverNumber(serverCell(row, 8)) || 0, pseudo });
   }
+  // GV agent-wise (naam + TL) GV Master tab se — sirf agent/TL insights ke liye (totals EIR se)
+  try { rows.push(...(await robotGvMasterRows(start, today))); } catch (err) { console.warn('🤖 robot GV Master:', err.message); }
   const gvN = rows.filter((r) => r.ch === 'gv').length;
   if (!gvN) { const ms = new Map(); for (const row of (table.rows || []).slice(0, 3000)) { const m = String(serverCell(row, 2) == null ? '' : serverCell(row, 2)); ms.set(m, (ms.get(m) || 0) + 1); } console.log(`🤖 robot: GV rows 0 — master values: ${[...ms.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${JSON.stringify(k)}×${v}`).join(', ')} (gvMasterId ${eirGvMasterId()})`); }
   robotBrain.gvRows = gvN;
   return rows;
 }
+async function robotGvMasterRows(start, today) {
+  const m = (db.settings.gv && db.settings.gv.master) || {};
+  const col = { date: m.date || 'P', cls: m.cch || m.vClass || 'G', tag: m.tagId || 'I', agent: m.agentName || 'B', tl: m.tlName || 'D' };
+  const sheetId = String(db.settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  if (!sheetId) return [];
+  const run = async (where) => {
+    const tq = `select ${col.date}, ${col.cls}, ${col.agent}, ${col.tl}, count(${col.tag}) where ${col.tag} is not null${where} group by ${col.date}, ${col.cls}, ${col.agent}, ${col.tl}`;
+    const out = await fetchPersonalCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: m.tab || 'GV Master', tq })), { timeoutMs: 120000 });
+    if (out.status < 200 || out.status >= 300) throw new Error(`GV Master ${out.status}`);
+    return parseGvizServer(out.body).rows || [];
+  };
+  let raw = [];
+  try { raw = await run(` and ${col.date} >= date '${start}' and ${col.date} <= date '${today}'`); } catch { raw = []; }
+  if (!raw.length) raw = await run(''); // date text ho to filter JS me
+  const out = [];
+  for (const row of raw) {
+    const date = serverDate(serverCell(row, 0)); if (!date || date < start || date > today) continue;
+    const name = String(serverCell(row, 2) || '').trim(); if (!name) continue;
+    const b = classBucket(serverCell(row, 1));
+    out.push({ date, ch: 'gv', name, tl: String(serverCell(row, 3) || '').trim(), cls: b === 'VC4' ? 'vc4' : b === 'VC20' ? 'vc20' : 'vc5', n: serverNumber(serverCell(row, 4)) || 0, agentOnly: true });
+  }
+  return out;
+}
 function robotInsights(rows) {
   const items = [];
   if (!rows.length) return items;
   const today = dateKeyNow();
-  const dates = [...new Set(rows.map((r) => r.date))].filter((d) => d <= today).sort();
+  const dates = [...new Set(rows.filter((r) => !r.agentOnly).map((r) => r.date))].filter((d) => d <= today).sort();
   const last = dates[dates.length - 1], cur = last.slice(0, 7), lastDay = Number(last.slice(8, 10));
   const [cy, cm] = cur.split('-').map(Number);
   const prev = `${cm === 1 ? cy - 1 : cy}-${pad2(cm === 1 ? 12 : cm - 1)}`;
@@ -5004,21 +5031,28 @@ function robotInsights(rows) {
   const tot = { ff: { cur: 0, vc4: 0, vc20: 0, vc5: 0 }, gv: { cur: 0, vc4: 0, vc20: 0, vc5: 0 } };
   let prevSame = 0, prevFull = 0;
   for (const r of rows) {
+    const ym = r.date.slice(0, 7), dd = Number(r.date.slice(8, 10));
+    // (1) totals — EIR (pseudo GV bhi), GV Master wali "agentOnly" rows nahi (double na gine)
+    if (!r.agentOnly) {
+      if (ym === cur) {
+        tot[r.ch].cur += r.n; tot[r.ch][r.cls] += r.n;
+        site.set(r.date, (site.get(r.date) || 0) + r.n);
+        const sc = siteCls.get(r.date) || { vc4: 0, vc20: 0, vc5: 0, ff: 0, gv: 0 }; sc[r.cls] += r.n; sc[r.ch] += r.n; siteCls.set(r.date, sc);
+      } else if (ym === prev) {
+        prevFull += r.n; if (dd <= lastDay) prevSame += r.n;
+        site.set(r.date, (site.get(r.date) || 0) + r.n); // pichle mahine ke din (record ke liye)
+      }
+    }
+    // (2) agent / TL — naam wali rows (GV ke naam GV Master se); GV ki aaj ki live rows (last ke baad) nahi
+    if (r.pseudo || r.date > last) continue;
     const k = `${r.ch}|${r.name.toUpperCase()}`;
     let a = ag.get(k); if (!a) { a = { ch: r.ch, name: r.name, tl: r.tl, cur: 0, vc4: 0, vc20: 0, vc5: 0, prevSame: 0, prev: 0, days: new Map() }; ag.set(k, a); }
     if (r.tl && !a.tl) a.tl = r.tl;
     a.days.set(r.date, (a.days.get(r.date) || 0) + r.n);
-    const ym = r.date.slice(0, 7), dd = Number(r.date.slice(8, 10));
-    if (ym === cur) {
-      a.cur += r.n; a[r.cls] += r.n; tot[r.ch].cur += r.n; tot[r.ch][r.cls] += r.n;
-      site.set(r.date, (site.get(r.date) || 0) + r.n);
-      const sc = siteCls.get(r.date) || { vc4: 0, vc20: 0, vc5: 0, ff: 0, gv: 0 }; sc[r.cls] += r.n; sc[r.ch] += r.n; siteCls.set(r.date, sc);
-      if (r.tl) { const tk = `${r.ch}|${r.tl.toUpperCase()}`; const t = tls.get(tk) || { ch: r.ch, name: r.tl, cur: 0, prevSame: 0, agents: new Set() }; t.cur += r.n; t.agents.add(a.name); tls.set(tk, t); }
-    } else if (ym === prev) {
-      a.prev += r.n; prevFull += r.n;
-      if (dd <= lastDay) { a.prevSame += r.n; prevSame += r.n; if (r.tl) { const tk = `${r.ch}|${r.tl.toUpperCase()}`; const t = tls.get(tk) || { ch: r.ch, name: r.tl, cur: 0, prevSame: 0, agents: new Set() }; t.prevSame += r.n; tls.set(tk, t); } }
-    } else if (r.date.slice(0, 7) < prev) { /* window ke bahar */ }
-    if (ym !== cur) site.set(r.date, (site.get(r.date) || 0) + (ym === prev ? r.n : 0)); // pichle mahine ke din bhi (record ke liye)
+    const tk = r.tl ? `${r.ch}|${r.tl.toUpperCase()}` : '';
+    const T0 = () => { let t = tls.get(tk); if (!t) { t = { ch: r.ch, name: r.tl, cur: 0, prevSame: 0, agents: new Set() }; tls.set(tk, t); } return t; };
+    if (ym === cur) { a.cur += r.n; a[r.cls] += r.n; if (tk) { const t = T0(); t.cur += r.n; t.agents.add(a.name); } }
+    else if (ym === prev) { a.prev += r.n; if (dd <= lastDay) { a.prevSame += r.n; if (tk) T0().prevSame += r.n; } }
   }
   const A = [...ag.values()];
   const tlOf = (a) => (a.tl && a.tl.toUpperCase() !== a.name.toUpperCase() ? ` (TL ${a.tl})` : '');
