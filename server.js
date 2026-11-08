@@ -4975,11 +4975,17 @@ async function robotEirRows() {
   const rows = [];
   for (const row of table.rows || []) {
     const date = serverDate(serverCell(row, 0)); if (!date) continue;
-    const gv = isGvPersonalRow(serverCell(row, 2));
-    const name = String(serverCell(row, gv ? 5 : 3) || '').trim(); if (!name) continue;
+    // GV = master ID match; master khaali ho to purana rule: FF TL column = "ApnaPayment Pvt. Ltd." (client channelOf jaisa)
+    const master = String(serverCell(row, 2) == null ? '' : serverCell(row, 2)).trim().replace(/\.0+$/, '');
+    const gvTlName = String(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').trim().toLowerCase();
+    const gv = master ? isGvPersonalRow(master) : String(serverCell(row, 4) || '').trim().toLowerCase() === gvTlName;
+    const name = String(serverCell(row, gv ? 5 : 3) || '').trim() || String(serverCell(row, gv ? 3 : 5) || '').trim(); if (!name) continue;
     const b = classBucket(serverCell(row, 1));
     rows.push({ date, ch: gv ? 'gv' : 'ff', name, tl: String(serverCell(row, gv ? 6 : 4) || '').trim(), cls: b === 'VC4' ? 'vc4' : b === 'VC20' ? 'vc20' : 'vc5', n: serverNumber(serverCell(row, 7)) || 0 });
   }
+  const gvN = rows.filter((r) => r.ch === 'gv').length;
+  if (!gvN) { const ms = new Map(); for (const row of (table.rows || []).slice(0, 3000)) { const m = String(serverCell(row, 2) == null ? '' : serverCell(row, 2)); ms.set(m, (ms.get(m) || 0) + 1); } console.log(`🤖 robot: GV rows 0 — master values: ${[...ms.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${JSON.stringify(k)}×${v}`).join(', ')} (gvMasterId ${eirGvMasterId()})`); }
+  robotBrain.gvRows = gvN;
   return rows;
 }
 function robotInsights(rows) {
@@ -5108,7 +5114,7 @@ async function robotBrainRun(reason) {
     let added = 0;
     for (const it of items) if (!sent[it.key] && !robotBrain.queue.some((q) => q.key === it.key)) { robotBrain.queue.push(it); added++; }
     if (robotBrain.queue.length > 60) robotBrain.queue.splice(0, robotBrain.queue.length - 60);
-    console.log(`🤖 robot brain (${reason}): ${items.length} updates bane, ${added} naye queue me, queue ${robotBrain.queue.length}, admin devices ${robotAdminSubs().length}${robotBrain.lastErr ? `, err: ${robotBrain.lastErr}` : ''}`);
+    console.log(`🤖 robot brain (${reason}): ${robotBrain.rows || 0} rows (GV ${robotBrain.gvRows || 0}), ${items.length} updates bane, ${added} naye queue me, queue ${robotBrain.queue.length}, admin devices ${robotAdminSubs().length}${robotBrain.lastErr ? `, err: ${robotBrain.lastErr}` : ''}`);
   } finally { robotBrain.busy = false; }
 }
 function robotAdminSubs() {
