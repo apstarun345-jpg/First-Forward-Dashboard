@@ -7803,3 +7803,6 @@ html.mc-pip, html.mc-pip body { margin: 0; height: 100%; overflow: hidden; backg
 html.mc-pip .mc { z-index: 1; }
 html.mc-pip .mc-tip { position: fixed; left: 10px; top: 8px; right: 10px; font: 600 11px system-ui, sans-serif; color: #6d28d9; opacity: .8; }
 .mc-ctl .mc-pill.pip { background: linear-gradient(110deg, #0ea5e9, #6366f1); }
+.mc.holding[data-side="pip"] .mc-arm.r { animation: mcHoldUp 2.4s ease-in-out infinite !important; }
+@keyframes mcHoldUp { 0%, 100% { transform: rotate(-160deg); } 50% { transform: rotate(-170deg); } }
+html.mc-pip .mc-board { max-height: calc(100vh - 130px); overflow: auto; }

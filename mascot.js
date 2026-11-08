@@ -23,7 +23,9 @@
   const reduced = () => false;
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   const rnd = (a, b) => a + Math.random() * (b - a);
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // pop-out window khuli ho to uske timer (site ka tab background me ho to Chrome uske timer dheeme kar deta hai)
+  const tw = () => { try { return (pipWin && !pipWin.closed) ? pipWin : window; } catch { return window; } };
+  const wait = (ms) => new Promise((r) => tw().setTimeout(r, ms));
 
   // ---------------------------------------------------------------- insights (data → board)
   const sq = (id, n) => { try { return FF.smartQ && FF.smartQ.answer ? FF.smartQ.answer(id, n) : null; } catch { return null; } };
@@ -136,6 +138,125 @@
       };
     }
   ];
+
+  // ---------------------------------------------------------------- 📊 v3.125.125: issuance + stock + dispatch + KYC — sab kuch
+  // ek generic builder: smartQ ka koi bhi sawaal → 5 naam ka board + Hindi awaaz
+  const chTag = (x) => (x.ch ? String(x.ch).toUpperCase() : '');
+  function mk(id, o) {
+    return function () {
+      const a = sq(id, 5); if (!a || !a.rows.length) return null;
+      const r = a.rows[0];
+      return {
+        key: o.key, mood: o.mood || 'happy', icon: o.icon, title: pick(o.titles), head: o.head(r, a), view: o.bars ? 'bars' : 'list',
+        rows: a.rows.map((x) => ({ name: x.name, sub: o.sub(x), val: o.val(x), w: o.bars ? Math.max(0, Number(o.w ? o.w(x) : 0) || 0) : 0, tone: o.tone || 'up' })),
+        say: o.say(r, a), q: id
+      };
+    };
+  }
+  const tlS = (x) => `${chTag(x)}${x.tl ? ' · TL ' + x.tl : ''}`;
+  BUILDERS.push(
+    mk('top|all', { key: 'top', icon: '🏆', titles: ['Issuance ke badshah', 'Top 5 agents'], bars: true, w: (x) => x.cur,
+      head: (r) => `${r.name} sabse aage — ${fmt(r.cur)} tags`, sub: (x) => `${tlS(x)} · last ${fmt(x.last)}`, val: (x) => fmt(x.cur),
+      say: (r, a) => `इस महीने सबसे ज़्यादा इशुअंस ${nm(r.name)} की है, ${fmt(r.cur)} टैग्स। दूसरे नंबर पर ${nm((a.rows[1] || {}).name)}।` }),
+    mk('vc4|all', { key: 'vc4', icon: '🚗', titles: ['VC4 ke king', 'Car wale champion'], bars: true, w: (x) => x.vc4,
+      head: (r) => `${r.name} — ${fmt(r.vc4)} VC4`, sub: tlS, val: (x) => fmt(x.vc4),
+      say: (r) => `वी सी 4 में सबसे आगे ${nm(r.name)}, ${fmt(r.vc4)} टैग्स।` }),
+    mk('vc20|all', { key: 'vc20', icon: '🚐', titles: ['VC20 champions', 'VC20 me sabse aage'], bars: true, w: (x) => x.vc20,
+      head: (r) => `${r.name} — ${fmt(r.vc20)} VC20`, sub: tlS, val: (x) => fmt(x.vc20),
+      say: (r) => `वी सी 20 में ${nm(r.name)} सबसे आगे, ${fmt(r.vc20)} टैग्स।` }),
+    mk('vc5|all', { key: 'vc5', icon: '🚛', titles: ['VC5+ commercial stars', 'Bade vehicle wale'], bars: true, w: (x) => x.vc5,
+      head: (r) => `${r.name} — ${fmt(r.vc5)} VC5+`, sub: tlS, val: (x) => fmt(x.vc5),
+      say: (r) => `कमर्शियल वी सी 5 प्लस में ${nm(r.name)} सबसे आगे, ${fmt(r.vc5)} टैग्स।` }),
+    mk('stockhigh|all', { key: 'stockhigh', mood: 'info', icon: '📦', titles: ['Sabse zyada stock', 'Godaam full'], bars: true, w: (x) => x.stock, tone: 'chip',
+      head: (r) => `${r.name} ke paas ${fmt(r.stock)} tag stock`, sub: (x) => `${tlS(x)} · is month ${fmt(x.cur)}`, val: (x) => fmt(x.stock),
+      say: (r) => `सबसे ज़्यादा स्टॉक ${nm(r.name)} के पास है, ${fmt(r.stock)} टैग्स।` }),
+    mk('deadstock|all', { key: 'deadstock', mood: 'sleepy', icon: '🪦', titles: ['Stock pada hai, issuance zero', 'Soya hua stock'], tone: 'warn',
+      head: (r) => `${r.name}: ${fmt(r.stock)} stock, is month 0`, sub: (x) => `${tlS(x)} · last ${fmt(x.last)}`, val: (x) => fmt(x.stock),
+      say: (r) => `${nm(r.name)} के पास ${fmt(r.stock)} टैग्स का स्टॉक पड़ा है, पर इस महीने एक भी इशू नहीं हुआ।` }),
+    mk('dispatch|all', { key: 'dispatchneed', mood: 'alert', icon: '🚚', titles: ['Dispatch chahiye', 'Inko tag bhejo'], tone: 'warn',
+      head: (r) => `${r.name} ko ~${fmt(r.need)} tag chahiye`, sub: (x) => `stock ${fmt(x.stock)} · is month ${fmt(x.cur)}`, val: (x) => fmt(x.need),
+      say: (r) => `${nm(r.name)} को लगभग ${fmt(r.need)} टैग्स भेजने चाहिए।` }),
+    mk('nostock|all', { key: 'nostock', mood: 'alert', icon: '🚫', titles: ['Issue kar rahe, stock zero!', 'Stock khatam'], tone: 'down',
+      head: (r) => `${r.name} ne ${fmt(r.cur)} kiye, stock 0`, sub: tlS, val: (x) => fmt(x.cur),
+      say: (r) => `${nm(r.name)} ने ${fmt(r.cur)} टैग्स इशू किए पर स्टॉक ज़ीरो है। जल्दी डिस्पैच करो।` }),
+    mk('runrate|all', { key: 'runrate', icon: '⚡', titles: ['Sabse tez speed', 'Run-rate ke cheetah'], bars: true, w: (x) => x.rate,
+      head: (r) => `${r.name} — roz ~${fmt(r.rate)} tags`, sub: tlS, val: (x) => `${fmt(x.rate)}/din`,
+      say: (r) => `सबसे तेज़ रन रेट ${nm(r.name)} का है, रोज़ लगभग ${fmt(r.rate)} टैग्स।` }),
+    mk('toptl|all', { key: 'toptl', icon: '🥇', titles: ['Top TL teams', 'TL leaderboard'], bars: true, w: (x) => x.cur,
+      head: (r) => `TL ${r.name} — ${fmt(r.cur)} tags`, sub: (x) => `${fmt(x.agents)} agents · last ${fmt(x.last)}`, val: (x) => fmt(x.cur),
+      say: (r) => `टी एल में सबसे आगे ${nm(r.name)} की टीम, ${fmt(r.cur)} टैग्स।` }),
+    mk('stocktl|all', { key: 'stocktl', mood: 'info', icon: '🏬', titles: ['TL ka stock', 'Kis TL ke paas kitna maal'], bars: true, w: (x) => x.stock, tone: 'chip',
+      head: (r) => `TL ${r.name} ki team ke paas ${fmt(r.stock)} stock`, sub: (x) => `${fmt(x.agents)} agents · is month ${fmt(x.cur)}`, val: (x) => fmt(x.stock),
+      say: (r) => `सबसे ज़्यादा स्टॉक टी एल ${nm(r.name)} की टीम के पास, ${fmt(r.stock)} टैग्स।` }),
+    mk('dispatchtl|all', { key: 'dispatchtl', mood: 'alert', icon: '📮', titles: ['TL ko dispatch', 'Team ko maal chahiye'], tone: 'warn',
+      head: (r) => `TL ${r.name} ki team ko ~${fmt(r.need)} tag`, sub: (x) => `stock ${fmt(x.stock)} · is month ${fmt(x.cur)}`, val: (x) => fmt(x.need),
+      say: (r) => `टी एल ${nm(r.name)} की टीम को लगभग ${fmt(r.need)} टैग्स चाहिए।` }),
+    mk('inactagentstl|all', { key: 'inacttl', mood: 'sleepy', icon: '💤', titles: ['TL ke soye agents', 'Team me neend'], tone: 'down',
+      head: (r) => `TL ${r.name}: ${fmt(r.inact)} agents inactive`, sub: (x) => `${fmt(x.active)} active / ${fmt(x.agents)}`, val: (x) => fmt(x.inact),
+      say: (r) => `टी एल ${nm(r.name)} के ${fmt(r.inact)} एजेंट्स इस महीने इनएक्टिव हैं।` }),
+    mk('vc4tl|all', { key: 'vc4tl', icon: '🚙', titles: ['VC4 TL champions'], bars: true, w: (x) => x.vc4,
+      head: (r) => `TL ${r.name} — ${fmt(r.vc4)} VC4`, sub: (x) => `${fmt(x.agents)} agents`, val: (x) => fmt(x.vc4),
+      say: (r) => `वी सी 4 में टी एल ${nm(r.name)} की टीम सबसे आगे, ${fmt(r.vc4)}।` }),
+    function lowIssue() { // stock hai par issuance bahut kam
+      const a = sq('top|all', 100000); if (!a || !a.rows.length) return null;
+      const rows = a.rows.filter((x) => x.stock >= 20 && x.cur > 0).sort((x, y) => x.cur / x.stock - y.cur / y.stock).slice(0, 5);
+      if (!rows.length) return null;
+      const r = rows[0];
+      return { key: 'lowissue', mood: 'sad', icon: '🐢', title: pick(['Low issuance', 'Stock hai, speed kam']), head: `${r.name}: stock ${fmt(r.stock)}, issue sirf ${fmt(r.cur)}`, view: 'list',
+        rows: rows.map((x) => ({ name: x.name, sub: `stock ${fmt(x.stock)} · ${tlS(x)}`, val: fmt(x.cur), tone: 'down' })),
+        say: `${nm(r.name)} के पास ${fmt(r.stock)} टैग्स का स्टॉक है, पर इस महीने सिर्फ़ ${fmt(r.cur)} इशू हुए।`, q: 'top|all' };
+    },
+    function siteTotal() { // poori site ka hisaab
+      const t = sq('summary|all'), act = sq('top|all', 100000), st = sq('stockhigh|all', 100000), ina = sq('inactive|all', 100000), dn = sq('dispatch|all', 100000);
+      if (!t || !t.rows.length) return null;
+      const s0 = t.rows[0], stock = st ? st.rows.reduce((m, x) => m + (Number(x.stock) || 0), 0) : 0, need = dn ? dn.rows.reduce((m, x) => m + (Number(x.need) || 0), 0) : 0;
+      const nAct = act ? act.rows.length : 0, nIna = ina ? ina.rows.length : 0;
+      return { key: 'sitetotal', mood: 'excited', icon: '🧾', title: 'Poori site ka hisaab', head: `is month ab tak issuance · last month ${fmt(s0.last)}`, view: 'big', big: fmt(s0.cur),
+        rows: [{ name: '📦 Stock', val: fmt(stock) }, { name: '🟢 Active', val: fmt(nAct) }, { name: '😴 Inactive', val: fmt(nIna) }, { name: '🚚 Dispatch need', val: fmt(need) }, { name: 'VC4', val: fmt(s0.vc4) }, { name: 'VC20', val: fmt(s0.vc20) }, { name: 'VC5+', val: fmt(s0.vc5) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+        say: `पूरी साइट का हिसाब: इस महीने अभी तक ${fmt(s0.cur)} टैग्स। स्टॉक ${fmt(stock)}। ${fmt(nAct)} एजेंट्स एक्टिव, ${fmt(nIna)} इनएक्टिव।`, q: 'summary|all' };
+    },
+    function kycLow() { // issuance zyada, KYC ratio kam
+      if (!kycCache.rows || !kycCache.rows.length) return null;
+      const rows = kycCache.rows.slice(0, 5), r = rows[0];
+      return { key: 'kyclow', mood: 'alert', icon: '🪪', title: pick(['Issuance zyada, KYC kam', 'KYC par dhyaan do']), head: `${r.name}: ${fmt(r.n)} tags, full KYC sirf ${r.pct}%`, view: 'list',
+        rows: rows.map((x) => ({ name: x.name, sub: `${x.ch.toUpperCase()} · ${fmt(x.full)}/${fmt(x.n)} full KYC`, val: `${x.pct}%`, tone: 'down' })),
+        say: `${nm(r.name)} ने इस महीने ${fmt(r.n)} टैग्स किए, पर फ़ुल के वाई सी सिर्फ़ ${r.pct} प्रतिशत है।`, q: '' };
+    },
+    function lastDispatch() { // 🚚 tag dispatch (ledger) — aakhri din
+      const d = dispCache.data; if (!d || !d.latest) return null;
+      const dt = new Date(`${d.latest}T00:00:00`), lbl = dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+      const cls = Object.entries(d.latestCls || {}).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([c, n]) => ({ name: c, val: fmt(n), sub: '', tone: 'chip' }));
+      return { key: `dispatch:${d.latest}`, mood: 'excited', icon: '🚚', title: `Tag dispatch · ${lbl}`, head: `${d.agentCount} agents ko gaye · FF ${fmt(d.latestFf)} · GV ${fmt(d.latestGv)}`, view: 'big', big: fmt(d.latestTotal),
+        rows: cls.concat((d.agents || []).slice(0, 5).map((x) => ({ name: `${x.name}`, val: fmt(x.qty), sub: '', tone: 'up' }))),
+        foot: (d.days || []).slice(1, 4).map((x) => `${new Date(`${x.date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}: ${fmt(x.total)}`).join(' · '),
+        say: `${lbl} को ${fmt(d.latestTotal)} टैग्स डिस्पैच हुए, ${d.agentCount} एजेंट्स को। सबसे ज़्यादा ${nm(((d.agents || [])[0] || {}).name)} को।`, q: '' };
+    }
+  );
+  // KYC + dispatch: async data, cache me (KYC 30 min, dispatch 10 min)
+  const kycCache = { at: 0, rows: [] }, dispCache = { at: 0, data: null };
+  async function refreshExtras() {
+    if (!allowed()) return;
+    if (Date.now() - dispCache.at > 10 * 60e3) {
+      try { const d = await api('/api/robot/dispatch'); if (d && !d.pending) { dispCache.data = d; dispCache.at = Date.now(); } } catch { /* ignore */ }
+    }
+    if (Date.now() - kycCache.at > 30 * 60e3 && FF.model && FF.model.loadKycAll) {
+      try {
+        const all = await FF.model.loadKycAll();
+        const cur = U.reportYm ? U.reportYm() : '';
+        const m = new Map();
+        for (const r of all || []) {
+          if (cur && r.ym !== cur) continue;
+          const name = r.gvName || r.agent; if (!name) continue;
+          const ch = r.gvName ? 'gv' : 'ff', k = `${ch}|${name}`;
+          let o = m.get(k); if (!o) { o = { ch, name, n: 0, full: 0 }; m.set(k, o); }
+          o.n += r.n; if (r.kyc === 'full') o.full += r.n;
+        }
+        kycCache.rows = [...m.values()].filter((o) => o.n >= 15).map((o) => ({ ...o, pct: Math.round((o.full / o.n) * 100) }))
+          .filter((o) => o.pct < 70).sort((a, b) => b.n - a.n);
+        kycCache.at = Date.now();
+      } catch { /* ignore */ }
+    }
+  }
 
   function insights() {
     const out = [];
@@ -433,7 +554,7 @@
     return { vw, vh, mob, W, H, BW, minY: mob ? 64 : 72, maxY: vh - H - (mob ? 84 : 16) };
   }
   function dockPos() {
-    const g = geo(), d = (!pipWin && cfg.dock) || { r: g.mob ? 10 : 16, b: g.mob ? 84 : 14 };
+    const g = geo(), d = pipWin ? { r: 12, b: 12 } : cfg.dock || { r: g.mob ? 10 : 16, b: g.mob ? 84 : 14 };
     return [Math.max(4, Math.min(g.vw - g.W - 4, g.vw - g.W - d.r)), Math.max(g.minY, Math.min(g.vh - g.H - 4, g.vh - g.H - d.b))];
   }
   const tf = (p, extra) => `translate3d(${Math.round(p[0])}px, ${Math.round(p[1])}px, 0)${extra || ''}`;
@@ -469,6 +590,18 @@
   }
 
   function layoutBoard(g, side) {
+    if (pipWin) { // 📌 pop-out: board poori chaudai me robot ke upar — saaf dikhe
+      const bw = g.vw - 16;
+      board.style.width = `${bw}px`;
+      el.dataset.side = 'pip';
+      const bh = board.offsetHeight;
+      let top = -bh - 6;
+      if (pos[1] + top < 8) top = 8 - pos[1];
+      board.style.top = `${Math.round(top)}px`;
+      board.style.left = `${Math.round(8 - pos[0])}px`;
+      stick.style.cssText = 'display:none';
+      return;
+    }
     board.style.width = `${g.BW}px`;
     el.dataset.side = side;
     const bh = board.offsetHeight;
@@ -494,7 +627,7 @@
     if (reduced()) { t.textContent = s; return Promise.resolve(); }
     return new Promise((r) => {
       let i = 0; el.classList.add('talk');
-      const step = () => { i += 1; t.textContent = s.slice(0, i); if (i < s.length) setTimeout(step, 28); else { if (!talking) el.classList.remove('talk'); r(); } };
+      const step = () => { i += 1; t.textContent = s.slice(0, i); if (i < s.length) tw().setTimeout(step, 28); else { if (!talking) el.classList.remove('talk'); r(); } };
       step();
     });
   }
@@ -533,7 +666,7 @@
     if (pipWin) { try { pipWin.focus(); } catch { /* ignore */ } return true; }
     build();
     let w;
-    try { w = await window.documentPictureInPicture.requestWindow({ width: 400, height: 480 }); } catch (e) { note('📌 Pop-out nahi khula — robot par click karke dobara try karo'); return false; }
+    try { w = await window.documentPictureInPicture.requestWindow({ width: 430, height: 620 }); } catch (e) { note('📌 Pop-out nahi khula — robot par click karke dobara try karo'); return false; }
     pipWin = w;
     const d = w.document;
     d.documentElement.className = `${document.documentElement.className} mc-pip`.replace('mc-on', '');
@@ -598,10 +731,10 @@
     board.style.width = `${g.BW}px`;
     const bh = board.offsetHeight || 170;
     const yLo = Math.min(g.maxY, g.minY + bh - g.W * 0.85 + 10);
-    const rest = [goLeft ? 12 : g.vw - g.W - 12, Math.round(rnd(Math.min(yLo, g.maxY), g.maxY))];
+    const rest = pipWin ? dockPos() : [goLeft ? 12 : g.vw - g.W - 12, Math.round(rnd(Math.min(yLo, g.maxY), g.maxY))];
     const style = pick(['arc', 'zigzag', 'loop', 'up', 'hop']);
     await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
-    layoutBoard(g, goLeft ? 'right' : 'left');
+    layoutBoard(g, pipWin ? 'pip' : goLeft ? 'right' : 'left');
     dance(it.mood);
     el.classList.add('holding');
     if (it.cls) el.classList.add(it.cls);
@@ -787,9 +920,11 @@
     return null;
   }
   const gapMs = () => Math.max(10, Number(cfg.everySec) || 10) * 1e3;
+  let timerWin = window;
   function schedule(ms) {
-    clearTimeout(timer);
-    timer = setTimeout(tick, ms == null ? gapMs() : ms);
+    try { timerWin.clearTimeout(timer); } catch { /* window band */ }
+    timerWin = tw();
+    timer = timerWin.setTimeout(tick, ms == null ? gapMs() : ms);
   }
   let funTurn = 0, lastUpd = 0;
   async function tick(force) {
@@ -850,6 +985,8 @@
       setInterval(checkVersions, 10 * 60e3);
       setTimeout(pollFeeds, 4e3);
       setInterval(pollFeeds, 30e3);
+      setTimeout(refreshExtras, 15e3);
+      setInterval(refreshExtras, 5 * 60e3);
       window.addEventListener('ff:data-fresh', () => setTimeout(checkVersions, 3000));
     };
     boot();

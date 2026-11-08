@@ -6992,6 +6992,37 @@ async function handleApi(req, res, url) {
     setTimeout(() => { ledgerAggregate(true).catch(() => {}); }, 60e3).unref?.();
     return sendJson(res, 200, { ok: true, at: new Date(forceRefreshAt).toISOString() }, { 'Cache-Control': 'no-store' });
   }
+  // 🤖 v3.125.125 — robot ke liye dispatch summary (admin): aakhri dispatch din, kitne tag, class-wise, kis agent ko; pichle 7 dispatch din
+  if (p === '/api/robot/dispatch' && method === 'GET') {
+    requireAdmin(user);
+    const d = ledgerAggState.data;
+    if (!d || !d.byCh) { ledgerAggregate(false).catch(() => {}); return sendJson(res, 200, { pending: true }); }
+    const days = new Map();   // date → { total, cls, agents: Map }
+    for (const ch of ['ff', 'gv']) {
+      const seen = new Set();
+      for (const rec of (d.byCh[ch] || new Map()).values()) {
+        if (seen.has(rec)) continue; seen.add(rec);
+        for (const [date, day] of rec.dates) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+          let x = days.get(date); if (!x) { x = { total: 0, cls: {}, agents: new Map(), ff: 0, gv: 0 }; days.set(date, x); }
+          const q = Number(day.total) || 0;
+          x.total += q; x[ch] += q;
+          for (const [c, n] of Object.entries(day.cls || {})) x.cls[c] = (x.cls[c] || 0) + (Number(n) || 0);
+          const nmk = `${ch}|${rec.agent || rec.agentId}`;
+          x.agents.set(nmk, (x.agents.get(nmk) || 0) + q);
+        }
+      }
+    }
+    const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+    const dates = [...days.keys()].filter((k) => k <= today).sort().reverse();
+    if (!dates.length) return sendJson(res, 200, { latest: '', days: [] });
+    const L = days.get(dates[0]);
+    const agents = [...L.agents.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => { const [ch, ...nm] = k.split('|'); return { ch, name: nm.join('|'), qty: n }; });
+    return sendJson(res, 200, {
+      latest: dates[0], latestTotal: L.total, latestFf: L.ff, latestGv: L.gv, latestCls: L.cls, agents, agentCount: L.agents.size,
+      days: dates.slice(0, 7).map((k) => ({ date: k, total: days.get(k).total }))
+    });
+  }
   if (p === '/api/dispatch-by' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
     const body = await readBody(req);
