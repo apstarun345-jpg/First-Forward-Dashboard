@@ -709,9 +709,13 @@
     });
     return it;
   }
+  const CLIENT_PUSH = /^(lowcover|stockend|nostock|deadstock|stockhigh|dispatchneed|stocktl|dispatchtl|kyclow|kycup|kycdown|dispfx|rephigh|hours|chassis|oneday|late|lowissue|inacttl|runrate|vc4tl)\b/;
   // 📱 robot ki khabar → app + web push (server dedupe + rate limit karta hai)
   function pushRobot(it) {
     if (!it || it.fun || cfg.push === false || !allowed() || !FF.auth || !FF.auth.api) return;
+    // issuance / growth / TL / champions / record / milestone / dispatch / stock total ab SERVER khud bhejta hai (dashboard band ho tab bhi);
+    // yahan se sirf wo jo server nahi banata — agent-wise stock, KYC, dispatch ka asar, replacement, busy time, chassis, data late…
+    if (!CLIENT_PUSH.test(String(it.key || ''))) return;
     const lines = (it.rows || []).slice(0, 5).map((r) => `• ${r.name}${r.tl ? ` (TL ${r.tl})` : ''}${r.val ? ` — ${r.val}` : ''}`);
     const body = [it.big ? `${it.big} · ${it.head || ''}` : it.head, ...lines, it.foot || ''].filter(Boolean).join('\n');
     const key = `${it.key}|${it.head}|${(it.rows || []).map((r) => r.val).join(',')}|${it.big || ''}`.slice(0, 200);

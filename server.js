@@ -4915,6 +4915,227 @@ async function gvStockSnapshot() {
  * Server free-tier par sote waqt fir jaata hai — isliye window "8 baje ke baad, roz ek baar" hai
  * (pehla wake-up us din digest bhej dega). force=true se Settings ka button kabhi bhi bhej sakta hai.
  */
+
+// 🤖 dispatch ledger → aakhri dispatch din + pichle 15 din (robot ke liye; endpoint + server brain dono)
+function robotDispatchData() {
+  const d = ledgerAggState.data;
+  if (!d || !d.byCh) return null;
+    const days = new Map();   // date → { total, cls, agents: Map }
+    for (const ch of ['ff', 'gv']) {
+      const seen = new Set();
+      for (const rec of (d.byCh[ch] || new Map()).values()) {
+        if (seen.has(rec)) continue; seen.add(rec);
+        for (const [date, day] of rec.dates) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+          let x = days.get(date); if (!x) { x = { total: 0, cls: {}, agents: new Map(), ff: 0, gv: 0 }; days.set(date, x); }
+          const q = Number(day.total) || 0;
+          x.total += q; x[ch] += q;
+          for (const [c, n] of Object.entries(day.cls || {})) x.cls[c] = (x.cls[c] || 0) + (Number(n) || 0);
+          const nmk = `${ch}|${rec.agent || rec.agentId}`;
+          x.agents.set(nmk, (x.agents.get(nmk) || 0) + q);
+        }
+      }
+    }
+    const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+    const dates = [...days.keys()].filter((k) => k <= today).sort().reverse();
+    if (!dates.length) return { latest: '', days: [] };
+    const L = days.get(dates[0]);
+    const agents = [...L.agents.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => { const [ch, ...nm] = k.split('|'); return { ch, name: nm.join('|'), qty: n }; });
+    // v3.125.131 — pichle ~15 dispatch din: kis agent ko kab kitna (robot "dispatch ke baad asar" ke liye)
+    const recent = [];
+    for (const k of dates.slice(0, 15)) for (const [nmk, q] of days.get(k).agents) { const [ch, ...nm] = nmk.split('|'); recent.push({ date: k, ch, name: nm.join('|'), qty: q }); }
+    recent.sort((a, b) => b.qty - a.qty);
+    return {
+      recent: recent.slice(0, 400),
+      latest: dates[0], latestTotal: L.total, latestFf: L.ff, latestGv: L.gv, latestCls: L.cls, agents, agentCount: L.agents.size,
+      days: dates.slice(0, 7).map((k) => ({ date: k, total: days.get(k).total }))
+    };
+}
+
+// ===================== 🤖 v3.125.134 — Robot brain (server) =====================
+// Dashboard khula ho ya band: server khud EIR (FF + GV) + dispatch ledger + stock se robot wale updates banata hai
+// aur saare admins ke app + web par push karta hai (agent ke saath TL naam). Har khabar ek hi baar (key yaad, restart
+// ke baad bhi), 45 sec me ek push, raat 10 se subah 7 baje tak queue (shor nahi).
+const robotBrain = { at: 0, busy: false, queue: [], lastErr: '' };
+const RB_MON_HI = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const rbLbl = (iso) => `${Number(String(iso).slice(8, 10))} ${RB_MON_HI[Number(String(iso).slice(5, 7)) - 1] || ''}`;
+const rbFmt = (n) => Math.round(Number(n) || 0).toLocaleString('en-IN');
+const rbPct = (g) => `${g > 0 ? '+' : ''}${Math.round(g)}%`;
+async function robotEirRows() {
+  const e = db.settings.eir || {};
+  const c = personalConfig({ source: 'ff' });
+  const ffName = e.agentName || 'L', ffTl = e.tlName || 'BA', gvName = e.gvName || 'AX', gvTl = e.gvTl || 'AZ';
+  const { start, today } = personalWindow();
+  const cols = `${c.dateCol}, ${c.clsCol}, ${c.masterCol}, ${ffName}, ${ffTl}, ${gvName}, ${gvTl}`;
+  const tq = `select ${cols}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' group by ${cols}`;
+  const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
+  const out = await fetchPersonalCached(upstreamUrl(params));
+  if (out.status < 200 || out.status >= 300) throw new Error(`EIR ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const rows = [];
+  for (const row of table.rows || []) {
+    const date = serverDate(serverCell(row, 0)); if (!date) continue;
+    const gv = isGvPersonalRow(serverCell(row, 2));
+    const name = String(serverCell(row, gv ? 5 : 3) || '').trim(); if (!name) continue;
+    const b = classBucket(serverCell(row, 1));
+    rows.push({ date, ch: gv ? 'gv' : 'ff', name, tl: String(serverCell(row, gv ? 6 : 4) || '').trim(), cls: b === 'VC4' ? 'vc4' : b === 'VC20' ? 'vc20' : 'vc5', n: serverNumber(serverCell(row, 7)) || 0 });
+  }
+  return rows;
+}
+function robotInsights(rows) {
+  const items = [];
+  if (!rows.length) return items;
+  const today = dateKeyNow();
+  const dates = [...new Set(rows.map((r) => r.date))].filter((d) => d <= today).sort();
+  const last = dates[dates.length - 1], cur = last.slice(0, 7), lastDay = Number(last.slice(8, 10));
+  const [cy, cm] = cur.split('-').map(Number);
+  const prev = `${cm === 1 ? cy - 1 : cy}-${pad2(cm === 1 ? 12 : cm - 1)}`;
+  const dim = new Date(Date.UTC(cy, cm, 0)).getUTCDate();
+  const ag = new Map(), tls = new Map(), site = new Map(), siteCls = new Map();
+  const tot = { ff: { cur: 0, vc4: 0, vc20: 0, vc5: 0 }, gv: { cur: 0, vc4: 0, vc20: 0, vc5: 0 } };
+  let prevSame = 0, prevFull = 0;
+  for (const r of rows) {
+    const k = `${r.ch}|${r.name.toUpperCase()}`;
+    let a = ag.get(k); if (!a) { a = { ch: r.ch, name: r.name, tl: r.tl, cur: 0, vc4: 0, vc20: 0, vc5: 0, prevSame: 0, prev: 0, days: new Map() }; ag.set(k, a); }
+    if (r.tl && !a.tl) a.tl = r.tl;
+    a.days.set(r.date, (a.days.get(r.date) || 0) + r.n);
+    const ym = r.date.slice(0, 7), dd = Number(r.date.slice(8, 10));
+    if (ym === cur) {
+      a.cur += r.n; a[r.cls] += r.n; tot[r.ch].cur += r.n; tot[r.ch][r.cls] += r.n;
+      site.set(r.date, (site.get(r.date) || 0) + r.n);
+      const sc = siteCls.get(r.date) || { vc4: 0, vc20: 0, vc5: 0, ff: 0, gv: 0 }; sc[r.cls] += r.n; sc[r.ch] += r.n; siteCls.set(r.date, sc);
+      if (r.tl) { const tk = `${r.ch}|${r.tl.toUpperCase()}`; const t = tls.get(tk) || { ch: r.ch, name: r.tl, cur: 0, prevSame: 0, agents: new Set() }; t.cur += r.n; t.agents.add(a.name); tls.set(tk, t); }
+    } else if (ym === prev) {
+      a.prev += r.n; prevFull += r.n;
+      if (dd <= lastDay) { a.prevSame += r.n; prevSame += r.n; if (r.tl) { const tk = `${r.ch}|${r.tl.toUpperCase()}`; const t = tls.get(tk) || { ch: r.ch, name: r.tl, cur: 0, prevSame: 0, agents: new Set() }; t.prevSame += r.n; tls.set(tk, t); } }
+    } else if (r.date.slice(0, 7) < prev) { /* window ke bahar */ }
+    if (ym !== cur) site.set(r.date, (site.get(r.date) || 0) + (ym === prev ? r.n : 0)); // pichle mahine ke din bhi (record ke liye)
+  }
+  const A = [...ag.values()];
+  const tlOf = (a) => (a.tl && a.tl.toUpperCase() !== a.name.toUpperCase() ? ` (TL ${a.tl})` : '');
+  const chS = (c) => (c === 'ff' ? 'FF' : 'GV');
+  const line = (a, v) => `• ${a.name}${tlOf(a)} · ${chS(a.ch)} — ${v}`;
+  const push = (key, title, lines, link) => items.push({ key: `srv:${key}`, title: `🤖 ${title}`, body: lines.filter(Boolean).join('\n').slice(0, 600), link: link || '#/' });
+  const all = { cur: tot.ff.cur + tot.gv.cur, vc4: tot.ff.vc4 + tot.gv.vc4, vc20: tot.ff.vc20 + tot.gv.vc20, vc5: tot.ff.vc5 + tot.gv.vc5 };
+  // 1) aakhri din ki report
+  const sc = siteCls.get(last) || { vc4: 0, vc20: 0, vc5: 0, ff: 0, gv: 0 };
+  const dayTop = A.map((a) => ({ a, v: a.days.get(last) || 0 })).filter((x) => x.v).sort((x, y) => y.v - x.v).slice(0, 5);
+  push(`day:${last}`, `📊 ${rbLbl(last)} ki issuance: ${rbFmt(site.get(last))} tags`, [`VC4 ${rbFmt(sc.vc4)} · VC20 ${rbFmt(sc.vc20)} · VC5+ ${rbFmt(sc.vc5)} · FF ${rbFmt(sc.ff)} · GV ${rbFmt(sc.gv)}`, 'Top agents:', ...dayTop.map((x) => line(x.a, rbFmt(x.v)))], '#/dashboard');
+  // 2) run-rate + andaaza
+  const rate = all.cur / Math.max(1, lastDay), exp = Math.round(rate * dim), g = prevFull ? ((exp - prevFull) / prevFull) * 100 : null;
+  push(`rr:${last}`, `⚡ Run-rate ${rbFmt(rate)}/din · andaaza ${rbFmt(exp)}`, [
+    `VC4 ${rbFmt(all.vc4 / Math.max(1, lastDay))}/din · VC20 ${rbFmt(all.vc20 / Math.max(1, lastDay))}/din · VC5+ ${rbFmt(all.vc5 / Math.max(1, lastDay))}/din`,
+    `FF ${rbFmt(tot.ff.cur / Math.max(1, lastDay))}/din · GV ${rbFmt(tot.gv.cur / Math.max(1, lastDay))}/din`,
+    `Is mahine ab tak ${rbFmt(all.cur)} · andaaza ${rbFmt(exp)}${g !== null ? ` (last month ${rbFmt(prevFull)}, ${rbPct(g)})` : ''}`,
+    prevSame ? `Pichle mahine ${lastDay} tareekh tak ${rbFmt(prevSame)} the — ${rbPct(((all.cur - prevSame) / prevSame) * 100)}` : ''
+  ]);
+  // 3) high growth / de-growth agents (pichle mahine ke isi din tak se)
+  const gr = A.filter((a) => a.prevSame >= 10 && a.cur >= 5).map((a) => ({ a, g: ((a.cur - a.prevSame) / a.prevSame) * 100 }));
+  const hi = gr.filter((x) => x.g >= 20).sort((x, y) => y.g - x.g).slice(0, 5);
+  if (hi.length) push(`high:${last}`, `🚀 High growth: ${hi[0].a.name} ${rbPct(hi[0].g)}`, hi.map((x) => line(x.a, `${rbPct(x.g)} (${rbFmt(x.a.prevSame)} → ${rbFmt(x.a.cur)})`)), '#/performance');
+  const lo = A.filter((a) => a.prevSame >= 20).map((a) => ({ a, g: ((a.cur - a.prevSame) / a.prevSame) * 100 })).filter((x) => x.g <= -30).sort((x, y) => x.g - y.g).slice(0, 5);
+  if (lo.length) push(`low:${last}`, `📉 De-growth: ${lo[0].a.name} ${rbPct(lo[0].g)}`, lo.map((x) => line(x.a, `${rbPct(x.g)} (${rbFmt(x.a.prevSame)} → ${rbFmt(x.a.cur)})`)), '#/performance');
+  // 4) TL growth / de-growth
+  const T = [...tls.values()].filter((t) => t.prevSame >= 30).map((t) => ({ t, g: ((t.cur - t.prevSame) / t.prevSame) * 100 }));
+  const th = T.filter((x) => x.g >= 15).sort((x, y) => y.g - x.g).slice(0, 5), tl = T.filter((x) => x.g <= -20).sort((x, y) => x.g - y.g).slice(0, 5);
+  const tline = (x) => `• TL ${x.t.name} · ${chS(x.t.ch)} — ${rbPct(x.g)} (${rbFmt(x.t.prevSame)} → ${rbFmt(x.t.cur)}, ${x.t.agents.size} agents)`;
+  if (th.length) push(`tlhigh:${last}`, `👑 TL growth: ${th[0].t.name} ${rbPct(th[0].g)}`, th.map(tline), '#/performance');
+  if (tl.length) push(`tllow:${last}`, `🧭 TL de-growth: ${tl[0].t.name} ${rbPct(tl[0].g)}`, tl.map(tline), '#/performance');
+  // 5) champions FF / GV (badle tab)
+  for (const ch of ['ff', 'gv']) {
+    const L = A.filter((a) => a.ch === ch && a.cur);
+    if (L.length < 2) continue;
+    const best = (k) => L.slice().sort((x, y) => y[k] - x[k])[0];
+    const t = best('cur'), a4 = best('vc4'), a20 = best('vc20'), a5 = best('vc5');
+    push(`champ:${ch}:${cur}:${t.name}|${a4.name}|${a20.name}|${a5.name}`, `${ch === 'ff' ? '🥇 First Forward' : '🏅 GV Partner'} champions`, [
+      `🏆 Total: ${t.name}${tlOf(t)} — ${rbFmt(t.cur)}`, a4.vc4 ? `🚗 VC4: ${a4.name}${tlOf(a4)} — ${rbFmt(a4.vc4)}` : '', a20.vc20 ? `🚐 VC20: ${a20.name}${tlOf(a20)} — ${rbFmt(a20.vc20)}` : '', a5.vc5 ? `🚛 VC5+: ${a5.name}${tlOf(a5)} — ${rbFmt(a5.vc5)}` : ''
+    ], '#/performance');
+  }
+  // 6) best din / record
+  const curDays = [...site.entries()].filter(([d]) => d.startsWith(cur));
+  const bestCur = curDays.sort((x, y) => y[1] - x[1])[0];
+  if (bestCur && bestCur[0] === last && curDays.length > 2) {
+    const allBest = Math.max(...[...site.entries()].filter(([d]) => d !== last).map(([, v]) => v), 0);
+    push(`best:${last}`, site.get(last) > allBest ? `🏅 Record din! ${rbFmt(site.get(last))} tags` : `📅 Is mahine ka best din: ${rbLbl(last)}`, [`${rbLbl(last)} ko ${rbFmt(site.get(last))} tags${site.get(last) > allBest ? ` — pichla best ${rbFmt(allBest)}` : ''}`]);
+  }
+  // 7) agent record (apna best din) + milestones + comeback + naya agent
+  const rec = [], mile = [], back = [], fresh = [];
+  const firstDate = dates[0];
+  for (const a of A) {
+    const v = a.days.get(last) || 0;
+    if (v >= 10) { let b = 0; for (const [d, n] of a.days) if (d !== last && n > b) b = n; if (b && v > b) rec.push({ a, v, b }); }
+    const before = a.cur - (a.days.get(last) || 0); const th2 = [100, 250, 500, 1000, 2000].filter((x) => before < x && a.cur >= x).pop(); if (th2) mile.push({ a, th: th2 });
+    if (v) { const ds = [...a.days.keys()].filter((d) => d < last).sort(); const pd = ds[ds.length - 1]; if (pd && (Date.parse(last) - Date.parse(pd)) / 864e5 >= 8) back.push({ a, gap: Math.round((Date.parse(last) - Date.parse(pd)) / 864e5) - 1, v }); }
+    const ds0 = [...a.days.keys()].sort()[0]; if (ds0 && (Date.parse(last) - Date.parse(ds0)) / 864e5 <= 2 && (Date.parse(ds0) - Date.parse(firstDate)) / 864e5 > 20) fresh.push({ a, d: ds0, n: a.cur });
+  }
+  if (rec.length) push(`rec:${last}`, `🏅 Record toda: ${rec.sort((x, y) => y.v - x.v)[0].a.name}`, rec.slice(0, 5).map((x) => line(x.a, `${rbFmt(x.v)} (pichla best ${rbFmt(x.b)})`)));
+  if (mile.length) push(`mile:${last}`, `💯 Milestone: ${mile.sort((x, y) => y.th - x.th)[0].a.name} ${rbFmt(mile[0].th)} paar`, mile.slice(0, 5).map((x) => line(x.a, `${rbFmt(x.th)} paar (abhi ${rbFmt(x.a.cur)})`)));
+  if (back.length) push(`back:${last}`, `🔙 Comeback: ${back.sort((x, y) => y.gap - x.gap)[0].a.name} ${back[0].gap} din baad`, back.slice(0, 5).map((x) => line(x.a, `${x.gap} din baad · ${rbFmt(x.v)} tags`)));
+  if (fresh.length) push(`new:${last}`, `🎈 Naye agent: ${fresh[0].a.name}`, fresh.slice(0, 5).map((x) => line(x.a, `pehla tag ${rbLbl(x.d)} · ${rbFmt(x.n)}`)));
+  // 8) inactive (last month the, is month 0)
+  const ina = A.filter((a) => a.prev >= 10 && !a.cur).sort((x, y) => y.prev - x.prev);
+  if (ina.length && lastDay >= 3) push(`inactive:${last}`, `😴 ${ina.length} agents is month 0 par`, ina.slice(0, 5).map((x) => line(x, `last month ${rbFmt(x.prev)}`)), '#/performance');
+  // 9) site milestone
+  const SM = [1000, 2000, 5000, 7500, 10000, 15000, 20000, 30000, 50000, 75000, 100000].filter((x) => all.cur >= x).pop();
+  if (SM) push(`smile:${cur}:${SM}`, `🎯 Is mahine ${rbFmt(SM)} tags paar!`, [`Ab tak ${rbFmt(all.cur)} · FF ${rbFmt(tot.ff.cur)} · GV ${rbFmt(tot.gv.cur)}`]);
+  // 10) FF vs GV (roz ek)
+  push(`ffgv:${last}`, `⚔️ FF ${rbFmt(tot.ff.cur)} vs GV ${rbFmt(tot.gv.cur)}`, [`VC4: FF ${rbFmt(tot.ff.vc4)} / GV ${rbFmt(tot.gv.vc4)}`, `VC20: FF ${rbFmt(tot.ff.vc20)} / GV ${rbFmt(tot.gv.vc20)}`, `VC5+: FF ${rbFmt(tot.ff.vc5)} / GV ${rbFmt(tot.gv.vc5)}`]);
+  return items;
+}
+async function robotBrainRun(reason) {
+  if (robotBrain.busy || !vapidKeys) return;
+  if (feats().robotPush === false) return;
+  if (reason !== 'daily' && Date.now() - robotBrain.at < 25 * 60e3) return;
+  robotBrain.busy = true; robotBrain.at = Date.now();
+  try {
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const sent = db.notify.watch.robotSent && typeof db.notify.watch.robotSent === 'object' ? db.notify.watch.robotSent : (db.notify.watch.robotSent = {});
+    for (const [k, t] of Object.entries(sent)) if (Date.now() - t > 3 * 864e5) delete sent[k];
+    const items = [];
+    try { items.push(...robotInsights(await robotEirRows())); } catch (e) { robotBrain.lastErr = e.message; }
+    // 🚚 dispatch (ledger)
+    try {
+      const d = robotDispatchData();
+      if (d && d.latest) items.push({ key: `srv:disp:${d.latest}`, title: `🤖 🚚 Dispatch ${rbLbl(d.latest)}: ${rbFmt(d.latestTotal)} tags`, link: '#/',
+        body: [`${d.agentCount} agents · FF ${rbFmt(d.latestFf)} · GV ${rbFmt(d.latestGv)}`, Object.entries(d.latestCls || {}).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([c, n]) => `${c} ${rbFmt(n)}`).join(' · '), ...(d.agents || []).slice(0, 5).map((x) => `• ${x.name} · ${x.ch === 'ff' ? 'FF' : 'GV'} — ${rbFmt(x.qty)}`)].filter(Boolean).join('\n') });
+    } catch { /* ledger abhi nahi */ }
+    // 📦 stock (roz ek)
+    try {
+      const st = await stockSnapshot();
+      if (st && st.total) items.push({ key: `srv:stock:${dateKeyNow()}`, title: `🤖 📦 Stock: ${rbFmt(st.total)} tags`, link: '#/stock', body: Object.entries(st.classes || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c, n]) => `${c}: ${rbFmt(n)}`).join(' · ') });
+    } catch { /* ignore */ }
+    let added = 0;
+    for (const it of items) if (!sent[it.key] && !robotBrain.queue.some((q) => q.key === it.key)) { robotBrain.queue.push(it); added++; }
+    if (robotBrain.queue.length > 60) robotBrain.queue.splice(0, robotBrain.queue.length - 60);
+    if (added) console.log(`🤖 robot brain (${reason}): ${added} naye updates queue me`);
+  } finally { robotBrain.busy = false; }
+}
+function robotAdminSubs() {
+  return pushSubs().filter((s) => {
+    const u = findUser(s.username);
+    if (!u || u.role !== 'admin') return false;
+    const prefs = normalizeNotifyPrefs(u.notifyPrefs);
+    return prefs.enabled !== false && prefs.push !== false;
+  });
+}
+function robotFlush() {
+  if (!robotBrain.queue.length || !vapidKeys) return;
+  const h = istNow().getUTCHours();
+  if (h >= 22 || h < 7) return; // 🌙 raat me shor nahi — subah 7 baje se
+  const it = robotBrain.queue.shift();
+  const sent = (db.notify.watch && db.notify.watch.robotSent) || {};
+  if (sent[it.key]) return;
+  sent[it.key] = Date.now();
+  const subs = robotAdminSubs();
+  const id = `robot-${Date.now()}`;
+  Promise.all(subs.map(async (sub) => {
+    const u = findUser(sub.username);
+    const prefs = u ? normalizeNotifyPrefs(u.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
+    const data = { id, title: it.title, body: it.body, tag: `ff-robot-${it.key.replace(/[^a-z0-9_-]/gi, '-').slice(0, 60)}`, type: 'info', link: it.link || '#/', sound: prefs.sound !== false, tone: prefs.tone, at: Date.now(), voice: '', speak: false, user: sub.username, badge: unreadCountFor(u), lang: 'hi-IN', actions: [{ action: 'open', title: '🤖 Open' }, { action: 'dismiss', title: '✅ OK' }], persist: false, robot: true };
+    handlePushResult(sub, await deliverPush(sub, data), { type: 'robot', id });
+  })).then(() => persist('notify')).catch(() => {});
+}
+
 async function maybeDailyDigest(force = false) {
   try {
     if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
@@ -6132,6 +6353,8 @@ async function checkDailyVersions(reason) {
       // stock tab badla → stock index (ageing / dispatch status) naya
       // false = due logic (index ka verSig vs abhi ka) — snapshot pehle se naya ho to dobara scan nahi (restart loop se bachao)
       if (changed.some((t) => t.label !== 'EIR')) { try { stockAgeIndex(false).catch(() => {}); } catch { /* optional */ } }
+      // 🤖 naya data → robot brain (server) turant naye updates push kare
+      setTimeout(() => { robotBrainRun('daily').catch(() => {}); }, 90e3);
     }
     return changed;
   })().finally(() => { dailyCheckRunning = null; });
@@ -6995,6 +7218,11 @@ async function handleApi(req, res, url) {
   }
   // 🤖 v3.125.133 — robot ki khabar → admin ke apne saare devices (app + web) par push notification.
   // Dedupe: same key 24h me ek baar (kai tab / phone khule hon tab bhi); rate: user par 25 sec me max 1.
+  if (p === '/api/robot/brain' && (method === 'GET' || method === 'POST')) {
+    requireAdmin(user);
+    if (method === 'POST') { robotBrain.at = 0; await robotBrainRun('manual').catch(() => {}); }
+    return sendJson(res, 200, { at: robotBrain.at ? new Date(robotBrain.at).toISOString() : null, queue: robotBrain.queue.map((x) => x.title), err: robotBrain.lastErr || '', subs: robotAdminSubs().length, sent: Object.keys((db.notify.watch && db.notify.watch.robotSent) || {}).length });
+  }
   if (p === '/api/robot/notify' && method === 'POST') {
     requireAdmin(user);
     const body = await readBody(req);
@@ -7024,38 +7252,9 @@ async function handleApi(req, res, url) {
   // 🤖 v3.125.125 — robot ke liye dispatch summary (admin): aakhri dispatch din, kitne tag, class-wise, kis agent ko; pichle 7 dispatch din
   if (p === '/api/robot/dispatch' && method === 'GET') {
     requireAdmin(user);
-    const d = ledgerAggState.data;
-    if (!d || !d.byCh) { ledgerAggregate(false).catch(() => {}); return sendJson(res, 200, { pending: true }); }
-    const days = new Map();   // date → { total, cls, agents: Map }
-    for (const ch of ['ff', 'gv']) {
-      const seen = new Set();
-      for (const rec of (d.byCh[ch] || new Map()).values()) {
-        if (seen.has(rec)) continue; seen.add(rec);
-        for (const [date, day] of rec.dates) {
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-          let x = days.get(date); if (!x) { x = { total: 0, cls: {}, agents: new Map(), ff: 0, gv: 0 }; days.set(date, x); }
-          const q = Number(day.total) || 0;
-          x.total += q; x[ch] += q;
-          for (const [c, n] of Object.entries(day.cls || {})) x.cls[c] = (x.cls[c] || 0) + (Number(n) || 0);
-          const nmk = `${ch}|${rec.agent || rec.agentId}`;
-          x.agents.set(nmk, (x.agents.get(nmk) || 0) + q);
-        }
-      }
-    }
-    const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
-    const dates = [...days.keys()].filter((k) => k <= today).sort().reverse();
-    if (!dates.length) return sendJson(res, 200, { latest: '', days: [] });
-    const L = days.get(dates[0]);
-    const agents = [...L.agents.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => { const [ch, ...nm] = k.split('|'); return { ch, name: nm.join('|'), qty: n }; });
-    // v3.125.131 — pichle ~15 dispatch din: kis agent ko kab kitna (robot "dispatch ke baad asar" ke liye)
-    const recent = [];
-    for (const k of dates.slice(0, 15)) for (const [nmk, q] of days.get(k).agents) { const [ch, ...nm] = nmk.split('|'); recent.push({ date: k, ch, name: nm.join('|'), qty: q }); }
-    recent.sort((a, b) => b.qty - a.qty);
-    return sendJson(res, 200, {
-      recent: recent.slice(0, 400),
-      latest: dates[0], latestTotal: L.total, latestFf: L.ff, latestGv: L.gv, latestCls: L.cls, agents, agentCount: L.agents.size,
-      days: dates.slice(0, 7).map((k) => ({ date: k, total: days.get(k).total }))
-    });
+    const out = robotDispatchData();
+    if (!out) { ledgerAggregate(false).catch(() => {}); return sendJson(res, 200, { pending: true }); }
+    return sendJson(res, 200, out);
   }
   if (p === '/api/dispatch-by' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -14355,6 +14554,10 @@ async function start() {
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
     setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();
+    // 🤖 robot brain (server): dashboard band ho tab bhi admins ko push — boot ke 3 min baad, phir har 30 min; push 45 sec me ek
+    setTimeout(() => robotBrainRun('boot').catch(() => {}), 180e3).unref?.();
+    setInterval(() => robotBrainRun('tick').catch(() => {}), 30 * 60e3).unref();
+    setInterval(() => { try { robotFlush(); } catch { /* ignore */ } }, 45e3).unref();
     let ledgerDailyDone = '';
     setInterval(() => {
       const ist = new Date(Date.now() + 5.5 * 3600e3);
