@@ -5103,12 +5103,12 @@ async function robotBrainRun(reason) {
     for (const [k, t] of Object.entries(sent)) if (Date.now() - t > 3 * 864e5) delete sent[k];
     // v3.125.137 — GV pehle 0 gina gaya tha: aaj ke galat updates ek baar sahi data ke saath dobara
     const fixed = new Set();
-    if (db.notify.watch.robotFix !== 137) {
+    const items = [];
+    try { robotBrain.lastErr = ''; const rr = await robotEirRows(); robotBrain.rows = rr.length; items.push(...robotInsights(rr)); } catch (e) { robotBrain.lastErr = e.message; }
+    if (db.notify.watch.robotFix !== 137 && robotBrain.gvRows > 0) { // sirf tab jab GV sach me aa gaya
       for (const k of Object.keys(sent)) if (k.startsWith('srv:') && !/^srv:(disp|stock):/.test(k)) { fixed.add(k); delete sent[k]; }
       db.notify.watch.robotFix = 137;
     }
-    const items = [];
-    try { robotBrain.lastErr = ''; const rr = await robotEirRows(); robotBrain.rows = rr.length; items.push(...robotInsights(rr)); } catch (e) { robotBrain.lastErr = e.message; }
     // 🚚 dispatch (ledger)
     try {
       const d = robotDispatchData();
