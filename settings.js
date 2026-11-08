@@ -795,6 +795,38 @@ FF.pages = FF.pages || {};
   }
   // ---- 🔊 Sound & voice (Office Bell + Voice Announcer) — v3.18 ----------------------------------
   /** Naye tags ki awaaz yahan se test / configure hoti hai (topbar 🔊 menu ka hi doosra darwaza). */
+  // 🤖 v3.125.123 — Robot dost (sirf admin): site par ghoomta Gems robot — on/off, kitni der me, sound, masti
+  function mascotSection() {
+    if (!A.isAdmin()) return '';
+    const M = FF.mascot;
+    const c = M ? M.getCfg() : { on: true, sound: false, everySec: 10, roam: true, fun: true };
+    const opts = [[10, '10 sec'], [20, '20 sec'], [30, '30 sec'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']];
+    return section('🤖 Robot dost (sirf admin ko dikhta hai)', `<p class="dim small">Gems robot site par ghoomta, naachta aur board par <b>site ki har khabar</b> batata hai — agents/TL growth &amp; de-growth, inactive, low stock, naya data, 🔔 alerts (tag request, search, login…), ⚙️ settings / users ke badlaav (audit), kaun online aaya, naya site version. Robot par click → last 24h ki unique history.</p>
+      <div class="form-grid mc-set">
+        <label class="check"><input type="checkbox" data-mcs="on" ${c.on ? 'checked' : ''}> 🤖 <b>Robot ON</b></label>
+        <label class="fld"><span>⏱ Har update / activity ke beech</span><select class="input" data-mcs="everySec">${opts.map(([v, l]) => `<option value="${v}" ${c.everySec === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="check"><input type="checkbox" data-mcs="sound" ${c.sound ? 'checked' : ''}> 🔊 <b>Bol kar sunao</b></label>
+        <label class="check"><input type="checkbox" data-mcs="roam" ${c.roam ? 'checked' : ''}> 🛸 <b>Idhar-udhar ghoomna</b></label>
+        <label class="check"><input type="checkbox" data-mcs="fun" ${c.fun ? 'checked' : ''}> 🕺 <b>Masti</b> — dance, moonwalk, jokes (jab nayi khabar na ho)</label>
+      </div>
+      <div class="btn-row"><button type="button" class="btn small" data-mcs-act="now">▶ Abhi update dikhao</button><button type="button" class="btn small ghost" data-mcs-act="hist">🕘 24h history</button><button type="button" class="btn small ghost" data-mcs-act="clear">🗑 History saaf</button><span class="dim small" id="mcs-msg"></span></div>`);
+  }
+  function bindMascot(body) {
+    if (!A.isAdmin()) return;
+    const ensure = async () => { if (!FF.mascot && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('mascot'); } catch { /* ignore */ } } return FF.mascot; };
+    const msg = (t) => { const m = U.$('#mcs-msg', body); if (m) m.textContent = t; };
+    U.$$('[data-mcs]', body).forEach((el) => el.addEventListener('change', async () => {
+      const M = await ensure(); if (!M) return msg('Robot load nahi hua — page refresh karo');
+      const k = el.dataset.mcs;
+      M.setCfg({ [k]: el.type === 'checkbox' ? el.checked : Number(el.value) });
+      msg('Saved ✓');
+    }));
+    U.$$('[data-mcs-act]', body).forEach((el) => el.addEventListener('click', async () => {
+      const M = await ensure(); if (!M) return msg('Robot load nahi hua — page refresh karo');
+      const a = el.dataset.mcsAct;
+      if (a === 'now') M.now(true); else if (a === 'hist') M.openHistory(); else if (a === 'clear') { M.clearHistory(); msg('History saaf ✓'); }
+    }));
+  }
   function soundTab() {
     const B = FF.officeBell;
     const p = B ? B.prefs() : { minTags: 1, ff: true, gv: true, ting: true, tone: 'classic', muteUntil: 0 };
@@ -2714,7 +2746,7 @@ FF.pages = FF.pages || {};
       history.replaceState(null, '', `#/settings?tab=${tab}`);
       if (tab === 'account') body.innerHTML = accountTab();
       else if (tab === 'diagnostics') body.innerHTML = diagnosticsTab();
-      else if (tab === 'sound') { body.innerHTML = soundTab(); bindSoundTab(body, draw); }
+      else if (tab === 'sound') { body.innerHTML = mascotSection() + soundTab(); bindSoundTab(body, draw); bindMascot(body); }
       else if (tab === 'brand') body.innerHTML = brandTab();
       else if (tab === 'sources') body.innerHTML = sourcesTab();
       else if (tab === 'access') { body.innerHTML = U.spinner('Access matrix…'); await accessTab(body); }

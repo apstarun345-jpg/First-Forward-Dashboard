@@ -14,7 +14,7 @@
   // ---------------------------------------------------------------- per-viewer settings
   const LS = 'ff_mascot_v1';
   const load = () => { try { return JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch { return {}; } };
-  const cfg = Object.assign({ on: true, sound: false, every: 5, idx: 0, seen: {}, snoozeDay: '' }, load());
+  const cfg = Object.assign({ on: true, sound: false, everySec: 10, idx: 0, seen: {}, snoozeDay: '' }, load());
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(cfg)); } catch { /* private mode */ } };
   const today = () => new Date().toISOString().slice(0, 10);
   // v3.125.122: robot ki chaal user ne khud maangi hai (aur ⚙ me band ho sakti hai) — OS ka reduced-motion ise nahi rokta
@@ -187,12 +187,12 @@
   const ago = (t) => { const m = Math.round((Date.now() - t) / 60e3); return m < 1 ? 'abhi' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60 ? (m % 60) + 'm' : ''}`.trim(); };
   function runQ(q) {
     if (!q) return;
-    try { if (q[0] === '#') location.hash = q; else if (FF.smartQ) FF.smartQ.open(q, /inactive/.test(q) ? 50 : 10); } catch { /* optional */ }
+    try { if (q === '@notif') { if (FF.app && FF.app.openNotifications) FF.app.openNotifications('center'); } else if (q[0] === '#') location.hash = q; else if (FF.smartQ) FF.smartQ.open(q, /inactive/.test(q) ? 50 : 10); } catch { /* optional */ }
   }
   function openAssistant() { const f = document.getElementById('ask-fab'); if (f) f.click(); }
 
   // ---------------------------------------------------------------- DOM — assistant ka hi robot (Gems) site par
-  let el = null, bot = null, board = null, stick = null, mode = 'dock', busy = false, timer = 0, wtimer = 0;
+  let el = null, bot = null, board = null, stick = null, mode = 'dock', busy = false, timer = 0;
   let current = null, hover = false, skip = null, pos = [0, 0], dragged = false;
   const root = document.documentElement;
   function build() {
@@ -265,13 +265,15 @@
     applyOn();
   }
   function applyOn() {
-    root.classList.toggle('mc-on', !!cfg.on);
-    if (el) el.hidden = !cfg.on;
+    const on = !!cfg.on && allowed(); // 👑 sirf admin
+    root.classList.toggle('mc-on', on);
+    if (el) el.hidden = !on;
   }
 
   function rowsHtml(it) {
     const rows = it.rows || [];
     const max = Math.max(1, ...rows.map((r) => r.w || 0));
+    if (it.view === 'text') return `<div class="mc-headline mc-textv"><span class="mc-type" data-text="${esc(it.head)}"></span></div>`;
     if (it.view === 'big') {
       return `<div class="mc-big"><b>${esc(it.big)}</b><span>${esc(it.head)}</span></div>`
         + (it.prog != null ? `<div class="mc-prog"><i style="width:${it.prog}%"></i></div>` : '')
@@ -281,15 +283,17 @@
       <li style="--d:${0.5 + i * 0.25}s">${it.view === 'bars' ? `<i class="mc-bar" style="--w:${Math.max(8, Math.round((r.w || 0) / max * 100))}%"></i>` : ''}
         <span class="mc-n">${esc(r.name)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><b class="mc-v ${r.tone || ''}">${esc(r.val)}</b></li>`).join('')}</ol>`;
   }
+  const EVERY = [[10, '10 sec'], [20, '20 sec'], [30, '30 sec'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']];
   const menuHtml = () => `
       <div class="mc-menu" hidden>
         <label>Naya update kitni der me
-          <select data-mc="every">${[2, 5, 10, 20].map((m) => `<option value="${m}"${Number(cfg.every) === m ? ' selected' : ''}>${m} min</option>`).join('')}</select></label>
+          <select data-mc="every">${EVERY.map(([v, l]) => `<option value="${v}"${(Number(cfg.everySec) || 10) === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
         <label>Idhar-udhar ghoomna <input type="checkbox" data-mc="roam"${cfg.roam !== false ? ' checked' : ''}></label>
+        <label>Masti (dance + jokes) <input type="checkbox" data-mc="fun"${cfg.fun !== false ? ' checked' : ''}></label>
         <button type="button" data-mc="home">🏠 Wapas kone me (default jagah)</button>
         <button type="button" data-mc="today">😴 Aaj ke liye updates band</button>
         <button type="button" data-mc="off">⛔ Robot band karo (purana 🎙 button)</button>
-        <small>Wapas chalu: Gems panel → 🤖</small>
+        <small>Wapas chalu: Settings → 🔔 Sound → 🤖 Robot dost (ya Gems panel → 🤖)</small>
       </div>`;
   function boardHtml(it) {
     return `<div class="mc-bh"><span class="mc-ic">${it.icon}</span><b>${esc(it.title)}</b></div>
@@ -336,8 +340,9 @@
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (!t || !t.closest || !t.closest('#ff-mascot')) return;
-    if (t.dataset.mc === 'every') { cfg.every = Number(t.value) || 5; save(); schedule(); }
+    if (t.dataset.mc === 'every') { cfg.everySec = Number(t.value) || 10; save(); schedule(); }
     if (t.dataset.mc === 'roam') { cfg.roam = !!t.checked; save(); }
+    if (t.dataset.mc === 'fun') { cfg.fun = !!t.checked; save(); }
   });
 
   // ---------------------------------------------------------------- voice
@@ -488,16 +493,16 @@
     const yLo = Math.min(g.maxY, g.minY + bh - g.W * 0.85 + 10);
     const rest = [goLeft ? 12 : g.vw - g.W - 12, Math.round(rnd(Math.min(yLo, g.maxY), g.maxY))];
     const style = pick(['arc', 'zigzag', 'loop', 'up', 'hop']);
-    await fly(path(pos, rest, style), 2400 + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
+    await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
     layoutBoard(g, goLeft ? 'right' : 'left');
     dance(it.mood);
     board.classList.add('in');
-    histAdd(it);
+    if (!it.fun) histAdd(it); // masti/jokes history me nahi
     await wait(350);
     let reason = '';
     const ended = new Promise((res) => { skip = (why) => { reason = why || 'skip'; res(); }; });
     const spoken = typewriter().then(() => say(it.say));
-    const minStay = wait(Math.max(9000, String(it.say || '').length * 70));
+    const minStay = wait(it.stay || Math.max(10000, String(it.say || '').length * 60)); // kam se kam 10 sec board
     const stay = (async () => { await Promise.all([spoken, minStay]); while (hover && !reason) await wait(500); })();
     await Promise.race([stay, ended]);
     skip = null; stopSpeech();
@@ -507,33 +512,152 @@
     await wait(250);
     await fly(path(pos, dockPos(), pick(['arc', 'hop'])), 1700);
     el.dataset.mood = ''; current = null; busy = false; hover = false; mode = 'dock';
-    if (reason !== 'next') dot(true); // history me naya hai
+    if (reason !== 'next' && !it.fun) dot(true); // history me naya hai
     return reason;
   }
 
-  // ---------------------------------------------------------------- idle: idhar-udhar ghoomna
-  async function wander() {
-    if (busy || mode !== 'dock' || blocked(true) || cfg.roam === false || reduced()) return;
-    busy = true;
-    const g = geo();
-    const spots = [[12, rnd(g.minY + 40, g.maxY)], [g.vw - g.W - 12, rnd(g.minY + 40, g.maxY)], [rnd(g.vw * 0.2, g.vw * 0.8), g.maxY], [rnd(g.vw * 0.3, g.vw * 0.7), g.minY + 10]];
-    const to = pick(spots);
-    el.dataset.mood = 'fly';
-    await fly(path(pos, to, pick(['arc', 'zigzag', 'hop', 'loop'])), 2600);
-    const mood = pick(['curious', 'happy', 'info', 'wave']);
-    dance(mood === 'wave' ? 'happy' : mood, 3600);
-    await wait(rnd(4500, 7500));
-    if (!current) { el.dataset.mood = 'fly'; el.classList.remove('rest'); await fly(path(pos, dockPos(), 'arc'), 2000); el.dataset.mood = ''; }
-    busy = false;
+  // ---------------------------------------------------------------- 📡 site ki har khabar (admin feeds)
+  //  🔔 notifications (tag requests, search, login, anomaly…) · ⚙️ audit (settings / users / links…) ·
+  //  👀 kaun online hai · 🆕 site version — har naya item ek baar board par, history me bhi.
+  const AUDIT_TXT = {
+    settings_update: '⚙️ Settings badli', user_create: '👤 Naya user bana', user_update: '👤 User update hua', user_delete: '🗑 User hata',
+    password_changed: '🔑 Password badla', announcement: '📣 Announcement', backup_export: '💾 Backup export', email_test: '✉️ Test email',
+    link_assign: '🔗 Link assign', link_create: '🔗 Naya link', link_revoke: '⛔ Link revoke', link_toggle: '🔗 Link on/off', link_update: '🔗 Link update',
+    live_assist_accept: '🤝 Live assist accept', live_assist_decline: '🙅 Live assist decline', live_assist_end: '🤝 Live assist khatam', live_assist_request: '🆘 Live assist request',
+    public_tag_form_config: '📝 Tag form config', saved_view_created: '⭐ Saved view bana', saved_view_deleted: '🗑 Saved view hata',
+    tag_request_bulk_status: '🏷 Tag requests bulk status', tag_request_created: '🏷 Naya tag request', tag_request_deleted: '🗑 Tag request delete',
+    tag_request_recovered: '♻️ Tag request wapas', tag_request_updated: '🏷 Tag request update', tag_sheet_config: '📄 Tag sheet config', tag_sheet_push: '📤 Tag sheet push'
+  };
+  const emo = (s) => { const m = String(s || '').match(/^\s*(\p{Extended_Pictographic}️?)/u); return m ? m[1] : ''; };
+  const noEmo = (s) => String(s || '').replace(/^\s*\p{Extended_Pictographic}️?\s*/u, '');
+  const clip = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+  const tm = (iso) => { const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : ''; };
+  const queued = new Set();
+  function enqueue(it) { if (!it || queued.has(it.id)) return; queued.add(it.id); prio.push(it); if (prio.length > 40) prio.splice(0, prio.length - 40); }
+  const api = (p) => (FF.auth && FF.auth.api ? FF.auth.api(p) : Promise.reject(new Error('no api')));
+  const firstRun = (k) => !cfg[k];
+  async function pollFeeds() {
+    if (!allowed() || !cfg.on || document.hidden) return;
+    const cutoff = Date.now() - 30 * 60e3; // pehli baar: sirf pichle 30 min ka
+    // 🔔 notifications
+    try {
+      const r = await api('/api/notifications');
+      const last = Date.parse(cfg.lastNotif || '') || 0;
+      const fresh = (r && r.items || []).filter((x) => { const t = Date.parse(x.createdAt) || 0; return t > last && (last || t > cutoff); })
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+      const top = (r && r.items || []).reduce((m, x) => Math.max(m, Date.parse(x.createdAt) || 0), last);
+      if (top) cfg.lastNotif = new Date(top).toISOString();
+      (firstRun('notifInit') ? fresh.slice(-3) : fresh).forEach((x) => {
+        const ic = emo(x.title) || '🔔';
+        const link = x.meta && x.meta.link ? String(x.meta.link) : '';
+        enqueue({
+          id: `n:${x.id}`, key: `notif:${x.id}`, mood: /delete|fail|error|alert|drop|girawat|⚠|❌|🚨/i.test(x.title + x.type) ? 'alert' : x.type === 'search' ? 'curious' : 'excited',
+          icon: ic, title: clip(noEmo(x.title), 46) || 'Naya alert', head: clip(x.body || x.title, 160), view: 'text', foot: `🔔 ${tm(x.createdAt)}`,
+          say: clip(`${noEmo(x.title)}. ${x.body || ''}`, 220), q: link && link[0] === '#' ? link : '@notif', fast: true
+        });
+      });
+      cfg.notifInit = 1;
+    } catch { /* login nahi */ }
+    // ⚙️ audit (admin)
+    try {
+      const r = await api('/api/audit');
+      const last = Date.parse(cfg.lastAudit || '') || 0;
+      const fresh = (r && r.entries || []).filter((x) => { const t = Date.parse(x.at) || 0; return t > last && (last || t > cutoff); })
+        .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+      const top = (r && r.entries || []).reduce((m, x) => Math.max(m, Date.parse(x.at) || 0), last);
+      if (top) cfg.lastAudit = new Date(top).toISOString();
+      (firstRun('auditInit') ? fresh.slice(-3) : fresh).forEach((x) => {
+        const lbl = AUDIT_TXT[x.action] || `⚙️ ${String(x.action || 'change').replace(/_/g, ' ')}`;
+        enqueue({
+          id: `a:${x.at}:${x.action}:${x.target}`, key: `audit:${x.at}:${x.action}`, mood: /delete|revoke|decline/.test(x.action) ? 'alert' : 'info',
+          icon: emo(lbl) || '⚙️', title: noEmo(lbl), head: clip(`${x.actor || 'koi'} ne ${x.target ? `"${x.target}" ` : ''}${noEmo(lbl).toLowerCase()}${x.note ? ` — ${x.note}` : ''}`, 160),
+          view: 'text', foot: `📜 Audit · ${tm(x.at)}`, say: clip(`${x.actor || 'Kisi'} ne ${noEmo(lbl)}. ${x.note || ''}`, 200), q: '#/settings?tab=audit', fast: true
+        });
+      });
+      cfg.auditInit = 1;
+    } catch { /* admin nahi */ }
+    // 👀 online log (sirf jab list badle)
+    try {
+      const r = await api('/api/presence');
+      const on = (r && r.people || []).filter((x) => x.active).map((x) => x.name || x.username).filter(Boolean);
+      const me = FF.auth && FF.auth.user ? (FF.auth.user.name || FF.auth.user.username) : '';
+      const others = on.filter((n) => n !== me);
+      const sig = others.slice().sort().join('|');
+      if (sig !== (cfg.onlineSig || '')) {
+        const prev = new Set(String(cfg.onlineSig || '').split('|').filter(Boolean));
+        const joined = others.filter((n) => !prev.has(n));
+        cfg.onlineSig = sig;
+        if (joined.length) {
+          enqueue({
+            id: `p:${sig}:${Date.now()}`, key: `online:${sig}`, mood: 'happy', icon: '👀', title: 'Site par kaun aaya', view: 'list',
+            head: `${joined.slice(0, 2).join(', ')}${joined.length > 2 ? ` +${joined.length - 2}` : ''} abhi online aaye`,
+            rows: others.slice(0, 5).map((n) => ({ name: n, sub: joined.includes(n) ? 'abhi aaye' : 'pehle se online', val: '🟢', tone: 'chip' })),
+            foot: `Total online: ${others.length}`, say: `${joined.slice(0, 3).join(', ')} abhi site par aaye hain.`, q: '#/settings?tab=users', fast: true
+          });
+        }
+      }
+    } catch { /* admin only */ }
+    // 🆕 site version
+    try {
+      const r = await api('/api/version');
+      const v = r && r.version ? String(r.version) : '';
+      if (v && cfg.lastVer && v !== cfg.lastVer) {
+        enqueue({ id: `v:${v}`, key: `ver:${v}`, mood: 'excited', icon: '🚀', title: 'Site update aaya!', head: `Naya version live: ${v.replace(/^apnapayment-/, '')} — page refresh karo to naye features milenge`, view: 'text', say: 'Site ka naya version aa gaya hai. Ek baar refresh kar lo.', q: '', fast: true });
+      }
+      if (v) cfg.lastVer = v;
+    } catch { /* ignore */ }
+    save();
   }
-  function scheduleWander() {
-    clearTimeout(wtimer);
-    wtimer = setTimeout(async () => { await wander(); scheduleWander(); }, rnd(35e3, 70e3));
+
+  // ---------------------------------------------------------------- 🎭 masti: jab koi nayi khabar nahi
+  const JOKES = [
+    ['🤖', 'Robot ka sach', 'Main kabhi chhutti nahi leta… kyunki mujhe leave form bharna hi nahi aata 😅'],
+    ['🏷', 'FASTag gyaan', 'Toll par sabse fast kaun? FASTag wala… aur dashboard par? Main! 🏎️'],
+    ['📈', 'Motivation', 'Growth graph aur gym — dono me roz thoda upar jaana padta hai 💪'],
+    ['☕', 'Chai break?', 'Data load ho raha hai… tab tak ek chai ho jaye? Main battery charge kar leta hoon 🔋'],
+    ['🕺', 'Dance time', 'Jab VC4 badhta hai, main aise naachta hoon! Dekho dekho 🎶'],
+    ['🧮', 'Robot maths', 'Ek agent + ek call = do guna tag. Ye formula maine khud banaya 🤓'],
+    ['😴', 'Inactive agents ke liye', 'Neend achhi cheez hai… par mahine ke end me nahi! ⏰'],
+    ['🎯', 'Target', 'Target door lag raha hai? Main to roz udd ke jaata hoon, aap bhi chalo! 🚀'],
+    ['📦', 'Stock tip', 'Stock khatam hone se pehle dispatch — warna main udaas ho jaata hoon 🥺'],
+    ['🦾', 'Tarun sir ke liye', 'Boss online hai — sab log seedhe baith jao! 😎']
+  ];
+  function joke() {
+    const i = (Number(cfg.jk) || 0) % JOKES.length; cfg.jk = i + 1; save();
+    const [icon, title, head] = JOKES[i];
+    return { key: `joke:${i}`, mood: 'happy', icon, title, head, view: 'text', fun: true, stay: 6500, say: head.replace(/\p{Extended_Pictographic}/gu, '') };
+  }
+  const DANCE = ['disco', 'moonwalk', 'spinjump', 'peek', 'nap', 'robot', 'wave'];
+  async function funAct() {
+    const g = geo();
+    const a = DANCE[(Number(cfg.dn) || 0) % DANCE.length]; cfg.dn = (Number(cfg.dn) || 0) + 1; save();
+    busy = true; mode = 'fun';
+    const go = async (to, style, ms) => { el.dataset.mood = 'fly'; el.classList.remove('rest'); await fly(path(pos, to, style), ms || 2200); };
+    const home = async () => { await go(dockPos(), 'arc', 1800); };
+    const act = async (cls, ms, mood) => { el.dataset.mood = mood || 'happy'; el.classList.add('rest', cls); confetti(mood || 'happy'); await wait(ms); el.classList.remove(cls); };
+    try {
+      if (a === 'disco') { await go([rnd(g.vw * 0.25, g.vw * 0.7), g.maxY], 'loop', 2600); await act('mc-disco', 4200, 'excited'); }
+      else if (a === 'moonwalk') {
+        const y = g.maxY, left = pos[0] > g.vw / 2;
+        await go([left ? g.vw - g.W - 20 : 20, y], 'hop', 1600);
+        el.classList.add('rest', 'mc-moon'); el.dataset.mood = 'happy';
+        await fly([pos, [left ? g.vw * 0.35 : g.vw * 0.6, y]], 3800); el.classList.remove('mc-moon');
+      } else if (a === 'spinjump') { await go([rnd(g.vw * 0.2, g.vw * 0.8), rnd(g.minY + 80, g.maxY)], 'zigzag', 2400); await act('mc-spin', 2600, 'excited'); }
+      else if (a === 'peek') {
+        const right = Math.random() < 0.5, y = rnd(g.minY + 60, g.maxY);
+        await go([right ? g.vw - g.W * 0.45 : -g.W * 0.55, y], 'arc', 2200);
+        await act(right ? 'mc-peek-r' : 'mc-peek-l', 3600, 'curious');
+      } else if (a === 'nap') { await act('mc-nap', 4200, 'sleepy'); el.dataset.mood = 'alert'; confetti('alert'); await act('mc-startle', 900, 'alert'); }
+      else if (a === 'robot') { await go([rnd(g.vw * 0.3, g.vw * 0.7), rnd(g.minY + 80, g.maxY)], 'up', 2600); await act('mc-robot', 4000, 'happy'); }
+      else { await act('mc-wave', 2600, 'happy'); }
+      if (a !== 'nap' && a !== 'wave') await home();
+    } finally { el.classList.remove('rest'); el.dataset.mood = ''; busy = false; mode = 'dock'; }
   }
 
   // ---------------------------------------------------------------- scheduler
+  function allowed() { try { return !!(FF.auth && FF.auth.isAdmin && FF.auth.isAdmin()); } catch { return false; } }
   function blocked(soft) {
-    if (!cfg.on) return true;
+    if (!cfg.on || !allowed()) return true;
     if (!soft && cfg.snoozeDay === today()) return true;
     if (document.hidden) return true;
     if (document.body.classList.contains('no-scroll')) return true; // modal/drawer khula hai
@@ -544,7 +668,6 @@
   function nextItem(force) {
     if (prio.length) return prio.shift();
     const list = insights();
-    if (!list.length) return null;
     // jo baat pichle 3 ghante me bata chuka (same numbers) wo dobara nahi
     for (let k = 0; k < list.length; k++) {
       const i = ((Number(cfg.idx) || 0) + k) % list.length;
@@ -552,23 +675,33 @@
     }
     return null;
   }
+  const gapMs = () => Math.max(10, Number(cfg.everySec) || 10) * 1e3;
   function schedule(ms) {
     clearTimeout(timer);
-    timer = setTimeout(tick, ms == null ? Math.max(1, Number(cfg.every) || 5) * 60e3 : ms);
+    timer = setTimeout(tick, ms == null ? gapMs() : ms);
   }
+  let funTurn = 0, lastUpd = 0;
   async function tick(force) {
-    if (busy || mode === 'hist') return schedule(30e3);
-    if (!force && blocked()) return schedule(45e3);
+    applyOn();
+    if (busy || mode === 'hist') return schedule(4e3);
+    if (!force && blocked()) return schedule(15e3);
     if (!FF.smartQ && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('smartQ'); } catch { /* optional */ } }
-    const it = nextItem(force);
-    if (!it) { if (force) dance('curious', 2000); return schedule(force ? undefined : 60e3); }
-    const why = await show(it);
-    schedule(why === 'next' ? 600 : undefined);
+    // update ka time (default 10 sec) ho gaya → agli khabar; beech ka time masti me, kabhi khaali khada nahi
+    const due = force || Date.now() - lastUpd >= gapMs();
+    const it = due ? nextItem(force) : null;
+    if (it) { const why = await show(it); lastUpd = Date.now(); return schedule(why === 'next' ? 600 : 1500); }
+    if (cfg.fun !== false) {
+      funTurn += 1;
+      if (funTurn % 4 === 0) await show(joke()); else await funAct();
+      return schedule(1500);
+    }
+    if (cfg.roam !== false) { await funAct(); return schedule(4000); }
+    schedule();
   }
 
-  // ---------------------------------------------------------------- public
+  // ---------------------------------------------------------------- public (Settings → 🔔 Sound → 🤖 Robot dost)
   function now(force) {
-    if (busy) return;
+    if (busy || !allowed()) return;
     cfg.on = true; cfg.snoozeDay = ''; save(); build(); applyOn();
     clearTimeout(timer); tick(force !== false);
   }
@@ -577,15 +710,32 @@
     if (cfg.on) schedule(1500); else if (skip) skip();
     return cfg.on;
   }
-  FF.mascot = { now, toggle, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights };
+  function setCfg(o) {
+    Object.assign(cfg, o || {});
+    if (o && 'on' in o && o.on) cfg.snoozeDay = '';
+    save(); build(); applyOn();
+    if (!cfg.on && skip) skip();
+    if (o && ('everySec' in o || 'on' in o)) schedule(1500);
+    return getCfg();
+  }
+  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false });
+  function clearHistory() { histSave([]); dot(false); }
+  FF.mascot = { now, toggle, setCfg, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
-    build();
-    schedule(25e3);
-    scheduleWander();
-    setTimeout(checkVersions, 15e3);
-    setInterval(checkVersions, 10 * 60e3);
-    window.addEventListener('ff:data-fresh', () => setTimeout(checkVersions, 3000));
+    // sirf admin ko — login/auth ready hone tak check karte raho
+    let tries = 0;
+    const boot = () => {
+      if (!allowed()) { applyOn(); if (++tries < 90) setTimeout(boot, 2000); return; }
+      build();
+      schedule(6e3);
+      setTimeout(checkVersions, 12e3);
+      setInterval(checkVersions, 10 * 60e3);
+      setTimeout(pollFeeds, 4e3);
+      setInterval(pollFeeds, 30e3);
+      window.addEventListener('ff:data-fresh', () => setTimeout(checkVersions, 3000));
+    };
+    boot();
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })(window.FF);

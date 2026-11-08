@@ -1246,7 +1246,7 @@ window.FF = window.FF || {};
         <button class="ask-ico" data-act="voice" title="🎛 Voice Studio — default voices / meri awaaz">🎛️</button>
         <button class="ask-ico${convMode ? ' on' : ''}" data-act="conv" title="${convMode ? '🎧 Hands-free ON — jawab ke baad khud sunta hai' : '🎧 Hands-free mode chalu karo (Alexa-style)'}">🎧</button>
         <button class="ask-ico" data-act="speak" title="Jawab bol kar sunao (on/off)">🔊</button>
-        <button class="ask-ico" data-act="mascot" title="🤖 Robot dost — abhi update dikhao (site par ghoom kar board par batata hai)">🤖</button>
+        ${FF.auth && FF.auth.isAdmin && FF.auth.isAdmin() ? '<button class="ask-ico" data-act="mascot" title="🤖 Robot dost — abhi update dikhao (sirf admin)">🤖</button>' : ''}
         <button class="ask-ico" data-act="close" title="Band karo">✕</button></div>
       <div class="ask-log" aria-live="polite"></div>
       <div class="ask-chips">${(CHIP_Q[lang] || CHIP_Q.hi).map(([q, label]) => `<button data-q="${esc(q)}">${esc(label)}</button>`).join('')}</div>
@@ -1270,7 +1270,7 @@ window.FF = window.FF || {};
     wrap.querySelector('[data-act="close"]').addEventListener('click', () => { wrap.hidden = true; });
     wrap.querySelector('[data-act="lang"]').addEventListener('click', () => setLang(lang === 'en' ? 'hi' : 'en'));
     wrap.querySelector('[data-act="voice"]').addEventListener('click', () => openVoiceStudio());
-    wrap.querySelector('[data-act="mascot"]').addEventListener('click', async () => {
+    wrap.querySelector('[data-act="mascot"]')?.addEventListener('click', async () => {
       wrap.hidden = true;
       try { if (!FF.mascot && FF.lazy && FF.lazy.inject) await FF.lazy.inject('mascot'); } catch { /* optional */ }
       if (FF.mascot) FF.mascot.now();

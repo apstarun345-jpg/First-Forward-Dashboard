@@ -7712,3 +7712,28 @@ html.mc-on #ask-fab { display: none !important; }
 .mc-menu input[type="checkbox"] { width: 16px; height: 16px; }
 @media print { html.mc-on #ask-fab { display: none !important; } }
 .mc-board:not(.in) { pointer-events: none; visibility: hidden; transition: transform .45s cubic-bezier(.3, 1.6, .5, 1), opacity .25s, visibility 0s .3s; }
+/* ===== 🎭 v3.125.123 — robot ki masti: disco, moonwalk, spin-jump, peek, nap, robot-dance, wave ===== */
+.mc-textv { font-weight: 600; font-size: 13px; line-height: 1.45; margin: 2px 0 4px; }
+.mc.rest.mc-disco .mc-bot { animation: mcDance .45s ease-in-out infinite, mcHue 1.2s linear infinite; }
+.mc.rest.mc-disco .mc-headwrap { animation: mcBop .22s ease-in-out infinite alternate; }
+.mc.mc-disco .mc-glow { background: radial-gradient(closest-side, rgba(236, 72, 153, .9), rgba(99, 102, 241, .4) 60%, transparent); height: 30%; animation-duration: .18s; }
+@keyframes mcHue { from { filter: hue-rotate(0) saturate(1.6); } to { filter: hue-rotate(360deg) saturate(1.6); } }
+.mc.mc-moon .mc-bot { animation: mcShuffle .5s ease-in-out infinite !important; }
+@keyframes mcShuffle { 0%, 100% { transform: scaleX(-1) translateY(0) rotate(-4deg); } 50% { transform: scaleX(-1) translateY(-5px) rotate(4deg); } }
+.mc.rest.mc-spin .mc-bot { animation: mcSpinJump 1.3s cubic-bezier(.3, 1.4, .5, 1) 2; }
+@keyframes mcSpinJump { 0% { transform: translateY(0) rotate(0); } 40% { transform: translateY(-70px) rotate(200deg) scale(1.1); } 70% { transform: translateY(-40px) rotate(360deg); } 85% { transform: translateY(4px) scaleY(.88); } 100% { transform: none; } }
+.mc.rest.mc-peek-r .mc-bot { animation: mcPeekR 1.8s ease-in-out 2; } .mc.rest.mc-peek-l .mc-bot { animation: mcPeekL 1.8s ease-in-out 2; }
+@keyframes mcPeekR { 0%, 100% { transform: rotate(0) translateX(0); } 40%, 60% { transform: rotate(-18deg) translateX(-14px); } }
+@keyframes mcPeekL { 0%, 100% { transform: rotate(0) translateX(0); } 40%, 60% { transform: rotate(18deg) translateX(14px); } }
+.mc.rest.mc-nap .mc-bot { animation: mcSway 2.2s ease-in-out infinite; }
+.mc.rest.mc-nap .mc-headwrap { animation: mcNod 1.4s ease-in-out infinite; }
+.mc.rest.mc-nap .mc-lid { animation: none; transform: scaleY(1); }
+.mc.rest.mc-startle .mc-bot { animation: mcStartle .9s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes mcStartle { 0% { transform: none; } 30% { transform: translateY(-34px) scale(1.12); } 100% { transform: none; } }
+.mc.rest.mc-robot .mc-bot { animation: mcRobo 1s steps(4) infinite; }
+.mc.rest.mc-robot .mc-headwrap { animation: mcRoboHead 1s steps(2) infinite; }
+@keyframes mcRobo { 0% { transform: translateX(0) rotate(0); } 25% { transform: translateX(-8px) rotate(-6deg); } 50% { transform: translateX(0) rotate(0) translateY(-6px); } 75% { transform: translateX(8px) rotate(6deg); } }
+@keyframes mcRoboHead { 0% { transform: rotate(-12deg); } 100% { transform: rotate(12deg); } }
+.mc.rest.mc-wave .mc-bot { animation: mcWave .35s ease-in-out infinite alternate; }
+@keyframes mcWave { from { transform: rotate(-10deg); } to { transform: rotate(10deg) translateY(-4px); } }
+.mc-set .form-grid { margin-top: 6px; }
