@@ -7737,3 +7737,69 @@ html.mc-on #ask-fab { display: none !important; }
 .mc.rest.mc-wave .mc-bot { animation: mcWave .35s ease-in-out infinite alternate; }
 @keyframes mcWave { from { transform: rotate(-10deg); } to { transform: rotate(10deg) translateY(-4px); } }
 .mc-set .form-grid { margin-top: 6px; }
+/* ===== 🤖 v3.125.124 — robot ke haath, aankhen, munh (alag parts) + pop-out window ===== */
+.mc-arm { position: absolute; z-index: 1; top: calc(var(--w) * .8064); width: calc(var(--w) * .196); height: calc(var(--w) * .292); pointer-events: none; transition: transform .35s cubic-bezier(.3, 1.4, .5, 1); }
+.mc-arm img { display: block; width: 100%; height: 100%; filter: drop-shadow(0 3px 4px rgba(15, 23, 42, .22)); }
+.mc-arm.l { left: calc(var(--w) * .006); transform-origin: 70% 8%; animation: mcArmIdleL 3.2s ease-in-out infinite; }
+.mc-arm.r { left: calc(var(--w) * .798); transform-origin: 30% 8%; animation: mcArmIdleR 3.2s ease-in-out infinite; }
+.mc-body { z-index: 0; }
+@keyframes mcArmIdleL { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(7deg); } }
+@keyframes mcArmIdleR { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-7deg); } }
+/* udte waqt haath peeche */
+.mc.moving .mc-arm.l { animation: none; transform: rotate(28deg); } .mc.moving .mc-arm.r { animation: none; transform: rotate(-28deg); }
+/* dance: haath upar-neeche */
+.mc.rest[data-mood="happy"] .mc-arm.l, .mc.rest[data-mood="excited"] .mc-arm.l, .mc.mc-disco .mc-arm.l, .mc.mc-robot .mc-arm.l, .mc.mc-moon .mc-arm.l { animation: mcArmDanceL .42s ease-in-out infinite alternate; }
+.mc.rest[data-mood="happy"] .mc-arm.r, .mc.rest[data-mood="excited"] .mc-arm.r, .mc.mc-disco .mc-arm.r, .mc.mc-robot .mc-arm.r, .mc.mc-moon .mc-arm.r { animation: mcArmDanceR .42s ease-in-out .21s infinite alternate; }
+@keyframes mcArmDanceL { from { transform: rotate(15deg); } to { transform: rotate(125deg); } }
+@keyframes mcArmDanceR { from { transform: rotate(-15deg); } to { transform: rotate(-125deg); } }
+.mc.mc-robot .mc-arm.l { animation-timing-function: steps(3); } .mc.mc-robot .mc-arm.r { animation-timing-function: steps(3); }
+/* 👋 hi: right haath upar hila */
+.mc.mc-wave .mc-arm.r, .mc.greet .mc-arm.r { animation: mcArmWave .26s ease-in-out infinite alternate !important; }
+@keyframes mcArmWave { from { transform: rotate(-135deg); } to { transform: rotate(-175deg); } }
+/* 😂 hasna: pet pakad ke hilna */
+.mc.rest[data-mood="laugh"] .mc-bot { animation: mcLaughBody .16s ease-in-out infinite alternate; }
+.mc.rest[data-mood="laugh"] .mc-arm.l { animation: mcLaughArmL .16s ease-in-out infinite alternate; }
+.mc.rest[data-mood="laugh"] .mc-arm.r { animation: mcLaughArmR .16s ease-in-out infinite alternate; }
+@keyframes mcLaughBody { from { transform: translateY(0) rotate(-2deg); } to { transform: translateY(-3px) rotate(2deg); } }
+@keyframes mcLaughArmL { from { transform: rotate(-18deg); } to { transform: rotate(-30deg); } }
+@keyframes mcLaughArmR { from { transform: rotate(18deg); } to { transform: rotate(30deg); } }
+/* 😢 udaas: haath latke */
+.mc.rest[data-mood="sad"] .mc-arm.l, .mc.rest[data-mood="sleepy"] .mc-arm.l { animation: none; transform: rotate(-8deg); }
+.mc.rest[data-mood="sad"] .mc-arm.r, .mc.rest[data-mood="sleepy"] .mc-arm.r { animation: none; transform: rotate(8deg); }
+/* ⚠️ alert: haath hila ke ishaara */
+.mc.rest[data-mood="alert"] .mc-arm.r { animation: mcArmPoint .3s ease-in-out infinite alternate; }
+@keyframes mcArmPoint { from { transform: rotate(-70deg); } to { transform: rotate(-95deg); } }
+/* 🪧 board pakda hua haath (board ki taraf) — baaki mood se upar */
+.mc.holding[data-side="right"] .mc-arm.r { animation: mcHoldR 2.4s ease-in-out infinite !important; }
+.mc.holding[data-side="left"] .mc-arm.l { animation: mcHoldL 2.4s ease-in-out infinite !important; }
+@keyframes mcHoldR { 0%, 100% { transform: rotate(-60deg); } 50% { transform: rotate(-66deg); } }
+@keyframes mcHoldL { 0%, 100% { transform: rotate(60deg); } 50% { transform: rotate(66deg); } }
+/* 👀 aankhen — asli aankhon ke upar apni (blink, idhar-udhar dekhna, mood) */
+.mc-eye { position: absolute; top: 46%; width: 13.5%; height: 17%; background: #1b3a4f; border-radius: 45%; box-shadow: 0 0 2px 2px #1b3a4f; z-index: 1; }
+.mc-eye.l { left: 27.2%; } .mc-eye.r { left: 58.6%; }
+.mc-eye b { position: absolute; left: 10%; right: 10%; top: 28%; height: 72%; border: calc(var(--w) * .03) solid #7ee8fa; border-bottom: 0; border-radius: 50% 50% 0 0 / 80% 80% 0 0; box-shadow: 0 -1px 6px rgba(103, 232, 249, .75), inset 0 1px 4px rgba(103, 232, 249, .4); transform-origin: 50% 80%; animation: mcEyeBlink 3.6s infinite, mcEyeLook 8s ease-in-out infinite; }
+@keyframes mcEyeBlink { 0%, 90%, 100% { transform: scaleY(1); } 93%, 95% { transform: scaleY(.08); } }
+@keyframes mcEyeLook { 0%, 30%, 100% { translate: 0 0; } 38%, 50% { translate: -22% 0; } 58%, 70% { translate: 22% 0; } 78% { translate: 0 -8%; } }
+.mc.rest[data-mood="happy"] .mc-eye b, .mc.rest[data-mood="excited"] .mc-eye b, .mc.rest[data-mood="laugh"] .mc-eye b { scale: 1.05 .75; translate: 0 -6%; animation: mcEyeBlink 2.2s infinite; }
+.mc.rest[data-mood="sad"] .mc-eye.l b { rotate: -22deg; translate: 0 18%; animation: mcEyeBlink 4s infinite; }
+.mc.rest[data-mood="sad"] .mc-eye.r b { rotate: 22deg; translate: 0 18%; animation: mcEyeBlink 4s infinite; }
+.mc.rest[data-mood="sleepy"] .mc-eye b, .mc.mc-nap .mc-eye b { scale: 1 .12; translate: 0 30%; animation: none; }
+.mc.rest[data-mood="curious"] .mc-eye.l b { scale: 1.25; animation: mcEyeLook 2.4s ease-in-out infinite; } .mc.rest[data-mood="curious"] .mc-eye.r b { animation: mcEyeLook 2.4s ease-in-out infinite; }
+.mc.rest[data-mood="alert"] .mc-eye b { scale: 1.25 1.15; animation: mcEyeBlink 1.6s infinite; }
+.mc.mc-startle .mc-eye b { scale: 1.4; animation: none; }
+/* 👄 munh — muskaan, bolna, hasna, udaas */
+.mc-mouth { position: absolute; left: 42.5%; top: 69%; width: 15%; height: 13%; background: #1b3a4f; border-radius: 40%; box-shadow: 0 0 2px 2px #1b3a4f; transform: none !important; animation: none !important; z-index: 1; }
+.mc-mouth b { position: absolute; left: 14%; right: 14%; top: 4%; height: 62%; border: calc(var(--w) * .022) solid #7ee8fa; border-top: 0; border-radius: 0 0 50% 50% / 0 0 100% 100%; box-shadow: 0 2px 5px rgba(103, 232, 249, .55); transform-origin: 50% 0; }
+.mc.talk .mc-mouth b, .mc[data-astate="speaking"] .mc-mouth b { border: 0; background: #7ee8fa; border-radius: 45%; top: 12%; height: 72%; animation: mcTalk2 .19s ease-in-out infinite alternate; }
+@keyframes mcTalk2 { from { scale: .8 .25; } to { scale: 1 1; } }
+.mc.rest[data-mood="happy"]:not(.talk) .mc-mouth b, .mc.rest[data-mood="excited"]:not(.talk) .mc-mouth b, .mc.mc-disco .mc-mouth b { border: 0; background: #7ee8fa; height: 78%; border-radius: 0 0 50% 50% / 0 0 100% 100%; }
+.mc.rest[data-mood="laugh"] .mc-mouth b { border: 0; background: #7ee8fa; height: 88%; border-radius: 10% 10% 50% 50% / 10% 10% 100% 100%; animation: mcLaughMouth .16s ease-in-out infinite alternate; }
+@keyframes mcLaughMouth { from { scale: 1 .7; } to { scale: 1.1 1.05; } }
+.mc.rest[data-mood="sad"] .mc-mouth b { border-top: calc(var(--w) * .022) solid #7ee8fa; border-bottom: 0; border-radius: 50% 50% 0 0 / 100% 100% 0 0; top: 40%; box-shadow: none; }
+.mc.rest[data-mood="alert"] .mc-mouth b, .mc.mc-startle .mc-mouth b { border: calc(var(--w) * .022) solid #7ee8fa; border-radius: 50%; left: 30%; right: 30%; top: 10%; height: 75%; }
+.mc.mc-nap .mc-mouth b { left: 30%; right: 30%; border-width: 0 0 calc(var(--w) * .02) 0; border-radius: 0; height: 40%; }
+/* 📌 pop-out (Picture-in-Picture) window */
+html.mc-pip, html.mc-pip body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(120% 90% at 80% 100%, #ede9fe, #f8fafc 60%); }
+html.mc-pip .mc { z-index: 1; }
+html.mc-pip .mc-tip { position: fixed; left: 10px; top: 8px; right: 10px; font: 600 11px system-ui, sans-serif; color: #6d28d9; opacity: .8; }
+.mc-ctl .mc-pill.pip { background: linear-gradient(110deg, #0ea5e9, #6366f1); }

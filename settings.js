@@ -801,7 +801,7 @@ FF.pages = FF.pages || {};
     const M = FF.mascot;
     const c = M ? M.getCfg() : { on: true, sound: false, everySec: 10, roam: true, fun: true };
     const opts = [[10, '10 sec'], [20, '20 sec'], [30, '30 sec'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']];
-    return section('🤖 Robot dost (sirf admin ko dikhta hai)', `<p class="dim small">Gems robot site par ghoomta, naachta aur board par <b>site ki har khabar</b> batata hai — agents/TL growth &amp; de-growth, inactive, low stock, naya data, 🔔 alerts (tag request, search, login…), ⚙️ settings / users ke badlaav (audit), kaun online aaya, naya site version. Robot par click → last 24h ki unique history.</p>
+    return section('🤖 Robot dost (sirf admin ko dikhta hai)', `<p class="dim small">Gems robot site par ghoomta, naachta aur board par <b>site ki har khabar</b> batata hai — agents/TL growth &amp; de-growth, inactive, low stock, naya data, 🔔 alerts (tag request, search, login…), ⚙️ settings / users ke badlaav (audit), kaun online aaya, naya site version. Robot par click → last 24h ki unique history. <b>📌 Har tab / WhatsApp par</b> dabao to robot ek chhoti window me aa jaata hai jo Chrome ke dusre tab, WhatsApp ya kisi bhi app ke upar rehti hai (Chrome/Edge computer).</p>
       <div class="form-grid mc-set">
         <label class="check"><input type="checkbox" data-mcs="on" ${c.on ? 'checked' : ''}> 🤖 <b>Robot ON</b></label>
         <label class="fld"><span>⏱ Har update / activity ke beech</span><select class="input" data-mcs="everySec">${opts.map(([v, l]) => `<option value="${v}" ${c.everySec === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -809,7 +809,7 @@ FF.pages = FF.pages || {};
         <label class="check"><input type="checkbox" data-mcs="roam" ${c.roam ? 'checked' : ''}> 🛸 <b>Idhar-udhar ghoomna</b></label>
         <label class="check"><input type="checkbox" data-mcs="fun" ${c.fun ? 'checked' : ''}> 🕺 <b>Masti</b> — dance, moonwalk, jokes (jab nayi khabar na ho)</label>
       </div>
-      <div class="btn-row"><button type="button" class="btn small" data-mcs-act="now">▶ Abhi update dikhao</button><button type="button" class="btn small ghost" data-mcs-act="hist">🕘 24h history</button><button type="button" class="btn small ghost" data-mcs-act="clear">🗑 History saaf</button><span class="dim small" id="mcs-msg"></span></div>`);
+      <div class="btn-row"><button type="button" class="btn small" data-mcs-act="now">▶ Abhi update dikhao</button><button type="button" class="btn small ghost" data-mcs-act="hist">🕘 24h history</button><button type="button" class="btn small ghost" data-mcs-act="clear">🗑 History saaf</button>${'documentPictureInPicture' in window ? '<button type="button" class="btn small" data-mcs-act="pop" title="Chhoti always-on-top window — Chrome ke dusre tab, WhatsApp ya kisi bhi app ke upar robot">📌 Har tab / WhatsApp par robot</button>' : ''}<span class="dim small" id="mcs-msg"></span></div>`);
   }
   function bindMascot(body) {
     if (!A.isAdmin()) return;
@@ -824,6 +824,7 @@ FF.pages = FF.pages || {};
     U.$$('[data-mcs-act]', body).forEach((el) => el.addEventListener('click', async () => {
       const M = await ensure(); if (!M) return msg('Robot load nahi hua — page refresh karo');
       const a = el.dataset.mcsAct;
+      if (a === 'pop') { const ok = await M.popOut(); msg(ok ? '📌 Robot ab chhoti window me — kisi bhi tab / app par dikhega' : 'Pop-out nahi khula'); return; }
       if (a === 'now') M.now(true); else if (a === 'hist') M.openHistory(); else if (a === 'clear') { M.clearHistory(); msg('History saaf ✓'); }
     }));
   }

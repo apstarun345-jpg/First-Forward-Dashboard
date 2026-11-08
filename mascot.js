@@ -9,7 +9,9 @@
   const U = FF.util || {};
   const esc = U.esc || ((s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
   const fmt = (n) => (U.fmt ? U.fmt(Math.round(Number(n) || 0)) : String(Math.round(Number(n) || 0)));
-  const IMG_V = 1;
+  const IMG_V = 2;
+  // absolute URL — robot pop-out (Picture-in-Picture) window me bhi images sahi load hon
+  const ASSET = (f) => { try { return new URL(`./${f}?v=${IMG_V}`, location.href).href; } catch { return `./${f}?v=${IMG_V}`; } };
 
   // ---------------------------------------------------------------- per-viewer settings
   const LS = 'ff_mascot_v1';
@@ -25,50 +27,52 @@
 
   // ---------------------------------------------------------------- insights (data → board)
   const sq = (id, n) => { try { return FF.smartQ && FF.smartQ.answer ? FF.smartQ.answer(id, n) : null; } catch { return null; } };
+  // 🗣 bolne ke liye naam: 'RAHUL SHARMA' → 'Rahul Sharma' (caps ko voice A-B-C ki tarah padhti thi)
+  const nm = (s) => String(s || '').toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
   const pct = (g) => (g == null ? '' : `${g > 0 ? '+' : ''}${fmt(g)}%`);
 
   const BUILDERS = [
     function highAgents() {
-      const a = sq('high|all', 3); if (!a || !a.rows.length) return null;
+      const a = sq('high|all', 5); if (!a || !a.rows.length) return null;
       const r = a.rows[0];
       return {
         key: 'high', mood: 'happy', icon: '🚀', title: pick(['Rocket mode ON!', 'Aag laga di! 🔥', 'Growth ke sitare']),
         head: `${r.name} ne ${pct(r.growth)} growth di`, view: 'bars',
         rows: a.rows.map((x) => ({ name: x.name, sub: `${x.ch}${x.tl ? ' · TL ' + x.tl : ''} · ${fmt(x.cur)} tags`, val: pct(x.growth), w: Math.max(0, Number(x.growth) || 0), tone: 'up' })),
-        say: `Shabash! ${r.name} ne pichle mahine se ${fmt(r.growth)} percent zyada growth di hai.${a.rows[1] ? ` Uske baad ${a.rows[1].name}.` : ''}`,
+        say: `शाबाश! ${nm(r.name)} ने पिछले महीने से ${fmt(r.growth)} प्रतिशत ज़्यादा ग्रोथ दी है।${a.rows[1] ? ` उसके बाद ${nm(a.rows[1].name)}, फिर ${a.rows[2] ? nm(a.rows[2].name) : ''}।` : ''}`,
         q: 'high|all'
       };
     },
     function degrowthAgents() {
-      const a = sq('degrowth|all', 3); if (!a || !a.rows.length) return null;
+      const a = sq('degrowth|all', 5); if (!a || !a.rows.length) return null;
       const r = a.rows[0];
       return {
         key: 'degrowth', mood: 'sad', icon: '📉', title: pick(['Thoda dhyaan do', 'Girawat alert', 'In par nazar rakho']),
         head: `${r.name} ${fmt(Math.abs(r.growth || 0))}% neeche chal rahe hain`, view: 'list',
         rows: a.rows.map((x) => ({ name: x.name, sub: `last ${fmt(x.last)} → abhi ${fmt(x.cur)}${x.tl ? ' · TL ' + x.tl : ''}`, val: pct(x.growth), tone: 'down' })),
-        say: `${r.name} ki issuance pichle mahine se ${fmt(Math.abs(r.growth || 0))} percent kam chal rahi hai. Ek call kar lo.`,
+        say: `${nm(r.name)} की इशुअंस पिछले महीने से ${fmt(Math.abs(r.growth || 0))} प्रतिशत कम चल रही है। एक कॉल कर लो।`,
         q: 'degrowth|all'
       };
     },
     function highTls() {
-      const a = sq('highgrowthtl|all', 3); if (!a || !a.rows.length) return null;
+      const a = sq('highgrowthtl|all', 5); if (!a || !a.rows.length) return null;
       const r = a.rows[0];
       return {
         key: 'hightl', mood: 'happy', icon: '👑', title: pick(['TL champions', 'Team ka jalwa']),
         head: `TL ${r.name} ki team ${pct(r.growth)} upar`, view: 'bars',
         rows: a.rows.map((x) => ({ name: x.name, sub: `${fmt(x.agents)} agents · ${fmt(x.cur)} tags`, val: pct(x.growth), w: Math.max(0, Number(x.growth) || 0), tone: 'up' })),
-        say: `T L ${r.name} ki team is mahine ${fmt(r.growth)} percent upar hai. Zabardast!`,
+        say: `टी एल ${nm(r.name)} की टीम इस महीने ${fmt(r.growth)} प्रतिशत ऊपर है। ज़बरदस्त!`,
         q: 'highgrowthtl|all'
       };
     },
     function degrowthTls() {
-      const a = sq('degrowthtl|all', 3); if (!a || !a.rows.length) return null;
+      const a = sq('degrowthtl|all', 5); if (!a || !a.rows.length) return null;
       const r = a.rows[0];
       return {
         key: 'degrowthtl', mood: 'sad', icon: '🧭', title: pick(['TL team neeche', 'Team ko boost chahiye']),
         head: `TL ${r.name} ki team ${fmt(Math.abs(r.growth || 0))}% neeche`, view: 'list',
         rows: a.rows.map((x) => ({ name: x.name, sub: `${fmt(x.agents)} agents · last ${fmt(x.last)} → ${fmt(x.cur)}`, val: pct(x.growth), tone: 'down' })),
-        say: `T L ${r.name} ki team pichle mahine se ${fmt(Math.abs(r.growth || 0))} percent peeche hai.`,
+        say: `टी एल ${nm(r.name)} की टीम पिछले महीने से ${fmt(Math.abs(r.growth || 0))} प्रतिशत पीछे है।`,
         q: 'degrowthtl|all'
       };
     },
@@ -78,41 +82,41 @@
       return {
         key: 'inactive', mood: 'sleepy', icon: '😴', title: pick(['Kaun so raha hai?', 'Neend se jagao']),
         head: 'agents ne is month ek bhi tag nahi kiya', view: 'big', big: fmt(n),
-        rows: a.rows.slice(0, 3).map((x) => ({ name: x.name, sub: `last month ${fmt(x.last)}${x.stock ? ' · stock ' + fmt(x.stock) : ''}`, val: '0', tone: 'down' })),
-        say: `${n} agents ne is mahine abhi tak ek bhi tag issue nahi kiya. Inko jagao!`,
+        rows: a.rows.slice(0, 5).map((x) => ({ name: x.name, sub: `last month ${fmt(x.last)}${x.stock ? ' · stock ' + fmt(x.stock) : ''}`, val: '0', tone: 'down' })),
+        say: `${n} एजेंट्स ने इस महीने अभी तक एक भी टैग इशू नहीं किया। इनको जगाओ!`,
         q: 'inactive|all'
       };
     },
     function lowCover() {
-      const a = sq('lowcover|all', 3); if (!a || !a.rows.length) return null;
+      const a = sq('lowcover|all', 5); if (!a || !a.rows.length) return null;
       const r = a.rows[0];
       return {
         key: 'lowcover', mood: 'alert', icon: '⛽', title: pick(['Stock khatam hone wala!', 'Tanki khaali ho rahi hai']),
         head: `${r.name} ke paas ${fmt(r.cover)} din ka stock`, view: 'list',
         rows: a.rows.map((x) => ({ name: x.name, sub: `stock ${fmt(x.stock)} · roz ${fmt(x.rate)}`, val: `${(Number(x.cover) || 0).toFixed(1)}d`, tone: 'warn' })),
-        say: `Dhyaan do! ${r.name} ka stock sirf ${Math.max(1, Math.round(r.cover || 0))} din ka bacha hai. Dispatch plan kar lo.`,
+        say: `ध्यान दो! ${nm(r.name)} का स्टॉक सिर्फ़ ${Math.max(1, Math.round(r.cover || 0))} दिन का बचा है। डिस्पैच प्लान कर लो।`,
         q: 'lowcover|all'
       };
     },
     function newAgents() {
-      const a = sq('newagents|all', 3); if (!a || !a.rows.length) return null;
+      const a = sq('newagents|all', 5); if (!a || !a.rows.length) return null;
       const r = a.rows[0];
       return {
         key: 'newagents', mood: 'happy', icon: '👋', title: pick(['Welcome back!', 'Naye khiladi']),
         head: `${r.name} wapas aaye — ${fmt(r.cur)} tags`, view: 'list',
         rows: a.rows.map((x) => ({ name: x.name, sub: `last month 0 · ${x.ch}`, val: fmt(x.cur), tone: 'up' })),
-        say: `${r.name} pichle mahine zero the, is mahine ${fmt(r.cur)} tags kar chuke hain. Welcome back!`,
+        say: `${nm(r.name)} पिछले महीने ज़ीरो थे, इस महीने ${fmt(r.cur)} टैग्स कर चुके हैं। वेलकम बैक!`,
         q: 'newagents|all'
       };
     },
     function drop() {
-      const a = sq('biggestdrop|all', 3); if (!a || !a.rows.length) return null;
+      const a = sq('biggestdrop|all', 5); if (!a || !a.rows.length) return null;
       const r = a.rows[0];
       return {
         key: 'drop', mood: 'alert', icon: '🧯', title: pick(['Sabse badi girawat', 'Yahan aag bujh rahi hai']),
         head: `${r.name}: ${fmt(r.last)} → ${fmt(r.cur)}`, view: 'list',
         rows: a.rows.map((x) => ({ name: x.name, sub: `last ${fmt(x.last)} → abhi ${fmt(x.cur)}`, val: `−${fmt(x.drop)}`, tone: 'down' })),
-        say: `${r.name} last month ${fmt(r.last)} par the, abhi tak sirf ${fmt(r.cur)}.`,
+        say: `${nm(r.name)} पिछले महीने ${fmt(r.last)} पर थे, अभी तक सिर्फ़ ${fmt(r.cur)}।`,
         q: 'biggestdrop|all'
       };
     },
@@ -127,7 +131,7 @@
         head: `last month ${fmt(t.last)} ka ${prog}% ho gaya`, view: 'big', big: fmt(t.cur), prog,
         rows: [{ name: 'VC4', val: fmt(t.vc4) }, { name: 'VC20', val: fmt(t.vc20) }, { name: 'VC5+', val: fmt(t.vc5) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
         foot: pace ? `Isi speed se mahine ka andaaza ≈ ${fmt(pace)} ${pace >= t.last ? '🎯' : ''}` : '',
-        say: `Is mahine abhi tak ${fmt(t.cur)} tags, last month ka ${prog} percent.${pace ? ` Isi speed se lagbhag ${fmt(pace)} tak jaayenge.` : ''}`,
+        say: `इस महीने अभी तक ${fmt(t.cur)} टैग्स, पिछले महीने का ${prog} प्रतिशत।${pace ? ` इसी स्पीड से लगभग ${fmt(pace)} तक जाएँगे।` : ''}`,
         q: 'summary|all'
       };
     }
@@ -162,7 +166,7 @@
           key: 'data', mood: 'excited', icon: '🆕', title: pick(['Naya data aa gaya!', 'Taaza khabar!']),
           head: fresh.length === 1 ? `${fresh[0].name} update hua` : `${fresh.length} sheets update hui`, view: 'list',
           rows: fresh.slice(0, 4).map((x) => ({ name: x.name, sub: x.rows != null ? `${fmt(x.rows)} rows` : '', val: t(x.at), tone: 'chip' })),
-          say: `Naya data aa gaya hai! ${fresh.map((x) => x.name).join(', ')} update ho gaya. Ab sab numbers taaza hain.`,
+          say: `नया डेटा आ गया है! ${fresh.map((x) => x.name).join(', ')} अपडेट हो गया। अब सब नंबर ताज़ा हैं।`,
           q: '#home'
         });
         schedule(4000);
@@ -205,8 +209,10 @@
       <div class="mc-board" role="status" aria-live="polite"></div>
       <button type="button" class="mc-bot" aria-label="Gems robot — kya kya bataya (24h history)" title="🤖 Gems — click: maine kya bataya (24h) · drag: jagah badlo">
         <i class="mc-glow" aria-hidden="true"></i>
-        <img class="mc-body" src="./robot-body.png?v=${IMG_V}" alt="" draggable="false">
-        <span class="mc-headwrap"><img class="mc-head" src="./robot-head.png?v=${IMG_V}" alt="" draggable="false"><i class="mc-lid l"></i><i class="mc-lid r"></i><i class="mc-mouth"></i></span>
+        <span class="mc-arm l"><img src="${ASSET('robot-arm-l.png')}" alt="" draggable="false"></span>
+        <span class="mc-arm r"><img src="${ASSET('robot-arm-r.png')}" alt="" draggable="false"></span>
+        <img class="mc-body" src="${ASSET('robot-torso.png')}" alt="" draggable="false">
+        <span class="mc-headwrap"><img class="mc-head" src="${ASSET('robot-head.png')}" alt="" draggable="false"><i class="mc-eye l"><b></b></i><i class="mc-eye r"><b></b></i><i class="mc-mouth"><b></b></i></span>
         <span class="mc-fx" aria-hidden="true"></span>
         <span class="mc-dot" hidden></span>
       </button>`;
@@ -241,7 +247,7 @@
     const end = () => {
       if (!start) return;
       start = null; el.classList.remove('drag');
-      if (dragged) { const g = geo(); cfg.dock = { r: Math.round(g.vw - g.W - pos[0]), b: Math.round(g.vh - g.H - pos[1]) }; save(); }
+      if (dragged && !pipWin) { const g = geo(); cfg.dock = { r: Math.round(g.vw - g.W - pos[0]), b: Math.round(g.vh - g.H - pos[1]) }; save(); }
     };
     bot.addEventListener('pointerup', end);
     bot.addEventListener('pointercancel', end);
@@ -266,7 +272,7 @@
   }
   function applyOn() {
     const on = !!cfg.on && allowed(); // 👑 sirf admin
-    root.classList.toggle('mc-on', on);
+    root.classList.toggle('mc-on', on && !pipWin); // robot pop-out me ho to site par 🎙 button wapas
     if (el) el.hidden = !on;
   }
 
@@ -317,6 +323,7 @@
       <div class="mc-ctl wide">
         <button type="button" class="mc-pill" data-mc="ask">🎙 Gems se poochho</button>
         <button type="button" class="mc-pill" data-mc="now">✨ Naya update</button>
+        ${pipWin ? '<button type="button" class="mc-pill pip" data-mc="popin">↩️ Wapas site par</button>' : pipOk() ? '<button type="button" class="mc-pill pip" data-mc="pop" title="Chhoti window — Chrome ke dusre tab, WhatsApp, kisi bhi app ke upar">📌 Har tab / WhatsApp par</button>' : ''}
         <span class="mc-go"></span>
         <button type="button" data-mc="sound" title="Bol kar sunao (on/off)">${cfg.sound ? '🔊' : '🔇'}</button>
         <button type="button" data-mc="menu" title="Robot settings">⚙</button>
@@ -336,6 +343,8 @@
     else if (k === 'home') { delete cfg.dock; save(); closeHist(); fly([pos, dockPos()], 900); }
     else if (k === 'ask') { closeHist(); openAssistant(); }
     else if (k === 'now') { closeHist(); now(true); }
+    else if (k === 'pop') { closeHist(); popOut(); }
+    else if (k === 'popin') { closeHist(); popIn(); }
   }
   document.addEventListener('change', (e) => {
     const t = e.target;
@@ -345,35 +354,86 @@
     if (t.dataset.mc === 'fun') { cfg.fun = !!t.checked; save(); }
   });
 
-  // ---------------------------------------------------------------- voice
+  // ---------------------------------------------------------------- 🗣 voice (v3.125.124: sahi Hindi uchcharan)
+  // Hindi voice Roman Hinglish ("ne", "kiya", "hai") ko angrezi akshar ki tarah padhti thi → bolne se pehle
+  // Devanagari me badlo, naam Title-case, VC4/TL/% ko bol-chaal me; sabse achhi Hindi voice (Natural/Online/Google).
+  const HI = {
+    ne: 'ने', ki: 'की', ka: 'का', ke: 'के', ko: 'को', hai: 'है', hain: 'हैं', tha: 'था', the: 'थे', thi: 'थी', kiya: 'किया', kiye: 'किए', kar: 'कर', karo: 'करो',
+    kare: 'करे', diya: 'दिया', di: 'दी', liya: 'लिया', aaj: 'आज', abhi: 'अभी', naya: 'नया', nayi: 'नई', naye: 'नए', aaya: 'आया', aaye: 'आए', aayi: 'आई',
+    wapas: 'वापस', ho: 'हो', hua: 'हुआ', hui: 'हुई', gaya: 'गया', gayi: 'गई', gaye: 'गए', se: 'से', me: 'में', mein: 'में', par: 'पर', aur: 'और', ek: 'एक',
+    bhi: 'भी', nahi: 'नहीं', nahin: 'नहीं', kam: 'कम', zyada: 'ज़्यादा', jyada: 'ज़्यादा', mahine: 'महीने', mahina: 'महीना', din: 'दिन', sirf: 'सिर्फ़',
+    badla: 'बदला', badli: 'बदली', badle: 'बदले', kisi: 'किसी', koi: 'कोई', kaun: 'कौन', log: 'लोग', maange: 'माँगे', maanga: 'माँगा', ye: 'ये', yeh: 'यह',
+    wo: 'वो', woh: 'वह', is: 'इस', us: 'उस', inko: 'इनको', unko: 'उनको', tak: 'तक', pe: 'पे', jaldi: 'जल्दी', bahut: 'बहुत', achha: 'अच्छा', accha: 'अच्छा',
+    sabse: 'सबसे', sab: 'सब', upar: 'ऊपर', neeche: 'नीचे', chal: 'चल', rahe: 'रहे', raha: 'रहा', rahi: 'रही', bacha: 'बचा', khatam: 'ख़त्म', wala: 'वाला',
+    wale: 'वाले', wali: 'वाली', aage: 'आगे', peeche: 'पीछे', pichle: 'पिछले', agla: 'अगला', agle: 'अगले', kitne: 'कितने', kitna: 'कितना', hisaab: 'हिसाब',
+    dhyaan: 'ध्यान', do: 'दो', lo: 'लो', dekho: 'देखो', chalo: 'चलो', bolo: 'बोलो', mera: 'मेरा', meri: 'मेरी', main: 'मैं', aap: 'आप', aapka: 'आपका',
+    tags: 'टैग्स', tag: 'टैग', agents: 'एजेंट्स', agent: 'एजेंट', stock: 'स्टॉक', report: 'रिपोर्ट', update: 'अपडेट', today: 'आज', total: 'टोटल',
+    issuance: 'इशुअंस', growth: 'ग्रोथ', team: 'टीम', sheet: 'शीट', data: 'डेटा', online: 'ऑनलाइन', settings: 'सेटिंग्स', user: 'यूज़र', search: 'सर्च',
+    request: 'रिक्वेस्ट', dispatch: 'डिस्पैच', all: 'ऑल', last: 'लास्ट', month: 'मंथ', replace: 'रिप्लेस', chassis: 'चेसिस'
+  };
+  function toSpeech(text) {
+    let t = String(text || '').replace(/\p{Extended_Pictographic}️?/gu, ' ').replace(/[·|•→]/g, ', ');
+    t = t.replace(/\bVC\s?5\+/gi, 'वी सी 5 प्लस').replace(/\bVC\s?(\d+)/gi, 'वी सी $1').replace(/\bTLs?\b/g, 'टी एल').replace(/\bKYC\b/gi, 'के वाई सी')
+      .replace(/(\d)\s?%/g, '$1 प्रतिशत').replace(/\+(\d)/g, 'प्लस $1').replace(/[−–-](\d)/g, ' माइनस $1')
+      .replace(/(\d{4})-(\d{2})-(\d{2})/g, (m, y, mo, d) => `${Number(d)} ${['जनवरी', 'फ़रवरी', 'मार्च', 'अप्रैल', 'मई', 'जून', 'जुलाई', 'अगस्त', 'सितंबर', 'अक्टूबर', 'नवंबर', 'दिसंबर'][Number(mo) - 1] || ''}`);
+    // ALL CAPS naam → Title case (warna voice R-A-H-U-L padhti hai)
+    t = t.replace(/\b[A-Z]{3,}\b/g, (w) => (/^(GV|FF|IDFC|NHAI|VRN)$/.test(w) ? w.split('').join(' ') : w[0] + w.slice(1).toLowerCase()));
+    t = t.replace(/\b[A-Za-z]+\b/g, (w) => HI[w.toLowerCase()] || w);
+    return t.replace(/\s+/g, ' ').trim();
+  }
+  let hiVoice = null;
+  function pickVoice() {
+    try {
+      const vs = window.speechSynthesis.getVoices() || [];
+      const pref = U.voicePrefs ? (U.voicePrefs().hi || '') : '';
+      const chosen = pref && vs.find((v) => v.voiceURI === pref);
+      if (chosen) return chosen;
+      const hi = vs.filter((v) => /^hi([-_]|$)/i.test(v.lang));
+      const score = (v) => (/natural|neural/i.test(v.name) ? 0 : /online/i.test(v.name) ? 1 : /google/i.test(v.name) ? 2 : 3);
+      return hi.sort((a, b) => score(a) - score(b))[0] || null;
+    } catch { return null; }
+  }
+  try { if ('speechSynthesis' in window) { hiVoice = pickVoice(); window.speechSynthesis.addEventListener('voiceschanged', () => { hiVoice = pickVoice(); }); } } catch { /* ignore */ }
   let talking = false;
   function stopSpeech() { try { if (talking && window.speechSynthesis) window.speechSynthesis.cancel(); } catch { /* ignore */ } talking = false; if (el) el.classList.remove('talk'); }
   function say(text) {
     return new Promise((resolve) => {
       const act = navigator.userActivation ? navigator.userActivation.hasBeenActive : true;
       if (!cfg.sound || !text || !act || !('speechSynthesis' in window)) return resolve(false);
-      const done = () => { talking = false; if (el) el.classList.remove('talk'); resolve(true); };
+      const parts = toSpeech(text).split(/(?<=[।.!?])\s+/).filter(Boolean); // chhote vaakya → Chrome beech me nahi katta
+      if (!parts.length) return resolve(false);
+      let left = parts.length, fin = false;
+      const done = () => { if (fin) return; fin = true; talking = false; if (el) el.classList.remove('talk'); resolve(true); };
       talking = true; el.classList.add('talk');
       try {
-        if (FF.assistant && FF.assistant.speak) { FF.assistant.speak(text, { force: true, onEnd: done, onError: done }); return; }
         window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = 'hi-IN'; u.rate = 1.02; u.pitch = 1.15;
-        u.onend = done; u.onerror = done;
-        window.speechSynthesis.speak(u);
+        if (!hiVoice) hiVoice = pickVoice();
+        const p = U.voicePrefs ? U.voicePrefs() : {};
+        parts.forEach((part) => {
+          const u = new SpeechSynthesisUtterance(part);
+          if (hiVoice) u.voice = hiVoice;
+          u.lang = (hiVoice && hiVoice.lang) || 'hi-IN';
+          u.rate = Number(p.rate) > 0 ? Math.min(1.15, Number(p.rate)) : 0.98;
+          u.pitch = Math.min(1.4, (Number(p.pitch) > 0 ? Number(p.pitch) : 1) * 1.12); // thodi pyaari robot awaaz
+          u.onend = () => { left -= 1; if (left <= 0) done(); };
+          u.onerror = done;
+          window.speechSynthesis.speak(u);
+        });
+        setTimeout(done, 30000);
       } catch { done(); }
     });
   }
 
   // ---------------------------------------------------------------- motion
   function geo() {
-    const vw = window.innerWidth, vh = window.innerHeight, mob = vw < 760;
+    const w = win(), vw = w.innerWidth, vh = w.innerHeight, mob = vw < 760;
     const W = mob ? 62 : 84, H = Math.round(W * 1.208);
     const BW = Math.min(mob ? 260 : 330, vw - W - 30);
+    if (pipWin) return { vw, vh, mob, W, H, BW, minY: 8, maxY: vh - H - 10 };
     return { vw, vh, mob, W, H, BW, minY: mob ? 64 : 72, maxY: vh - H - (mob ? 84 : 16) };
   }
   function dockPos() {
-    const g = geo(), d = cfg.dock || { r: g.mob ? 10 : 16, b: g.mob ? 84 : 14 };
+    const g = geo(), d = (!pipWin && cfg.dock) || { r: g.mob ? 10 : 16, b: g.mob ? 84 : 14 };
     return [Math.max(4, Math.min(g.vw - g.W - 4, g.vw - g.W - d.r)), Math.max(g.minY, Math.min(g.vh - g.H - 4, g.vh - g.H - d.b))];
   }
   const tf = (p, extra) => `translate3d(${Math.round(p[0])}px, ${Math.round(p[1])}px, 0)${extra || ''}`;
@@ -418,7 +478,10 @@
     bTop = Math.min(bTop, g.vh - 8 - pos[1] - bh);
     board.style.top = `${Math.round(bTop)}px`;
     board.style.left = side === 'right' ? `${g.W + 10}px` : `${-g.BW - 10}px`;
-    const hx = side === 'right' ? g.W * 0.9 : g.W * 0.1, hy = g.W * 1.06;
+    // haath (60° upar uthaya, CSS .holding) ka sira — danda yahin se board tak
+    const aW = g.W * 0.196, aH = g.W * 0.292, aT = g.W * 0.8064, L = aH * 0.85;
+    const px = side === 'right' ? g.W * 0.798 + aW * 0.3 : g.W * 0.006 + aW * 0.7, py = aT + aH * 0.08;
+    const hx = side === 'right' ? px + L * 0.866 : px - L * 0.866, hy = py + L * 0.5;
     const bx = side === 'right' ? g.W + 26 : -26, by = Math.min(bTop + bh - 8, Math.max(bTop + 20, g.W * 0.85 - 6));
     const len = Math.hypot(bx - hx, by - hy), ang = Math.atan2(by - hy, bx - hx) * 180 / Math.PI;
     stick.style.cssText = `left:${hx}px;top:${hy}px;width:${len}px;transform:rotate(${ang}deg)`;
@@ -437,8 +500,8 @@
   }
   function confetti(kind) {
     const fx = el.querySelector('.mc-fx'); if (!fx || reduced()) return;
-    const set = kind === 'sad' ? ['💧'] : kind === 'sleepy' ? ['💤', 'z', 'Z'] : kind === 'alert' ? ['❗', '⚠️'] : kind === 'curious' ? ['❔', '👀'] : ['🎉', '✨', '⭐', '🎊', '💥'];
-    const n = kind === 'happy' || kind === 'excited' ? 14 : 3;
+    const set = kind === 'laugh' ? ['😂', '🤣', 'ha', 'HA', '😆'] : kind === 'sad' ? ['💧'] : kind === 'sleepy' ? ['💤', 'z', 'Z'] : kind === 'alert' ? ['❗', '⚠️'] : kind === 'curious' ? ['❔', '👀'] : ['🎉', '✨', '⭐', '🎊', '💥'];
+    const n = kind === 'happy' || kind === 'excited' ? 14 : kind === 'laugh' ? 8 : 3;
     for (let i = 0; i < n; i++) {
       const s = document.createElement('i');
       s.textContent = pick(set);
@@ -458,6 +521,50 @@
   }
   function dot(on) { const d = el && el.querySelector('.mc-dot'); if (d) d.hidden = !on; }
 
+  // ---------------------------------------------------------------- 📌 pop-out: har tab / WhatsApp ke upar
+  // Chrome/Edge (desktop) Document Picture-in-Picture: chhoti "always on top" window — robot usme chala jaata
+  // hai, to Chrome ke dusre tab, WhatsApp ya kisi bhi app par ho, robot upar tairta + updates batata rahega.
+  let pipWin = null;
+  function win() { return (el && el.ownerDocument && el.ownerDocument.defaultView) || window; }
+  const pipOk = () => typeof window !== 'undefined' && 'documentPictureInPicture' in window;
+  function note(t) { try { if (U.toast) U.toast(t, 'warn'); } catch { /* ignore */ } }
+  async function popOut() {
+    if (!pipOk()) { note('📌 Pop-out sirf Chrome / Edge (computer) me chalta hai'); return false; }
+    if (pipWin) { try { pipWin.focus(); } catch { /* ignore */ } return true; }
+    build();
+    let w;
+    try { w = await window.documentPictureInPicture.requestWindow({ width: 400, height: 480 }); } catch (e) { note('📌 Pop-out nahi khula — robot par click karke dobara try karo'); return false; }
+    pipWin = w;
+    const d = w.document;
+    d.documentElement.className = `${document.documentElement.className} mc-pip`.replace('mc-on', '');
+    [...document.documentElement.attributes].forEach((a) => { if (/^data-/.test(a.name)) d.documentElement.setAttribute(a.name, a.value); });
+    d.title = '🤖 Gems — live updates';
+    document.querySelectorAll('link[rel="stylesheet"], style').forEach((n) => {
+      if (n.tagName === 'LINK') { const l = d.createElement('link'); l.rel = 'stylesheet'; l.href = n.href; d.head.appendChild(l); } else d.head.appendChild(n.cloneNode(true));
+    });
+    const tip = d.createElement('div'); tip.className = 'mc-tip'; tip.textContent = '🤖 Gems live — har tab / app ke upar · band karne ko ✕ (window)'; d.body.appendChild(tip);
+    if (skip) skip(); closeHist();
+    d.body.appendChild(el);
+    d.addEventListener('click', (e) => { if (mode === 'hist' && !el.contains(e.target)) closeHist(); });
+    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (mode === 'hist') closeHist(); else if (skip) skip(); } });
+    w.addEventListener('resize', () => { if (mode === 'dock') place(dockPos()); });
+    w.addEventListener('pagehide', () => {
+      pipWin = null;
+      if (skip) skip();
+      document.body.appendChild(el);
+      busy = false; mode = 'dock'; el.classList.remove('rest', 'holding', 'moving'); board.classList.remove('in', 'hist');
+      place(dockPos()); applyOn();
+      cfg.pip = false; save();
+    });
+    cfg.pip = true; save();
+    applyOn();
+    place(dockPos());
+    dance('happy', 1800);
+    schedule(2500);
+    return true;
+  }
+  function popIn() { try { if (pipWin) pipWin.close(); } catch { /* ignore */ } }
+
   // ---------------------------------------------------------------- history board (bot par click)
   function openHist() {
     if (busy) return;
@@ -466,13 +573,13 @@
     board.innerHTML = histHtml();
     board.classList.add('hist');
     layoutBoard(g, sideFor(g));
-    el.classList.add('rest'); el.dataset.mood = 'info';
-    requestAnimationFrame(() => board.classList.add('in'));
+    el.classList.add('rest', 'holding'); el.dataset.mood = 'info';
+    setTimeout(() => board.classList.add('in'), 30);
   }
   function closeHist() {
     if (mode !== 'hist') return;
     board.classList.remove('in', 'hist');
-    el.classList.remove('rest'); el.dataset.mood = '';
+    el.classList.remove('rest', 'holding'); el.dataset.mood = '';
     mode = 'dock';
   }
 
@@ -496,6 +603,8 @@
     await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
     layoutBoard(g, goLeft ? 'right' : 'left');
     dance(it.mood);
+    el.classList.add('holding');
+    if (it.cls) el.classList.add(it.cls);
     board.classList.add('in');
     if (!it.fun) histAdd(it); // masti/jokes history me nahi
     await wait(350);
@@ -506,7 +615,8 @@
     const stay = (async () => { await Promise.all([spoken, minStay]); while (hover && !reason) await wait(500); })();
     await Promise.race([stay, ended]);
     skip = null; stopSpeech();
-    board.classList.remove('in');
+    board.classList.remove('in'); el.classList.remove('holding');
+    if (it.cls) el.classList.remove(it.cls);
     el.dataset.mood = 'fly';
     el.classList.remove('rest');
     await wait(250);
@@ -592,7 +702,7 @@
             id: `p:${sig}:${Date.now()}`, key: `online:${sig}`, mood: 'happy', icon: '👀', title: 'Site par kaun aaya', view: 'list',
             head: `${joined.slice(0, 2).join(', ')}${joined.length > 2 ? ` +${joined.length - 2}` : ''} abhi online aaye`,
             rows: others.slice(0, 5).map((n) => ({ name: n, sub: joined.includes(n) ? 'abhi aaye' : 'pehle se online', val: '🟢', tone: 'chip' })),
-            foot: `Total online: ${others.length}`, say: `${joined.slice(0, 3).join(', ')} abhi site par aaye hain.`, q: '#/settings?tab=users', fast: true
+            foot: `Total online: ${others.length}`, say: `${joined.slice(0, 3).map(nm).join(', ')} अभी साइट पर आए हैं।`, q: '#/settings?tab=users', fast: true
           });
         }
       }
@@ -602,7 +712,7 @@
       const r = await api('/api/version');
       const v = r && r.version ? String(r.version) : '';
       if (v && cfg.lastVer && v !== cfg.lastVer) {
-        enqueue({ id: `v:${v}`, key: `ver:${v}`, mood: 'excited', icon: '🚀', title: 'Site update aaya!', head: `Naya version live: ${v.replace(/^apnapayment-/, '')} — page refresh karo to naye features milenge`, view: 'text', say: 'Site ka naya version aa gaya hai. Ek baar refresh kar lo.', q: '', fast: true });
+        enqueue({ id: `v:${v}`, key: `ver:${v}`, mood: 'excited', icon: '🚀', title: 'Site update aaya!', head: `Naya version live: ${v.replace(/^apnapayment-/, '')} — page refresh karo to naye features milenge`, view: 'text', say: 'साइट का नया वर्ज़न आ गया है। एक बार रिफ्रेश कर लो।', q: '', fast: true });
       }
       if (v) cfg.lastVer = v;
     } catch { /* ignore */ }
@@ -611,21 +721,21 @@
 
   // ---------------------------------------------------------------- 🎭 masti: jab koi nayi khabar nahi
   const JOKES = [
-    ['🤖', 'Robot ka sach', 'Main kabhi chhutti nahi leta… kyunki mujhe leave form bharna hi nahi aata 😅'],
-    ['🏷', 'FASTag gyaan', 'Toll par sabse fast kaun? FASTag wala… aur dashboard par? Main! 🏎️'],
-    ['📈', 'Motivation', 'Growth graph aur gym — dono me roz thoda upar jaana padta hai 💪'],
-    ['☕', 'Chai break?', 'Data load ho raha hai… tab tak ek chai ho jaye? Main battery charge kar leta hoon 🔋'],
-    ['🕺', 'Dance time', 'Jab VC4 badhta hai, main aise naachta hoon! Dekho dekho 🎶'],
-    ['🧮', 'Robot maths', 'Ek agent + ek call = do guna tag. Ye formula maine khud banaya 🤓'],
-    ['😴', 'Inactive agents ke liye', 'Neend achhi cheez hai… par mahine ke end me nahi! ⏰'],
-    ['🎯', 'Target', 'Target door lag raha hai? Main to roz udd ke jaata hoon, aap bhi chalo! 🚀'],
-    ['📦', 'Stock tip', 'Stock khatam hone se pehle dispatch — warna main udaas ho jaata hoon 🥺'],
-    ['🦾', 'Tarun sir ke liye', 'Boss online hai — sab log seedhe baith jao! 😎']
+    ['🤖', 'Robot ka sach', 'Main kabhi chhutti nahi leta… kyunki mujhe leave form bharna hi nahi aata 😅', 'मैं कभी छुट्टी नहीं लेता… क्योंकि मुझे लीव फ़ॉर्म भरना ही नहीं आता! हा हा हा!'],
+    ['🏷', 'FASTag gyaan', 'Toll par sabse fast kaun? FASTag wala… aur dashboard par? Main! 🏎️', 'टोल पर सबसे फ़ास्ट कौन? फ़ास्टैग वाला… और डैशबोर्ड पर? मैं!'],
+    ['📈', 'Motivation', 'Growth graph aur gym — dono me roz thoda upar jaana padta hai 💪', 'ग्रोथ ग्राफ़ और जिम — दोनों में रोज़ थोड़ा ऊपर जाना पड़ता है!'],
+    ['☕', 'Chai break?', 'Data load ho raha hai… tab tak ek chai ho jaye? Main battery charge kar leta hoon 🔋', 'डेटा लोड हो रहा है… तब तक एक चाय हो जाए? मैं बैटरी चार्ज कर लेता हूँ।'],
+    ['🕺', 'Dance time', 'Jab VC4 badhta hai, main aise naachta hoon! Dekho dekho 🎶', 'जब वी सी 4 बढ़ता है, मैं ऐसे नाचता हूँ! देखो देखो!'],
+    ['🧮', 'Robot maths', 'Ek agent + ek call = do guna tag. Ye formula maine khud banaya 🤓', 'एक एजेंट प्लस एक कॉल, बराबर दो गुना टैग। ये फ़ॉर्मूला मैंने ख़ुद बनाया!'],
+    ['😴', 'Inactive agents ke liye', 'Neend achhi cheez hai… par mahine ke end me nahi! ⏰', 'नींद अच्छी चीज़ है… पर महीने के एंड में नहीं!'],
+    ['🎯', 'Target', 'Target door lag raha hai? Main to roz udd ke jaata hoon, aap bhi chalo! 🚀', 'टारगेट दूर लग रहा है? मैं तो रोज़ उड़ के जाता हूँ, आप भी चलो!'],
+    ['📦', 'Stock tip', 'Stock khatam hone se pehle dispatch — warna main udaas ho jaata hoon 🥺', 'स्टॉक ख़त्म होने से पहले डिस्पैच — वरना मैं उदास हो जाता हूँ।'],
+    ['🦾', 'Boss alert', 'Boss online hai — sab log seedhe baith jao! 😎', 'बॉस ऑनलाइन है — सब लोग सीधे बैठ जाओ! हा हा!']
   ];
   function joke() {
     const i = (Number(cfg.jk) || 0) % JOKES.length; cfg.jk = i + 1; save();
-    const [icon, title, head] = JOKES[i];
-    return { key: `joke:${i}`, mood: 'happy', icon, title, head, view: 'text', fun: true, stay: 6500, say: head.replace(/\p{Extended_Pictographic}/gu, '') };
+    const [icon, title, head, hi] = JOKES[i];
+    return { key: `joke:${i}`, mood: 'laugh', icon, title, head, view: 'text', fun: true, stay: 7000, say: hi };
   }
   const DANCE = ['disco', 'moonwalk', 'spinjump', 'peek', 'nap', 'robot', 'wave'];
   async function funAct() {
@@ -659,6 +769,7 @@
   function blocked(soft) {
     if (!cfg.on || !allowed()) return true;
     if (!soft && cfg.snoozeDay === today()) return true;
+    if (pipWin) return false; // 📌 pop-out window me: dusre tab / WhatsApp par bhi chalta rahe
     if (document.hidden) return true;
     if (document.body.classList.contains('no-scroll')) return true; // modal/drawer khula hai
     const ask = document.getElementById('ask-panel');
@@ -720,7 +831,7 @@
   }
   const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { now, toggle, setCfg, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
@@ -728,7 +839,13 @@
     const boot = () => {
       if (!allowed()) { applyOn(); if (++tries < 90) setTimeout(boot, 2000); return; }
       build();
-      schedule(6e3);
+      // 👋 pehli mulaqat: haath hila ke namaste (din me ek baar)
+      const u = FF.auth && FF.auth.user ? String(FF.auth.user.name || FF.auth.user.username || '').split(/\s+/)[0] : '';
+      if (cfg.greetDay !== today()) {
+        cfg.greetDay = today(); save();
+        setTimeout(() => { if (!busy && !blocked()) show({ key: 'greet', fun: true, cls: 'greet', mood: 'happy', icon: '👋', title: `Namaste ${u}!`.trim(), head: 'Main Gems hoon — aaj site ki har khabar main board par dunga 😎', view: 'text', stay: 5500, say: `नमस्ते ${nm(u)}! मैं जेम्स हूँ। आज साइट की हर ख़बर मैं दूँगा।` }); }, 2500);
+      }
+      schedule(9e3);
       setTimeout(checkVersions, 12e3);
       setInterval(checkVersions, 10 * 60e3);
       setTimeout(pollFeeds, 4e3);
