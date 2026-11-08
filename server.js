@@ -1571,7 +1571,7 @@ async function fetchUpstreamCached(url, options) {
   // ⚡ v3.79 — stale-while-revalidate (personal /p/ pages): purana data turant do, naya background me lao.
   if (hit && options && options.staleMs && Date.now() - hit.at < options.staleMs) {
     if (!inflight.has(url) && !gvizCooldownActive()) {
-      const bg = fetchUpstream(url).finally(() => inflight.delete(url));
+      const bg = fetchUpstream(url, options).finally(() => inflight.delete(url));
       inflight.set(url, bg);
       bg.then((out) => {
         const ok = out && !out.rateLimited && out.status >= 200 && out.status < 300 && out.body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(out.body);
@@ -1584,7 +1584,7 @@ async function fetchUpstreamCached(url, options) {
   if (hit && gvizCooldownActive()) return { status: hit.status || 200, body: hit.body, cached: true, stale: true };
   try {
     let job = inflight.get(url);
-    if (!job) { job = fetchUpstream(url).finally(() => inflight.delete(url)); inflight.set(url, job); }
+    if (!job) { job = fetchUpstream(url, options).finally(() => inflight.delete(url)); inflight.set(url, job); }
     const out = await job;
     if (out.rateLimited) {
       // Kabhi bhi rate-limit page cache me nahi jaata; purana accha data hi mileyga.
@@ -4970,7 +4970,7 @@ async function robotEirRows() {
   const cols = `${c.dateCol}, ${c.clsCol}, ${c.masterCol}, ${ffName}, ${ffTl}, ${gvName}, ${gvTl}, ${gvIdCol}`;
   const tq = `select ${cols}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' group by ${cols}`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
-  const out = await fetchPersonalCached(upstreamUrl(params));
+  const out = await fetchPersonalCached(upstreamUrl(params), { timeoutMs: 150000 }); // badi query — 2.5 min tak
   if (out.status < 200 || out.status >= 300) throw new Error(`EIR ${out.status}`);
   const table = parseGvizServer(out.body);
   const rows = [];
@@ -5127,7 +5127,10 @@ async function robotBrainRun(reason) {
     }
     if (robotBrain.queue.length > 60) robotBrain.queue.splice(0, robotBrain.queue.length - 60);
     console.log(`🤖 robot brain (${reason}): ${robotBrain.rows || 0} rows (GV ${robotBrain.gvRows || 0}${robotBrain.gvSample ? ` e.g. ${robotBrain.gvSample}` : ''}), ${items.length} updates bane, ${added} naye queue me, queue ${robotBrain.queue.length}, admin devices ${robotAdminSubs().length}${robotBrain.lastErr ? `, err: ${robotBrain.lastErr}` : ''}`);
-  } finally { robotBrain.busy = false; }
+  } finally {
+    robotBrain.busy = false;
+    if (robotBrain.lastErr) { robotBrain.at = 0; setTimeout(() => robotBrainRun('retry').catch(() => {}), 4 * 60e3).unref?.(); } // fail → 4 min me dobara
+  }
 }
 function robotAdminSubs() {
   return pushSubs().filter((s) => {
