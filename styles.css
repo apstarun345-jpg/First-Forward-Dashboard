@@ -7621,7 +7621,7 @@ img.ff-robot { display: block; object-fit: contain; filter: drop-shadow(0 2px 3p
 .mc.rest .mc-stick { opacity: 1; }
 .mc-board { position: absolute; pointer-events: auto; cursor: pointer; background: var(--card, #fff); color: var(--text, #0f172a); border: 3px solid #fff; border-radius: 16px; box-shadow: 0 14px 34px rgba(15, 23, 42, .28), 0 0 0 1px rgba(15, 23, 42, .08); overflow: hidden; opacity: 0; transform: scale(.2) rotate(-6deg); transform-origin: var(--bo, 0% 100%); transition: transform .45s cubic-bezier(.3, 1.6, .5, 1), opacity .25s; font-size: 12.5px; line-height: 1.35; }
 .mc[data-side="left"] .mc-board { --bo: 100% 100%; transform: scale(.2) rotate(6deg); }
-.mc-board.in { opacity: 1; transform: none; animation: mcBoardSway 3.4s ease-in-out .5s infinite; }
+.mc .mc-board.in, .mc[data-side] .mc-board.in { opacity: 1; transform: none; animation: mcBoardSway 3.4s ease-in-out .5s infinite; }
 .mc-bh { display: flex; align-items: center; gap: 8px; padding: 8px 12px; color: #fff; font-size: 13.5px; background: linear-gradient(110deg, #6366f1, #8b5cf6); }
 .mc-bh b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-ic { font-size: 18px; animation: mcBop .5s ease-in-out infinite alternate; }
@@ -7675,16 +7675,13 @@ img.ff-robot { display: block; object-fit: contain; filter: drop-shadow(0 2px 3p
 @keyframes mcPop { from { transform: scale(.3); } to { transform: none; } }
 @keyframes mcCaret { 50% { opacity: 0; } }
 @media (max-width: 760px) { .mc-board { font-size: 12px; } .mc-big b { font-size: 28px; } }
-@media (prefers-reduced-motion: reduce) {
-.mc-bot, .mc-headwrap, .mc-board.in, .mc-ic, .mc-lid, .mc-glow, .mc-rows li, .mc-bar, .ask-fab img.ff-robot { animation: none !important; }
-.mc-rows li { opacity: 1; transform: none; } .mc-bar { width: var(--w); }
-}
+@media (prefers-reduced-motion: reduce) { .ask-fab img.ff-robot { animation: none !important; } }
 @media print { .mc { display: none !important; } }
 /* ===== 🤖 v3.125.121 — Gems robot hi site par: purana FAB chhupa, history board, drag, assistant state ===== */
 html.mc-on #ask-fab { display: none !important; }
 .mc.rest, .mc.moving, .mc.drag { z-index: 9990; }
 .mc-bot { border: 0; padding: 0; margin: 0; background: transparent; font: inherit; color: inherit; touch-action: none; -webkit-tap-highlight-color: transparent; }
-.mc-bot:focus-visible { outline: 3px solid #8b5cf6; outline-offset: 4px; border-radius: 18px; }
+.mc-bot, .mc-bot:focus, .mc-bot:focus-visible { outline: none !important; box-shadow: none !important; }
 .mc.drag .mc-bot { cursor: grabbing; animation: none; transform: scale(1.08) rotate(-4deg); }
 .mc-dot { position: absolute; right: 6%; top: 2%; width: 12px; height: 12px; border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 4; animation: mcPing 1.6s ease-out infinite; }
 .mc-dot[hidden] { display: none; }
@@ -7699,7 +7696,7 @@ html.mc-on #ask-fab { display: none !important; }
 /* history board */
 .mc-board.hist .mc-bh { background: linear-gradient(110deg, #4f46e5, #0ea5e9); }
 .mc-cnt { margin-left: auto; font-size: 10.5px; opacity: .85; background: rgba(255, 255, 255, .2); padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
-.mc-hist { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; max-height: min(320px, 46vh); overflow: auto; overscroll-behavior: contain; }
+.mc-hist { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; max-height: min(380px, 52vh); overflow: auto; overscroll-behavior: contain; }
 .mc-hist li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 9px; background: color-mix(in srgb, var(--line, #e2e8f0) 45%, transparent); border-left: 3px solid #8b5cf6; }
 .mc-hist li[data-q] { cursor: pointer; } .mc-hist li[data-q]:hover { background: color-mix(in srgb, #6366f1 14%, transparent); }
 .mc-hist li.m-happy, .mc-hist li.m-excited { border-left-color: #16a34a; } .mc-hist li.m-sad { border-left-color: #dc2626; }

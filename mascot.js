@@ -17,7 +17,8 @@
   const cfg = Object.assign({ on: true, sound: false, every: 5, idx: 0, seen: {}, snoozeDay: '' }, load());
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(cfg)); } catch { /* private mode */ } };
   const today = () => new Date().toISOString().slice(0, 10);
-  const reduced = () => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+  // v3.125.122: robot ki chaal user ne khud maangi hai (aur ⚙ me band ho sakti hai) — OS ka reduced-motion ise nahi rokta
+  const reduced = () => false;
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   const rnd = (a, b) => a + Math.random() * (b - a);
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -363,7 +364,7 @@
   function geo() {
     const vw = window.innerWidth, vh = window.innerHeight, mob = vw < 760;
     const W = mob ? 62 : 84, H = Math.round(W * 1.208);
-    const BW = Math.min(mob ? 250 : 290, vw - W - 30);
+    const BW = Math.min(mob ? 260 : 330, vw - W - 30);
     return { vw, vh, mob, W, H, BW, minY: mob ? 64 : 72, maxY: vh - H - (mob ? 84 : 16) };
   }
   function dockPos() {
