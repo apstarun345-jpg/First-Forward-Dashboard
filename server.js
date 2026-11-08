@@ -7018,7 +7018,12 @@ async function handleApi(req, res, url) {
     if (!dates.length) return sendJson(res, 200, { latest: '', days: [] });
     const L = days.get(dates[0]);
     const agents = [...L.agents.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => { const [ch, ...nm] = k.split('|'); return { ch, name: nm.join('|'), qty: n }; });
+    // v3.125.131 — pichle ~15 dispatch din: kis agent ko kab kitna (robot "dispatch ke baad asar" ke liye)
+    const recent = [];
+    for (const k of dates.slice(0, 15)) for (const [nmk, q] of days.get(k).agents) { const [ch, ...nm] = nmk.split('|'); recent.push({ date: k, ch, name: nm.join('|'), qty: q }); }
+    recent.sort((a, b) => b.qty - a.qty);
     return sendJson(res, 200, {
+      recent: recent.slice(0, 400),
       latest: dates[0], latestTotal: L.total, latestFf: L.ff, latestGv: L.gv, latestCls: L.cls, agents, agentCount: L.agents.size,
       days: dates.slice(0, 7).map((k) => ({ date: k, total: days.get(k).total }))
     });

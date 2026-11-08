@@ -61,7 +61,7 @@
   }
   function confetti(kind) {
     const fx = el.querySelector('.mc-fx');
-    const set = kind === 'laugh' ? ['😂', '🤣', 'ha'] : kind === 'sad' ? ['💧'] : kind === 'sleepy' ? ['💤', 'z'] : kind === 'alert' ? ['❗', '⚠️'] : kind === 'curious' ? ['❔', '👀'] : ['🎉', '✨', '⭐', '🎊'];
+    const set = kind === 'clap' ? ['👏', '👏', '🎉', '🏆'] : kind === 'laugh' ? ['😂', '🤣', 'ha'] : kind === 'sad' ? ['💧'] : kind === 'sleepy' ? ['💤', 'z'] : kind === 'alert' ? ['❗', '⚠️'] : kind === 'curious' ? ['❔', '👀'] : ['🎉', '✨', '⭐', '🎊'];
     const n = kind === 'happy' || kind === 'excited' ? 12 : 3;
     for (let i = 0; i < n; i++) {
       const s = document.createElement('i'); s.textContent = pick(set);
@@ -85,13 +85,14 @@
   function rowsHtml(it) {
     const rows = it.rows || [], max = Math.max(1, ...rows.map((r) => r.w || 0));
     if (it.view === 'text') return `<div class="mc-headline mc-textv"><span class="mc-type" data-text="${esc(it.head)}"></span></div>`;
+    if (it.view === 'quiz' && it.quiz) return `<div class="mc-headline mc-textv"><span class="mc-type" data-text="${esc(it.head)}"></span></div><ol class="mc-quiz">${it.quiz.opts.map((o, i) => `<li class="${i === it.quiz.ans ? 'ok' : ''}"><b>${'ABC'[i]}</b> ${esc(o)}${i === it.quiz.ans ? ` <small>· ${esc(it.quiz.val)}</small>` : ''}</li>`).join('')}</ol><div class="mc-qtimer"><i></i></div>`;
     if (it.view === 'big') return `<div class="mc-big"><b>${esc(it.big)}</b><span>${esc(it.head)}</span></div>${it.prog != null ? `<div class="mc-prog"><i style="width:${it.prog}%"></i></div>` : ''}${rows.length ? `<div class="mc-chips">${rows.map((r) => `<span class="mc-chip"><small>${esc(r.name)}</small> <b>${esc(r.val)}</b></span>`).join('')}</div>` : ''}`;
     return `<div class="mc-headline"><span class="mc-type" data-text="${esc(it.head)}"></span></div><ol class="mc-rows">${rows.map((r, i) => `<li style="--d:${0.5 + i * 0.2}s">${it.view === 'bars' ? `<i class="mc-bar" style="--w:${Math.max(8, Math.round((r.w || 0) / max * 100))}%"></i>` : ''}<span class="mc-n">${esc(r.name)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><b class="mc-v ${esc(r.tone || '')}">${esc(r.val)}</b></li>`).join('')}</ol>`;
   }
   function typewriter() {
     const t = board.querySelector('.mc-type'); if (!t) return Promise.resolve();
     const s = t.dataset.text || '';
-    return new Promise((r) => { let i = 0; el.classList.add('talk'); const step = () => { i += 1; t.textContent = s.slice(0, i); if (i < s.length) setTimeout(step, 26); else { el.classList.remove('talk'); r(); } }; step(); });
+    return new Promise((r) => { let i = 0; el.classList.add('talk'); const step = () => { i += 1; t.textContent = s.slice(0, i); if (i < s.length) setTimeout(step, 26); else { t.classList.add('done'); el.classList.remove('talk'); r(); } }; step(); });
   }
   const ctl = (extra) => `<div class="mc-ctl">${extra || '<span class="mc-go"></span>'}<button type="button" data-k="dash" title="Dashboard kholo">📊</button><button type="button" data-k="menu" title="Settings">⚙</button><button type="button" data-k="close" title="Band">✕</button></div>
     <div class="mc-menu" hidden><button type="button" data-k="site">🚫 Is site (${esc(host)}) par mat dikhao</button><button type="button" data-k="today">😴 Aaj ke liye chhupao</button><button type="button" data-k="home">🏠 Wapas kone me</button></div>`;
@@ -113,10 +114,16 @@
     setTimeout(() => board.classList.add('in'), 30);
     let reason = '';
     const ended = new Promise((res) => { skip = (why) => { reason = why || 'skip'; res(); }; });
-    const stay = (async () => { await typewriter(); await wait(it.stay || 10000); while (hover && !reason) await wait(500); })();
+    if (it.fx) confetti(it.fx);
+    if (it.cls) el.classList.add(it.cls);
+    const stay = (async () => {
+      await typewriter();
+      if (it.view === 'quiz') { board.classList.add('quiz-run'); await wait(5000); board.classList.add('reveal'); el.dataset.mood = 'happy'; confetti('happy'); }
+      await wait(it.stay || 10000); while (hover && !reason) await wait(500);
+    })();
     await Promise.race([stay, ended]);
     skip = null; current = null;
-    board.classList.remove('in'); el.classList.remove('holding', 'rest'); el.dataset.mood = 'fly';
+    board.classList.remove('in'); el.classList.remove('holding', 'rest'); if (it.cls) el.classList.remove(it.cls); el.dataset.mood = 'fly';
     await wait(250);
     await fly(path(pos, dockPos(), 'arc'), 1600);
     el.dataset.mood = ''; busy = false; mode = 'dock';

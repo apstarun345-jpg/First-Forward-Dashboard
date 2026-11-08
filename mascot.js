@@ -351,6 +351,143 @@
     }
   );
 
+  // ---------------------------------------------------------------- 🆕 v3.125.131: record, pehla tag, stock khatam kab, dispatch ka asar, KYC sudhra/bigda, replacement, quiz, shabaashi
+  const NK = (x) => String(x || '').trim().toUpperCase();
+  const isoOf = (ym, d) => `${ym}-${String(d).padStart(2, '0')}`;
+  const dLbl = (iso) => { const [, mo, d] = String(iso).split('-'); return `${Number(d)} ${MSHORT[Number(mo) - 1] || ''}`; };
+  const dSay = (iso) => { const [, mo, d] = String(iso).split('-'); return `${Number(d)} ${MON_HI[Number(mo) - 1] || ''}`; };
+  let serCache = { at: 0, v: null };
+  function series() { // agent → { din → tags } (FF + GV, saare mahine jo load hain)
+    if (serCache.v && Date.now() - serCache.at < 5 * 60e3) return serCache.v;
+    const ag = new Map(), site = new Map();
+    const scan = (rows, ch) => rows.forEach((r) => {
+      if (!r.ym || !r.day) return;
+      const iso = isoOf(r.ym, r.day), q = Number(r.n) || 0; if (!q) return;
+      const name = r.agentName || r.agentId; if (!name) return;
+      const k = `${ch}|${NK(name)}`;
+      let o = ag.get(k); if (!o) { o = { name, ch, days: new Map(), rep: 0 }; ag.set(k, o); }
+      o.days.set(iso, (o.days.get(iso) || 0) + q);
+      site.set(iso, (site.get(iso) || 0) + q);
+    });
+    try { let ff = FF.store.get('daily') || []; if (FF.filters && FF.filters.dropLaggedFf) ff = FF.filters.dropLaggedFf(ff); scan(ff.filter((r) => r.channel !== 'GV Partner'), 'ff'); } catch { /* ignore */ }
+    try { scan(FF.gv.issuanceRows() || [], 'gv'); } catch { /* ignore */ }
+    if (!ag.size) return null;
+    const last = [...site.keys()].sort().pop();
+    serCache = { at: Date.now(), v: { ag, site, last } };
+    return serCache.v;
+  }
+  const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+  BUILDERS.push(
+    function records() { // 🏅 apna sabse best din (aakhri din)
+      const S = series(); if (!S) return null;
+      const out = [];
+      for (const o of S.ag.values()) {
+        const v = o.days.get(S.last) || 0; if (v < 10) continue;
+        let best = 0; for (const [d, n] of o.days) if (d !== S.last && n > best) best = n;
+        if (best && v > best) out.push({ name: o.name, ch: o.ch, v, best });
+      }
+      const sv = S.site.get(S.last) || 0; let sb = 0; for (const [d, n] of S.site) if (d !== S.last && n > sb) sb = n;
+      out.sort((a, b) => b.v - a.v);
+      if (!out.length && !(sv > sb && sb)) return null;
+      const rows = out.slice(0, 5).map((x) => ({ name: x.name, sub: `${x.ch === 'ff' ? 'FF' : 'GV'} · pichla best ${fmt(x.best)}`, val: fmt(x.v), tone: 'up' }));
+      if (sv > sb && sb) rows.unshift({ name: '🌐 Poori site', sub: `pichla best din ${fmt(sb)}`, val: fmt(sv), tone: 'up' });
+      const r = out[0];
+      return { key: `record:${S.last}`, mood: 'excited', cls: 'greet', icon: '🏅', title: 'Record toda!', head: `${dLbl(S.last)} ko apna sabse best din`, view: 'list', rows: rows.slice(0, 5),
+        say: `${dSay(S.last)} को रिकॉर्ड टूटा!${sv > sb && sb ? ` पूरी साइट का अब तक का सबसे अच्छा दिन, ${fmt(sv)} टैग्स।` : ''}${r ? ` ${nm(r.name)} ने ${fmt(r.v)} टैग्स किए, उनका पिछला बेस्ट ${fmt(r.best)} था।` : ''} शाबाश!`, q: 'top|all' };
+    },
+    function firstTag() { // 🎈 naye agent ka pehla tag
+      const S = series(); if (!S) return null;
+      const out = [];
+      for (const o of S.ag.values()) {
+        const ds = [...o.days.keys()].sort(); const f = ds[0];
+        if (f && daysBetween(f, S.last) <= 3 && daysBetween([...S.site.keys()].sort()[0], f) > 20) out.push({ name: o.name, ch: o.ch, f, n: [...o.days.values()].reduce((a, b) => a + b, 0) });
+      }
+      if (!out.length) return null;
+      out.sort((a, b) => b.n - a.n);
+      const r = out[0];
+      return { key: `first:${out.map((x) => x.name).join(',')}`, mood: 'happy', cls: 'greet', icon: '🎈', title: 'Naye agent ka pehla tag!', head: `${r.name} ne ${dLbl(r.f)} ko shuruaat ki`, view: 'list',
+        rows: out.slice(0, 5).map((x) => ({ name: x.name, sub: `${x.ch === 'ff' ? 'First Forward' : 'GV Partner'} · pehla tag ${dLbl(x.f)}`, val: fmt(x.n), tone: 'up' })),
+        say: `स्वागत है! ${nm(r.name)} ने ${dSay(r.f)} को अपना पहला टैग किया, अब तक ${fmt(r.n)} टैग्स।${out[1] ? ` और ${out.length - 1} नए एजेंट भी शुरू हुए हैं।` : ''}`, q: '' };
+    },
+    function stockEnd() { // ⏳ stock kab khatam hoga — tareekh
+      const a = sq('lowcover|all', 5); if (!a || !a.rows.length) return null;
+      const end = (x) => { const d = new Date(Date.now() + Math.max(0, Number(x.cover) || 0) * 864e5); return d.toISOString().slice(0, 10); };
+      const r = a.rows[0];
+      return { key: 'stockend', mood: 'alert', icon: '⏳', title: 'Stock kab khatam hoga', head: `${r.name} ka stock ~${dLbl(end(r))} tak`, view: 'list',
+        rows: a.rows.map((x) => ({ name: x.name, sub: `stock ${fmt(x.stock)} · roz ${r1(Number(x.rate) || 0)}`, val: dLbl(end(x)), tone: 'warn' })),
+        say: `ध्यान दो! ${nm(r.name)} का स्टॉक लगभग ${dSay(end(r))} तक ख़त्म हो जाएगा।${a.rows[1] ? ` ${nm(a.rows[1].name)} का ${dSay(end(a.rows[1]))} तक।` : ''} डिस्पैच प्लान कर लो।`, q: 'lowcover|all' };
+    },
+    function dispatchEffect() { // 🚚→📈 dispatch ke baad asar
+      const S = series(), d = dispCache.data; if (!S || !d || !Array.isArray(d.recent)) return null;
+      const rate = (o, from, to) => { let n = 0; for (const [k, v] of o.days) if (k >= from && k < to) n += v; return n / Math.max(1, daysBetween(from, to)); };
+      const add = (iso, n) => new Date(Date.parse(iso) + n * 864e5).toISOString().slice(0, 10);
+      const out = [];
+      for (const x of d.recent) {
+        if (x.qty < 20 || daysBetween(x.date, S.last) < 3) continue;
+        const o = S.ag.get(`${x.ch}|${NK(x.name)}`); if (!o) continue;
+        const before = rate(o, add(x.date, -7), x.date), after = rate(o, add(x.date, 1), add(S.last, 1));
+        out.push({ ...x, before, after, gain: after - before });
+      }
+      if (out.length < 2) return null;
+      const good = out.slice().sort((a, b) => b.gain - a.gain).slice(0, 3), idle = out.filter((x) => x.after < 0.5).sort((a, b) => b.qty - a.qty).slice(0, 2);
+      const rows = good.map((x) => ({ name: x.name, sub: `${dLbl(x.date)} ko ${fmt(x.qty)} tag → roz ${r1(x.before)} se ${r1(x.after)}`, val: x.gain >= 0 ? '📈' : '📉', tone: x.gain >= 0 ? 'up' : 'down' }))
+        .concat(idle.map((x) => ({ name: x.name, sub: `${dLbl(x.date)} ko ${fmt(x.qty)} tag mile — issuance nahi`, val: '😴', tone: 'down' })));
+      const g = good[0];
+      return { key: `dispfx:${S.last}`, mood: 'info', icon: '🚚', title: 'Dispatch ke baad asar', head: `${g.name}: roz ${r1(g.before)} → ${r1(g.after)}`, view: 'list', rows,
+        say: `डिस्पैच का असर: ${nm(g.name)} को ${dSay(g.date)} को ${fmt(g.qty)} टैग्स मिले, उसके बाद रोज़ ${r1(g.before)} से बढ़कर ${r1(g.after)} हो गए।${idle[0] ? ` पर ${nm(idle[0].name)} को ${fmt(idle[0].qty)} टैग्स मिले और अभी तक इशू नहीं हुए।` : ''}`, q: '' };
+    },
+    function kycBetter() {
+      const c = (kycCache.cmp || []).filter((x) => x.d >= 10).sort((a, b) => b.d - a.d); if (!c.length) return null;
+      const r = c[0];
+      return { key: 'kycup', mood: 'happy', icon: '📗', title: 'KYC sudhra 👍', head: `${r.name}: ${r.prev}% → ${r.pct}%`, view: 'list',
+        rows: c.slice(0, 5).map((x) => ({ name: x.name, sub: `${x.ch.toUpperCase()} · last month ${x.prev}% → abhi ${x.pct}%`, val: `+${x.d}%`, tone: 'up' })),
+        say: `के वाई सी में सुधार! ${nm(r.name)} का फ़ुल के वाई सी पिछले महीने ${r.prev} प्रतिशत था, अब ${r.pct} प्रतिशत है।`, q: '' };
+    },
+    function kycWorse() {
+      const c = (kycCache.cmp || []).filter((x) => x.d <= -10).sort((a, b) => a.d - b.d); if (!c.length) return null;
+      const r = c[0];
+      return { key: 'kycdown', mood: 'sad', icon: '📕', title: 'KYC bigda 👎', head: `${r.name}: ${r.prev}% → ${r.pct}%`, view: 'list',
+        rows: c.slice(0, 5).map((x) => ({ name: x.name, sub: `${x.ch.toUpperCase()} · last month ${x.prev}% → abhi ${x.pct}%`, val: `${x.d}%`, tone: 'down' })),
+        say: `ध्यान दो, ${nm(r.name)} का फ़ुल के वाई सी पिछले महीने ${r.prev} प्रतिशत था, अब गिरकर ${r.pct} प्रतिशत रह गया है।`, q: '' };
+    },
+    function replacementHigh() {
+      const m = monthStats(); if (!m || !m.all.total) return null;
+      const avg = m.all.rep / m.all.total;
+      const ag = [...m.all.agents.values()].filter((a) => a.rep >= 5 && a.total >= 10 && a.rep / a.total > Math.max(0.15, avg * 2)).sort((a, b) => b.rep - a.rep);
+      if (!ag.length) return null;
+      const r = ag[0];
+      return { key: 'rephigh', mood: 'alert', icon: '🔁', title: 'Replacement zyada', head: `${r.name}: ${fmt(r.rep)} replacement (${Math.round((r.rep / r.total) * 100)}%)`, view: 'list',
+        rows: ag.slice(0, 5).map((x) => ({ name: x.name, sub: `${x.ch === 'ff' ? 'FF' : 'GV'} · ${fmt(x.total)} me se · site avg ${Math.round(avg * 100)}%`, val: `${Math.round((x.rep / x.total) * 100)}%`, tone: 'warn' })),
+        say: `${nm(r.name)} के ${fmt(r.total)} टैग्स में से ${fmt(r.rep)} रिप्लेसमेंट हैं, जो साइट के एवरेज से बहुत ज़्यादा है। एक बार चेक कर लो।`, q: '' };
+    },
+    function shabaashi() { // 👏 taaliyan
+      const S = series(); if (!S) return null;
+      let best = null; for (const o of S.ag.values()) { const v = o.days.get(S.last) || 0; if (!best || v > best.v) best = { name: o.name, ch: o.ch, v }; }
+      if (!best || best.v < 5) return null;
+      return { key: `clap:${S.last}:${best.name}`, mood: 'excited', fx: 'clap', cls: 'mc-wave', icon: '👏', title: `Shabaash ${best.name}!`, head: `${dLbl(S.last)} ko ${fmt(best.v)} tags — sabse aage! Taaliyan 👏👏👏`, view: 'text',
+        say: `शाबाश ${nm(best.name)}! ${dSay(S.last)} को ${fmt(best.v)} टैग्स, सबसे आगे! ज़ोरदार तालियाँ!`, q: '' };
+    },
+    function quiz() { // ❓ quiz — 5 sec sochne do, phir jawab
+      const m = monthStats(); if (!m || m.all.agents.size < 3) return null;
+      const ag = [...m.all.agents.values()];
+      const qs = [];
+      const topBy = (k, list) => list.slice().sort((a, b) => b[k] - a[k]);
+      [['vc4', 'VC4', 'वी सी 4'], ['vc20', 'VC20', 'वी सी 20'], ['vc5', 'VC5+', 'वी सी 5 प्लस'], ['total', 'total issuance', 'कुल इशुअंस']].forEach(([k, l, h]) => {
+        const t = topBy(k, ag); if (!t[0] || !t[0][k]) return;
+        qs.push({ q: `Is mahine ${l} me sabse aage kaun?`, qs: `इस महीने ${h} में सबसे आगे कौन है?`, a: t[0].name, val: fmt(t[0][k]), wrong: t.slice(1, 6).map((x) => x.name) });
+      });
+      ['ff', 'gv'].forEach((ch) => { const t = topBy('total', [...m[ch].agents.values()]); if (t[0] && t.length > 2) qs.push({ q: `${chName(ch)} ka champion kaun?`, qs: `${chSay(ch)} का चैंपियन कौन है?`, a: t[0].name, val: fmt(t[0].total), wrong: t.slice(1, 6).map((x) => x.name) }); });
+      if (m.all.days.size > 2) { const td = [...m.all.days.entries()].sort((a, b) => b[1].total - a[1].total); qs.push({ q: 'Is mahine kis din sabse zyada issuance hui?', qs: 'इस महीने किस दिन सबसे ज़्यादा इशुअंस हुई?', a: dLabel(m.cur, td[0][0]), val: fmt(td[0][1].total), wrong: td.slice(1, 6).map(([d]) => dLabel(m.cur, d)) }); }
+      if (!qs.length) return null;
+      const Q = qs[(Number(cfg.qz) || 0) % qs.length]; cfg.qz = (Number(cfg.qz) || 0) + 1; save();
+      const wrong = Q.wrong.filter((w) => w !== Q.a).sort(() => Math.random() - 0.5).slice(0, 2);
+      const opts = [Q.a, ...wrong].sort(() => Math.random() - 0.5);
+      const ans = opts.indexOf(Q.a);
+      return { key: `quiz:${Q.q}`, fun: true, mood: 'curious', icon: '❓', title: 'Quiz time!', head: Q.q, view: 'quiz', stay: 9000,
+        quiz: { opts, ans, val: Q.val }, say: `क्विज़ टाइम! ${Q.qs} सोचो सोचो…`, sayAns: `सही जवाब है ${/\d/.test(Q.a) ? Q.a : nm(Q.a)}, ${Q.val} टैग्स के साथ!`, q: '' };
+    }
+  );
+
   // KYC + dispatch: async data, cache me (KYC 30 min, dispatch 10 min)
   const kycCache = { at: 0, rows: [] }, dispCache = { at: 0, data: null };
   async function refreshExtras() {
@@ -372,6 +509,16 @@
         }
         kycCache.rows = [...m.values()].filter((o) => o.n >= 15).map((o) => ({ ...o, pct: Math.round((o.full / o.n) * 100) }))
           .filter((o) => o.pct < 70).sort((a, b) => b.n - a.n);
+        // v3.125.131 — pichle mahine se KYC ratio tulna (sudhra / bigda)
+        const prevYm = U.prevMonthKey ? U.prevMonthKey(cur) : '', pm = new Map();
+        for (const r of all || []) {
+          if (r.ym !== prevYm) continue;
+          const name = r.gvName || r.agent; if (!name) continue;
+          const k = `${r.gvName ? 'gv' : 'ff'}|${name}`;
+          let o = pm.get(k); if (!o) { o = { n: 0, full: 0 }; pm.set(k, o); }
+          o.n += r.n; if (r.kyc === 'full') o.full += r.n;
+        }
+        kycCache.cmp = [...m.entries()].map(([k, o]) => { const p0 = pm.get(k); if (!p0 || p0.n < 15 || o.n < 15) return null; const a = Math.round((o.full / o.n) * 100), b = Math.round((p0.full / p0.n) * 100); return { ...o, pct: a, prev: b, d: a - b }; }).filter(Boolean);
         kycCache.at = Date.now();
       } catch { /* ignore */ }
     }
@@ -520,6 +667,7 @@
     const rows = it.rows || [];
     const max = Math.max(1, ...rows.map((r) => r.w || 0));
     if (it.view === 'text') return `<div class="mc-headline mc-textv"><span class="mc-type" data-text="${esc(it.head)}"></span></div>`;
+    if (it.view === 'quiz' && it.quiz) return `<div class="mc-headline mc-textv"><span class="mc-type" data-text="${esc(it.head)}"></span></div><ol class="mc-quiz">${it.quiz.opts.map((o, i) => `<li class="${i === it.quiz.ans ? 'ok' : ''}"><b>${'ABC'[i]}</b> ${esc(o)}${i === it.quiz.ans ? ` <small>· ${esc(it.quiz.val)}</small>` : ''}</li>`).join('')}</ol><div class="mc-qtimer"><i></i></div>`;
     if (it.view === 'big') {
       return `<div class="mc-big"><b>${esc(it.big)}</b><span>${esc(it.head)}</span></div>`
         + (it.prog != null ? `<div class="mc-prog"><i style="width:${it.prog}%"></i></div>` : '')
@@ -757,14 +905,14 @@
     if (reduced()) { t.textContent = s; return Promise.resolve(); }
     return new Promise((r) => {
       let i = 0; el.classList.add('talk');
-      const step = () => { i += 1; t.textContent = s.slice(0, i); if (i < s.length) tw().setTimeout(step, 28); else { if (!talking) el.classList.remove('talk'); r(); } };
+      const step = () => { i += 1; t.textContent = s.slice(0, i); if (i < s.length) tw().setTimeout(step, 28); else { t.classList.add('done'); if (!talking) el.classList.remove('talk'); r(); } };
       step();
     });
   }
   function confetti(kind) {
     const fx = el.querySelector('.mc-fx'); if (!fx || reduced()) return;
-    const set = kind === 'laugh' ? ['😂', '🤣', 'ha', 'HA', '😆'] : kind === 'sad' ? ['💧'] : kind === 'sleepy' ? ['💤', 'z', 'Z'] : kind === 'alert' ? ['❗', '⚠️'] : kind === 'curious' ? ['❔', '👀'] : ['🎉', '✨', '⭐', '🎊', '💥'];
-    const n = kind === 'happy' || kind === 'excited' ? 14 : kind === 'laugh' ? 8 : 3;
+    const set = kind === 'clap' ? ['👏', '👏', '🎉', '🏆', '⭐'] : kind === 'laugh' ? ['😂', '🤣', 'ha', 'HA', '😆'] : kind === 'sad' ? ['💧'] : kind === 'sleepy' ? ['💤', 'z', 'Z'] : kind === 'alert' ? ['❗', '⚠️'] : kind === 'curious' ? ['❔', '👀'] : ['🎉', '✨', '⭐', '🎊', '💥'];
+    const n = kind === 'happy' || kind === 'excited' ? 14 : kind === 'clap' ? 20 : kind === 'laugh' ? 8 : 3;
     for (let i = 0; i < n; i++) {
       const s = document.createElement('i');
       s.textContent = pick(set);
@@ -876,7 +1024,12 @@
     await wait(350);
     let reason = '';
     const ended = new Promise((res) => { skip = (why) => { reason = why || 'skip'; res(); }; });
-    const spoken = typewriter().then(() => say(it.say));
+    if (it.fx) confetti(it.fx);
+    const spoken = typewriter().then(() => say(it.say)).then(async () => {
+      if (it.view !== 'quiz') return;
+      board.classList.add('quiz-run'); await wait(5000); // ⏳ sochne ka time
+      board.classList.add('reveal'); dance('happy'); await say(it.sayAns);
+    });
     const minStay = wait(it.stay || Math.max(10000, String(it.say || '').length * 60)); // kam se kam 10 sec board
     const stay = (async () => { await Promise.all([spoken, minStay]); while (hover && !reason) await wait(500); })();
     await Promise.race([stay, ended]);
@@ -1063,7 +1216,7 @@
   const extOn = () => document.documentElement.dataset.ffRobotExt === '1';
   function toExt(it) {
     if (!extOn() || !it) return;
-    const slim = { key: it.key, mood: it.mood, icon: it.icon, title: it.title, head: it.head, view: it.view, big: it.big, prog: it.prog, foot: it.foot, q: it.q, fun: !!it.fun, stay: it.stay,
+    const slim = { key: it.key, mood: it.mood, icon: it.icon, title: it.title, head: it.head, view: it.view, big: it.big, prog: it.prog, foot: it.foot, q: it.q, fun: !!it.fun, stay: it.stay, quiz: it.quiz, fx: it.fx, cls: it.cls,
       rows: (it.rows || []).slice(0, 7).map((r) => ({ name: r.name, sub: r.sub, val: r.val, w: r.w, tone: r.tone })) };
     try { window.postMessage({ source: 'ff-robot-page', msg: { type: 'show', item: slim } }, location.origin); } catch { /* ignore */ }
   }
@@ -1160,7 +1313,7 @@
   }
   const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { _sp: toSpeech, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { _sp: toSpeech, _show: (it) => show(it), now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho

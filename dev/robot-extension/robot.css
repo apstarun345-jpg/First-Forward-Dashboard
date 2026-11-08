@@ -210,7 +210,21 @@
 .mc-ctl .mc-pill.pip { background: linear-gradient(110deg, #0ea5e9, #6366f1); }
 .mc.holding[data-side="pip"] .mc-arm.r { animation: mcHoldUp 2.4s ease-in-out infinite !important; }
 @keyframes mcHoldUp { 0%, 100% { transform: rotate(-160deg); } 50% { transform: rotate(-170deg); } }
+/* ===== ❓ v3.125.131 — robot quiz ===== */
+.mc-quiz { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.mc-quiz li { padding: 7px 10px; border-radius: 10px; background: color-mix(in srgb, #6366f1 9%, transparent); border: 2px solid transparent; font-weight: 600; transition: all .35s; }
+.mc-quiz li b { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #6366f1; color: #fff; font-size: 11px; margin-right: 6px; }
+.mc-quiz li small { display: none; color: #16a34a; font-weight: 700; }
+.mc-board.reveal .mc-quiz li { opacity: .45; }
+.mc-board.reveal .mc-quiz li.ok { opacity: 1; border-color: #22c55e; background: color-mix(in srgb, #22c55e 18%, transparent); transform: scale(1.03); }
+.mc-board.reveal .mc-quiz li.ok b { background: #16a34a; }
+.mc-board.reveal .mc-quiz li.ok small { display: inline; }
+.mc-qtimer { height: 5px; border-radius: 4px; margin-top: 8px; background: color-mix(in srgb, #94a3b8 30%, transparent); overflow: hidden; }
+.mc-qtimer i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #f59e0b, #ef4444); }
+.mc-board.quiz-run .mc-qtimer i { animation: mcQuizT 5s linear forwards; }
+.mc-board.reveal .mc-qtimer { visibility: hidden; }
+@keyframes mcQuizT { from { width: 0; } to { width: 100%; } }
 
 .mc { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #0f172a; }
 .mc-board { --card: #fff; --text: #0f172a; --muted: #64748b; --line: #e2e8f0; }
-.mc-dash { display: inline-block; margin-top: 6px; font-size: 11px; color: #64748b; }
+.mc-type.done::after { display: none; }
