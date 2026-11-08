@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Stable feed snapshots (/api/today),
 // /api/auth/me and /api/settings are network-first with a cached fallback; raw /api/gviz stays live-only.
-const CACHE_NAME = 'apnapayment-v312632';
+const CACHE_NAME = 'apnapayment-v312633';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // A same-origin browser tab and an installed PWA are both WindowClients. Remember the display
@@ -132,7 +132,7 @@ self.addEventListener('push', e => {
     : [];
   const options = {
     body: data.body || 'Naya update aaya hai — app khol ke dekho.',
-    icon: 'icon-192.png',
+    icon: data.robot ? 'robot.png' : 'icon-192.png', // 🤖 robot ki khabar → robot ka icon
     badge: 'icon-192.png',
     tag: data.tag || `ff-${String(data.type || 'info').replace(/[^a-z0-9_-]/gi, '-').slice(0, 24)}-${id}`,
     renotify: true,

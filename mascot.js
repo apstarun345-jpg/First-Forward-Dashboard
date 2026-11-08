@@ -687,9 +687,44 @@
 
   function insights() {
     const out = [];
-    BUILDERS.forEach((b) => { try { const x = b(); if (x) out.push(x); } catch { /* data abhi nahi */ } });
+    BUILDERS.forEach((b) => { try { const x = b(); if (x) out.push(withTl(x)); } catch { /* data abhi nahi */ } });
     return out;
   }
+  // 👤 v3.125.133 — har agent ke saath uska TL (board + notification)
+  let tlCache = { at: 0, map: null };
+  function tlMap() {
+    if (tlCache.map && Date.now() - tlCache.at < 5 * 60e3) return tlCache.map;
+    const m = new Map();
+    ['top|all', 'inactive|all', 'stockhigh|all', 'deadstock|all', 'degrowth|all'].forEach((id) => { const a = sq(id, 100000); (a && a.rows || []).forEach((r) => { if (r && r.name && r.tl) m.set(String(r.name).trim().toUpperCase(), r.tl); }); });
+    tlCache = { at: Date.now(), map: m };
+    return m;
+  }
+  function withTl(it) {
+    const m = tlMap(); if (!m.size || !it || !Array.isArray(it.rows)) return it;
+    it.rows.forEach((r) => {
+      const raw = String(r.name || '').replace(/^[^\p{L}]+/u, '').trim(), tl = m.get(raw.toUpperCase());
+      if (!tl || tl.toUpperCase() === raw.toUpperCase()) return;
+      r.tl = tl;
+      if (!/\bTL\b/.test(r.sub || '')) r.sub = r.sub ? `${r.sub} · TL ${tl}` : `TL ${tl}`;
+    });
+    return it;
+  }
+  // 📱 robot ki khabar → app + web push (server dedupe + rate limit karta hai)
+  function pushRobot(it) {
+    if (!it || it.fun || cfg.push === false || !allowed() || !FF.auth || !FF.auth.api) return;
+    const lines = (it.rows || []).slice(0, 5).map((r) => `• ${r.name}${r.tl ? ` (TL ${r.tl})` : ''}${r.val ? ` — ${r.val}` : ''}`);
+    const body = [it.big ? `${it.big} · ${it.head || ''}` : it.head, ...lines, it.foot || ''].filter(Boolean).join('\n');
+    const key = `${it.key}|${it.head}|${(it.rows || []).map((r) => r.val).join(',')}|${it.big || ''}`.slice(0, 200);
+    if (pushQ.some((x) => x.key === key)) return;
+    pushQ.push({ key, title: `🤖 ${it.icon || ''} ${it.title}`.replace(/\s+/g, ' ').trim(), body, link: it.q && it.q[0] === '#' ? it.q : '#/' });
+    if (pushQ.length > 30) pushQ.splice(0, pushQ.length - 30);
+  }
+  // server 25 sec me ek push leta hai → queue se ek-ek karke (koi khabar chhoote nahi)
+  const pushQ = [];
+  setInterval(() => {
+    const x = pushQ.shift(); if (!x || !FF.auth || !FF.auth.api) return;
+    FF.auth.api('/api/robot/notify', 'POST', x).then((r) => { if (r && r.reason === 'rate') pushQ.unshift(x); }).catch(() => {});
+  }, 27e3);
 
   // "🆕 naya data aaya" — server ke daily versions se
   const prio = [];
@@ -1181,7 +1216,7 @@
     if (it.cls) el.classList.add(it.cls);
     board.classList.add('in');
     try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
-    if (!it.fun) histAdd(it); // masti/jokes history me nahi
+    if (!it.fun) { histAdd(it); pushRobot(it); } // masti/jokes history / push me nahi
     toExt(it);
     await wait(350);
     let reason = '';
@@ -1393,7 +1428,7 @@
       const it = nextItem(false) || (cfg.fun !== false && extTurn % 2 ? joke() : null);
       if (!it) return;
       try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
-      if (!it.fun) { histAdd(it); dot(true); }
+      if (!it.fun) { histAdd(it); dot(true); pushRobot(it); }
       toExt(it);
       if (cfg.sound) say(it.say);
     }
@@ -1401,6 +1436,14 @@
   let lastNote = 0;
   async function notifyHidden() {
     try {
+      if (cfg.push !== false) { // server push (app + web dono) — local notification ki zarurat nahi
+        if (Date.now() - lastNote < Math.max(30e3, gapMs())) return;
+        const it = nextItem(false); if (!it || it.fun) return;
+        lastNote = Date.now();
+        try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
+        histAdd(it); pushRobot(it); dot(true);
+        return;
+      }
       if (!('Notification' in window) || Notification.permission !== 'granted') return;
       if (Date.now() - lastNote < Math.max(60e3, gapMs())) return;
       const it = nextItem(false); if (!it) return;
@@ -1475,7 +1518,7 @@
     if (o && ('everySec' in o || 'on' in o)) schedule(1500);
     return getCfg();
   }
-  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false });
+  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false, push: cfg.push !== false });
   function clearHistory() { histSave([]); dot(false); }
   FF.mascot = { _sp: toSpeech, _show: (it) => show(it), now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 

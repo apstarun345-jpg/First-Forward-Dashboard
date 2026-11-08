@@ -129,6 +129,7 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip'
 };
 const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const robotPushState = new Map(); // 🤖 robot push dedupe / rate (per admin)
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
 let APP_VERSION = '3.65.0';
@@ -6991,6 +6992,34 @@ async function handleApi(req, res, url) {
     setTimeout(() => { try { stockAgeIndex(false).catch(() => {}); } catch { /* optional */ } }, 20e3).unref?.();   // pehle user ki sheets, phir bada stock scan
     setTimeout(() => { ledgerAggregate(true).catch(() => {}); }, 60e3).unref?.();
     return sendJson(res, 200, { ok: true, at: new Date(forceRefreshAt).toISOString() }, { 'Cache-Control': 'no-store' });
+  }
+  // 🤖 v3.125.133 — robot ki khabar → admin ke apne saare devices (app + web) par push notification.
+  // Dedupe: same key 24h me ek baar (kai tab / phone khule hon tab bhi); rate: user par 25 sec me max 1.
+  if (p === '/api/robot/notify' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const key = String(body.key || '').slice(0, 200);
+    const title = String(body.title || '').replace(/\s+/g, ' ').trim().slice(0, 90);
+    const text = String(body.body || '').trim().slice(0, 600);
+    if (!key || !title) return sendJson(res, 400, { error: 'key/title chahiye' });
+    if (!vapidKeys) return sendJson(res, 200, { ok: false, reason: 'push-off' });
+    const st = robotPushState.get(user.username) || { last: 0, sent: new Map() };
+    const now = Date.now();
+    for (const [k, t] of st.sent) if (now - t > 24 * 3600e3) st.sent.delete(k);
+    if (st.sent.has(key)) return sendJson(res, 200, { ok: false, reason: 'dup' });
+    if (now - st.last < 25e3) return sendJson(res, 200, { ok: false, reason: 'rate' });
+    st.last = now; st.sent.set(key, now); robotPushState.set(user.username, st);
+    const u = findUser(user.username);
+    const prefs = u ? normalizeNotifyPrefs(u.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
+    const subs = pushSubs().filter((x) => x.username === user.username);
+    const id = `robot-${now}`;
+    const data = {
+      id, title, body: text, tag: `ff-robot-${key.replace(/[^a-z0-9_-]/gi, '-').slice(0, 60)}`, type: 'info', link: String(body.link || '#/').slice(0, 160),
+      sound: prefs.sound !== false, tone: prefs.tone, at: now, voice: '', speak: false, user: user.username, badge: unreadCountFor(u), lang: 'hi-IN',
+      icon: '/robot.png', image: '', actions: [{ action: 'open', title: '🤖 Open' }, { action: 'dismiss', title: '✅ OK' }], persist: false, robot: true
+    };
+    Promise.all(subs.map(async (sub) => handlePushResult(sub, await deliverPush(sub, data), { type: 'robot', id }))).then(() => persist('notify')).catch(() => {});
+    return sendJson(res, 200, { ok: true, devices: subs.length });
   }
   // 🤖 v3.125.125 — robot ke liye dispatch summary (admin): aakhri dispatch din, kitne tag, class-wise, kis agent ko; pichle 7 dispatch din
   if (p === '/api/robot/dispatch' && method === 'GET') {
