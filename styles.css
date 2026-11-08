@@ -7590,7 +7590,7 @@ img.ff-robot { display: block; object-fit: contain; filter: drop-shadow(0 2px 3p
 .ask-avatar img.ff-robot { width: 34px; height: 34px; }
 .ask-hero img.ff-robot { width: 54px; height: 54px; padding: 4px; }
 
-.mc { position: fixed; left: 0; top: 0; z-index: 9990; width: var(--w, 84px); height: calc(var(--w, 84px) * 1.208); pointer-events: none; will-change: transform; }
+.mc { position: fixed; left: 0; top: 0; z-index: 56; width: var(--w, 84px); height: calc(var(--w, 84px) * 1.208); pointer-events: none; will-change: transform; }
 .mc[hidden] { display: none; }
 .mc-bot { position: absolute; inset: 0; pointer-events: auto; cursor: pointer; transform-origin: 50% 90%; animation: mcFloat 2.4s ease-in-out infinite; }
 .mc-body { position: absolute; left: 0; top: calc(var(--w) * .5685); width: 100%; height: auto; filter: drop-shadow(0 6px 10px rgba(15, 23, 42, .28)); user-select: none; }
@@ -7680,3 +7680,38 @@ img.ff-robot { display: block; object-fit: contain; filter: drop-shadow(0 2px 3p
 .mc-rows li { opacity: 1; transform: none; } .mc-bar { width: var(--w); }
 }
 @media print { .mc { display: none !important; } }
+/* ===== 🤖 v3.125.121 — Gems robot hi site par: purana FAB chhupa, history board, drag, assistant state ===== */
+html.mc-on #ask-fab { display: none !important; }
+.mc.rest, .mc.moving, .mc.drag { z-index: 9990; }
+.mc-bot { border: 0; padding: 0; margin: 0; background: transparent; font: inherit; color: inherit; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.mc-bot:focus-visible { outline: 3px solid #8b5cf6; outline-offset: 4px; border-radius: 18px; }
+.mc.drag .mc-bot { cursor: grabbing; animation: none; transform: scale(1.08) rotate(-4deg); }
+.mc-dot { position: absolute; right: 6%; top: 2%; width: 12px; height: 12px; border-radius: 50%; background: #ef4444; border: 2px solid #fff; z-index: 4; animation: mcPing 1.6s ease-out infinite; }
+.mc-dot[hidden] { display: none; }
+@keyframes mcPing { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, .55); } 100% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } }
+.mc.rest[data-mood="curious"] .mc-headwrap { animation: mcLook 1.8s ease-in-out infinite; }
+@keyframes mcLook { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg) translateX(-2px); } 65% { transform: rotate(12deg) translateX(2px); } }
+/* Gems assistant ki state */
+.mc[data-astate="listening"] .mc-headwrap { animation: mcBop .45s ease-in-out infinite alternate; }
+.mc[data-astate="listening"] .mc-glow { background: radial-gradient(closest-side, rgba(236, 72, 153, .85), rgba(236, 72, 153, 0)); }
+.mc[data-astate="thinking"] .mc-headwrap { animation: mcLook 1.2s ease-in-out infinite; }
+.mc[data-astate="speaking"] .mc-mouth { animation: mcTalk .22s ease-in-out infinite alternate; }
+/* history board */
+.mc-board.hist .mc-bh { background: linear-gradient(110deg, #4f46e5, #0ea5e9); }
+.mc-cnt { margin-left: auto; font-size: 10.5px; opacity: .85; background: rgba(255, 255, 255, .2); padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.mc-hist { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; max-height: min(320px, 46vh); overflow: auto; overscroll-behavior: contain; }
+.mc-hist li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 9px; background: color-mix(in srgb, var(--line, #e2e8f0) 45%, transparent); border-left: 3px solid #8b5cf6; }
+.mc-hist li[data-q] { cursor: pointer; } .mc-hist li[data-q]:hover { background: color-mix(in srgb, #6366f1 14%, transparent); }
+.mc-hist li.m-happy, .mc-hist li.m-excited { border-left-color: #16a34a; } .mc-hist li.m-sad { border-left-color: #dc2626; }
+.mc-hist li.m-alert { border-left-color: #f59e0b; } .mc-hist li.m-sleepy { border-left-color: #64748b; }
+.mc-hi { font-size: 17px; flex: none; }
+.mc-hist .mc-n { flex: 1; white-space: normal; }
+.mc-hist .mc-n small { white-space: normal; }
+.mc-hist .mc-v { font-size: 10.5px; color: var(--muted, #64748b); font-weight: 600; }
+.mc-empty { text-align: center; padding: 10px 4px; color: var(--muted, #64748b); }
+.mc-ctl.wide { flex-wrap: wrap; gap: 4px; padding-left: 8px; }
+.mc-ctl .mc-pill { background: linear-gradient(110deg, #6366f1, #8b5cf6); color: #fff; font-weight: 600; font-size: 11.5px; padding: 4px 9px; border-radius: 999px; }
+.mc-ctl .mc-pill:hover { filter: brightness(1.1); background: linear-gradient(110deg, #6366f1, #8b5cf6); }
+.mc-menu input[type="checkbox"] { width: 16px; height: 16px; }
+@media print { html.mc-on #ask-fab { display: none !important; } }
+.mc-board:not(.in) { pointer-events: none; visibility: hidden; transition: transform .45s cubic-bezier(.3, 1.6, .5, 1), opacity .25s, visibility 0s .3s; }
