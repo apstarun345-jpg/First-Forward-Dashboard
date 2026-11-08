@@ -5083,7 +5083,8 @@ function robotInsights(rows) {
   return items;
 }
 async function robotBrainRun(reason) {
-  if (robotBrain.busy || !vapidKeys) return;
+  if (robotBrain.busy) return;
+  if (!vapidKeys) { console.log('🤖 robot brain: push keys (VAPID) nahi'); return; }
   if (feats().robotPush === false) return;
   if (reason !== 'daily' && Date.now() - robotBrain.at < 25 * 60e3) return;
   robotBrain.busy = true; robotBrain.at = Date.now();
@@ -5092,7 +5093,7 @@ async function robotBrainRun(reason) {
     const sent = db.notify.watch.robotSent && typeof db.notify.watch.robotSent === 'object' ? db.notify.watch.robotSent : (db.notify.watch.robotSent = {});
     for (const [k, t] of Object.entries(sent)) if (Date.now() - t > 3 * 864e5) delete sent[k];
     const items = [];
-    try { items.push(...robotInsights(await robotEirRows())); } catch (e) { robotBrain.lastErr = e.message; }
+    try { robotBrain.lastErr = ''; const rr = await robotEirRows(); robotBrain.rows = rr.length; items.push(...robotInsights(rr)); } catch (e) { robotBrain.lastErr = e.message; }
     // 🚚 dispatch (ledger)
     try {
       const d = robotDispatchData();
@@ -5107,7 +5108,7 @@ async function robotBrainRun(reason) {
     let added = 0;
     for (const it of items) if (!sent[it.key] && !robotBrain.queue.some((q) => q.key === it.key)) { robotBrain.queue.push(it); added++; }
     if (robotBrain.queue.length > 60) robotBrain.queue.splice(0, robotBrain.queue.length - 60);
-    if (added) console.log(`🤖 robot brain (${reason}): ${added} naye updates queue me`);
+    console.log(`🤖 robot brain (${reason}): ${items.length} updates bane, ${added} naye queue me, queue ${robotBrain.queue.length}, admin devices ${robotAdminSubs().length}${robotBrain.lastErr ? `, err: ${robotBrain.lastErr}` : ''}`);
   } finally { robotBrain.busy = false; }
 }
 function robotAdminSubs() {
@@ -5127,6 +5128,7 @@ function robotFlush() {
   if (sent[it.key]) return;
   sent[it.key] = Date.now();
   const subs = robotAdminSubs();
+  console.log(`🤖 robot push → ${subs.length} device: ${it.title}`);
   const id = `robot-${Date.now()}`;
   Promise.all(subs.map(async (sub) => {
     const u = findUser(sub.username);
@@ -7221,7 +7223,7 @@ async function handleApi(req, res, url) {
   if (p === '/api/robot/brain' && (method === 'GET' || method === 'POST')) {
     requireAdmin(user);
     if (method === 'POST') { robotBrain.at = 0; await robotBrainRun('manual').catch(() => {}); }
-    return sendJson(res, 200, { at: robotBrain.at ? new Date(robotBrain.at).toISOString() : null, queue: robotBrain.queue.map((x) => x.title), err: robotBrain.lastErr || '', subs: robotAdminSubs().length, sent: Object.keys((db.notify.watch && db.notify.watch.robotSent) || {}).length });
+    return sendJson(res, 200, { at: robotBrain.at ? new Date(robotBrain.at).toISOString() : null, rows: robotBrain.rows || 0, queue: robotBrain.queue.map((x) => x.title), err: robotBrain.lastErr || '', subs: robotAdminSubs().length, sent: Object.keys((db.notify.watch && db.notify.watch.robotSent) || {}).length });
   }
   if (p === '/api/robot/notify' && method === 'POST') {
     requireAdmin(user);

@@ -813,7 +813,7 @@ FF.pages = FF.pages || {};
         <label class="check"><input type="checkbox" data-mcs="notify" ${c.notify !== false ? 'checked' : ''}> 🔔 <b>Site band / peeche ho aur pop-out na ho</b> → computer ki notification me update (har 1 min max)</label>
       </div>
       <div class="card-sub" style="margin:8px 0;padding:10px;border:1px dashed var(--line);border-radius:10px"><b>🧩 Sirf robot, bina window — har tab par (Claude, WhatsApp Web, Sheets…)</b><br><span class="dim small">Chrome extension lagao: <a href="./gems-robot-extension.zip?v=3" download>⬇️ gems-robot-extension.zip</a> → unzip → Chrome me <code>chrome://extensions</code> → upar <b>Developer mode</b> ON → <b>Load unpacked</b> → unzip wala folder chuno. Bas — dashboard ka tab khula rakho (peeche bhi chalega), robot har dusre tab par ghoomega aur har 30 sec updates dega. Extension laga ho to pop-out window apne aap nahi khulti.</span></div>
-      <div class="btn-row"><button type="button" class="btn small" data-mcs-act="now">▶ Abhi update dikhao</button><button type="button" class="btn small ghost" data-mcs-act="hist">🕘 24h history</button><button type="button" class="btn small ghost" data-mcs-act="clear">🗑 History saaf</button>${'documentPictureInPicture' in window ? '<button type="button" class="btn small" data-mcs-act="pop" title="Chhoti always-on-top window — Chrome ke dusre tab, WhatsApp ya kisi bhi app ke upar robot">📌 Har tab / WhatsApp par robot</button>' : ''}<span class="dim small" id="mcs-msg"></span></div>`);
+      <div class="btn-row"><button type="button" class="btn small" data-mcs-act="now">▶ Abhi update dikhao</button><button type="button" class="btn small ghost" data-mcs-act="hist">🕘 24h history</button><button type="button" class="btn small ghost" data-mcs-act="clear">🗑 History saaf</button><button type="button" class="btn small ghost" data-mcs-act="brain" title="Server wala robot abhi chalao aur status dikhao">📡 Server robot check</button>${'documentPictureInPicture' in window ? '<button type="button" class="btn small" data-mcs-act="pop" title="Chhoti always-on-top window — Chrome ke dusre tab, WhatsApp ya kisi bhi app ke upar robot">📌 Har tab / WhatsApp par robot</button>' : ''}<span class="dim small" id="mcs-msg"></span></div>`);
   }
   function bindMascot(body) {
     if (!A.isAdmin()) return;
@@ -830,6 +830,11 @@ FF.pages = FF.pages || {};
     U.$$('[data-mcs-act]', body).forEach((el) => el.addEventListener('click', async () => {
       const M = await ensure(); if (!M) return msg('Robot load nahi hua — page refresh karo');
       const a = el.dataset.mcsAct;
+      if (a === 'brain') {
+        msg('Chal raha hai…');
+        try { const r = await FF.auth.api('/api/robot/brain', 'POST', {}); msg(`📡 ${r.rows || 0} rows padhe · queue ${r.queue.length} · aapke devices ${r.subs}${r.err ? ` · ❗ ${r.err}` : ''}${r.queue.length ? ` · agla: ${r.queue[0]}` : ''}`); } catch (e) { msg(`❗ ${e.message}`); }
+        return;
+      }
       if (a === 'pop') { const ok = await M.popOut(); msg(ok ? '📌 Robot ab chhoti window me — kisi bhi tab / app par dikhega' : 'Pop-out nahi khula'); return; }
       if (a === 'now') M.now(true); else if (a === 'hist') M.openHistory(); else if (a === 'clear') { M.clearHistory(); msg('History saaf ✓'); }
     }));
