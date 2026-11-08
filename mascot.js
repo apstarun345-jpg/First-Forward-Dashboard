@@ -657,7 +657,8 @@
   // ---------------------------------------------------------------- 📌 pop-out: har tab / WhatsApp ke upar
   // Chrome/Edge (desktop) Document Picture-in-Picture: chhoti "always on top" window — robot usme chala jaata
   // hai, to Chrome ke dusre tab, WhatsApp ya kisi bhi app par ho, robot upar tairta + updates batata rahega.
-  let pipWin = null;
+  let pipWin = null, pipClosedByUser = false, leavingPage = false;
+  window.addEventListener('pagehide', () => { leavingPage = true; });
   function win() { return (el && el.ownerDocument && el.ownerDocument.defaultView) || window; }
   const pipOk = () => typeof window !== 'undefined' && 'documentPictureInPicture' in window;
   function note(t) { try { if (U.toast) U.toast(t, 'warn'); } catch { /* ignore */ } }
@@ -688,6 +689,7 @@
       busy = false; mode = 'dock'; el.classList.remove('rest', 'holding', 'moving'); board.classList.remove('in', 'hist');
       place(dockPos()); applyOn();
       cfg.pip = false; save();
+      if (!leavingPage) pipClosedByUser = true; // khud band kiya → is page load me dobara apne aap nahi
     });
     cfg.pip = true; save();
     applyOn();
@@ -926,10 +928,47 @@
     timerWin = tw();
     timer = timerWin.setTimeout(tick, ms == null ? gapMs() : ms);
   }
+  let lastNote = 0;
+  async function notifyHidden() {
+    try {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      if (Date.now() - lastNote < Math.max(60e3, gapMs())) return;
+      const it = nextItem(false); if (!it) return;
+      lastNote = Date.now();
+      if (!it.fun) histAdd(it);
+      const lines = (it.rows || []).slice(0, 5).map((r) => `• ${r.name}${r.val ? ` — ${r.val}` : ''}`).join('\n');
+      const body = `${it.big ? `${it.big} · ` : ''}${it.head || ''}${lines ? `\n${lines}` : ''}`.slice(0, 400);
+      const opts = { body, icon: ASSET('robot.png'), badge: ASSET('robot.png'), tag: `ff-robot-${it.key}`, renotify: true, data: { link: it.q && it.q[0] === '#' ? it.q : '#/', robot: 1 } };
+      const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+      if (reg) await reg.showNotification(`🤖 ${it.icon || ''} ${it.title}`.trim(), opts); else new Notification(`🤖 ${it.title}`, opts);
+      dot(true);
+      if (cfg.sound) say(it.say);
+    } catch { /* ignore */ }
+  }
+  // 📌 site par pehla click → robot apne aap pop-out window me (browser click ke bina window kholne nahi deta)
+  function armAutoPip() {
+    const go = () => {
+      if (!cfg.on || !allowed() || cfg.autoPip === false || pipWin || pipClosedByUser || !pipOk()) return;
+      popOut();
+    };
+    const once = (e) => {
+      if (e.isTrusted === false) return;
+      if (el && el.contains(e.target)) return; // robot ke apne buttons
+      try { if ('Notification' in window && Notification.permission === 'default' && cfg.notify !== false) Notification.requestPermission().catch(() => {}); } catch { /* ignore */ }
+      go();
+    };
+    document.addEventListener('pointerup', once, true);
+    document.addEventListener('keydown', once, true);
+    // Chrome (naye version) tab badalne par khud PiP de sakta hai — mil gaya to badhiya
+    try { navigator.mediaSession && navigator.mediaSession.setActionHandler('enterpictureinpicture', () => { if (!pipWin && cfg.on && allowed() && cfg.autoPip !== false) popOut(); }); } catch { /* unsupported */ }
+  }
+
   let funTurn = 0, lastUpd = 0;
   async function tick(force) {
     applyOn();
     if (busy || mode === 'hist') return schedule(4e3);
+    // 🔔 site ka tab peeche (dusra tab / WhatsApp) aur pop-out nahi → system notification se update
+    if (!force && document.hidden && !pipWin && cfg.on && allowed() && cfg.notify !== false && cfg.snoozeDay !== today()) { await notifyHidden(); return schedule(60e3); }
     if (!force && blocked()) return schedule(15e3);
     if (!FF.smartQ && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('smartQ'); } catch { /* optional */ } }
     // update ka time (default 10 sec) ho gaya → agli khabar; beech ka time masti me, kabhi khaali khada nahi
@@ -964,7 +1003,7 @@
     if (o && ('everySec' in o || 'on' in o)) schedule(1500);
     return getCfg();
   }
-  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false });
+  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false });
   function clearHistory() { histSave([]); dot(false); }
   FF.mascot = { now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
@@ -985,6 +1024,7 @@
       setInterval(checkVersions, 10 * 60e3);
       setTimeout(pollFeeds, 4e3);
       setInterval(pollFeeds, 30e3);
+      armAutoPip();
       setTimeout(refreshExtras, 15e3);
       setInterval(refreshExtras, 5 * 60e3);
       window.addEventListener('ff:data-fresh', () => setTimeout(checkVersions, 3000));
