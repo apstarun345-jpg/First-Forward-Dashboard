@@ -1982,7 +1982,7 @@ html[data-theme="dark"] .direct-filter:not(.primary), html[data-theme="dark"] .s
 .dispatch-filter-bar { align-items: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) {
-*, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+*:not(#ff-mascot):not(#ff-mascot *), *:not(#ff-mascot):not(#ff-mascot *)::before, *:not(#ff-mascot):not(#ff-mascot *)::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 .btn.is-busy::before, .btn.is-busy::after, .mic-btn.listening { animation-duration: 1.8s !important; animation-iteration-count: infinite !important; }
 }
 /* ---------- 🔊 voice button state ---------- */
@@ -3307,7 +3307,7 @@ html.a11y-contrast body { text-rendering: optimizeLegibility; }
 html.a11y-contrast .card, html.a11y-contrast .kpi, html.a11y-contrast .btn, html.a11y-contrast input, html.a11y-contrast select { border-width: 2px; }
 html.a11y-contrast a { text-decoration: underline; }
 html.a11y-contrast .badge, html.a11y-contrast .tag, html.a11y-contrast .chip { outline: 1px solid currentColor; }
-html.a11y-motion *, html.a11y-motion *::before, html.a11y-motion *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .001ms !important; }
+html.a11y-motion *:not(#ff-mascot):not(#ff-mascot *), html.a11y-motion *:not(#ff-mascot):not(#ff-mascot *)::before, html.a11y-motion *:not(#ff-mascot):not(#ff-mascot *)::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .001ms !important; }
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 75%, #f59e0b); outline-offset: 2px; }
 .a11y-panel { position: fixed; top: 62px; right: 20px; z-index: 260; width: min(320px, calc(100vw - 24px)); padding: 14px; border: 2px solid var(--brand); border-radius: 15px; background: var(--card); color: var(--ink); box-shadow: 0 22px 55px rgba(15,23,42,.25); }
 .a11y-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -4229,7 +4229,7 @@ html[data-theme="dark"] .ua-hit b { color: #fca5a5; }
 .pref-row input[type="checkbox"] { margin-top: 3px; width: 16px; height: 16px; flex: none; }
 .pref-row span { min-width: 0; }
 /* --- ⚡ Speed doctor prefs: animations band + lite mode (boot par app.js lagata hai) --- */
-html.ff-no-anim *, html.ff-no-anim *::before, html.ff-no-anim *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+html.ff-no-anim *:not(#ff-mascot):not(#ff-mascot *), html.ff-no-anim *:not(#ff-mascot):not(#ff-mascot *)::before, html.ff-no-anim *:not(#ff-mascot):not(#ff-mascot *)::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 html.ff-no-anim .ua-kpi-card.ua-kpi-pending::after { animation: none !important; background: var(--brand, #4f46e5); }
 html.ff-lite .ua-head, html.ff-lite .card { box-shadow: none !important; background-image: none !important; }
 /* Lite mode removes gradients. KPI labels are white, so give their cards a solid fallback instead

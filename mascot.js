@@ -521,7 +521,7 @@
     return new Promise((resolve) => {
       const act = navigator.userActivation ? navigator.userActivation.hasBeenActive : true;
       if (!cfg.sound || !text || !act || !('speechSynthesis' in window)) return resolve(false);
-      const parts = toSpeech(text).split(/(?<=[।.!?])\s+/).filter(Boolean); // chhote vaakya → Chrome beech me nahi katta
+      const parts = (toSpeech(text).match(/[^।.!?]+[।.!?]*/g) || []).map((x) => x.trim()).filter(Boolean); // chhote vaakya (lookbehind nahi — purane iPhone Safari me poori file fail hoti thi)
       if (!parts.length) return resolve(false);
       let left = parts.length, fin = false;
       const done = () => { if (fin) return; fin = true; talking = false; if (el) el.classList.remove('talk'); resolve(true); };
