@@ -232,6 +232,125 @@
         say: `${lbl} को ${fmt(d.latestTotal)} टैग्स डिस्पैच हुए, ${d.agentCount} एजेंट्स को। सबसे ज़्यादा ${nm(((d.agents || [])[0] || {}).name)} को।`, q: '' };
     }
   );
+  // ---------------------------------------------------------------- 📈 v3.125.130: mahine ka run-rate, andaaza, best din, champions (FF + GV)
+  const MSHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  let msCache = { at: 0, v: null };
+  function monthStats() {
+    if (msCache.v && Date.now() - msCache.at < 5 * 60e3) return msCache.v;
+    if (!U.reportYm) return null;
+    const cur = U.reportYm(), prev = U.prevMonthKey ? U.prevMonthKey(cur) : '';
+    let ff = []; let gv = [];
+    try { ff = (FF.store && FF.store.get && FF.store.get('daily')) || []; if (FF.filters && FF.filters.dropLaggedFf) ff = FF.filters.dropLaggedFf(ff); ff = ff.filter((r) => r.channel !== 'GV Partner'); } catch { ff = []; }
+    try { gv = (FF.gv && FF.gv.issuanceRows ? FF.gv.issuanceRows() : []) || []; } catch { gv = []; }
+    if (!ff.length && !gv.length) return null;
+    const blank = () => ({ total: 0, vc4: 0, vc20: 0, vc5: 0, rep: 0, days: new Map(), agents: new Map(), prevTotal: 0, prevSame: 0, lastDay: 0 });
+    const out = { ff: blank(), gv: blank(), all: blank(), cur, prev };
+    const add = (ch, r) => {
+      const q = Number(r.n) || 0; if (!q) return;
+      const cls = r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5';
+      for (const o of [out[ch], out.all]) {
+        if (r.ym === cur) {
+          o.total += q; o[cls] += q;
+          if (String(r.type || '').toUpperCase() === 'REPLACEMENT') o.rep += q;
+          const d = o.days.get(r.day) || { total: 0, vc4: 0, vc20: 0, vc5: 0 }; d.total += q; d[cls] += q; o.days.set(r.day, d);
+          if (r.day > o.lastDay) o.lastDay = r.day;
+          const name = r.agentName || r.agentId || '?', a = o.agents.get(`${ch}|${name}`) || { name, ch, total: 0, vc4: 0, vc20: 0, vc5: 0, rep: 0 };
+          a.total += q; a[cls] += q; if (String(r.type || '').toUpperCase() === 'REPLACEMENT') a.rep += q; o.agents.set(`${ch}|${name}`, a);
+        } else if (r.ym === prev) { o.prevTotal += q; o.__prevDays = o.__prevDays || []; o.__prevDays.push([r.day, q]); }
+      }
+    };
+    ff.forEach((r) => add('ff', r)); gv.forEach((r) => add('gv', r));
+    const dim = U.daysInMonth ? U.daysInMonth(cur) : 30;
+    for (const k of ['ff', 'gv', 'all']) {
+      const o = out[k], days = Math.max(1, o.lastDay);
+      o.prevSame = (o.__prevDays || []).filter(([d]) => d <= o.lastDay).reduce((m, [, q]) => m + q, 0);
+      o.rate = { total: o.total / days, vc4: o.vc4 / days, vc20: o.vc20 / days, vc5: o.vc5 / days };
+      o.exp = { total: Math.round(o.rate.total * dim), vc4: Math.round(o.rate.vc4 * dim), vc20: Math.round(o.rate.vc20 * dim), vc5: Math.round(o.rate.vc5 * dim) };
+      o.dim = dim;
+    }
+    msCache = { at: Date.now(), v: out };
+    return out;
+  }
+  const dLabel = (ym, d) => `${d} ${MSHORT[Number(String(ym).slice(5, 7)) - 1] || ''}`;
+  const r1 = (x) => (x >= 10 ? fmt(x) : (Math.round(x * 10) / 10).toString());
+  const chName = (k) => (k === 'ff' ? 'First Forward' : 'GV Partner');
+  const chSay = (k) => (k === 'ff' ? 'फ़र्स्ट फ़ॉरवर्ड' : 'जी वी पार्टनर');
+  BUILDERS.push(
+    function runRateNow() {
+      const m = monthStats(); if (!m || !m.all.total) return null;
+      const a = m.all;
+      return { key: 'rr', mood: 'info', icon: '⚡', title: 'Abhi ka run-rate', view: 'big', big: `${r1(a.rate.total)}/din`, head: `${a.lastDay} din me ${fmt(a.total)} tags`,
+        rows: [{ name: 'VC4', val: `${r1(a.rate.vc4)}/din` }, { name: 'VC20', val: `${r1(a.rate.vc20)}/din` }, { name: 'VC5+', val: `${r1(a.rate.vc5)}/din` }, { name: 'First Forward', val: `${r1(m.ff.rate.total)}/din` }, { name: 'GV Partner', val: `${r1(m.gv.rate.total)}/din` }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+        foot: `Isi speed se mahine ka andaaza ≈ ${fmt(a.exp.total)}`,
+        say: `अभी हमारा रन रेट रोज़ लगभग ${fmt(a.rate.total)} टैग्स का है। इसमें वी सी 4 रोज़ ${r1(a.rate.vc4)}, वी सी 20 रोज़ ${r1(a.rate.vc20)}, और वी सी 5 प्लस रोज़ ${r1(a.rate.vc5)}। फ़र्स्ट फ़ॉरवर्ड रोज़ ${fmt(m.ff.rate.total)} और जी वी पार्टनर रोज़ ${fmt(m.gv.rate.total)} कर रहे हैं।`, q: 'runrate|all' };
+    },
+    function expected() {
+      const m = monthStats(); if (!m || !m.all.total) return null;
+      const a = m.all, g = a.prevTotal ? Math.round(((a.exp.total - a.prevTotal) / a.prevTotal) * 100) : null;
+      const sp = a.prevSame ? Math.round(((a.total - a.prevSame) / a.prevSame) * 100) : null;
+      return { key: 'exp', mood: g != null && g < 0 ? 'alert' : 'excited', icon: '🎯', title: 'Is mahine ka andaaza', view: 'big', big: fmt(a.exp.total), head: `last month ${fmt(a.prevTotal)}${g != null ? ` · ${pct(g)}` : ''}`,
+        rows: [{ name: 'VC4', val: fmt(a.exp.vc4) }, { name: 'VC20', val: fmt(a.exp.vc20) }, { name: 'VC5+', val: fmt(a.exp.vc5) }, { name: 'First Forward', val: fmt(m.ff.exp.total) }, { name: 'GV Partner', val: fmt(m.gv.exp.total) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+        prog: a.exp.total ? Math.min(100, Math.round((a.total / a.exp.total) * 100)) : 0,
+        foot: sp != null ? `Pichle mahine ke isi din (${a.lastDay}) tak ${fmt(a.prevSame)} the — abhi ${fmt(a.total)} (${pct(sp)})` : '',
+        say: `इसी स्पीड से चले तो इस महीने लगभग ${fmt(a.exp.total)} टैग्स होंगे${g != null ? `, जो पिछले महीने से ${Math.abs(g)} प्रतिशत ${g >= 0 ? 'ज़्यादा' : 'कम'} है` : ''}। वी सी 4 लगभग ${fmt(a.exp.vc4)}, वी सी 20 लगभग ${fmt(a.exp.vc20)}, और वी सी 5 प्लस लगभग ${fmt(a.exp.vc5)}।${sp != null ? ` पिछले महीने इसी दिन तक ${fmt(a.prevSame)} थे, अभी ${fmt(a.total)} हैं।` : ''}`, q: 'summary|all' };
+    },
+    function bestDays() {
+      const m = monthStats(); if (!m || !m.all.days.size) return null;
+      const top = [...m.all.days.entries()].sort((x, y) => y[1].total - x[1].total).slice(0, 5);
+      const [d0, v0] = top[0];
+      return { key: 'bestday', mood: 'happy', icon: '📅', title: 'Is mahine ke best din', head: `${dLabel(m.cur, d0)} ko sabse zyada — ${fmt(v0.total)} tags`, view: 'bars',
+        rows: top.map(([d, v]) => ({ name: dLabel(m.cur, d), sub: `VC4 ${fmt(v.vc4)} · VC20 ${fmt(v.vc20)} · VC5+ ${fmt(v.vc5)}`, val: fmt(v.total), w: v.total, tone: 'up' })),
+        say: `इस महीने सबसे ज़्यादा इशुअंस ${d0} ${MON_HI[Number(m.cur.slice(5, 7)) - 1]} को हुई, पूरे ${fmt(v0.total)} टैग्स।${top[1] ? ` दूसरे नंबर पर ${top[1][0]} तारीख़, ${fmt(top[1][1].total)} टैग्स।` : ''}`, q: '' };
+    },
+    function lastDayIssue() {
+      const m = monthStats(); if (!m || !m.all.lastDay) return null;
+      const d = m.all.lastDay, v = m.all.days.get(d) || { total: 0, vc4: 0, vc20: 0, vc5: 0 };
+      const ff = (m.ff.days.get(d) || { total: 0 }).total, gv = (m.gv.days.get(d) || { total: 0 }).total;
+      const avg = m.all.rate.total, diff = avg ? Math.round(((v.total - avg) / avg) * 100) : 0;
+      return { key: `lastday:${d}:${v.total}`, mood: diff >= 0 ? 'happy' : 'sad', icon: '🗓', title: `${dLabel(m.cur, d)} ki issuance`, view: 'big', big: fmt(v.total), head: `average se ${pct(diff)} · FF ${fmt(ff)} · GV ${fmt(gv)}`,
+        rows: [{ name: 'VC4', val: fmt(v.vc4) }, { name: 'VC20', val: fmt(v.vc20) }, { name: 'VC5+', val: fmt(v.vc5) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+        say: `${d} ${MON_HI[Number(m.cur.slice(5, 7)) - 1]} को कुल ${fmt(v.total)} टैग्स इशू हुए — फ़र्स्ट फ़ॉरवर्ड ${fmt(ff)} और जी वी ${fmt(gv)}। ये रोज़ के एवरेज से ${Math.abs(diff)} प्रतिशत ${diff >= 0 ? 'ज़्यादा' : 'कम'} है।`, q: '' };
+    },
+    ...['ff', 'gv'].map((ch) => function champions() {
+      const m = monthStats(); if (!m || !m[ch].agents.size) return null;
+      const ag = [...m[ch].agents.values()];
+      const best = (k) => ag.slice().sort((x, y) => y[k] - x[k])[0];
+      const t = best('total'), a4 = best('vc4'), a20 = best('vc20'), a5 = best('vc5'), rp = best('rep');
+      const rows = [
+        { name: `🏆 ${t.name}`, sub: 'Sabse zyada total', val: fmt(t.total), n: t.total },
+        { name: `🚗 ${a4.name}`, sub: 'VC4 king', val: fmt(a4.vc4), n: a4.vc4 },
+        { name: `🚐 ${a20.name}`, sub: 'VC20 king', val: fmt(a20.vc20), n: a20.vc20 },
+        { name: `🚛 ${a5.name}`, sub: 'VC5+ king', val: fmt(a5.vc5), n: a5.vc5 }
+      ].filter((x) => x.n > 0);
+      const parts = [a4.vc4 ? `वी सी 4 में ${nm(a4.name)}` : '', a20.vc20 ? `वी सी 20 में ${nm(a20.name)}` : '', a5.vc5 ? `वी सी 5 प्लस में ${nm(a5.name)}` : ''].filter(Boolean);
+      if (rp && rp.rep) rows.push({ name: `🔁 ${rp.name}`, sub: 'Sabse zyada replacement', val: fmt(rp.rep) });
+      return { key: `champ:${ch}`, mood: 'excited', icon: ch === 'ff' ? '🥇' : '🏅', title: `${chName(ch)} champions`, head: `Is mahine ${fmt(m[ch].total)} tags · ${m[ch].agents.size} agents`, view: 'list',
+        rows: rows.map((x) => ({ ...x, tone: 'up' })),
+        say: `${chSay(ch)} के चैंपियंस! सबसे ज़्यादा टैग्स ${nm(t.name)} के, ${fmt(t.total)}।${parts.length ? ` ${parts.join(', ')} सबसे आगे हैं।` : ''}`, q: 'top|all' };
+    }),
+    function ffVsGv() {
+      const m = monthStats(); if (!m || !m.all.total) return null;
+      const share = Math.round((m.ff.total / m.all.total) * 100);
+      const lead = m.ff.total >= m.gv.total ? 'ff' : 'gv';
+      return { key: 'ffvsgv', mood: 'excited', icon: '⚔️', title: 'First Forward vs GV Partner', head: `${chName(lead)} aage · FF ${share}% / GV ${100 - share}%`, view: 'list',
+        rows: [['Total', 'total'], ['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+', 'vc5']].map(([n, k]) => ({ name: n, sub: `FF ${fmt(m.ff[k])}  vs  GV ${fmt(m.gv[k])}`, val: m.ff[k] >= m.gv[k] ? 'FF 🏆' : 'GV 🏆', tone: 'chip' }))
+          .concat([{ name: 'Run-rate', sub: `FF ${r1(m.ff.rate.total)}/din vs GV ${r1(m.gv.rate.total)}/din`, val: m.ff.rate.total >= m.gv.rate.total ? 'FF 🏆' : 'GV 🏆', tone: 'chip' }]),
+        say: `मुक़ाबला! इस महीने फ़र्स्ट फ़ॉरवर्ड के ${fmt(m.ff.total)} टैग्स और जी वी पार्टनर के ${fmt(m.gv.total)}। अभी ${chSay(lead)} आगे है।`, q: '' };
+    },
+    function topTodayAgents() {
+      const m = monthStats(); if (!m || !m.all.lastDay) return null;
+      // aakhri din ke top agents — daily rows se dobara (day-level agent map nahi rakha)
+      const d = m.all.lastDay, map = new Map();
+      const scan = (rows, ch) => rows.forEach((r) => { if (r.ym === m.cur && r.day === d) { const k = `${ch}|${r.agentName || r.agentId}`; const o = map.get(k) || { name: r.agentName || r.agentId, ch, n: 0 }; o.n += Number(r.n) || 0; map.set(k, o); } });
+      try { let ff = FF.store.get('daily') || []; if (FF.filters && FF.filters.dropLaggedFf) ff = FF.filters.dropLaggedFf(ff); scan(ff.filter((r) => r.channel !== 'GV Partner'), 'ff'); } catch { /* ignore */ }
+      try { scan(FF.gv.issuanceRows() || [], 'gv'); } catch { /* ignore */ }
+      const top = [...map.values()].sort((a, b) => b.n - a.n).slice(0, 5); if (!top.length) return null;
+      return { key: `daystar:${d}:${top[0].name}`, mood: 'happy', icon: '🌟', title: `${dLabel(m.cur, d)} ke star agents`, head: `${top[0].name} ne us din ${fmt(top[0].n)} tags kiye`, view: 'bars',
+        rows: top.map((x) => ({ name: x.name, sub: x.ch === 'ff' ? 'First Forward' : 'GV Partner', val: fmt(x.n), w: x.n, tone: 'up' })),
+        say: `${d} ${MON_HI[Number(m.cur.slice(5, 7)) - 1]} के स्टार एजेंट ${nm(top[0].name)} रहे, ${fmt(top[0].n)} टैग्स के साथ।${top[1] ? ` उनके बाद ${nm(top[1].name)}।` : ''}`, q: '' };
+    }
+  );
+
   // KYC + dispatch: async data, cache me (KYC 30 min, dispatch 10 min)
   const kycCache = { at: 0, rows: [] }, dispCache = { at: 0, data: null };
   async function refreshExtras() {
@@ -492,15 +611,26 @@
     issuance: 'इशुअंस', growth: 'ग्रोथ', team: 'टीम', sheet: 'शीट', data: 'डेटा', online: 'ऑनलाइन', settings: 'सेटिंग्स', user: 'यूज़र', search: 'सर्च',
     request: 'रिक्वेस्ट', dispatch: 'डिस्पैच', all: 'ऑल', last: 'लास्ट', month: 'मंथ', replace: 'रिप्लेस', chassis: 'चेसिस'
   };
+  const MON_HI = ['जनवरी', 'फ़रवरी', 'मार्च', 'अप्रैल', 'मई', 'जून', 'जुलाई', 'अगस्त', 'सितंबर', 'अक्टूबर', 'नवंबर', 'दिसंबर'];
+  const MON_EN = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
+  // v3.125.130 — insaan jaisi bol-chaal: date pehle ("2026-11-08" → "8 नवंबर", minus nahi), symbols → shabd
   function toSpeech(text) {
-    let t = String(text || '').replace(/\p{Extended_Pictographic}️?/gu, ' ').replace(/[·|•→]/g, ', ');
-    t = t.replace(/\bVC\s?5\+/gi, 'वी सी 5 प्लस').replace(/\bVC\s?(\d+)/gi, 'वी सी $1').replace(/\bTLs?\b/g, 'टी एल').replace(/\bKYC\b/gi, 'के वाई सी')
-      .replace(/(\d)\s?%/g, '$1 प्रतिशत').replace(/\+(\d)/g, 'प्लस $1').replace(/[−–-](\d)/g, ' माइनस $1')
-      .replace(/(\d{4})-(\d{2})-(\d{2})/g, (m, y, mo, d) => `${Number(d)} ${['जनवरी', 'फ़रवरी', 'मार्च', 'अप्रैल', 'मई', 'जून', 'जुलाई', 'अगस्त', 'सितंबर', 'अक्टूबर', 'नवंबर', 'दिसंबर'][Number(mo) - 1] || ''}`);
+    let t = String(text || '').replace(/\p{Extended_Pictographic}️?/gu, ' ');
+    const yr = new Date().getFullYear();
+    t = t.replace(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/g, (m, y, mo, d) => `${Number(d)} ${MON_HI[Number(mo) - 1] || ''}${Number(y) !== yr ? ` ${y}` : ''}`)
+      .replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g, (m, d, mo, y) => `${Number(d)} ${MON_HI[Number(mo) - 1] || ''}${Number(y) !== yr ? ` ${y}` : ''}`)
+      .replace(/\b(\d{1,2})\s(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)[a-z]*\b\.?/gi, (m, d, mo) => `${Number(d)} ${MON_HI[MON_EN[mo.toLowerCase()]]}`)
+      .replace(/\b(\d{1,2}):(\d{2})\s?(am|pm)\b/gi, (m, h, mi, ap) => `${/p/i.test(ap) ? (Number(h) >= 6 && Number(h) < 12 ? 'शाम' : 'दोपहर') : 'सुबह'} ${Number(h)} बजकर ${Number(mi)} मिनट`);
+    t = t.replace(/\bVC\s?5\s?\+/gi, 'वी सी 5 प्लस').replace(/\bVC\s?(\d+)/gi, 'वी सी $1').replace(/\bTLs?\b/g, 'टी एल').replace(/\bKYC\b/gi, 'के वाई सी')
+      .replace(/\bGV\b/g, 'जी वी').replace(/\bFF\b/g, 'फ़र्स्ट फ़ॉरवर्ड').replace(/\bEIR\b/g, 'ई आई आर')
+      .replace(/(\d+)\s?\/\s?din\b/gi, '$1 रोज़').replace(/(\d+)\s?\/\s?(\d+)/g, '$2 में से $1')
+      .replace(/(\d)\s?%/g, '$1 प्रतिशत').replace(/~\s?|≈\s?/g, 'लगभग ').replace(/\s→\s|→/g, ' से ')
+      .replace(/(^|[\s(,])\+(\d)/g, '$1प्लस $2').replace(/(^|[\s(,])[−–-](\d)/g, '$1माइनस $2')
+      .replace(/[·|•]/g, ', ').replace(/\s*:\s+/g, ', ').replace(/\s[–—-]\s/g, ', ');
     // ALL CAPS naam → Title case (warna voice R-A-H-U-L padhti hai)
-    t = t.replace(/\b[A-Z]{3,}\b/g, (w) => (/^(GV|FF|IDFC|NHAI|VRN)$/.test(w) ? w.split('').join(' ') : w[0] + w.slice(1).toLowerCase()));
+    t = t.replace(/\b[A-Z]{3,}\b/g, (w) => (/^(IDFC|NHAI|VRN)$/.test(w) ? w.split('').join(' ') : w[0] + w.slice(1).toLowerCase()));
     t = t.replace(/\b[A-Za-z]+\b/g, (w) => HI[w.toLowerCase()] || w);
-    return t.replace(/\s+/g, ' ').trim();
+    return t.replace(/\s+([,।.!?])/g, '$1').replace(/(,\s*){2,}/g, ', ').replace(/\s+/g, ' ').trim();
   }
   let hiVoice = null;
   function pickVoice() {
@@ -534,8 +664,8 @@
           const u = new SpeechSynthesisUtterance(part);
           if (hiVoice) u.voice = hiVoice;
           u.lang = (hiVoice && hiVoice.lang) || 'hi-IN';
-          u.rate = Number(p.rate) > 0 ? Math.min(1.15, Number(p.rate)) : 0.98;
-          u.pitch = Math.min(1.4, (Number(p.pitch) > 0 ? Number(p.pitch) : 1) * 1.12); // thodi pyaari robot awaaz
+          u.rate = Number(p.rate) > 0 ? Math.min(1.1, Number(p.rate)) : 0.95; // aaram se, insaan jaisa
+          u.pitch = Number(p.pitch) > 0 ? Math.min(1.2, Number(p.pitch)) : 1; // natural pitch (robotic nahi)
           u.onend = () => { left -= 1; if (left <= 0) done(); };
           u.onerror = done;
           window.speechSynthesis.speak(u);
@@ -1030,7 +1160,7 @@
   }
   const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { _sp: toSpeech, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
