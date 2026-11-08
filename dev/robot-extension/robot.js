@@ -15,7 +15,9 @@
   const hostEl = document.createElement('div');
   hostEl.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;';
   const root = hostEl.attachShadow({ mode: 'open' });
-  root.innerHTML = `<link rel="stylesheet" href="${chrome.runtime.getURL('robot.css')}">
+  // CSS: constructable stylesheet (kisi bhi site ki CSP isse nahi rokti)
+  fetch(chrome.runtime.getURL('robot.css')).then((r) => r.text()).then((t) => { const sh = new CSSStyleSheet(); sh.replaceSync(t); root.adoptedStyleSheets = [sh]; }).catch(() => {});
+  root.innerHTML = `
     <div class="mc" id="ff-mascot">
       <div class="mc-stick" aria-hidden="true"></div>
       <div class="mc-board" role="status" aria-live="polite"></div>

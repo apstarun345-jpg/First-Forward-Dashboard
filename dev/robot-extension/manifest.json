@@ -1,16 +1,63 @@
 {
   "manifest_version": 3,
   "name": "Gems Robot — FF & GV Dashboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Dashboard ka Gems robot har tab par (Claude, WhatsApp Web, Sheets…) — sirf robot, bina window, updates board par.",
-  "icons": { "16": "img/icon-16.png", "48": "img/icon-48.png", "128": "img/icon-128.png" },
-  "action": { "default_title": "Gems Robot", "default_icon": { "16": "img/icon-16.png", "48": "img/icon-48.png" } },
-  "background": { "service_worker": "background.js" },
-  "permissions": ["storage", "alarms"],
-  "host_permissions": ["https://first-forward-dashboard.onrender.com/*"],
-  "content_scripts": [
-    { "matches": ["https://first-forward-dashboard.onrender.com/*"], "js": ["bridge.js"], "run_at": "document_start" },
-    { "matches": ["<all_urls>"], "exclude_matches": ["https://first-forward-dashboard.onrender.com/*"], "js": ["robot.js"], "run_at": "document_idle" }
+  "icons": {
+    "16": "img/icon-16.png",
+    "48": "img/icon-48.png",
+    "128": "img/icon-128.png"
+  },
+  "action": {
+    "default_title": "Gems Robot",
+    "default_icon": {
+      "16": "img/icon-16.png",
+      "48": "img/icon-48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "scripting"
   ],
-  "web_accessible_resources": [{ "resources": ["img/*", "robot.css"], "matches": ["<all_urls>"] }]
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://first-forward-dashboard.onrender.com/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "exclude_matches": [
+        "https://first-forward-dashboard.onrender.com/*"
+      ],
+      "js": [
+        "robot.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "img/*",
+        "robot.css"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }

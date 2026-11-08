@@ -3,7 +3,16 @@ const DASH = 'https://first-forward-dashboard.onrender.com/';
 const DAY = 24 * 3600e3;
 const isDash = (u) => String(u || '').startsWith(DASH);
 const ensureAlarm = () => chrome.alarms.create('pull', { periodInMinutes: 0.5 });
-chrome.runtime.onInstalled.addListener(ensureAlarm);
+// Install / update ke waqt jo tabs pehle se khule hain unme bhi robot daalo (warna reload karna padta)
+async function injectOpenTabs() {
+  const tabs = await chrome.tabs.query({});
+  for (const t of tabs) {
+    if (!t.id || !/^https?:/.test(t.url || '')) continue;
+    const files = isDash(t.url) ? ['bridge.js'] : ['robot.js'];
+    chrome.scripting.executeScript({ target: { tabId: t.id }, files }).catch(() => {});
+  }
+}
+chrome.runtime.onInstalled.addListener(() => { ensureAlarm(); injectOpenTabs(); });
 chrome.runtime.onStartup.addListener(ensureAlarm);
 async function activeTab() { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return t; }
 async function dashTab() { const ts = await chrome.tabs.query({ url: `${DASH}*` }); return ts[0]; }
