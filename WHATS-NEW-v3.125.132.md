@@ -1,0 +1,13 @@
+# v3.125.132 — Robot: 11 naye update
+- 🔙 Comeback — 7+ din chup rehne ke baad wapas aaye agents.
+- 1️⃣ Ek din aaye, phir gayab — mahine me sirf ek din kaam karne wale.
+- 🕐 Din ka sabse busy time — GV Master ke time se, pichle 30 din ke top 5 ghante.
+- 🔩 Chassis number wale tags — kitne %, kis agent ke zyada.
+- 🎯 Site milestone — mahine me 500 / 1000 / 2000 / 5000 / 10000… paar (taaliyan + disco).
+- 💯 Agent milestone — agent ne is mahine 100 / 250 / 500 / 1000 paar kiye.
+- 👀 Aaj site par kaun aaya — kaun online, kis page par, aakhri kaam.
+- ⏰ Data late — 11 baje ke baad bhi EIR / StockDataa aaj update nahi hui to alert.
+- 🌅 Good morning motivation — subah ek line, naam lekar (din me ek baar).
+- 🔮 Aaj ka andaaza — robot subah batata hai aaj kitne tags honge; data aane par "kitna sahi tha".
+- 🤖 Robot ka mood — kal average se upar/neeche ke hisaab se khush/udaas + kaaran (growth, low stock, inactive, KYC).
+- Bolte waqt naam me aaye shabd (jaise "AGENT") ab Hindi me nahi badalte.

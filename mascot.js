@@ -30,7 +30,8 @@
   // ---------------------------------------------------------------- insights (data → board)
   const sq = (id, n) => { try { return FF.smartQ && FF.smartQ.answer ? FF.smartQ.answer(id, n) : null; } catch { return null; } };
   // 🗣 bolne ke liye naam: 'RAHUL SHARMA' → 'Rahul Sharma' (caps ko voice A-B-C ki tarah padhti thi)
-  const nm = (s) => String(s || '').toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+  // ⟪…⟫ = naam (bolte waqt Hinglish→Hindi shabd-badal naam par na lage: 'OLD AGENT' 'एजेंट' na bane)
+  const nm = (s) => `⟪${String(s || '').toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase())}⟫`;
   const pct = (g) => (g == null ? '' : `${g > 0 ? '+' : ''}${fmt(g)}%`);
 
   const BUILDERS = [
@@ -488,6 +489,166 @@
     }
   );
 
+  // ---------------------------------------------------------------- 🆕 v3.125.132: comeback, ek-din wale, ghante ka pattern, chassis, milestones, site activity, data late, motivation, andaaza, robot ka mood
+  let presCache = { at: 0, people: [] }, verCache = null;
+  const istNow = () => new Date(Date.now() + 5.5 * 3600e3);
+  const istToday = () => istNow().toISOString().slice(0, 10);
+  const istHour = () => istNow().getUTCHours();
+  const firstName = () => { const u = FF.auth && FF.auth.user; return String((u && (u.name || u.username)) || '').split(/\s+/)[0]; };
+  function siteAvg(S, n) { const ks = [...S.site.keys()].sort().slice(-(n || 14) - 1, -1); return ks.length ? ks.reduce((a, k) => a + S.site.get(k), 0) / ks.length : 0; }
+  BUILDERS.push(
+    function comeback() { // 🔙 7+ din chup, ab wapas
+      const S = series(); if (!S) return null;
+      const out = [];
+      for (const o of S.ag.values()) {
+        if (!o.days.get(S.last)) continue;
+        const ds = [...o.days.keys()].filter((d) => d < S.last).sort(); const prev = ds[ds.length - 1];
+        if (prev && daysBetween(prev, S.last) >= 8) out.push({ name: o.name, ch: o.ch, gap: daysBetween(prev, S.last) - 1, n: o.days.get(S.last) });
+      }
+      if (!out.length) return null;
+      out.sort((a, b) => b.gap - a.gap);
+      const r = out[0];
+      return { key: `comeback:${S.last}`, mood: 'happy', cls: 'greet', icon: '🔙', title: 'Comeback!', head: `${r.name} ${r.gap} din baad wapas — ${fmt(r.n)} tags`, view: 'list',
+        rows: out.slice(0, 5).map((x) => ({ name: x.name, sub: `${x.ch === 'ff' ? 'FF' : 'GV'} · ${x.gap} din chup the`, val: fmt(x.n), tone: 'up' })),
+        say: `कमबैक! ${nm(r.name)} ${r.gap} दिन बाद वापस आए और ${dSay(S.last)} को ${fmt(r.n)} टैग्स किए।`, q: '' };
+    },
+    function oneDayers() { // 1️⃣ mahine me sirf ek din
+      const S = series(), m = monthStats(); if (!S || !m) return null;
+      const out = [];
+      for (const o of S.ag.values()) {
+        const ds = [...o.days.keys()].filter((d) => d.startsWith(m.cur));
+        if (ds.length === 1 && daysBetween(ds[0], S.last) >= 5) out.push({ name: o.name, ch: o.ch, d: ds[0], n: o.days.get(ds[0]) });
+      }
+      if (out.length < 1) return null;
+      out.sort((a, b) => b.n - a.n);
+      return { key: `oneday:${out.length}:${S.last}`, mood: 'curious', icon: '1️⃣', title: 'Ek din aaye, phir gayab', head: `${out.length} agents ne is mahine sirf ek din kaam kiya`, view: 'list',
+        rows: out.slice(0, 5).map((x) => ({ name: x.name, sub: `${x.ch === 'ff' ? 'FF' : 'GV'} · sirf ${dLbl(x.d)} ko`, val: fmt(x.n), tone: 'warn' })),
+        say: `${out.length} एजेंट्स ने इस महीने सिर्फ़ एक दिन काम किया और फिर ग़ायब हो गए। जैसे ${nm(out[0].name)}, सिर्फ़ ${dSay(out[0].d)} को। इनसे बात कर लो।`, q: '' };
+    },
+    function hourPattern() { // 🕐 din ke kis waqt sabse zyada (GV Master me time hai)
+      let rows = []; try { rows = (FF.gv && FF.gv.rows ? FF.gv.rows() : []) || []; } catch { rows = []; }
+      if (!rows.length || !FF.model || !FF.model.timeToMins) return null;
+      const cut = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10), h = new Array(24).fill(0);
+      let tot = 0;
+      for (const r of rows) { const k = r.date ? String(r.date instanceof Date ? r.date.toISOString() : r.date).slice(0, 10) : ''; if (k && k < cut) continue; const mn = FF.model.timeToMins(r.time); if (!Number.isFinite(mn)) continue; h[Math.floor(mn / 60)] += 1; tot += 1; }
+      if (tot < 50) return null;
+      const order = h.map((n, i) => [i, n]).sort((a, b) => b[1] - a[1]);
+      const lab = (i) => `${i % 12 || 12}${i < 12 ? ' AM' : ' PM'}–${(i + 1) % 12 || 12}${i + 1 < 12 || i + 1 === 24 ? ' AM' : ' PM'}`;
+      const sayH = (i) => `${i < 12 ? 'सुबह' : i < 16 ? 'दोपहर' : i < 20 ? 'शाम' : 'रात'} ${i % 12 || 12} से ${(i + 1) % 12 || 12} बजे`;
+      const top = order.slice(0, 5);
+      return { key: `hours:${top[0][0]}`, mood: 'info', icon: '🕐', title: 'Din ka sabse busy time', head: `${lab(top[0][0])} sabse zyada tags (GV, 30 din)`, view: 'bars',
+        rows: top.map(([i, n]) => ({ name: lab(i), sub: `${Math.round((n / tot) * 100)}% tags`, val: fmt(n), w: n, tone: 'up' })),
+        say: `पिछले तीस दिन में सबसे ज़्यादा टैग्स ${sayH(top[0][0])} के बीच होते हैं। उसके बाद ${sayH(top[1][0])}। इसी टाइम पर एजेंट्स को एक्टिव रखो।`, q: '' };
+    },
+    function chassis() { // 🔩 chassis / VRN wale tag
+      const m = monthStats(); if (!m) return null;
+      const map = new Map(); let tot = 0;
+      const scan = (rows, ch) => rows.forEach((r) => { if (r.ym !== m.cur || !/chassis/i.test(r.vrnType || '')) return; const q = Number(r.n) || 0; tot += q; const k = `${ch}|${r.agentName || r.agentId}`; const o = map.get(k) || { name: r.agentName || r.agentId, ch, n: 0 }; o.n += q; map.set(k, o); });
+      try { let ff = FF.store.get('daily') || []; if (FF.filters && FF.filters.dropLaggedFf) ff = FF.filters.dropLaggedFf(ff); scan(ff.filter((r) => r.channel !== 'GV Partner'), 'ff'); } catch { /* ignore */ }
+      try { scan(FF.gv.issuanceRows() || [], 'gv'); } catch { /* ignore */ }
+      if (!tot) return null;
+      const top = [...map.values()].sort((a, b) => b.n - a.n).slice(0, 5);
+      return { key: `chassis:${tot}`, mood: 'info', icon: '🔩', title: 'Chassis number wale tags', head: `Is mahine ${fmt(tot)} tags chassis par (${Math.round((tot / Math.max(1, m.all.total)) * 100)}%)`, view: 'bars',
+        rows: top.map((x) => ({ name: x.name, sub: x.ch === 'ff' ? 'First Forward' : 'GV Partner', val: fmt(x.n), w: x.n, tone: 'chip' })),
+        say: `इस महीने ${fmt(tot)} टैग्स चेसिस नंबर पर लगे। सबसे ज़्यादा ${nm(top[0].name)} के, ${fmt(top[0].n)}।`, q: '' };
+    },
+    function siteMilestone() { // 🎯 site ne 1000 / 5000 … paar kiye
+      const m = monthStats(); if (!m || !m.all.total) return null;
+      const T = [500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 50000, 75000, 100000];
+      const hit = T.filter((t) => m.all.total >= t).pop(); if (!hit) return null;
+      return { key: `mile:${m.cur}:${hit}`, mood: 'excited', fx: 'clap', cls: 'mc-disco', icon: '🎯', title: `${fmt(hit)} tags paar!`, head: `Is mahine ab tak ${fmt(m.all.total)} — agla padaav ${fmt(T.find((t) => t > m.all.total) || hit * 2)}`, view: 'big', big: fmt(m.all.total),
+        rows: [{ name: 'First Forward', val: fmt(m.ff.total) }, { name: 'GV Partner', val: fmt(m.gv.total) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+        say: `बधाई हो! इस महीने साइट ने ${fmt(hit)} टैग्स का आँकड़ा पार कर लिया। अभी तक ${fmt(m.all.total)} टैग्स। अगला पड़ाव ${fmt(T.find((t) => t > m.all.total) || hit * 2)}!`, q: 'summary|all' };
+    },
+    function agentMilestone() { // 💯 agent ke 100 / 250 / 500 / 1000 is mahine
+      const S = series(), m = monthStats(); if (!S || !m) return null;
+      const T = [100, 250, 500, 1000, 2000];
+      const out = [];
+      for (const o of S.ag.values()) {
+        let tot = 0; for (const [d, n] of o.days) if (d.startsWith(m.cur)) tot += n;
+        const before = tot - (o.days.get(S.last) || 0);
+        const t = T.filter((x) => before < x && tot >= x).pop();
+        if (t) out.push({ name: o.name, ch: o.ch, t, tot });
+      }
+      if (!out.length) return null;
+      out.sort((a, b) => b.t - a.t);
+      const r = out[0];
+      return { key: `amile:${S.last}`, mood: 'excited', fx: 'clap', icon: '💯', title: 'Agent milestone!', head: `${r.name} ne is mahine ${fmt(r.t)} tags paar kiye`, view: 'list',
+        rows: out.slice(0, 5).map((x) => ({ name: x.name, sub: `${x.ch === 'ff' ? 'FF' : 'GV'} · ${fmt(x.t)} paar`, val: fmt(x.tot), tone: 'up' })),
+        say: `मुबारक हो ${nm(r.name)}! इस महीने ${fmt(r.t)} टैग्स पूरे हो गए, अभी ${fmt(r.tot)} पर हैं।`, q: '' };
+    },
+    function siteActivity() { // 👀 aaj site par kaun kitna active
+      const ppl = (presCache.people || []).filter((p) => p.lastSeen && new Date(p.lastSeen + 5.5 * 3600e3).toISOString().slice(0, 10) === istToday());
+      if (!ppl.length) return null;
+      const rows = ppl.slice(0, 5).map((p) => {
+        const mn = Math.round((Date.now() - p.lastSeen) / 60e3);
+        const last = p.lastEvent && p.lastEvent.label ? ` · ${String(p.lastEvent.label).slice(0, 40)}` : '';
+        return { name: p.name || p.username, sub: `${String(p.title || p.page || '').replace(/^#\/?/, '').slice(0, 30)}${last}`, val: p.active ? '🟢 abhi' : mn < 60 ? `${mn}m` : `${Math.floor(mn / 60)}h`, tone: 'chip' };
+      });
+      return { key: `act:${ppl.map((p) => p.username).join(',')}`, mood: 'curious', icon: '👀', title: 'Aaj site par kaun aaya', head: `${ppl.length} log aaj site par · ${ppl.filter((p) => p.active).length} abhi online`, view: 'list', rows,
+        say: `आज ${ppl.length} लोग साइट पर आए। ${ppl.filter((p) => p.active).length ? `अभी ${ppl.filter((p) => p.active).map((p) => nm(p.name || p.username)).slice(0, 3).join(', ')} ऑनलाइन हैं।` : ''}`, q: '#/settings?tab=users' };
+    },
+    function dataLate() { // ⏰ subah sheet update nahi hui
+      if (!verCache || !Array.isArray(verCache.sheets) || istHour() < 11) return null;
+      const t = istToday();
+      const late = verCache.sheets.filter((x) => /eir|stock/i.test(x.name || '') && x.changedAt && new Date(Date.parse(x.changedAt) + 5.5 * 3600e3).toISOString().slice(0, 10) !== t);
+      if (!late.length) return null;
+      return { key: `late:${t}:${late.map((x) => x.name).join(',')}`, mood: 'alert', icon: '⏰', title: 'Aaj ka data late hai!', head: `${late.map((x) => x.name).join(', ')} aaj abhi tak update nahi hui`, view: 'list',
+        rows: late.slice(0, 5).map((x) => ({ name: x.name, sub: 'aakhri update', val: new Date(x.changedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }), tone: 'warn' })),
+        say: `ध्यान दो! ${late.map((x) => x.name).join(' और ')} आज अभी तक अपडेट नहीं हुई। शीट चेक कर लो।`, q: '#/' };
+    },
+    function motivation() { // 🌅 subah ki ek line
+      if (istHour() >= 12 || cfg.motivDay === istToday()) return null;
+      const n = firstName(), L = [
+        ['Aaj ka din aapka hai! Har ek tag ek naya customer hai 🚀', 'आज का दिन आपका है! हर एक टैग एक नया कस्टमर है।'],
+        ['Chhote kadam roz — bada target mahine ke end me 🎯', 'छोटे कदम रोज़, बड़ा टारगेट महीने के एंड में।'],
+        ['Jo agent aaj call karega, wahi kal record todega 📞', 'जो एजेंट आज कॉल करेगा, वही कल रिकॉर्ड तोड़ेगा।'],
+        ['Stock bharo, speed badhao, team ko jagao — chalo shuru karein 💪', 'स्टॉक भरो, स्पीड बढ़ाओ, टीम को जगाओ, चलो शुरू करें!'],
+        ['Kal se behtar — bas itna hi karna hai aaj 🌟', 'कल से बेहतर, बस इतना ही करना है आज।']
+      ];
+      const [h, sy] = L[new Date().getDate() % L.length];
+      return { onShow: () => { cfg.motivDay = istToday(); save(); }, key: `motiv:${istToday()}`, fun: true, cls: 'greet', mood: 'happy', icon: '🌅', title: `Good morning${n ? ' ' + n : ''}!`, head: h, view: 'text', stay: 7000,
+        say: `गुड मॉर्निंग${n ? ' ' + nm(n) : ''}! ${sy}` };
+    },
+    function guess() { // 🔮 aaj ka andaaza + kal ka hisaab
+      const S = series(); if (!S) return null;
+      const g = cfg.guess;
+      if (g && g.date && !g.done && S.site.has(g.date)) { // asal aa gaya → result
+        const act = S.site.get(g.date), err = act ? Math.round((Math.abs(g.n - act) / act) * 100) : 0;
+        return { onShow: () => { cfg.guess = { ...g, done: 1 }; save(); }, key: `guessres:${g.date}`, mood: err <= 10 ? 'excited' : err <= 25 ? 'happy' : 'laugh', fx: err <= 10 ? 'clap' : '', icon: '🔮', title: 'Mera andaaza kaisa raha?', head: `${dLbl(g.date)}: andaaza ${fmt(g.n)} · asal ${fmt(act)} — ${100 - Math.min(100, err)}% sahi`, view: 'big', big: fmt(act),
+          rows: [{ name: 'Mera andaaza', val: fmt(g.n) }, { name: 'Asal', val: fmt(act) }, { name: 'Farak', val: `${act >= g.n ? '+' : '−'}${fmt(Math.abs(act - g.n))}` }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+          say: `${dSay(g.date)} के लिए मेरा अंदाज़ा ${fmt(g.n)} था, असल में ${fmt(act)} टैग्स हुए। ${err <= 10 ? 'वाह, लगभग सही!' : err <= 25 ? 'काफ़ी पास था!' : 'इस बार चूक गया, हा हा!'}`, q: '' };
+      }
+      const t = istToday();
+      if (g && g.date === t) return null;
+      if (S.site.has(t)) return null;
+      // same weekday ka pichle 4 hafte ka average × haal ka level
+      const wd = new Date(`${t}T00:00:00Z`).getUTCDay(), same = [];
+      for (const [k, v] of S.site) if (new Date(`${k}T00:00:00Z`).getUTCDay() === wd && k < t) same.push([k, v]);
+      same.sort((a, b) => (a[0] < b[0] ? 1 : -1));
+      const base = same.slice(0, 4).map((x) => x[1]); if (!base.length) return null;
+      const est = Math.round((base.reduce((a, b) => a + b, 0) / base.length) * 0.5 + siteAvg(S, 7) * 0.5);
+      return { onShow: () => { cfg.guess = { date: t, n: est }; save(); }, key: `guess:${t}`, mood: 'curious', icon: '🔮', title: 'Aaj kitne tags honge?', head: `Mera andaaza: aaj ~${fmt(est)} tags (kal data aane par batata hoon kitna sahi tha)`, view: 'big', big: `~${fmt(est)}`,
+        rows: [{ name: 'Pichle 7 din avg', val: fmt(siteAvg(S, 7)) }, { name: 'Isi weekday avg', val: fmt(base.reduce((a, b) => a + b, 0) / base.length) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+        say: `मेरा अंदाज़ा है आज लगभग ${fmt(est)} टैग्स होंगे। कल डेटा आने पर बताऊँगा कितना सही था!`, q: '' };
+    },
+    function robotMood() { // 😄/😢 robot ka mood + kaaran
+      const S = series(); if (!S) return null;
+      const v = S.site.get(S.last) || 0, avg = siteAvg(S, 14); if (!avg) return null;
+      const d = Math.round(((v - avg) / avg) * 100);
+      const reasons = [{ name: `${dLbl(S.last)} ki issuance`, sub: `14 din avg ${fmt(avg)}`, val: pct(d), tone: d >= 0 ? 'up' : 'down' }];
+      const lc = sq('lowcover|all', 500), ina = sq('inactive|all', 5000), hi = sq('high|all', 5000), kl = kycCache.rows || [];
+      if (hi && hi.rows.length) reasons.push({ name: 'High growth agents', sub: '', val: fmt(hi.rows.length), tone: 'up' });
+      if (lc && lc.rows.length) reasons.push({ name: 'Stock khatam hone wale', sub: '', val: fmt(lc.rows.length), tone: 'warn' });
+      if (ina && ina.rows.length) reasons.push({ name: 'Inactive agents', sub: '', val: fmt(ina.rows.length), tone: 'down' });
+      if (kl.length) reasons.push({ name: 'KYC kam wale', sub: '', val: fmt(kl.length), tone: 'down' });
+      const mood = d >= 10 ? 'excited' : d >= -5 ? 'happy' : d >= -20 ? 'sad' : 'sleepy';
+      const face = { excited: '🤩 Bahut khush', happy: '😊 Khush', sad: '😟 Thoda udaas', sleepy: '😢 Udaas' }[mood];
+      return { key: `rmood:${S.last}:${mood}`, mood, icon: '🤖', title: `Aaj mera mood: ${face}`, head: d >= 0 ? `Kyunki ${dLbl(S.last)} ko average se ${d}% zyada tags hue!` : `Kyunki ${dLbl(S.last)} ko average se ${Math.abs(d)}% kam tags hue`, view: 'list', rows: reasons.slice(0, 5),
+        say: d >= 0 ? `आज मेरा मूड बहुत अच्छा है, क्योंकि ${dSay(S.last)} को एवरेज से ${d} प्रतिशत ज़्यादा टैग्स हुए!` : `आज मैं थोड़ा उदास हूँ, क्योंकि ${dSay(S.last)} को एवरेज से ${Math.abs(d)} प्रतिशत कम टैग्स हुए। चलो आज ज़्यादा करते हैं!`, q: '' };
+    }
+  );
+
   // KYC + dispatch: async data, cache me (KYC 30 min, dispatch 10 min)
   const kycCache = { at: 0, rows: [] }, dispCache = { at: 0, data: null };
   async function refreshExtras() {
@@ -535,7 +696,7 @@
   async function checkVersions() {
     try {
       if (!FF.data || !FF.data.versions) return;
-      const v = await FF.data.versions(true);
+      const v = await FF.data.versions(true); verCache = v;
       const fresh = [];
       (v && v.sheets || []).forEach((s) => {
         const at = Date.parse(s.changedAt || '') || 0;
@@ -777,7 +938,7 @@
       .replace(/[·|•]/g, ', ').replace(/\s*:\s+/g, ', ').replace(/\s[–—-]\s/g, ', ');
     // ALL CAPS naam → Title case (warna voice R-A-H-U-L padhti hai)
     t = t.replace(/\b[A-Z]{3,}\b/g, (w) => (/^(IDFC|NHAI|VRN)$/.test(w) ? w.split('').join(' ') : w[0] + w.slice(1).toLowerCase()));
-    t = t.replace(/\b[A-Za-z]+\b/g, (w) => HI[w.toLowerCase()] || w);
+    t = t.split(/(⟪[^⟫]*⟫)/).map((seg) => (seg[0] === '⟪' ? seg.slice(1, -1) : seg.replace(/\b[A-Za-z]+\b/g, (w) => HI[w.toLowerCase()] || w))).join('');
     return t.replace(/\s+([,।.!?])/g, '$1').replace(/(,\s*){2,}/g, ', ').replace(/\s+/g, ' ').trim();
   }
   let hiVoice = null;
@@ -1019,6 +1180,7 @@
     el.classList.add('holding');
     if (it.cls) el.classList.add(it.cls);
     board.classList.add('in');
+    try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
     if (!it.fun) histAdd(it); // masti/jokes history me nahi
     toExt(it);
     await wait(350);
@@ -1107,7 +1269,7 @@
     } catch { /* admin nahi */ }
     // 👀 online log (sirf jab list badle)
     try {
-      const r = await api('/api/presence');
+      const r = await api('/api/presence'); presCache = { at: Date.now(), people: (r && r.people) || [] };
       const on = (r && r.people || []).filter((x) => x.active).map((x) => x.name || x.username).filter(Boolean);
       const me = FF.auth && FF.auth.user ? (FF.auth.user.name || FF.auth.user.username) : '';
       const others = on.filter((n) => n !== me);
@@ -1230,6 +1392,7 @@
       extTurn += 1;
       const it = nextItem(false) || (cfg.fun !== false && extTurn % 2 ? joke() : null);
       if (!it) return;
+      try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
       if (!it.fun) { histAdd(it); dot(true); }
       toExt(it);
       if (cfg.sound) say(it.say);
@@ -1242,6 +1405,7 @@
       if (Date.now() - lastNote < Math.max(60e3, gapMs())) return;
       const it = nextItem(false); if (!it) return;
       lastNote = Date.now();
+      try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
       if (!it.fun) histAdd(it);
       const lines = (it.rows || []).slice(0, 5).map((r) => `• ${r.name}${r.val ? ` — ${r.val}` : ''}`).join('\n');
       const body = `${it.big ? `${it.big} · ` : ''}${it.head || ''}${lines ? `\n${lines}` : ''}`.slice(0, 400);
