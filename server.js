@@ -4966,7 +4966,8 @@ async function robotEirRows() {
   const c = personalConfig({ source: 'ff' });
   const ffName = e.agentName || 'L', ffTl = e.tlName || 'BA', gvName = e.gvName || 'AX', gvTl = e.gvTl || 'AZ';
   const { start, today } = personalWindow();
-  const cols = `${c.dateCol}, ${c.clsCol}, ${c.masterCol}, ${ffName}, ${ffTl}, ${gvName}, ${gvTl}`;
+  const gvIdCol = e.gvId || 'AW';
+  const cols = `${c.dateCol}, ${c.clsCol}, ${c.masterCol}, ${ffName}, ${ffTl}, ${gvName}, ${gvTl}, ${gvIdCol}`;
   const tq = `select ${cols}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' group by ${cols}`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
   const out = await fetchPersonalCached(upstreamUrl(params));
@@ -4979,9 +4980,11 @@ async function robotEirRows() {
     const master = String(serverCell(row, 2) == null ? '' : serverCell(row, 2)).trim().replace(/\.0+$/, '');
     const gvTlName = String(e.gvChannelTl || 'ApnaPayment Pvt. Ltd.').trim().toLowerCase();
     const gv = master ? isGvPersonalRow(master) : String(serverCell(row, 4) || '').trim().toLowerCase() === gvTlName;
-    const name = String(serverCell(row, gv ? 5 : 3) || '').trim() || String(serverCell(row, gv ? 3 : 5) || '').trim(); if (!name) continue;
+    // GV: naam AX → warna L → warna GV ID (AW); naam na ho tab bhi total me gino
+    const name = (gv ? (serverCell(row, 5) || serverCell(row, 3) || (serverCell(row, 7) ? `GV ${serverCell(row, 7)}` : '')) : (serverCell(row, 3) || serverCell(row, 5))).trim() || (gv ? 'GV (naam nahi)' : 'FF (naam nahi)');
+    if (gv && !robotBrain.gvSample) robotBrain.gvSample = JSON.stringify((row.c || []).map((x) => (x ? x.v : null)));
     const b = classBucket(serverCell(row, 1));
-    rows.push({ date, ch: gv ? 'gv' : 'ff', name, tl: String(serverCell(row, gv ? 6 : 4) || '').trim(), cls: b === 'VC4' ? 'vc4' : b === 'VC20' ? 'vc20' : 'vc5', n: serverNumber(serverCell(row, 7)) || 0 });
+    rows.push({ date, ch: gv ? 'gv' : 'ff', name, tl: String(serverCell(row, gv ? 6 : 4) || '').trim(), cls: b === 'VC4' ? 'vc4' : b === 'VC20' ? 'vc20' : 'vc5', n: serverNumber(serverCell(row, 8)) || 0 });
   }
   const gvN = rows.filter((r) => r.ch === 'gv').length;
   if (!gvN) { const ms = new Map(); for (const row of (table.rows || []).slice(0, 3000)) { const m = String(serverCell(row, 2) == null ? '' : serverCell(row, 2)); ms.set(m, (ms.get(m) || 0) + 1); } console.log(`🤖 robot: GV rows 0 — master values: ${[...ms.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${JSON.stringify(k)}×${v}`).join(', ')} (gvMasterId ${eirGvMasterId()})`); }
@@ -5098,6 +5101,12 @@ async function robotBrainRun(reason) {
     if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
     const sent = db.notify.watch.robotSent && typeof db.notify.watch.robotSent === 'object' ? db.notify.watch.robotSent : (db.notify.watch.robotSent = {});
     for (const [k, t] of Object.entries(sent)) if (Date.now() - t > 3 * 864e5) delete sent[k];
+    // v3.125.137 — GV pehle 0 gina gaya tha: aaj ke galat updates ek baar sahi data ke saath dobara
+    const fixed = new Set();
+    if (db.notify.watch.robotFix !== 137) {
+      for (const k of Object.keys(sent)) if (k.startsWith('srv:') && !/^srv:(disp|stock):/.test(k)) { fixed.add(k); delete sent[k]; }
+      db.notify.watch.robotFix = 137;
+    }
     const items = [];
     try { robotBrain.lastErr = ''; const rr = await robotEirRows(); robotBrain.rows = rr.length; items.push(...robotInsights(rr)); } catch (e) { robotBrain.lastErr = e.message; }
     // 🚚 dispatch (ledger)
@@ -5112,9 +5121,12 @@ async function robotBrainRun(reason) {
       if (st && st.total) items.push({ key: `srv:stock:${dateKeyNow()}`, title: `🤖 📦 Stock: ${rbFmt(st.total)} tags`, link: '#/stock', body: Object.entries(st.classes || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c, n]) => `${c}: ${rbFmt(n)}`).join(' · ') });
     } catch { /* ignore */ }
     let added = 0;
-    for (const it of items) if (!sent[it.key] && !robotBrain.queue.some((q) => q.key === it.key)) { robotBrain.queue.push(it); added++; }
+    for (const it of items) {
+      if (fixed.has(it.key)) it.title = it.title.replace(/^🤖 /, '🤖 ✅ Sahi (GV ke saath) · ');
+      if (!sent[it.key] && !robotBrain.queue.some((q) => q.key === it.key)) { robotBrain.queue.push(it); added++; }
+    }
     if (robotBrain.queue.length > 60) robotBrain.queue.splice(0, robotBrain.queue.length - 60);
-    console.log(`🤖 robot brain (${reason}): ${robotBrain.rows || 0} rows (GV ${robotBrain.gvRows || 0}), ${items.length} updates bane, ${added} naye queue me, queue ${robotBrain.queue.length}, admin devices ${robotAdminSubs().length}${robotBrain.lastErr ? `, err: ${robotBrain.lastErr}` : ''}`);
+    console.log(`🤖 robot brain (${reason}): ${robotBrain.rows || 0} rows (GV ${robotBrain.gvRows || 0}${robotBrain.gvSample ? ` e.g. ${robotBrain.gvSample}` : ''}), ${items.length} updates bane, ${added} naye queue me, queue ${robotBrain.queue.length}, admin devices ${robotAdminSubs().length}${robotBrain.lastErr ? `, err: ${robotBrain.lastErr}` : ''}`);
   } finally { robotBrain.busy = false; }
 }
 function robotAdminSubs() {
