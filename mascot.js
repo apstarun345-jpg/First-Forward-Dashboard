@@ -768,10 +768,11 @@
     try { const a = JSON.parse(localStorage.getItem(HK) || '[]'); return Array.isArray(a) ? a.filter((h) => h && Date.now() - h.at < DAY) : []; } catch { return []; }
   }
   function histSave(a) { try { localStorage.setItem(HK, JSON.stringify(a.slice(0, 60))); } catch { /* private mode */ } }
-  function histAdd(it) {
+  function histAdd(it, at) {
     const sig = sigOf(it);
     const a = histLoad().filter((h) => h.sig !== sig); // same baat dobara → purani entry hatao, ek hi rahe
-    a.unshift({ sig, at: Date.now(), key: it.key, icon: it.icon, title: it.title, head: it.head, big: it.big || '', q: it.q || '', mood: it.mood });
+    a.unshift({ sig, at: at || Date.now(), key: it.key, icon: it.icon, title: it.title, head: it.head, big: it.big || '', q: it.q || '', mood: it.mood });
+    a.sort((x, y) => y.at - x.at);
     histSave(a);
   }
   const saidWithin = (it, ms) => { const sig = sigOf(it); return histLoad().some((h) => h.sig === sig && Date.now() - h.at < ms); };
@@ -1263,7 +1264,23 @@
   const clip = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
   const tm = (iso) => { const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : ''; };
   const queued = new Set();
-  function enqueue(it) { if (!it || queued.has(it.id)) return; queued.add(it.id); prio.push(it); if (prio.length > 40) prio.splice(0, prio.length - 40); }
+  function enqueue(it) {
+    if (!it || queued.has(it.id)) return; queued.add(it.id);
+    // same type ki purani khabar line me ho to hatao — sirf sabse nayi dikhe (purani history me)
+    if (it.grp) { for (let i = prio.length - 1; i >= 0; i--) if (prio[i].grp === it.grp) { const old = prio.splice(i, 1)[0]; if (!old.fun) histAdd(old, old.at); } }
+    prio.push(it); if (prio.length > 40) prio.splice(0, prio.length - 40);
+  }
+  // 🔔 v3.125.141 — site / app khulte hi: har type ki SIRF sabse nayi khabar board par; purani (raat wali) seedhe history me.
+  //    6 ghante se purani khabar board par nahi aati (history me rehti hai).
+  function latestOnly(list, grpOf, timeOf, build) {
+    const by = new Map();
+    for (const x of list) { const g = grpOf(x); const cur = by.get(g); if (!cur || timeOf(x) >= timeOf(cur)) by.set(g, x); }
+    for (const x of list) {
+      const it = build(x); it.grp = grpOf(x); it.at = timeOf(x);
+      if (by.get(it.grp) === x && Date.now() - it.at < 6 * 3600e3) enqueue(it);
+      else histAdd(it, it.at);
+    }
+  }
   const api = (p) => (FF.auth && FF.auth.api ? FF.auth.api(p) : Promise.reject(new Error('no api')));
   const firstRun = (k) => !cfg[k];
   async function pollFeeds() {
@@ -1277,14 +1294,14 @@
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
       const top = (r && r.items || []).reduce((m, x) => Math.max(m, Date.parse(x.createdAt) || 0), last);
       if (top) cfg.lastNotif = new Date(top).toISOString();
-      (firstRun('notifInit') ? fresh.slice(-3) : fresh).forEach((x) => {
+      latestOnly(fresh, (x) => `n|${x.type || ''}|${noEmo(x.title)}`, (x) => Date.parse(x.createdAt) || 0, (x) => {
         const ic = emo(x.title) || '🔔';
         const link = x.meta && x.meta.link ? String(x.meta.link) : '';
-        enqueue({
+        return {
           id: `n:${x.id}`, key: `notif:${x.id}`, mood: /delete|fail|error|alert|drop|girawat|⚠|❌|🚨/i.test(x.title + x.type) ? 'alert' : x.type === 'search' ? 'curious' : 'excited',
           icon: ic, title: clip(noEmo(x.title), 46) || 'Naya alert', head: clip(x.body || x.title, 160), view: 'text', foot: `🔔 ${tm(x.createdAt)}`,
           say: clip(`${noEmo(x.title)}. ${x.body || ''}`, 220), q: link && link[0] === '#' ? link : '@notif', fast: true
-        });
+        };
       });
       cfg.notifInit = 1;
     } catch { /* login nahi */ }
@@ -1296,13 +1313,13 @@
         .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
       const top = (r && r.entries || []).reduce((m, x) => Math.max(m, Date.parse(x.at) || 0), last);
       if (top) cfg.lastAudit = new Date(top).toISOString();
-      (firstRun('auditInit') ? fresh.slice(-3) : fresh).forEach((x) => {
+      latestOnly(fresh, (x) => `a|${x.action}|${x.target || ''}`, (x) => Date.parse(x.at) || 0, (x) => {
         const lbl = AUDIT_TXT[x.action] || `⚙️ ${String(x.action || 'change').replace(/_/g, ' ')}`;
-        enqueue({
+        return {
           id: `a:${x.at}:${x.action}:${x.target}`, key: `audit:${x.at}:${x.action}`, mood: /delete|revoke|decline/.test(x.action) ? 'alert' : 'info',
           icon: emo(lbl) || '⚙️', title: noEmo(lbl), head: clip(`${x.actor || 'koi'} ne ${x.target ? `"${x.target}" ` : ''}${noEmo(lbl).toLowerCase()}${x.note ? ` — ${x.note}` : ''}`, 160),
           view: 'text', foot: `📜 Audit · ${tm(x.at)}`, say: clip(`${x.actor || 'Kisi'} ne ${noEmo(lbl)}. ${x.note || ''}`, 200), q: '#/settings?tab=audit', fast: true
-        });
+        };
       });
       cfg.auditInit = 1;
     } catch { /* admin nahi */ }
