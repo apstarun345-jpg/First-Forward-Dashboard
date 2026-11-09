@@ -1271,13 +1271,13 @@
     prio.push(it); if (prio.length > 40) prio.splice(0, prio.length - 40);
   }
   // 🔔 v3.125.141 — site / app khulte hi: har type ki SIRF sabse nayi khabar board par; purani (raat wali) seedhe history me.
-  //    6 ghante se purani khabar board par nahi aati (history me rehti hai).
+  //    v3.125.143: 20 min se purani khabar board par nahi aati (history me rehti hai).
   function latestOnly(list, grpOf, timeOf, build) {
     const by = new Map();
     for (const x of list) { const g = grpOf(x); const cur = by.get(g); if (!cur || timeOf(x) >= timeOf(cur)) by.set(g, x); }
     for (const x of list) {
       const it = build(x); it.grp = grpOf(x); it.at = timeOf(x);
-      if (by.get(it.grp) === x && Date.now() - it.at < 6 * 3600e3) enqueue(it);
+      if (by.get(it.grp) === x && Date.now() - it.at < 20 * 60e3) enqueue(it); // sirf abhi ki (20 min) — purani history me
       else histAdd(it, it.at);
     }
   }
