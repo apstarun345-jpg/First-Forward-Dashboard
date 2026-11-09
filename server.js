@@ -4998,6 +4998,10 @@ async function robotEirRows() {
   const gvN = rows.filter((r) => r.ch === 'gv').length;
   if (!gvN) { const ms = new Map(); for (const row of (table.rows || []).slice(0, 3000)) { const m = String(serverCell(row, 2) == null ? '' : serverCell(row, 2)); ms.set(m, (ms.get(m) || 0) + 1); } console.log(`🤖 robot: GV rows 0 — master values: ${[...ms.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${JSON.stringify(k)}×${v}`).join(', ')} (gvMasterId ${eirGvMasterId()})`); }
   robotBrain.gvRows = gvN;
+  try { // 🔍 tulna: EIR ka GV total vs GV Master ka total (pichle 3 din)
+    const days = [...new Set(rows.filter((r) => !r.agentOnly).map((r) => r.date))].sort().slice(-3);
+    console.log('🤖 robot GV check: ' + days.map((d) => `${d} EIR-GV ${rows.filter((r) => r.date === d && r.ch === 'gv' && !r.agentOnly).reduce((m, r) => m + r.n, 0)} / GV-Master ${rows.filter((r) => r.date === d && r.agentOnly).reduce((m, r) => m + r.n, 0)} / EIR-FF ${rows.filter((r) => r.date === d && r.ch === 'ff').reduce((m, r) => m + r.n, 0)}`).join(' · '));
+  } catch { /* debug */ }
   return rows;
 }
 async function robotGvMasterRows(start, today) {
