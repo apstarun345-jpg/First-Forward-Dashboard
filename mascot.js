@@ -1307,8 +1307,7 @@
     await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
     layoutBoard(g, pipWin ? 'pip' : goLeft ? 'right' : 'left');
     dance(it.mood);
-    setTimeout(() => chotuSay(pick(CH_REACT[it.mood] || CH_REACT.info)), 900);
-    if (/record|mile|badges|rec:|clap|champ/.test(it.key || '') || it.fx === 'clap') jingle('record'); else if (/anom|late|stzero|nostock/.test(it.key || '')) jingle('alert'); else if (it.mood === 'excited' || it.mood === 'happy') jingle('win');
+    clearTimeout(extSayT); stopSpeech(); // purani / extension wali awaaz band — ab sirf isi board ki
     el.classList.add('holding');
     if (it.cls) el.classList.add(it.cls);
     board.classList.add('in');
@@ -1316,11 +1315,15 @@
     if (/^srv:/.test(it.key || '')) { cfg.srvIdx = (Number(cfg.srvIdx) || 0) + 1; save(); }
     if (!it.fun) { histAdd(it); pushRobot(it); } // masti/jokes history / push me nahi
     toExt(it);
-    await wait(350);
+    await wait(480); // 🔄 v3.125.151: board poora khul jaye (transition .45s) — tab hi koi awaaz
     let reason = '';
     const ended = new Promise((res) => { skip = (why) => { reason = why || 'skip'; res(); }; });
     if (it.fx) confetti(it.fx);
-    const spoken = typewriter().then(() => say(it.say)).then(async () => {
+    const jk = /record|mile|badges|rec:|clap|champ/.test(it.key || '') || it.fx === 'clap' ? 'record' : /anom|late|stzero|nostock/.test(it.key || '') ? 'alert' : it.mood === 'excited' || it.mood === 'happy' ? 'win' : '';
+    const jingled = jk ? jingle(jk) : 0;
+    tw().setTimeout(() => { if (current === it) chotuSay(pick(CH_REACT[it.mood] || CH_REACT.info)); }, 700);
+    // board dikhte hi typing + bolna saath-saath (dhun bajı ho to uske khatam hone ke baad)
+    const spoken = Promise.all([typewriter(), (jingled ? wait(Math.min(jingled, 750)) : Promise.resolve()).then(() => (current === it ? say(it.say) : false))]).then(async () => {
       if (it.view !== 'quiz') return;
       board.classList.add('quiz-run'); await wait(5000); // ⏳ sochne ka time
       board.classList.add('reveal'); dance('happy'); await say(it.sayAns);
@@ -1623,9 +1626,9 @@
   // 🎵 chhoti dhun (WebAudio) — sound ON ho tab
   let actx = null;
   function jingle(kind) {
-    if (!cfg.sound || cfg.jingle === false) return;
+    if (!cfg.sound || cfg.jingle === false) return 0;
     try {
-      const act = navigator.userActivation ? navigator.userActivation.hasBeenActive : true; if (!act) return;
+      const act = navigator.userActivation ? navigator.userActivation.hasBeenActive : true; if (!act) return 0;
       actx = actx || new (window.AudioContext || window.webkitAudioContext)();
       const N = { win: [523, 659, 784, 1047], record: [392, 523, 659, 784, 659, 1047], alert: [440, 330, 440, 330], pop: [660, 880] }[kind] || [523, 784];
       let t = actx.currentTime + 0.02;
@@ -1636,7 +1639,9 @@
         g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(kind === 'alert' ? 0.05 : 0.12, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
         o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + d + 0.02); t += d * 0.85;
       });
+      return Math.round((t - actx.currentTime) * 1000) + 150;
     } catch { /* audio nahi */ }
+    return 0;
   }
   // ---------------------------------------------------------------- 🏠 v3.125.149: Home par robot ke saare updates (dropdown, rangeen)
   const CATS = [
@@ -1797,7 +1802,9 @@
       rows: (it.rows || []).slice(0, 7).map((r) => ({ name: r.name, sub: r.sub, val: r.val, w: r.w, tone: r.tone })) };
     try { window.postMessage({ source: 'ff-robot-page', msg: { type: 'show', item: slim } }, location.origin); } catch { /* ignore */ }
   }
-  let extTurn = 0;
+  let extTurn = 0, extSayT = 0;
+  // 🧩 dusre tab wala robot pehle ~2.2s udta hai, phir board khulta hai → awaaz tab hi (aage-peeche nahi)
+  function extSay(text) { clearTimeout(extSayT); extSayT = setTimeout(() => { if (!busy) say(text); }, 2800); }
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data || e.data.source !== 'ff-robot-ext' || !e.data.msg) return;
     const m = e.data.msg;
@@ -1808,7 +1815,7 @@
         try { item = await answerItem(String(m.q || '')); } catch (err) { item = { key: 'askerr', fun: true, mood: 'sad', icon: '🙈', title: 'Jawab nahi mila', head: String(err.message || err), view: 'text', stay: 5000 }; }
         const slim = { ...item, html: undefined, say: undefined, onShow: undefined };
         try { window.postMessage({ source: 'ff-robot-page', msg: { type: 'answer', tab: m.tab, item: slim } }, location.origin); } catch { /* ignore */ }
-        if (cfg.sound && item.say) say(item.say);
+        if (cfg.sound && item.say) extSay(item.say);
       })();
       return;
     }
@@ -1820,7 +1827,7 @@
       try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
       if (!it.fun) { histAdd(it); dot(true); pushRobot(it); }
       toExt(it);
-      if (cfg.sound) say(it.say);
+      if (cfg.sound) extSay(it.say);
     }
   });
   let lastNote = 0;
