@@ -1218,10 +1218,12 @@ window.FF = window.FF || {};
     const lk = gvPersonLookup();
     const fromEir = (eirDaily() || []).filter((r) => r.channel === 'GV Partner').map((r) => {
       const p = lk.resolve(r.agentId, r.agentName, r.tlId, r.tlName);
+      // v3.125.145 — EIR ki GV row jisme agent ka naam / ID hi nahi (sirf channel TL) = "anonymous" total
+      const anon = !U.clean(p.agentId) && (!U.clean(p.agentName) || lk.isChannelTl(U.clean(p.agentName).toUpperCase()));
       return {
         date: r.d, d: r.d, key: r.key || (r.d ? U.dateKey(r.d) : ''), ym: r.ym, day: r.day, cls: r.cls, group: r.group, type: r.type,
         status: r.type, tagType: r.vrnType || '', vrnType: r.vrnType || '', channel: 'GV Partner',
-        agentId: p.agentId, agentName: p.agentName, tlId: p.tlId, tlName: p.tlName, n: r.n
+        agentId: p.agentId, agentName: p.agentName, tlId: p.tlId, tlName: p.tlName, n: r.n, __anon: anon
       };
     });
     // 🩹 GV Master supplement — EIR me agar us mahine ka koi bhi GV row hai to pehle poora mahina skip ho
@@ -1272,7 +1274,24 @@ window.FF = window.FF || {};
         agentId: p.agentId, agentName: p.agentName, tlId: p.tlId, tlName: p.tlName, n: 1
       });
     }
-    return fromEir;
+    // v3.125.145 — double count fix: jis din GV Master ke (naam wale) tags jude, us din ki EIR anonymous GV
+    // rows hatao — warna wahi GV issuance do baar gini jaati thi (EIR total + GV Master tags). Naam GV Master se.
+    // Total EIR jaisa hi rahe: us din + class ka EIR total − GV Master tags = bacha hua "naam nahi" row (agar > 0).
+    const isMaster = (r) => !('__anon' in r);
+    const masterDays = new Set(fromEir.filter(isMaster).map((r) => r.key));
+    const mCount = new Map();
+    fromEir.filter(isMaster).forEach((r) => { const k = `${r.key}|${normClass(r.cls || '')}`; mCount.set(k, (mCount.get(k) || 0) + (Number(r.n) || 0)); });
+    const out = [];
+    const residual = new Map();
+    for (const r of fromEir) {
+      if (r.__anon && masterDays.has(r.key)) { const k = `${r.key}|${normClass(r.cls || '')}`; const x = residual.get(k) || { r, n: 0 }; x.n += Number(r.n) || 0; residual.set(k, x); continue; }
+      delete r.__anon; out.push(r);
+    }
+    residual.forEach((x, k) => {
+      const left = x.n - (mCount.get(k) || 0);
+      if (left > 0) { const o = { ...x.r, n: left }; delete o.__anon; out.push(o); }
+    });
+    return out;
   }
   function operationalCommission(ym, upToDay) {
     const s = masterSummary(ym, upToDay);
