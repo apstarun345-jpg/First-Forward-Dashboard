@@ -5099,14 +5099,16 @@ function robotInsights(rows) {
   const gr = A.filter((a) => a.prevSame >= 10 && a.cur >= 5).map((a) => ({ a, g: ((a.cur - a.prevSame) / a.prevSame) * 100 }));
   const hi = gr.filter((x) => x.g >= 20).sort((x, y) => y.g - x.g).slice(0, 5);
   if (hi.length) push(`high:${last}`, `🚀 High growth: ${hi[0].a.name} ${rbPct(hi[0].g)}`, hi.flatMap((x) => [line(x.a, `${rbPct(x.g)} (${rbFmt(x.a.prevSame)} → ${rbFmt(x.a.cur)})`), whyOf(x.a)]), '#/performance');
-  const lo = A.filter((a) => a.prevSame >= 20).map((a) => ({ a, g: ((a.cur - a.prevSame) / a.prevSame) * 100 })).filter((x) => x.g <= -30).sort((x, y) => x.g - y.g).slice(0, 5);
+  const lo = A.filter((a) => a.prevSame >= 20 && a.cur > 0).map((a) => ({ a, g: ((a.cur - a.prevSame) / a.prevSame) * 100 })).filter((x) => x.g <= -30).sort((x, y) => x.g - y.g).slice(0, 5);
   if (lo.length) push(`low:${last}`, `📉 De-growth: ${lo[0].a.name} ${rbPct(lo[0].g)}`, lo.flatMap((x) => [line(x.a, `${rbPct(x.g)} (${rbFmt(x.a.prevSame)} → ${rbFmt(x.a.cur)})`), whyOf(x.a)]), '#/performance');
   // 4) TL growth / de-growth
   const T = [...tls.values()].filter((t) => t.prevSame >= 30).map((t) => ({ t, g: ((t.cur - t.prevSame) / t.prevSame) * 100 }));
-  const th = T.filter((x) => x.g >= 15).sort((x, y) => y.g - x.g).slice(0, 5), tl = T.filter((x) => x.g <= -20).sort((x, y) => x.g - y.g).slice(0, 5);
+  const th = T.filter((x) => x.g >= 15).sort((x, y) => y.g - x.g).slice(0, 5), tl = T.filter((x) => x.g <= -20 && x.t.cur > 0).sort((x, y) => x.g - y.g).slice(0, 5);
   const tline = (x) => `• TL ${x.t.name} · ${chS(x.t.ch)} — ${rbPct(x.g)} (${rbFmt(x.t.prevSame)} → ${rbFmt(x.t.cur)}, ${x.t.agents.size} agents)`;
   if (th.length) push(`tlhigh:${last}`, `👑 TL growth: ${th[0].t.name} ${rbPct(th[0].g)}`, th.map(tline), '#/performance');
-  if (tl.length) push(`tllow:${last}`, `🧭 TL de-growth: ${tl[0].t.name} ${rbPct(tl[0].g)}`, tl.map(tline), '#/performance');
+  // 🔎 TL kyon neeche: kitne agents 0 par / sabse zyada gire
+  const tlWhy = (x) => { const L = A.filter((a) => a.ch === x.t.ch && a.tl && a.tl.toUpperCase() === String(x.t.name).toUpperCase()); const z = L.filter((a) => a.prevSame >= 5 && !a.cur).length; const d = L.map((a) => ({ a, d: a.cur - a.prevSame })).sort((p, q) => p.d - q.d)[0]; const w = []; if (z) w.push(`${z} agents is month 0`); if (d && d.d < -5) w.push(`sabse zyada gira: ${d.a.name} (${rbFmt(d.d)})`); return w.length ? `   🔎 ${w.join(' · ')}` : ''; };
+  if (tl.length) push(`tllow:${last}`, `🧭 TL de-growth: ${tl[0].t.name} ${rbPct(tl[0].g)}`, tl.flatMap((x) => [tline(x), tlWhy(x)]), '#/performance');
   // 5) champions FF / GV (badle tab)
   for (const ch of ['ff', 'gv']) {
     const L = A.filter((a) => a.ch === ch && a.cur);

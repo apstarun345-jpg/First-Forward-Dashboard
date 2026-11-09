@@ -47,7 +47,9 @@
       };
     },
     function degrowthAgents() {
-      const a = sq('degrowth|all', 5); if (!a || !a.rows.length) return null;
+      const a0 = sq('degrowth|all', 12); if (!a0) return null;
+      const a = { ...a0, rows: a0.rows.filter((x) => Number(x.cur) > 0).slice(0, 5) }; // 0 wale "neend" me — -100% de-growth nahi
+      if (!a.rows.length) return null;
       const r = a.rows[0];
       return {
         key: 'degrowth', mood: 'sad', icon: '📉', title: pick(['Thoda dhyaan do', 'Girawat alert', 'In par nazar rakho']),
@@ -808,6 +810,7 @@
     a.unshift({ sig, at: at || Date.now(), key: it.key, icon: it.icon, title: it.title, head: it.head, big: it.big || '', q: it.q || '', mood: it.mood });
     a.sort((x, y) => y.at - x.at);
     histSave(a);
+    try { homeBump(it); } catch { /* home band */ }
   }
   const saidWithin = (it, ms) => { const sig = sigOf(it); return histLoad().some((h) => h.sig === sig && Date.now() - h.at < ms); };
   const ago = (t) => { const m = Math.round((Date.now() - t) / 60e3); return m < 1 ? 'abhi' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60 ? (m % 60) + 'm' : ''}`.trim(); };
@@ -1653,29 +1656,63 @@
     if (/day|rr|exp|run|mix|need|week|ffgv|ffvsgv|summary|sitetotal|top|vc4|vc20|vc5|cls|gvlive|hours|chassis/.test(k)) return 'iss';
     return 'other';
   }
-  async function mountHome(box) {
-    if (!box || !allowed()) return;
-    await refreshSrv().catch(() => {});
-    const local = insights().filter((x) => !x.fun);
-    const srv = (srvCache.items || []).map(srvToItem);
-    const seen = new Set(); const all = [];
-    [...srv, ...local].forEach((x) => { if (!x || seen.has(x.key)) return; seen.add(x.key); x.cat = catOf(x.key); all.push(x); });
-    const cnt = (c) => (c === 'all' ? all.length : all.filter((x) => x.cat === c).length);
-    const sel = cfg.homeCat || 'all';
+  // v3.125.150: live — robot jo bhi bole turant yahan sabse upar; 4 dikhte, baaki scroll
+  const home = { box: null, live: new Map(), t: 0, iv: 0 };
+  function homeBump(it) {
+    if (it && it.key && !it.fun) home.live.set(it.key, { ...it, at: Date.now() });
+    if (!home.box) return;
+    clearTimeout(home.t); home.t = setTimeout(homeRender, 250);
+  }
+  function homeItems() {
+    const pool = new Map();
+    insights().filter((x) => x && !x.fun).forEach((x) => pool.set(x.key, x));
+    (srvCache.items || []).map(srvToItem).forEach((x) => { if (x && !pool.has(x.key)) pool.set(x.key, x); });
+    const out = [], seen = new Set();
+    const add = (x, at) => { if (!x || !x.key || seen.has(x.key)) return; seen.add(x.key); out.push({ ...x, at: at || 0, cat: catOf(x.key) }); };
+    // 1) jo robot ne bola (24h) — naya sabse upar
+    const said = [...home.live.values()].map((x) => ({ x, at: x.at }));
+    histLoad().forEach((h) => { if (!home.live.has(h.key)) said.push({ x: pool.get(h.key) || { key: h.key, icon: h.icon, title: h.title, head: h.head, big: h.big, mood: h.mood, q: h.q }, at: h.at }); });
+    said.sort((a, b) => b.at - a.at).forEach((s) => add(pool.get(s.x.key) && !s.x.rows ? pool.get(s.x.key) : s.x, s.at));
+    // 2) baaki saare (abhi tak nahi bole)
+    pool.forEach((x) => add(x, 0));
+    return out;
+  }
+  function homeRender() {
+    const box = home.box;
+    if (!box || !box.isConnected) { home.box = null; clearInterval(home.iv); return; }
+    const all = homeItems();
+    const c = cfg.homeCat || 'all', L = all.filter((x) => c === 'all' || x.cat === c);
+    const cnt = (k) => (k === 'all' ? all.length : all.filter((x) => x.cat === k).length);
     const tone = (m) => (m === 'alert' || m === 'sad' ? 'r' : m === 'excited' || m === 'happy' ? 'g' : m === 'sleepy' ? 's' : 'b');
-    const card = (x) => `<details class="rf-card rf-${tone(x.mood)}"><summary><span class="rf-ic">${x.icon || '🤖'}</span><span class="rf-t"><b>${esc(x.title)}</b><small>${esc(x.big ? `${x.big} · ${x.head || ''}` : x.head || '')}</small></span><span class="rf-cat">${esc((CATS.find((c) => c[0] === x.cat) || ['', ''])[1])}</span></summary>
-      ${(x.rows || []).length ? `<ol class="rf-rows">${x.rows.slice(0, 7).map((r) => `<li><span>${esc(r.name)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><b class="rf-v ${esc(r.tone || '')}">${esc(r.val || '')}</b></li>`).join('')}</ol>` : ''}
+    const prev = box.querySelector('.rf-list'), open = new Set([...box.querySelectorAll('.rf-card[open]')].map((d) => d.dataset.k)), top = prev ? prev.scrollTop : 0;
+    const sub = (x) => {
+      const h = String(x.head || '').trim();
+      if (h && h !== x.title) return x.big ? `${x.big} · ${h}` : h;
+      const r = (x.rows || []).slice(0, 3).map((r) => `${r.name}${r.val ? ` ${r.val}` : ''}`).join(' · ');
+      return r || x.big || '';
+    };
+    const card = (x) => {
+      const fresh = x.at && Date.now() - x.at < 15 * 60e3;
+      return `<details class="rf-card rf-${tone(x.mood)}${fresh ? ' rf-new' : ''}" data-k="${esc(x.key)}"${open.has(x.key) ? ' open' : ''}><summary><span class="rf-ic">${x.icon || '🤖'}</span><span class="rf-t"><b>${esc(x.title)}</b><small>${esc(sub(x))}</small></span>
+      <span class="rf-meta">${x.at ? `<span class="rf-time">${fresh ? '🆕 ' : '🕒 '}${ago(x.at)}${ago(x.at) === 'abhi' ? '' : ' pehle'}</span>` : ''}<span class="rf-cat">${esc((CATS.find((k) => k[0] === x.cat) || ['', ''])[1])}</span></span></summary>
+      ${(x.rows || []).length ? `<ol class="rf-rows">${x.rows.slice(0, 7).map((r) => `<li><span>${esc(r.name)}${r.tl ? ` <em class="rf-tl">TL ${esc(r.tl)}</em>` : ''}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><b class="rf-v ${esc(r.tone || '')}">${esc(r.val || '')}</b></li>`).join('')}</ol>` : ''}
       ${x.view === 'todo' ? `<ol class="rf-rows">${(x.todo || []).map((t) => `<li><span>${esc(t)}</span></li>`).join('')}</ol>` : ''}
       ${x.foot ? `<div class="rf-foot">${esc(x.foot)}</div>` : ''}<div class="rf-act"><button type="button" class="btn small ghost" data-rf-show="${esc(x.key)}">🤖 Robot se sunao</button></div></details>`;
-    const render = () => {
-      const c = cfg.homeCat || 'all', L = all.filter((x) => c === 'all' || x.cat === c);
-      box.innerHTML = `<section class="card rf-wrap"><div class="rf-head"><b>🤖 Robot ke updates</b><span class="dim small">${all.length} updates · server + site</span>
-        <select class="input rf-sel">${CATS.map(([k, l]) => `<option value="${k}" ${k === c ? 'selected' : ''}>${l} (${cnt(k)})</option>`).join('')}</select></div>
-        <div class="rf-list">${L.slice(0, 80).map(card).join('') || '<div class="dim">Is category me abhi kuch nahi.</div>'}</div></section>`;
-      box.querySelector('.rf-sel').addEventListener('change', (e) => { cfg.homeCat = e.target.value; save(); render(); });
-      box.querySelectorAll('[data-rf-show]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); const it = all.find((x) => x.key === b.dataset.rfShow); if (it) { build(); if (skip) skip(); setTimeout(() => show(it), 400); } }));
     };
-    void sel; render();
+    const saidN = all.filter((x) => x.at).length;
+    box.innerHTML = `<section class="card rf-wrap"><div class="rf-head"><b>🤖 Robot ke updates</b><span class="dim small">${all.length} updates · ${saidN} bole gaye (24h) · live</span>
+      <select class="input rf-sel">${CATS.map(([k, l]) => `<option value="${k}" ${k === c ? 'selected' : ''}>${l} (${cnt(k)})</option>`).join('')}</select></div>
+      <div class="rf-list">${L.slice(0, 120).map(card).join('') || '<div class="dim">Is category me abhi kuch nahi.</div>'}</div></section>`;
+    const list = box.querySelector('.rf-list'); if (list) list.scrollTop = top;
+    box.querySelector('.rf-sel').addEventListener('change', (e) => { cfg.homeCat = e.target.value; save(); homeRender(); });
+    box.querySelectorAll('[data-rf-show]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); const it = all.find((x) => x.key === b.dataset.rfShow); if (it) { build(); if (skip) skip(); setTimeout(() => show(it), 400); } }));
+  }
+  async function mountHome(box) {
+    if (!box || !allowed()) return;
+    home.box = box; homeRender();
+    await refreshSrv().catch(() => {}); homeRender();
+    clearInterval(home.iv);
+    home.iv = setInterval(async () => { if (!home.box || !home.box.isConnected) { clearInterval(home.iv); home.box = null; return; } if (document.hidden) return; await refreshSrv().catch(() => {}); homeRender(); }, 60e3);
   }
 
   // ---------------------------------------------------------------- 🎭 masti: jab koi nayi khabar nahi
