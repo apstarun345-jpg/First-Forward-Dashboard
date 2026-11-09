@@ -2004,7 +2004,14 @@ FF.pages = FF.pages || {};
       const worst = plan.reduce((a, x) => (rank[x.prio] > rank[a] ? x.prio : a), 'None');
       const sm = '';
       const chipOf = (p) => (p === 'None' ? '<span class="badge">No issuance</span>' : prioChip(p));
-      const prioBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2">${chipOf(x.prio)}</span><span class="c3">${x.cover != null ? `<span class="msp-hl ${x.cover < redD ? 'red' : x.cover < orgD ? 'amber' : 'green'}">cover ${U.fmt(x.cover, true)} d</span>` : '<span class="dim">no run-rate</span>'}</span></div>`).join('');
+      // v3.125.142 — cover ke saath stock khatam hone ki tareekh; 1–10 din red · 11–20 yellow · 20+ green (bold)
+      const coverPill = (c) => {
+        const d = Math.max(0, c), tone = d <= 10 ? 'r' : d <= 20 ? 'y' : 'g';
+        const end = new Date(Date.now() + d * 864e5);
+        const lbl = d > 3650 ? '10+ saal' : end.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: end.getFullYear() !== new Date().getFullYear() ? '2-digit' : undefined });
+        return `<span class="msp-cov ${tone}"><b>${U.fmt(c, true)} d</b><i>⏳ ${esc(lbl)}</i></span>`;
+      };
+      const prioBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2">${chipOf(x.prio)}</span><span class="c3">${x.cover != null ? coverPill(x.cover) : '<span class="dim">no run-rate</span>'}</span></div>`).join('');
       const prioSub = plan.map((x) => `${esc(x.k)}: stock ${U.fmt(x.stock)} ÷ ${U.fmt(x.rate, true)}/day`).join(' · ');
       // v3.90 — class-wise dispatch: VC4/VC20 ek jagah, baaki TVC-wise (Settings → TVC mapping); neeche VC4/VC20 aur VC5+ totals.
       const calcRow = (label, stock, cur, last) => {
