@@ -799,7 +799,7 @@ FF.pages = FF.pages || {};
   function mascotSection() {
     if (!A.isAdmin()) return '';
     const M = FF.mascot;
-    const c = M ? M.getCfg() : { on: true, sound: false, everySec: 10, roam: true, fun: true, autoPip: true, notify: true };
+    const c = M ? M.getCfg() : { on: true, sound: false, everySec: 10, roam: true, fun: true, autoPip: true, notify: true, voice: {} };
     const opts = [[10, '10 sec'], [20, '20 sec'], [30, '30 sec'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']];
     return section('🤖 Robot dost (sirf admin ko dikhta hai)', `<p class="dim small">Gems robot site par ghoomta, naachta aur board par <b>site ki har khabar</b> batata hai — agents/TL growth &amp; de-growth, inactive, low stock, naya data, 🔔 alerts (tag request, search, login…), ⚙️ settings / users ke badlaav (audit), kaun online aaya, naya site version. Robot par click → last 24h ki unique history. <b>📌 Har tab / WhatsApp par</b> dabao to robot ek chhoti window me aa jaata hai jo Chrome ke dusre tab, WhatsApp ya kisi bhi app ke upar rehti hai (Chrome/Edge computer).</p>
       <div class="form-grid mc-set">
@@ -811,6 +811,14 @@ FF.pages = FF.pages || {};
         <label class="check"><input type="checkbox" data-mcs="autoPip" ${c.autoPip !== false ? 'checked' : ''}> 📌 <b>Site par pehla click → robot pop-out window me</b> — phir Chrome ke dusre tab / WhatsApp / kisi bhi app ke upar</label>
         <label class="check"><input type="checkbox" data-mcs="push" ${c.push !== false ? 'checked' : ''}> 📱 <b>Robot ki har khabar app + web notification me</b> — agent ke TL naam ke saath (phone app band ho tab bhi; dashboard kahin khula hona chahiye)</label>
         <label class="check"><input type="checkbox" data-mcs="notify" ${c.notify !== false ? 'checked' : ''}> 🔔 <b>Site band / peeche ho aur pop-out na ho</b> → computer ki notification me update (har 1 min max)</label>
+      </div>
+      <div class="mcv" style="margin:10px 0;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,#6366f1 5%,transparent)">
+        <b>🗣 Robot ki awaaz</b>
+        <div class="mcv-presets" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">${[['auto', '✨ Best (apne aap)'], ['female', '👩 Ladki'], ['male', '👨 Ladka'], ['kid', '🧒 Bachcha']].map(([k, l]) => `<button type="button" class="btn small ${((c.voice || {}).preset || 'auto') === k ? '' : 'ghost'}" data-mcv-preset="${k}">${l}</button>`).join('')}</div>
+        <label class="fld"><span>Exact voice (⭐ = natural)</span><select class="input" data-mcv="uri"><option value="">Preset ke hisaab se (best)</option></select></label>
+        <label class="fld"><span>Speed <b data-mcv-rv>${Number((c.voice || {}).rate) || 'auto'}</b></span><input type="range" min="0.7" max="1.3" step="0.05" value="${Number((c.voice || {}).rate) || 0.96}" data-mcv="rate"></label>
+        <div class="btn-row"><button type="button" class="btn small" data-mcv-act="play">▶ Sunao</button><span class="dim small" data-mcv-info></span></div>
+        <p class="dim small" style="margin:6px 0 0">💡 Sabse natural awaaz: <b>Microsoft Edge</b> browser me "Swara (ladki) / Madhur (ladka) Online (Natural)" — insaan jaisi. Mac par: System Settings → Accessibility → Spoken Content → System voice → <b>Lekha (Enhanced)</b> download. Chrome me "Google हिन्दी".</p>
       </div>
       <div class="card-sub" style="margin:8px 0;padding:10px;border:1px dashed var(--line);border-radius:10px"><b>🧩 Sirf robot, bina window — har tab par (Claude, WhatsApp Web, Sheets…)</b><br><span class="dim small">Chrome extension lagao: <a href="./gems-robot-extension.zip?v=5" download>⬇️ gems-robot-extension.zip</a> → unzip → Chrome me <code>chrome://extensions</code> → upar <b>Developer mode</b> ON → <b>Load unpacked</b> → unzip wala folder chuno. Bas — dashboard ka tab khula rakho (peeche bhi chalega), robot har dusre tab par ghoomega aur har 30 sec updates dega. Extension laga ho to pop-out window apne aap nahi khulti.</span></div>
       <div class="btn-row"><button type="button" class="btn small" data-mcs-act="now">▶ Abhi update dikhao</button><button type="button" class="btn small ghost" data-mcs-act="hist">🕘 24h history</button><button type="button" class="btn small ghost" data-mcs-act="clear">🗑 History saaf</button><button type="button" class="btn small ghost" data-mcs-act="brain" title="Server wala robot abhi chalao aur status dikhao">📡 Server robot check</button>${'documentPictureInPicture' in window ? '<button type="button" class="btn small" data-mcs-act="pop" title="Chhoti always-on-top window — Chrome ke dusre tab, WhatsApp ya kisi bhi app ke upar robot">📌 Har tab / WhatsApp par robot</button>' : ''}<span class="dim small" id="mcs-msg"></span></div>`);
@@ -827,6 +835,29 @@ FF.pages = FF.pages || {};
       if (k === 'autoPip' && el.checked && !M.popped) { const ok = await M.popOut(); if (ok) return msg('📌 Robot pop-out window me ✓'); }
       msg('Saved ✓');
     }));
+    // 🗣 awaaz
+    const vbox = U.$('.mcv', body);
+    if (vbox) {
+      const info = U.$('[data-mcv-info]', vbox), sel = U.$('[data-mcv="uri"]', vbox), rng = U.$('[data-mcv="rate"]', vbox);
+      const fill = async () => {
+        const M = await ensure(); if (!M || !M.voiceList) return;
+        const cur = (M.getCfg().voice || {}).uri || '';
+        const L = M.voiceList();
+        sel.innerHTML = '<option value="">Preset ke hisaab se (best)</option>' + L.map((v) => `<option value="${U.esc(v.uri)}" ${v.uri === cur ? 'selected' : ''}>${v.nat <= 2 ? '⭐ ' : ''}${U.esc(v.name)} (${U.esc(v.lang)})${v.gender ? ` · ${v.gender === 'male' ? '👨' : '👩'}` : ''}</option>`).join('');
+        const p = M.voicePlan();
+        info.textContent = L.length ? `Abhi: ${p.name || 'default'}${p.nat <= 1 ? ' ⭐ natural' : ''}` : 'Is browser me Hindi voice nahi mili — Edge / Chrome try karo';
+      };
+      fill(); try { window.speechSynthesis.addEventListener('voiceschanged', fill); } catch { /* ignore */ }
+      const setV = async (patch) => { const M = await ensure(); if (!M) return; const v = { ...(M.getCfg().voice || {}), ...patch }; M.setCfg({ voice: v }); fill(); };
+      U.$$('[data-mcv-preset]', vbox).forEach((b) => b.addEventListener('click', async () => {
+        U.$$('[data-mcv-preset]', vbox).forEach((x) => x.classList.toggle('ghost', x !== b));
+        await setV({ preset: b.dataset.mcvPreset, uri: '' }); const M = await ensure(); if (M) M.preview();
+      }));
+      sel.addEventListener('change', () => setV({ uri: sel.value }));
+      rng.addEventListener('input', () => { U.$('[data-mcv-rv]', vbox).textContent = rng.value; });
+      rng.addEventListener('change', () => setV({ rate: Number(rng.value) }));
+      U.$('[data-mcv-act="play"]', vbox).addEventListener('click', async () => { const M = await ensure(); if (M) M.preview(); });
+    }
     U.$$('[data-mcs-act]', body).forEach((el) => el.addEventListener('click', async () => {
       const M = await ensure(); if (!M) return msg('Robot load nahi hua — page refresh karo');
       const a = el.dataset.mcsAct;

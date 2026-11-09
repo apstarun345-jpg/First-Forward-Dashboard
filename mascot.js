@@ -1004,48 +1004,77 @@
     t = t.split(/(⟪[^⟫]*⟫)/).map((seg) => (seg[0] === '⟪' ? seg.slice(1, -1) : seg.replace(/\b[A-Za-z]+\b/g, (w) => HI[w.toLowerCase()] || w))).join('');
     return t.replace(/\s+([,।.!?])/g, '$1').replace(/(,\s*){2,}/g, ', ').replace(/\s+/g, ' ').trim();
   }
-  let hiVoice = null;
-  function pickVoice() {
+  // 🗣 v3.125.148 — robot ki awaaz chuno: 👩 ladki · 👨 ladka · 🧒 bachcha · ya koi bhi exact voice; speed slider.
+  // Sabse natural: Edge me "Microsoft Swara / Madhur Online (Natural)", Mac par "Lekha (Enhanced)", Chrome me "Google हिन्दी".
+  const FEMALE = /swara|lekha|kalpana|heera|kiyara|aditi|raveena|veena|neerja|ananya|google\s*(हिन्दी|hindi)|female|woman|priya|isha|sapna|aarohi|kavya|dhwani|neeta|shruti|sonia|soumya/i;
+  const MALE = /madhur|hemant|rishi|prabhat|aarav|arjun|kunal|\bmale\b|\bman\b|ravi|rohan|vihaan|aryan|ajay/i;
+  const naturalScore = (v) => (/natural|neural/i.test(v.name) ? 0 : /online/i.test(v.name) ? 1 : /enhanced|premium|siri/i.test(v.name) ? 2 : /google/i.test(v.name) ? 3 : 4);
+  const genderOf = (v) => (MALE.test(v.name) ? 'male' : FEMALE.test(v.name) ? 'female' : '');
+  const PRESET = { auto: { pitch: 1, rate: 0.96 }, female: { pitch: 1, rate: 0.96 }, male: { pitch: 1, rate: 0.95 }, kid: { pitch: 1.5, rate: 1.04 } };
+  function voiceList() {
     try {
-      const vs = window.speechSynthesis.getVoices() || [];
-      const pref = U.voicePrefs ? (U.voicePrefs().hi || '') : '';
-      const chosen = pref && vs.find((v) => v.voiceURI === pref);
-      if (chosen) return chosen;
-      const hi = vs.filter((v) => /^hi([-_]|$)/i.test(v.lang));
-      const score = (v) => (/natural|neural/i.test(v.name) ? 0 : /online/i.test(v.name) ? 1 : /google/i.test(v.name) ? 2 : 3);
-      return hi.sort((a, b) => score(a) - score(b))[0] || null;
-    } catch { return null; }
+      return (window.speechSynthesis.getVoices() || []).filter((v) => /^hi([-_]|$)/i.test(v.lang))
+        .map((v) => ({ v, uri: v.voiceURI, name: v.name, lang: v.lang, gender: genderOf(v), nat: naturalScore(v) }))
+        .sort((a, b) => a.nat - b.nat || a.name.localeCompare(b.name));
+    } catch { return []; }
   }
-  try { if ('speechSynthesis' in window) { hiVoice = pickVoice(); window.speechSynthesis.addEventListener('voiceschanged', () => { hiVoice = pickVoice(); }); } } catch { /* ignore */ }
+  // preset → voice + pitch/rate (male voice na mile to sabse achhi voice thodi bhaari pitch ke saath)
+  function voicePlan() {
+    const vc = cfg.voice || {}, preset = PRESET[vc.preset] ? vc.preset : 'auto', L = voiceList();
+    let pick = vc.uri && L.find((x) => x.uri === vc.uri);
+    let pitch = PRESET[preset].pitch;
+    if (!pick) {
+      const want = preset === 'male' ? 'male' : preset === 'auto' ? '' : 'female';
+      pick = (want && L.find((x) => x.gender === want)) || L.find((x) => x.gender !== 'male') || L[0];
+      if (preset === 'male' && pick && pick.gender !== 'male') pitch = 0.78;
+    }
+    const rate = Number(vc.rate) > 0 ? Number(vc.rate) : PRESET[preset].rate;
+    return { voice: pick ? pick.v : null, name: pick ? pick.name : '', nat: pick ? pick.nat : 9, pitch, rate, preset };
+  }
+  try { if ('speechSynthesis' in window) window.speechSynthesis.getVoices(); } catch { /* ignore */ }
   let talking = false;
   function stopSpeech() { try { if (talking && window.speechSynthesis) window.speechSynthesis.cancel(); } catch { /* ignore */ } talking = false; if (el) el.classList.remove('talk'); }
-  function say(text) {
+  // insaan jaisa: lambe vaakya comma par tod ke chhote tukde (saans), har tukde ke beech halka viraam
+  function chunks(t) {
+    const out = [];
+    (t.match(/[^।.!?]+[।.!?]*/g) || []).map((x) => x.trim()).filter(Boolean).forEach((sent) => {
+      if (sent.length <= 140) { out.push(sent); return; }
+      let cur = '';
+      sent.split(/,\s+/).map((x, i, A) => (i < A.length - 1 ? `${x},` : x)).forEach((piece) => { if ((cur + ' ' + piece).length > 140 && cur) { out.push(cur.trim()); cur = piece; } else cur += ` ${piece}`; });
+      if (cur.trim()) out.push(cur.trim());
+    });
+    return out;
+  }
+  function say(text, opts) {
     return new Promise((resolve) => {
+      const force = opts && opts.force;
       const act = navigator.userActivation ? navigator.userActivation.hasBeenActive : true;
-      if (!cfg.sound || !text || !act || !('speechSynthesis' in window)) return resolve(false);
-      const parts = (toSpeech(text).match(/[^।.!?]+[।.!?]*/g) || []).map((x) => x.trim()).filter(Boolean); // chhote vaakya (lookbehind nahi — purane iPhone Safari me poori file fail hoti thi)
+      if ((!cfg.sound && !force) || !text || !act || !('speechSynthesis' in window)) return resolve(false);
+      const parts = chunks(toSpeech(text));
       if (!parts.length) return resolve(false);
       let left = parts.length, fin = false;
       const done = () => { if (fin) return; fin = true; talking = false; if (el) el.classList.remove('talk'); resolve(true); };
-      talking = true; el.classList.add('talk');
+      talking = true; if (el) el.classList.add('talk');
       try {
         window.speechSynthesis.cancel();
-        if (!hiVoice) hiVoice = pickVoice();
-        const p = U.voicePrefs ? U.voicePrefs() : {};
-        parts.forEach((part) => {
+        const plan = voicePlan();
+        parts.forEach((part, i) => {
           const u = new SpeechSynthesisUtterance(part);
-          if (hiVoice) u.voice = hiVoice;
-          u.lang = (hiVoice && hiVoice.lang) || 'hi-IN';
-          u.rate = Number(p.rate) > 0 ? Math.min(1.1, Number(p.rate)) : 0.95; // aaram se, insaan jaisa
-          u.pitch = Number(p.pitch) > 0 ? Math.min(1.2, Number(p.pitch)) : 1; // natural pitch (robotic nahi)
+          if (plan.voice) u.voice = plan.voice;
+          u.lang = (plan.voice && plan.voice.lang) || 'hi-IN';
+          // halka utaar-chadhaav: sawaal par thoda upar, aakhri tukda thoda dheema — kam robotic
+          const q = /\?$/.test(part) ? 0.06 : 0;
+          u.pitch = Math.max(0.5, Math.min(2, plan.pitch + q));
+          u.rate = Math.max(0.6, Math.min(1.4, plan.rate * (i === parts.length - 1 && parts.length > 1 ? 0.97 : 1)));
           u.onend = () => { left -= 1; if (left <= 0) done(); };
           u.onerror = done;
           window.speechSynthesis.speak(u);
         });
-        setTimeout(done, 30000);
+        setTimeout(done, 45000);
       } catch { done(); }
     });
   }
+
 
   // ---------------------------------------------------------------- motion
   function geo() {
@@ -1721,9 +1750,9 @@
     if (o && ('everySec' in o || 'on' in o)) schedule(1500);
     return getCfg();
   }
-  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false, push: cfg.push !== false });
+  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { _sp: toSpeech, _show: (it) => show(it), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
