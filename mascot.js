@@ -1440,6 +1440,28 @@
     const text = q.replace(/\b(kal|aaj|parso|subah|shaam|sham|dopahar|raat|baje|bje|mujhe|yaad\s*dila(na|o|dena)?|remind( me)?|reminder|ko)\b/gi, ' ').replace(/\d+\s*(min|minute|ghante|ghanta|hour|din)\s*(baad)?/gi, ' ').replace(/\d{1,2}([:.]\d{2})?\s*(am|pm)?/gi, ' ').replace(/\s+/g, ' ').trim() || q;
     return { at, text };
   }
+  // jawab ka board-item (site ke robot aur extension dono ke liye)
+  async function answerItem(q) {
+    if (q === '@todo') return srvItem(/^srv:todo:/) || { key: 'todo-none', fun: true, mood: 'curious', icon: '📋', title: 'Aaj ke kaam', head: 'Abhi kaam list nahi bani — subah data aane do.', view: 'text', stay: 5000 };
+    if (q === '@badges') return srvItem(/^srv:badges:/) || { key: 'bdg-none', fun: true, mood: 'curious', icon: '🎖', title: 'Badges', head: 'Abhi koi naya badge nahi.', view: 'text', stay: 5000 };
+    if (q === '@rems') {
+      let L = []; try { L = ((await FF.auth.api('/api/robot/remind')) || {}).items || []; } catch { /* ignore */ }
+      return { key: `rems:${Date.now()}`, fun: true, mood: 'info', icon: '⏰', title: `Reminders (${L.length})`, head: L.length ? 'Jo yaad dilana hai' : 'Koi reminder nahi', view: 'list', stay: 10000, rows: L.slice(0, 7).map((r) => ({ name: r.text, sub: '', val: new Date(r.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }), tone: 'chip' })) };
+    }
+    const rem = parseReminder(q);
+    if (rem) {
+      await FF.auth.api('/api/robot/remind', 'POST', { at: rem.at, text: rem.text });
+      const when = new Date(rem.at).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+      return { key: `rem:${rem.at}`, fun: true, mood: 'happy', cls: 'greet', icon: '⏰', title: 'Theek hai, yaad dila dunga!', head: `${when} — "${rem.text}"`, view: 'text', stay: 6000, say: `ठीक है, ${new Date(rem.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} पर याद दिला दूँगा: ${rem.text}` };
+    }
+    if (!FF.assistant && FF.lazy && FF.lazy.inject) await FF.lazy.inject('assistant');
+    const html = FF.assistant && FF.assistant.answer ? await FF.assistant.answer(q) : '';
+    const tmp = document.createElement('div'); tmp.innerHTML = String(html || 'Iska jawab abhi mere paas nahi 🙈');
+    tmp.querySelectorAll('script,style,iframe').forEach((n) => n.remove());
+    const tx = tmp.cloneNode(true); tx.querySelectorAll('td,th,li,p,div,tr,br,b').forEach((n) => n.append(' ')); tx.querySelectorAll('tr,li,p').forEach((n) => n.append(' · '));
+    const text = (tx.textContent || '').replace(/\s+/g, ' ').replace(/(\s·\s*)+/g, ' · ').trim();
+    return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '💬', title: 'Gems ka jawab', head: q, view: 'html', html: tmp.innerHTML, text: text.slice(0, 900), stay: Math.min(25000, 6000 + text.length * 40), say: text.slice(0, 400) };
+  }
   let asking = false;
   async function askRobot(q) {
     const rem = parseReminder(q);
@@ -1593,6 +1615,16 @@
     if (e.source !== window || !e.data || e.data.source !== 'ff-robot-ext' || !e.data.msg) return;
     const m = e.data.msg;
     if (m.type === 'open') { runQ(m.q || ''); return; }
+    if (m.type === 'ask') { // 🧩 dusre tab ke robot ka sawaal → jawab wapas
+      (async () => {
+        let item;
+        try { item = await answerItem(String(m.q || '')); } catch (err) { item = { key: 'askerr', fun: true, mood: 'sad', icon: '🙈', title: 'Jawab nahi mila', head: String(err.message || err), view: 'text', stay: 5000 }; }
+        const slim = { ...item, html: undefined, say: undefined, onShow: undefined };
+        try { window.postMessage({ source: 'ff-robot-page', msg: { type: 'answer', tab: m.tab, item: slim } }, location.origin); } catch { /* ignore */ }
+        if (cfg.sound && item.say) say(item.say);
+      })();
+      return;
+    }
     if (m.type === 'pull') {
       if (!cfg.on || !allowed() || cfg.snoozeDay === today() || pipWin) return;
       extTurn += 1;

@@ -31,7 +31,7 @@
         <span class="mc-arm r"><img src="${IMG('robot-arm-r.png')}" alt="" draggable="false"></span>
         <img class="mc-body" src="${IMG('robot-torso.png')}" alt="" draggable="false">
         <span class="mc-headwrap"><img class="mc-head" src="${IMG('robot-head.png')}" alt="" draggable="false"><i class="mc-eye l"><b></b></i><i class="mc-eye r"><b></b></i><i class="mc-mouth"><b></b></i></span>
-        <span class="mc-fx"></span><span class="mc-dot" hidden></span>
+        <span class="mc-fx"></span><span class="mc-dot" hidden></span><span class="mc-hat"></span>
       </button>
     </div>`;
   const el = root.getElementById('ff-mascot'), bot = el.querySelector('.mc-bot'), board = el.querySelector('.mc-board'), stick = el.querySelector('.mc-stick');
@@ -89,6 +89,8 @@
   function rowsHtml(it) {
     const rows = it.rows || [], max = Math.max(1, ...rows.map((r) => r.w || 0));
     if (it.view === 'text') return `<div class="mc-headline mc-textv"><span class="mc-type" data-text="${esc(it.head)}"></span></div>`;
+    if (it.view === 'html') return `<div class="mc-headline mc-textv">${esc(it.head || '')}</div><div class="mc-html">${esc(it.text || '')}</div>`;
+    if (it.view === 'todo') return `<div class="mc-headline mc-textv">${esc(it.head || '')}</div><ol class="mc-todo">${(it.todo || []).map((t, i) => `<li class="${(cfg.todoDone || {})[`${it.key}|${i}`] ? 'done' : ''}"><button type="button" data-k="tdo" data-key="${esc(it.key)}" data-i="${i}">✔</button><span>${esc(t)}</span></li>`).join('')}</ol>`;
     if (it.view === 'quiz' && it.quiz) return `<div class="mc-headline mc-textv"><span class="mc-type" data-text="${esc(it.head)}"></span></div><ol class="mc-quiz">${it.quiz.opts.map((o, i) => `<li class="${i === it.quiz.ans ? 'ok' : ''}"><b>${'ABC'[i]}</b> ${esc(o)}${i === it.quiz.ans ? ` <small>· ${esc(it.quiz.val)}</small>` : ''}</li>`).join('')}</ol><div class="mc-qtimer"><i></i></div>`;
     if (it.view === 'big') return `<div class="mc-big"><b>${esc(it.big)}</b><span>${esc(it.head)}</span></div>${it.prog != null ? `<div class="mc-prog"><i style="width:${it.prog}%"></i></div>` : ''}${rows.length ? `<div class="mc-chips">${rows.map((r) => `<span class="mc-chip"><small>${esc(r.name)}</small> <b>${esc(r.val)}</b></span>`).join('')}</div>` : ''}`;
     return `<div class="mc-headline"><span class="mc-type" data-text="${esc(it.head)}"></span></div><ol class="mc-rows">${rows.map((r, i) => `<li style="--d:${0.5 + i * 0.2}s">${it.view === 'bars' ? `<i class="mc-bar" style="--w:${Math.max(8, Math.round((r.w || 0) / max * 100))}%"></i>` : ''}<span class="mc-n">${esc(r.name)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><b class="mc-v ${esc(r.tone || '')}">${esc(r.val)}</b></li>`).join('')}</ol>`;
@@ -147,7 +149,10 @@
     try { a = await chrome.runtime.sendMessage({ type: 'hist' }) || []; } catch { /* ignore */ }
     const g = geo();
     board.className = 'mc-board hist';
-    board.innerHTML = `<div class="mc-bh"><span class="mc-ic">🕘</span><b>Maine kya bataya · 24h</b><small class="mc-cnt">${a.length} unique</small></div><div class="mc-bb">${a.length
+    board.innerHTML = `<div class="mc-bh"><span class="mc-ic">🕘</span><b>Maine kya bataya · 24h</b><small class="mc-cnt">${a.length} unique</small></div>
+      <form class="mc-askf" data-kf="ask"><input type="text" name="q" placeholder="Robot se poochho… (Rahul ka stock / kal 9 baje yaad dilana)" autocomplete="off"><button type="button" data-k="mic" title="Bolkar">🎙</button><button type="submit">➤</button></form>
+      <div class="mc-quick"><button type="button" data-k="todo">📋 Aaj ke kaam</button><button type="button" data-k="badges">🎖 Badges</button><button type="button" data-k="rems">⏰ Reminders</button></div>
+      <div class="mc-bb">${a.length
       ? `<ol class="mc-hist">${a.map((h) => `<li data-q="${esc(h.q || '')}" class="m-${esc(h.mood || 'info')}"><span class="mc-hi">${esc(h.icon || '🤖')}</span><span class="mc-n">${esc(h.title)}<small>${h.big ? `<b>${esc(h.big)}</b> ` : ''}${esc(h.head)}</small></span><b class="mc-v">${ago(h.at)}</b></li>`).join('')}</ol>`
       : '<div class="mc-empty">Abhi kuch nahi bataya.<br>Dashboard tab khula rakho — wahi se khabar aati hai 📊</div>'}</div>${ctl('<span class="mc-go"></span>')}`;
     layoutBoard(g, sideFor(g));
@@ -163,6 +168,9 @@
       e.stopPropagation();
       const k = b.dataset.k;
       if (k === 'close') { if (mode === 'hist') closeHist(); else if (skip) skip(); }
+      else if (k === 'mic') listen(b);
+      else if (k === 'todo' || k === 'badges' || k === 'rems') { closeHist(); ask(`@${k}`); }
+      else if (k === 'tdo') { const key = `${b.dataset.key}|${b.dataset.i}`; cfg.todoDone = cfg.todoDone || {}; cfg.todoDone[key] = !cfg.todoDone[key]; save(); b.closest('li').classList.toggle('done', !!cfg.todoDone[key]); hover = true; }
       else if (k === 'menu') { const m = board.querySelector('.mc-menu'); m.hidden = !m.hidden; hover = true; layoutBoard(geo(), el.dataset.side || 'left'); }
       else if (k === 'dash') { chrome.runtime.sendMessage({ type: 'open' }).catch(() => {}); closeHist(); }
       else if (k === 'site') { cfg.off[host] = 1; save(); closeHist(); if (skip) skip(); apply(); }
@@ -174,6 +182,29 @@
     const q = li ? li.dataset.q : (current && current.q) || '';
     if (li || current) { chrome.runtime.sendMessage({ type: 'open', q }).catch(() => {}); closeHist(); if (skip) skip(); }
   });
+  board.addEventListener('submit', (e) => { const f = e.target.closest('[data-kf="ask"]'); if (!f) return; e.preventDefault(); const q = (f.q.value || '').trim(); if (q) { closeHist(); ask(q); } });
+  board.addEventListener('keydown', (e) => e.stopPropagation(), true); // site ke shortcuts input me na lagen
+  // 💬 sawaal → dashboard tab (Gems) → jawab yahin board par
+  function ask(q) {
+    el.dataset.mood = 'curious'; el.classList.add('rest'); confetti('curious');
+    chrome.runtime.sendMessage({ type: 'ask', q }).catch(() => {});
+    setTimeout(() => { if (mode !== 'show') { el.classList.remove('rest'); el.dataset.mood = ''; } }, 15000);
+  }
+  function listen(btn) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    const r = new SR(); r.lang = 'hi-IN'; btn.classList.add('rec');
+    r.onresult = (e) => { closeHist(); ask(e.results[0][0].transcript); };
+    r.onend = () => btn.classList.remove('rec'); r.onerror = () => btn.classList.remove('rec');
+    try { r.start(); } catch { /* ignore */ }
+  }
+  // 🎉 tyohaar ki topi
+  function festival() {
+    const d = new Date(Date.now() + 5.5 * 3600e3), md = `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`, y = d.getUTCFullYear();
+    const F = [['diwali', '🪔', (y === 2026 && md >= '11-05' && md <= '11-12') || (y === 2027 && md >= '10-26' && md <= '11-01')], ['xmas', '🎅', md >= '12-20' && md <= '12-26'], ['newyear', '🎉', md >= '12-31' || md <= '01-02'], ['republic', '🇮🇳', md >= '01-25' && md <= '01-26'], ['holi', '🌈', y === 2027 && md >= '03-20' && md <= '03-23'], ['independence', '🇮🇳', md >= '08-14' && md <= '08-15']];
+    const f = F.find((x) => x[2]); el.dataset.fest = f ? f[0] : ''; el.querySelector('.mc-hat').textContent = f ? f[1] : '';
+  }
+  festival(); setInterval(festival, 30 * 60e3);
   el.addEventListener('mouseenter', () => { hover = true; });
   el.addEventListener('mouseleave', () => { hover = false; });
   // drag + click
@@ -218,6 +249,7 @@
     if (!m) return;
     if (m.type === 'show' && !document.hidden) show(m.item);
     if (m.type === 'resume' && m.item) show(m.item, { ms: Number(m.ms) || 4000 });
+    if (m.type === 'answer' && m.item) show(m.item, { ms: m.item.stay || 12000, fresh: true });
     if (m.type === 'nodash' && !busy && !blocked() && !document.hidden && Math.random() < 0.2) show({ key: 'nodash', fun: true, mood: 'curious', icon: '📊', title: 'Dashboard band hai', head: 'Dashboard ka tab khula rakho — tabhi main har tab par updates de paunga 🙂', view: 'text', q: '#/', stay: 6000 });
   });
 

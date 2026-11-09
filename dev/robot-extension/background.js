@@ -56,6 +56,15 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
       if (d) { await chrome.tabs.update(d.id, { active: true }); await chrome.windows.update(d.windowId, { focused: true }); if (m.q) chrome.tabs.sendMessage(d.id, { type: 'open', q: m.q }).catch(() => {}); }
       else chrome.tabs.create({ url: DASH + (m.q && m.q[0] === '#' ? m.q : '') });
     })();
+  } else if (m.type === 'ask') {
+    // 💬 sawaal → dashboard tab (Gems wahan hai) → jawab wapas isi tab par
+    (async () => {
+      const d = await dashTab(), tab = sender.tab && sender.tab.id;
+      if (!d) { if (tab != null) chrome.tabs.sendMessage(tab, { type: 'answer', item: { key: 'nodash', fun: true, mood: 'sad', icon: '📊', title: 'Dashboard band hai', head: 'Sawaal ka jawab dene ke liye dashboard ka tab khula rakho', view: 'text', stay: 6000 } }).catch(() => {}); return; }
+      chrome.tabs.sendMessage(d.id, { type: 'ask', q: m.q, tab }).catch(() => {});
+    })();
+  } else if (m.type === 'answer') {
+    if (m.tab != null) chrome.tabs.sendMessage(m.tab, { type: 'answer', item: m.item }).catch(() => {});
   } else if (m.type === 'hist') { getHist().then(reply); return true; }
   else if (m.type === 'status') { dashTab().then((d) => reply({ dash: !!d })); return true; }
 });

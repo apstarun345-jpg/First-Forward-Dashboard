@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gems Robot — FF & GV Dashboard",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Dashboard ka Gems robot har tab par (Claude, WhatsApp Web, Sheets…) — sirf robot, bina window, updates board par.",
   "icons": {
     "16": "img/icon-16.png",
