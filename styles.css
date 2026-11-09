@@ -7906,3 +7906,7 @@ html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 9
 .rf-new .rf-time { color: #16a34a; opacity: 1; }
 .rf-tl { font-style: normal; font-size: 10.5px; font-weight: 700; color: #7c3aed; background: rgba(124, 58, 237, .1); padding: 1px 6px; border-radius: 99px; margin-left: 4px; }
 @keyframes rfNew { 0% { box-shadow: 0 0 0 0 rgba(22, 163, 74, .55); } 100% { box-shadow: 0 0 0 10px rgba(22, 163, 74, 0); } }
+/* v3.125.152 Sawaal-jawab: poori list scroll — header upar chipka rahe */
+#sq-panel .ms-panel-body .msp-dtable-wrap { max-height: calc(min(88vh, 920px) - 190px); overflow: auto; }
+#sq-panel .ms-panel-body thead th { position: sticky; top: 0; z-index: 2; background: var(--card, #fff); box-shadow: 0 1px 0 var(--line, #e5e7eb); }
+#sq-panel .ms-panel-body tbody tr:nth-child(even) td { background: rgba(99, 102, 241, .035); }

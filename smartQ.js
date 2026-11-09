@@ -226,8 +226,9 @@ window.FF = window.FF || {};
     const d = find(id);
     if (!d) return null;
     const rows = rowsFor(d.ch);
-    const out = d.run(rows, n || 10);
-    return { def: d, n: n || 10, rows: out, total: rows.length };
+    const lim = n === 'all' || n === 0 || n === Infinity ? Infinity : (n || 10); // 'all' → poori list
+    const out = d.run(rows, lim);
+    return { def: d, n: lim, rows: out, total: rows.length };
   }
   const cell = (c, v) => {
     if (c.p) return v == null || v === '' ? '<span class="dim">—</span>' : `<span class="${v >= 0 ? 'delta up' : 'delta down'}">${v > 0 ? '+' : ''}${fmt(v)}%</span>`;
@@ -250,6 +251,13 @@ window.FF = window.FF || {};
     const q = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
     return [['#', 'Ch', ...cols.map((c) => c.l)].map(q).join(','), ...a.rows.map((r, i) => [i + 1, r.ch, ...cols.map((c) => r[c.k])].map(q).join(','))].join('\n');
   }
+  // 📊 v3.125.152 — Excel (rangeen header, number column number hi rahen, % growth ▲▼)
+  function xlsxSheet(a, title) {
+    const cols = (a.def.cols || []).map((k) => C[k]).filter(Boolean);
+    const num = (v) => (v === null || v === undefined || v === '' ? '' : Number.isFinite(Number(v)) ? Math.round(Number(v) * 10) / 10 : v);
+    const rows = a.rows.map((r, i) => [i + 1, r.ch || '', ...cols.map((c) => (c.n || c.p ? num(r[c.k]) : (r[c.k] == null ? '' : String(r[c.k]))))]);
+    return { name: String(title).replace(/[\\/?*[\]:]/g, ' ').slice(0, 31), header: ['#', 'Ch', ...cols.map((c) => (c.p ? `${c.l} %` : c.l))], rows };
+  }
 
   let panel = null;
   function close() { if (panel && panel.parentNode) panel.parentNode.removeChild(panel); panel = null; document.body.classList.remove('no-scroll'); }
@@ -257,11 +265,14 @@ window.FF = window.FF || {};
     close();
     const d = find(id);
     if (!d) return;
-    const title = `${d.n && n && n !== 10 ? d.title.replace(/^Top /, `Top ${n} `) : d.title} · ${CH_LABEL[d.ch]}`;
+    let mode = n === 'all' ? 'all' : (n || 10); // robot se → 'all' (poori list)
+    const baseN = n === 'all' ? 10 : (n || 10);
+    const titleOf = () => `${mode === 'all' ? d.title.replace(/^Top /, 'Sab ') : d.n && mode !== 10 ? d.title.replace(/^Top /, `Top ${mode} `) : d.title} · ${CH_LABEL[d.ch]}`;
+    const title = titleOf();
     panel = U.h(`<div class="ms-panel" id="sq-panel" role="dialog" aria-modal="true">
       <div class="ms-panel-backdrop" data-sq-close></div>
-      <div class="ms-panel-box"><div class="ms-panel-head"><div><span class="ms-panel-kicker">❓ Sawaal · jawab</span><h2>${esc(title)}</h2><small class="dim" data-sq-state>loading…</small></div>
-        <div class="btn-row"><button class="btn small" data-sq-csv>⬇ CSV</button><button class="btn small" data-sq-close>✕ Close</button></div></div>
+      <div class="ms-panel-box"><div class="ms-panel-head"><div><span class="ms-panel-kicker">❓ Sawaal · jawab</span><h2 data-sq-title>${esc(title)}</h2><small class="dim" data-sq-state>loading…</small></div>
+        <div class="btn-row"><button class="btn small" data-sq-all title="Top ${baseN} ↔ poori list">${mode === 'all' ? `🔝 Top ${baseN}` : '📜 Poori list'}</button><button class="btn small primary" data-sq-xlsx title="Excel (rangeen, numbers ke saath)">⬇ Excel</button><button class="btn small" data-sq-csv>⬇ CSV</button><button class="btn small" data-sq-close>✕ Close</button></div></div>
         <div class="ms-panel-body" data-sq-body></div></div></div>`);
     document.body.appendChild(panel);
     document.body.classList.add('no-scroll');
@@ -269,10 +280,14 @@ window.FF = window.FF || {};
     let cur = null;
     const paint = () => {
       if (!panel || !panel.isConnected) return;
-      cur = answer(id, n);
+      cur = answer(id, mode);
       if (!cur) return;
-      state.textContent = `${fmt(cur.rows.length)} result${cur.def.note ? ' · ' + cur.def.note : ''}`;
+      const top = body.scrollTop;
+      state.textContent = `${fmt(cur.rows.length)} result${mode === 'all' ? ' · poori list (scroll karo)' : ''}${cur.def.note ? ' · ' + cur.def.note : ''}`;
       body.innerHTML = tableHtml(cur);
+      body.scrollTop = top;
+      const h = panel.querySelector('[data-sq-title]'); if (h) h.textContent = titleOf();
+      const b = panel.querySelector('[data-sq-all]'); if (b) b.textContent = mode === 'all' ? `🔝 Top ${baseN}` : '📜 Poori list';
     };
     paint();
     // Data abhi aa raha ho to ensure karo, phir dobara paint (instant jab already loaded).
@@ -286,7 +301,14 @@ window.FF = window.FF || {};
     document.addEventListener('ff:data-fresh', onData);
     panel.addEventListener('click', (e) => {
       if (e.target.closest('[data-sq-close]')) { document.removeEventListener('ff:data-fresh', onData); close(); return; }
+      if (e.target.closest('[data-sq-all]')) { mode = mode === 'all' ? baseN : 'all'; body.scrollTop = 0; paint(); return; }
+      if (e.target.closest('[data-sq-xlsx]') && cur) {
+        const t = titleOf(), file = `${t.replace(/[^\w]+/g, '_').replace(/^_|_$/g, '')}_${U.stamp ? U.stamp() : Date.now()}.xlsx`;
+        if (FF.xlsx && FF.xlsx.download) { FF.xlsx.download(FF.util && FF.util.niceFileName ? FF.util.niceFileName(file) : file, [xlsxSheet(cur, t.split(' · ')[0])]); if (U.toast) U.toast(`Excel download — ${fmt(cur.rows.length)} rows ✓`, 'ok'); }
+        return;
+      }
       if (e.target.closest('[data-sq-csv]') && cur) {
+        const title = titleOf();
         const blob = new Blob(['﻿' + csv(cur)], { type: 'text/csv;charset=utf-8' });
         const aEl = document.createElement('a'); aEl.href = URL.createObjectURL(blob); aEl.download = ((window.FF && FF.util && FF.util.niceFileName) ? FF.util.niceFileName(`${title.replace(/[^\w]+/g, '_')}.csv`) : `${title.replace(/[^\w]+/g, '_')}.csv`); aEl.click();
         setTimeout(() => URL.revokeObjectURL(aEl.href), 4000);

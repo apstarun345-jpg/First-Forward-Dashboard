@@ -816,7 +816,7 @@
   const ago = (t) => { const m = Math.round((Date.now() - t) / 60e3); return m < 1 ? 'abhi' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60 ? (m % 60) + 'm' : ''}`.trim(); };
   function runQ(q) {
     if (!q) return;
-    try { if (q === '@notif') { if (FF.app && FF.app.openNotifications) FF.app.openNotifications('center'); } else if (q[0] === '#') location.hash = q; else if (FF.smartQ) FF.smartQ.open(q, /inactive/.test(q) ? 50 : 10); } catch { /* optional */ }
+    try { if (q === '@notif') { if (FF.app && FF.app.openNotifications) FF.app.openNotifications('center'); } else if (q[0] === '#') location.hash = q; else if (FF.smartQ) FF.smartQ.open(q, 'all'); /* 🤖 robot board se → poori list (scroll + Excel) */ } catch { /* optional */ }
   }
   function openAssistant() { const f = document.getElementById('ask-fab'); if (f) f.click(); }
 
