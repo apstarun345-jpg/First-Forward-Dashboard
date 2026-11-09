@@ -687,8 +687,16 @@
 
   function insights() {
     const out = [];
-    BUILDERS.forEach((b) => { try { const x = b(); if (x) out.push(withTl(x)); } catch { /* data abhi nahi */ } });
+    BUILDERS.forEach((b) => { try { const x = b(); if (x) out.push(withRanks(withTl(x))); } catch { /* data abhi nahi */ } });
     return out;
+  }
+  // 🗣 v3.125.144 — sirf pehla naam nahi: list me se top 3 bolo (pehle, doosre, teesre number par…)
+  function withRanks(it) {
+    if (!it || !it.say || !Array.isArray(it.rows) || it.rows.length < 2 || !/^(list|bars)$/.test(it.view || '') || /^champ:/.test(it.key || '')) return it;
+    const ord = ['पहले', 'दूसरे', 'तीसरे'];
+    const parts = it.rows.slice(0, 3).map((r, i) => `${ord[i]} नंबर पर ${nm(String(r.name || '').replace(/^[^\p{L}\d]+/u, ''))}${r.val ? `, ${r.val}` : ''}${r.tl ? `, टी एल ${nm(r.tl)}` : ''}`);
+    it.say = `${it.say} टॉप तीन: ${parts.join('। ')}।`;
+    return it;
   }
   // 👤 v3.125.133 — har agent ke saath uska TL (board + notification)
   let tlCache = { at: 0, map: null };

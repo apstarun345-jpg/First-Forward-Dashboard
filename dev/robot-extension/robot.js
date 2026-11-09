@@ -2,6 +2,9 @@
 // yahan robot udta, naachta, haath hilata aur board par dikhata hai. Click → 24h history · drag → jagah badlo.
 (() => {
   if (window.top !== window || window.__ffGemsRobot) return;
+  // ek hi robot: DOM me pehle se (is ya purane extension version ka) robot ho to doosra mat banao
+  const already = () => document.getElementById('ff-gems-robot-host') || [...(document.body ? document.body.children : [])].some((n) => n.shadowRoot && n.shadowRoot.getElementById && n.shadowRoot.getElementById('ff-mascot'));
+  if (already()) return;
   window.__ffGemsRobot = true;
   const IMG = (f) => chrome.runtime.getURL(`img/${f}`);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -13,6 +16,7 @@
   let cfg = { off: {}, snooze: '', dock: null };
 
   const hostEl = document.createElement('div');
+  hostEl.id = 'ff-gems-robot-host';
   hostEl.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;';
   const root = hostEl.attachShadow({ mode: 'open' });
   // CSS: constructable stylesheet (kisi bhi site ki CSP isse nahi rokti)
@@ -97,8 +101,10 @@
   const ctl = (extra) => `<div class="mc-ctl">${extra || '<span class="mc-go"></span>'}<button type="button" data-k="dash" title="Dashboard kholo">📊</button><button type="button" data-k="menu" title="Settings">⚙</button><button type="button" data-k="close" title="Band">✕</button></div>
     <div class="mc-menu" hidden><button type="button" data-k="site">🚫 Is site (${esc(host)}) par mat dikhao</button><button type="button" data-k="today">😴 Aaj ke liye chhupao</button><button type="button" data-k="home">🏠 Wapas kone me</button></div>`;
 
-  async function show(it) {
-    if (busy || !it || blocked()) return;
+  // resume = dusre tab se aaye: udna / typing nahi — wahi board turant, bacha hua time
+  async function show(it, resume) {
+    if (!it || blocked()) return;
+    if (busy) { if (!resume) return; if (skip) skip('swap'); let n = 0; while (busy && n++ < 40) await wait(100); }
     busy = true; mode = 'show';
     const g = geo();
     board.className = 'mc-board';
@@ -107,7 +113,7 @@
     const goLeft = pos[0] + g.W / 2 > g.vw / 2, bh = board.offsetHeight || 180;
     const rest = [goLeft ? 14 : g.vw - g.W - 14, Math.round(rnd(Math.min(g.maxY, bh - g.W * 0.85 + 20), g.maxY))];
     el.dataset.mood = 'fly'; el.classList.remove('rest');
-    await fly(path(pos, rest, pick(['arc', 'zigzag', 'loop', 'hop'])), 2200);
+    if (resume) place(rest); else await fly(path(pos, rest, pick(['arc', 'zigzag', 'loop', 'hop'])), 2200);
     layoutBoard(g, goLeft ? 'right' : 'left');
     el.dataset.mood = it.mood || 'happy'; el.classList.add('rest', 'holding'); confetti(it.mood);
     current = it;
@@ -117,9 +123,13 @@
     if (it.fx) confetti(it.fx);
     if (it.cls) el.classList.add(it.cls);
     const stay = (async () => {
-      await typewriter();
-      if (it.view === 'quiz') { board.classList.add('quiz-run'); await wait(5000); board.classList.add('reveal'); el.dataset.mood = 'happy'; confetti('happy'); }
-      await wait(it.stay || 10000); while (hover && !reason) await wait(500);
+      if (resume) { const t = board.querySelector('.mc-type'); if (t) { t.textContent = t.dataset.text || ''; t.classList.add('done'); } if (it.view === 'quiz' && resume.ms < 9000) board.classList.add('reveal'); await wait(Math.max(2500, resume.ms)); }
+      else {
+        await typewriter();
+        if (it.view === 'quiz') { board.classList.add('quiz-run'); await wait(5000); board.classList.add('reveal'); el.dataset.mood = 'happy'; confetti('happy'); }
+        await wait(it.stay || 10000);
+      }
+      while (hover && !reason) await wait(500);
     })();
     await Promise.race([stay, ended]);
     skip = null; current = null;
@@ -207,6 +217,7 @@
   chrome.runtime.onMessage.addListener((m) => {
     if (!m) return;
     if (m.type === 'show' && !document.hidden) show(m.item);
+    if (m.type === 'resume' && m.item) show(m.item, { ms: Number(m.ms) || 4000 });
     if (m.type === 'nodash' && !busy && !blocked() && !document.hidden && Math.random() < 0.2) show({ key: 'nodash', fun: true, mood: 'curious', icon: '📊', title: 'Dashboard band hai', head: 'Dashboard ka tab khula rakho — tabhi main har tab par updates de paunga 🙂', view: 'text', q: '#/', stay: 6000 });
   });
 

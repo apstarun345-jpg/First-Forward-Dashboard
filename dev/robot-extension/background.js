@@ -14,6 +14,14 @@ async function injectOpenTabs() {
 }
 chrome.runtime.onInstalled.addListener(() => { ensureAlarm(); injectOpenTabs(); });
 chrome.runtime.onStartup.addListener(ensureAlarm);
+let curShow = null;
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  if (!curShow) return;
+  const left = curShow.at + curShow.dur - Date.now();
+  if (left < 2500) return;
+  try { const t = await chrome.tabs.get(tabId); if (isDash(t.url)) return; } catch { return; }
+  chrome.tabs.sendMessage(tabId, { type: 'resume', item: curShow.item, ms: left }).catch(() => {});
+});
 async function activeTab() { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return t; }
 async function dashTab() { const ts = await chrome.tabs.query({ url: `${DASH}*` }); return ts[0]; }
 async function getHist() { const { hist } = await chrome.storage.local.get('hist'); return (Array.isArray(hist) ? hist : []).filter((h) => Date.now() - h.at < DAY); }
@@ -37,7 +45,11 @@ chrome.alarms.onAlarm.addListener(async (a) => {
 });
 chrome.runtime.onMessage.addListener((m, sender, reply) => {
   if (!m || !m.type) return;
-  if (m.type === 'show') { addHist(m.item).then(() => toFront({ type: 'show', item: m.item })); }
+  if (m.type === 'show') {
+    // abhi chal rahi khabar yaad rakho — tab badle to naye tab me wahi (bacha hua time) turant
+    curShow = { item: m.item, at: Date.now(), dur: (m.item && m.item.stay ? m.item.stay : 11000) + 4500 };
+    addHist(m.item).then(() => toFront({ type: 'show', item: m.item }));
+  }
   else if (m.type === 'open') {
     (async () => {
       const d = await dashTab();
