@@ -1,0 +1,11 @@
+# v3.125.146 — Robot: poochho, yaad dilao, sujhaav, aaj ke kaam, gadbad alert, badges, tyohaar
+- 💬 Robot se poochho: robot par click → upar likho ya 🎙 bolo ("Rahul ka stock", "aaj GV kitna") — Gems ka jawab robot ke board par + bolkar.
+- ⏰ Reminders: "kal subah 9 baje Rahul ka stock yaad dilana", "30 min baad dispatch check yaad dilana" — us waqt phone + web par notification (app band ho tab bhi). ⏰ Reminders button se list / hatao.
+- 💡 Sujhaav: agent spotlight me action — "~40 tag bhejo, 3 din me khatam", "call karke wajah poochho", "shabaashi do".
+- 📋 Aaj ke 5 kaam: kise dispatch, kise call, kise jagao — board par tick ✔ karte jao (📋 button).
+- 🚨 Gadbad pakdo: regular agent achanak 0 · ek din me 5 guna se zyada · TL ki poori team giri — turant alert.
+- 🧠 Robot ka "aaj kitne honge" andaaza pichli galtiyon se seekh kar har din sudharta hai.
+- 🎉 Tyohaar: Diwali par sir par diya 🪔 + sunehri chamak, Christmas 🎅, New Year 🎉, 26 Jan / 15 Aug 🇮🇳, Holi 🌈 — aur shubhkamna board.
+- 🎖 Badges: Record Breaker, Comeback King, Rocket, Top 10, 10+ din streak (🎖 button + notification).
+- Site ka robot ab server ke saare 100+ updates bhi dikhata hai; board chal raha ho tab bhi robot par click → history / sawaal.
+- Server: /api/robot/feed, /api/robot/remind.

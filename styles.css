@@ -7831,3 +7831,26 @@ html.mc-pip .mc-board { max-height: calc(100vh - 130px); overflow: auto; }
 html[data-theme="dark"] .msp-cov.r { color: #fca5a5; background: rgba(239, 68, 68, .18); }
 html[data-theme="dark"] .msp-cov.y { color: #fde047; background: rgba(234, 179, 8, .18); }
 html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 94, .18); }
+/* ===== 🤖 v3.125.146 — robot se poochho, aaj ke kaam, reminders, badges, tyohaar ===== */
+.mc-askf { display: flex; gap: 4px; padding: 8px 10px 0; }
+.mc-askf input { flex: 1; min-width: 0; border: 1.5px solid color-mix(in srgb, #6366f1 35%, transparent); border-radius: 10px; padding: 7px 10px; font: inherit; font-size: 12.5px; background: var(--card, #fff); color: inherit; }
+.mc-askf input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .18); }
+.mc-askf button { border: 0; border-radius: 10px; padding: 0 10px; cursor: pointer; background: linear-gradient(110deg, #6366f1, #8b5cf6); color: #fff; font-size: 14px; }
+.mc-askf button.rec { background: #ef4444; animation: mcPing 1s infinite; }
+.mc-quick { display: flex; gap: 5px; padding: 6px 10px 0; flex-wrap: wrap; }
+.mc-quick button { border: 1px solid color-mix(in srgb, #6366f1 25%, transparent); background: color-mix(in srgb, #6366f1 8%, transparent); color: inherit; border-radius: 999px; padding: 3px 9px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.mc-html { max-height: min(300px, 45vh); overflow: auto; font-size: 12.5px; line-height: 1.45; }
+.mc-html table { width: 100%; border-collapse: collapse; font-size: 11.5px; } .mc-html td, .mc-html th { padding: 3px 5px; border-bottom: 1px solid var(--line, #e2e8f0); text-align: left; }
+.mc-todo { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 5px; }
+.mc-todo li { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 9px; background: color-mix(in srgb, #6366f1 7%, transparent); font-weight: 600; }
+.mc-todo li button { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #94a3b8; background: transparent; color: transparent; cursor: pointer; font-size: 12px; line-height: 1; }
+.mc-todo li.done { opacity: .6; text-decoration: line-through; }
+.mc-todo li.done button { background: #22c55e; border-color: #22c55e; color: #fff; }
+.mc-rem { display: flex; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px dashed var(--line, #e2e8f0); }
+.mc-rem b { flex: none; color: #6366f1; font-size: 11.5px; } .mc-rem span { flex: 1; } .mc-rem button { border: 0; background: transparent; cursor: pointer; color: #ef4444; }
+/* 🎉 tyohaar: sir par topi / diya + chamak */
+.mc-hat { position: absolute; left: 50%; top: -12%; transform: translateX(-50%) rotate(-12deg); font-size: calc(var(--w) * .34); z-index: 3; pointer-events: none; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .25)); }
+.mc-hat:empty { display: none; }
+.mc[data-fest="diwali"] .mc-glow { background: radial-gradient(closest-side, rgba(251, 191, 36, .95), rgba(249, 115, 22, .4) 60%, transparent); }
+.mc[data-fest="diwali"] .mc-hat { animation: mcBop .9s ease-in-out infinite alternate; }
+.mc[data-fest="holi"] .mc-body { filter: hue-rotate(0) drop-shadow(0 6px 10px rgba(236, 72, 153, .4)); }

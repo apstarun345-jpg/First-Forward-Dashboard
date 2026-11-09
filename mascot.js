@@ -615,7 +615,7 @@
       const g = cfg.guess;
       if (g && g.date && !g.done && S.site.has(g.date)) { // asal aa gaya → result
         const act = S.site.get(g.date), err = act ? Math.round((Math.abs(g.n - act) / act) * 100) : 0;
-        return { onShow: () => { cfg.guess = { ...g, done: 1 }; save(); }, key: `guessres:${g.date}`, mood: err <= 10 ? 'excited' : err <= 25 ? 'happy' : 'laugh', fx: err <= 10 ? 'clap' : '', icon: '🔮', title: 'Mera andaaza kaisa raha?', head: `${dLbl(g.date)}: andaaza ${fmt(g.n)} · asal ${fmt(act)} — ${100 - Math.min(100, err)}% sahi`, view: 'big', big: fmt(act),
+        return { onShow: () => { cfg.guess = { ...g, done: 1 }; cfg.guessLog = (cfg.guessLog || []).concat([{ d: g.date, r: act / Math.max(1, g.n) }]).slice(-20); save(); }, key: `guessres:${g.date}`, mood: err <= 10 ? 'excited' : err <= 25 ? 'happy' : 'laugh', fx: err <= 10 ? 'clap' : '', icon: '🔮', title: 'Mera andaaza kaisa raha?', head: `${dLbl(g.date)}: andaaza ${fmt(g.n)} · asal ${fmt(act)} — ${100 - Math.min(100, err)}% sahi`, view: 'big', big: fmt(act),
           rows: [{ name: 'Mera andaaza', val: fmt(g.n) }, { name: 'Asal', val: fmt(act) }, { name: 'Farak', val: `${act >= g.n ? '+' : '−'}${fmt(Math.abs(act - g.n))}` }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
           say: `${dSay(g.date)} के लिए मेरा अंदाज़ा ${fmt(g.n)} था, असल में ${fmt(act)} टैग्स हुए। ${err <= 10 ? 'वाह, लगभग सही!' : err <= 25 ? 'काफ़ी पास था!' : 'इस बार चूक गया, हा हा!'}`, q: '' };
       }
@@ -627,7 +627,10 @@
       for (const [k, v] of S.site) if (new Date(`${k}T00:00:00Z`).getUTCDay() === wd && k < t) same.push([k, v]);
       same.sort((a, b) => (a[0] < b[0] ? 1 : -1));
       const base = same.slice(0, 4).map((x) => x[1]); if (!base.length) return null;
-      const est = Math.round((base.reduce((a, b) => a + b, 0) / base.length) * 0.5 + siteAvg(S, 7) * 0.5);
+      // 🧠 seekhna: pichle andaazon me asal / andaaza ka median — har din correction
+      const logs = (cfg.guessLog || []).slice(-10).map((x) => x.r).filter((r) => r > 0.2 && r < 5).sort((a, b) => a - b);
+      const bias = logs.length >= 2 ? logs[Math.floor(logs.length / 2)] : 1;
+      const est = Math.round(((base.reduce((a, b) => a + b, 0) / base.length) * 0.5 + siteAvg(S, 7) * 0.5) * bias);
       return { onShow: () => { cfg.guess = { date: t, n: est }; save(); }, key: `guess:${t}`, mood: 'curious', icon: '🔮', title: 'Aaj kitne tags honge?', head: `Mera andaaza: aaj ~${fmt(est)} tags (kal data aane par batata hoon kitna sahi tha)`, view: 'big', big: `~${fmt(est)}`,
         rows: [{ name: 'Pichle 7 din avg', val: fmt(siteAvg(S, 7)) }, { name: 'Isi weekday avg', val: fmt(base.reduce((a, b) => a + b, 0) / base.length) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
         say: `मेरा अंदाज़ा है आज लगभग ${fmt(est)} टैग्स होंगे। कल डेटा आने पर बताऊँगा कितना सही था!`, q: '' };
@@ -809,7 +812,7 @@
         <span class="mc-arm r"><img src="${ASSET('robot-arm-r.png')}" alt="" draggable="false"></span>
         <img class="mc-body" src="${ASSET('robot-torso.png')}" alt="" draggable="false">
         <span class="mc-headwrap"><img class="mc-head" src="${ASSET('robot-head.png')}" alt="" draggable="false"><i class="mc-eye l"><b></b></i><i class="mc-eye r"><b></b></i><i class="mc-mouth"><b></b></i></span>
-        <span class="mc-fx" aria-hidden="true"></span>
+        <span class="mc-fx" aria-hidden="true"></span><span class="mc-hat" aria-hidden="true"></span>
         <span class="mc-dot" hidden></span>
       </button>`;
     document.body.appendChild(el);
@@ -825,6 +828,8 @@
       if (li) { runQ(li.dataset.q); closeHist(); return; }
       if (mode === 'show' && current) { runQ(current.q); if (skip) skip(); }
     });
+    board.addEventListener('submit', (e) => { const f = e.target.closest('[data-mcf="ask"]'); if (!f) return; e.preventDefault(); const q = (f.q.value || '').trim(); if (q) { closeHist(); askRobot(q); } });
+    board.addEventListener('keydown', (e) => { if (e.target && e.target.tagName === 'INPUT') e.stopPropagation(); });
     // drag → nayi jagah (dock) · click → history
     let start = null;
     bot.addEventListener('pointerdown', (e) => {
@@ -850,7 +855,7 @@
     bot.addEventListener('click', (e) => {
       e.stopPropagation();
       if (dragged) { dragged = false; return; }
-      if (mode === 'show') { dance('happy', 1400); return; }
+      if (mode === 'show' || busy) { histSoon(); return; } // board chal raha ho tab bhi click → history (sawaal poochhne ke liye)
       if (mode === 'hist') closeHist(); else openHist();
     });
     document.addEventListener('click', (e) => { if (mode === 'hist' && !el.contains(e.target)) closeHist(); });
@@ -876,6 +881,8 @@
     const rows = it.rows || [];
     const max = Math.max(1, ...rows.map((r) => r.w || 0));
     if (it.view === 'text') return `<div class="mc-headline mc-textv"><span class="mc-type" data-text="${esc(it.head)}"></span></div>`;
+    if (it.view === 'html') return `<div class="mc-headline mc-textv">${esc(it.head || '')}</div><div class="mc-html">${it.html || ''}</div>`;
+    if (it.view === 'todo') return `<div class="mc-headline mc-textv">${esc(it.head || '')}</div><ol class="mc-todo">${(it.todo || []).map((t, i) => `<li class="${(cfg.todoDone || {})[`${it.key}|${i}`] ? 'done' : ''}"><button type="button" data-mc="tdo" data-key="${esc(it.key)}" data-i="${i}">✔</button><span>${esc(t)}</span></li>`).join('')}</ol>`;
     if (it.view === 'quiz' && it.quiz) return `<div class="mc-headline mc-textv"><span class="mc-type" data-text="${esc(it.head)}"></span></div><ol class="mc-quiz">${it.quiz.opts.map((o, i) => `<li class="${i === it.quiz.ans ? 'ok' : ''}"><b>${'ABC'[i]}</b> ${esc(o)}${i === it.quiz.ans ? ` <small>· ${esc(it.quiz.val)}</small>` : ''}</li>`).join('')}</ol><div class="mc-qtimer"><i></i></div>`;
     if (it.view === 'big') {
       return `<div class="mc-big"><b>${esc(it.big)}</b><span>${esc(it.head)}</span></div>`
@@ -916,6 +923,8 @@
           <span class="mc-n">${esc(h.title)}<small>${h.big ? `<b>${esc(h.big)}</b> ` : ''}${esc(h.head)}</small></span><b class="mc-v">${ago(h.at)}</b></li>`).join('')}</ol>`
       : '<div class="mc-empty">Pichle 24 ghante me abhi kuch nahi bataya.<br>✨ <b>Naya update</b> dabao — main abhi batata hoon!</div>';
     return `<div class="mc-bh"><span class="mc-ic">🕘</span><b>Maine kya bataya · 24h</b><small class="mc-cnt">${a.length} unique</small></div>
+      <form class="mc-askf" data-mcf="ask"><input type="text" name="q" placeholder="Robot se poochho… (jaise: Rahul ka stock / kal 9 baje yaad dilana)" autocomplete="off"><button type="button" data-mc="mic" title="Bolkar poochho">🎙</button><button type="submit" title="Poochho">➤</button></form>
+      <div class="mc-quick"><button type="button" data-mc="todo">📋 Aaj ke kaam</button><button type="button" data-mc="rems">⏰ Reminders</button><button type="button" data-mc="badges">🎖 Badges</button></div>
       <div class="mc-bb">${list}</div>
       <div class="mc-ctl wide">
         <button type="button" class="mc-pill" data-mc="ask">🎙 Gems se poochho</button>
@@ -942,6 +951,12 @@
     else if (k === 'now') { closeHist(); now(true); }
     else if (k === 'pop') { closeHist(); popOut(); }
     else if (k === 'popin') { closeHist(); popIn(); }
+    else if (k === 'mic') listen(b);
+    else if (k === 'todo') { closeHist(); const t = srvItem(/^srv:todo:/); if (t) show(t); else show({ key: 'todo-none', fun: true, mood: 'curious', icon: '📋', title: 'Aaj ke kaam', head: 'Abhi koi kaam list nahi bani — server data aane do (subah).', view: 'text', stay: 5000 }); }
+    else if (k === 'badges') { closeHist(); const t = srvItem(/^srv:badges:/); if (t) show(t); else show({ key: 'bdg-none', fun: true, mood: 'curious', icon: '🎖', title: 'Badges', head: 'Abhi koi naya badge nahi.', view: 'text', stay: 5000 }); }
+    else if (k === 'rems') { closeHist(); showReminders(); }
+    else if (k === 'remdel') { delReminder(b.dataset.id); }
+    else if (k === 'tdo') { const st = cfg.todoDone || (cfg.todoDone = {}); const key = `${b.dataset.key}|${b.dataset.i}`; st[key] = !st[key]; save(); b.closest('li').classList.toggle('done', !!st[key]); hover = true; }
   }
   document.addEventListener('change', (e) => {
     const t = e.target;
@@ -1188,6 +1203,12 @@
   function popIn() { try { if (pipWin) pipWin.close(); } catch { /* ignore */ } }
 
   // ---------------------------------------------------------------- history board (bot par click)
+  async function histSoon() {
+    if (!busy) return openHist();
+    if (skip) skip('hist');
+    let n = 0; while (busy && n++ < 60) await wait(100);
+    openHist();
+  }
   function openHist() {
     if (busy) return;
     mode = 'hist'; dot(false);
@@ -1229,6 +1250,7 @@
     if (it.cls) el.classList.add(it.cls);
     board.classList.add('in');
     try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
+    if (/^srv:/.test(it.key || '')) { cfg.srvIdx = (Number(cfg.srvIdx) || 0) + 1; save(); }
     if (!it.fun) { histAdd(it); pushRobot(it); } // masti/jokes history / push me nahi
     toExt(it);
     await wait(350);
@@ -1363,6 +1385,126 @@
     } catch { /* ignore */ }
     save();
   }
+
+  // ---------------------------------------------------------------- 🧠 v3.125.146: server ke 100+ updates site ke robot par bhi
+  const srvCache = { at: 0, items: [] };
+  async function refreshSrv() {
+    if (!allowed() || Date.now() - srvCache.at < 8 * 60e3) return;
+    try { const r = await api('/api/robot/feed'); if (r && Array.isArray(r.items)) { srvCache.items = r.items; srvCache.at = Date.now(); } } catch { /* ignore */ }
+  }
+  function srvToItem(x) {
+    const title = String(x.title || '').replace(/^🤖\s*/, '').replace(/^✅ Sahi \(GV ke saath\) · /, '');
+    const icon = emo(title) || '🤖', t2 = noEmo(title);
+    const lines = String(x.body || '').split('\n').filter(Boolean);
+    const isTodo = /^srv:todo:/.test(x.key);
+    const bullets = lines.filter((l) => /^(•|\d+\.|⭐|🏆|🚗|🚐|🚛|🔻|🔺)/u.test(l.trim()));
+    const other = lines.filter((l) => !bullets.includes(l));
+    const rows = bullets.slice(0, 7).map((l) => {
+      const t = l.replace(/^(•|\d+\.)\s*/, '').trim(), i = t.lastIndexOf(' — ');
+      return i > 0 ? { name: t.slice(0, i), sub: '', val: t.slice(i + 3), tone: /-\d|neeche|0 par|khatam/.test(t) ? 'down' : 'up' } : { name: t, sub: '', val: '', tone: 'chip' };
+    });
+    const mood = /🚨|📉|😴|⛽|🚫|🪦|🧭|kam/.test(title) ? 'alert' : /🚀|🏅|💯|🎯|🥇|🎖|👑|🔙|🎈/.test(title) ? 'excited' : 'info';
+    const sayLines = [t2, ...other.slice(0, 2), ...bullets.slice(0, 3).map((l) => l.replace(/^(•|\d+\.)\s*/, ''))].join('. ');
+    if (isTodo) return { key: x.key, mood: 'info', icon: '📋', title: t2, head: 'Ek-ek karke tick karte jao ✔', view: 'todo', todo: lines.map((l) => l.replace(/^\d+\.\s*/, '')), say: sayLines, q: '', stay: 14000 };
+    return { key: x.key, mood, icon, title: t2.slice(0, 60), head: other.join(' · ').slice(0, 170) || t2, view: rows.length ? 'list' : 'text', rows, say: sayLines, q: x.link && x.link[0] === '#' ? x.link : '' };
+  }
+  const srvItem = (re) => { const x = (srvCache.items || []).find((i) => re.test(i.key)); return x ? srvToItem(x) : null; };
+  BUILDERS.push(...Array.from({ length: 12 }, (_, k) => function srvFeed() {
+    // har baari 12 me se ek slot → rotation me server ke saare updates dheere-dheere aate rahen
+    const L = srvCache.items || [];
+    if (!L.length) return null;
+    const pos = ((Number(cfg.srvIdx) || 0) + k) % L.length;
+    return srvToItem(L[pos]);
+  }));
+  // ---------------------------------------------------------------- 💬 robot se poochho + ⏰ reminders
+  function parseReminder(q) {
+    const t = q.toLowerCase();
+    if (!/(yaad|remind|reminder|याद)/.test(t)) return null;
+    const now = new Date();
+    let at = null;
+    const rel = t.match(/(\d+)\s*(min|minute|mint|ghante|ghanta|hour|hr|din|day)/);
+    if (rel) { const n = Number(rel[1]), u = rel[2]; at = Date.now() + n * (/^min|mint/.test(u) ? 60e3 : /din|day/.test(u) ? 864e5 : 3600e3); }
+    const tm = t.match(/(\d{1,2})(?:[:.](\d{2}))?\s*(baje|bje|am|pm|o'?clock)/);
+    if (tm) {
+      let h = Number(tm[1]); const mi = Number(tm[2] || 0);
+      if (/pm/.test(tm[3]) && h < 12) h += 12;
+      if (/shaam|sham|raat|evening|night/.test(t) && h < 12) h += 12;
+      if (/dopahar|dopher|afternoon/.test(t) && h < 6) h += 12;
+      const d = new Date(now); d.setHours(h, mi, 0, 0);
+      if (/kal|tomorrow/.test(t)) d.setDate(d.getDate() + 1);
+      else if (/parso/.test(t)) d.setDate(d.getDate() + 2);
+      else if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+      at = d.getTime();
+    } else if (!rel && /kal|tomorrow/.test(t)) { const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); at = d.getTime(); }
+    if (!at) return null;
+    const text = q.replace(/\b(kal|aaj|parso|subah|shaam|sham|dopahar|raat|baje|bje|mujhe|yaad\s*dila(na|o|dena)?|remind( me)?|reminder|ko)\b/gi, ' ').replace(/\d+\s*(min|minute|ghante|ghanta|hour|din)\s*(baad)?/gi, ' ').replace(/\d{1,2}([:.]\d{2})?\s*(am|pm)?/gi, ' ').replace(/\s+/g, ' ').trim() || q;
+    return { at, text };
+  }
+  let asking = false;
+  async function askRobot(q) {
+    const rem = parseReminder(q);
+    if (rem) {
+      try {
+        await FF.auth.api('/api/robot/remind', 'POST', { at: rem.at, text: rem.text });
+        const when = new Date(rem.at).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+        return show({ key: `rem:${rem.at}`, fun: true, mood: 'happy', cls: 'greet', icon: '⏰', title: 'Theek hai, yaad dila dunga!', head: `${when} — "${rem.text}"`, view: 'text', stay: 6000, say: `ठीक है, ${new Date(rem.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} पर याद दिला दूँगा: ${rem.text}` });
+      } catch (e) { return show({ key: 'rem-err', fun: true, mood: 'sad', icon: '⏰', title: 'Reminder nahi bana', head: String(e.message || e), view: 'text', stay: 5000 }); }
+    }
+    asking = true; // tick beech me apna update na daale
+    if (skip) skip('ask');
+    if (el) { el.dataset.mood = 'curious'; el.classList.add('rest'); confetti('curious'); }
+    let html = '';
+    try {
+      if (!FF.assistant && FF.lazy && FF.lazy.inject) await FF.lazy.inject('assistant');
+      html = FF.assistant && FF.assistant.answer ? await FF.assistant.answer(q) : '';
+    } catch (e) { html = `Jawab nahi mila: ${esc(e.message || '')}`; }
+    const tmp = document.createElement('div'); tmp.innerHTML = String(html || 'Iska jawab abhi mere paas nahi 🙈');
+    tmp.querySelectorAll('script,style,iframe').forEach((n) => n.remove());
+    const text = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
+    let n = 0; while (busy && n++ < 80) await wait(100);
+    asking = false;
+    show({ key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '💬', title: 'Gems ka jawab', head: q, view: 'html', html: tmp.innerHTML, stay: Math.min(25000, 6000 + text.length * 40), say: text.slice(0, 400) });
+  }
+  function listen(btn) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { note('🎙 Is browser me bolkar poochhna nahi chalta — likh kar poochho'); return; }
+    const r = new SR(); r.lang = 'hi-IN'; r.interimResults = false; r.maxAlternatives = 1;
+    if (btn) btn.classList.add('rec');
+    r.onresult = (e) => { const q = e.results[0][0].transcript; closeHist(); askRobot(q); };
+    r.onend = () => { if (btn) btn.classList.remove('rec'); };
+    r.onerror = () => { if (btn) btn.classList.remove('rec'); };
+    try { r.start(); } catch { /* already */ }
+  }
+  async function showReminders() {
+    let L = [];
+    try { L = ((await FF.auth.api('/api/robot/remind')) || {}).items || []; } catch { /* ignore */ }
+    show({ key: `rems:${Date.now()}`, fun: true, mood: 'info', icon: '⏰', title: `Reminders (${L.length})`, head: L.length ? 'Jo yaad dilana hai' : 'Koi reminder nahi — likho: "kal 9 baje Rahul ka stock yaad dilana"', view: 'html', stay: 12000,
+      html: L.map((r) => `<div class="mc-rem"><b>${esc(new Date(r.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }))}</b><span>${esc(r.text)}</span><button type="button" data-mc="remdel" data-id="${esc(r.id)}">✕</button></div>`).join('') });
+  }
+  async function delReminder(id) { try { await FF.auth.api(`/api/robot/remind?id=${encodeURIComponent(id)}`, 'DELETE'); } catch { /* ignore */ } if (skip) skip(); showReminders(); }
+  // ---------------------------------------------------------------- 🎉 tyohaar ke kapde
+  function festival() {
+    const d = istNow(), md = `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`, y = d.getUTCFullYear();
+    const F = [
+      ['diwali', '🪔', 'Happy Diwali!', 'दिवाली की बहुत-बहुत शुभकामनाएँ!', (y === 2026 && md >= '11-05' && md <= '11-12') || (y === 2027 && md >= '10-26' && md <= '11-01')],
+      ['xmas', '🎅', 'Merry Christmas!', 'मैरी क्रिसमस!', md >= '12-20' && md <= '12-26'],
+      ['newyear', '🎉', 'Happy New Year!', 'नया साल मुबारक हो!', md >= '12-31' || md <= '01-02'],
+      ['republic', '🇮🇳', 'Happy Republic Day!', 'गणतंत्र दिवस की शुभकामनाएँ!', md >= '01-25' && md <= '01-26'],
+      ['holi', '🌈', 'Happy Holi!', 'होली मुबारक!', y === 2027 && md >= '03-20' && md <= '03-23'],
+      ['independence', '🇮🇳', 'Happy Independence Day!', 'स्वतंत्रता दिवस की शुभकामनाएँ!', md >= '08-14' && md <= '08-15']
+    ];
+    const f = F.find((x) => x[4]);
+    return f ? { id: f[0], hat: f[1], title: f[2], say: f[3] } : null;
+  }
+  function applyFestival() {
+    const f = festival(); if (!el) return;
+    el.dataset.fest = f ? f.id : '';
+    const h = el.querySelector('.mc-hat'); if (h) h.textContent = f ? f.hat : '';
+  }
+  BUILDERS.push(function festGreet() {
+    const f = festival(); if (!f || cfg.festDay === istToday()) return null;
+    return { onShow: () => { cfg.festDay = istToday(); save(); }, key: `fest:${istToday()}`, fun: true, cls: 'mc-disco', fx: 'clap', mood: 'excited', icon: f.hat, title: f.title, head: `Poori ApnaPayment team ko ${f.title.replace(/^Happy |!$/g, '')} ki shubhkamnayein ${f.hat}`, view: 'text', stay: 7000, say: f.say };
+  });
 
   // ---------------------------------------------------------------- 🎭 masti: jab koi nayi khabar nahi
   const JOKES = [
@@ -1509,7 +1651,7 @@
   let funTurn = 0, lastUpd = 0;
   async function tick(force) {
     applyOn();
-    if (busy || mode === 'hist') return schedule(4e3);
+    if (busy || asking || mode === 'hist') return schedule(4e3);
     // 🔔 site ka tab peeche (dusra tab / WhatsApp) aur pop-out nahi → system notification se update
     if (!force && document.hidden && !pipWin && extOn()) return schedule(30e3); // extension har 30 sec "pull" karta hai
     if (!force && document.hidden && !pipWin && cfg.on && allowed() && cfg.notify !== false && cfg.snoozeDay !== today()) { await notifyHidden(); return schedule(60e3); }
@@ -1549,7 +1691,7 @@
   }
   const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false, push: cfg.push !== false });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { _sp: toSpeech, _show: (it) => show(it), now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); openHist(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { _sp: toSpeech, _show: (it) => show(it), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
@@ -1569,6 +1711,8 @@
       setTimeout(pollFeeds, 4e3);
       setInterval(pollFeeds, 30e3);
       armAutoPip();
+      applyFestival(); setInterval(applyFestival, 30 * 60e3);
+      setTimeout(refreshSrv, 8e3); setInterval(refreshSrv, 10 * 60e3);
       setTimeout(refreshExtras, 15e3);
       setInterval(refreshExtras, 5 * 60e3);
       window.addEventListener('ff:data-fresh', () => setTimeout(checkVersions, 3000));

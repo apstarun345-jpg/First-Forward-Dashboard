@@ -5152,7 +5152,14 @@ function robotInsights(rows) {
       `Is mahine ${rbFmt(a.cur)} tags — VC4 ${rbFmt(a.vc4)} · VC20 ${rbFmt(a.vc20)} · VC5+ ${rbFmt(a.vc5)}`,
       `Run-rate ${r.toFixed(1)}/din · andaaza ${rbFmt(r * dim)}${g !== null ? ` · last month isi din tak ${rbFmt(a.prevSame)} (${rbPct(g)})` : ''}`,
       st ? `📦 Stock ${rbFmt(st.t)} (VC4/20 ${rbFmt(st.core)} · VC5+ ${rbFmt(st.comm)})${r > 0 ? ` · ~${Math.round(st.t / r)} din ka` : ''}${st.old ? ` · sabse purana ${st.old} din` : ''}` : '',
-      `${rbLbl(last)} ko ${rbFmt(a.days.get(last) || 0)} · aakhri tag ${rbLbl(lastTag(a))}`
+      `${rbLbl(last)} ko ${rbFmt(a.days.get(last) || 0)} · aakhri tag ${rbLbl(lastTag(a))}`,
+      (() => { // 💡 sujhaav
+        if (st && r > 0 && st.t / r < 7) return `💡 ~${rbFmt(Math.max(0, Math.ceil(r * 15 - st.t)))} tag bhejo — stock ${Math.max(0, Math.round(st.t / r))} din me khatam`;
+        if (st && st.t === 0 && a.cur) return `💡 Stock 0 — turant dispatch karo (roz ~${rbFmt(r)})`;
+        if (g !== null && g <= -30) return `💡 ${rbPct(g)} neeche — call karke wajah poochho`;
+        if (g !== null && g >= 50) return '💡 Zabardast growth — shabaashi do, stock ready rakho';
+        return '';
+      })()
     ], '#/masterSearch?q=' + encodeURIComponent(a.name) + '&ch=' + a.ch);
   });
   // (B) 🧑‍💼 TL spotlight — har TL
@@ -5216,6 +5223,34 @@ function robotInsights(rows) {
   // (H) 🎯 andaaza: last month paar karne ke liye roz kitne chahiye
   const left = dim - lastDay;
   if (prevFull && left > 0) { const need = Math.max(0, prevFull - all.cur); push(`need:${last}`, need ? `🎯 Last month (${rbFmt(prevFull)}) paar karne ko roz ${rbFmt(need / left)} chahiye` : '🎯 Last month ka total paar ho gaya!', [`Abhi ${rbFmt(all.cur)} · ${left} din baaki · abhi ka run-rate ${rbFmt(rate)}/din`]); }
+  // (J) 🚨 gadbad pakdo — achanak 0 · achanak bahut zyada · TL ki poori team giri
+  const prevDays = (a, n) => { const ds = [...a.days.keys()].filter((d) => d < last).sort().slice(-n); return ds.length ? ds.reduce((m, d) => m + a.days.get(d), 0) / n : 0; };
+  const drop0 = A.filter((a) => !(a.days.get(last)) && prevDays(a, 7) >= 8).sort((x, y) => prevDays(y, 7) - prevDays(x, 7)).slice(0, 8);
+  if (drop0.length) push(`anom0:${last}`, `🚨 Achanak 0: ${drop0.length} regular agents ne ${rbLbl(last)} ko kuch nahi kiya`, drop0.map((a) => line(a, `roz ~${rbFmt(prevDays(a, 7))} karte the`)), '#/performance');
+  const spike = A.map((a) => ({ a, v: a.days.get(last) || 0, avg: prevDays(a, 14) })).filter((x) => x.v >= 20 && x.avg > 0 && x.v >= x.avg * 5).sort((x, y) => y.v / y.avg - x.v / x.avg).slice(0, 6);
+  if (spike.length) push(`anomup:${last}`, `🚨 Achanak bahut zyada: ${spike[0].a.name} (${rbFmt(spike[0].v)} vs roz ~${rbFmt(spike[0].avg)})`, spike.map((x) => line(x.a, `${rbFmt(x.v)} · roz ~${rbFmt(x.avg)} (${Math.round(x.v / x.avg)}x) — check karo`)), '#/performance');
+  const tlFall = [...tlAgents.values()].map((L) => { const v = L.reduce((m, a) => m + (a.days.get(last) || 0), 0), avg = L.reduce((m, a) => m + prevDays(a, 7), 0); return { name: L[0].tl, ch: L[0].ch, v, avg }; }).filter((x) => x.avg >= 20 && x.v < x.avg * 0.4).sort((x, y) => y.avg - x.avg).slice(0, 5);
+  if (tlFall.length) push(`anomtl:${last}`, `🚨 TL team giri: ${tlFall[0].name} (${rbFmt(tlFall[0].v)} vs roz ~${rbFmt(tlFall[0].avg)})`, tlFall.map((x) => `• TL ${x.name} · ${chS(x.ch)} — ${rbLbl(last)} ${rbFmt(x.v)} · roz ~${rbFmt(x.avg)}`), '#/performance');
+  // (K) 📋 aaj ke 5 kaam
+  const todo = [];
+  if (idx) {
+    const cov = A.map((a) => ({ a, st: stockOf(a), r: rateOf(a) })).filter((x) => x.st && x.r >= 1 && x.st.t / x.r < 5).sort((x, y) => x.st.t / x.r - y.st.t / y.r);
+    cov.slice(0, 2).forEach((x) => todo.push(`🚚 ${x.a.name}${tlOf(x.a)} ko ~${rbFmt(Math.ceil(x.r * 15 - x.st.t))} tag bhejo (stock ${Math.max(0, Math.round(x.st.t / x.r))} din)`));
+  }
+  drop0.slice(0, 1).forEach((a) => todo.push(`📞 ${a.name}${tlOf(a)} ko call — roz ~${rbFmt(prevDays(a, 7))} the, ab 0`));
+  lo.slice(0, 1).forEach((x) => todo.push(`📞 ${x.a.name}${tlOf(x.a)} — ${rbPct(x.g)} neeche, wajah poochho`));
+  ina.slice(0, 1).forEach((a) => todo.push(`😴 ${a.name}${tlOf(a)} ko jagao — last month ${rbFmt(a.prev)}, ab 0`));
+  if (todo.length) push(`todo:${last}`, `📋 Aaj ke ${Math.min(5, todo.length)} kaam`, todo.slice(0, 5).map((t, i) => `${i + 1}. ${t}`));
+  // (L) 🎖 badges
+  const bdg = new Map();
+  const give = (a, b) => { const k = `${a.ch}|${a.name}`; const o = bdg.get(k) || { a, b: [] }; o.b.push(b); bdg.set(k, o); };
+  rec.forEach((x) => give(x.a, '🏅 Record Breaker'));
+  back.forEach((x) => give(x.a, '🔙 Comeback King'));
+  hi.filter((x) => x.g >= 50).forEach((x) => give(x.a, '🚀 Rocket'));
+  A.filter((a) => a.cur).sort((x, y) => y.cur - x.cur).slice(0, 10).forEach((a) => give(a, '👑 Top 10'));
+  A.forEach((a) => { let n = 0; for (let d = last; a.days.get(d); d = addD(d, -1)) n += 1; if (n >= 10) give(a, `🔥 ${n} din streak`); });
+  const B = [...bdg.values()].filter((o) => o.b.length >= 2 || o.b.some((b) => /Record|Comeback|Rocket|streak/.test(b))).sort((x, y) => y.b.length - x.b.length).slice(0, 8);
+  if (B.length) push(`badges:${last}`, `🎖 Badges: ${B[0].a.name} — ${B[0].b.join(' ')}`, B.map((o) => `• ${o.a.name}${tlOf(o.a)} — ${o.b.join(' · ')}`));
   // (I) ⏱ GV live — aaj ab tak (GV Master, har ghante ek)
   const liveRows = rows.filter((r) => r.agentOnly && r.date === today);
   if (liveRows.length) {
@@ -5295,6 +5330,7 @@ async function robotBrainRun(reason) {
       const st = await stockSnapshot();
       if (st && st.total) items.push({ key: `srv:stock:${dateKeyNow()}`, title: `🤖 📦 Stock: ${rbFmt(st.total)} tags`, link: '#/stock', body: Object.entries(st.classes || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c, n]) => `${c}: ${rbFmt(n)}`).join(' · ') });
     } catch { /* ignore */ }
+    robotBrain.lastItems = items.map((it) => ({ key: it.key, title: it.title, body: it.body, link: it.link }));
     let added = 0;
     for (const it of items) {
       if (fixed.has(it.key)) it.title = it.title.replace(/^🤖 /, '🤖 ✅ Sahi (GV ke saath) · ');
@@ -5315,7 +5351,24 @@ function robotAdminSubs() {
     return prefs.enabled !== false && prefs.push !== false;
   });
 }
+// ⏰ robot reminders (user ne robot ko bola "kal 9 baje yaad dilana") — due hote hi us user ke devices par push
+function robotReminders() { if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {}; if (!Array.isArray(db.notify.watch.robotRem)) db.notify.watch.robotRem = []; return db.notify.watch.robotRem; }
+function robotRemindersDue() {
+  if (!vapidKeys) return;
+  const L = robotReminders(), now = Date.now(), due = L.filter((r) => r.at <= now);
+  if (!due.length) return;
+  db.notify.watch.robotRem = L.filter((r) => r.at > now);
+  for (const r of due) {
+    const subs = pushSubs().filter((x) => x.username === r.user);
+    const u = findUser(r.user); const prefs = u ? normalizeNotifyPrefs(u.notifyPrefs) : DEFAULT_NOTIFY_PREFS;
+    const data = { id: r.id, title: '🤖 ⏰ Yaad dila raha hoon', body: r.text, tag: `ff-robot-rem-${r.id}`, type: 'info', link: '#/', sound: prefs.sound !== false, tone: prefs.tone, at: now, voice: '', speak: false, user: r.user, badge: unreadCountFor(u), lang: 'hi-IN', actions: [{ action: 'open', title: '🤖 Open' }, { action: 'dismiss', title: '✅ Ho gaya' }], persist: true, robot: true };
+    Promise.all(subs.map(async (sub) => handlePushResult(sub, await deliverPush(sub, data), { type: 'robot', id: r.id }))).catch(() => {});
+    console.log(`🤖 reminder → ${r.user}: ${r.text}`);
+  }
+  persist('notify').catch(() => {});
+}
 function robotFlush() {
+  try { robotRemindersDue(); } catch { /* ignore */ }
   if (!robotBrain.queue.length || !vapidKeys) return;
   const h = istNow().getUTCHours();
   if (h >= 22 || h < 7) return; // 🌙 raat me shor nahi — subah 7 baje se
@@ -7421,6 +7474,29 @@ async function handleApi(req, res, url) {
   }
   // 🤖 v3.125.133 — robot ki khabar → admin ke apne saare devices (app + web) par push notification.
   // Dedupe: same key 24h me ek baar (kai tab / phone khule hon tab bhi); rate: user par 25 sec me max 1.
+  if (p === '/api/robot/feed' && method === 'GET') { // site ke robot ko bhi server wale 100+ updates
+    requireAdmin(user);
+    return sendJson(res, 200, { at: robotBrain.at || 0, items: robotBrain.lastItems || [] });
+  }
+  if (p === '/api/robot/remind') {
+    requireAdmin(user);
+    const L = robotReminders();
+    if (method === 'GET') return sendJson(res, 200, { items: L.filter((r) => r.user === user.username).sort((a, b) => a.at - b.at) });
+    if (method === 'POST') {
+      const body = await readBody(req);
+      const at = Number(body.at), text = String(body.text || '').trim().slice(0, 300);
+      if (!at || at < Date.now() - 60e3 || !text) return sendJson(res, 400, { error: 'time / text sahi nahi' });
+      if (L.filter((r) => r.user === user.username).length >= 50) return sendJson(res, 400, { error: 'max 50 reminders' });
+      const it = { id: `rem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, user: user.username, at, text };
+      L.push(it); persist('notify').catch(() => {});
+      return sendJson(res, 200, { ok: true, item: it });
+    }
+    if (method === 'DELETE') {
+      const id = String(new URL(req.url, 'http://x').searchParams.get('id') || '');
+      db.notify.watch.robotRem = L.filter((r) => !(r.user === user.username && r.id === id)); persist('notify').catch(() => {});
+      return sendJson(res, 200, { ok: true });
+    }
+  }
   if (p === '/api/robot/brain' && (method === 'GET' || method === 'POST')) {
     requireAdmin(user);
     if (method === 'POST') { robotBrain.at = 0; await robotBrainRun('manual').catch(() => {}); }
