@@ -8250,3 +8250,46 @@ html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 9
 .mc[data-fest="diwali"] .mc-glow { background: radial-gradient(closest-side, rgba(251, 191, 36, .95), rgba(249, 115, 22, .4) 60%, transparent); }
 .mc[data-fest="diwali"] .mc-hat { animation: mcBop .9s ease-in-out infinite alternate; }
 .mc[data-fest="holi"] .mc-body { filter: hue-rotate(0) drop-shadow(0 6px 10px rgba(236, 72, 153, .4)); }
+/* v3.125.149 🤖 Chhotu (chhota dost) + bubbles */
+.mc-chhotu { position: absolute; left: -46%; bottom: -2%; width: 44%; pointer-events: none; transform-origin: 50% 100%; animation: mcChBob 1.9s ease-in-out infinite; filter: drop-shadow(0 3px 4px rgba(15, 23, 42, .25)); }
+.mc-chhotu img { width: 100%; display: block; }
+.mc.no-chhotu .mc-chhotu { display: none; }
+.mc.moving .mc-chhotu { animation: mcChHop .35s ease-in-out infinite; }
+.mc.rest[data-mood="happy"] .mc-chhotu, .mc.rest[data-mood="excited"] .mc-chhotu, .mc.ch-talk .mc-chhotu { animation: mcChHop .5s ease-in-out infinite; }
+.mc.rest[data-mood="sad"] .mc-chhotu { animation: mcSway 3s ease-in-out infinite; }
+.mc-cb, .mc-mb { position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, 6px) scale(.6); opacity: 0; white-space: nowrap; background: #fff; color: #0f172a; font: 700 11px/1.2 system-ui, sans-serif; padding: 5px 8px; border-radius: 10px; box-shadow: 0 4px 12px rgba(15, 23, 42, .22); transition: transform .25s cubic-bezier(.3, 1.6, .5, 1), opacity .2s; pointer-events: none; }
+.mc-cb { background: #fde68a; }
+.mc-cb::after, .mc-mb::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -5px; border: 5px solid transparent; border-top-color: inherit; border-top-color: #fff; }
+.mc-cb::after { border-top-color: #fde68a; }
+.mc-mb { left: 60%; bottom: 104%; z-index: 2; background: #dbeafe; }
+.mc-mb::after { border-top-color: #dbeafe; }
+.mc-cb.on, .mc-mb.on { opacity: 1; transform: translate(-50%, 0) scale(1); }
+@keyframes mcChBob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-12%) rotate(3deg); } }
+@keyframes mcChHop { 0%, 100% { transform: translateY(0) rotate(-8deg); } 50% { transform: translateY(-28%) rotate(8deg); } }
+/* v3.125.149 🏠 Home: robot ke saare updates */
+.rf-wrap { padding: 12px 14px; margin: 12px 0; background: linear-gradient(135deg, rgba(99, 102, 241, .08), rgba(236, 72, 153, .06)); }
+.rf-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.rf-head b { font-size: 15px; }
+.rf-sel { margin-left: auto; min-width: 210px; max-width: 100%; font-weight: 600; }
+.rf-list { display: grid; gap: 8px; max-height: 560px; overflow: auto; padding-right: 2px; }
+.rf-card { border-radius: 12px; background: var(--card, #fff); border: 1px solid rgba(15, 23, 42, .08); border-left: 5px solid var(--rfc, #6366f1); box-shadow: 0 2px 6px rgba(15, 23, 42, .05); }
+.rf-card.rf-g { --rfc: #16a34a; --rfb: rgba(22, 163, 74, .1); }
+.rf-card.rf-r { --rfc: #dc2626; --rfb: rgba(220, 38, 38, .09); }
+.rf-card.rf-b { --rfc: #2563eb; --rfb: rgba(37, 99, 235, .08); }
+.rf-card.rf-s { --rfc: #9333ea; --rfb: rgba(147, 51, 234, .08); }
+.rf-card summary { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; list-style: none; background: var(--rfb, transparent); border-radius: 10px 12px 12px 10px; }
+.rf-card summary::-webkit-details-marker { display: none; }
+.rf-card[open] summary { border-radius: 10px 12px 0 0; }
+.rf-ic { font-size: 22px; flex: none; }
+.rf-t { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.rf-t b { color: var(--rfc); font-size: 13.5px; }
+.rf-t small { opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-cat { flex: none; font-size: 10.5px; font-weight: 700; color: #fff; background: var(--rfc); padding: 2px 8px; border-radius: 99px; }
+.rf-rows { margin: 0; padding: 6px 14px 4px 32px; display: grid; gap: 4px; }
+.rf-rows li { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 3px 0; border-bottom: 1px dashed rgba(15, 23, 42, .08); }
+.rf-rows li small { display: block; opacity: .7; font-size: 11px; }
+.rf-v { white-space: nowrap; color: var(--rfc); }
+.rf-v.up, .rf-v.g { color: #16a34a; } .rf-v.down, .rf-v.r { color: #dc2626; } .rf-v.y { color: #ca8a04; }
+.rf-foot { padding: 4px 14px; font-size: 11.5px; opacity: .8; }
+.rf-act { padding: 4px 12px 10px; text-align: right; }
+@media (max-width: 600px) { .rf-sel { margin-left: 0; width: 100%; } .rf-cat { display: none; } }

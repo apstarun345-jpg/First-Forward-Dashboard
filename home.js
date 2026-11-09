@@ -1386,6 +1386,7 @@ FF.pages = FF.pages || {};
       <div id="home-stock">${U.spinner('Stock (StockDataa + Tag Assignment)…')}</div>
       <div id="home-stock-map"></div>
       <div id="home-freshness"></div>
+      <div id="home-robot-feed"></div>
       <div id="home-data-versions"></div>
       <p class="foot-note">🟩 GV aaj = <b>GV Master sheet</b> (live) · 🧾 Issuance history = <b>EIR</b> (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF) · 📦 Stock = <b>StockDataa</b> (FF) + <b>Tag Assignment</b> (GV) · 🟦 FF ka issuance T+1 aata hai · 🔎 Global search top bar par hai · full profile/results Management → Master Search me.</p>`;
 
@@ -1393,6 +1394,8 @@ FF.pages = FF.pages || {};
     homeLayout.apply(root);
     freshness.mount(root, false);
     mountDataVersions(U.$('#home-data-versions', root));
+    // 🤖 v3.125.149 — robot ke saare updates Home par (dropdown, rangeen) — sirf admin
+    (async () => { try { const box = U.$('#home-robot-feed', root); if (!box || !(FF.auth && FF.auth.isAdmin && FF.auth.isAdmin())) return; if (!FF.mascot && FF.lazy && FF.lazy.inject) await FF.lazy.inject('mascot'); if (FF.mascot && FF.mascot.mountHome) FF.mascot.mountHome(box); } catch { /* optional */ } })();
     root.addEventListener('click', (ev) => { const b = ev.target && ev.target.closest && ev.target.closest('[data-fresh-refresh]'); if (b) { freshness.mount(root, true); return; } const d = ev.target && ev.target.closest && ev.target.closest('[data-fresh-dismiss]'); if (d) freshness.dismiss(root); });
     const custBtn = U.$('#home-customize', root);
     if (custBtn) custBtn.addEventListener('click', () => homeLayout.toggle(root, custBtn));

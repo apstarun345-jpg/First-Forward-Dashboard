@@ -5061,7 +5061,7 @@ function robotInsights(rows) {
     const tk = r.tl ? `${r.ch}|${r.tl.toUpperCase()}` : '';
     const T0 = () => { let t = tls.get(tk); if (!t) { t = { ch: r.ch, name: r.tl, cur: 0, prevSame: 0, agents: new Set() }; tls.set(tk, t); } return t; };
     if (ym === cur) { a.cur += r.n; a[r.cls] += r.n; if (tk) { const t = T0(); t.cur += r.n; t.agents.add(a.name); } }
-    else if (ym === prev) { a.prev += r.n; if (dd <= lastDay) { a.prevSame += r.n; if (tk) T0().prevSame += r.n; } }
+    else if (ym === prev) { a.prev += r.n; if (dd <= lastDay) { a.prevSame += r.n; a.pc = a.pc || { vc4: 0, vc20: 0, vc5: 0 }; a.pc[r.cls] += r.n; if (tk) T0().prevSame += r.n; } }
   }
   const A = [...ag.values()];
   const tlOf = (a) => (a.tl && a.tl.toUpperCase() !== a.name.toUpperCase() ? ` (TL ${a.tl})` : '');
@@ -5082,11 +5082,25 @@ function robotInsights(rows) {
     prevSame ? `Pichle mahine ${lastDay} tareekh tak ${rbFmt(prevSame)} the — ${rbPct(((all.cur - prevSame) / prevSame) * 100)}` : ''
   ]);
   // 3) high growth / de-growth agents (pichle mahine ke isi din tak se)
+  // 🔎 v3.125.149 — kyon hua? (wajah): kitne din kaam kiya, kaunsi class badli, kab se band
+  const whyOf = (a) => {
+    const pm = prev, cd = [...a.days.keys()].filter((d) => d.startsWith(cur) && d <= last && a.days.get(d) > 0).length;
+    const pd = [...a.days.keys()].filter((d) => d.startsWith(pm) && Number(d.slice(8, 10)) <= lastDay && a.days.get(d) > 0).length;
+    const why = [];
+    if (pd && cd !== pd) why.push(`${cd < pd ? 'kam' : 'zyada'} din kaam (${cd} vs ${pd} din)`);
+    const pc = a.pc || { vc4: 0, vc20: 0, vc5: 0 };
+    const dl = [['VC4', a.vc4 - pc.vc4], ['VC20', a.vc20 - pc.vc20], ['VC5+', a.vc5 - pc.vc5]].sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))[0];
+    if (dl && Math.abs(dl[1]) >= 5) why.push(`${dl[0]} ${dl[1] > 0 ? '+' : ''}${rbFmt(dl[1])} (sabse bada farak)`);
+    const ds = [...a.days.keys()].filter((d) => a.days.get(d) > 0).sort(), ld = ds[ds.length - 1];
+    if (ld && ld < last) { const gap = Math.round((Date.parse(last) - Date.parse(ld)) / 864e5); if (gap >= 2) why.push(`${gap} din se 0 (aakhri ${rbLbl(ld)})`); }
+    try { const st = stockAgeState.index && stockAgeState.index[a.ch]; if (st && st.agents) { for (const n of st.agents.values()) if (String(n.n || '').trim().toUpperCase() === a.name.trim().toUpperCase()) { const t = (n.t[0] || 0) + (n.t[1] || 0); if (t === 0) why.push('stock 0 hai'); else if (a.cur && t / (a.cur / Math.max(1, lastDay)) < 3) why.push(`stock kam (${t})`); break; } } } catch { /* ignore */ }
+    return why.length ? `   🔎 ${why.slice(0, 3).join(' · ')}` : '';
+  };
   const gr = A.filter((a) => a.prevSame >= 10 && a.cur >= 5).map((a) => ({ a, g: ((a.cur - a.prevSame) / a.prevSame) * 100 }));
   const hi = gr.filter((x) => x.g >= 20).sort((x, y) => y.g - x.g).slice(0, 5);
-  if (hi.length) push(`high:${last}`, `🚀 High growth: ${hi[0].a.name} ${rbPct(hi[0].g)}`, hi.map((x) => line(x.a, `${rbPct(x.g)} (${rbFmt(x.a.prevSame)} → ${rbFmt(x.a.cur)})`)), '#/performance');
+  if (hi.length) push(`high:${last}`, `🚀 High growth: ${hi[0].a.name} ${rbPct(hi[0].g)}`, hi.flatMap((x) => [line(x.a, `${rbPct(x.g)} (${rbFmt(x.a.prevSame)} → ${rbFmt(x.a.cur)})`), whyOf(x.a)]), '#/performance');
   const lo = A.filter((a) => a.prevSame >= 20).map((a) => ({ a, g: ((a.cur - a.prevSame) / a.prevSame) * 100 })).filter((x) => x.g <= -30).sort((x, y) => x.g - y.g).slice(0, 5);
-  if (lo.length) push(`low:${last}`, `📉 De-growth: ${lo[0].a.name} ${rbPct(lo[0].g)}`, lo.map((x) => line(x.a, `${rbPct(x.g)} (${rbFmt(x.a.prevSame)} → ${rbFmt(x.a.cur)})`)), '#/performance');
+  if (lo.length) push(`low:${last}`, `📉 De-growth: ${lo[0].a.name} ${rbPct(lo[0].g)}`, lo.flatMap((x) => [line(x.a, `${rbPct(x.g)} (${rbFmt(x.a.prevSame)} → ${rbFmt(x.a.cur)})`), whyOf(x.a)]), '#/performance');
   // 4) TL growth / de-growth
   const T = [...tls.values()].filter((t) => t.prevSame >= 30).map((t) => ({ t, g: ((t.cur - t.prevSame) / t.prevSame) * 100 }));
   const th = T.filter((x) => x.g >= 15).sort((x, y) => y.g - x.g).slice(0, 5), tl = T.filter((x) => x.g <= -20).sort((x, y) => x.g - y.g).slice(0, 5);
@@ -5153,6 +5167,7 @@ function robotInsights(rows) {
       `Run-rate ${r.toFixed(1)}/din · andaaza ${rbFmt(r * dim)}${g !== null ? ` · last month isi din tak ${rbFmt(a.prevSame)} (${rbPct(g)})` : ''}`,
       st ? `📦 Stock ${rbFmt(st.t)} (VC4/20 ${rbFmt(st.core)} · VC5+ ${rbFmt(st.comm)})${r > 0 ? ` · ~${Math.round(st.t / r)} din ka` : ''}${st.old ? ` · sabse purana ${st.old} din` : ''}` : '',
       `${rbLbl(last)} ko ${rbFmt(a.days.get(last) || 0)} · aakhri tag ${rbLbl(lastTag(a))}`,
+      g !== null && Math.abs(g) >= 20 ? whyOf(a).trim() : '',
       (() => { // 💡 sujhaav
         if (st && r > 0 && st.t / r < 7) return `💡 ~${rbFmt(Math.max(0, Math.ceil(r * 15 - st.t)))} tag bhejo — stock ${Math.max(0, Math.round(st.t / r))} din me khatam`;
         if (st && st.t === 0 && a.cur) return `💡 Stock 0 — turant dispatch karo (roz ~${rbFmt(r)})`;

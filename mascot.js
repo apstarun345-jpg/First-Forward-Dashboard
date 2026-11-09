@@ -690,8 +690,31 @@
 
   function insights() {
     const out = [];
-    BUILDERS.forEach((b) => { try { const x = b(); if (x) out.push(withRanks(withTl(x))); } catch { /* data abhi nahi */ } });
+    BUILDERS.forEach((b) => { try { const x = b(); if (x) out.push(withRanks(withWhy(withTl(x)))); } catch { /* data abhi nahi */ } });
     return out;
+  }
+  // 🔎 v3.125.149 — kyon hua? growth / girawat ke saath wajah (kitne din kaam, kab se band, stock)
+  function whyText(name, ch) {
+    try {
+      const S = series(), m = monthStats(); if (!S || !m) return '';
+      const nmK = String(name || '').trim().toUpperCase();
+      const o = (/gv/i.test(ch || '') ? S.ag.get(`gv|${nmK}`) : S.ag.get(`ff|${nmK}`)) || S.ag.get(`gv|${nmK}`) || S.ag.get(`ff|${nmK}`); if (!o) return '';
+      const lastD = Number(S.last.slice(8, 10));
+      const cd = [...o.days.keys()].filter((d) => d.startsWith(m.cur) && d <= S.last && o.days.get(d) > 0).length;
+      const pd = [...o.days.keys()].filter((d) => d.startsWith(m.prev) && Number(d.slice(8, 10)) <= lastD && o.days.get(d) > 0).length;
+      const why = [];
+      if (pd && cd !== pd) why.push(`${cd < pd ? 'kam' : 'zyada'} din kaam (${cd} vs ${pd})`);
+      const ds = [...o.days.keys()].filter((d) => o.days.get(d) > 0).sort(), ld = ds[ds.length - 1];
+      if (ld && ld < S.last) { const gap = daysBetween(ld, S.last); if (gap >= 2) why.push(`${gap} din se 0`); }
+      return why.join(' · ');
+    } catch { return ''; }
+  }
+  function withWhy(it) {
+    if (!it || !Array.isArray(it.rows) || !/^(high|degrowth|drop|lowissue)$/.test(it.key || '')) return it;
+    it.rows.forEach((r) => { const w = whyText(r.name, (r.sub || '').slice(0, 2)); if (w) r.sub = `${r.sub ? `${r.sub} · ` : ''}🔎 ${w}`; r.why = w; });
+    const w0 = it.rows[0] && it.rows[0].why;
+    if (w0 && it.say) it.say += ` वजह: ${w0.replace(/kam din kaam/, 'कम दिन काम').replace(/zyada din kaam/, 'ज़्यादा दिन काम').replace(/din se 0/, 'दिन से ज़ीरो')}।`;
+    return it;
   }
   // 🗣 v3.125.144 — sirf pehla naam nahi: list me se top 3 bolo (pehle, doosre, teesre number par…)
   function withRanks(it) {
@@ -802,10 +825,12 @@
     if (el) return;
     el = document.createElement('div');
     el.id = 'ff-mascot';
-    el.className = 'mc';
+    el.className = 'mc' + (cfg.chhotu === false ? ' no-chhotu' : '');
     el.innerHTML = `
       <div class="mc-stick" aria-hidden="true"></div>
       <div class="mc-board" role="status" aria-live="polite"></div>
+      <div class="mc-chhotu" aria-hidden="true"><img src="${ASSET('robot.png')}" alt="" draggable="false"><span class="mc-cb"></span></div>
+      <span class="mc-mb" aria-hidden="true"></span>
       <button type="button" class="mc-bot" aria-label="Gems robot — kya kya bataya (24h history)" title="🤖 Gems — click: maine kya bataya (24h) · drag: jagah badlo">
         <i class="mc-glow" aria-hidden="true"></i>
         <span class="mc-arm l"><img src="${ASSET('robot-arm-l.png')}" alt="" draggable="false"></span>
@@ -900,6 +925,8 @@
           <select data-mc="every">${EVERY.map(([v, l]) => `<option value="${v}"${(Number(cfg.everySec) || 10) === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
         <label>Idhar-udhar ghoomna <input type="checkbox" data-mc="roam"${cfg.roam !== false ? ' checked' : ''}></label>
         <label>Masti (dance + jokes) <input type="checkbox" data-mc="fun"${cfg.fun !== false ? ' checked' : ''}></label>
+        <label>🤖 Chhotu (chhota dost) <input type="checkbox" data-mc="chhotu"${cfg.chhotu !== false ? ' checked' : ''}></label>
+        <label>🎵 Dhun (jingle) <input type="checkbox" data-mc="jingle"${cfg.jingle !== false ? ' checked' : ''}></label>
         <button type="button" data-mc="home">🏠 Wapas kone me (default jagah)</button>
         <button type="button" data-mc="today">😴 Aaj ke liye updates band</button>
         <button type="button" data-mc="off">⛔ Robot band karo (purana 🎙 button)</button>
@@ -964,6 +991,8 @@
     if (t.dataset.mc === 'every') { cfg.everySec = Number(t.value) || 10; save(); schedule(); }
     if (t.dataset.mc === 'roam') { cfg.roam = !!t.checked; save(); }
     if (t.dataset.mc === 'fun') { cfg.fun = !!t.checked; save(); }
+    if (t.dataset.mc === 'chhotu') { cfg.chhotu = !!t.checked; save(); if (el) el.classList.toggle('no-chhotu', !cfg.chhotu); }
+    if (t.dataset.mc === 'jingle') { cfg.jingle = !!t.checked; save(); }
   });
 
   // ---------------------------------------------------------------- 🗣 voice (v3.125.124: sahi Hindi uchcharan)
@@ -1275,6 +1304,8 @@
     await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
     layoutBoard(g, pipWin ? 'pip' : goLeft ? 'right' : 'left');
     dance(it.mood);
+    setTimeout(() => chotuSay(pick(CH_REACT[it.mood] || CH_REACT.info)), 900);
+    if (/record|mile|badges|rec:|clap|champ/.test(it.key || '') || it.fx === 'clap') jingle('record'); else if (/anom|late|stzero|nostock/.test(it.key || '')) jingle('alert'); else if (it.mood === 'excited' || it.mood === 'happy') jingle('win');
     el.classList.add('holding');
     if (it.cls) el.classList.add(it.cls);
     board.classList.add('in');
@@ -1426,11 +1457,13 @@
     const icon = emo(title) || '🤖', t2 = noEmo(title);
     const lines = String(x.body || '').split('\n').filter(Boolean);
     const isTodo = /^srv:todo:/.test(x.key);
+    const whyL = new Map(); // "🔎 wajah" line → upar wali row ka sub
+    lines.forEach((l, i) => { if (/^\s*🔎/u.test(l) && i > 0) whyL.set(lines[i - 1], l.trim()); });
     const bullets = lines.filter((l) => /^(•|\d+\.|⭐|🏆|🚗|🚐|🚛|🔻|🔺)/u.test(l.trim()));
-    const other = lines.filter((l) => !bullets.includes(l));
+    const other = lines.filter((l) => !bullets.includes(l) && !/^\s*🔎/u.test(l));
     const rows = bullets.slice(0, 7).map((l) => {
-      const t = l.replace(/^(•|\d+\.)\s*/, '').trim(), i = t.lastIndexOf(' — ');
-      return i > 0 ? { name: t.slice(0, i), sub: '', val: t.slice(i + 3), tone: /-\d|neeche|0 par|khatam/.test(t) ? 'down' : 'up' } : { name: t, sub: '', val: '', tone: 'chip' };
+      const t = l.replace(/^(•|\d+\.)\s*/, '').trim(), i = t.lastIndexOf(' — '), why = whyL.get(l) || '';
+      return i > 0 ? { name: t.slice(0, i), sub: why, val: t.slice(i + 3), tone: /-\d|neeche|0 par|khatam/.test(t) ? 'down' : 'up' } : { name: t, sub: why, val: '', tone: 'chip' };
     });
     const mood = /🚨|📉|😴|⛽|🚫|🪦|🧭|kam/.test(title) ? 'alert' : /🚀|🏅|💯|🎯|🥇|🎖|👑|🔙|🎈/.test(title) ? 'excited' : 'info';
     const sayLines = [t2, ...other.slice(0, 2), ...bullets.slice(0, 3).map((l) => l.replace(/^(•|\d+\.)\s*/, ''))].join('. ');
@@ -1556,6 +1589,94 @@
     const f = festival(); if (!f || cfg.festDay === istToday()) return null;
     return { onShow: () => { cfg.festDay = istToday(); save(); }, key: `fest:${istToday()}`, fun: true, cls: 'mc-disco', fx: 'clap', mood: 'excited', icon: f.hat, title: f.title, head: `Poori ApnaPayment team ko ${f.title.replace(/^Happy |!$/g, '')} ki shubhkamnayein ${f.hat}`, view: 'text', stay: 7000, say: f.say };
   });
+
+  // ---------------------------------------------------------------- 🤖🤖 v3.125.149: Chhotu (chhota dost) + 🎵 jingle
+  const CH_REACT = {
+    happy: ['Wah! 🎉', 'Kya baat!', 'Shabaash! 👏', 'Mazaa aa gaya!'], excited: ['Yeee! 🥳', 'Record!! 🔥', 'Party! 🎊'], laugh: ['Hahaha 😂', 'Hi hi hi 🤭'],
+    sad: ['Oho 😟', 'Ye theek nahi…', 'Chalo sudharte hain 💪'], alert: ['Jaldi karo! ⚡', 'Dhyaan do! ⚠️', 'Arre baap re 😱'], sleepy: ['Zzz… 😴', 'Uth jao bhai!'],
+    curious: ['Hmm 🤔', 'Kya scene hai?'], info: ['Achha! 📊', 'Note kar liya ✍️']
+  };
+  const CH_TALK = [
+    ['Chhotu, aaj kitne tag hue?', 'Bade bhaiya, dashboard dekho na! 😜'], ['Stock check kiya?', 'Haan, kuch ka khatam hone wala hai ⛽'],
+    ['Chai piyega?', 'Main to sirf battery peeta hoon 🔋'], ['Aaj record tootega kya?', 'Pakka! 🚀'], ['VC20 kaun bechega?', 'Main bech dunga, tag do! 🚐'],
+    ['Inactive agents ko jagao', 'Alarm laga diya ⏰'], ['Boss aa gaye!', 'Seedha khade ho jao! 😎']
+  ];
+  function chotuSay(t, ms) {
+    if (!el || cfg.chhotu === false) return;
+    const b = el.querySelector('.mc-cb'); if (!b) return;
+    b.textContent = t; b.classList.add('on'); el.classList.add('ch-talk');
+    clearTimeout(chotuSay.t); chotuSay.t = setTimeout(() => { b.classList.remove('on'); el.classList.remove('ch-talk'); }, ms || 2600);
+  }
+  function mbSay(t, ms) {
+    const b = el && el.querySelector('.mc-mb'); if (!b) return;
+    b.textContent = t; b.classList.add('on');
+    clearTimeout(mbSay.t); mbSay.t = setTimeout(() => b.classList.remove('on'), ms || 2600);
+  }
+  async function chChat() {
+    if (!el || cfg.chhotu === false || busy || mode !== 'dock' || document.hidden) return;
+    const [a, b] = pick(CH_TALK);
+    mbSay(a, 2600); await wait(2400); chotuSay(b, 3000);
+  }
+  // 🎵 chhoti dhun (WebAudio) — sound ON ho tab
+  let actx = null;
+  function jingle(kind) {
+    if (!cfg.sound || cfg.jingle === false) return;
+    try {
+      const act = navigator.userActivation ? navigator.userActivation.hasBeenActive : true; if (!act) return;
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const N = { win: [523, 659, 784, 1047], record: [392, 523, 659, 784, 659, 1047], alert: [440, 330, 440, 330], pop: [660, 880] }[kind] || [523, 784];
+      let t = actx.currentTime + 0.02;
+      N.forEach((f, i) => {
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.type = kind === 'alert' ? 'square' : 'triangle'; o.frequency.value = f;
+        const d = kind === 'record' && i === N.length - 1 ? 0.45 : 0.14;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(kind === 'alert' ? 0.05 : 0.12, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+        o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + d + 0.02); t += d * 0.85;
+      });
+    } catch { /* audio nahi */ }
+  }
+  // ---------------------------------------------------------------- 🏠 v3.125.149: Home par robot ke saare updates (dropdown, rangeen)
+  const CATS = [
+    ['all', '🗂 Sab updates'], ['iss', '📊 Issuance / run-rate'], ['grow', '🚀 Growth / de-growth'], ['agent', '👤 Agents spotlight'], ['tl', '🧑‍💼 TL'],
+    ['stock', '📦 Stock / dispatch'], ['kyc', '🪪 KYC'], ['alert', '🚨 Alerts'], ['champ', '🏆 Champions / badges / record'], ['todo', '📋 Aaj ke kaam'], ['other', '✨ Baaki']
+  ];
+  function catOf(k) {
+    k = String(k || '');
+    if (/todo/.test(k)) return 'todo';
+    if (/anom|late|nostock|stzero|stlow|lowcover|stockend|dispatchneed|dispatchtl/.test(k)) return /stzero|stlow|lowcover|stockend|nostock|dispatchneed|dispatchtl/.test(k) ? 'stock' : 'alert';
+    if (/kyc/.test(k)) return 'kyc';
+    if (/stock|stbig|stdead|stold|stslow|sttl|deadstock|disp|dispfx/.test(k)) return 'stock';
+    if (/champ|badges|rec|record|mile|amile|smile|best|clap|daystar/.test(k)) return 'champ';
+    if (/spot:/.test(k)) return 'agent';
+    if (/tl|inatl|clstl/.test(k)) return 'tl';
+    if (/high|low|degrowth|wk|grow|drop|lowissue|comeback|back|new|inactive|first|oneday/.test(k)) return 'grow';
+    if (/day|rr|exp|run|mix|need|week|ffgv|ffvsgv|summary|sitetotal|top|vc4|vc20|vc5|cls|gvlive|hours|chassis/.test(k)) return 'iss';
+    return 'other';
+  }
+  async function mountHome(box) {
+    if (!box || !allowed()) return;
+    await refreshSrv().catch(() => {});
+    const local = insights().filter((x) => !x.fun);
+    const srv = (srvCache.items || []).map(srvToItem);
+    const seen = new Set(); const all = [];
+    [...srv, ...local].forEach((x) => { if (!x || seen.has(x.key)) return; seen.add(x.key); x.cat = catOf(x.key); all.push(x); });
+    const cnt = (c) => (c === 'all' ? all.length : all.filter((x) => x.cat === c).length);
+    const sel = cfg.homeCat || 'all';
+    const tone = (m) => (m === 'alert' || m === 'sad' ? 'r' : m === 'excited' || m === 'happy' ? 'g' : m === 'sleepy' ? 's' : 'b');
+    const card = (x) => `<details class="rf-card rf-${tone(x.mood)}"><summary><span class="rf-ic">${x.icon || '🤖'}</span><span class="rf-t"><b>${esc(x.title)}</b><small>${esc(x.big ? `${x.big} · ${x.head || ''}` : x.head || '')}</small></span><span class="rf-cat">${esc((CATS.find((c) => c[0] === x.cat) || ['', ''])[1])}</span></summary>
+      ${(x.rows || []).length ? `<ol class="rf-rows">${x.rows.slice(0, 7).map((r) => `<li><span>${esc(r.name)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><b class="rf-v ${esc(r.tone || '')}">${esc(r.val || '')}</b></li>`).join('')}</ol>` : ''}
+      ${x.view === 'todo' ? `<ol class="rf-rows">${(x.todo || []).map((t) => `<li><span>${esc(t)}</span></li>`).join('')}</ol>` : ''}
+      ${x.foot ? `<div class="rf-foot">${esc(x.foot)}</div>` : ''}<div class="rf-act"><button type="button" class="btn small ghost" data-rf-show="${esc(x.key)}">🤖 Robot se sunao</button></div></details>`;
+    const render = () => {
+      const c = cfg.homeCat || 'all', L = all.filter((x) => c === 'all' || x.cat === c);
+      box.innerHTML = `<section class="card rf-wrap"><div class="rf-head"><b>🤖 Robot ke updates</b><span class="dim small">${all.length} updates · server + site</span>
+        <select class="input rf-sel">${CATS.map(([k, l]) => `<option value="${k}" ${k === c ? 'selected' : ''}>${l} (${cnt(k)})</option>`).join('')}</select></div>
+        <div class="rf-list">${L.slice(0, 80).map(card).join('') || '<div class="dim">Is category me abhi kuch nahi.</div>'}</div></section>`;
+      box.querySelector('.rf-sel').addEventListener('change', (e) => { cfg.homeCat = e.target.value; save(); render(); });
+      box.querySelectorAll('[data-rf-show]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); const it = all.find((x) => x.key === b.dataset.rfShow); if (it) { build(); if (skip) skip(); setTimeout(() => show(it), 400); } }));
+    };
+    void sel; render();
+  }
 
   // ---------------------------------------------------------------- 🎭 masti: jab koi nayi khabar nahi
   const JOKES = [
@@ -1752,7 +1873,7 @@
   }
   const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
@@ -1773,6 +1894,7 @@
       setInterval(pollFeeds, 30e3);
       armAutoPip();
       applyFestival(); setInterval(applyFestival, 30 * 60e3);
+      setInterval(() => { if (Math.random() < 0.6) chChat(); }, 75e3);
       setTimeout(refreshSrv, 8e3); setInterval(refreshSrv, 10 * 60e3);
       setTimeout(refreshExtras, 15e3);
       setInterval(refreshExtras, 5 * 60e3);
