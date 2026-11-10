@@ -1993,14 +1993,14 @@
   }
   // 📥 jawab se pehle data pakka load ho (kisi bhi page par — pehle sirf Home / Performance khula ho tab hi sahi aata tha)
   let ensAt = 0, ensP = null;
+  const ffLoaded = () => { try { return FF.smartQ._rows.ffRows().length > 0; } catch { return false; } };
   function ensureData() {
-    if (Date.now() - ensAt < 5 * 60e3 && allAgentRows().length > 50) return Promise.resolve();
+    if (ffLoaded() && Date.now() - ensAt < 5 * 60e3) return Promise.resolve();
     if (ensP) return ensP;
     const jobs = [];
-    try { if (FF.lazy && FF.lazy.need) jobs.push(FF.lazy.need('performance')); } catch { /* ignore */ }
-    try { if (FF.store && FF.store.need) { jobs.push(FF.store.need('agents')); jobs.push(FF.store.need('stockAgents')); jobs.push(FF.store.need('daily')); } } catch { /* ignore */ }
+    try { if (FF.lazy && FF.lazy.need) jobs.push(Promise.resolve(FF.lazy.need('performance')).then(() => { const P = FF.pages && FF.pages.performance; return P && P.ensureLoaded ? P.ensureLoaded({ light: true }) : null; })); } catch { /* ignore */ }
     try { if (FF.gv && FF.gv.need) jobs.push(FF.gv.need('report')); } catch { /* ignore */ }
-    ensP = Promise.race([Promise.allSettled(jobs), wait(20000)]).then(() => { ensAt = Date.now(); ensP = null; });
+    ensP = Promise.race([Promise.allSettled(jobs), wait(ffLoaded() ? 4000 : 20000)]).then(() => { ensAt = Date.now(); ensP = null; });
     return ensP;
   }
   async function answerItem(q) {
@@ -2023,7 +2023,8 @@
     if (/\bkyc\b/i.test(q)) await loadKycMap();
     try { const ti = await tollItem(q); if (ti) return ti; } catch { /* ignore */ }
     try { const di = await dataItem(q); if (di) return di; } catch { /* ignore */ }
-    const ii = intentItem(q); if (ii) return ii;
+    const ii = intentItem(q);
+    if (ii) { if (!ffLoaded() && /^(👤|👥|🔎|🆚|📦|🚚|🧑‍🤝‍🧑|🏅|⛽|🏆|📋|🗞)$/.test(ii.icon || '')) { ii.foot = '⚠ First Forward ka data abhi load nahi hua (Google Sheet dheere chal rahi hai) — ye jawab adhoora ho sakta hai, 1 minute baad dobara poochho.'; ii.say = `ध्यान दें, फ़र्स्ट फ़ॉरवर्ड का डेटा अभी लोड नहीं हुआ, जवाब अधूरा हो सकता है। ${ii.say || ''}`; } return ii; }
     try { // "अंकुर की कमीशन / wrong vrn / chassis" → assistant ko saaf naam do
       const tq = ` ${String(q).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()} `;
       const kw = /(commission|payout|kamai|wrong vrn|wrong|chassis|replacement)/.exec(tq);
