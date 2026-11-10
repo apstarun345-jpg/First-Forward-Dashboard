@@ -1647,7 +1647,7 @@
         const d = new Date(), mon = d.toLocaleString('en-IN', { month: 'long' });
         const prevQ = has(/ (pichle|pichla|last|previous|purane|पिछले) /), kalQ = has(/ (kal|yesterday) /), aajQ = has(/ (aaj|today) /) && !kalQ;
         let rowsH = []; let rd = m.all.rd; try { const h = FF.pages.home.monthRows(); rowsH = h.rows || []; } catch { rowsH = []; }
-        const dayTotal = (dd) => { const o = { total: 0, vc4: 0, vc20: 0, vc5: 0 }; rowsH.filter((r) => r.day === dd && (gvQ ? r.channel === 'GV Partner' : ffQ ? r.channel !== 'GV Partner' : true)).forEach((r) => { const q = Number(r.n) || 0; o.total += q; o[r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5'] += q; }); return o; };
+        const dayTotal = (dd) => { const o = { total: 0, vc4: 0, vc20: 0, vc5: 0 }; rowsH.filter((r) => r.day === dd && r.ym === m.cur && (gvQ ? r.channel === 'GV Partner' : ffQ ? r.channel !== 'GV Partner' : true)).forEach((r) => { const q = Number(r.n) || 0; o.total += q; o[r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5'] += q; }); return o; };
         const chips = (o) => [{ name: 'VC4', val: fmt(o.vc4) }, { name: 'VC20', val: fmt(o.vc20) }, { name: 'VC5+', val: fmt(o.vc5) }].map((x) => ({ ...x, sub: '', tone: 'chip' }));
         const base = { key: `ans:${Date.now()}`, qkey: 'mtd', fun: true, view: 'big', stay: 16000, q: 'summary|all' };
         if (prevQ) return { ...base, mood: 'info', icon: '📅', title: `${lab}: pichle mahine`, big: fmt(sc.prevTotal), head: 'poore pichle mahine ka total', rows: [], say: `पिछले महीने ${lab === 'Poori site' ? 'पूरी साइट' : lab} का टोटल ${fmt(sc.prevTotal)} टैग्स था।` };
