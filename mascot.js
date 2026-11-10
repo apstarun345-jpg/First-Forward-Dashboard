@@ -239,12 +239,20 @@
   const MSHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   let msCache = { at: 0, v: null };
   function monthStats() {
-    if (msCache.v && Date.now() - msCache.at < 5 * 60e3) return msCache.v;
+    let hAt = 0; try { const h = FF.pages && FF.pages.home && FF.pages.home.monthRows && FF.pages.home.monthRows(); hAt = (h && h.at) || 0; } catch { hAt = 0; }
+    if (msCache.v && Date.now() - msCache.at < 5 * 60e3 && hAt <= msCache.at) return msCache.v; // Home naya bana → turant naya total
     if (!U.reportYm) return null;
     const cur = U.reportYm(), prev = U.prevMonthKey ? U.prevMonthKey(cur) : '';
-    let ff = []; let gv = [];
-    try { ff = (FF.store && FF.store.get && FF.store.get('daily')) || []; if (FF.filters && FF.filters.dropLaggedFf) ff = FF.filters.dropLaggedFf(ff); ff = ff.filter((r) => r.channel !== 'GV Partner'); } catch { ff = []; }
-    try { gv = (FF.gv && FF.gv.issuanceRows ? FF.gv.issuanceRows() : []) || []; } catch { gv = []; }
+    // 🔢 v3.125.153: total wahi jo Home "MTD total" dikhata hai — Home ki rows (FF + GV + aaj ka GV live).
+    // Home abhi tak nahi bana to wahi store 'daily' (dono channel). GV agents ke naam ke liye GV issuance rows.
+    let all = [];
+    try { const h = FF.pages && FF.pages.home && FF.pages.home.monthRows && FF.pages.home.monthRows(); if (h && h.rows && h.rows.length) all = h.rows; } catch { all = []; }
+    if (!all.length) try { all = (FF.store && FF.store.get && FF.store.get('daily')) || []; } catch { all = []; }
+    const ff = all.filter((r) => r.channel !== 'GV Partner');
+    let gv = all.filter((r) => r.channel === 'GV Partner');
+    let gvNames = [];
+    try { gvNames = (FF.gv && FF.gv.issuanceRows ? FF.gv.issuanceRows() : []) || []; } catch { gvNames = []; }
+    if (!gv.length && gvNames.length) { gv = gvNames; gvNames = []; } // store me GV nahi (sirf GV user) → GV rows hi
     if (!ff.length && !gv.length) return null;
     const blank = () => ({ total: 0, vc4: 0, vc20: 0, vc5: 0, rep: 0, days: new Map(), agents: new Map(), prevTotal: 0, prevSame: 0, lastDay: 0 });
     const out = { ff: blank(), gv: blank(), all: blank(), cur, prev };
@@ -263,6 +271,14 @@
       }
     };
     ff.forEach((r) => add('ff', r)); gv.forEach((r) => add('gv', r));
+    // GV ke agent naam: EIR GV rows aksar bina naam ke — champions/agents GV issuance rows se (total nahi chhedte)
+    if (gvNames.length) {
+      const named = new Map();
+      gvNames.forEach((r) => { if (r.ym !== cur || !(Number(r.n) > 0)) return; const name = r.agentName || r.agentId; if (!name) return; const cls = r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5'; const a = named.get(`gv|${name}`) || { name, ch: 'gv', total: 0, vc4: 0, vc20: 0, vc5: 0, rep: 0 }; const q = Number(r.n) || 0; a.total += q; a[cls] += q; if (String(r.type || '').toUpperCase() === 'REPLACEMENT') a.rep += q; named.set(`gv|${name}`, a); });
+      if (named.size) {
+        for (const o of [out.gv, out.all]) { [...o.agents.keys()].filter((k) => k.startsWith('gv|')).forEach((k) => o.agents.delete(k)); named.forEach((v, k) => o.agents.set(k, { ...v })); }
+      }
+    }
     const dim = U.daysInMonth ? U.daysInMonth(cur) : 30;
     for (const k of ['ff', 'gv', 'all']) {
       const o = out[k], days = Math.max(1, o.lastDay);
