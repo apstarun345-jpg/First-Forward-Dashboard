@@ -38,7 +38,8 @@
     });
     days.sort((a, b) => (a.date < b.date ? -1 : 1));
     const okDays = days.filter((d) => d.ok);
-    const basis = okDays.length && okDays.every((d) => /TVC/i.test(d.status)) ? 'TVC' : okDays.some((d) => /TVC/i.test(d.status)) ? 'TVC + CCH (purane din)' : 'CCH';
+    const isTvc = (d) => /^✅\s*TVC/i.test(d.status);
+    const basis = okDays.length && okDays.every(isTvc) ? 'TVC' : okDays.some(isTvc) ? 'TVC + CCH (purane din)' : 'CCH';
     return { days, classes: classes.map((c) => c.k), basis };
   }
   async function load(fresh) {
