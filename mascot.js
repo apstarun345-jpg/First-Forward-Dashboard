@@ -1624,6 +1624,10 @@
       let names = ''; try { names = FF.config.allTabs(true).map((x) => x.label).slice(0, 14).join(' · '); } catch { names = ''; }
       return txt('Main kya kya kar sakta hoon', `${names ? `Pages: ${names}. ` : ''}Poochho: run-rate, andaza, total, top agents/TL, stock, dispatch, inactive, KYC, de-growth, FF vs GV, kisi agent ka issuance. Bolo: "performance kholo", "settings kholo", "awaaz band", "aaj chup", "reminder lagao".`, 'मैं साइट का हर पेज खोल सकता हूँ, रन रेट, अंदाज़ा, टोटल, टॉप एजेंट, स्टॉक, डिस्पैच, इनएक्टिव, केवाईसी, सब बता सकता हूँ। रिमाइंडर भी लगा सकता हूँ।', { stay: 16000 });
     }
+    // "Rahul ka issuance / stock / commission" — kisi agent ka sawaal: site-wide intent nahi, assistant ko do
+    const GEN = /^(aaj|kal|total|site|sabka|sabki|mera|meri|hamara|hamari|is|us|ye|wo|pura|poora|poori|gv|ff|first|forward|partner|top|kul|abhi|uska|iska|pichle|last|mahine|month|agent|agents|tl|tls)$/;
+    const nmQ = /(?:^| )([a-z][a-z.]{2,}(?: [a-z][a-z.]{2,})?) (?:ka|ki|ke) (?:issuance|issue|stock|commission|tag|tags|kyc|target|performance)(?: |$)/.exec(t.trim());
+    if (nmQ && !nmQ[1].split(' ').every((w) => GEN.test(w))) return null;
     if (has(/ (run ?rate|रन ?रेट|raftaar|रफ्तार|speed|roz ka|per day|रोज का|रोज़ का|daily average|din ka average) /)) return byKey('rr');
     if (has(/ (andaz\w*|andaj\w*|अंदाज़\w*|अंदाज\w*|expected|projection|forecast|kitna hoga|कितना होगा|month end|mahine ke ant|महीने के अंत|estimate) /)) return byKey('exp', 'rr');
     if (has(/ (de ?growth|degrowth|girawat|गिरावट|gir (gaya|gaye|rahe|raha)|ghat (gaya|gaye|rahe|raha)|गिर गए|घट) /)) return byKey(tl ? 'degrowthtl' : 'degrowth', 'degrowth');
@@ -1635,16 +1639,25 @@
     if (has(/ (best day|record|sabse (accha|achha|badhiya) din|सबसे अच्छा दिन) /)) return byKey('bestday');
     if (has(/ (ff|first forward|फर्स्ट फॉरवर्ड) /) && has(/ (gv|जीवी) /)) return byKey('ffvsgv');
     if (!has(/ (commission|payout|rate card) /) && has(/ (top|best|sabse (zyada|jyada|upar|aage)|number (one|1)|leader|टॉप|सबसे ज्यादा|सबसे आगे) /)) return byKey(tl ? 'toptl' : 'top', 'top');
-    if (has(/ (total|kul|कुल|abhi tak|अभी तक|kitne tag|कितने टैग|kitna hua|कितना हुआ|scoreboard|summary|hisab|हिसाब|nov|november|नवंबर|month|mahin\w*|महीन\w*|issuance|issue) /)) {
+    if (has(/ (total|kul|abhi tak|kitne tag|kitne tags|kitna hua|scoreboard|summary|hisab|nov|november|month|mahin\w*|tags? hue|tag hue|hue) /) || has(/ (aaj|kal|today|yesterday|pichle|last|previous|purane) .*(total|tag|tags|issue|issuance|hue|hua) /)) {
       const m = monthStats();
       if (m && m.all && m.all.total) {
-        const a = m.all, d = new Date();
-        const g = a.prevTotal ? Math.round(((a.exp.total - a.prevTotal) / a.prevTotal) * 100) : null;
-        return { key: `ans:${Date.now()}`, qkey: 'mtd', fun: true, mood: g != null && g < 0 ? 'alert' : 'excited', icon: '📊', title: `${d.toLocaleString('en-IN', { month: 'long' })} ka total`, view: 'big', big: fmt(a.total), stay: 16000,
-          head: `1 se aaj tak (aaj ka GV live milakar)`,
-          rows: [{ name: 'VC4', val: fmt(a.vc4) }, { name: 'VC20', val: fmt(a.vc20) }, { name: 'VC5+', val: fmt(a.vc5) }, { name: 'First Forward', val: fmt(m.ff.total) }, { name: 'GV Partner', val: fmt(m.gv.total) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
-          foot: `Kal tak run-rate ${r1(a.rate.total)}/din · mahine ka andaaza ≈ ${fmt(a.exp.total)}${g != null ? ` (${pct(g)})` : ''}`,
-          say: `इस महीने अभी तक कुल ${fmt(a.total)} टैग्स। रोज़ का रन रेट लगभग ${fmt(a.rate.total)}, और महीने के आख़िर तक करीब ${fmt(a.exp.total)} का अंदाज़ा है।`, q: 'summary|all' };
+        const gvQ = has(/ (gv|जीवी) /), ffQ = !gvQ && has(/ (ff|first forward) /);
+        const sc = gvQ ? m.gv : ffQ ? m.ff : m.all, lab = gvQ ? 'GV Partner' : ffQ ? 'First Forward' : 'Poori site';
+        const d = new Date(), mon = d.toLocaleString('en-IN', { month: 'long' });
+        const prevQ = has(/ (pichle|pichla|last|previous|purane|पिछले) /), kalQ = has(/ (kal|yesterday) /), aajQ = has(/ (aaj|today) /) && !kalQ;
+        let rowsH = []; let rd = m.all.rd; try { const h = FF.pages.home.monthRows(); rowsH = h.rows || []; } catch { rowsH = []; }
+        const dayTotal = (dd) => { const o = { total: 0, vc4: 0, vc20: 0, vc5: 0 }; rowsH.filter((r) => r.day === dd && (gvQ ? r.channel === 'GV Partner' : ffQ ? r.channel !== 'GV Partner' : true)).forEach((r) => { const q = Number(r.n) || 0; o.total += q; o[r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5'] += q; }); return o; };
+        const chips = (o) => [{ name: 'VC4', val: fmt(o.vc4) }, { name: 'VC20', val: fmt(o.vc20) }, { name: 'VC5+', val: fmt(o.vc5) }].map((x) => ({ ...x, sub: '', tone: 'chip' }));
+        const base = { key: `ans:${Date.now()}`, qkey: 'mtd', fun: true, view: 'big', stay: 16000, q: 'summary|all' };
+        if (prevQ) return { ...base, mood: 'info', icon: '📅', title: `${lab}: pichle mahine`, big: fmt(sc.prevTotal), head: 'poore pichle mahine ka total', rows: [], say: `पिछले महीने ${lab === 'Poori site' ? 'पूरी साइट' : lab} का टोटल ${fmt(sc.prevTotal)} टैग्स था।` };
+        if (kalQ) { const o = dayTotal(rd); return { ...base, mood: 'info', icon: '🗓', title: `${lab}: kal (${rd} ${mon})`, big: fmt(o.total), head: 'kal ka total (jo data Home me aaya)', rows: chips(o), say: `कल ${rd} तारीख़ को ${fmt(o.total)} टैग्स हुए।` }; }
+        if (aajQ) { const o = dayTotal(d.getDate()); return { ...base, mood: 'info', icon: '☀️', title: `${lab}: aaj`, big: fmt(o.total), head: 'aaj ab tak (sirf GV live aata hai, FF ka aaj ka data kal aata hai)', rows: chips(o), say: `आज अभी तक ${fmt(o.total)} टैग्स हुए। ध्यान रहे, आज का सिर्फ़ जी वी लाइव आता है।` }; }
+        const g = sc.prevTotal ? Math.round(((sc.exp.total - sc.prevTotal) / sc.prevTotal) * 100) : null;
+        return { ...base, mood: g != null && g < 0 ? 'alert' : 'excited', icon: '📊', title: `${lab}: ${mon} ka total`, big: fmt(sc.total), head: '1 se aaj tak (aaj ka GV live milakar)',
+          rows: [{ name: 'VC4', val: fmt(sc.vc4) }, { name: 'VC20', val: fmt(sc.vc20) }, { name: 'VC5+', val: fmt(sc.vc5) }, ...(gvQ || ffQ ? [] : [{ name: 'First Forward', val: fmt(m.ff.total) }, { name: 'GV Partner', val: fmt(m.gv.total) }])].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+          foot: `Kal tak run-rate ${r1(sc.rate.total)}/din · mahine ka andaaza ≈ ${fmt(sc.exp.total)}${g != null ? ` (${pct(g)})` : ''}`,
+          say: `${lab === 'Poori site' ? 'पूरी साइट' : lab} का इस महीने अभी तक कुल ${fmt(sc.total)} टैग्स। रोज़ का रन रेट लगभग ${fmt(sc.rate.total)}, और महीने के आख़िर तक करीब ${fmt(sc.exp.total)} का अंदाज़ा है।` };
       }
       return byKey('sitetotal', 'summary');
     }
@@ -1688,7 +1701,7 @@
     const ii = intentItem(q); if (ii) return ii;
     if (!FF.assistant && FF.lazy && FF.lazy.inject) await FF.lazy.inject('assistant');
     let html = FF.assistant && FF.assistant.answer ? await FF.assistant.answer(q) : '';
-    if (!html || /Ye samajh nahi aaya|did not understand/i.test(String(html))) { const fb = await fuzzyItem(q); if (fb) return fb; }
+    if (!html || /Ye samajh nahi aaya|did not understand|main data assistant hoon|I am a data assistant/i.test(String(html))) { const fb = await fuzzyItem(q); if (fb) return fb; }
     const tmp = document.createElement('div'); tmp.innerHTML = String(html || 'Iska jawab abhi mere paas nahi 🙈');
     tmp.querySelectorAll('script,style,iframe').forEach((n) => n.remove());
     const tx = tmp.cloneNode(true); tx.querySelectorAll('td,th,li,p,div,tr,br,b').forEach((n) => n.append(' ')); tx.querySelectorAll('tr,li,p').forEach((n) => n.append(' · '));
@@ -1721,7 +1734,7 @@
   // 🎙 v3.125.156 — "Hey Gems / Hii Gems" bolo → "hii Tarun Sir, main aapki kya help karu?" → phir kuch bhi poochho
   let convo = false, lastSpoken = null;
   let wakeR = null, wakeDenied = false, wakeBusy = false, wakeNoted = false;
-  const WAKE_RE = /(gems?|jems?|jem|जेम्स?|जैम्स?|जेम|जैम|गेम्स)/i;
+  const WAKE_RE = /(gems?|jems?|jem|james|games|जेम्स?|जैम्स?|जेम्ज|जेमस|जेंस|जिम्स|जेम|जैम|गेम्स|जेन्स)/i;
   const SRC = () => window.SpeechRecognition || window.webkitSpeechRecognition;
   function wakeStop() { const r = wakeR; wakeR = null; if (r) { try { r.onresult = r.onend = r.onerror = null; r.abort(); } catch { /* ignore */ } } }
   function listenOnce(ms) { // ek sawaal sunke text lauta do ('' = kuch nahi bola)
@@ -1783,7 +1796,7 @@
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const tx = (e.results[i][0] && e.results[i][0].transcript) || '';
         const m = WAKE_RE.exec(tx);
-        if (m && /(hey|hay|hi|hii|hello|helo|ok|okay|हे|हाय|हाई|हेलो|हैलो|ओके|अरे|^\s*(gems?|जेम्स?|जैम्स?))/i.test(tx.slice(0, m.index + m[0].length))) {
+        if (m && /(hey|hay|hi|hii|hello|helo|ok|okay|ey|हे|है|हैं|हेय|ए|एय|ये|अबे|सुनो|हाय|हाई|हेलो|हैलो|ओके|अरे|^\s*(gems?|jems?|जेम्स?|जैम्स?|जेंस))/i.test(tx.slice(0, m.index + m[0].length))) {
           if (!e.results[i].isFinal && tx.slice(m.index + m[0].length).trim().length < 1) { fired = true; wakeFlow(''); return; }
           if (e.results[i].isFinal) { fired = true; wakeFlow(tx.slice(m.index + m[0].length)); return; }
         }
