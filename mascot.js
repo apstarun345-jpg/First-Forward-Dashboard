@@ -1749,46 +1749,155 @@
       try { r.start(); } catch { end(); }
     });
   }
+  // 💬 v3.125.164 — Gems Voice: ChatGPT / Google Assistant jaisa baat-cheet screen (live bolna, typing jawab, orb animation)
+  const GV_CSS = `#gems-voice{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;background:rgba(10,14,30,.99);color:#eef2ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;animation:gvIn .22s ease}
+@media(min-width:760px){#gems-voice{inset:auto 18px 18px auto;width:420px;height:min(680px,86vh);border-radius:22px;box-shadow:0 20px 60px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12)}}
+@keyframes gvIn{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+#gems-voice .gv-h{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
+#gems-voice .gv-h b{font-size:16px;flex:1}#gems-voice .gv-x{background:none;border:0;color:#cbd5ff;font-size:22px;cursor:pointer;padding:4px 8px}
+#gems-voice .gv-orb{width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#8ab4ff,#5b6cff 60%,#2b2f8f);box-shadow:0 0 0 0 rgba(120,140,255,.6);flex:none}
+#gems-voice[data-s=listen] .gv-orb{animation:gvPulse 1.3s infinite}
+#gems-voice[data-s=think] .gv-orb{animation:gvSpin 1s linear infinite;background:conic-gradient(#8ab4ff,#5b6cff,#c084fc,#8ab4ff)}
+#gems-voice[data-s=speak] .gv-orb{animation:gvBeat .5s ease-in-out infinite alternate}
+@keyframes gvPulse{0%{box-shadow:0 0 0 0 rgba(120,140,255,.65)}100%{box-shadow:0 0 0 22px rgba(120,140,255,0)}}
+@keyframes gvSpin{to{transform:rotate(360deg)}}@keyframes gvBeat{from{transform:scale(.88)}to{transform:scale(1.18)}}
+#gems-voice .gv-log{flex:1;overflow:auto;padding:14px 14px 6px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth}
+#gems-voice .gv-m{max-width:88%;padding:10px 13px;border-radius:16px;font-size:15px;line-height:1.45;word-wrap:break-word;animation:gvIn .2s ease}
+#gems-voice .gv-m.me{align-self:flex-end;background:#3b4bd8;border-bottom-right-radius:5px}
+#gems-voice .gv-m.bot{align-self:flex-start;background:rgba(255,255,255,.09);border-bottom-left-radius:5px}
+#gems-voice .gv-m.live{opacity:.65;font-style:italic}
+#gems-voice .gv-dots i{display:inline-block;width:7px;height:7px;margin:0 2px;border-radius:50%;background:#b6c2ff;animation:gvDot 1s infinite}
+#gems-voice .gv-dots i:nth-child(2){animation-delay:.15s}#gems-voice .gv-dots i:nth-child(3){animation-delay:.3s}
+@keyframes gvDot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-4px)}}
+#gems-voice .gv-card{margin-top:8px;padding:8px 10px;border-radius:12px;background:rgba(0,0,0,.25);animation:gvIn .35s ease;max-height:42vh;overflow:auto;font-size:14px}
+#gems-voice .gv-big{font-size:28px;font-weight:800;color:#a5b4ff}
+#gems-voice .gv-r{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
+#gems-voice .gv-r span:last-child{font-weight:700;color:#c7d2ff}#gems-voice .gv-foot{margin-top:6px;opacity:.75;font-size:12.5px}
+#gems-voice table{width:100%;border-collapse:collapse;font-size:13px}#gems-voice td,#gems-voice th{padding:3px 5px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left}
+#gems-voice .gv-f{display:flex;gap:8px;padding:10px 12px 14px;align-items:center;border-top:1px solid rgba(255,255,255,.08)}
+#gems-voice .gv-f input{flex:1;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#fff;border-radius:22px;padding:10px 14px;font-size:15px;outline:none}
+#gems-voice .gv-mic{width:46px;height:46px;border-radius:50%;border:0;background:#5b6cff;color:#fff;font-size:20px;cursor:pointer;flex:none}
+#gems-voice[data-s=listen] .gv-mic{background:#e11d48;animation:gvPulse 1.3s infinite}
+#gems-fab{position:fixed;left:12px;bottom:92px;z-index:2147482000;width:48px;height:48px;border-radius:50%;border:0;background:linear-gradient(135deg,#5b6cff,#8b5cf6);color:#fff;font-size:22px;box-shadow:0 6px 18px rgba(60,70,200,.45);cursor:pointer}
+@media(min-width:760px){#gems-fab{bottom:20px;left:20px;width:44px;height:44px}}`;
+  let gvEl = null, gvRec = null, gvOpen = false, gvGen = 0;
+  const gvSet = (st) => { if (gvEl) gvEl.dataset.s = st; };
   const BYE_RE = /(^|\s)(bas|bus|ruko|ruk jao|stop|band karo|chup|ho gaya|bye|goodbye|that'?s all|dhanyawad bas|thank you bas|बस|रुको|रुक जाओ|चुप|बंद करो|हो गया|बाय)(\s|$)/i;
-  async function hearUntil(totalMs) { // 15 sec kuch na bola to '' (baat khatam)
-    const t0 = Date.now();
-    while (Date.now() - t0 < totalMs) { const h = await listenOnce(Math.min(7000, totalMs - (Date.now() - t0))); if (h && h.trim().length > 1) return h; }
-    return '';
+  function gvMsg(role, html, cls) {
+    const log = gvEl && gvEl.querySelector('.gv-log'); if (!log) return null;
+    const d = document.createElement('div'); d.className = `gv-m ${role}${cls ? ` ${cls}` : ''}`; d.innerHTML = html; log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
   }
-  async function convoTurn(q) { // sawaal ka jawab dikhao + bolo, jab tak awaaz poori na ho (tab tak mic band)
-    lastSpoken = null;
-    await askRobot(q, true);
-    let n = 0; while (!lastSpoken && n++ < 100) await wait(100);
-    if (lastSpoken) await Promise.race([lastSpoken, wait(120000)]).catch(() => {});
-    n = 0; while (talking && n++ < 600) await wait(200);
+  const gvScroll = () => { const l = gvEl && gvEl.querySelector('.gv-log'); if (l) l.scrollTop = l.scrollHeight; };
+  function gvCard(it) {
+    let h = '';
+    if (it.big) h += `<div class="gv-big">${esc(it.big)}</div>`;
+    if (it.view === 'html' && it.html) h += `<div>${it.html}</div>`;
+    else if ((it.rows || []).length) h += (it.rows || []).slice(0, 12).map((r) => `<div class="gv-r"><span>${esc(r.name || '')}${r.sub ? ` <small style="opacity:.6">${esc(r.sub)}</small>` : ''}</span><span>${esc(r.val == null ? '' : r.val)}</span></div>`).join('');
+    if (it.foot) h += `<div class="gv-foot">${esc(it.foot)}</div>`;
+    return h;
+  }
+  async function gvType(el, text, gen) { // ek-ek akshar, ChatGPT jaisa
+    const t = String(text || ''); el.textContent = '';
+    const step = Math.max(1, Math.round(t.length / 160));
+    for (let i = 0; i < t.length; i += step) { if (gen !== gvGen) return; el.textContent = t.slice(0, i + step); gvScroll(); await new Promise((r) => setTimeout(r, 16)); }
+    el.textContent = t;
+  }
+  function gvListen(onInterim, maxMs) { // → final text ('' agar chup)
+    return new Promise((resolve) => {
+      const SR = SRC(); if (!SR) return resolve({ text: '', err: 'nosr' });
+      const r = new SR(); gvRec = r; r.lang = wakeLang; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+      let fin = false, got = '', er = '';
+      const end = () => { if (fin) return; fin = true; clearTimeout(tm); gvRec = null; try { r.abort(); } catch { /* ignore */ } resolve({ text: got, err: er }); };
+      const tm = setTimeout(end, maxMs || 8000);
+      r.onresult = (e) => { let t = ''; for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript; if (onInterim) onInterim(t); if (e.results[e.results.length - 1].isFinal) { got = t; end(); } };
+      r.onerror = (e) => { er = (e && e.error) || ''; if (er === 'no-speech' || er === 'aborted') er = ''; end(); };
+      r.onend = end;
+      try { r.start(); } catch { end(); }
+    });
+  }
+  function gvClose(why) {
+    gvGen += 1; gvOpen = false; convo = false; wakeBusy = false;
+    try { if (gvRec) gvRec.abort(); } catch { /* ignore */ } gvRec = null;
+    stopSpeech();
+    const e = gvEl; gvEl = null; if (e) { e.style.transition = 'opacity .2s'; e.style.opacity = '0'; setTimeout(() => e.remove(), 220); }
+    gvFab(true);
+    if (skip && why !== 'quiet') skip('convo');
+  }
+  async function gvAnswer(q, gen) {
+    gvSet('think');
+    const th = gvMsg('bot', '<span class="gv-dots"><i></i><i></i><i></i></span>');
+    let it; try { it = await answerItem(String(q)); } catch (e) { it = { title: 'Jawab nahi mila', head: String(e.message || e), say: 'माफ़ कीजिए, जवाब नहीं मिल पाया।' }; }
+    if (gen !== gvGen) return;
+    if (th) th.innerHTML = '';
+    const plain = it.view === 'html' && it.text ? it.text : [it.title, it.big && !it.rows ? it.big : '', it.head].filter(Boolean).join(' — ');
+    gvSet('speak');
+    const sp = it.say && cfg.sound !== false ? say(it.say, { force: true }) : Promise.resolve(false);
+    if (th) await gvType(th, plain, gen);
+    if (gen !== gvGen) return;
+    const card = gvCard(it); if (card && th) { const c = document.createElement('div'); c.className = 'gv-card'; c.innerHTML = card; th.appendChild(c); gvScroll(); }
+    if (it.q && it.q[0] === '#') { /* link wale items: user kahe "kholo" */ }
+    await sp; await wait(250);
+  }
+  async function gvLoop(gen) {
+    let idle = Date.now();
+    while (gen === gvGen && gvOpen) {
+      gvSet('listen');
+      let live = null;
+      const res = await gvListen((t) => { if (!live) live = gvMsg('me', '', 'live'); if (live) { live.textContent = t; gvScroll(); } }, 8000);
+      if (gen !== gvGen) return;
+      if (res.err === 'not-allowed' || res.err === 'service-not-allowed') { if (live) live.remove(); gvMsg('bot', '🎙 Mic ki permission band hai — browser / phone Settings me Microphone allow karo, ya neeche likhkar poochho.'); gvSet('idle'); return; }
+      if (res.err === 'nosr') { if (live) live.remove(); gvMsg('bot', 'Is browser me bolkar poochhna nahi chalta — neeche likhkar poochho.'); gvSet('idle'); return; }
+      const heard = (res.text || '').trim();
+      if (!heard) { if (live) live.remove(); if (Date.now() - idle > 15000) { gvMsg('bot', 'Theek hai, jab zarurat ho "Hey Gems" bol dena. 👋'); gvSet('idle'); await wait(1400); if (gen === gvGen) gvClose(); return; } continue; }
+      idle = Date.now();
+      if (live) { live.classList.remove('live'); live.textContent = heard; }
+      if (BYE_RE.test(` ${heard.toLowerCase()} `) && heard.split(/\s+/).length <= 4) { const b = gvMsg('bot', ''); gvSet('speak'); const sp = say('ठीक है, कभी भी बुलाइए।', { force: true }); await gvType(b, 'Theek hai, kabhi bhi bulana. 👋', gen); await sp; gvClose(); return; }
+      await gvAnswer(heard, gen); idle = Date.now();
+    }
+  }
+  function gvFab(show0) {
+    let f = document.getElementById('gems-fab');
+    const want = show0 && allowed() && cfg.on && !pipWin && cfg.fab !== false;
+    if (!want) { if (f) f.remove(); return; }
+    if (f) return;
+    f = document.createElement('button'); f.id = 'gems-fab'; f.type = 'button'; f.title = 'Gems se baat karo'; f.textContent = '🎙';
+    f.addEventListener('click', () => wakeFlow(''));
+    document.body.appendChild(f);
   }
   async function wakeFlow(rest) {
-    wakeBusy = true; convo = true; wakeStop();
+    if (gvOpen) return;
+    wakeBusy = true; convo = true; gvOpen = true; wakeStop();
+    const gen = ++gvGen;
     try {
+      // jo bhi robot kar raha tha — turant band: pehle aapki baat
+      stopSpeech(); try { if (skip) skip('ask'); } catch { /* ignore */ } try { abortFun(); } catch { /* ignore */ }
+      if (!document.getElementById('gems-voice-css')) { const st = document.createElement('style'); st.id = 'gems-voice-css'; st.textContent = GV_CSS; document.head.appendChild(st); }
+      gvFab(false);
       const nm = firstName() || 'Tarun';
-      let q = String(rest || '').replace(/^[\s,.!?]+/, '').trim();
-      if (q.split(/\s+/).filter(Boolean).length < 2) q = '';
-      stopSpeech(); if (skip) skip('ask');
-      let n = 0; while (busy && n++ < 60) await wait(50);
-      if (q) await convoTurn(q);
+      gvEl = document.createElement('div'); gvEl.id = 'gems-voice'; gvEl.dataset.s = 'idle';
+      gvEl.innerHTML = `<div class="gv-h"><span class="gv-orb"></span><b>Gems</b><button type="button" class="gv-x" aria-label="Band karo">✕</button></div><div class="gv-log"></div><form class="gv-f"><input type="text" name="q" placeholder="Ya yahan likhkar poochho…" autocomplete="off"><button type="button" class="gv-mic" aria-label="Bolo">🎙</button></form>`;
+      document.body.appendChild(gvEl);
+      gvEl.querySelector('.gv-x').addEventListener('click', () => gvClose());
+      gvEl.querySelector('.gv-f').addEventListener('submit', async (ev) => {
+        ev.preventDefault(); const inp = ev.target.q, q = inp.value.trim(); if (!q) return; inp.value = '';
+        try { if (gvRec) gvRec.abort(); } catch { /* ignore */ }
+        gvMsg('me', esc(q)); gvGen += 1; const g2 = gvGen; await gvAnswer(q, g2); if (g2 === gvGen && gvOpen) gvLoop(g2);
+      });
+      gvEl.querySelector('.gv-mic').addEventListener('click', () => { if (gvEl.dataset.s === 'listen') return; stopSpeech(); gvGen += 1; gvLoop(gvGen); });
+      const q0 = String(rest || '').replace(/^[\s,.!?]+/, '').trim();
+      if (q0.split(/\s+/).filter(Boolean).length >= 2) { gvMsg('me', esc(q0)); await gvAnswer(q0, gen); }
       else {
-        show({ key: `wake:${Date.now()}`, convoOk: true, fun: true, cls: 'greet', mood: 'happy', icon: '👋', title: `Hii ${nm} Sir!`, head: 'Main aapki kya help karu? Bolo — site ka kuch bhi poochho.', view: 'text', stay: 15000, say: '' });
-        await wait(900);
-        await say(`हाय ${nm} सर, मैं आपकी क्या हेल्प करूँ?`, { force: true });
+        const b = gvMsg('bot', ''); gvSet('speak');
+        const sp = say(`हाय ${nm} सर, मैं आपकी क्या हेल्प करूँ?`, { force: true });
+        await gvType(b, `Hii ${nm} Sir! Main aapki kya help karu? Site ka kuch bhi poochho.`, gen); await sp;
       }
-      // baat-cheet: jab tak aap bolte raho; 15 sec chup rahe to khatam
-      for (let turn = 0; turn < 40; turn++) {
-        const heard = await hearUntil(15000);
-        if (!heard) break;
-        if (BYE_RE.test(` ${heard.toLowerCase()} `) && heard.trim().split(/\s+/).length <= 4) { await say('ठीक है, कभी भी बुलाइए।', { force: true }); break; }
-        await convoTurn(heard);
-      }
-    } catch { /* ignore */ } finally { convo = false; wakeBusy = false; if (skip) skip('convo'); }
+      if (gen === gvGen && gvOpen) gvLoop(gen);
+    } catch { gvClose(); }
   }
   function wakeTick() {
     const SR = SRC();
     const want = SR && cfg.wake !== false && cfg.on && allowed() && !wakeDenied && !document.hidden && !pipWin;
-    if (!want || busy || talking || wakeBusy || asking) { if (wakeR) wakeStop(); return; }
+    if (!want || wakeBusy || gvOpen) { if (wakeR) wakeStop(); return; }
     if (wakeR) return;
     const r = new SR(); r.lang = wakeLang; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
     let fired = false;
@@ -1815,6 +1924,7 @@
     try { r.start(); } catch { wakeR = null; }
   }
   setInterval(wakeTick, 1500);
+  setInterval(() => { try { gvFab(!gvOpen); } catch { /* ignore */ } }, 3000);
   // 📱 phone / app me mic ki permission aur pehla start user ke touch se hi milta hai → pehle touch par wake sunna shuru
   ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => { try { if (!wakeR && !wakeDenied) wakeTick(); } catch { /* ignore */ } }, { passive: true }));
   async function showReminders() {
@@ -2199,7 +2309,7 @@
   }
   const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake !== false, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake !== false, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
