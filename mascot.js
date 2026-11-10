@@ -1316,6 +1316,7 @@
   // ---------------------------------------------------------------- announce one update
   // rs = dusre tab se wapas aaye: udna / bolna / history nahi — wahi jagah, wahi board, typing wahin se, bacha hua time
   async function show(it, rs) {
+    if (convo && !rs && it && !it.convoOk) return; // baat-cheet chal rahi hai: beech me koi update nahi
     if (busy || !it) return '';
     busy = true; current = it; build(); closeHist();
     mode = 'show';
@@ -1372,8 +1373,9 @@
       board.classList.add('quiz-run'); await wait(5000); // ⏳ sochne ka time
       board.classList.add('reveal'); dance('happy'); await say(it.sayAns);
     });
+    lastSpoken = spoken;
     const minStay = wait(it.stay || Math.max(10000, String(it.say || '').length * 60)); // kam se kam 10 sec board
-    const stay = (async () => { await Promise.all([spoken, minStay]); while (hover && !reason) await wait(500); })();
+    const stay = (async () => { await Promise.all([spoken, minStay]); while ((hover || convo) && !reason) await wait(500); })();
     await Promise.race([stay, ended]);
     skip = null; stopSpeech(); extEnd(it);
     board.classList.remove('in'); el.classList.remove('holding');
@@ -1424,7 +1426,7 @@
   const api = (p) => (FF.auth && FF.auth.api ? FF.auth.api(p) : Promise.reject(new Error('no api')));
   const firstRun = (k) => !cfg[k];
   async function pollFeeds() {
-    if (!allowed() || !cfg.on || document.hidden) return;
+    if (!allowed() || !cfg.on || document.hidden || convo) return;
     const cutoff = Date.now() - 30 * 60e3; // pehli baar: sirf pichle 30 min ka
     // 🔔 notifications
     try {
@@ -1562,6 +1564,26 @@
     const byKey = (...ks) => { let L = []; try { L = insights(); } catch { L = []; } for (const k of ks) { const f = L.find((x) => x.key === k); if (f) return finish(f); } return null; };
     if (has(/ (thank|thanks|thank you|shukriya|dhanyawad|धन्यवाद|शुक्रिया|थैंक) /)) return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', cls: 'greet', icon: '😊', title: 'Koi baat nahi!', head: 'Kabhi bhi poochho, main yahin hoon.', view: 'text', stay: 5000, say: `कोई बात नहीं ${firstName() || 'Tarun'} सर, कभी भी पूछिए।` };
     if (has(/ (kaun ho|kaun hai tu|who are you|tum kaun|aap kaun|तुम कौन|आप कौन) /)) return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', cls: 'greet', icon: '🤖', title: 'Main Gems hoon', head: 'ApnaPayment dashboard ka robot — site ka har data bata sakta hoon.', view: 'text', stay: 7000, say: 'मैं जेम्स हूँ, आपकी साइट का रोबोट। यहाँ का हर डेटा पूछिए।' };
+    const txt = (title, head, say, extra) => ({ key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '🤖', title, head, view: 'text', stay: 9000, say, ...(extra || {}) });
+    // 🎛 robot ko control: awaaz / band / chup
+    if (has(/ (sound|awaaz|आवाज़|आवाज) /) && has(/ (band|off|mute|बंद|chup|चुप) /)) { cfg.sound = false; save(); return txt('Awaaz band', 'Ab main bolunga nahi, sirf board dikhaunga.', ''); }
+    if (has(/ (sound|awaaz|आवाज़|आवाज) /) && has(/ (on|chalu|start|चालू|shuru|शुरू) /)) { cfg.sound = true; save(); return txt('Awaaz chalu', 'Ab main bolunga bhi.', 'ठीक है, अब मैं बोलूँगा भी।'); }
+    if (has(/ (aaj|आज) /) && has(/ (chup|chhupo|snooze|mat dikhao|चुप|छुप) /)) { cfg.snoozeDay = today(); save(); return txt('Aaj chhutti', 'Aaj ke liye main chup rahunga.', 'ठीक है, आज मैं चुप रहूँगा।'); }
+    if (has(/ (hey gems|wake word|hii gems) /) && has(/ (band|off|बंद) /)) { cfg.wake = false; save(); wakeStop(); return txt('Hey Gems band', 'Settings → Sound & voice se wapas chalu kar sakte ho.', 'ठीक है, अब मैं नहीं सुनूँगा।'); }
+    // 🧭 site ke pages: "performance kholo", "stock dikhao"
+    if (has(/ (kholo|khol|open|chalo|jao|jaao|le chalo|go to|खोलो|चलो|जाओ) /) || has(/ (page|tab|section|पेज|टैब) /)) {
+      let tabs = []; try { tabs = FF.config.allTabs(true); } catch { tabs = []; }
+      const nz = (x) => String(x || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+      const can = (id) => { try { return !FF.auth.can || FF.auth.can(id); } catch { return true; } };
+      const hit = tabs.map((tb) => { const w = nz(`${tb.label} ${tb.id}`).split(' ').filter((x) => x.length > 2); const sc = w.filter((x) => t.includes(` ${x}`) ).length; return { tb, sc }; }).filter((x) => x.sc && can(x.tb.id)).sort((a, b) => b.sc - a.sc)[0];
+      if (has(/ (setting|settings|सेटिंग|सेटिंग्स) /) ) { location.hash = '#/settings'; return txt('Settings khol di', 'Tabs: My account · Diagnostics · Sound & voice · Branding · Sheets & tabs · Access · Data source · Direct agents · Thresholds · Features · Contacts · Users · Links · Audit log · Backup', 'सेटिंग्स खोल दी हैं। यहाँ अकाउंट, साउंड और वॉइस, ब्रांडिंग, डेटा सोर्स, थ्रेशोल्ड, फीचर्स, यूज़र्स, ऑडिट लॉग और बैकअप के टैब हैं।'); }
+      if (hit) { location.hash = `#/${hit.tb.id}`; return txt(`${hit.tb.label} khol diya`, 'Page khul gaya — ab iske data ke baare me bhi poochh sakte ho.', `${hit.tb.label} खोल दिया।`); }
+    }
+    if (has(/ (setting|settings|सेटिंग|सेटिंग्स) /)) return txt('Settings me kya kya hai', 'My account · Site diagnostics · Sound & voice (robot, Hey Gems, extension) · Branding · Sheets & tabs · Access matrix · Data source · Direct agents · Thresholds · Features · Contacts & sharing · Users & access · Personal links · Audit log · Storage & backup. "settings kholo" bolo to main khol dunga.', 'सेटिंग्स में अकाउंट, साउंड और वॉइस, ब्रांडिंग, डेटा सोर्स, थ्रेशोल्ड, फीचर्स, यूज़र्स, ऑडिट लॉग और बैकअप हैं। कहिए तो खोल दूँ।', { stay: 14000 });
+    if (has(/ (kya kya|options?|features?|help|madad|मदद|kar sakte|कर सकते|kya kar sakta|क्या क्या) /)) {
+      let names = ''; try { names = FF.config.allTabs(true).map((x) => x.label).slice(0, 14).join(' · '); } catch { names = ''; }
+      return txt('Main kya kya kar sakta hoon', `${names ? `Pages: ${names}. ` : ''}Poochho: run-rate, andaza, total, top agents/TL, stock, dispatch, inactive, KYC, de-growth, FF vs GV, kisi agent ka issuance. Bolo: "performance kholo", "settings kholo", "awaaz band", "aaj chup", "reminder lagao".`, 'मैं साइट का हर पेज खोल सकता हूँ, रन रेट, अंदाज़ा, टोटल, टॉप एजेंट, स्टॉक, डिस्पैच, इनएक्टिव, केवाईसी, सब बता सकता हूँ। रिमाइंडर भी लगा सकता हूँ।', { stay: 16000 });
+    }
     if (has(/ (run ?rate|रन ?रेट|raftaar|रफ्तार|speed|roz ka|per day|रोज का|रोज़ का|daily average|din ka average) /)) return byKey('rr');
     if (has(/ (andaz\w*|andaj\w*|अंदाज़\w*|अंदाज\w*|expected|projection|forecast|kitna hoga|कितना होगा|month end|mahine ke ant|महीने के अंत|estimate) /)) return byKey('exp', 'rr');
     if (has(/ (de ?growth|degrowth|girawat|गिरावट|gir (gaya|gaye|rahe|raha)|ghat (gaya|gaye|rahe|raha)|गिर गए|घट) /)) return byKey(tl ? 'degrowthtl' : 'degrowth', 'degrowth');
@@ -1611,7 +1633,7 @@
     return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '💬', title: 'Gems ka jawab', head: q, view: 'html', html: tmp.innerHTML, text: text.slice(0, 900), stay: Math.min(25000, 6000 + text.length * 40), say: text.slice(0, 400) };
   }
   let asking = false;
-  async function askRobot(q) {
+  async function askRobot(q, inConvo) {
     asking = true; // tick beech me apna update na daale
     if (skip) skip('ask');
     if (el) { el.dataset.mood = 'curious'; el.classList.add('rest'); confetti('curious'); }
@@ -1619,7 +1641,9 @@
     try { item = await answerItem(String(q || '')); } catch (e) { item = { key: `ans:${Date.now()}`, fun: true, mood: 'sad', icon: '🙈', title: 'Jawab nahi mila', head: String(e.message || e), view: 'text', stay: 5000 }; }
     let n = 0; while (busy && n++ < 80) await wait(100);
     asking = false;
-    return show(item);
+    item.convoOk = true;
+    const p = show(item);
+    return inConvo ? item : p;
   }
   function listen(btn) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1632,6 +1656,7 @@
     try { r.start(); } catch { /* already */ }
   }
   // 🎙 v3.125.156 — "Hey Gems / Hii Gems" bolo → "hii Tarun Sir, main aapki kya help karu?" → phir kuch bhi poochho
+  let convo = false, lastSpoken = null;
   let wakeR = null, wakeDenied = false, wakeBusy = false, wakeNoted = false;
   const WAKE_RE = /(gems?|jems?|jem|जेम्स?|जैम्स?|जेम|जैम|गेम्स)/i;
   const SRC = () => window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1647,23 +1672,41 @@
       try { r.start(); } catch { end(); }
     });
   }
+  const BYE_RE = /(^|\s)(bas|bus|ruko|ruk jao|stop|band karo|chup|ho gaya|bye|goodbye|that'?s all|dhanyawad bas|thank you bas|बस|रुको|रुक जाओ|चुप|बंद करो|हो गया|बाय)(\s|$)/i;
+  async function hearUntil(totalMs) { // 15 sec kuch na bola to '' (baat khatam)
+    const t0 = Date.now();
+    while (Date.now() - t0 < totalMs) { const h = await listenOnce(Math.min(7000, totalMs - (Date.now() - t0))); if (h && h.trim().length > 1) return h; }
+    return '';
+  }
+  async function convoTurn(q) { // sawaal ka jawab dikhao + bolo, jab tak awaaz poori na ho (tab tak mic band)
+    lastSpoken = null;
+    await askRobot(q, true);
+    let n = 0; while (!lastSpoken && n++ < 100) await wait(100);
+    if (lastSpoken) await Promise.race([lastSpoken, wait(120000)]).catch(() => {});
+    n = 0; while (talking && n++ < 600) await wait(200);
+  }
   async function wakeFlow(rest) {
-    wakeBusy = true; wakeStop();
+    wakeBusy = true; convo = true; wakeStop();
     try {
       const nm = firstName() || 'Tarun';
       let q = String(rest || '').replace(/^[\s,.!?]+/, '').trim();
       if (q.split(/\s+/).filter(Boolean).length < 2) q = '';
-      if (q) { await askRobot(q); return; }
       stopSpeech(); if (skip) skip('ask');
       let n = 0; while (busy && n++ < 60) await wait(50);
-      const greet = `हाय ${nm} सर, मैं आपकी क्या हेल्प करूँ?`;
-      const p = show({ key: `wake:${Date.now()}`, fun: true, cls: 'greet', mood: 'happy', icon: '👋', title: `Hii ${nm} Sir!`, head: 'Main aapki kya help karu? Bolo — site ka kuch bhi poochho.', view: 'text', stay: 15000, say: '' });
-      await wait(900);
-      await say(greet, { force: true });
-      const heard = await listenOnce(9000);
-      if (heard && heard.trim().length > 1) { await p.catch(() => {}); await askRobot(heard); }
-      else if (skip) skip('ask');
-    } catch { /* ignore */ } finally { wakeBusy = false; }
+      if (q) await convoTurn(q);
+      else {
+        show({ key: `wake:${Date.now()}`, convoOk: true, fun: true, cls: 'greet', mood: 'happy', icon: '👋', title: `Hii ${nm} Sir!`, head: 'Main aapki kya help karu? Bolo — site ka kuch bhi poochho.', view: 'text', stay: 15000, say: '' });
+        await wait(900);
+        await say(`हाय ${nm} सर, मैं आपकी क्या हेल्प करूँ?`, { force: true });
+      }
+      // baat-cheet: jab tak aap bolte raho; 15 sec chup rahe to khatam
+      for (let turn = 0; turn < 40; turn++) {
+        const heard = await hearUntil(15000);
+        if (!heard) break;
+        if (BYE_RE.test(` ${heard.toLowerCase()} `) && heard.trim().split(/\s+/).length <= 4) { await say('ठीक है, कभी भी बुलाइए।', { force: true }); break; }
+        await convoTurn(heard);
+      }
+    } catch { /* ignore */ } finally { convo = false; wakeBusy = false; if (skip) skip('convo'); }
   }
   function wakeTick() {
     const SR = SRC();
@@ -1972,7 +2015,7 @@
       return;
     }
     if (m.type === 'pull') {
-      if (!cfg.on || !allowed() || cfg.snoozeDay === today() || pipWin) return;
+      if (!cfg.on || !allowed() || cfg.snoozeDay === today() || pipWin || convo) return;
       extTurn += 1;
       const it = nextItem(false) || (cfg.fun !== false && extTurn % 2 ? joke() : null);
       if (!it) return;
@@ -1984,6 +2027,7 @@
   });
   let lastNote = 0;
   async function notifyHidden() {
+    if (convo) return;
     try {
       if (cfg.push !== false) { // server push (app + web dono) — local notification ki zarurat nahi
         if (Date.now() - lastNote < Math.max(30e3, gapMs())) return;
@@ -2029,7 +2073,7 @@
   let funTurn = 0, lastUpd = 0;
   async function tick(force) {
     applyOn();
-    if (busy || asking || mode === 'hist') return schedule(4e3);
+    if (busy || asking || convo || mode === 'hist') return schedule(4e3);
     // 🔔 site ka tab peeche (dusra tab / WhatsApp) aur pop-out nahi → system notification se update
     if (!force && document.hidden && !pipWin && extOn()) return schedule(30e3); // extension har 30 sec "pull" karta hai
     if (!force && document.hidden && !pipWin && cfg.on && allowed() && cfg.notify !== false && cfg.snoozeDay !== today()) { await notifyHidden(); return schedule(60e3); }
