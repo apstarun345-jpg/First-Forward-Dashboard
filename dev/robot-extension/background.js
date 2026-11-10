@@ -15,15 +15,18 @@ async function injectOpenTabs() {
 chrome.runtime.onInstalled.addListener(() => { ensureAlarm(); injectOpenTabs(); });
 chrome.runtime.onStartup.addListener(ensureAlarm);
 let curShow = null;
+// service worker 30 sec idle par so jata hai — chal rahi khabar storage.session me bhi (warna tab badalte waqt yaad nahi rehti)
+const setCur = (v) => { curShow = v; try { chrome.storage.session.set({ cs: v }); } catch { /* ignore */ } };
+async function getCur() { if (curShow) return curShow; try { const { cs } = await chrome.storage.session.get('cs'); curShow = cs || null; } catch { /* ignore */ } return curShow; }
 // 🎬 tab badla → jo khabar abhi board par chal rahi hai wahi, usi jagah, usi board side par, jahan tak pahunchi wahin se
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-  if (!curShow) return;
+  if (!(await getCur())) return;
   const left = curShow.t0 + curShow.dur - Date.now();
-  if (left < 1500) { curShow = null; return; }
+  if (left < 1500) { setCur(null); return; }
   if (curShow.owner === tabId) return; // isi tab par already chal rahi
   const prev = curShow.owner;
   const msg = { type: 'resume', item: curShow.item, ms: left, elapsed: Date.now() - curShow.t0, fx: curShow.fx, fy: curShow.fy, side: curShow.side };
-  curShow.owner = tabId;
+  curShow.owner = tabId; setCur(curShow);
   if (prev != null) chrome.tabs.sendMessage(prev, { type: 'drop', key: curShow.item && curShow.item.key }).catch(() => {});
   chrome.tabs.sendMessage(tabId, msg).catch(() => { /* tab me robot / bridge abhi nahi — agli baar */ });
 });
@@ -53,13 +56,16 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
   if (m.type === 'show') {
     // abhi chal rahi khabar yaad rakho — tab badle to naye tab me wahi (bacha hua time) turant
     const it = m.item || {}, typing = String(it.head || '').length * 28;
-    curShow = { item: it, t0: Date.now() + (m.st ? 0 : 2400), dur: Math.max(it.stay || 0, 10000) + typing + 1200, owner: sender.tab ? sender.tab.id : null, fx: m.st ? m.st.fx : undefined, fy: m.st ? m.st.fy : undefined, side: m.st ? m.st.side : undefined };
+    // dashboard se aayi (st hai) → asli samay uski awaaz / 'end' tay karti hai (lambi ho sakti hai); pull wali → andaaza
+    setCur({ item: it, t0: Date.now() + (m.st ? 0 : 2400), dur: m.st ? 90000 : Math.max(it.stay || 0, 10000) + typing + 1200, owner: sender.tab ? sender.tab.id : null, fx: m.st ? m.st.fx : undefined, fy: m.st ? m.st.fy : undefined, side: m.st ? m.st.side : undefined });
     addHist(m.item).then(() => toFront({ type: 'show', item: m.item }));
   }
   else if (m.type === 'stage') { // jo tab dikha raha hai wo landing ke baad apni jagah batata hai
-    if (curShow && curShow.item && curShow.item.key === m.key) { curShow.fx = m.fx; curShow.fy = m.fy; curShow.side = m.side; curShow.t0 = m.t0 || Date.now(); if (sender.tab) curShow.owner = sender.tab.id; }
+    getCur().then((c) => { if (c && c.item && c.item.key === m.key) { c.fx = m.fx; c.fy = m.fy; c.side = m.side; c.t0 = m.t0 || Date.now(); if (sender.tab) c.owner = sender.tab.id; setCur(c); } });
   }
-  else if (m.type === 'end') { if (curShow && curShow.item && curShow.item.key === m.key && (curShow.owner == null || !sender.tab || sender.tab.id === curShow.owner)) curShow = null; } // sirf abhi dikhane wale tab ka 'end' maano
+  else if (m.type === 'end') { // khabar khatam — jis tab par abhi dikh rahi hai wahan bhi band karo
+    getCur().then((c) => { if (c && c.item && c.item.key === m.key) { const ow = c.owner; setCur(null); if (ow != null && (!sender.tab || sender.tab.id !== ow)) chrome.tabs.sendMessage(ow, { type: 'end', key: m.key }).catch(() => {}); } });
+  }
   else if (m.type === 'open') {
     (async () => {
       const d = await dashTab();

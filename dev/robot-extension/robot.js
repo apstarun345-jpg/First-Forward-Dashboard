@@ -54,12 +54,16 @@
     else pts = [from, [mx, Math.min(y0, y1) - 120], to];
     return pts.map((p) => clampP(g, p));
   }
+  let aborted = false, abortR = null;
+  function abortFun() { if (mode !== 'fun') return; aborted = true; try { if (abortR) abortR(); } catch { /* ignore */ } try { el.getAnimations().forEach((x) => x.cancel()); } catch { /* ignore */ } }
   async function fly(pts, ms) {
+    if (aborted) return;
     const last = pts[pts.length - 1];
     el.style.setProperty('--lean', `${Math.max(-14, Math.min(14, (last[0] - pts[0][0]) / 40))}deg`);
     el.classList.add('moving');
     const a = el.animate(pts.map((p, i) => ({ transform: tf(p), offset: i / (pts.length - 1) })), { duration: ms, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
     await Promise.race([new Promise((r) => { a.onfinish = r; a.oncancel = r; }), wait(ms + 400)]);
+    if (aborted) { el.classList.remove('moving'); return; }
     place(last); try { a.cancel(); } catch { /* ignore */ }
     el.classList.remove('moving');
   }
@@ -110,10 +114,10 @@
   // resume = dusre tab se aaye: udna nahi — wahi jagah, wahi board, typing wahin se jahan tak pahunchi thi, bacha hua time
   async function show(it, resume) {
     if (!it || blocked()) return;
-    if (busy) { if (!resume) return; if (skip) skip('swap'); let n = 0; while (busy && n++ < 40) await wait(100); }
+    if (busy) { if (!resume) return; if (skip) skip('swap'); abortFun(); let n = 0; while (busy && n++ < 120) await new Promise((r) => setTimeout(r, 25)); }
     busy = true; mode = 'show';
     const g = geo();
-    board.className = 'mc-board';
+    board.className = 'mc-board' + (resume ? ' instant' : '');
     board.innerHTML = `<div class="mc-bh"><span class="mc-ic">${esc(it.icon || '🤖')}</span><b>${esc(it.title)}</b></div><div class="mc-bb">${rowsHtml(it)}${it.foot ? `<div class="mc-foot">${esc(it.foot)}</div>` : ''}</div>${ctl(it.q ? '<span class="mc-go">Tap → dashboard par poori list</span>' : '')}`;
     board.style.width = `${g.BW}px`;
     const goLeft = resume && resume.side ? resume.side === 'right' : pos[0] + g.W / 2 > g.vw / 2, bh = board.offsetHeight || 180;
@@ -240,16 +244,17 @@
   let ai = Math.floor(Math.random() * ACTS.length);
   async function fun() {
     if (busy || mode !== 'dock' || blocked() || document.hidden) return;
-    busy = true; mode = 'fun';
+    busy = true; mode = 'fun'; aborted = false;
+    const abortP = new Promise((r) => { abortR = r; });
     const g = geo(), a = ACTS[ai++ % ACTS.length];
-    const act = async (cls, ms, mood) => { el.dataset.mood = mood; el.classList.add('rest', cls); confetti(mood); await wait(ms); el.classList.remove(cls, 'rest'); el.dataset.mood = ''; };
+    const act = async (cls, ms, mood) => { if (aborted) return; el.dataset.mood = mood; el.classList.add('rest', cls); confetti(mood); await Promise.race([wait(ms), abortP]); el.classList.remove(cls, 'rest'); el.dataset.mood = ''; };
     try {
       if (a === 'peek') { const right = Math.random() < 0.5; el.dataset.mood = 'fly'; await fly(path(pos, [right ? g.vw - g.W * 0.45 : -g.W * 0.55, rnd(60, g.maxY)], 'arc'), 2000); await act(right ? 'mc-peek-r' : 'mc-peek-l', 3200, 'curious'); }
       else if (a === 'moon') { el.dataset.mood = 'happy'; el.classList.add('rest', 'mc-moon'); await fly([pos, [Math.max(10, pos[0] - g.vw * 0.3), pos[1]]], 3400); el.classList.remove('mc-moon', 'rest'); }
       else if (a === 'mc-nap' || a === 'mc-wave') await act(a, 3600, a === 'mc-nap' ? 'sleepy' : 'happy');
       else { el.dataset.mood = 'fly'; await fly(path(pos, [rnd(g.vw * 0.2, g.vw * 0.8), rnd(g.vh * 0.3, g.maxY)], pick(['loop', 'zigzag', 'hop'])), 2400); await act(a, 3600, 'excited'); }
       if (!['mc-nap', 'mc-wave'].includes(a)) { el.dataset.mood = 'fly'; await fly(path(pos, dockPos(), 'arc'), 1800); el.dataset.mood = ''; }
-    } finally { busy = false; mode = 'dock'; }
+    } finally { el.classList.remove('rest', 'mc-disco', 'mc-spin', 'mc-wave', 'mc-robot', 'mc-nap', 'mc-peek-r', 'mc-peek-l', 'mc-moon'); aborted = false; busy = false; mode = 'dock'; }
   }
   setInterval(fun, 22000);
 
@@ -262,6 +267,7 @@
     if (m.type === 'show' && !document.hidden) show(m.item);
     if (m.type === 'resume' && m.item) show(m.item, { ms: Number(m.ms) || 4000, elapsed: Number(m.elapsed) || 0, fx: m.fx, fy: m.fy, side: m.side });
     if (m.type === 'drop' && current && current.key === m.key && skip) skip('moved');
+    if (m.type === 'end' && current && current.key === m.key && skip) skip('ended'); // asli (dashboard wali) khabar khatam
     if (m.type === 'answer' && m.item) show(m.item, { ms: m.item.stay || 12000, fresh: true });
     if (m.type === 'nodash' && !busy && !blocked() && !document.hidden && Math.random() < 0.2) show({ key: 'nodash', fun: true, mood: 'curious', icon: '📊', title: 'Dashboard band hai', head: 'Dashboard ka tab khula rakho — tabhi main har tab par updates de paunga 🙂', view: 'text', q: '#/', stay: 6000 });
   });

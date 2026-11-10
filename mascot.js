@@ -1156,6 +1156,7 @@
   async function fly(pts, ms, opts) {
     const o = opts || {};
     const last = pts[pts.length - 1];
+    if (aborted) return;
     if (!el.animate || reduced() || !ms) { place(last); return; }
     const dx = last[0] - pts[0][0];
     el.style.setProperty('--lean', `${Math.max(-14, Math.min(14, dx / 40))}deg`);
@@ -1163,6 +1164,7 @@
     const frames = pts.map((p, i) => ({ transform: tf(p, o.spin ? ` rotate(${Math.round((-360 * i) / (pts.length - 1))}deg)` : ''), offset: i / (pts.length - 1) }));
     const a = el.animate(frames, { duration: ms, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
     await Promise.race([new Promise((r) => { a.onfinish = r; a.oncancel = r; }), wait(ms + 400)]); // chhupe tab me animation ruk jaati hai — timeout
+    if (aborted) { el.classList.remove('moving'); return; } // masti beech me roki gayi (tab wapas aaya) — purani jagah par mat rakho
     place(last);
     try { a.cancel(); } catch { /* ignore */ }
     el.classList.remove('moving');
@@ -1312,7 +1314,7 @@
     const g = geo();
     el.dataset.mood = 'fly';
     board.innerHTML = boardHtml(it);
-    board.classList.remove('in', 'hist');
+    board.classList.remove('in', 'hist', 'instant');
     el.classList.remove('rest', 'talk');
     // jahan hai uske ulti taraf jao — left↔right, kabhi pehle upar
     const goLeft = rs && rs.side ? rs.side === 'right' : pos[0] + g.W / 2 > g.vw / 2;
@@ -1327,6 +1329,7 @@
     if (!rs) { clearTimeout(extSayT); stopSpeech(); } // purani / extension wali awaaz band — ab sirf isi board ki (resume me awaaz chhedna nahi)
     el.classList.add('holding');
     if (it.cls) el.classList.add(it.cls);
+    if (rs) board.classList.add('instant'); // resume: board turant (animation ke bina)
     board.classList.add('in');
     if (!rs) {
       try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
@@ -1772,20 +1775,25 @@
     return { key: `joke:${i}`, mood: 'laugh', icon, title, head, view: 'text', fun: true, stay: 7000, say: hi };
   }
   const DANCE = ['disco', 'moonwalk', 'spinjump', 'peek', 'nap', 'robot', 'wave'];
+  // ⚡ tab wapas aane par masti turant rukti hai (robot ko wahi jagah chahiye) — abortFun()
+  let aborted = false, abortR = null;
+  function abortFun() { if (mode !== 'fun') return; aborted = true; try { if (abortR) abortR(); } catch { /* ignore */ } try { el.getAnimations().forEach((x) => x.cancel()); } catch { /* ignore */ } }
   async function funAct() {
     const g = geo();
     const a = DANCE[(Number(cfg.dn) || 0) % DANCE.length]; cfg.dn = (Number(cfg.dn) || 0) + 1; save();
-    busy = true; mode = 'fun';
-    const go = async (to, style, ms) => { el.dataset.mood = 'fly'; el.classList.remove('rest'); await fly(path(pos, to, style), ms || 2200); };
+    busy = true; mode = 'fun'; aborted = false;
+    const abortP = new Promise((r) => { abortR = r; });
+    const RC = (pr) => (aborted ? Promise.resolve() : Promise.race([pr, abortP]));
+    const go = async (to, style, ms) => { if (aborted) return; el.dataset.mood = 'fly'; el.classList.remove('rest'); await RC(fly(path(pos, to, style), ms || 2200)); };
     const home = async () => { await go(dockPos(), 'arc', 1800); };
-    const act = async (cls, ms, mood) => { el.dataset.mood = mood || 'happy'; el.classList.add('rest', cls); confetti(mood || 'happy'); await wait(ms); el.classList.remove(cls); };
+    const act = async (cls, ms, mood) => { if (aborted) return; el.dataset.mood = mood || 'happy'; el.classList.add('rest', cls); confetti(mood || 'happy'); await RC(wait(ms)); el.classList.remove(cls); };
     try {
       if (a === 'disco') { await go([rnd(g.vw * 0.25, g.vw * 0.7), g.maxY], 'loop', 2600); await act('mc-disco', 4200, 'excited'); }
       else if (a === 'moonwalk') {
         const y = g.maxY, left = pos[0] > g.vw / 2;
         await go([left ? g.vw - g.W - 20 : 20, y], 'hop', 1600);
         el.classList.add('rest', 'mc-moon'); el.dataset.mood = 'happy';
-        await fly([pos, [left ? g.vw * 0.35 : g.vw * 0.6, y]], 3800); el.classList.remove('mc-moon');
+        await RC(fly([pos, [left ? g.vw * 0.35 : g.vw * 0.6, y]], 3800)); el.classList.remove('mc-moon');
       } else if (a === 'spinjump') { await go([rnd(g.vw * 0.2, g.vw * 0.8), rnd(g.minY + 80, g.maxY)], 'zigzag', 2400); await act('mc-spin', 2600, 'excited'); }
       else if (a === 'peek') {
         const right = Math.random() < 0.5, y = rnd(g.minY + 60, g.maxY);
@@ -1795,7 +1803,7 @@
       else if (a === 'robot') { await go([rnd(g.vw * 0.3, g.vw * 0.7), rnd(g.minY + 80, g.maxY)], 'up', 2600); await act('mc-robot', 4000, 'happy'); }
       else { await act('mc-wave', 2600, 'happy'); }
       if (a !== 'nap' && a !== 'wave') await home();
-    } finally { el.classList.remove('rest'); el.dataset.mood = ''; busy = false; mode = 'dock'; }
+    } finally { el.classList.remove('rest', 'mc-disco', 'mc-spin', 'mc-wave', 'mc-robot', 'mc-nap', 'mc-moon', 'mc-startle', 'mc-peek-r', 'mc-peek-l'); el.dataset.mood = ''; aborted = false; busy = false; mode = 'dock'; }
   }
 
   // ---------------------------------------------------------------- scheduler
@@ -1855,12 +1863,13 @@
       (async () => {
         if (!cfg.on || !allowed()) return;
         if (busy && current && current.key === m.item.key) { snapBoard(); return; } // yahi chal rahi thi — bas sahi jagah / poora board
-        let n = 0; if (busy && skip) skip('swap'); while (busy && n++ < 30) await wait(100);
+        let n = 0; if (busy && skip) skip('swap'); abortFun(); while (busy && n++ < 120) await new Promise((r) => setTimeout(r, 25));
         if (!busy) show({ ...m.item, say: '' }, { ms: Number(m.ms) || 4000, elapsed: Number(m.elapsed) || 0, fx: m.fx, fy: m.fy, side: m.side });
       })();
       return;
     }
     if (m.type === 'drop') return; // doosre tab ne le liya — yahan awaaz chalti rehne do (sound ek hi jagah se)
+    if (m.type === 'end') { if (current && current.key === m.key && skip) skip('ended'); return; } // dusre tab ke robot ki khabar khatam
     if (m.type === 'ask') { // 🧩 dusre tab ke robot ka sawaal → jawab wapas
       (async () => {
         let item;

@@ -8306,3 +8306,6 @@ html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 9
 #sq-panel .ms-panel-body .msp-dtable-wrap { max-height: calc(min(88vh, 920px) - 190px); overflow: auto; }
 #sq-panel .ms-panel-body thead th { position: sticky; top: 0; z-index: 2; background: var(--card, #fff); box-shadow: 0 1px 0 var(--line, #e5e7eb); }
 #sq-panel .ms-panel-body tbody tr:nth-child(even) td { background: rgba(99, 102, 241, .035); }
+
+/* v3.125.155 resume: board turant (tab badalne par) */
+.mc .mc-board.instant, .mc[data-side] .mc-board.instant { transition: none !important; animation: none !important; }

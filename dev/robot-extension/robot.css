@@ -262,3 +262,6 @@ html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 9
 .mc { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #0f172a; }
 .mc-board { --card: #fff; --text: #0f172a; --muted: #64748b; --line: #e2e8f0; }
 .mc-type.done::after { display: none; }
+
+/* v3.125.155 resume: board turant (tab badalne par) */
+.mc .mc-board.instant, .mc[data-side] .mc-board.instant { transition: none !important; animation: none !important; }
