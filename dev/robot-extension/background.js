@@ -15,12 +15,17 @@ async function injectOpenTabs() {
 chrome.runtime.onInstalled.addListener(() => { ensureAlarm(); injectOpenTabs(); });
 chrome.runtime.onStartup.addListener(ensureAlarm);
 let curShow = null;
+// 🎬 tab badla → jo khabar abhi board par chal rahi hai wahi, usi jagah, usi board side par, jahan tak pahunchi wahin se
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   if (!curShow) return;
-  const left = curShow.at + curShow.dur - Date.now();
-  if (left < 2500) return;
-  try { const t = await chrome.tabs.get(tabId); if (isDash(t.url)) return; } catch { return; }
-  chrome.tabs.sendMessage(tabId, { type: 'resume', item: curShow.item, ms: left }).catch(() => {});
+  const left = curShow.t0 + curShow.dur - Date.now();
+  if (left < 1500) { curShow = null; return; }
+  if (curShow.owner === tabId) return; // isi tab par already chal rahi
+  const prev = curShow.owner;
+  const msg = { type: 'resume', item: curShow.item, ms: left, elapsed: Date.now() - curShow.t0, fx: curShow.fx, fy: curShow.fy, side: curShow.side };
+  curShow.owner = tabId;
+  if (prev != null) chrome.tabs.sendMessage(prev, { type: 'drop', key: curShow.item && curShow.item.key }).catch(() => {});
+  chrome.tabs.sendMessage(tabId, msg).catch(() => { /* tab me robot / bridge abhi nahi — agli baar */ });
 });
 async function activeTab() { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return t; }
 async function dashTab() { const ts = await chrome.tabs.query({ url: `${DASH}*` }); return ts[0]; }
@@ -47,9 +52,14 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
   if (!m || !m.type) return;
   if (m.type === 'show') {
     // abhi chal rahi khabar yaad rakho — tab badle to naye tab me wahi (bacha hua time) turant
-    curShow = { item: m.item, at: Date.now(), dur: (m.item && m.item.stay ? m.item.stay : 11000) + 4500 };
+    const it = m.item || {}, typing = String(it.head || '').length * 28;
+    curShow = { item: it, t0: Date.now() + (m.st ? 0 : 2400), dur: Math.max(it.stay || 0, 10000) + typing + 1200, owner: sender.tab ? sender.tab.id : null, fx: m.st ? m.st.fx : undefined, fy: m.st ? m.st.fy : undefined, side: m.st ? m.st.side : undefined };
     addHist(m.item).then(() => toFront({ type: 'show', item: m.item }));
   }
+  else if (m.type === 'stage') { // jo tab dikha raha hai wo landing ke baad apni jagah batata hai
+    if (curShow && curShow.item && curShow.item.key === m.key) { curShow.fx = m.fx; curShow.fy = m.fy; curShow.side = m.side; curShow.t0 = m.t0 || Date.now(); if (sender.tab) curShow.owner = sender.tab.id; }
+  }
+  else if (m.type === 'end') { if (curShow && curShow.item && curShow.item.key === m.key && (curShow.owner == null || !sender.tab || sender.tab.id === curShow.owner)) curShow = null; } // sirf abhi dikhane wale tab ka 'end' maano
   else if (m.type === 'open') {
     (async () => {
       const d = await dashTab();

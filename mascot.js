@@ -1162,7 +1162,7 @@
     el.classList.add('moving');
     const frames = pts.map((p, i) => ({ transform: tf(p, o.spin ? ` rotate(${Math.round((-360 * i) / (pts.length - 1))}deg)` : ''), offset: i / (pts.length - 1) }));
     const a = el.animate(frames, { duration: ms, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
-    await new Promise((r) => { a.onfinish = r; a.oncancel = r; });
+    await Promise.race([new Promise((r) => { a.onfinish = r; a.oncancel = r; }), wait(ms + 400)]); // chhupe tab me animation ruk jaati hai — timeout
     place(last);
     try { a.cancel(); } catch { /* ignore */ }
     el.classList.remove('moving');
@@ -1200,12 +1200,12 @@
   }
   const sideFor = (g) => (pos[0] + g.W / 2 > g.vw / 2 ? 'left' : 'right');
 
-  function typewriter() {
+  function typewriter(from) {
     const t = board.querySelector('.mc-type'); if (!t) return Promise.resolve();
     const s = t.dataset.text || '';
     if (reduced()) { t.textContent = s; return Promise.resolve(); }
     return new Promise((r) => {
-      let i = 0; el.classList.add('talk');
+      let i = Math.max(0, Math.min(s.length - 1, from || 0)); el.classList.add('talk');
       const step = () => { i += 1; t.textContent = s.slice(0, i); if (i < s.length) tw().setTimeout(step, 28); else { t.classList.add('done'); if (!talking) el.classList.remove('talk'); r(); } };
       step();
     });
@@ -1304,7 +1304,8 @@
   }
 
   // ---------------------------------------------------------------- announce one update
-  async function show(it) {
+  // rs = dusre tab se wapas aaye: udna / bolna / history nahi — wahi jagah, wahi board, typing wahin se, bacha hua time
+  async function show(it, rs) {
     if (busy || !it) return '';
     busy = true; current = it; build(); closeHist();
     mode = 'show';
@@ -1314,23 +1315,39 @@
     board.classList.remove('in', 'hist');
     el.classList.remove('rest', 'talk');
     // jahan hai uske ulti taraf jao — left↔right, kabhi pehle upar
-    const goLeft = pos[0] + g.W / 2 > g.vw / 2;
+    const goLeft = rs && rs.side ? rs.side === 'right' : pos[0] + g.W / 2 > g.vw / 2;
     board.style.width = `${g.BW}px`;
     const bh = board.offsetHeight || 170;
     const yLo = Math.min(g.maxY, g.minY + bh - g.W * 0.85 + 10);
-    const rest = pipWin ? dockPos() : [goLeft ? 12 : g.vw - g.W - 12, Math.round(rnd(Math.min(yLo, g.maxY), g.maxY))];
+    const rest = pipWin ? dockPos() : rs && rs.fx != null ? [Math.max(6, Math.min(g.vw - g.W - 6, rs.fx * g.vw)), Math.max(g.minY, Math.min(g.maxY, rs.fy * g.vh))] : [goLeft ? 12 : g.vw - g.W - 12, Math.round(rnd(Math.min(yLo, g.maxY), g.maxY))];
     const style = pick(['arc', 'zigzag', 'loop', 'up', 'hop']);
-    await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
+    if (rs) place(rest); else await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
     layoutBoard(g, pipWin ? 'pip' : goLeft ? 'right' : 'left');
-    dance(it.mood);
-    clearTimeout(extSayT); stopSpeech(); // purani / extension wali awaaz band — ab sirf isi board ki
+    if (rs) { el.dataset.mood = it.mood || 'happy'; el.classList.add('rest'); } else dance(it.mood);
+    if (!rs) { clearTimeout(extSayT); stopSpeech(); } // purani / extension wali awaaz band — ab sirf isi board ki (resume me awaaz chhedna nahi)
     el.classList.add('holding');
     if (it.cls) el.classList.add(it.cls);
     board.classList.add('in');
-    try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
-    if (/^srv:/.test(it.key || '')) { cfg.srvIdx = (Number(cfg.srvIdx) || 0) + 1; save(); }
-    if (!it.fun) { histAdd(it); pushRobot(it); } // masti/jokes history / push me nahi
-    toExt(it);
+    if (!rs) {
+      try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
+      if (/^srv:/.test(it.key || '')) { cfg.srvIdx = (Number(cfg.srvIdx) || 0) + 1; save(); }
+      if (!it.fun) { histAdd(it); pushRobot(it); } // masti/jokes history / push me nahi
+      toExt(it);
+    }
+    if (rs) {
+      // 🎬 dusre tab se wapas: board seedha poora, typing wahin se; bolna nahi (awaaz wahi pehle wali chal rahi hai)
+      const t = board.querySelector('.mc-type'), full = t ? (t.dataset.text || '') : '', from = Math.floor((rs.elapsed || 0) / 28);
+      if (t && from >= full.length) { t.textContent = full; t.classList.add('done'); } else if (t) { t.textContent = full.slice(0, from); typewriter(from); }
+      if (it.view === 'quiz' && rs.ms < 9000) board.classList.add('reveal');
+      let reasonR = ''; const endedR = new Promise((res) => { skip = (why) => { reasonR = why || 'skip'; res(); }; });
+      await Promise.race([wait(Math.max(1500, rs.ms)), endedR]);
+      skip = null; stopSpeech();
+      board.classList.remove('in'); el.classList.remove('holding', 'rest'); if (it.cls) el.classList.remove(it.cls);
+      extEnd(it); el.dataset.mood = 'fly'; await wait(250);
+      await fly(path(pos, dockPos(), 'arc'), 1700);
+      el.dataset.mood = ''; current = null; busy = false; hover = false; mode = 'dock';
+      return reasonR;
+    }
     await wait(480); // 🔄 v3.125.151: board poora khul jaye (transition .45s) — tab hi koi awaaz
     let reason = '';
     const ended = new Promise((res) => { skip = (why) => { reason = why || 'skip'; res(); }; });
@@ -1347,7 +1364,7 @@
     const minStay = wait(it.stay || Math.max(10000, String(it.say || '').length * 60)); // kam se kam 10 sec board
     const stay = (async () => { await Promise.all([spoken, minStay]); while (hover && !reason) await wait(500); })();
     await Promise.race([stay, ended]);
-    skip = null; stopSpeech();
+    skip = null; stopSpeech(); extEnd(it);
     board.classList.remove('in'); el.classList.remove('holding');
     if (it.cls) el.classList.remove(it.cls);
     el.dataset.mood = 'fly';
@@ -1812,12 +1829,21 @@
   }
   // 🧩 Chrome extension "Gems Robot" laga ho → baaki saare tabs par sirf robot (bina window); ye tab dimaag
   const extOn = () => document.documentElement.dataset.ffRobotExt === '1';
-  function toExt(it) {
+  function extEnd(it) { if (!extOn() || !it) return; try { window.postMessage({ source: 'ff-robot-page', msg: { type: 'end', key: it.key } }, location.origin); } catch { /* ignore */ } }
+  function toExt(it, stageOnly) {
     if (!extOn() || !it) return;
     const slim = { key: it.key, mood: it.mood, icon: it.icon, title: it.title, head: it.head, view: it.view, big: it.big, prog: it.prog, foot: it.foot, q: it.q, fun: !!it.fun, stay: it.stay, quiz: it.quiz, fx: it.fx, cls: it.cls,
       rows: (it.rows || []).slice(0, 7).map((r) => ({ name: r.name, sub: r.sub, val: r.val, w: r.w, tone: r.tone })) };
-    try { window.postMessage({ source: 'ff-robot-page', msg: { type: 'show', item: slim } }, location.origin); } catch { /* ignore */ }
+    // 🎬 jagah + board ki taraf (viewport ke fraction me) — dusre tab par robot bilkul yahin aaye
+    let st = null; try { const g = geo(); st = { fx: +(pos[0] / g.vw).toFixed(4), fy: +(pos[1] / g.vh).toFixed(4), side: el && el.dataset.side === 'right' ? 'right' : 'left' }; } catch { st = null; }
+    try { window.postMessage({ source: 'ff-robot-page', msg: stageOnly ? { type: 'stage', key: it.key, ...st, t0: Date.now() } : { type: 'show', item: slim, st } }, location.origin); } catch { /* ignore */ }
   }
+  // tab wapas dikha: chal rahi khabar ka board poora + sahi jagah (chhupe tab me animation / typing ruk jaati hai)
+  function snapBoard() {
+    if (!el || mode !== 'show' || !board) return;
+    try { const t = board.querySelector('.mc-type'); if (t && t.dataset.text && !t.classList.contains('done')) { t.textContent = t.dataset.text; t.classList.add('done'); } el.classList.remove('moving'); layoutBoard(geo(), el.dataset.side || 'left'); } catch { /* ignore */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(snapBoard, 80); });
   let extTurn = 0, extSayT = 0;
   // 🧩 dusre tab wala robot pehle ~2.2s udta hai, phir board khulta hai → awaaz tab hi (aage-peeche nahi)
   function extSay(text) { clearTimeout(extSayT); extSayT = setTimeout(() => { if (!busy) say(text); }, 2800); }
@@ -1825,6 +1851,16 @@
     if (e.source !== window || !e.data || e.data.source !== 'ff-robot-ext' || !e.data.msg) return;
     const m = e.data.msg;
     if (m.type === 'open') { runQ(m.q || ''); return; }
+    if (m.type === 'resume' && m.item) { // 🎬 dusre tab se dashboard par wapas: wahi jagah, wahi board
+      (async () => {
+        if (!cfg.on || !allowed()) return;
+        if (busy && current && current.key === m.item.key) { snapBoard(); return; } // yahi chal rahi thi — bas sahi jagah / poora board
+        let n = 0; if (busy && skip) skip('swap'); while (busy && n++ < 30) await wait(100);
+        if (!busy) show({ ...m.item, say: '' }, { ms: Number(m.ms) || 4000, elapsed: Number(m.elapsed) || 0, fx: m.fx, fy: m.fy, side: m.side });
+      })();
+      return;
+    }
+    if (m.type === 'drop') return; // doosre tab ne le liya — yahan awaaz chalti rehne do (sound ek hi jagah se)
     if (m.type === 'ask') { // 🧩 dusre tab ke robot ka sawaal → jawab wapas
       (async () => {
         let item;

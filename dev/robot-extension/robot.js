@@ -59,7 +59,7 @@
     el.style.setProperty('--lean', `${Math.max(-14, Math.min(14, (last[0] - pts[0][0]) / 40))}deg`);
     el.classList.add('moving');
     const a = el.animate(pts.map((p, i) => ({ transform: tf(p), offset: i / (pts.length - 1) })), { duration: ms, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
-    await new Promise((r) => { a.onfinish = r; a.oncancel = r; });
+    await Promise.race([new Promise((r) => { a.onfinish = r; a.oncancel = r; }), wait(ms + 400)]);
     place(last); try { a.cancel(); } catch { /* ignore */ }
     el.classList.remove('moving');
   }
@@ -95,15 +95,19 @@
     if (it.view === 'big') return `<div class="mc-big"><b>${esc(it.big)}</b><span>${esc(it.head)}</span></div>${it.prog != null ? `<div class="mc-prog"><i style="width:${it.prog}%"></i></div>` : ''}${rows.length ? `<div class="mc-chips">${rows.map((r) => `<span class="mc-chip"><small>${esc(r.name)}</small> <b>${esc(r.val)}</b></span>`).join('')}</div>` : ''}`;
     return `<div class="mc-headline"><span class="mc-type" data-text="${esc(it.head)}"></span></div><ol class="mc-rows">${rows.map((r, i) => `<li style="--d:${0.5 + i * 0.2}s">${it.view === 'bars' ? `<i class="mc-bar" style="--w:${Math.max(8, Math.round((r.w || 0) / max * 100))}%"></i>` : ''}<span class="mc-n">${esc(r.name)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><b class="mc-v ${esc(r.tone || '')}">${esc(r.val)}</b></li>`).join('')}</ol>`;
   }
-  function typewriter() {
+  function typewriter(from) {
     const t = board.querySelector('.mc-type'); if (!t) return Promise.resolve();
     const s = t.dataset.text || '';
-    return new Promise((r) => { let i = 0; el.classList.add('talk'); const step = () => { i += 1; t.textContent = s.slice(0, i); if (i < s.length) setTimeout(step, 26); else { t.classList.add('done'); el.classList.remove('talk'); r(); } }; step(); });
+    return new Promise((r) => { let i = Math.max(0, Math.min(s.length - 1, from || 0)); el.classList.add('talk'); const step = () => { i += 1; t.textContent = s.slice(0, i); if (i < s.length) setTimeout(step, 26); else { t.classList.add('done'); el.classList.remove('talk'); r(); } }; step(); });
   }
   const ctl = (extra) => `<div class="mc-ctl">${extra || '<span class="mc-go"></span>'}<button type="button" data-k="dash" title="Dashboard kholo">📊</button><button type="button" data-k="menu" title="Settings">⚙</button><button type="button" data-k="close" title="Band">✕</button></div>
     <div class="mc-menu" hidden><button type="button" data-k="site">🚫 Is site (${esc(host)}) par mat dikhao</button><button type="button" data-k="today">😴 Aaj ke liye chhupao</button><button type="button" data-k="home">🏠 Wapas kone me</button></div>`;
 
-  // resume = dusre tab se aaye: udna / typing nahi — wahi board turant, bacha hua time
+  // 🎬 shared stage: jagah (viewport ka fraction) + board ki taraf + kab khula — har tab par bilkul wahi dikhe
+  const frac = (g) => ({ fx: +(pos[0] / g.vw).toFixed(4), fy: +(pos[1] / g.vh).toFixed(4) });
+  function sendStage(it) { try { const g = geo(); chrome.runtime.sendMessage({ type: 'stage', key: it.key, ...frac(g), side: el.dataset.side || 'left', t0: Date.now() }).catch(() => {}); } catch { /* ignore */ } }
+  function sendEnd(it) { try { chrome.runtime.sendMessage({ type: 'end', key: it.key }).catch(() => {}); } catch { /* ignore */ } }
+  // resume = dusre tab se aaye: udna nahi — wahi jagah, wahi board, typing wahin se jahan tak pahunchi thi, bacha hua time
   async function show(it, resume) {
     if (!it || blocked()) return;
     if (busy) { if (!resume) return; if (skip) skip('swap'); let n = 0; while (busy && n++ < 40) await wait(100); }
@@ -112,20 +116,25 @@
     board.className = 'mc-board';
     board.innerHTML = `<div class="mc-bh"><span class="mc-ic">${esc(it.icon || '🤖')}</span><b>${esc(it.title)}</b></div><div class="mc-bb">${rowsHtml(it)}${it.foot ? `<div class="mc-foot">${esc(it.foot)}</div>` : ''}</div>${ctl(it.q ? '<span class="mc-go">Tap → dashboard par poori list</span>' : '')}`;
     board.style.width = `${g.BW}px`;
-    const goLeft = pos[0] + g.W / 2 > g.vw / 2, bh = board.offsetHeight || 180;
-    const rest = [goLeft ? 14 : g.vw - g.W - 14, Math.round(rnd(Math.min(g.maxY, bh - g.W * 0.85 + 20), g.maxY))];
+    const goLeft = resume && resume.side ? resume.side === 'right' : pos[0] + g.W / 2 > g.vw / 2, bh = board.offsetHeight || 180;
+    const rest = resume && resume.fx != null ? clampP(g, [resume.fx * g.vw, resume.fy * g.vh]) : [goLeft ? 14 : g.vw - g.W - 14, Math.round(rnd(Math.min(g.maxY, bh - g.W * 0.85 + 20), g.maxY))];
     el.dataset.mood = 'fly'; el.classList.remove('rest');
     if (resume) place(rest); else await fly(path(pos, rest, pick(['arc', 'zigzag', 'loop', 'hop'])), 2200);
     layoutBoard(g, goLeft ? 'right' : 'left');
-    el.dataset.mood = it.mood || 'happy'; el.classList.add('rest', 'holding'); confetti(it.mood);
-    current = it;
+    el.dataset.mood = it.mood || 'happy'; el.classList.add('rest', 'holding'); if (!resume) confetti(it.mood);
+    current = it; if (!resume) sendStage(it);
     setTimeout(() => board.classList.add('in'), 30);
     let reason = '';
     const ended = new Promise((res) => { skip = (why) => { reason = why || 'skip'; res(); }; });
     if (it.fx) confetti(it.fx);
     if (it.cls) el.classList.add(it.cls);
     const stay = (async () => {
-      if (resume) { const t = board.querySelector('.mc-type'); if (t) { t.textContent = t.dataset.text || ''; t.classList.add('done'); } if (it.view === 'quiz' && resume.ms < 9000) board.classList.add('reveal'); await wait(Math.max(2500, resume.ms)); }
+      if (resume) {
+        const t = board.querySelector('.mc-type'), full = t ? (t.dataset.text || '') : '', from = Math.floor((resume.elapsed || 0) / 26);
+        if (t && from >= full.length) { t.textContent = full; t.classList.add('done'); } else if (t) { t.textContent = full.slice(0, from); typewriter(from); }
+        if (it.view === 'quiz' && resume.ms < 9000) board.classList.add('reveal');
+        await wait(Math.max(1500, resume.ms));
+      }
       else {
         await typewriter();
         if (it.view === 'quiz') { board.classList.add('quiz-run'); await wait(5000); board.classList.add('reveal'); el.dataset.mood = 'happy'; confetti('happy'); }
@@ -136,8 +145,9 @@
     await Promise.race([stay, ended]);
     skip = null; current = null;
     board.classList.remove('in'); el.classList.remove('holding', 'rest'); if (it.cls) el.classList.remove(it.cls); el.dataset.mood = 'fly';
-    await wait(250);
-    await fly(path(pos, dockPos(), 'arc'), 1600);
+    if (reason !== 'moved') sendEnd(it); // 'moved' = dusre tab ne le liya — show khatam nahi hua
+    if (document.hidden || reason === 'moved') place(dockPos()); // chhupe tab me udna nahi
+    else { await wait(250); await fly(path(pos, dockPos(), 'arc'), 1600); }
     el.dataset.mood = ''; busy = false; mode = 'dock';
     if (!it.fun) el.querySelector('.mc-dot').hidden = false;
   }
@@ -222,6 +232,8 @@
   bot.addEventListener('click', (e) => { e.stopPropagation(); if (dragged) { dragged = false; return; } if (mode === 'show') { el.dataset.mood = 'laugh'; confetti('laugh'); return; } if (mode === 'hist') closeHist(); else openHist(); });
   document.addEventListener('click', (e) => { if (mode === 'hist' && !e.composedPath().includes(hostEl)) closeHist(); }, true);
   window.addEventListener('resize', () => { if (mode === 'dock') place(dockPos()); });
+  // tab chhupte hi (user dusre tab gaya) is tab ka robot chupchap dock — board wahan dikhta rahe to galat
+  document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'show' && skip) skip('moved'); });
 
   // 🎭 masti jab khaali ho — kabhi khada nahi
   const ACTS = ['mc-disco', 'mc-spin', 'mc-wave', 'mc-robot', 'mc-nap', 'peek', 'moon'];
@@ -248,7 +260,8 @@
   chrome.runtime.onMessage.addListener((m) => {
     if (!m) return;
     if (m.type === 'show' && !document.hidden) show(m.item);
-    if (m.type === 'resume' && m.item) show(m.item, { ms: Number(m.ms) || 4000 });
+    if (m.type === 'resume' && m.item) show(m.item, { ms: Number(m.ms) || 4000, elapsed: Number(m.elapsed) || 0, fx: m.fx, fy: m.fy, side: m.side });
+    if (m.type === 'drop' && current && current.key === m.key && skip) skip('moved');
     if (m.type === 'answer' && m.item) show(m.item, { ms: m.item.stay || 12000, fresh: true });
     if (m.type === 'nodash' && !busy && !blocked() && !document.hidden && Math.random() < 0.2) show({ key: 'nodash', fun: true, mood: 'curious', icon: '📊', title: 'Dashboard band hai', head: 'Dashboard ka tab khula rakho — tabhi main har tab par updates de paunga 🙂', view: 'text', q: '#/', stay: 6000 });
   });
