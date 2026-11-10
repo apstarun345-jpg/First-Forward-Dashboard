@@ -128,6 +128,7 @@
     el.dataset.mood = it.mood || 'happy'; el.classList.add('rest', 'holding'); if (!resume) confetti(it.mood);
     current = it; if (!resume) sendStage(it);
     setTimeout(() => board.classList.add('in'), 30);
+    if (!resume || resume.fresh) setTimeout(() => { try { chrome.runtime.sendMessage({ type: 'shown', key: it.key }).catch(() => {}); } catch { /* ignore */ } }, 420); // board dikh gaya → ab dashboard awaaz chalaye
     let reason = '';
     const ended = new Promise((res) => { skip = (why) => { reason = why || 'skip'; res(); }; });
     if (it.fx) confetti(it.fx);

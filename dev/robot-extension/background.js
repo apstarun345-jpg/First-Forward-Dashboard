@@ -60,6 +60,7 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
     setCur({ item: it, t0: Date.now() + (m.st ? 0 : 2400), dur: m.st ? 90000 : Math.max(it.stay || 0, 10000) + typing + 1200, owner: sender.tab ? sender.tab.id : null, fx: m.st ? m.st.fx : undefined, fy: m.st ? m.st.fy : undefined, side: m.st ? m.st.side : undefined });
     addHist(m.item).then(() => toFront({ type: 'show', item: m.item }));
   }
+  else if (m.type === 'shown') { dashTab().then((d) => { if (d) chrome.tabs.sendMessage(d.id, { type: 'speak', key: m.key }).catch(() => {}); }); }
   else if (m.type === 'stage') { // jo tab dikha raha hai wo landing ke baad apni jagah batata hai
     getCur().then((c) => { if (c && c.item && c.item.key === m.key) { c.fx = m.fx; c.fy = m.fy; c.side = m.side; c.t0 = m.t0 || Date.now(); if (sender.tab) c.owner = sender.tab.id; setCur(c); } });
   }

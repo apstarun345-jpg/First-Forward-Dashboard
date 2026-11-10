@@ -1539,7 +1539,7 @@ FF.pages = FF.pages || {};
       paintLive();
       if (ui.ready && liveRows.length) {
         const st2 = streams(ui.sf.rows, liveRows, liveSourceReady);
-        ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv }; homeRows = { rows: st2.rows, at: Date.now() };
+        ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv }; homeRows = { rows: st2.rows, at: Date.now(), get ctx() { return ui.ctx; } };
         ui.sc = M.summary(st2.rows, ui.ctx.curKey);
         ui.liveToday = st2.gvLiveAdded;
         paintMonth();
@@ -1752,7 +1752,7 @@ FF.pages = FF.pages || {};
       paintLive();
       if (ui.ready) {
         const st2 = streams(ui.sf.rows, liveRows, true);
-        ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv }; homeRows = { rows: st2.rows, at: Date.now() };
+        ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv }; homeRows = { rows: st2.rows, at: Date.now(), get ctx() { return ui.ctx; } };
         ui.sc = M.summary(st2.rows, ui.ctx.curKey);
         ui.liveToday = true;
         paintMonth();
@@ -1802,7 +1802,7 @@ FF.pages = FF.pages || {};
       if (ui.ready) {
         // `st` is the already-built stream object, so pass its rows (not the wrapper) back in.
         const st2 = streams(st.rows, liveRows, liveSourceReady);
-        ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv }; homeRows = { rows: st2.rows, at: Date.now() };
+        ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv }; homeRows = { rows: st2.rows, at: Date.now(), get ctx() { return ui.ctx; } };
         ui.sc = M.summary(st2.rows, ui.ctx.curKey);
         ui.liveToday = st2.gvLiveAdded;
         paintAll();
@@ -1818,7 +1818,7 @@ FF.pages = FF.pages || {};
     const ctx = monthContext(st.rows);
     const sf = { rows: st.rows, ff: st.ff, gv: st.gv };
     const sc = M.summary(st.rows, ctx.curKey);
-    ui.ready = true; ui.daily = M.eirOnlyDaily(daily || []); ui.sf = sf; homeRows = { rows: sf.rows, at: Date.now() }; ui.ctx = ctx; ui.sc = sc; ui.liveToday = st.gvLiveAdded;
+    ui.ready = true; ui.daily = M.eirOnlyDaily(daily || []); ui.sf = sf; homeRows = { rows: sf.rows, at: Date.now(), get ctx() { return ui.ctx; } }; ui.ctx = ctx; ui.sc = sc; ui.liveToday = st.gvLiveAdded;
     paintMonth();
     paintLive();   // Expected Today ab EIR weekdays se
     paintTargetAchievement();

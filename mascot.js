@@ -245,8 +245,8 @@
     const cur = U.reportYm(), prev = U.prevMonthKey ? U.prevMonthKey(cur) : '';
     // 🔢 v3.125.153: total wahi jo Home "MTD total" dikhata hai — Home ki rows (FF + GV + aaj ka GV live).
     // Home abhi tak nahi bana to wahi store 'daily' (dono channel). GV agents ke naam ke liye GV issuance rows.
-    let all = [];
-    try { const h = FF.pages && FF.pages.home && FF.pages.home.monthRows && FF.pages.home.monthRows(); if (h && h.rows && h.rows.length) all = h.rows; } catch { all = []; }
+    let all = [], hCtx = null;
+    try { const h = FF.pages && FF.pages.home && FF.pages.home.monthRows && FF.pages.home.monthRows(); if (h && h.rows && h.rows.length) { all = h.rows; hCtx = h.ctx || null; } } catch { all = []; }
     if (!all.length) try { all = (FF.store && FF.store.get && FF.store.get('daily')) || []; } catch { all = []; }
     const ff = all.filter((r) => r.channel !== 'GV Partner');
     let gv = all.filter((r) => r.channel === 'GV Partner');
@@ -254,7 +254,10 @@
     try { gvNames = (FF.gv && FF.gv.issuanceRows ? FF.gv.issuanceRows() : []) || []; } catch { gvNames = []; }
     if (!gv.length && gvNames.length) { gv = gvNames; gvNames = []; } // store me GV nahi (sirf GV user) → GV rows hi
     if (!ff.length && !gv.length) return null;
-    const blank = () => ({ total: 0, vc4: 0, vc20: 0, vc5: 0, rep: 0, days: new Map(), agents: new Map(), prevTotal: 0, prevSame: 0, lastDay: 0 });
+    // 📅 Home jaisa: total = abhi tak (GV ka aaj ka live bhi), lekin run-rate / andaaza / din-wise = kal tak (report-cutoff). Home ka observedDay.
+    const dim0 = U.daysInMonth ? U.daysInMonth(cur) : 30;
+    const rd = Math.max(1, Math.min(dim0, Number(hCtx && hCtx.observedDay) || (new Date().getDate() - 1) || 1));
+    const blank = () => ({ total: 0, vc4: 0, vc20: 0, vc5: 0, rep: 0, days: new Map(), agents: new Map(), prevTotal: 0, prevSame: 0, lastDay: 0, rd, r: { total: 0, vc4: 0, vc20: 0, vc5: 0 }, todayGv: 0 });
     const out = { ff: blank(), gv: blank(), all: blank(), cur, prev };
     const add = (ch, r) => {
       const q = Number(r.n) || 0; if (!q) return;
@@ -263,8 +266,8 @@
         if (r.ym === cur) {
           o.total += q; o[cls] += q;
           if (String(r.type || '').toUpperCase() === 'REPLACEMENT') o.rep += q;
-          const d = o.days.get(r.day) || { total: 0, vc4: 0, vc20: 0, vc5: 0 }; d.total += q; d[cls] += q; o.days.set(r.day, d);
-          if (r.day > o.lastDay) o.lastDay = r.day;
+          if (r.day <= rd) { const d = o.days.get(r.day) || { total: 0, vc4: 0, vc20: 0, vc5: 0 }; d.total += q; d[cls] += q; o.days.set(r.day, d); }
+          if (r.day <= rd) { o.r.total += q; o.r[cls] += q; if (r.day > o.lastDay) o.lastDay = r.day; } else o.todayGv += q;
           const name = r.agentName || r.agentId || '?', a = o.agents.get(`${ch}|${name}`) || { name, ch, total: 0, vc4: 0, vc20: 0, vc5: 0, rep: 0 };
           a.total += q; a[cls] += q; if (String(r.type || '').toUpperCase() === 'REPLACEMENT') a.rep += q; o.agents.set(`${ch}|${name}`, a);
         } else if (r.ym === prev) { o.prevTotal += q; o.__prevDays = o.__prevDays || []; o.__prevDays.push([r.day, q]); }
@@ -281,9 +284,9 @@
     }
     const dim = U.daysInMonth ? U.daysInMonth(cur) : 30;
     for (const k of ['ff', 'gv', 'all']) {
-      const o = out[k], days = Math.max(1, o.lastDay);
-      o.prevSame = (o.__prevDays || []).filter(([d]) => d <= o.lastDay).reduce((m, [, q]) => m + q, 0);
-      o.rate = { total: o.total / days, vc4: o.vc4 / days, vc20: o.vc20 / days, vc5: o.vc5 / days };
+      const o = out[k], days = rd;
+      o.prevSame = (o.__prevDays || []).filter(([d]) => d <= rd).reduce((m, [, q]) => m + q, 0);
+      o.rate = { total: o.r.total / days, vc4: o.r.vc4 / days, vc20: o.r.vc20 / days, vc5: o.r.vc5 / days };
       o.exp = { total: Math.round(o.rate.total * dim), vc4: Math.round(o.rate.vc4 * dim), vc20: Math.round(o.rate.vc20 * dim), vc5: Math.round(o.rate.vc5 * dim) };
       o.dim = dim;
     }
@@ -298,7 +301,7 @@
     function runRateNow() {
       const m = monthStats(); if (!m || !m.all.total) return null;
       const a = m.all;
-      return { key: 'rr', mood: 'info', icon: '⚡', title: 'Abhi ka run-rate', view: 'big', big: `${r1(a.rate.total)}/din`, head: `${a.lastDay} din me ${fmt(a.total)} tags`,
+      return { key: 'rr', mood: 'info', icon: '⚡', title: 'Abhi ka run-rate', view: 'big', big: `${r1(a.rate.total)}/din`, head: `kal tak ${a.rd} din me ${fmt(a.r.total)} tags`,
         rows: [{ name: 'VC4', val: `${r1(a.rate.vc4)}/din` }, { name: 'VC20', val: `${r1(a.rate.vc20)}/din` }, { name: 'VC5+', val: `${r1(a.rate.vc5)}/din` }, { name: 'First Forward', val: `${r1(m.ff.rate.total)}/din` }, { name: 'GV Partner', val: `${r1(m.gv.rate.total)}/din` }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
         foot: `Isi speed se mahine ka andaaza ≈ ${fmt(a.exp.total)}`,
         say: `अभी हमारा रन रेट रोज़ लगभग ${fmt(a.rate.total)} टैग्स का है। इसमें वी सी 4 रोज़ ${r1(a.rate.vc4)}, वी सी 20 रोज़ ${r1(a.rate.vc20)}, और वी सी 5 प्लस रोज़ ${r1(a.rate.vc5)}। फ़र्स्ट फ़ॉरवर्ड रोज़ ${fmt(m.ff.rate.total)} और जी वी पार्टनर रोज़ ${fmt(m.gv.rate.total)} कर रहे हैं।`, q: 'runrate|all' };
@@ -306,11 +309,11 @@
     function expected() {
       const m = monthStats(); if (!m || !m.all.total) return null;
       const a = m.all, g = a.prevTotal ? Math.round(((a.exp.total - a.prevTotal) / a.prevTotal) * 100) : null;
-      const sp = a.prevSame ? Math.round(((a.total - a.prevSame) / a.prevSame) * 100) : null;
+      const sp = a.prevSame ? Math.round(((a.r.total - a.prevSame) / a.prevSame) * 100) : null;
       return { key: 'exp', mood: g != null && g < 0 ? 'alert' : 'excited', icon: '🎯', title: 'Is mahine ka andaaza', view: 'big', big: fmt(a.exp.total), head: `last month ${fmt(a.prevTotal)}${g != null ? ` · ${pct(g)}` : ''}`,
         rows: [{ name: 'VC4', val: fmt(a.exp.vc4) }, { name: 'VC20', val: fmt(a.exp.vc20) }, { name: 'VC5+', val: fmt(a.exp.vc5) }, { name: 'First Forward', val: fmt(m.ff.exp.total) }, { name: 'GV Partner', val: fmt(m.gv.exp.total) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
         prog: a.exp.total ? Math.min(100, Math.round((a.total / a.exp.total) * 100)) : 0,
-        foot: sp != null ? `Pichle mahine ke isi din (${a.lastDay}) tak ${fmt(a.prevSame)} the — abhi ${fmt(a.total)} (${pct(sp)})` : '',
+        foot: sp != null ? `Pichle mahine ke isi din (${a.rd}) tak ${fmt(a.prevSame)} the — ab tak ${fmt(a.r.total)} (${pct(sp)})` : '',
         say: `इसी स्पीड से चले तो इस महीने लगभग ${fmt(a.exp.total)} टैग्स होंगे${g != null ? `, जो पिछले महीने से ${Math.abs(g)} प्रतिशत ${g >= 0 ? 'ज़्यादा' : 'कम'} है` : ''}। वी सी 4 लगभग ${fmt(a.exp.vc4)}, वी सी 20 लगभग ${fmt(a.exp.vc20)}, और वी सी 5 प्लस लगभग ${fmt(a.exp.vc5)}।${sp != null ? ` पिछले महीने इसी दिन तक ${fmt(a.prevSame)} थे, अभी ${fmt(a.total)} हैं।` : ''}`, q: 'summary|all' };
     },
     function bestDays() {
@@ -1080,8 +1083,8 @@
     return { voice: pick ? pick.v : null, name: pick ? pick.name : '', nat: pick ? pick.nat : 9, pitch, rate, preset };
   }
   try { if ('speechSynthesis' in window) window.speechSynthesis.getVoices(); } catch { /* ignore */ }
-  let talking = false;
-  function stopSpeech() { try { if (talking && window.speechSynthesis) window.speechSynthesis.cancel(); } catch { /* ignore */ } talking = false; if (el) el.classList.remove('talk'); }
+  let talking = false, sayGen = 0;
+  function stopSpeech() { sayGen += 1; try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch { /* ignore */ } talking = false; if (el) el.classList.remove('talk'); }
   // insaan jaisa: lambe vaakya comma par tod ke chhote tukde (saans), har tukde ke beech halka viraam
   function chunks(t) {
     const out = [];
@@ -1100,8 +1103,9 @@
       if ((!cfg.sound && !force) || !text || !act || !('speechSynthesis' in window)) return resolve(false);
       const parts = chunks(toSpeech(text));
       if (!parts.length) return resolve(false);
-      let left = parts.length, fin = false;
-      const done = () => { if (fin) return; fin = true; talking = false; if (el) el.classList.remove('talk'); resolve(true); };
+      let left = parts.length, fin = false, poll = 0;
+      const my = ++sayGen, t0 = Date.now();
+      const done = (ok) => { if (fin) return; fin = true; clearInterval(poll); if (my === sayGen) { talking = false; if (el) el.classList.remove('talk'); } resolve(ok !== false && my === sayGen); };
       talking = true; if (el) el.classList.add('talk');
       try {
         window.speechSynthesis.cancel();
@@ -1110,15 +1114,19 @@
           const u = new SpeechSynthesisUtterance(part);
           if (plan.voice) u.voice = plan.voice;
           u.lang = (plan.voice && plan.voice.lang) || 'hi-IN';
-          // halka utaar-chadhaav: sawaal par thoda upar, aakhri tukda thoda dheema — kam robotic
           const q = /\?$/.test(part) ? 0.06 : 0;
           u.pitch = Math.max(0.5, Math.min(2, plan.pitch + q));
           u.rate = Math.max(0.6, Math.min(1.4, plan.rate * (i === parts.length - 1 && parts.length > 1 ? 0.97 : 1)));
           u.onend = () => { left -= 1; if (left <= 0) done(); };
-          u.onerror = done;
+          u.onerror = () => { left -= 1; if (left <= 0) done(); };
           window.speechSynthesis.speak(u);
         });
-        setTimeout(done, 45000);
+        poll = setInterval(() => {
+          if (my !== sayGen) return done(false);
+          const ss = window.speechSynthesis, e0 = Date.now() - t0;
+          if (e0 > 1500 && !ss.speaking && !ss.pending) done();
+          else if (e0 > 150000) { try { ss.cancel(); } catch { /* ignore */ } done(); }
+        }, 400);
       } catch { done(); }
     });
   }
@@ -1326,7 +1334,7 @@
     if (rs) place(rest); else await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
     layoutBoard(g, pipWin ? 'pip' : goLeft ? 'right' : 'left');
     if (rs) { el.dataset.mood = it.mood || 'happy'; el.classList.add('rest'); } else dance(it.mood);
-    if (!rs) { clearTimeout(extSayT); stopSpeech(); } // purani / extension wali awaaz band — ab sirf isi board ki (resume me awaaz chhedna nahi)
+    if (!rs) { clearTimeout(extSayT); pendSay = null; stopSpeech(); } // purani / extension wali awaaz band — ab sirf isi board ki (resume me awaaz chhedna nahi)
     el.classList.add('holding');
     if (it.cls) el.classList.add(it.cls);
     if (rs) board.classList.add('instant'); // resume: board turant (animation ke bina)
@@ -1545,6 +1553,41 @@
     return { at, text };
   }
   // jawab ka board-item (site ke robot aur extension dono ke liye)
+  // 🧠 v3.125.156 — sawaal → wahi item jo Home / robot board dikhata hai (numbers hamesha Home jaise)
+  function intentItem(q) {
+    const t = ` ${String(q || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()} `;
+    const has = (re) => re.test(t);
+    const tl = has(/ (tl|tls|team leaders?|टीएल|टी एल) /);
+    const finish = (it) => it && { ...it, key: `ans:${Date.now()}`, qkey: it.key, fun: true, stay: Math.max(Number(it.stay) || 0, 14000) };
+    const byKey = (...ks) => { let L = []; try { L = insights(); } catch { L = []; } for (const k of ks) { const f = L.find((x) => x.key === k); if (f) return finish(f); } return null; };
+    if (has(/ (thank|thanks|thank you|shukriya|dhanyawad|धन्यवाद|शुक्रिया|थैंक) /)) return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', cls: 'greet', icon: '😊', title: 'Koi baat nahi!', head: 'Kabhi bhi poochho, main yahin hoon.', view: 'text', stay: 5000, say: `कोई बात नहीं ${firstName() || 'Tarun'} सर, कभी भी पूछिए।` };
+    if (has(/ (kaun ho|kaun hai tu|who are you|tum kaun|aap kaun|तुम कौन|आप कौन) /)) return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', cls: 'greet', icon: '🤖', title: 'Main Gems hoon', head: 'ApnaPayment dashboard ka robot — site ka har data bata sakta hoon.', view: 'text', stay: 7000, say: 'मैं जेम्स हूँ, आपकी साइट का रोबोट। यहाँ का हर डेटा पूछिए।' };
+    if (has(/ (run ?rate|रन ?रेट|raftaar|रफ्तार|speed|roz ka|per day|रोज का|रोज़ का|daily average|din ka average) /)) return byKey('rr');
+    if (has(/ (andaz\w*|andaj\w*|अंदाज़\w*|अंदाज\w*|expected|projection|forecast|kitna hoga|कितना होगा|month end|mahine ke ant|महीने के अंत|estimate) /)) return byKey('exp', 'rr');
+    if (has(/ (de ?growth|degrowth|girawat|गिरावट|gir (gaya|gaye|rahe|raha)|ghat (gaya|gaye|rahe|raha)|गिर गए|घट) /)) return byKey(tl ? 'degrowthtl' : 'degrowth', 'degrowth');
+    if (has(/ (inactive|inactiv|nahi chal rahe|band hain|बंद|इनएक्टिव) /)) return byKey(tl ? 'inacttl' : 'inactive');
+    if (has(/ (stock|स्टॉक) /) && has(/ (khatam|end|low|kam|खत्म|कम) /)) return byKey(tl ? 'stocktl' : 'stockend', 'stockend', 'nostock');
+    if (has(/ (dispatch|डिस्पैच|bhejna|भेजना) /)) return byKey(tl ? 'dispatchtl' : 'dispatchneed', 'dispatchneed');
+    if (has(/ (stock|स्टॉक) /)) return byKey(tl ? 'stocktl' : 'stockhigh', 'stockhigh');
+    if (has(/ (kyc|केवाईसी) /)) return byKey('kycdown', 'kyclow', 'kycup');
+    if (has(/ (best day|record|sabse (accha|achha|badhiya) din|सबसे अच्छा दिन) /)) return byKey('bestday');
+    if (has(/ (ff|first forward|फर्स्ट फॉरवर्ड) /) && has(/ (gv|जीवी) /)) return byKey('ffvsgv');
+    if (has(/ (top|best|sabse (zyada|jyada|upar|aage)|number (one|1)|leader|टॉप|सबसे ज्यादा|सबसे आगे) /)) return byKey(tl ? 'toptl' : 'top', 'top');
+    if (has(/ (total|kul|कुल|abhi tak|अभी तक|kitne tag|कितने टैग|kitna hua|कितना हुआ|scoreboard|summary|hisab|हिसाब|nov|november|नवंबर|month|mahin\w*|महीन\w*|issuance|issue) /)) {
+      const m = monthStats();
+      if (m && m.all && m.all.total) {
+        const a = m.all, d = new Date();
+        const g = a.prevTotal ? Math.round(((a.exp.total - a.prevTotal) / a.prevTotal) * 100) : null;
+        return { key: `ans:${Date.now()}`, qkey: 'mtd', fun: true, mood: g != null && g < 0 ? 'alert' : 'excited', icon: '📊', title: `${d.toLocaleString('en-IN', { month: 'long' })} ka total`, view: 'big', big: fmt(a.total), stay: 16000,
+          head: `1 se aaj tak (aaj ka GV live milakar)`,
+          rows: [{ name: 'VC4', val: fmt(a.vc4) }, { name: 'VC20', val: fmt(a.vc20) }, { name: 'VC5+', val: fmt(a.vc5) }, { name: 'First Forward', val: fmt(m.ff.total) }, { name: 'GV Partner', val: fmt(m.gv.total) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+          foot: `Kal tak run-rate ${r1(a.rate.total)}/din · mahine ka andaaza ≈ ${fmt(a.exp.total)}${g != null ? ` (${pct(g)})` : ''}`,
+          say: `इस महीने अभी तक कुल ${fmt(a.total)} टैग्स। रोज़ का रन रेट लगभग ${fmt(a.rate.total)}, और महीने के आख़िर तक करीब ${fmt(a.exp.total)} का अंदाज़ा है।`, q: 'summary|all' };
+      }
+      return byKey('sitetotal', 'summary');
+    }
+    return null;
+  }
   async function answerItem(q) {
     if (q === '@todo') return srvItem(/^srv:todo:/) || { key: 'todo-none', fun: true, mood: 'curious', icon: '📋', title: 'Aaj ke kaam', head: 'Abhi kaam list nahi bani — subah data aane do.', view: 'text', stay: 5000 };
     if (q === '@badges') return srvItem(/^srv:badges:/) || { key: 'bdg-none', fun: true, mood: 'curious', icon: '🎖', title: 'Badges', head: 'Abhi koi naya badge nahi.', view: 'text', stay: 5000 };
@@ -1558,6 +1601,7 @@
       const when = new Date(rem.at).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
       return { key: `rem:${rem.at}`, fun: true, mood: 'happy', cls: 'greet', icon: '⏰', title: 'Theek hai, yaad dila dunga!', head: `${when} — "${rem.text}"`, view: 'text', stay: 6000, say: `ठीक है, ${new Date(rem.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} पर याद दिला दूँगा: ${rem.text}` };
     }
+    const ii = intentItem(q); if (ii) return ii;
     if (!FF.assistant && FF.lazy && FF.lazy.inject) await FF.lazy.inject('assistant');
     const html = FF.assistant && FF.assistant.answer ? await FF.assistant.answer(q) : '';
     const tmp = document.createElement('div'); tmp.innerHTML = String(html || 'Iska jawab abhi mere paas nahi 🙈');
@@ -1568,28 +1612,14 @@
   }
   let asking = false;
   async function askRobot(q) {
-    const rem = parseReminder(q);
-    if (rem) {
-      try {
-        await FF.auth.api('/api/robot/remind', 'POST', { at: rem.at, text: rem.text });
-        const when = new Date(rem.at).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
-        return show({ key: `rem:${rem.at}`, fun: true, mood: 'happy', cls: 'greet', icon: '⏰', title: 'Theek hai, yaad dila dunga!', head: `${when} — "${rem.text}"`, view: 'text', stay: 6000, say: `ठीक है, ${new Date(rem.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} पर याद दिला दूँगा: ${rem.text}` });
-      } catch (e) { return show({ key: 'rem-err', fun: true, mood: 'sad', icon: '⏰', title: 'Reminder nahi bana', head: String(e.message || e), view: 'text', stay: 5000 }); }
-    }
     asking = true; // tick beech me apna update na daale
     if (skip) skip('ask');
     if (el) { el.dataset.mood = 'curious'; el.classList.add('rest'); confetti('curious'); }
-    let html = '';
-    try {
-      if (!FF.assistant && FF.lazy && FF.lazy.inject) await FF.lazy.inject('assistant');
-      html = FF.assistant && FF.assistant.answer ? await FF.assistant.answer(q) : '';
-    } catch (e) { html = `Jawab nahi mila: ${esc(e.message || '')}`; }
-    const tmp = document.createElement('div'); tmp.innerHTML = String(html || 'Iska jawab abhi mere paas nahi 🙈');
-    tmp.querySelectorAll('script,style,iframe').forEach((n) => n.remove());
-    const text = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
+    let item;
+    try { item = await answerItem(String(q || '')); } catch (e) { item = { key: `ans:${Date.now()}`, fun: true, mood: 'sad', icon: '🙈', title: 'Jawab nahi mila', head: String(e.message || e), view: 'text', stay: 5000 }; }
     let n = 0; while (busy && n++ < 80) await wait(100);
     asking = false;
-    show({ key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '💬', title: 'Gems ka jawab', head: q, view: 'html', html: tmp.innerHTML, stay: Math.min(25000, 6000 + text.length * 40), say: text.slice(0, 400) });
+    return show(item);
   }
   function listen(btn) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1601,6 +1631,64 @@
     r.onerror = () => { if (btn) btn.classList.remove('rec'); };
     try { r.start(); } catch { /* already */ }
   }
+  // 🎙 v3.125.156 — "Hey Gems / Hii Gems" bolo → "hii Tarun Sir, main aapki kya help karu?" → phir kuch bhi poochho
+  let wakeR = null, wakeDenied = false, wakeBusy = false, wakeNoted = false;
+  const WAKE_RE = /(gems?|jems?|jem|जेम्स?|जैम्स?|जेम|जैम|गेम्स)/i;
+  const SRC = () => window.SpeechRecognition || window.webkitSpeechRecognition;
+  function wakeStop() { const r = wakeR; wakeR = null; if (r) { try { r.onresult = r.onend = r.onerror = null; r.abort(); } catch { /* ignore */ } } }
+  function listenOnce(ms) { // ek sawaal sunke text lauta do ('' = kuch nahi bola)
+    return new Promise((resolve) => {
+      const SR = SRC(); if (!SR) return resolve('');
+      const r = new SR(); r.lang = 'hi-IN'; r.interimResults = false; r.maxAlternatives = 1; let got = '', fin = false;
+      const end = () => { if (fin) return; fin = true; clearTimeout(tm); try { r.abort(); } catch { /* ignore */ } resolve(got); };
+      const tm = setTimeout(end, ms || 9000);
+      r.onresult = (e) => { got = (e.results[0] && e.results[0][0] && e.results[0][0].transcript) || ''; end(); };
+      r.onend = end; r.onerror = end;
+      try { r.start(); } catch { end(); }
+    });
+  }
+  async function wakeFlow(rest) {
+    wakeBusy = true; wakeStop();
+    try {
+      const nm = firstName() || 'Tarun';
+      let q = String(rest || '').replace(/^[\s,.!?]+/, '').trim();
+      if (q.split(/\s+/).filter(Boolean).length < 2) q = '';
+      if (q) { await askRobot(q); return; }
+      stopSpeech(); if (skip) skip('ask');
+      let n = 0; while (busy && n++ < 60) await wait(50);
+      const greet = `हाय ${nm} सर, मैं आपकी क्या हेल्प करूँ?`;
+      const p = show({ key: `wake:${Date.now()}`, fun: true, cls: 'greet', mood: 'happy', icon: '👋', title: `Hii ${nm} Sir!`, head: 'Main aapki kya help karu? Bolo — site ka kuch bhi poochho.', view: 'text', stay: 15000, say: '' });
+      await wait(900);
+      await say(greet, { force: true });
+      const heard = await listenOnce(9000);
+      if (heard && heard.trim().length > 1) { await p.catch(() => {}); await askRobot(heard); }
+      else if (skip) skip('ask');
+    } catch { /* ignore */ } finally { wakeBusy = false; }
+  }
+  function wakeTick() {
+    const SR = SRC();
+    const want = SR && cfg.wake !== false && cfg.on && allowed() && !wakeDenied && !document.hidden && !pipWin;
+    if (!want || busy || talking || wakeBusy || asking) { if (wakeR) wakeStop(); return; }
+    if (wakeR) return;
+    const r = new SR(); r.lang = 'hi-IN'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+    let fired = false;
+    r.onresult = (e) => {
+      if (fired) return;
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const tx = (e.results[i][0] && e.results[i][0].transcript) || '';
+        const m = WAKE_RE.exec(tx);
+        if (m && /(hey|hay|hi|hii|hello|helo|ok|okay|हे|हाय|हाई|हेलो|हैलो|ओके|अरे|^\s*(gems?|जेम्स?|जैम्स?))/i.test(tx.slice(0, m.index + m[0].length))) {
+          if (!e.results[i].isFinal && tx.slice(m.index + m[0].length).trim().length < 1) { fired = true; wakeFlow(''); return; }
+          if (e.results[i].isFinal) { fired = true; wakeFlow(tx.slice(m.index + m[0].length)); return; }
+        }
+      }
+    };
+    r.onerror = (e) => { if (e && (e.error === 'not-allowed' || e.error === 'service-not-allowed')) { wakeDenied = true; if (!wakeNoted) { wakeNoted = true; note('🎙 "Hey Gems" ke liye mic ki permission do (address bar ka 🔒 → Microphone)'); } } };
+    r.onend = () => { if (wakeR === r) wakeR = null; };
+    wakeR = r;
+    try { r.start(); } catch { wakeR = null; }
+  }
+  setInterval(wakeTick, 1500);
   async function showReminders() {
     let L = [];
     try { L = ((await FF.auth.api('/api/robot/remind')) || {}).items || []; } catch { /* ignore */ }
@@ -1854,7 +1942,9 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(snapBoard, 80); });
   let extTurn = 0, extSayT = 0;
   // 🧩 dusre tab wala robot pehle ~2.2s udta hai, phir board khulta hai → awaaz tab hi (aage-peeche nahi)
-  function extSay(text) { clearTimeout(extSayT); extSayT = setTimeout(() => { if (!busy) say(text); }, 2800); }
+  // awaaz tabhi jab extension bole 'board dikh gaya' (shown → speak). Board nahi dikha to awaaz bhi nahi.
+  let pendSay = null;
+  function extSay(text, key) { clearTimeout(extSayT); pendSay = text ? { text, key } : null; extSayT = setTimeout(() => { pendSay = null; }, 20000); }
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data || e.data.source !== 'ff-robot-ext' || !e.data.msg) return;
     const m = e.data.msg;
@@ -1868,6 +1958,7 @@
       })();
       return;
     }
+    if (m.type === 'speak') { if (pendSay && (!m.key || pendSay.key === m.key) && !busy) { const t = pendSay.text; pendSay = null; clearTimeout(extSayT); say(t); } return; }
     if (m.type === 'drop') return; // doosre tab ne le liya — yahan awaaz chalti rehne do (sound ek hi jagah se)
     if (m.type === 'end') { if (current && current.key === m.key && skip) skip('ended'); return; } // dusre tab ke robot ki khabar khatam
     if (m.type === 'ask') { // 🧩 dusre tab ke robot ka sawaal → jawab wapas
@@ -1876,7 +1967,7 @@
         try { item = await answerItem(String(m.q || '')); } catch (err) { item = { key: 'askerr', fun: true, mood: 'sad', icon: '🙈', title: 'Jawab nahi mila', head: String(err.message || err), view: 'text', stay: 5000 }; }
         const slim = { ...item, html: undefined, say: undefined, onShow: undefined };
         try { window.postMessage({ source: 'ff-robot-page', msg: { type: 'answer', tab: m.tab, item: slim } }, location.origin); } catch { /* ignore */ }
-        if (cfg.sound && item.say) extSay(item.say);
+        if (cfg.sound && item.say) extSay(item.say, item.key);
       })();
       return;
     }
@@ -1888,7 +1979,7 @@
       try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
       if (!it.fun) { histAdd(it); dot(true); pushRobot(it); }
       toExt(it);
-      if (cfg.sound) extSay(it.say);
+      if (cfg.sound) extSay(it.say, it.key);
     }
   });
   let lastNote = 0;
@@ -1976,9 +2067,9 @@
     if (o && ('everySec' in o || 'on' in o)) schedule(1500);
     return getCfg();
   }
-  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
+  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
