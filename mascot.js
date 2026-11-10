@@ -1555,6 +1555,46 @@
     return { at, text };
   }
   // jawab ka board-item (site ke robot aur extension dono ke liye)
+  // 🔤 v3.125.159 — Hindi (Devanagari) bolna → Latin Hinglish, taaki har sawaal samjhe (mic hi-IN me Devanagari likhta hai)
+  const DV_WORDS = [
+    ['रन रेट', 'run rate'], ['रनरेट', 'run rate'], ['अंदाज़ा', 'andaza'], ['अंदाजा', 'andaza'], ['अनुमान', 'andaza'], ['टोटल', 'total'], ['कुल', 'total'], ['महीने', 'mahine'], ['महीना', 'mahine'], ['मंथ', 'month'], ['नवंबर', 'november'], ['नवम्बर', 'november'],
+    ['स्टॉक', 'stock'], ['खत्म', 'khatam'], ['डिस्पैच', 'dispatch'], ['इनएक्टिव', 'inactive'], ['टॉप', 'top'], ['एजेंट्स', 'agents'], ['एजेंट', 'agent'], ['टीएल', 'tl'], ['टी एल', 'tl'], ['केवाईसी', 'kyc'], ['केवायसी', 'kyc'],
+    ['परफॉर्मेंस', 'performance'], ['परफारमेंस', 'performance'], ['खोलो', 'kholo'], ['खोल दो', 'kholo'], ['खोलिए', 'kholo'], ['सेटिंग्स', 'settings'], ['सेटिंग', 'settings'], ['आवाज़', 'awaaz'], ['आवाज', 'awaaz'], ['बंद', 'band'], ['चालू', 'chalu'], ['आज', 'aaj'], ['कल', 'kal'], ['चुप', 'chup'],
+    ['क्या', 'kya'], ['कितना', 'kitna'], ['कितने', 'kitne'], ['कितनी', 'kitni'], ['बताओ', 'batao'], ['बताइए', 'batao'], ['बताएं', 'batao'], ['बता दो', 'batao'], ['दिखाओ', 'dikhao'], ['कौन', 'kaun'], ['सबसे', 'sabse'], ['ज्यादा', 'zyada'], ['ज़्यादा', 'zyada'], ['कम', 'kam'], ['है', 'hai'], ['हैं', 'hain'], ['का', 'ka'], ['की', 'ki'], ['के', 'ke'], ['में', 'me'], ['पर', 'par'], ['और', 'aur'],
+    ['इश्यू', 'issuance'], ['इशू', 'issuance'], ['टैग्स', 'tags'], ['टैग', 'tag'], ['गिरावट', 'degrowth'], ['डीग्रोथ', 'degrowth'], ['ग्रोथ', 'growth'], ['जीवी', 'gv'], ['जी वी', 'gv'], ['फर्स्ट फॉरवर्ड', 'first forward'], ['फर्स्ट फारवर्ड', 'first forward'], ['एफएफ', 'ff'],
+    ['रिमाइंडर', 'reminder'], ['याद दिलाना', 'yaad dilana'], ['कमीशन', 'commission'], ['चेसिस', 'chassis'], ['वीसी', 'vc'], ['कैसे', 'kaise'], ['कहाँ', 'kahan'], ['कहां', 'kahan'], ['मदद', 'madad'], ['धन्यवाद', 'dhanyawad'], ['शुक्रिया', 'shukriya'], ['थैंक यू', 'thank you'], ['हेल्प', 'help'], ['पेज', 'page'], ['टैब', 'tab']
+  ].sort((a, b) => b[0].length - a[0].length);
+  const DV_V = { 'अ': 'a', 'आ': 'aa', 'इ': 'i', 'ई': 'i', 'उ': 'u', 'ऊ': 'u', 'ए': 'e', 'ऐ': 'ai', 'ओ': 'o', 'औ': 'au', 'ऑ': 'o', 'ऋ': 'ri' };
+  const DV_M = { 'ा': 'a', 'ि': 'i', 'ी': 'i', 'ु': 'u', 'ू': 'u', 'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au', 'ॉ': 'o', 'ृ': 'ri' };
+  const DV_C = { 'क': 'k', 'ख': 'kh', 'ग': 'g', 'घ': 'gh', 'ङ': 'n', 'च': 'ch', 'छ': 'chh', 'ज': 'j', 'झ': 'jh', 'ञ': 'n', 'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'dh', 'ण': 'n', 'त': 't', 'थ': 'th', 'द': 'd', 'ध': 'dh', 'न': 'n', 'प': 'p', 'फ': 'f', 'ब': 'b', 'भ': 'bh', 'म': 'm', 'य': 'y', 'र': 'r', 'ल': 'l', 'व': 'v', 'श': 'sh', 'ष': 'sh', 'स': 's', 'ह': 'h', 'ळ': 'l', 'क़': 'q', 'ख़': 'kh', 'ग़': 'g', 'ज़': 'z', 'ड़': 'r', 'ढ़': 'rh', 'फ़': 'f' };
+  function devaWord(w) {
+    let o = '', ch = [...w.normalize('NFC')];
+    for (let i = 0; i < ch.length; i++) {
+      const c = ch[i], nx = ch[i + 1];
+      if (DV_C[c] !== undefined) {
+        o += DV_C[c];
+        if (nx === '़') { i++; }
+        const n2 = ch[i + 1];
+        if (n2 === '्') { i++; continue; }
+        if (n2 && (DV_M[n2] !== undefined)) continue;
+        if (n2 === 'ं' || n2 === 'ँ' || n2 === 'ः') { o += 'a'; continue; }
+        if (n2 && DV_C[n2] !== undefined) o += 'a'; else if (n2) o += 'a'; // beech ka akshar: schwa; shabd ke ant me nahi
+      } else if (DV_V[c] !== undefined) o += DV_V[c];
+      else if (DV_M[c] !== undefined) o += DV_M[c];
+      else if (c === 'ं' || c === 'ँ') o += 'n';
+      else if (c === 'ः') o += 'h';
+      else if (c === '्' || c === '़' || c === '।') o += c === '।' ? ' ' : '';
+      else o += c;
+    }
+    return o;
+  }
+  function deva(q) {
+    let t = String(q || '');
+    if (!/[ऀ-ॿ]/.test(t)) return t;
+    t = ` ${t} `;
+    DV_WORDS.forEach(([h, l]) => { t = t.split(h).join(` ${l} `); });
+    return t.split(/(\s+)/).map((w) => (/[ऀ-ॿ]/.test(w) ? devaWord(w) : w)).join('').replace(/\s+/g, ' ').trim();
+  }
   // 🧠 v3.125.156 — sawaal → wahi item jo Home / robot board dikhata hai (numbers hamesha Home jaise)
   function intentItem(q) {
     const t = ` ${String(q || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()} `;
@@ -1610,7 +1650,29 @@
     }
     return null;
   }
+  // 🔎 samajh nahi aaya? → sabse milta sawaal (smartQ) ka jawab, warna madad ki list
+  async function fuzzyItem(q) {
+    try {
+      if (!FF.smartQ && FF.lazy && FF.lazy.inject) await FF.lazy.inject('smartQ');
+      const sg = FF.smartQ && FF.smartQ.suggest ? FF.smartQ.suggest(` ${q}`, 3) : [];
+      const hit = (sg || []).find((x) => x && x.q && x.q !== '__catalog');
+      if (hit) {
+        const a = FF.smartQ.answer(hit.q, hit.qn || 10);
+        if (a && a.rows && a.rows.length) {
+          const cols = (a.def.cols || []).filter((k) => k !== 'name');
+          const num = cols.find((k) => typeof a.rows[0][k] === 'number') || cols[0];
+          const rows = a.rows.slice(0, 7).map((r) => ({ name: r.name || r.tl || '—', sub: r.ch || '', val: num ? fmt(r[num]) : '', tone: 'chip' }));
+          const title = a.def.title || 'Jawab';
+          return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '💬', title, head: `"${q}" ke liye sabse milta sawaal`, view: 'list', rows, stay: 14000, q: hit.q,
+            say: `${title}। ${rows.slice(0, 3).map((r) => `${nm(r.name)} ${r.val}`).join(', ')}।` };
+        }
+      }
+    } catch { /* ignore */ }
+    return { key: `ans:${Date.now()}`, fun: true, mood: 'curious', icon: '🤔', title: 'Thoda aur batao', head: 'Aise poochho: "run rate", "is mahine ka total", "top agents", "stock khatam", "Rahul ka issuance", "performance kholo", "settings kholo".', view: 'text', stay: 12000,
+      say: 'थोड़ा और साफ़ बताइए। जैसे रन रेट, इस महीने का टोटल, टॉप एजेंट, या किसी एजेंट का नाम।' };
+  }
   async function answerItem(q) {
+    q = deva(q);
     if (q === '@todo') return srvItem(/^srv:todo:/) || { key: 'todo-none', fun: true, mood: 'curious', icon: '📋', title: 'Aaj ke kaam', head: 'Abhi kaam list nahi bani — subah data aane do.', view: 'text', stay: 5000 };
     if (q === '@badges') return srvItem(/^srv:badges:/) || { key: 'bdg-none', fun: true, mood: 'curious', icon: '🎖', title: 'Badges', head: 'Abhi koi naya badge nahi.', view: 'text', stay: 5000 };
     if (q === '@rems') {
@@ -1625,7 +1687,8 @@
     }
     const ii = intentItem(q); if (ii) return ii;
     if (!FF.assistant && FF.lazy && FF.lazy.inject) await FF.lazy.inject('assistant');
-    const html = FF.assistant && FF.assistant.answer ? await FF.assistant.answer(q) : '';
+    let html = FF.assistant && FF.assistant.answer ? await FF.assistant.answer(q) : '';
+    if (!html || /Ye samajh nahi aaya|did not understand/i.test(String(html))) { const fb = await fuzzyItem(q); if (fb) return fb; }
     const tmp = document.createElement('div'); tmp.innerHTML = String(html || 'Iska jawab abhi mere paas nahi 🙈');
     tmp.querySelectorAll('script,style,iframe').forEach((n) => n.remove());
     const tx = tmp.cloneNode(true); tx.querySelectorAll('td,th,li,p,div,tr,br,b').forEach((n) => n.append(' ')); tx.querySelectorAll('tr,li,p').forEach((n) => n.append(' · '));
