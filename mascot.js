@@ -973,7 +973,7 @@
       : '<div class="mc-empty">Pichle 24 ghante me abhi kuch nahi bataya.<br>✨ <b>Naya update</b> dabao — main abhi batata hoon!</div>';
     return `<div class="mc-bh"><span class="mc-ic">🕘</span><b>Maine kya bataya · 24h</b><small class="mc-cnt">${a.length} unique</small></div>
       <form class="mc-askf" data-mcf="ask"><input type="text" name="q" placeholder="Robot se poochho… (jaise: Rahul ka stock / kal 9 baje yaad dilana)" autocomplete="off"><button type="button" data-mc="mic" title="Bolkar poochho">🎙</button><button type="submit" title="Poochho">➤</button></form>
-      <div class="mc-quick"><button type="button" data-mc="todo">📋 Aaj ke kaam</button><button type="button" data-mc="rems">⏰ Reminders</button><button type="button" data-mc="badges">🎖 Badges</button></div>
+      <div class="mc-quick"><button type="button" data-mc="talk">🎙 Hey Gems — baat karo</button><button type="button" data-mc="todo">📋 Aaj ke kaam</button><button type="button" data-mc="rems">⏰ Reminders</button><button type="button" data-mc="badges">🎖 Badges</button></div>
       <div class="mc-bb">${list}</div>
       <div class="mc-ctl wide">
         <button type="button" class="mc-pill" data-mc="ask">🎙 Gems se poochho</button>
@@ -1000,7 +1000,8 @@
     else if (k === 'now') { closeHist(); now(true); }
     else if (k === 'pop') { closeHist(); popOut(); }
     else if (k === 'popin') { closeHist(); popIn(); }
-    else if (k === 'mic') listen(b);
+    else if (k === 'mic') { closeHist(); wakeFlow(''); }
+    else if (k === 'talk') { closeHist(); wakeFlow(''); }
     else if (k === 'todo') { closeHist(); const t = srvItem(/^srv:todo:/); if (t) show(t); else show({ key: 'todo-none', fun: true, mood: 'curious', icon: '📋', title: 'Aaj ke kaam', head: 'Abhi koi kaam list nahi bani — server data aane do (subah).', view: 'text', stay: 5000 }); }
     else if (k === 'badges') { closeHist(); const t = srvItem(/^srv:badges:/); if (t) show(t); else show({ key: 'bdg-none', fun: true, mood: 'curious', icon: '🎖', title: 'Badges', head: 'Abhi koi naya badge nahi.', view: 'text', stay: 5000 }); }
     else if (k === 'rems') { closeHist(); showReminders(); }
@@ -1733,7 +1734,7 @@
   }
   // 🎙 v3.125.156 — "Hey Gems / Hii Gems" bolo → "hii Tarun Sir, main aapki kya help karu?" → phir kuch bhi poochho
   let convo = false, lastSpoken = null;
-  let wakeR = null, wakeDenied = false, wakeBusy = false, wakeNoted = false;
+  let wakeR = null, wakeLastErr = '', wakeLang = 'hi-IN', wakeDenied = false, wakeBusy = false, wakeNoted = false;
   const WAKE_RE = /(gems?|jems?|jem|james|games|जेम्स?|जैम्स?|जेम्ज|जेमस|जेंस|जिम्स|जेम|जैम|गेम्स|जेन्स)/i;
   const SRC = () => window.SpeechRecognition || window.webkitSpeechRecognition;
   function wakeStop() { const r = wakeR; wakeR = null; if (r) { try { r.onresult = r.onend = r.onerror = null; r.abort(); } catch { /* ignore */ } } }
@@ -1789,7 +1790,7 @@
     const want = SR && cfg.wake !== false && cfg.on && allowed() && !wakeDenied && !document.hidden && !pipWin;
     if (!want || busy || talking || wakeBusy || asking) { if (wakeR) wakeStop(); return; }
     if (wakeR) return;
-    const r = new SR(); r.lang = 'hi-IN'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+    const r = new SR(); r.lang = wakeLang; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
     let fired = false;
     r.onresult = (e) => {
       if (fired) return;
@@ -1802,12 +1803,20 @@
         }
       }
     };
-    r.onerror = (e) => { if (e && (e.error === 'not-allowed' || e.error === 'service-not-allowed')) { wakeDenied = true; if (!wakeNoted) { wakeNoted = true; note('🎙 "Hey Gems" ke liye mic ki permission do (address bar ka 🔒 → Microphone)'); } } };
+    r.onerror = (e) => {
+      const er = e && e.error; wakeLastErr = er || '';
+      if (er === 'not-allowed' || er === 'service-not-allowed') { wakeDenied = true; if (!wakeNoted) { wakeNoted = true; note('🎙 "Hey Gems" ke liye mic ki permission do (address bar ka 🔒 / app Settings → Microphone), phir robot menu → 🎙 dabao'); } }
+      else if (er === 'network' && !wakeNoted) { wakeNoted = true; note('🎙 Bolna samajhne ke liye internet / Google voice service chahiye — net check karo'); }
+      else if (er === 'audio-capture' && !wakeNoted) { wakeNoted = true; note('🎙 Mic dusri app use kar rahi hai — usse band karo'); }
+      else if (er === 'language-not-supported') { wakeLang = 'en-IN'; }
+    };
     r.onend = () => { if (wakeR === r) wakeR = null; };
     wakeR = r;
     try { r.start(); } catch { wakeR = null; }
   }
   setInterval(wakeTick, 1500);
+  // 📱 phone / app me mic ki permission aur pehla start user ke touch se hi milta hai → pehle touch par wake sunna shuru
+  ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => { try { if (!wakeR && !wakeDenied) wakeTick(); } catch { /* ignore */ } }, { passive: true }));
   async function showReminders() {
     let L = [];
     try { L = ((await FF.auth.api('/api/robot/remind')) || {}).items || []; } catch { /* ignore */ }
@@ -2190,7 +2199,7 @@
   }
   const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake !== false, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
