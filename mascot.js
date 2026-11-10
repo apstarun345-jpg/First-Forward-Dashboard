@@ -1926,7 +1926,15 @@
   setInterval(wakeTick, 1500);
   setInterval(() => { try { gvFab(!gvOpen); } catch { /* ignore */ } }, 3000);
   // 📱 phone / app me mic ki permission aur pehla start user ke touch se hi milta hai → pehle touch par wake sunna shuru
-  ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => { try { if (!wakeR && !wakeDenied) wakeTick(); } catch { /* ignore */ } }, { passive: true }));
+  let wakeRetry = 0, noSrNoted = false;
+  ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => {
+    try {
+      if (!allowed() || !cfg.on) return;
+      if (!SRC()) { if (!noSrNoted) { noSrNoted = true; note('🎙 Is app / browser me "Hey Gems" sunna supported nahi. Neeche-left 🎙 dabao → likhne wale box me keyboard ka mic use karo.'); } return; }
+      if (wakeDenied && wakeRetry < 3) { wakeRetry += 1; wakeDenied = false; wakeNoted = false; } // permission ab touch ke saath dobara maango
+      if (!wakeR && !wakeDenied) wakeTick();
+    } catch { /* ignore */ }
+  }, { passive: true }));
   async function showReminders() {
     let L = [];
     try { L = ((await FF.auth.api('/api/robot/remind')) || {}).items || []; } catch { /* ignore */ }
