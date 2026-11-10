@@ -8313,3 +8313,15 @@ html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 9
 /* 🛣 v3.125.172 Toll Debit */
 .td-bar { height: 9px; background: var(--line, rgba(127,127,127,.18)); border-radius: 6px; overflow: hidden; min-width: 60px; }
 .td-bar i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, #2563eb, #7c3aed); }
+
+/* 🛣 v3.125.176 Toll Debit — rang, sort, chips */
+.td-tbl th.td-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.td-tbl th.td-sort:hover { background: rgba(99, 102, 241, .12); }
+.td-tbl th.td-sort.on { color: #4f46e5; }
+.td-tbl .td-arr { font-size: 10px; opacity: .6; margin-left: 2px; }
+.td-tbl th.td-sort.on .td-arr { opacity: 1; }
+.td-chip { display: inline-block; color: #fff; font-weight: 800; font-size: 11.5px; padding: 2px 9px; border-radius: 999px; letter-spacing: .02em; }
+.td-badge { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; color: #92400e; background: #fef3c7; border-radius: 999px; padding: 1px 8px; }
+.td-tbl tr.td-best td { background: rgba(250, 204, 21, .16); }
+.td-tbl tr.td-total td { background: rgba(99, 102, 241, .10); border-top: 2px solid rgba(99, 102, 241, .35); }
+.td-tbl tbody tr:hover td { filter: brightness(.97); }
