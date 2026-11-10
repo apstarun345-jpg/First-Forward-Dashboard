@@ -1596,6 +1596,64 @@
     DV_WORDS.forEach(([h, l]) => { t = t.split(h).join(` ${l} `); });
     return t.split(/(\s+)/).map((w) => (/[ऀ-ॿ]/.test(w) ? devaWord(w) : w)).join('').replace(/\s+/g, ' ').trim();
   }
+  // 👤 v3.125.166 — sawaal me kisi agent / TL ka naam ho (kaise bhi bola ho) → usi ka card
+  const skel = (w) => { const x = String(w || '').toLowerCase().replace(/w/g, 'v').replace(/ph/g, 'f').replace(/z/g, 'j').replace(/ee/g, 'i').replace(/oo/g, 'u'); return x[0] + x.slice(1).replace(/[aeiouyh]/g, '').replace(/(.)\1+/g, '$1'); };
+  const Q_STOP = new Set('stock total kitna kitne kitni hai hain ka ki ke ko pas paas pass me mein par aur ya is us ye wo kya kaun batao bata bataiye dikhao issuance issue tag tags agent agents tl team leader aaj kal month mahine mahina abhi tak sabse zyada jyada kam top best run rate andaza dispatch need kyc growth degrowth commission target wala wale hua hue kiya kitna the tha se liye mujhe mera meri ab bhi nahi haan gems hey hii hello please sir ji bhai ok gv ff first forward partner site pura poora sara saara kul overall last pichle inactive active report data number count list all sab sabka unka uska iska apna apne hamara summary scoreboard hisab record settings setting page kholo help madad november nov day din best wrong vrn chassis replacement reminder performance home awaaz sound band chalu expected projection forecast speed khatam wapas kaise kahan kab kyun kyon hone vala wala hoga raha rahe rahi chahiye bhejna maal'.split(' '));
+  function allAgentRows() { try { const R = FF.smartQ && FF.smartQ._rows; return R ? [...(R.ffRows() || []), ...(R.gvRows() || [])] : []; } catch { return []; } }
+  function findEntity(t) {
+    const words = t.trim().split(' ').filter((w) => w.length >= 3 && !Q_STOP.has(w) && !/^\d+$/.test(w));
+    if (!words.length) return null;
+    const wk = words.map(skel), rows = allAgentRows(); if (!rows.length) return null;
+    const hitTok = (tok) => { const k = skel(tok); for (let i = 0; i < words.length; i++) if (words[i] === tok || (k.length >= 3 && wk[i] === k)) return true; return false; };
+    const score = (name) => { const tk = String(name || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((x) => x.length >= 3); if (!tk.length) return 0; const h = tk.filter(hitTok).length; return h ? h + h / tk.length : 0; };
+    let best = 0; const ag = [];
+    rows.forEach((r) => { const sc = score(r.name); if (sc > best + 1e-9) { best = sc; ag.length = 0; ag.push(r); } else if (sc && Math.abs(sc - best) < 1e-9) ag.push(r); });
+    const tls = new Map(); rows.forEach((r) => { if (r.tl && !r.direct) { const sc = score(String(r.tl).replace(/^tl\s+/i, '')); if (sc) { const o = tls.get(r.tl) || { name: r.tl, sc, agents: 0, active: 0, cur: 0, last: 0, stock: 0, need: 0 }; o.agents++; if (r.cur > 0) o.active++; o.cur += r.cur; o.last += r.last; o.stock += r.stock; o.need += r.need || 0; tls.set(r.tl, o); } } });
+    const tlBest = [...tls.values()].sort((a, b) => b.sc - a.sc)[0];
+    const wantTl = / (tl|team leader|team) /.test(t);
+    if (tlBest && (wantTl || tlBest.sc > best)) return { tl: tlBest };
+    if (best >= 1.5 || (best >= 1 && ag.length <= 6)) return { agents: ag.sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock)) };
+    return null;
+  }
+  function entityItem(t, has) {
+    const e = findEntity(t); if (!e) return null;
+    const base = { key: `ans:${Date.now()}`, fun: true, mood: 'happy', stay: 16000 };
+    const wStock = has(/ (stock|maal) /), wDisp = has(/ (dispatch|bhejna|need) /), wLast = has(/ (pichle|last|previous) /);
+    if (e.tl) { const o = e.tl; return { ...base, icon: '👥', title: o.name, view: 'big', big: wStock ? fmt(o.stock) : fmt(o.cur), head: wStock ? 'team ka total stock' : 'team ka is mahine ka issuance', q: 'toptl|all',
+      rows: [{ name: 'Is month issuance', val: fmt(o.cur) }, { name: 'Last month', val: fmt(o.last) }, { name: 'Stock', val: fmt(o.stock) }, { name: 'Agents', val: `${o.active} active / ${o.agents}` }, { name: 'Dispatch need', val: fmt(o.need) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+      say: wStock ? `${nm(o.name)} की टीम के पास कुल ${fmt(o.stock)} टैग्स का स्टॉक है।` : `${nm(o.name)} की टीम ने इस महीने ${fmt(o.cur)} टैग्स किए, पिछले महीने ${fmt(o.last)}। स्टॉक ${fmt(o.stock)}।` }; }
+    const A = e.agents;
+    if (A.length > 1) { const k = wStock ? 'stock' : 'cur'; return { ...base, icon: '🔎', title: `${A.length} agents mile`, head: wStock ? 'in sabka stock' : 'in sabka is mahine ka issuance (poora naam bolo to ek ka detail)', view: 'list',
+      rows: A.slice(0, 7).map((r) => ({ name: r.name, sub: `${r.ch || ''} · ${r.tl || 'Direct'} · ${wStock ? `issue ${fmt(r.cur)}` : `stock ${fmt(r.stock)}`}`, val: fmt(r[k]), tone: 'chip' })),
+      say: `इस नाम के ${A.length} एजेंट मिले। ${A.slice(0, 3).map((r) => `${nm(r.name)} ${wStock ? 'स्टॉक' : ''} ${fmt(r[k])}`).join(', ')}।` }; }
+    const r = A[0], g = r.growth != null ? pct(r.growth) : '';
+    const big = wStock ? fmt(r.stock) : wDisp ? fmt(r.need || 0) : wLast ? fmt(r.last) : fmt(r.cur);
+    const head = wStock ? 'tag stock abhi' : wDisp ? 'tag dispatch chahiye' : wLast ? 'pichle mahine ka issuance' : 'is mahine ka issuance';
+    return { ...base, icon: '👤', title: r.name, view: 'big', big, head: `${head} · ${r.ch || ''} · ${r.tl || 'Direct'}`,
+      rows: [{ name: 'Stock', val: fmt(r.stock) }, { name: 'Is month', val: fmt(r.cur) }, { name: 'Last month', val: fmt(r.last) }, { name: 'VC4 / VC20 / VC5+', val: `${fmt(r.vc4)} / ${fmt(r.vc20)} / ${fmt(r.vc5)}` }, { name: 'Run-rate', val: `${r1(r.rate || 0)}/din` }, { name: 'Dispatch need', val: fmt(r.need || 0) }, ...(g ? [{ name: 'Growth', val: g }] : [])].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+      say: wStock ? `${nm(r.name)} के पास अभी ${fmt(r.stock)} टैग्स का स्टॉक है। इस महीने ${fmt(r.cur)} इशू किए।` : wDisp ? `${nm(r.name)} को लगभग ${fmt(r.need || 0)} टैग्स भेजने चाहिए। स्टॉक ${fmt(r.stock)} है।` : wLast ? `${nm(r.name)} ने पिछले महीने ${fmt(r.last)} टैग्स किए थे।` : `${nm(r.name)} ने इस महीने ${fmt(r.cur)} टैग्स किए, पिछले महीने ${fmt(r.last)}। स्टॉक ${fmt(r.stock)}।` };
+  }
+  function totalsItem(t, has) { // "total stock", "kitne agent active", "total dispatch"
+    const rows = allAgentRows(); if (!rows.length) return null;
+    const gvQ = has(/ gv /), ffQ = !gvQ && has(/ (ff|first forward) /);
+    const R = rows.filter((r) => (gvQ ? r.ch === 'GV' : ffQ ? r.ch !== 'GV' : true)), lab = gvQ ? 'GV Partner' : ffQ ? 'First Forward' : 'Poori site';
+    const sum = (k, L) => (L || R).reduce((m, r) => m + (Number(r[k]) || 0), 0);
+    const base = { key: `ans:${Date.now()}`, fun: true, mood: 'info', view: 'big', stay: 15000 };
+    const chip = (a) => a.map((x) => ({ ...x, sub: '', tone: 'chip' }));
+    const split = gvQ || ffQ ? [] : [{ name: 'First Forward', k: 'ff' }, { name: 'GV Partner', k: 'gv' }];
+    const part = (k, f) => split.map((x) => ({ name: x.name, val: fmt(f(rows.filter((r) => (x.k === 'gv' ? r.ch === 'GV' : r.ch !== 'GV')))) }));
+    const listy = has(/ (sabse|top|kiske|kiska|kaun|khatam|low|kam|zyada|jyada|highest|lowest|wale|list) /);
+    if (has(/ (stock|maal) /) && !listy) { const tot = sum('stock'), n = R.filter((r) => r.stock > 0).length, z = R.filter((r) => r.cur > 0 && r.stock <= 0).length;
+      return { ...base, icon: '📦', title: `${lab}: total stock`, big: fmt(tot), head: `${fmt(n)} agents ke paas stock hai`, q: 'stockhigh|all', rows: chip([...part('stock', (L) => sum('stock', L)), { name: 'Stock wale agents', val: fmt(n) }, { name: 'Issue chal raha, stock 0', val: fmt(z) }, { name: 'Dispatch need', val: fmt(sum('need')) }]),
+        say: `${lab === 'Poori site' ? 'पूरी साइट' : lab} का कुल स्टॉक ${fmt(tot)} टैग्स है, ${fmt(n)} एजेंट्स के पास।` }; }
+    if (has(/ (dispatch|bhejna) /) && has(/ (total|kul|kitna|kitne|overall) /) && !listy) { const tot = sum('need'), n = R.filter((r) => r.need > 0).length;
+      return { ...base, icon: '🚚', title: `${lab}: total dispatch need`, big: fmt(tot), head: `${fmt(n)} agents ko tag chahiye`, q: 'dispatch|all', rows: chip(part('need', (L) => sum('need', L))), say: `कुल ${fmt(tot)} टैग्स डिस्पैच करने हैं, ${fmt(n)} एजेंट्स को।` }; }
+    if (has(/ (agent|agents) /) && has(/ (kitne|total|count|kul|how many) /) && !has(/ (stock|dispatch|tag|tags) /)) { const act = R.filter((r) => r.cur > 0).length, ina = R.filter((r) => r.cur === 0 && (r.last > 0 || r.stock > 0)).length;
+      const inaQ = has(/ (inactive|band|nahi chal) /), actQ = !inaQ && has(/ (active|chal rahe|chalu) /);
+      return { ...base, icon: '🧑‍🤝‍🧑', title: `${lab}: agents`, big: fmt(inaQ ? ina : actQ ? act : R.length), head: inaQ ? 'inactive (is month 0 issuance)' : actQ ? 'active (is month issue kiya)' : 'total agents', q: inaQ ? 'inactive|all' : 'top|all',
+        rows: chip([{ name: 'Total', val: fmt(R.length) }, { name: '🟢 Active', val: fmt(act) }, { name: '😴 Inactive', val: fmt(ina) }]), say: `कुल ${fmt(R.length)} एजेंट्स हैं। ${fmt(act)} एक्टिव और ${fmt(ina)} इनएक्टिव।` }; }
+    return null;
+  }
   // 🧠 v3.125.156 — sawaal → wahi item jo Home / robot board dikhata hai (numbers hamesha Home jaise)
   function intentItem(q) {
     const t = ` ${String(q || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()} `;
@@ -1625,6 +1683,7 @@
       let names = ''; try { names = FF.config.allTabs(true).map((x) => x.label).slice(0, 14).join(' · '); } catch { names = ''; }
       return txt('Main kya kya kar sakta hoon', `${names ? `Pages: ${names}. ` : ''}Poochho: run-rate, andaza, total, top agents/TL, stock, dispatch, inactive, KYC, de-growth, FF vs GV, kisi agent ka issuance. Bolo: "performance kholo", "settings kholo", "awaaz band", "aaj chup", "reminder lagao".`, 'मैं साइट का हर पेज खोल सकता हूँ, रन रेट, अंदाज़ा, टोटल, टॉप एजेंट, स्टॉक, डिस्पैच, इनएक्टिव, केवाईसी, सब बता सकता हूँ। रिमाइंडर भी लगा सकता हूँ।', { stay: 16000 });
     }
+    if (!has(/ (commission|payout|wrong vrn|chassis|replacement|reminder|yaad) /)) { const ei = entityItem(t, has) || totalsItem(t, has); if (ei) return ei; }
     // "Rahul ka issuance / stock / commission" — kisi agent ka sawaal: site-wide intent nahi, assistant ko do
     const GEN = /^(aaj|kal|total|site|sabka|sabki|mera|meri|hamara|hamari|is|us|ye|wo|pura|poora|poori|gv|ff|first|forward|partner|top|kul|abhi|uska|iska|pichle|last|mahine|month|agent|agents|tl|tls)$/;
     const nmQ = /(?:^| )([a-z][a-z.]{2,}(?: [a-z][a-z.]{2,})?) (?:ka|ki|ke) (?:issuance|issue|stock|commission|tag|tags|kyc|target|performance)(?: |$)/.exec(t.trim());
@@ -1687,6 +1746,7 @@
   }
   async function answerItem(q) {
     q = deva(q);
+    if (!FF.smartQ && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('smartQ'); } catch { /* optional */ } }
     if (q === '@todo') return srvItem(/^srv:todo:/) || { key: 'todo-none', fun: true, mood: 'curious', icon: '📋', title: 'Aaj ke kaam', head: 'Abhi kaam list nahi bani — subah data aane do.', view: 'text', stay: 5000 };
     if (q === '@badges') return srvItem(/^srv:badges:/) || { key: 'bdg-none', fun: true, mood: 'curious', icon: '🎖', title: 'Badges', head: 'Abhi koi naya badge nahi.', view: 'text', stay: 5000 };
     if (q === '@rems') {
