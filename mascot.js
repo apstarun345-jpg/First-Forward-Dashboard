@@ -1634,7 +1634,7 @@
     if (has(/ (kyc|केवाईसी) /)) return byKey('kycdown', 'kyclow', 'kycup');
     if (has(/ (best day|record|sabse (accha|achha|badhiya) din|सबसे अच्छा दिन) /)) return byKey('bestday');
     if (has(/ (ff|first forward|फर्स्ट फॉरवर्ड) /) && has(/ (gv|जीवी) /)) return byKey('ffvsgv');
-    if (has(/ (top|best|sabse (zyada|jyada|upar|aage)|number (one|1)|leader|टॉप|सबसे ज्यादा|सबसे आगे) /)) return byKey(tl ? 'toptl' : 'top', 'top');
+    if (!has(/ (commission|payout|rate card) /) && has(/ (top|best|sabse (zyada|jyada|upar|aage)|number (one|1)|leader|टॉप|सबसे ज्यादा|सबसे आगे) /)) return byKey(tl ? 'toptl' : 'top', 'top');
     if (has(/ (total|kul|कुल|abhi tak|अभी तक|kitne tag|कितने टैग|kitna hua|कितना हुआ|scoreboard|summary|hisab|हिसाब|nov|november|नवंबर|month|mahin\w*|महीन\w*|issuance|issue) /)) {
       const m = monthStats();
       if (m && m.all && m.all.total) {
