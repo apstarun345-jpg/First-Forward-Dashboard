@@ -1600,6 +1600,7 @@
   // 👤 v3.125.166 — sawaal me kisi agent / TL ka naam ho (kaise bhi bola ho) → usi ka card
   const skel = (w) => { const x = String(w || '').toLowerCase().replace(/w/g, 'v').replace(/ph/g, 'f').replace(/z/g, 'j').replace(/ee/g, 'i').replace(/oo/g, 'u'); return x[0] + x.slice(1).replace(/[aeiouyh]/g, '').replace(/(.)\1+/g, '$1'); };
   const Q_STOP = new Set('stock total kitna kitne kitni hai hain ka ki ke ko pas paas pass me mein par aur ya is us ye wo kya kaun batao bata bataiye dikhao issuance issue tag tags agent agents tl team leader aaj kal month mahine mahina abhi tak sabse zyada jyada kam top best run rate andaza dispatch need kyc growth degrowth commission target wala wale hua hue kiya kitna the tha se liye mujhe mera meri ab bhi nahi haan gems hey hii hello please sir ji bhai ok gv ff first forward partner site pura poora sara saara kul overall last pichle inactive active report data number count list all sab sabka unka uska iska apna apne hamara summary scoreboard hisab record settings setting page kholo help madad november nov day din best wrong vrn chassis replacement reminder performance home awaaz sound band chalu expected projection forecast speed khatam wapas kaise kahan kab kyun kyon hone vala wala hoga raha rahe rahi chahiye bhejna maal karne karna pahunchne roz daily rozana lakh hazar thousand average avg ausat star kisne under kiske konsa members member kaun vs versus compare tulna mukable profile detail details excel download sheet export puri nikalo tareekh tarikh taarikh date week hafte hafta din days kab band active aage peeche piche khol open aakhri akhri time baar kaam kiye kiya kare karta dead low cover zero bina new naye naya direct high badh badi team teams commercial drop bada first pehle log same samay tak one two between dono'.split(' '));
+  let lastEnt = null;
   function allAgentRows() { try { const R = FF.smartQ && FF.smartQ._rows; return R ? [...(R.ffRows() || []), ...(R.gvRows() || [])] : []; } catch { return []; } }
   function findEntity(t) {
     const words = t.trim().split(' ').filter((w) => w.length >= 3 && !Q_STOP.has(w) && !/^\d+$/.test(w));
@@ -1622,7 +1623,10 @@
     return null;
   }
   function entityItem(t, has) {
-    const e = findEntity(t); if (!e) return null;
+    let e = findEntity(t);
+    if (!e && lastEnt && Date.now() - lastEnt.at < 240000 && has(/ (iska|uska|inka|unka|iski|uski|inki|unki|iske|uske|inke|unke|isne|usne|inhone|unhone|wahi|same|ye|yeh|is agent|us agent) /) && has(/ (stock|maal|issuance|issue|tag|tags|kyc|profile|band|kab|din|dispatch|tl|team|best|aaj|kal|tareekh|pichle|last|detail|kholo) /)) e = lastEnt.e;
+    if (!e) return null;
+    if (e.tl || (e.agents && e.agents.length === 1)) lastEnt = { at: Date.now(), e: e.tl ? { tl: e.tl } : { agents: e.agents } };
     const base = { key: `ans:${Date.now()}`, fun: true, mood: 'happy', stay: 16000 };
     const wStock = has(/ (stock|maal) /), wDisp = has(/ (dispatch|bhejna|need) /), wLast = has(/ (pichle|last|previous) /);
     if (e.tl && has(/ (kaun kaun|agents?|team me|members?|list|inactive|top|best|sabse) /) && !has(/ (kitna|kitne|total) (stock|issuance|tag|tags) /)) {
@@ -1725,6 +1729,18 @@
     const GEN = /^(aaj|kal|total|site|sabka|sabki|mera|meri|hamara|hamari|is|us|ye|wo|pura|poora|poori|gv|ff|first|forward|partner|top|kul|abhi|uska|iska|pichle|last|mahine|month|agent|agents|tl|tls)$/;
     const nmQ = /(?:^| )([a-z][a-z.]{2,}(?: [a-z][a-z.]{2,})?) (?:ka|ki|ke) (?:issuance|issue|stock|commission|tag|tags|kyc|target|performance)(?: |$)/.exec(t.trim());
     if (nmQ && !nmQ[1].split(' ').every((w) => GEN.test(w))) return null;
+    if (has(/ (samajh nahi aaya|miss hue|kya nahi samjha|unanswered) /)) { let L = []; try { L = JSON.parse(localStorage.getItem('gemsMiss') || '[]'); } catch { L = []; } return { key: `ans:${Date.now()}`, fun: true, mood: 'info', icon: '📝', title: `Jo sawaal main nahi samjha (${L.length})`, head: L.length ? 'Ye list developer ko bhej do — jod diye jayenge' : 'Abhi tak sab samajh aaya 👍', view: 'list', stay: 15000, rows: L.slice(0, 10).map((x) => ({ name: x, sub: '', val: '', tone: 'chip' })), say: L.length ? `${L.length} सवाल मैं नहीं समझ पाया।` : 'अभी तक सब समझ आया।' }; }
+    if (has(/ (briefing|brief|aaj ka haal|aaj ka hal|sab batao|sab kuch batao|poora haal|pura hal|subah ki report|daily report|overview|status batao|kya chal raha) /)) {
+      const m = monthStats();
+      if (m && m.all && m.all.total) {
+        const a = m.all, R = allAgentRows(), act = R.filter((r) => r.cur > 0).length, ina = R.filter((r) => r.cur === 0 && (r.last > 0 || r.stock > 0)).length, stock = R.reduce((x, r) => x + (r.stock || 0), 0), need = R.reduce((x, r) => x + (r.need || 0), 0);
+        const diff = a.r.total - a.prevSame, top = R.slice().sort((x, y) => y.cur - x.cur)[0], g = a.prevTotal ? Math.round(((a.exp.total - a.prevTotal) / a.prevTotal) * 100) : null;
+        return { key: `ans:${Date.now()}`, fun: true, mood: diff >= 0 ? 'excited' : 'alert', icon: '🗞', title: 'Aaj ki briefing', view: 'big', big: fmt(a.total), head: 'is mahine ab tak (aaj ka GV live milakar)', stay: 22000,
+          rows: [{ name: '⚡ Run-rate (kal tak)', val: `${r1(a.rate.total)}/din` }, { name: '🎯 Mahine ka andaaza', val: `${fmt(a.exp.total)}${g != null ? ` (${pct(g)})` : ''}` }, { name: diff >= 0 ? '📈 Last month se aage' : '📉 Last month se peeche', val: fmt(Math.abs(diff)) }, { name: 'FF / GV', val: `${fmt(m.ff.total)} / ${fmt(m.gv.total)}` }, ...(top ? [{ name: '🏆 Top agent', val: `${top.name} · ${fmt(top.cur)}` }] : []), { name: '🟢 Active / 😴 Inactive', val: `${fmt(act)} / ${fmt(ina)}` }, { name: '📦 Total stock', val: fmt(stock) }, { name: '🚚 Dispatch need', val: fmt(need) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+          sug: ['top agents', 'inactive agents', 'dead stock wale agent', 'pichle 7 din ka total'],
+          say: `आज की ब्रीफ़िंग। इस महीने अभी तक ${fmt(a.total)} टैग्स। रन रेट रोज़ ${fmt(a.rate.total)}, महीने का अंदाज़ा ${fmt(a.exp.total)}। पिछले महीने से हम ${fmt(Math.abs(diff))} टैग्स ${diff >= 0 ? 'आगे' : 'पीछे'} हैं।${top ? ` टॉप एजेंट ${nm(top.name)}, ${fmt(top.cur)} टैग्स।` : ''} ${fmt(act)} एजेंट एक्टिव, ${fmt(ina)} इनएक्टिव। कुल स्टॉक ${fmt(stock)}।` };
+      }
+    }
     // 🎯 v3.125.168 — "30000 karne ke liye roz kitna", "last month barabar karne ke liye", class mix, replacement, aaj ke star, kitne din bache
     {
       const m = monthStats();
@@ -1845,6 +1861,7 @@
         }
       }
     } catch { /* ignore */ }
+    try { const L = JSON.parse(localStorage.getItem('gemsMiss') || '[]'); if (!L.includes(q)) { L.unshift(String(q).slice(0, 120)); localStorage.setItem('gemsMiss', JSON.stringify(L.slice(0, 30))); } } catch { /* ignore */ }
     return { key: `ans:${Date.now()}`, fun: true, mood: 'curious', icon: '🤔', title: 'Thoda aur batao', head: 'Aise poochho: "run rate", "is mahine ka total", "top agents", "stock khatam", "Rahul ka issuance", "performance kholo", "settings kholo".', view: 'text', stay: 12000,
       say: 'थोड़ा और साफ़ बताइए। जैसे रन रेट, इस महीने का टोटल, टॉप एजेंट, या किसी एजेंट का नाम।' };
   }
@@ -1943,6 +1960,7 @@
 #gems-voice .gv-r{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
 #gems-voice .gv-r span:last-child{font-weight:700;color:#c7d2ff}#gems-voice .gv-foot{margin-top:6px;opacity:.75;font-size:12.5px}
 #gems-voice table{width:100%;border-collapse:collapse;font-size:13px}#gems-voice td,#gems-voice th{padding:3px 5px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left}
+#gems-voice .gv-sug{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}#gems-voice .gv-sug button{background:rgba(120,140,255,.16);border:1px solid rgba(140,160,255,.35);color:#dbe3ff;border-radius:16px;padding:5px 10px;font-size:12.5px;cursor:pointer}
 #gems-voice .gv-f{display:flex;gap:8px;padding:10px 12px 14px;align-items:center;border-top:1px solid rgba(255,255,255,.08)}
 #gems-voice .gv-f input{flex:1;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#fff;border-radius:22px;padding:10px 14px;font-size:15px;outline:none}
 #gems-voice .gv-mic{width:46px;height:46px;border-radius:50%;border:0;background:#5b6cff;color:#fff;font-size:20px;cursor:pointer;flex:none}
@@ -2005,7 +2023,8 @@
     if (th) await gvType(th, plain, gen);
     if (gen !== gvGen) return;
     const card = gvCard(it); if (card && th) { const c = document.createElement('div'); c.className = 'gv-card'; c.innerHTML = card; th.appendChild(c); gvScroll(); }
-    if (it.q && it.q[0] === '#') { /* link wale items: user kahe "kholo" */ }
+    const sug = it.sug || (/^(👤)$/.test(it.icon || '') ? ['iska stock', 'ye kab se band hai', 'iska KYC', 'iska profile kholo'] : it.icon === '👥' ? ['iski team me kaun kaun hai', 'iski team ke inactive agent', 'iski team ka stock'] : it.qkey === 'mtd' || it.qkey === 'rr' || it.qkey === 'exp' ? ['pichle mahine se aage ya peeche', 'pichle 7 din ka total', 'top agents', 'briefing do'] : ['briefing do', 'total stock', 'top agents', 'inactive agents']);
+    if (th && sug.length && !it.closeVoice) { const c = document.createElement('div'); c.className = 'gv-sug'; c.innerHTML = sug.slice(0, 4).map((x) => `<button type="button" data-gvq="${esc(x)}">${esc(x)}</button>`).join(''); th.appendChild(c); gvScroll(); }
     await sp; await wait(250);
     if (it.closeVoice && gen === gvGen) { await wait(900); if (gen === gvGen) gvClose('quiet'); }
   }
@@ -2049,6 +2068,7 @@
       gvEl.innerHTML = `<div class="gv-h"><span class="gv-orb"></span><b>Gems</b><button type="button" class="gv-x" aria-label="Band karo">✕</button></div><div class="gv-log"></div><form class="gv-f"><input type="text" name="q" placeholder="Ya yahan likhkar poochho…" autocomplete="off"><button type="button" class="gv-mic" aria-label="Bolo">🎙</button></form>`;
       document.body.appendChild(gvEl);
       gvEl.querySelector('.gv-x').addEventListener('click', () => gvClose());
+      gvEl.addEventListener('click', async (ev) => { const bq = ev.target.closest && ev.target.closest('[data-gvq]'); if (!bq) return; const q = bq.dataset.gvq; try { if (gvRec) gvRec.abort(); } catch { /* ignore */ } stopSpeech(); gvMsg('me', esc(q)); gvGen += 1; const g2 = gvGen; await gvAnswer(q, g2); if (g2 === gvGen && gvOpen) gvLoop(g2); });
       gvEl.querySelector('.gv-f').addEventListener('submit', async (ev) => {
         ev.preventDefault(); const inp = ev.target.q, q = inp.value.trim(); if (!q) return; inp.value = '';
         try { if (gvRec) gvRec.abort(); } catch { /* ignore */ }
