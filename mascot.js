@@ -1599,7 +1599,7 @@
   }
   // 👤 v3.125.166 — sawaal me kisi agent / TL ka naam ho (kaise bhi bola ho) → usi ka card
   const skel = (w) => { const x = String(w || '').toLowerCase().replace(/w/g, 'v').replace(/ph/g, 'f').replace(/z/g, 'j').replace(/ee/g, 'i').replace(/oo/g, 'u'); return x[0] + x.slice(1).replace(/[aeiouyh]/g, '').replace(/(.)\1+/g, '$1'); };
-  const Q_STOP = new Set('stock total kitna kitne kitni hai hain ka ki ke ko pas paas pass me mein par aur ya is us ye wo kya kaun batao bata bataiye dikhao issuance issue tag tags agent agents tl team leader aaj kal month mahine mahina abhi tak sabse zyada jyada kam top best run rate andaza dispatch need kyc growth degrowth commission target wala wale hua hue kiya kitna the tha se liye mujhe mera meri ab bhi nahi haan gems hey hii hello please sir ji bhai ok gv ff first forward partner site pura poora sara saara kul overall last pichle inactive active report data number count list all sab sabka unka uska iska apna apne hamara summary scoreboard hisab record settings setting page kholo help madad november nov day din best wrong vrn chassis replacement reminder performance home awaaz sound band chalu expected projection forecast speed khatam wapas kaise kahan kab kyun kyon hone vala wala hoga raha rahe rahi chahiye bhejna maal vs versus compare tulna mukable profile detail details excel download sheet export puri nikalo tareekh tarikh taarikh date week hafte hafta din days kab band active aage peeche piche khol open aakhri akhri time baar kaam kiye kiya kare karta dead low cover zero bina new naye naya direct high badh badi team teams commercial drop bada first pehle log same samay tak one two between dono'.split(' '));
+  const Q_STOP = new Set('stock total kitna kitne kitni hai hain ka ki ke ko pas paas pass me mein par aur ya is us ye wo kya kaun batao bata bataiye dikhao issuance issue tag tags agent agents tl team leader aaj kal month mahine mahina abhi tak sabse zyada jyada kam top best run rate andaza dispatch need kyc growth degrowth commission target wala wale hua hue kiya kitna the tha se liye mujhe mera meri ab bhi nahi haan gems hey hii hello please sir ji bhai ok gv ff first forward partner site pura poora sara saara kul overall last pichle inactive active report data number count list all sab sabka unka uska iska apna apne hamara summary scoreboard hisab record settings setting page kholo help madad november nov day din best wrong vrn chassis replacement reminder performance home awaaz sound band chalu expected projection forecast speed khatam wapas kaise kahan kab kyun kyon hone vala wala hoga raha rahe rahi chahiye bhejna maal karne karna pahunchne roz daily rozana lakh hazar thousand average avg ausat star kisne under kiske konsa members member kaun vs versus compare tulna mukable profile detail details excel download sheet export puri nikalo tareekh tarikh taarikh date week hafte hafta din days kab band active aage peeche piche khol open aakhri akhri time baar kaam kiye kiya kare karta dead low cover zero bina new naye naya direct high badh badi team teams commercial drop bada first pehle log same samay tak one two between dono'.split(' '));
   function allAgentRows() { try { const R = FF.smartQ && FF.smartQ._rows; return R ? [...(R.ffRows() || []), ...(R.gvRows() || [])] : []; } catch { return []; } }
   function findEntity(t) {
     const words = t.trim().split(' ').filter((w) => w.length >= 3 && !Q_STOP.has(w) && !/^\d+$/.test(w));
@@ -1625,6 +1625,13 @@
     const e = findEntity(t); if (!e) return null;
     const base = { key: `ans:${Date.now()}`, fun: true, mood: 'happy', stay: 16000 };
     const wStock = has(/ (stock|maal) /), wDisp = has(/ (dispatch|bhejna|need) /), wLast = has(/ (pichle|last|previous) /);
+    if (e.tl && has(/ (kaun kaun|agents?|team me|members?|list|inactive|top|best|sabse) /) && !has(/ (kitna|kitne|total) (stock|issuance|tag|tags) /)) {
+      const L = allAgentRows().filter((r) => r.tl === e.tl.name), ina = has(/ (inactive|band|nahi chal) /), stk = has(/ (stock|maal) /);
+      const F = (ina ? L.filter((r) => r.cur === 0) : L).sort((a, b) => (stk ? b.stock - a.stock : ina ? b.last - a.last : b.cur - a.cur));
+      return { ...base, icon: '👥', title: `${e.tl.name}: ${ina ? 'inactive agents' : 'team'} (${F.length})`, head: ina ? 'is mahine 0 issuance — last month ka number' : stk ? 'stock ke hisaab se' : 'is mahine ke issuance ke hisaab se', view: 'list',
+        rows: F.slice(0, 10).map((r) => ({ name: r.name, sub: `stock ${fmt(r.stock)}`, val: fmt(stk ? r.stock : ina ? r.last : r.cur), tone: 'chip' })),
+        say: F.length ? `${nm(e.tl.name)} की टीम में ${F.length} ${ina ? 'इनएक्टिव ' : ''}एजेंट हैं। ${F.slice(0, 3).map((r) => `${nm(r.name)} ${fmt(stk ? r.stock : ina ? r.last : r.cur)}`).join(', ')}।` : 'इस लिस्ट में कोई नहीं है।' };
+    }
     if (e.tl) { const o = e.tl; return { ...base, icon: '👥', title: o.name, view: 'big', big: wStock ? fmt(o.stock) : fmt(o.cur), head: wStock ? 'team ka total stock' : 'team ka is mahine ka issuance', q: 'toptl|all',
       rows: [{ name: 'Is month issuance', val: fmt(o.cur) }, { name: 'Last month', val: fmt(o.last) }, { name: 'Stock', val: fmt(o.stock) }, { name: 'Agents', val: `${o.active} active / ${o.agents}` }, { name: 'Dispatch need', val: fmt(o.need) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
       say: wStock ? `${nm(o.name)} की टीम के पास कुल ${fmt(o.stock)} टैग्स का स्टॉक है।` : `${nm(o.name)} की टीम ने इस महीने ${fmt(o.cur)} टैग्स किए, पिछले महीने ${fmt(o.last)}। स्टॉक ${fmt(o.stock)}।` }; }
@@ -1636,6 +1643,7 @@
         say: `${nm(x.name)} ने इस महीने ${fmt(x.cur)} टैग्स किए और ${nm(y.name)} ने ${fmt(y.cur)}। ${win ? `${nm(win.name)} आगे हैं।` : 'दोनों बराबर हैं।'}` }; }
     if (A.length === 1) {
       const r0 = A[0];
+      if (has(/ (kiske under|kis tl|tl kaun|kaun sa tl|kiski team|konsa tl) /)) return { ...base, icon: '👤', title: r0.name, view: 'big', big: r0.tl || 'Direct', head: r0.tl ? 'inka TL' : 'ye direct agent hai (koi TL nahi)', rows: [], say: r0.tl ? `${nm(r0.name)} ${nm(r0.tl)} की टीम में हैं।` : `${nm(r0.name)} डायरेक्ट एजेंट हैं।` };
       if (has(/ (profile|detail|details|kholo|khol|open) /)) { try { FF.masterSearch.openSearchPage(r0.name); } catch { /* ignore */ } return { ...base, icon: '👤', title: `${r0.name} ka profile`, head: 'Profile khol diya.', view: 'text', stay: 6000, closeVoice: true, say: `${nm(r0.name)} का प्रोफ़ाइल खोल दिया।` }; }
       // din-wise: last active, kis tareekh ko kitne, kitne din kaam, best din, aaj / kal
       let o = null, S = null; try { S = series(); const K = String(r0.name).trim().toUpperCase(); o = S && (S.ag.get(`${r0.ch === 'GV' ? 'gv' : 'ff'}|${K}`) || S.ag.get(`ff|${K}`) || S.ag.get(`gv|${K}`)); } catch { o = null; }
@@ -1717,6 +1725,29 @@
     const GEN = /^(aaj|kal|total|site|sabka|sabki|mera|meri|hamara|hamari|is|us|ye|wo|pura|poora|poori|gv|ff|first|forward|partner|top|kul|abhi|uska|iska|pichle|last|mahine|month|agent|agents|tl|tls)$/;
     const nmQ = /(?:^| )([a-z][a-z.]{2,}(?: [a-z][a-z.]{2,})?) (?:ka|ki|ke) (?:issuance|issue|stock|commission|tag|tags|kyc|target|performance)(?: |$)/.exec(t.trim());
     if (nmQ && !nmQ[1].split(' ').every((w) => GEN.test(w))) return null;
+    // 🎯 v3.125.168 — "30000 karne ke liye roz kitna", "last month barabar karne ke liye", class mix, replacement, aaj ke star, kitne din bache
+    {
+      const m = monthStats();
+      if (m && m.all && m.all.total) {
+        const a = m.all, dim = U.daysInMonth ? U.daysInMonth(m.cur) : 30, left = Math.max(0, dim - a.rd), B = { key: `ans:${Date.now()}`, fun: true, view: 'big', stay: 15000 };
+        const chip = (L) => L.map((x) => ({ ...x, sub: '', tone: 'chip' }));
+        const numM = / (\d{4,6}) /.exec(t.replace(/(\d),(\d)/g, '$1$2')), lakhM = / (\d+(?:\.\d+)?) ?(lakh|lac|हजार|hazar|hajar|thousand|k) /.exec(t);
+        const goal = numM ? Number(numM[1]) : lakhM ? Math.round(Number(lakhM[1]) * (/lakh|lac/.test(lakhM[2]) ? 100000 : 1000)) : 0;
+        const needQ = has(/ (roz|daily|per day|har din|rozana) /) && has(/ (chahiye|karna|karne|lagega|zaruri|need|required|padega) /);
+        if ((goal >= 1000 && has(/ (karne|pahunch\w*|target|tak|complete|pura|poora|achieve|chahiye) /)) || (needQ && has(/ (pichle|last|barabar|beat|todne|cross|target) /))) {
+          const g = goal >= 1000 ? goal : a.prevTotal, rem = Math.max(0, g - a.total), per = left ? rem / left : rem;
+          if (g > 0) return { ...B, mood: per <= a.rate.total ? 'excited' : 'alert', icon: '🎯', title: `${fmt(g)} tak pahunchne ke liye`, big: left ? `${fmt(Math.ceil(per))}/din` : fmt(rem), head: rem <= 0 ? 'ye to ho chuka! 🎉' : `${fmt(rem)} tag baki · ${left} din bache · abhi ka run-rate ${r1(a.rate.total)}/din`,
+            rows: chip([{ name: 'Abhi tak', val: fmt(a.total) }, { name: 'Baki', val: fmt(rem) }, { name: 'Din bache', val: String(left) }, { name: 'Isi speed se andaaza', val: fmt(a.exp.total) }]),
+            say: rem <= 0 ? `${fmt(g)} का आँकड़ा पार हो चुका है।` : `${fmt(g)} तक पहुँचने के लिए ${fmt(rem)} टैग्स बाकी हैं। बचे ${left} दिन में रोज़ ${fmt(Math.ceil(per))} टैग्स चाहिए। अभी रन रेट ${fmt(a.rate.total)} है।` }; }
+        if (has(/ (kitne din|din bache|days left|din baki|din baaki) /) && has(/ (bache|baki|baaki|left|mahine|month) /)) return { ...B, mood: 'info', icon: '📅', title: 'Mahine ke din', big: `${left} din`, head: `bache hain · ${a.rd} din ka data aa chuka`, rows: [], say: `इस महीने के ${left} दिन बचे हैं।` };
+        if (has(/ (vc ?4|vc ?20|vc ?5|commercial|class mix|class wise|classwise|car|truck) /) && !has(/ (top|best|sabse|kaun|kiska|agent|agents) /)) { const p = (x) => (a.total ? `${Math.round((x / a.total) * 100)}%` : '');
+          return { ...B, mood: 'info', icon: '🚗', title: 'Class-wise (is mahine)', big: fmt(has(/ vc ?20 /) ? a.vc20 : has(/ (vc ?5|commercial|truck) /) ? a.vc5 : a.vc4), head: has(/ vc ?20 /) ? 'VC20 tags' : has(/ (vc ?5|commercial|truck) /) ? 'VC5+ (commercial) tags' : 'VC4 tags',
+            rows: chip([{ name: 'VC4', val: `${fmt(a.vc4)} · ${p(a.vc4)}` }, { name: 'VC20', val: `${fmt(a.vc20)} · ${p(a.vc20)}` }, { name: 'VC5+', val: `${fmt(a.vc5)} · ${p(a.vc5)}` }, { name: 'Roz VC4 / VC20 / VC5+', val: `${r1(a.rate.vc4)} / ${r1(a.rate.vc20)} / ${r1(a.rate.vc5)}` }]),
+            say: `इस महीने वी सी 4 के ${fmt(a.vc4)}, वी सी 20 के ${fmt(a.vc20)}, और वी सी 5 प्लस के ${fmt(a.vc5)} टैग्स हुए।` }; }
+        if (has(/ (aaj|kal|today|yesterday) /) && has(/ (top|star|best|sabse|kisne|kaun) /)) { let L = []; try { L = insights(); } catch { L = []; } const f = L.find((x) => /^daystar:/.test(x.key)); if (f) return finish(f); }
+        if (has(/ (average|avg|ausat|per agent|har agent) /) && has(/ (agent|agents) /)) { const R = allAgentRows(), act = R.filter((r) => r.cur > 0).length; if (act) return { ...B, mood: 'info', icon: '➗', title: 'Per agent average', big: fmt(a.total / act), head: `tags per active agent · ${fmt(act)} active agents`, rows: [], say: `हर एक्टिव एजेंट औसतन ${fmt(a.total / act)} टैग्स कर रहा है।` }; }
+      }
+    }
     // 📚 smartQ ki poori catalog — list wale sawaal (top N, FF / GV, TL), "excel / poori list" bolo to panel khulta hai
     {
       const ch = has(/ gv /) ? 'gv' : has(/ (ff|first forward) /) ? 'ff' : 'all';
@@ -1833,6 +1864,11 @@
       return { key: `rem:${rem.at}`, fun: true, mood: 'happy', cls: 'greet', icon: '⏰', title: 'Theek hai, yaad dila dunga!', head: `${when} — "${rem.text}"`, view: 'text', stay: 6000, say: `ठीक है, ${new Date(rem.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} पर याद दिला दूँगा: ${rem.text}` };
     }
     const ii = intentItem(q); if (ii) return ii;
+    try { // "अंकुर की कमीशन / wrong vrn / chassis" → assistant ko saaf naam do
+      const tq = ` ${String(q).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()} `;
+      const kw = /(commission|payout|kamai|wrong vrn|wrong|chassis|replacement)/.exec(tq);
+      if (kw) { const e = findEntity(tq); if (e && e.agents && e.agents.length === 1) q = `${e.agents[0].name} ka ${kw[1] === 'kamai' || kw[1] === 'payout' ? 'commission' : kw[1]}`; }
+    } catch { /* ignore */ }
     if (!FF.assistant && FF.lazy && FF.lazy.inject) await FF.lazy.inject('assistant');
     let html = FF.assistant && FF.assistant.answer ? await FF.assistant.answer(q) : '';
     if (!html || /Ye samajh nahi aaya|did not understand|main data assistant hoon|I am a data assistant/i.test(String(html))) { const fb = await fuzzyItem(q); if (fb) return fb; }
@@ -1938,6 +1974,7 @@
   function gvListen(onInterim, maxMs) { // → final text ('' agar chup)
     return new Promise((resolve) => {
       const SR = SRC(); if (!SR) return resolve({ text: '', err: 'nosr' });
+      try { if (FF.assistant && FF.assistant.stopWake) FF.assistant.stopWake(); } catch { /* ignore */ }
       const r = new SR(); gvRec = r; r.lang = wakeLang; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
       let fin = false, got = '', er = '';
       const end = () => { if (fin) return; fin = true; clearTimeout(tm); gvRec = null; try { r.abort(); } catch { /* ignore */ } resolve({ text: got, err: er }); };
@@ -2033,6 +2070,7 @@
     const want = SR && cfg.wake !== false && cfg.on && allowed() && !wakeDenied && !document.hidden && !pipWin;
     if (!want || wakeBusy || gvOpen) { if (wakeR) wakeStop(); return; }
     if (wakeR) return;
+    try { if (FF.assistant && FF.assistant.stopWake) FF.assistant.stopWake(); } catch { /* ignore */ } // purana assistant wala wake band — warna dono ek dusre ka mic kaat dete hain
     const r = new SR(); r.lang = wakeLang; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
     let fired = false;
     r.onresult = (e) => {
@@ -2451,7 +2489,7 @@
   }
   const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
-  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake !== false, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(SRC() && cfg.wake !== false && cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake !== false, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho

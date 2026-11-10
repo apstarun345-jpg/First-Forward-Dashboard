@@ -666,6 +666,7 @@ window.FF = window.FF || {};
   function startWake() {
     const cfg = wakeCfg();
     if (!cfg.on || !wakeSupported() || !wakeAllowed()) { stopWake(); return; }
+    try { if (FF.mascot && FF.mascot.wakeOwns && FF.mascot.wakeOwns()) { stopWake(); return; } } catch { /* optional */ } // 🤖 Gems robot khud "Hey Gems" sun raha hai — do mic ek saath nahi chalte
     if (wakeRec || wakeRestartTimer) return;
     if (convMode) return; // hands-free already listening
     if (Date.now() < wakeCooldownUntil) { wakeRestartTimer = setTimeout(() => { wakeRestartTimer = null; startWake(); }, Math.max(400, wakeCooldownUntil - Date.now())); return; }
