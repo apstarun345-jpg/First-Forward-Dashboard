@@ -692,6 +692,7 @@
           let o = m.get(k); if (!o) { o = { ch, name, n: 0, full: 0 }; m.set(k, o); }
           o.n += r.n; if (r.kyc === 'full') o.full += r.n;
         }
+        kycCache.all = m;
         kycCache.rows = [...m.values()].filter((o) => o.n >= 15).map((o) => ({ ...o, pct: Math.round((o.full / o.n) * 100) }))
           .filter((o) => o.pct < 70).sort((a, b) => b.n - a.n);
         // v3.125.131 — pichle mahine se KYC ratio tulna (sudhra / bigda)
@@ -1598,7 +1599,7 @@
   }
   // 👤 v3.125.166 — sawaal me kisi agent / TL ka naam ho (kaise bhi bola ho) → usi ka card
   const skel = (w) => { const x = String(w || '').toLowerCase().replace(/w/g, 'v').replace(/ph/g, 'f').replace(/z/g, 'j').replace(/ee/g, 'i').replace(/oo/g, 'u'); return x[0] + x.slice(1).replace(/[aeiouyh]/g, '').replace(/(.)\1+/g, '$1'); };
-  const Q_STOP = new Set('stock total kitna kitne kitni hai hain ka ki ke ko pas paas pass me mein par aur ya is us ye wo kya kaun batao bata bataiye dikhao issuance issue tag tags agent agents tl team leader aaj kal month mahine mahina abhi tak sabse zyada jyada kam top best run rate andaza dispatch need kyc growth degrowth commission target wala wale hua hue kiya kitna the tha se liye mujhe mera meri ab bhi nahi haan gems hey hii hello please sir ji bhai ok gv ff first forward partner site pura poora sara saara kul overall last pichle inactive active report data number count list all sab sabka unka uska iska apna apne hamara summary scoreboard hisab record settings setting page kholo help madad november nov day din best wrong vrn chassis replacement reminder performance home awaaz sound band chalu expected projection forecast speed khatam wapas kaise kahan kab kyun kyon hone vala wala hoga raha rahe rahi chahiye bhejna maal'.split(' '));
+  const Q_STOP = new Set('stock total kitna kitne kitni hai hain ka ki ke ko pas paas pass me mein par aur ya is us ye wo kya kaun batao bata bataiye dikhao issuance issue tag tags agent agents tl team leader aaj kal month mahine mahina abhi tak sabse zyada jyada kam top best run rate andaza dispatch need kyc growth degrowth commission target wala wale hua hue kiya kitna the tha se liye mujhe mera meri ab bhi nahi haan gems hey hii hello please sir ji bhai ok gv ff first forward partner site pura poora sara saara kul overall last pichle inactive active report data number count list all sab sabka unka uska iska apna apne hamara summary scoreboard hisab record settings setting page kholo help madad november nov day din best wrong vrn chassis replacement reminder performance home awaaz sound band chalu expected projection forecast speed khatam wapas kaise kahan kab kyun kyon hone vala wala hoga raha rahe rahi chahiye bhejna maal vs versus compare tulna mukable profile detail details excel download sheet export puri nikalo tareekh tarikh taarikh date week hafte hafta din days kab band active aage peeche piche khol open aakhri akhri time baar kaam kiye kiya kare karta dead low cover zero bina new naye naya direct high badh badi team teams commercial drop bada first pehle log same samay tak one two between dono'.split(' '));
   function allAgentRows() { try { const R = FF.smartQ && FF.smartQ._rows; return R ? [...(R.ffRows() || []), ...(R.gvRows() || [])] : []; } catch { return []; } }
   function findEntity(t) {
     const words = t.trim().split(' ').filter((w) => w.length >= 3 && !Q_STOP.has(w) && !/^\d+$/.test(w));
@@ -1610,6 +1611,11 @@
     rows.forEach((r) => { const sc = score(r.name); if (sc > best + 1e-9) { best = sc; ag.length = 0; ag.push(r); } else if (sc && Math.abs(sc - best) < 1e-9) ag.push(r); });
     const tls = new Map(); rows.forEach((r) => { if (r.tl && !r.direct) { const sc = score(String(r.tl).replace(/^tl\s+/i, '')); if (sc) { const o = tls.get(r.tl) || { name: r.tl, sc, agents: 0, active: 0, cur: 0, last: 0, stock: 0, need: 0 }; o.agents++; if (r.cur > 0) o.active++; o.cur += r.cur; o.last += r.last; o.stock += r.stock; o.need += r.need || 0; tls.set(r.tl, o); } } });
     const tlBest = [...tls.values()].sort((a, b) => b.sc - a.sc)[0];
+    if (/ (vs|versus|compare|tulna|mukable|muqable|ya|aur|and|or) /.test(t)) { // do alag log?
+      const full = rows.map((r) => ({ r, sc: score(r.name) })).filter((x) => x.sc >= 1).sort((a, b) => b.sc - a.sc || (b.r.cur + b.r.stock) - (a.r.cur + a.r.stock));
+      const tokOf = (r) => String(r.name).toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((x) => x.length >= 3 && hitTok(x));
+      if (full.length >= 2) { const a0 = full[0], ta = new Set(tokOf(a0.r)); const b0 = full.find((x) => x.r !== a0.r && !tokOf(x.r).some((k) => ta.has(k))); if (b0) return { agents: [a0.r, b0.r], pair: [a0.r, b0.r] }; }
+    }
     const wantTl = / (tl|team leader|team) /.test(t);
     if (tlBest && (wantTl || tlBest.sc > best)) return { tl: tlBest };
     if (best >= 1.5 || (best >= 1 && ag.length <= 6)) return { agents: ag.sort((a, b) => (b.cur + b.stock) - (a.cur + a.stock)) };
@@ -1623,6 +1629,29 @@
       rows: [{ name: 'Is month issuance', val: fmt(o.cur) }, { name: 'Last month', val: fmt(o.last) }, { name: 'Stock', val: fmt(o.stock) }, { name: 'Agents', val: `${o.active} active / ${o.agents}` }, { name: 'Dispatch need', val: fmt(o.need) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
       say: wStock ? `${nm(o.name)} की टीम के पास कुल ${fmt(o.stock)} टैग्स का स्टॉक है।` : `${nm(o.name)} की टीम ने इस महीने ${fmt(o.cur)} टैग्स किए, पिछले महीने ${fmt(o.last)}। स्टॉक ${fmt(o.stock)}।` }; }
     const A = e.agents;
+    // 🆚 do alag naam + "vs / compare / ya / aur" → tulna
+    if (e.pair) { const [x, y] = e.pair; const row = (n, k, f) => ({ name: n, val: `${(f || fmt)(x[k] || 0)}  |  ${(f || fmt)(y[k] || 0)}`, sub: '', tone: 'chip' }); const win = x.cur === y.cur ? null : x.cur > y.cur ? x : y;
+      return { ...base, icon: '🆚', title: `${x.name}  vs  ${y.name}`, head: win ? `${win.name} aage — ${fmt(Math.abs(x.cur - y.cur))} tag se` : 'dono barabar', view: 'list',
+        rows: [row('Is month', 'cur'), row('Last month', 'last'), row('Stock', 'stock'), row('Run-rate /din', 'rate', r1), row('VC4', 'vc4'), row('VC20', 'vc20'), row('Dispatch need', 'need')],
+        say: `${nm(x.name)} ने इस महीने ${fmt(x.cur)} टैग्स किए और ${nm(y.name)} ने ${fmt(y.cur)}। ${win ? `${nm(win.name)} आगे हैं।` : 'दोनों बराबर हैं।'}` }; }
+    if (A.length === 1) {
+      const r0 = A[0];
+      if (has(/ (profile|detail|details|kholo|khol|open) /)) { try { FF.masterSearch.openSearchPage(r0.name); } catch { /* ignore */ } return { ...base, icon: '👤', title: `${r0.name} ka profile`, head: 'Profile khol diya.', view: 'text', stay: 6000, closeVoice: true, say: `${nm(r0.name)} का प्रोफ़ाइल खोल दिया।` }; }
+      // din-wise: last active, kis tareekh ko kitne, kitne din kaam, best din, aaj / kal
+      let o = null, S = null; try { S = series(); const K = String(r0.name).trim().toUpperCase(); o = S && (S.ag.get(`${r0.ch === 'GV' ? 'gv' : 'ff'}|${K}`) || S.ag.get(`ff|${K}`) || S.ag.get(`gv|${K}`)); } catch { o = null; }
+      const ymC = U.reportYm ? U.reportYm() : '', dOf = (iso) => `${Number(iso.slice(8, 10))} ${new Date(`${iso}T00:00:00`).toLocaleString('en-IN', { month: 'short' })}`;
+      if (o) {
+        const dl = [...o.days.entries()].filter(([, v]) => v > 0).sort((a, b) => (a[0] < b[0] ? -1 : 1)), curD = dl.filter(([d]) => d.startsWith(ymC));
+        const dm = / (\d{1,2}) (tareekh|tarikh|date|ko|nov|november|taarikh) /.exec(t);
+        const mk = (title, big, head, sayT) => ({ ...base, icon: '👤', title: `${r0.name}: ${title}`, view: 'big', big, head, rows: curD.slice(-7).reverse().map(([d, v]) => ({ name: dOf(d), val: fmt(v), sub: '', tone: 'chip' })), say: sayT });
+        if (dm) { const iso = `${ymC}-${String(Number(dm[1])).padStart(2, '0')}`, v = o.days.get(iso) || 0; return mk(`${Number(dm[1])} tareekh`, fmt(v), 'us din ke tags', `${nm(r0.name)} ने ${Number(dm[1])} तारीख़ को ${fmt(v)} टैग्स किए।`); }
+        if (has(/ (kab se|last active|aakhri|akhri|last tag|kab kiya|band hai|band kyon|kab se band|last time|pichli baar) /)) { const l = dl[dl.length - 1]; if (l) { const gap = S.last ? daysBetween(l[0], S.last) : 0; return mk('aakhri kaam', dOf(l[0]), gap > 0 ? `${gap} din se koi tag nahi · us din ${fmt(l[1])} tags` : `us din ${fmt(l[1])} tags (abhi active)`, `${nm(r0.name)} ने आख़िरी बार ${Number(l[0].slice(8, 10))} तारीख़ को ${fmt(l[1])} टैग्स किए थे।${gap > 0 ? ` ${gap} दिन से बंद हैं।` : ''}`); } }
+        if (has(/ (kitne din|active din|din kaam|days) /)) return mk('kaam ke din', `${curD.length} din`, `is mahine ${fmt(r0.cur)} tags`, `${nm(r0.name)} ने इस महीने ${curD.length} दिन काम किया और ${fmt(r0.cur)} टैग्स किए।`);
+        if (has(/ (best din|best day|sabse accha din|sabse zyada din|record) /) && curD.length) { const bd = curD.slice().sort((a, b) => b[1] - a[1])[0]; return mk('best din', fmt(bd[1]), `${dOf(bd[0])} ko`, `${nm(r0.name)} का सबसे अच्छा दिन ${Number(bd[0].slice(8, 10))} तारीख़ था, ${fmt(bd[1])} टैग्स।`); }
+        if (has(/ (aaj|today|kal|yesterday) /)) { const kal = has(/ (kal|yesterday) /), iso = kal ? S.last : new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10), v = o.days.get(iso) || 0; return mk(kal ? `kal (${dOf(iso)})` : 'aaj', fmt(v), kal ? 'aakhri data wale din ke tags' : 'aaj ab tak (FF ka aaj ka data kal aata hai)', `${nm(r0.name)} ने ${kal ? 'कल' : 'आज'} ${fmt(v)} टैग्स किए।`); }
+      }
+      if (has(/ kyc /) && kycCache.all) { const kk = kycCache.all.get(`${r0.ch === 'GV' ? 'gv' : 'ff'}|${r0.name}`) || [...kycCache.all.values()].find((z) => String(z.name).toUpperCase() === String(r0.name).toUpperCase()); if (kk && kk.n) { const p = Math.round((kk.full / kk.n) * 100); return { ...base, icon: '🪪', title: `${r0.name}: KYC`, view: 'big', big: `${p}%`, head: `full KYC ${fmt(kk.full)} / ${fmt(kk.n)} tags (is month)`, rows: [], say: `${nm(r0.name)} का फ़ुल के वाई सी ${p} प्रतिशत है।` }; } }
+    }
     if (A.length > 1) { const k = wStock ? 'stock' : 'cur'; return { ...base, icon: '🔎', title: `${A.length} agents mile`, head: wStock ? 'in sabka stock' : 'in sabka is mahine ka issuance (poora naam bolo to ek ka detail)', view: 'list',
       rows: A.slice(0, 7).map((r) => ({ name: r.name, sub: `${r.ch || ''} · ${r.tl || 'Direct'} · ${wStock ? `issue ${fmt(r.cur)}` : `stock ${fmt(r.stock)}`}`, val: fmt(r[k]), tone: 'chip' })),
       say: `इस नाम के ${A.length} एजेंट मिले। ${A.slice(0, 3).map((r) => `${nm(r.name)} ${wStock ? 'स्टॉक' : ''} ${fmt(r[k])}`).join(', ')}।` }; }
@@ -1642,7 +1671,7 @@
     const chip = (a) => a.map((x) => ({ ...x, sub: '', tone: 'chip' }));
     const split = gvQ || ffQ ? [] : [{ name: 'First Forward', k: 'ff' }, { name: 'GV Partner', k: 'gv' }];
     const part = (k, f) => split.map((x) => ({ name: x.name, val: fmt(f(rows.filter((r) => (x.k === 'gv' ? r.ch === 'GV' : r.ch !== 'GV')))) }));
-    const listy = has(/ (sabse|top|kiske|kiska|kaun|khatam|low|kam|zyada|jyada|highest|lowest|wale|list) /);
+    const listy = has(/ (sabse|top|kiske|kiska|kaun|khatam|low|kam|zyada|jyada|highest|lowest|wale|list|excel|download|export|sheet|nikalo|dead|zero|bina) /);
     if (has(/ (stock|maal) /) && !listy) { const tot = sum('stock'), n = R.filter((r) => r.stock > 0).length, z = R.filter((r) => r.cur > 0 && r.stock <= 0).length;
       return { ...base, icon: '📦', title: `${lab}: total stock`, big: fmt(tot), head: `${fmt(n)} agents ke paas stock hai`, q: 'stockhigh|all', rows: chip([...part('stock', (L) => sum('stock', L)), { name: 'Stock wale agents', val: fmt(n) }, { name: 'Issue chal raha, stock 0', val: fmt(z) }, { name: 'Dispatch need', val: fmt(sum('need')) }]),
         say: `${lab === 'Poori site' ? 'पूरी साइट' : lab} का कुल स्टॉक ${fmt(tot)} टैग्स है, ${fmt(n)} एजेंट्स के पास।` }; }
@@ -1675,8 +1704,8 @@
       const nz = (x) => String(x || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
       const can = (id) => { try { return !FF.auth.can || FF.auth.can(id); } catch { return true; } };
       const hit = tabs.map((tb) => { const w = nz(`${tb.label} ${tb.id}`).split(' ').filter((x) => x.length > 2); const sc = w.filter((x) => t.includes(` ${x}`) ).length; return { tb, sc }; }).filter((x) => x.sc && can(x.tb.id)).sort((a, b) => b.sc - a.sc)[0];
-      if (has(/ (setting|settings|सेटिंग|सेटिंग्स) /) ) { location.hash = '#/settings'; return txt('Settings khol di', 'Tabs: My account · Diagnostics · Sound & voice · Branding · Sheets & tabs · Access · Data source · Direct agents · Thresholds · Features · Contacts · Users · Links · Audit log · Backup', 'सेटिंग्स खोल दी हैं। यहाँ अकाउंट, साउंड और वॉइस, ब्रांडिंग, डेटा सोर्स, थ्रेशोल्ड, फीचर्स, यूज़र्स, ऑडिट लॉग और बैकअप के टैब हैं।'); }
-      if (hit) { location.hash = `#/${hit.tb.id}`; return txt(`${hit.tb.label} khol diya`, 'Page khul gaya — ab iske data ke baare me bhi poochh sakte ho.', `${hit.tb.label} खोल दिया।`); }
+      if (has(/ (setting|settings|सेटिंग|सेटिंग्स) /) ) { location.hash = '#/settings'; return txt('Settings khol di', 'Tabs: My account · Diagnostics · Sound & voice · Branding · Sheets & tabs · Access · Data source · Direct agents · Thresholds · Features · Contacts · Users · Links · Audit log · Backup', 'सेटिंग्स खोल दी हैं। यहाँ अकाउंट, साउंड और वॉइस, ब्रांडिंग, डेटा सोर्स, थ्रेशोल्ड, फीचर्स, यूज़र्स, ऑडिट लॉग और बैकअप के टैब हैं।', { closeVoice: true }); }
+      if (hit) { location.hash = `#/${hit.tb.id}`; return txt(`${hit.tb.label} khol diya`, 'Page khul gaya — ab iske data ke baare me bhi poochh sakte ho.', `${hit.tb.label} खोल दिया।`, { closeVoice: true }); }
     }
     if (has(/ (setting|settings|सेटिंग|सेटिंग्स) /)) return txt('Settings me kya kya hai', 'My account · Site diagnostics · Sound & voice (robot, Hey Gems, extension) · Branding · Sheets & tabs · Access matrix · Data source · Direct agents · Thresholds · Features · Contacts & sharing · Users & access · Personal links · Audit log · Storage & backup. "settings kholo" bolo to main khol dunga.', 'सेटिंग्स में अकाउंट, साउंड और वॉइस, ब्रांडिंग, डेटा सोर्स, थ्रेशोल्ड, फीचर्स, यूज़र्स, ऑडिट लॉग और बैकअप हैं। कहिए तो खोल दूँ।', { stay: 14000 });
     if (has(/ (kya kya|options?|features?|help|madad|मदद|kar sakte|कर सकते|kya kar sakta|क्या क्या) /)) {
@@ -1688,6 +1717,42 @@
     const GEN = /^(aaj|kal|total|site|sabka|sabki|mera|meri|hamara|hamari|is|us|ye|wo|pura|poora|poori|gv|ff|first|forward|partner|top|kul|abhi|uska|iska|pichle|last|mahine|month|agent|agents|tl|tls)$/;
     const nmQ = /(?:^| )([a-z][a-z.]{2,}(?: [a-z][a-z.]{2,})?) (?:ka|ki|ke) (?:issuance|issue|stock|commission|tag|tags|kyc|target|performance)(?: |$)/.exec(t.trim());
     if (nmQ && !nmQ[1].split(' ').every((w) => GEN.test(w))) return null;
+    // 📚 smartQ ki poori catalog — list wale sawaal (top N, FF / GV, TL), "excel / poori list" bolo to panel khulta hai
+    {
+      const ch = has(/ gv /) ? 'gv' : has(/ (ff|first forward) /) ? 'ff' : 'all';
+      const nM = / (?:top|pehle|first) (\d{1,3}) /.exec(t) || / (\d{1,3}) (?:agent|agents|tl|tls|log) /.exec(t), n = nM ? Math.max(1, Math.min(50, Number(nM[1]))) : 7;
+      const C = [
+        [/ dead ?stock /, 'deadstock'], [/ (stock|maal) .*(par|lekin|but) .*(inactive|band|kaam nahi) /, 'deadstock'], [/ (inactive|band) .*(stock|maal) /, 'deadstock'],
+        [/ (low cover|stock cover|kam stock|stock kam|5 din|jaldi khatam) /, 'lowcover'], [/ (zero stock|stock zero|bina stock|stock nahi hai|stock 0) /, 'nostock'],
+        [/ (new|naye|naya|nae) (agent|agents|id) /, 'newagents'], [/ (reactivat\w*|wapas aaye|comeback) /, 'newagents'],
+        [/ (biggest drop|bada drop|sabse (zyada|jyada|bada) (gir|drop|nuksan)\w*) /, 'biggestdrop'],
+        [/ (pichle|last) (mahine|month) .*(top|best|sabse) /, tl ? 'lasttl' : 'lastmonth'], [/ (top|best|sabse) .*(pichle|last) (mahine|month) /, tl ? 'lasttl' : 'lastmonth'],
+        [/ (badi team|badi teams|biggest team|sabse (zyada|jyada) agent) /, 'bigtl'], [/ (tl|team) .*inactive agent/, 'inactagentstl'],
+        [/ (high growth|growth wale|badh rahe|badhat|improv\w*) /, tl ? 'highgrowthtl' : 'high'],
+        [/ direct (agent|agents) /, has(/ (dispatch|bhejna) /) ? 'dispatchDirect' : 'direct'],
+        [/ (top|best|sabse) .*vc ?4 /, 'vc4'], [/ vc ?4 .*(top|best|sabse|kaun|kiska) /, 'vc4'], [/ (top|best|sabse) .*vc ?20 /, 'vc20'], [/ vc ?20 .*(top|best|sabse|kaun|kiska) /, 'vc20'], [/ (top|best|sabse) .*(vc ?5|commercial) /, 'vc5'], [/ (vc ?5|commercial) .*(top|best|sabse|kaun|kiska) /, 'vc5'],
+        [/ run ?rate .*(agent|kiska|kiski|sabse|top|kaun) /, 'runrate'], [/ (agent|kiska|sabse|top|kaun) .*run ?rate /, 'runrate'],
+        [/ inactive (tl|tls|team) /, 'inactivetl']
+      ];
+      const VAL = { inactive: 'last', top: 'cur', high: 'growth', degrowth: 'growth', dispatch: 'need', dispatchDirect: 'need', vc4: 'vc4', vc20: 'vc20', vc5: 'vc5', nostock: 'cur', direct: 'cur', toptl: 'cur', inactivetl: 'last', degrowthtl: 'growth', highgrowthtl: 'growth', stocktl: 'stock', dispatchtl: 'need', inactagentstl: 'inact', lasttl: 'last', bigtl: 'agents', stockhigh: 'stock', deadstock: 'stock', lowcover: 'stock', lastmonth: 'last', newagents: 'cur', runrate: 'rate' };
+      const SUB = { deadstock: 'stock pada hai, kaam band', lowcover: '5 din se kam ka stock', nostock: 'issue chal raha, stock 0', newagents: 'naye / wapas aaye', biggestdrop: 'last month se sabse zyada gire', bigtl: 'agents', inactagentstl: 'inactive agents', runrate: 'tags/din' };
+      const hitC = C.find(([re]) => re.test(t));
+      const wantList = has(/ (excel|download|sheet|export|poori list|puri list|full list|list nikalo|nikalo) /);
+      let key = hitC ? hitC[1] : '';
+      if (!key && wantList) key = has(/ (stock|maal) /) ? (tl ? 'stocktl' : 'stockhigh') : has(/ inactive /) ? 'inactive' : has(/ (dispatch|bhejna) /) ? (tl ? 'dispatchtl' : 'dispatch') : has(/ (degrowth|girawat) /) ? (tl ? 'degrowthtl' : 'degrowth') : tl ? 'toptl' : 'top';
+      if (key) {
+        let a = sq(`${key}|${ch}`, wantList ? 100000 : n) || (ch !== 'all' ? sq(`${key}|all`, wantList ? 100000 : n) : null);
+        if (a && a.rows && a.def) {
+          const title = `${a.def.title}${ch !== 'all' ? ` · ${ch.toUpperCase()}` : ''}`;
+          if (wantList) { setTimeout(() => { try { FF.smartQ.open(a.def.id, 'all'); } catch { /* ignore */ } }, 600); return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '📥', title, head: `${fmt(a.rows.length)} rows ki poori list khol di — upar "Excel" button dabao to download.`, view: 'text', stay: 7000, closeVoice: true, say: `${fmt(a.rows.length)} की पूरी लिस्ट खोल दी है। एक्सेल बटन दबाइए।` }; }
+          if (!a.rows.length) return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '✅', title, head: 'Is list me abhi koi nahi.', view: 'text', stay: 6000, say: 'इस लिस्ट में अभी कोई नहीं है।' };
+          const vk = VAL[key] || 'cur', fv = (r) => (vk === 'growth' ? pct(r.growth) : vk === 'rate' ? `${r1(r.rate || 0)}/din` : fmt(r[vk]));
+          return { key: `ans:${Date.now()}`, fun: true, mood: 'info', icon: '📋', title, head: `${SUB[key] || a.def.note || ''}`.slice(0, 90), view: 'list', stay: 16000, q: a.def.id,
+            rows: a.rows.slice(0, Math.min(n, 10)).map((r) => ({ name: r.name, sub: [r.ch, r.tl].filter(Boolean).join(' · '), val: fv(r), tone: 'chip' })),
+            say: `${a.rows.slice(0, 3).map((r) => `${nm(r.name)} ${fv(r).replace('/din', ' रोज़').replace('%', ' प्रतिशत')}`).join(', ')}।` };
+        }
+      }
+    }
     if (has(/ (run ?rate|रन ?रेट|raftaar|रफ्तार|speed|roz ka|per day|रोज का|रोज़ का|daily average|din ka average) /)) return byKey('rr');
     if (has(/ (andaz\w*|andaj\w*|अंदाज़\w*|अंदाज\w*|expected|projection|forecast|kitna hoga|कितना होगा|month end|mahine ke ant|महीने के अंत|estimate) /)) return byKey('exp', 'rr');
     if (has(/ (de ?growth|degrowth|girawat|गिरावट|gir (gaya|gaye|rahe|raha)|ghat (gaya|gaye|rahe|raha)|गिर गए|घट) /)) return byKey(tl ? 'degrowthtl' : 'degrowth', 'degrowth');
@@ -1699,7 +1764,7 @@
     if (has(/ (best day|record|sabse (accha|achha|badhiya) din|सबसे अच्छा दिन) /)) return byKey('bestday');
     if (has(/ (ff|first forward|फर्स्ट फॉरवर्ड) /) && has(/ (gv|जीवी) /)) return byKey('ffvsgv');
     if (!has(/ (commission|payout|rate card) /) && has(/ (top|best|sabse (zyada|jyada|upar|aage)|number (one|1)|leader|टॉप|सबसे ज्यादा|सबसे आगे) /)) return byKey(tl ? 'toptl' : 'top', 'top');
-    if (has(/ (total|kul|abhi tak|kitne tag|kitne tags|kitna hua|scoreboard|summary|hisab|nov|november|month|mahin\w*|tags? hue|tag hue|hue) /) || has(/ (aaj|kal|today|yesterday|pichle|last|previous|purane) .*(total|tag|tags|issue|issuance|hue|hua) /)) {
+    if (has(/ (total|kul|abhi tak|kitne tag|kitne tags|kitna hua|scoreboard|summary|hisab|nov|november|month|mahin\w*|tags? hue|tag hue|hue) /) || has(/ (aaj|kal|today|yesterday|pichle|last|previous|purane) .*(total|tag|tags|issue|issuance|hue|hua) /) || has(/ \d{1,2} (tareekh|tarikh|taarikh|date) /) || has(/ (hafte|hafta|week|saptah) /) || has(/ (pichle|last|past) \d{1,2} (din|days|day) /) || (has(/ (aage|peeche|piche|behind|ahead) /) && has(/ (pichle|last|previous) /))) {
       const m = monthStats();
       if (m && m.all && m.all.total) {
         const gvQ = has(/ (gv|जीवी) /), ffQ = !gvQ && has(/ (ff|first forward) /);
@@ -1710,6 +1775,14 @@
         const dayTotal = (dd) => { const o = { total: 0, vc4: 0, vc20: 0, vc5: 0 }; rowsH.filter((r) => r.day === dd && r.ym === m.cur && (gvQ ? r.channel === 'GV Partner' : ffQ ? r.channel !== 'GV Partner' : true)).forEach((r) => { const q = Number(r.n) || 0; o.total += q; o[r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5'] += q; }); return o; };
         const chips = (o) => [{ name: 'VC4', val: fmt(o.vc4) }, { name: 'VC20', val: fmt(o.vc20) }, { name: 'VC5+', val: fmt(o.vc5) }].map((x) => ({ ...x, sub: '', tone: 'chip' }));
         const base = { key: `ans:${Date.now()}`, qkey: 'mtd', fun: true, view: 'big', stay: 16000, q: 'summary|all' };
+        const dayM = / (\d{1,2}) (tareekh|tarikh|taarikh|date|ko|nov|november) /.exec(t);
+        const lastN = / (?:pichle|last|past) (\d{1,2}) (?:din|days|day) /.exec(t), weekQ = has(/ (hafte|hafta|week|saptah) /);
+        if (dayM && Number(dayM[1]) >= 1 && Number(dayM[1]) <= 31) { const dd = Number(dayM[1]), o = dayTotal(dd); return { ...base, mood: 'info', icon: '🗓', title: `${lab}: ${dd} ${mon}`, big: fmt(o.total), head: dd > rd ? 'is din ka poora data abhi nahi aaya (sirf GV live)' : 'us din ka total', rows: chips(o), say: `${dd} तारीख़ को ${fmt(o.total)} टैग्स हुए।` }; }
+        if (lastN || weekQ) { const n = Math.max(1, Math.min(rd, lastN ? Number(lastN[1]) : 7)); const L = []; let tot = 0; for (let dd = rd; dd > rd - n; dd--) { const o = dayTotal(dd); tot += o.total; L.push({ name: `${dd} ${mon.slice(0, 3)}`, val: fmt(o.total), sub: '', tone: 'chip' }); }
+          return { ...base, mood: 'info', icon: '📆', title: `${lab}: pichle ${n} din`, big: fmt(tot), head: `${rd - n + 1}–${rd} ${mon} · roz ka average ${fmt(tot / n)}`, rows: L, say: `पिछले ${n} दिन में ${fmt(tot)} टैग्स हुए, रोज़ का औसत ${fmt(tot / n)}।` }; }
+        if (has(/ (aage|peeche|piche|behind|ahead|same din|same day|is samay|isi din tak|compare|tulna|vs) /) && has(/ (pichle|last|previous) /)) { const diff = sc.r.total - sc.prevSame, pp = sc.prevSame ? Math.round((diff / sc.prevSame) * 100) : null;
+          return { ...base, mood: diff >= 0 ? 'excited' : 'alert', icon: diff >= 0 ? '📈' : '📉', title: `${lab}: is month vs last month`, big: `${diff >= 0 ? '+' : ''}${fmt(diff)}`, head: `${rd} tareekh tak: is month ${fmt(sc.r.total)} · last month ${fmt(sc.prevSame)}${pp != null ? ` (${pct(pp)})` : ''}`, rows: [{ name: 'Is month (kal tak)', val: fmt(sc.r.total) }, { name: 'Last month same din tak', val: fmt(sc.prevSame) }, { name: 'Last month poora', val: fmt(sc.prevTotal) }, { name: 'Is month andaaza', val: fmt(sc.exp.total) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+            say: `${rd} तारीख़ तक इस महीने ${fmt(sc.r.total)} टैग्स हुए, पिछले महीने इसी दिन तक ${fmt(sc.prevSame)} थे। यानी हम ${fmt(Math.abs(diff))} टैग्स ${diff >= 0 ? 'आगे' : 'पीछे'} हैं।` }; }
         if (prevQ) return { ...base, mood: 'info', icon: '📅', title: `${lab}: pichle mahine`, big: fmt(sc.prevTotal), head: 'poore pichle mahine ka total', rows: [], say: `पिछले महीने ${lab === 'Poori site' ? 'पूरी साइट' : lab} का टोटल ${fmt(sc.prevTotal)} टैग्स था।` };
         if (kalQ) { const o = dayTotal(rd); return { ...base, mood: 'info', icon: '🗓', title: `${lab}: kal (${rd} ${mon})`, big: fmt(o.total), head: 'kal ka total (jo data Home me aaya)', rows: chips(o), say: `कल ${rd} तारीख़ को ${fmt(o.total)} टैग्स हुए।` }; }
         if (aajQ) { const o = dayTotal(d.getDate()); return { ...base, mood: 'info', icon: '☀️', title: `${lab}: aaj`, big: fmt(o.total), head: 'aaj ab tak (sirf GV live aata hai, FF ka aaj ka data kal aata hai)', rows: chips(o), say: `आज अभी तक ${fmt(o.total)} टैग्स हुए। ध्यान रहे, आज का सिर्फ़ जी वी लाइव आता है।` }; }
@@ -1897,6 +1970,7 @@
     const card = gvCard(it); if (card && th) { const c = document.createElement('div'); c.className = 'gv-card'; c.innerHTML = card; th.appendChild(c); gvScroll(); }
     if (it.q && it.q[0] === '#') { /* link wale items: user kahe "kholo" */ }
     await sp; await wait(250);
+    if (it.closeVoice && gen === gvGen) { await wait(900); if (gen === gvGen) gvClose('quiet'); }
   }
   async function gvLoop(gen) {
     let idle = Date.now();
