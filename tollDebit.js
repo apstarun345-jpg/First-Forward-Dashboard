@@ -46,10 +46,10 @@
     if (!fresh && state.days.length && Date.now() - state.at < 10 * 60e3) return state;
     if (state.promise) return state.promise;
     state.promise = (async () => {
-      const p = new URLSearchParams({ tqx: 'out:json', gid: GID, range: 'A1:AK400', headers: '1' });
+      const p = new URLSearchParams({ tqx: 'out:json', gid: GID, range: 'A1:AK400', headers: '1', prio: '1' });
       if (FF.config && FF.config.gvSheetId) p.set('id', FF.config.gvSheetId);
       if (fresh) p.set('fresh', '1');
-      const res = await fetch(`${(FF.config && FF.config.proxyPath) || '/api/gviz'}?${p.toString()}`, { credentials: 'same-origin' });
+      const res = await Promise.race([fetch(`${(FF.config && FF.config.proxyPath) || '/api/gviz'}?${p.toString()}`, { credentials: 'same-origin' }), new Promise((_, rej) => setTimeout(() => rej(new Error('Google Sheet abhi busy hai (rate limit) — 1 minute baad ↻ dabao.')), 45000))]);
       const text = await res.text();
       if (!res.ok) { let m = `Toll Debit sheet nahi mili (${res.status})`; try { m = JSON.parse(text).error || m; } catch { /* text */ } throw new Error(m); }
       const out = parse(FF.data.parseGviz(text));

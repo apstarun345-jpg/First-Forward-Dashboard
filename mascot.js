@@ -1594,7 +1594,9 @@
     let t = String(q || '');
     if (!/[ऀ-ॿ]/.test(t)) return t;
     t = ` ${t} `;
-    DV_WORDS.forEach(([h, l]) => { t = t.split(h).join(` ${l} `); });
+    t = t.replace(/[।,.!?]/g, ' ').replace(/\s+/g, ' ');
+    DV_WORDS.forEach(([h, l]) => { t = t.split(` ${h} `).join(` ${l} `); }); // sirf poora shabd — naam ke andar ka 'के' nahi
+    DV_WORDS.forEach(([h, l]) => { t = t.split(` ${h} `).join(` ${l} `); }); // saath-saath wale shabd (doosri baar)
     return t.split(/(\s+)/).map((w) => (/[ऀ-ॿ]/.test(w) ? devaWord(w) : w)).join('').replace(/\s+/g, ' ').trim();
   }
   // 👤 v3.125.166 — sawaal me kisi agent / TL ka naam ho (kaise bhi bola ho) → usi ka card
@@ -1607,7 +1609,7 @@
     if (!words.length) return null;
     const wk = words.map(skel), rows = allAgentRows(); if (!rows.length) return null;
     const hitTok = (tok) => { const k = skel(tok); for (let i = 0; i < words.length; i++) if (words[i] === tok || (k.length >= 3 && wk[i] === k)) return true; return false; };
-    const score = (name) => { const tk = String(name || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((x) => x.length >= 3); if (!tk.length) return 0; const h = tk.filter(hitTok).length; return h ? h + h / tk.length : 0; };
+    const score = (name) => { const tk = [...new Set(String(name || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((x) => x.length >= 3))]; if (!tk.length) return 0; const h = tk.filter(hitTok).length; return h ? h + h / tk.length : 0; };
     let best = 0; const ag = [];
     rows.forEach((r) => { const sc = score(r.name); if (sc > best + 1e-9) { best = sc; ag.length = 0; ag.push(r); } else if (sc && Math.abs(sc - best) < 1e-9) ag.push(r); });
     const tls = new Map(); rows.forEach((r) => { if (r.tl && !r.direct) { const sc = score(String(r.tl).replace(/^tl\s+/i, '')); if (sc) { const o = tls.get(r.tl) || { name: r.tl, sc, agents: 0, active: 0, cur: 0, last: 0, stock: 0, need: 0 }; o.agents++; if (r.cur > 0) o.active++; o.cur += r.cur; o.last += r.last; o.stock += r.stock; o.need += r.need || 0; tls.set(r.tl, o); } } });
@@ -1674,6 +1676,7 @@
         if (has(/ (aaj|today|kal|yesterday) /)) { const kal = has(/ (kal|yesterday) /), iso = kal ? S.last : new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10), v = o.days.get(iso) || 0; return mk(kal ? `kal (${dOf(iso)})` : 'aaj', fmt(v), kal ? 'aakhri data wale din ke tags' : 'aaj ab tak (FF ka aaj ka data kal aata hai)', `${nm(r0.name)} ने ${kal ? 'कल' : 'आज'} ${fmt(v)} टैग्स किए।`); }
       }
       if (has(/ kyc /) && kycCache.all) { const kk = kycCache.all.get(`${r0.ch === 'GV' ? 'gv' : 'ff'}|${r0.name}`) || [...kycCache.all.values()].find((z) => String(z.name).toUpperCase() === String(r0.name).toUpperCase()); if (kk && kk.n) { const p = Math.round((kk.full / kk.n) * 100); return { ...base, icon: '🪪', title: `${r0.name}: KYC`, view: 'big', big: `${p}%`, head: `full KYC ${fmt(kk.full)} / ${fmt(kk.n)} tags (is month)`, rows: [], say: `${nm(r0.name)} का फ़ुल के वाई सी ${p} प्रतिशत है।` }; } }
+      if (has(/ kyc /)) return { ...base, icon: '🪪', title: `${r0.name}: KYC`, view: 'text', head: 'Is agent ka KYC data is mahine nahi mila (KYC report me naam nahi hai).', rows: [], say: `${nm(r0.name)} का के वाई सी डेटा नहीं मिला।` };
     }
     if (A.length > 1) { const k = wStock ? 'stock' : 'cur'; return { ...base, icon: '🔎', title: `${A.length} agents mile`, head: wStock ? 'in sabka stock' : 'in sabka is mahine ka issuance (poora naam bolo to ek ka detail)', view: 'list',
       rows: A.slice(0, 7).map((r) => ({ name: r.name, sub: `${r.ch || ''} · ${r.tl || 'Direct'} · ${wStock ? `issue ${fmt(r.cur)}` : `stock ${fmt(r.stock)}`}`, val: fmt(r[k]), tone: 'chip' })),
@@ -1988,8 +1991,21 @@
     return { key: `ans:${Date.now()}`, fun: true, mood: 'curious', icon: '🤔', title: 'Thoda aur batao', head: 'Aise poochho: "run rate", "is mahine ka total", "top agents", "stock khatam", "Rahul ka issuance", "performance kholo", "settings kholo".', view: 'text', stay: 12000,
       say: 'थोड़ा और साफ़ बताइए। जैसे रन रेट, इस महीने का टोटल, टॉप एजेंट, या किसी एजेंट का नाम।' };
   }
+  // 📥 jawab se pehle data pakka load ho (kisi bhi page par — pehle sirf Home / Performance khula ho tab hi sahi aata tha)
+  let ensAt = 0, ensP = null;
+  function ensureData() {
+    if (Date.now() - ensAt < 5 * 60e3 && allAgentRows().length > 50) return Promise.resolve();
+    if (ensP) return ensP;
+    const jobs = [];
+    try { if (FF.lazy && FF.lazy.need) jobs.push(FF.lazy.need('performance')); } catch { /* ignore */ }
+    try { if (FF.store && FF.store.need) { jobs.push(FF.store.need('agents')); jobs.push(FF.store.need('stockAgents')); jobs.push(FF.store.need('daily')); } } catch { /* ignore */ }
+    try { if (FF.gv && FF.gv.need) jobs.push(FF.gv.need('report')); } catch { /* ignore */ }
+    ensP = Promise.race([Promise.allSettled(jobs), wait(20000)]).then(() => { ensAt = Date.now(); ensP = null; });
+    return ensP;
+  }
   async function answerItem(q) {
     q = deva(q);
+    try { await ensureData(); } catch { /* ignore */ }
     if (!FF.smartQ && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('smartQ'); } catch { /* optional */ } }
     if (q === '@todo') return srvItem(/^srv:todo:/) || { key: 'todo-none', fun: true, mood: 'curious', icon: '📋', title: 'Aaj ke kaam', head: 'Abhi kaam list nahi bani — subah data aane do.', view: 'text', stay: 5000 };
     if (q === '@badges') return srvItem(/^srv:badges:/) || { key: 'bdg-none', fun: true, mood: 'curious', icon: '🎖', title: 'Badges', head: 'Abhi koi naya badge nahi.', view: 'text', stay: 5000 };
