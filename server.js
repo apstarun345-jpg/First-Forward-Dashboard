@@ -164,6 +164,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvPayout', label: 'GV Partner · Commission Payout (agent / TL commission + tags issued)', group: 'GV Partner' },
   { key: 'fastagMapping', label: 'GV Partner · FASTag Mapping (admin-only API mapping)', group: 'GV Partner' },
   { key: 'agentsOverview', label: 'Reports · GV & FF Agents Summary (stock agents · direct/TL · active/inactive)', group: 'Reports' },
+  { key: 'tollDebit', label: 'Reports · Toll Debit (roz ka toll debit · date-wise · class-wise)', group: 'Reports' },
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
   { key: 'multiCustomer', label: 'Cross-channel · Multiple Customer ID (EIR customer × month · issuing agent)', group: 'Cross Channel' },
   { key: 'aiAnalyst', label: 'Management · AI Business Analyst (GV + FF review)', group: 'Management' },

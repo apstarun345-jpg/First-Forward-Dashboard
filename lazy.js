@@ -84,6 +84,7 @@ window.FF = window.FF || {};
     fastagChampions: [...INSIGHT_DEPS],
     dispatchPlan: [...PROFILE_DEPS, 'dispatchPlanner'],
     directAgents: ['kpiDetail', 'directAgents'],
+    tollDebit: ['tollDebit'],
     agentsOverview: ['kpiDetail', 'performance', 'agentsOverview'],   // KPI drill lists kpiDetail me register hoti hain
     aiAnalyst: [...INSIGHT_DEPS, 'aiAnalyst'],
     unusual: ['pdf', 'unusual-scan', 'unusual'],
