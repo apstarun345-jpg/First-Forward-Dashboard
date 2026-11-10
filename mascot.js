@@ -1375,7 +1375,7 @@
     });
     lastSpoken = spoken;
     const minStay = wait(it.stay || Math.max(10000, String(it.say || '').length * 60)); // kam se kam 10 sec board
-    const stay = (async () => { await Promise.all([spoken, minStay]); while ((hover || convo) && !reason) await wait(500); })();
+    const stay = (async () => { await Promise.all([Promise.race([spoken, wait(25000 + String(it.say || '').length * 110)]), minStay]); while ((hover || convo) && !reason) await wait(500); })();
     await Promise.race([stay, ended]);
     skip = null; stopSpeech(); extEnd(it);
     board.classList.remove('in'); el.classList.remove('holding');
@@ -1992,7 +1992,8 @@
     if (e.source !== window || !e.data || e.data.source !== 'ff-robot-ext' || !e.data.msg) return;
     const m = e.data.msg;
     if (m.type === 'open') { runQ(m.q || ''); return; }
-    if (m.type === 'resume' && m.item) { // 🎬 dusre tab se dashboard par wapas: wahi jagah, wahi board
+    if (m.type === 'resume' && m.item) {
+      if (convo) return; // baat-cheet me purana board wapas nahi // 🎬 dusre tab se dashboard par wapas: wahi jagah, wahi board
       (async () => {
         if (!cfg.on || !allowed()) return;
         if (busy && current && current.key === m.item.key) { snapBoard(); return; } // yahi chal rahi thi — bas sahi jagah / poora board
