@@ -1599,7 +1599,7 @@
   }
   // 👤 v3.125.166 — sawaal me kisi agent / TL ka naam ho (kaise bhi bola ho) → usi ka card
   const skel = (w) => { const x = String(w || '').toLowerCase().replace(/w/g, 'v').replace(/ph/g, 'f').replace(/z/g, 'j').replace(/ee/g, 'i').replace(/oo/g, 'u'); return x[0] + x.slice(1).replace(/[aeiouyh]/g, '').replace(/(.)\1+/g, '$1'); };
-  const Q_STOP = new Set('stock total kitna kitne kitni hai hain ka ki ke ko pas paas pass me mein par aur ya is us ye wo kya kaun batao bata bataiye dikhao issuance issue tag tags agent agents tl team leader aaj kal month mahine mahina abhi tak sabse zyada jyada kam top best run rate andaza dispatch need kyc growth degrowth commission target wala wale hua hue kiya kitna the tha se liye mujhe mera meri ab bhi nahi haan gems hey hii hello please sir ji bhai ok gv ff first forward partner site pura poora sara saara kul overall last pichle inactive active report data number count list all sab sabka unka uska iska apna apne hamara summary scoreboard hisab record settings setting page kholo help madad november nov day din best wrong vrn chassis replacement reminder performance home awaaz sound band chalu expected projection forecast speed khatam wapas kaise kahan kab kyun kyon hone vala wala hoga raha rahe rahi chahiye bhejna maal kyon kyu kyun kyo why wajah reason karan kaaran rank ranking position sthan konse chalega bachega karne karna pahunchne roz daily rozana lakh hazar thousand average avg ausat star kisne under kiske konsa members member kaun vs versus compare tulna mukable profile detail details excel download sheet export puri nikalo tareekh tarikh taarikh date week hafte hafta din days kab band active aage peeche piche khol open aakhri akhri time baar kaam kiye kiya kare karta dead low cover zero bina new naye naya direct high badh badi team teams commercial drop bada first pehle log same samay tak one two between dono'.split(' '));
+  const Q_STOP = new Set('stock total kitna kitne kitni hai hain ka ki ke ko pas paas pass me mein par aur ya is us ye wo kya kaun batao bata bataiye dikhao issuance issue tag tags agent agents tl team leader aaj kal month mahine mahina abhi tak sabse zyada jyada kam top best run rate andaza dispatch need kyc growth degrowth commission target wala wale hua hue kiya kitna the tha se liye mujhe mera meri ab bhi nahi haan gems hey hii hello please sir ji bhai ok gv ff first forward partner site pura poora sara saara kul overall last pichle inactive active report data number count list all sab sabka unka uska iska apna apne hamara summary scoreboard hisab record settings setting page kholo help madad november nov day din best wrong vrn chassis replacement reminder performance home awaaz sound band chalu expected projection forecast speed khatam wapas kaise kahan kab kyun kyon hone vala wala hoga raha rahe rahi chahiye bhejna maal alert alerts dhyan khatra problem dikkat gadbad warning pending kharab accha achha badhiya min full kisne wrong kyon kyu kyun kyo why wajah reason karan kaaran rank ranking position sthan konse chalega bachega karne karna pahunchne roz daily rozana lakh hazar thousand average avg ausat star kisne under kiske konsa members member kaun vs versus compare tulna mukable profile detail details excel download sheet export puri nikalo tareekh tarikh taarikh date week hafte hafta din days kab band active aage peeche piche khol open aakhri akhri time baar kaam kiye kiya kare karta dead low cover zero bina new naye naya direct high badh badi team teams commercial drop bada first pehle log same samay tak one two between dono'.split(' '));
   let lastEnt = null;
   function allAgentRows() { try { const R = FF.smartQ && FF.smartQ._rows; return R ? [...(R.ffRows() || []), ...(R.gvRows() || [])] : []; } catch { return []; } }
   function findEntity(t) {
@@ -1705,6 +1705,87 @@
         rows: chip([{ name: 'Total', val: fmt(R.length) }, { name: '🟢 Active', val: fmt(act) }, { name: '😴 Inactive', val: fmt(ina) }]), say: `कुल ${fmt(R.length)} एजेंट्स हैं। ${fmt(act)} एक्टिव और ${fmt(ina)} इनएक्टिव।` }; }
     return null;
   }
+  // 🚨 v3.125.171 — Alerts (khud batana) + aur data: KYC, commission, wrong VRN / chassis / replacement agent-wise
+  function alertsList() {
+    const out = [], R = allAgentRows();
+    try { // 1) chalte hue agent ka stock 2 din me khatam
+      R.filter((r) => r.rate >= 3 && r.stock >= 0 && r.stock / r.rate <= 2).sort((a, b) => b.rate - a.rate).slice(0, 4)
+        .forEach((r) => out.push({ k: `stk:${r.name}`, sev: 3, icon: '📦', name: r.name, val: r.stock <= 0 ? 'stock 0' : `${r1(r.stock / r.rate)} din`, sub: `stock ${fmt(r.stock)} · roz ${r1(r.rate)} · ${r.tl || 'Direct'}`, say: `${nm(r.name)} का स्टॉक ${r.stock <= 0 ? 'ख़त्म है' : `${r1(r.stock / r.rate)} दिन में ख़त्म होगा`}` }));
+    } catch { /* ignore */ }
+    try { // 2) bade agent 3+ din se band
+      const S = series(); if (S && S.last) R.filter((r) => r.last >= 80 || r.cur >= 60).forEach((r) => { const K = String(r.name).trim().toUpperCase(), o = S.ag.get(`${r.ch === 'GV' ? 'gv' : 'ff'}|${K}`); if (!o) return; const dl = [...o.days.entries()].filter(([, v]) => v > 0).map(([d]) => d).sort(); const l = dl[dl.length - 1]; if (!l) return; const gap = daysBetween(l, S.last); if (gap >= 3 && gap <= 20) out.push({ k: `off:${r.name}`, sev: 2, icon: '😴', name: r.name, val: `${gap} din se band`, sub: `last month ${fmt(r.last)} · stock ${fmt(r.stock)} · ${r.tl || 'Direct'}`, say: `${nm(r.name)} ${gap} दिन से बंद हैं`, w: r.last }); });
+    } catch { /* ignore */ }
+    try { // 3) kal ka din kamzor · 4) mahina last month se peeche
+      const m = monthStats(); if (m && m.all && m.all.total) { const a = m.all, d1 = (a.days.get(a.rd) || {}).total || 0, d0 = (a.days.get(a.rd - 1) || {}).total || 0;
+        if (a.rd >= 3 && d1 > 0 && a.rate.total > 0 && d1 < a.rate.total * 0.8) out.push({ k: `day:${a.rd}`, sev: 2, icon: '📉', name: `Kal (${a.rd} tareekh) kamzor raha`, val: fmt(d1), sub: `run-rate ${r1(a.rate.total)}/din se ${Math.round((1 - d1 / a.rate.total) * 100)}% neeche${d0 ? ` · usse pehle din ${fmt(d0)}` : ''}`, say: `कल सिर्फ़ ${fmt(d1)} टैग्स हुए, जो रन रेट से ${Math.round((1 - d1 / a.rate.total) * 100)} प्रतिशत नीचे है` });
+        if (a.prevSame > 0 && a.r.total < a.prevSame * 0.9) out.push({ k: `mon:${a.rd}`, sev: 2, icon: '🐢', name: 'Mahina last month se peeche', val: `-${fmt(a.prevSame - a.r.total)}`, sub: `${a.rd} tareekh tak ${fmt(a.r.total)} · last month ${fmt(a.prevSame)}`, say: `हम पिछले महीने से ${fmt(a.prevSame - a.r.total)} टैग्स पीछे हैं` }); }
+    } catch { /* ignore */ }
+    const off = out.filter((x) => x.k.startsWith('off:')).sort((a, b) => (b.w || 0) - (a.w || 0)).slice(0, 4);
+    return [...out.filter((x) => !x.k.startsWith('off:')), ...off].sort((a, b) => b.sev - a.sev);
+  }
+  function alertsItem(spoken) {
+    const L = alertsList();
+    if (!L.length) return spoken ? { key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '✅', title: 'Sab theek hai', head: 'Abhi koi badi dikkat nahi dikh rahi.', view: 'text', stay: 6000, say: 'अभी सब ठीक है, कोई बड़ी दिक्कत नहीं दिख रही।' } : null;
+    return { key: `alerts:${Date.now()}`, fun: true, mood: 'alert', icon: '🚨', title: `Dhyan do — ${L.length} baatein`, head: L[0].name, view: 'list', stay: 20000, rows: L.slice(0, 8).map((x) => ({ name: `${x.icon} ${x.name}`, sub: x.sub, val: x.val, tone: 'chip' })), sug: ['dispatch kitna chahiye', 'dead stock wale agent', 'inactive agents', 'briefing do'],
+      say: `${L.length} बातों पर ध्यान दीजिए। ${L.slice(0, 3).map((x) => x.say).join('। ')}।`, sig: L.map((x) => x.k).sort().join(',') };
+  }
+  // khud batana: naya alert aaye to (2 ghante me ek baar se zyada nahi; wahi purani baat dobara nahi)
+  setInterval(() => {
+    try {
+      if (!allowed() || !cfg.on || cfg.alerts === false || cfg.snoozeDay === today() || busy || convo || asking || document.hidden) return;
+      let st = {}; try { st = JSON.parse(localStorage.getItem('gemsAlert') || '{}'); } catch { st = {}; }
+      if (Date.now() - (st.at || 0) < 2 * 3600e3) return;
+      const it = alertsItem(false); if (!it) return;
+      const seen = new Set(String(st.sig || '').split(',')), fresh = it.sig.split(',').filter((k) => !seen.has(k));
+      if (!fresh.length && st.day === today()) return;
+      localStorage.setItem('gemsAlert', JSON.stringify({ at: Date.now(), sig: it.sig, day: today() }));
+      show(it);
+    } catch { /* ignore */ }
+  }, 5 * 60e3);
+  async function loadKycMap() { // KYC (is mahine) — seedha model se, 20 min cache
+    if (kycCache.all && Date.now() - (kycCache.allAt || 0) < 20 * 60e3) return;
+    try { const all = await FF.model.loadKycAll(), cur = U.reportYm ? U.reportYm() : '', m = new Map();
+      for (const r of all || []) { if (cur && r.ym !== cur) continue; const name = r.gvName || r.agent; if (!name) continue; const ch = r.gvName ? 'gv' : 'ff', k = `${ch}|${name}`; let o = m.get(k); if (!o) { o = { ch, name, n: 0, full: 0 }; m.set(k, o); } o.n += r.n; if (r.kyc === 'full') o.full += r.n; }
+      if (m.size) { kycCache.all = m; kycCache.allAt = Date.now(); }
+    } catch { /* ignore */ }
+  }
+  async function dataItem(q) { // async data: wrong VRN / chassis / replacement / commission / KYC
+    const t = ` ${String(q || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()} `, has = (re) => re.test(t);
+    const B = () => ({ key: `ans:${Date.now()}`, fun: true, mood: 'info', stay: 16000 });
+    const listQ = has(/ (top|sabse|kiske|kiska|kiski|kaun|agent|agents|wale|list|kis ne|kisne) /);
+    const nM = / (?:top|pehle|first) (\d{1,3}) /.exec(t), n = nM ? Math.max(1, Math.min(30, Number(nM[1]))) : 8;
+    const cur = U.reportYm ? U.reportYm() : '';
+    const kind = has(/ wrong /) ? 'wrong' : has(/ chassis /) ? 'chassis' : has(/ (replacement|replace) /) ? 'replacement' : '';
+    if (kind && listQ) {
+      const e = findEntity(t); if (e && e.agents && e.agents.length === 1) return null; // ek agent ka sawaal → assistant
+      const map = new Map(), add = (name, ch, q0) => { if (!name || !q0) return; const k = `${ch}|${name}`, o = map.get(k) || { name, ch, n: 0 }; o.n += q0; map.set(k, o); };
+      const hit = (r) => (kind === 'replacement' ? /replacement/i.test(`${r.type || ''} ${r.status || ''}`) : new RegExp(kind, 'i').test(`${r.vrnType || ''} ${r.tagType || ''}`));
+      try { const ac = await FF.store.need('agentClass'); (ac || []).forEach((r) => { if (r.ym === cur && r.channel === 'First Forward' && hit(r)) add(r.name, 'FF', Number(r.n) || 0); }); } catch { /* ignore */ }
+      if (kind !== 'wrong') { try { (FF.gv.issuanceRows() || []).forEach((r) => { if (r.ym === cur && hit(r)) add(r.agentName, 'GV', Number(r.n) || 1); }); } catch { /* ignore */ } }
+      const L = [...map.values()].sort((a, b) => b.n - a.n), tot = L.reduce((x, r) => x + r.n, 0), lab = kind === 'wrong' ? 'Wrong VRN' : kind === 'chassis' ? 'Chassis' : 'Replacement';
+      if (!L.length) return { ...B(), icon: '✅', title: `${lab} tags`, head: 'Is mahine koi nahi mila.', view: 'text', say: `इस महीने ${lab} का कोई टैग नहीं मिला।` };
+      return { ...B(), icon: kind === 'wrong' ? '⚠️' : '🔧', title: `${lab}: agent-wise (is mahine)`, head: `total ${fmt(tot)} · ${fmt(L.length)} agents${kind === 'wrong' ? ' · sirf FF (GV me alag track nahi hota)' : ''}`, view: 'list', chart: true, rows: L.slice(0, n).map((r) => ({ name: r.name, sub: r.ch, val: fmt(r.n), tone: 'chip' })), say: `इस महीने ${lab} के कुल ${fmt(tot)} टैग्स। सबसे ज़्यादा ${L.slice(0, 3).map((r) => `${nm(r.name)} ${fmt(r.n)}`).join(', ')}।` };
+    }
+    if (has(/ (commission|payout|kamai) /) && (listQ || has(/ (total|kul|kitna|kitni) /))) {
+      const e = findEntity(t); if (e && e.agents && e.agents.length === 1) return null;
+      let rows = []; try { rows = (await FF.gv.need('master')) || []; } catch { rows = []; }
+      const map = new Map(); let tot = 0, tags = 0; rows.forEach((r) => { if (r.ym !== cur) return; const c = Number(r.commission) || 0; tot += c; tags += Number(r.n) || 1; const o = map.get(r.agentName) || { name: r.agentName, c: 0, n: 0 }; o.c += c; o.n += Number(r.n) || 1; map.set(r.agentName, o); });
+      const L = [...map.values()].filter((x) => x.name && x.c > 0).sort((a, b) => b.c - a.c), rs = (v) => `₹${fmt(Math.round(v))}`;
+      if (!L.length) return null;
+      return { ...B(), icon: '💰', title: 'GV commission (is mahine)', view: 'big', big: rs(tot), head: `${fmt(tags)} tags · ${fmt(L.length)} agents · FF ka commission "FF Commission" page par`, chart: true, rows: L.slice(0, n).map((r) => ({ name: r.name, sub: `${fmt(r.n)} tags`, val: rs(r.c), tone: 'chip' })), sug: ['ff commission page kholo', 'top 5 gv agents', 'gv ka total'], say: `जी वी का इस महीने कुल कमीशन ${fmt(Math.round(tot))} रुपये है। सबसे ज़्यादा ${L.slice(0, 2).map((r) => `${nm(r.name)} ${fmt(Math.round(r.c))} रुपये`).join(', ')}।` };
+    }
+    if (has(/ kyc /)) {
+      const e = findEntity(t); if (e && e.agents && e.agents.length === 1) return null;
+      await loadKycMap();
+      const all = kycCache.all ? [...kycCache.all.values()] : []; if (!all.length) return null;
+      const gvQ = has(/ gv /), ffQ = !gvQ && has(/ (ff|first forward) /), A = all.filter((o) => (gvQ ? o.ch === 'gv' : ffQ ? o.ch === 'ff' : true));
+      const N = A.reduce((x, o) => x + o.n, 0), F = A.reduce((x, o) => x + o.full, 0), p = N ? Math.round((F / N) * 100) : 0, P = (o) => Math.round((o.full / o.n) * 100);
+      const best = has(/ (best|accha|achha|badhiya|sabse zyada|sabse jyada|top|full kyc wale) /) && !has(/ (kam|low|pending|kharab|bura|min) /);
+      const L = A.filter((o) => o.n >= 10).sort((a, b) => (best ? P(b) - P(a) || b.n - a.n : P(a) - P(b) || b.n - a.n));
+      return { ...B(), icon: '🪪', title: `KYC${gvQ ? ' · GV' : ffQ ? ' · FF' : ''} (is mahine)`, view: 'big', big: `${p}%`, head: `full KYC ${fmt(F)} / ${fmt(N)} tags · min-KYC pending ${fmt(N - F)} · neeche ${best ? 'sabse acche' : 'sabse kam KYC wale'} agents`, rows: L.slice(0, n).map((o) => ({ name: o.name, sub: `${o.ch.toUpperCase()} · ${fmt(o.full)}/${fmt(o.n)}`, val: `${P(o)}%`, tone: 'chip' })), say: `इस महीने फ़ुल के वाई सी ${p} प्रतिशत है, ${fmt(N - F)} टैग्स पेंडिंग हैं।${L.length ? ` ${best ? 'सबसे अच्छे' : 'सबसे कम'} ${L.slice(0, 2).map((o) => `${nm(o.name)} ${P(o)} प्रतिशत`).join(', ')}।` : ''}` };
+    }
+    return null;
+  }
   // 🧠 v3.125.156 — sawaal → wahi item jo Home / robot board dikhata hai (numbers hamesha Home jaise)
   function intentItem(q) {
     const t = ` ${String(q || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()} `;
@@ -1746,8 +1827,8 @@
         const a = m.all, R = allAgentRows(), act = R.filter((r) => r.cur > 0).length, ina = R.filter((r) => r.cur === 0 && (r.last > 0 || r.stock > 0)).length, stock = R.reduce((x, r) => x + (r.stock || 0), 0), need = R.reduce((x, r) => x + (r.need || 0), 0);
         const diff = a.r.total - a.prevSame, top = R.slice().sort((x, y) => y.cur - x.cur)[0], g = a.prevTotal ? Math.round(((a.exp.total - a.prevTotal) / a.prevTotal) * 100) : null;
         return { key: `ans:${Date.now()}`, fun: true, mood: diff >= 0 ? 'excited' : 'alert', icon: '🗞', title: 'Aaj ki briefing', view: 'big', big: fmt(a.total), head: 'is mahine ab tak (aaj ka GV live milakar)', stay: 22000,
-          rows: [{ name: '⚡ Run-rate (kal tak)', val: `${r1(a.rate.total)}/din` }, { name: '🎯 Mahine ka andaaza', val: `${fmt(a.exp.total)}${g != null ? ` (${pct(g)})` : ''}` }, { name: diff >= 0 ? '📈 Last month se aage' : '📉 Last month se peeche', val: fmt(Math.abs(diff)) }, { name: 'FF / GV', val: `${fmt(m.ff.total)} / ${fmt(m.gv.total)}` }, ...(top ? [{ name: '🏆 Top agent', val: `${top.name} · ${fmt(top.cur)}` }] : []), { name: '🟢 Active / 😴 Inactive', val: `${fmt(act)} / ${fmt(ina)}` }, { name: '📦 Total stock', val: fmt(stock) }, { name: '🚚 Dispatch need', val: fmt(need) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
-          sug: ['top agents', 'inactive agents', 'dead stock wale agent', 'pichle 7 din ka total'],
+          rows: [{ name: '⚡ Run-rate (kal tak)', val: `${r1(a.rate.total)}/din` }, { name: '🎯 Mahine ka andaaza', val: `${fmt(a.exp.total)}${g != null ? ` (${pct(g)})` : ''}` }, { name: diff >= 0 ? '📈 Last month se aage' : '📉 Last month se peeche', val: fmt(Math.abs(diff)) }, { name: 'FF / GV', val: `${fmt(m.ff.total)} / ${fmt(m.gv.total)}` }, ...(top ? [{ name: '🏆 Top agent', val: `${top.name} · ${fmt(top.cur)}` }] : []), { name: '🟢 Active / 😴 Inactive', val: `${fmt(act)} / ${fmt(ina)}` }, { name: '📦 Total stock', val: fmt(stock) }, { name: '🚚 Dispatch need', val: fmt(need) }, { name: '🚨 Alerts', val: String(alertsList().length) }].map((x) => ({ ...x, sub: '', tone: 'chip' })),
+          sug: ['koi alert hai', 'top agents', 'inactive agents', 'pichle 7 din ka total'],
           say: `आज की ब्रीफ़िंग। इस महीने अभी तक ${fmt(a.total)} टैग्स। रन रेट रोज़ ${fmt(a.rate.total)}, महीने का अंदाज़ा ${fmt(a.exp.total)}। पिछले महीने से हम ${fmt(Math.abs(diff))} टैग्स ${diff >= 0 ? 'आगे' : 'पीछे'} हैं।${top ? ` टॉप एजेंट ${nm(top.name)}, ${fmt(top.cur)} टैग्स।` : ''} ${fmt(act)} एजेंट एक्टिव, ${fmt(ina)} इनएक्टिव। कुल स्टॉक ${fmt(stock)}।` };
       }
     }
@@ -1893,6 +1974,9 @@
       const when = new Date(rem.at).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
       return { key: `rem:${rem.at}`, fun: true, mood: 'happy', cls: 'greet', icon: '⏰', title: 'Theek hai, yaad dila dunga!', head: `${when} — "${rem.text}"`, view: 'text', stay: 6000, say: `ठीक है, ${new Date(rem.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} पर याद दिला दूँगा: ${rem.text}` };
     }
+    if (/\b(alert|alerts|dhyan|khatra|problem|dikkat|pareshani|kya gadbad|gadbad|warning|chetavni)\b/i.test(q)) return alertsItem(true);
+    if (/\bkyc\b/i.test(q)) await loadKycMap();
+    try { const di = await dataItem(q); if (di) return di; } catch { /* ignore */ }
     const ii = intentItem(q); if (ii) return ii;
     try { // "अंकुर की कमीशन / wrong vrn / chassis" → assistant ko saaf naam do
       const tq = ` ${String(q).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()} `;
@@ -2522,7 +2606,7 @@
     if (o && ('everySec' in o || 'on' in o)) schedule(1500);
     return getCfg();
   }
-  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
+  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake !== false, alerts: cfg.alerts !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
   FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(SRC() && cfg.wake !== false && cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake !== false, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 

@@ -806,6 +806,7 @@ FF.pages = FF.pages || {};
         <label class="check"><input type="checkbox" data-mcs="on" ${c.on ? 'checked' : ''}> 🤖 <b>Robot ON</b></label>
         <label class="fld"><span>⏱ Har update / activity ke beech</span><select class="input" data-mcs="everySec">${opts.map(([v, l]) => `<option value="${v}" ${c.everySec === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="check"><input type="checkbox" data-mcs="sound" ${c.sound ? 'checked' : ''}> 🔊 <b>Bol kar sunao</b></label>
+        <label class="check"><input type="checkbox" data-mcs="alerts" ${c.alerts !== false ? 'checked' : ''}> 🚨 <b>Alerts khud bataye</b> — stock khatam hone wala, bada agent band, kal ka din kamzor (2 ghante me ek baar)</label>
         <label class="check"><input type="checkbox" data-mcs="wake" ${c.wake !== false ? 'checked' : ''}> 🎙 <b>"Hey Gems / Hii Gems" bolo</b> — robot jawab dega "hii Tarun Sir, main aapki kya help karu?" phir site ka kuch bhi poochho (dashboard tab khula + mic permission)</label>
         <label class="check"><input type="checkbox" data-mcs="roam" ${c.roam ? 'checked' : ''}> 🛸 <b>Idhar-udhar ghoomna</b></label>
         <label class="check"><input type="checkbox" data-mcs="fun" ${c.fun ? 'checked' : ''}> 🕺 <b>Masti</b> — dance, moonwalk, jokes (jab nayi khabar na ho)</label>
