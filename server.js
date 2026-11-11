@@ -11,7 +11,9 @@ import zlib from 'node:zlib';
 // RSS fragmentation kam (Render 512 MB). Size par asar ~1-3%.
 const BR_LGWIN = Math.min(24, Math.max(10, Number(process.env.BR_LGWIN) || 18));
 import fs from 'node:fs/promises';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, createWriteStream, createReadStream } from 'node:fs';
+import readline from 'node:readline';
+import { once } from 'node:events';
 import path from 'node:path';
 import { en } from './enText.js';
 import crypto from 'node:crypto';
@@ -1421,6 +1423,46 @@ class GvizCache extends Map {
   clear() { super.clear(); this.bytes = 0; }
 }
 const cache = new GvizCache();   // url → { at, body, status }
+// 💾 v3.125.182 — gviz cache disk par bhi (persistent /data): deploy / restart ke baad naya server khaali cache se
+// shuru hota tha → sab query ek saath Google par → 429 / 502 / timeout aur site dheemi. Ab har 10 min cache ek
+// gzip NDJSON file me likha jata hai (stream — memory nahi badhti) aur boot par wapas padha jata hai. Purani
+// entries "stale" maani jati hain: user ko turant milti hain aur peeche se taaza hoti hain (stale-while-revalidate).
+const CACHE_FILE = path.join(DATA_DIR, 'gviz-cache.ndjson.gz');
+const CACHE_DISK_MAX_AGE_MS = 3 * 3600e3;   // 3 ghante se purani entry wapas nahi laate
+let cacheDiskBusy = false;
+async function cacheSaveDisk() {
+  if (cacheDiskBusy || !cache.size || process.env.CACHE_DISK === '0') return 0;
+  cacheDiskBusy = true; let n = 0;
+  const tmp = `${CACHE_FILE}.tmp`;
+  try {
+    const gz = zlib.createGzip({ level: 1 }), out = createWriteStream(tmp);
+    gz.pipe(out);
+    for (const [url, e] of [...cache.entries()]) {
+      if (!e || typeof e.body !== 'string' || !(e.status >= 200 && e.status < 300) || Date.now() - e.at > CACHE_DISK_MAX_AGE_MS) continue;
+      if (!gz.write(`${JSON.stringify({ u: url, at: e.at, s: e.status, v: e.ver || '', b: e.body })}\n`)) await once(gz, 'drain');
+      n++;
+      await new Promise((r) => setImmediate(r));
+    }
+    gz.end(); await once(out, 'finish');
+    await fs.rename(tmp, CACHE_FILE);
+  } catch (err) { console.warn('gviz cache save:', err && err.message); try { await fs.unlink(tmp); } catch { /* nahi tha */ } }
+  finally { cacheDiskBusy = false; }
+  return n;
+}
+async function cacheLoadDisk() {
+  if (process.env.CACHE_DISK === '0' || !existsSync(CACHE_FILE)) return 0;
+  let n = 0;
+  try {
+    const rl = readline.createInterface({ input: createReadStream(CACHE_FILE).pipe(zlib.createGunzip()), crlfDelay: Infinity });
+    for await (const line of rl) {
+      if (!line) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      if (!o || !o.u || typeof o.b !== 'string' || Date.now() - o.at > CACHE_DISK_MAX_AGE_MS || cache.has(o.u)) continue;
+      cache.set(o.u, { at: o.at, body: o.b, status: o.s || 200, ver: o.v || '' }); n++;
+    }
+  } catch (err) { console.warn('gviz cache load:', err && err.message); }
+  return n;
+}
 // 🛡️ v241 — memory guard. 512 MB cross karte hi Render process maar deta tha aur site ~10 min 502 rehti thi
 // (GC thrash). Ab: 400 MB par caches khali (soft) · 470 MB par turant clean restart (hard, ~10 sec) — data durable storage me safe hai.
 const MEM_SOFT_MB = Number(process.env.MEM_SOFT_MB) || 400;
@@ -14848,6 +14890,10 @@ async function start() {
     if (selfUrl && process.env.KEEP_AWAKE !== '0') {
       setInterval(() => { fetch(`${selfUrl}/api/version`, { headers: { 'User-Agent': 'ff-keepawake' } }).catch(() => {}); }, 10 * 60e3).unref();
     }
+    // 💾 gviz cache: boot par disk se wapas, phir har 10 min disk par
+    cacheLoadDisk().then((n) => { if (n) console.log(`💾 gviz cache: ${n} entries disk se wapas (deploy ke baad turant garam)`); }).catch(() => {});
+    setInterval(() => { cacheSaveDisk().catch(() => {}); }, 10 * 60e3).unref();
+    setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
     setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();

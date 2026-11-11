@@ -8329,3 +8329,9 @@ html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 9
 /* v3.125.180: Multiple Customer ID toolbar (.mcu-bar — .mc-bar robot ka hai) */
 .mcu-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .mcu-bar .input { max-width: 220px; }
+
+/* v3.125.182 Toll Debit: hafte ke din ka pattern */
+.td-wd { display: flex; gap: 10px; align-items: flex-end; height: 130px; margin-top: 14px; padding: 6px 4px 0; }
+.td-wd-c { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 3px; font-size: 12px; }
+.td-wd-c i { display: block; width: 70%; max-width: 46px; border-radius: 8px 8px 3px 3px; background: linear-gradient(180deg, #6366f1, #2563eb); }
+.td-wd-c small { color: var(--muted, #64748b); font-size: 11px; }

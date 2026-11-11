@@ -70,13 +70,43 @@
     const missing = state.days.filter((d) => d.ym === m && !d.ok);
     return { ym: m, days, txn, amt, avgTxn: days.length ? txn / days.length : 0, avgAmt: days.length ? amt / days.length : 0, best, last, missing, classes: Object.values(cls).sort((a, b) => b.amt - a.amt), basis: cch ? 'CCH' : 'TVC', members: state.members || {}, cch: !!cch };
   }
+  /** Hafte-wise (Mon–Sun): txn, ₹, roz ka average, pichhle hafte se badlav, top class ka share. */
+  function weeks(M, cch) {
+    const W = new Map();
+    M.days.forEach((d) => { const dt = new Date(`${d.date}T00:00:00`), mon = new Date(dt); mon.setDate(dt.getDate() - ((dt.getDay() + 6) % 7)); const k = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
+      const w = W.get(k) || { k, from: d.date, to: d.date, n: 0, txn: 0, amt: 0, cls: {} }; w.to = d.date; w.n++; w.txn += d.txn; w.amt += d.amt; Object.entries(cch ? d.cch : d.cls).forEach(([c, v]) => { const o = w.cls[c] || (w.cls[c] = { n: 0, amt: 0 }); o.n += v.n; o.amt += v.amt; }); W.set(k, w); });
+    const L = [...W.values()].sort((a, b) => (a.k < b.k ? -1 : 1));
+    L.forEach((w, i) => { w.avgAmt = w.amt / w.n; w.avgTxn = w.txn / w.n; const p = L[i - 1]; w.chg = p && p.avgAmt ? Math.round((w.avgAmt - p.avgAmt) / p.avgAmt * 100) : null; const top = Object.entries(w.cls).sort((a, b) => b[1].amt - a[1].amt)[0]; w.top = top ? { k: top[0], share: w.amt ? top[1].amt / w.amt * 100 : 0 } : null; });
+    return L;
+  }
+  /** Pichhle mahine se tulna: usi tareekh tak (same din) — jab pichhle mahine ka data sheet me ho. */
+  function compare(M) {
+    if (!M.ym || !M.days.length) return null;
+    const y = Number(M.ym.slice(0, 4)), mo = Number(M.ym.slice(5, 7)), py = mo === 1 ? y - 1 : y, pm = mo === 1 ? 12 : mo - 1, pym = `${py}-${String(pm).padStart(2, '0')}`;
+    const prevAll = state.days.filter((d) => d.ok && d.ym === pym); if (!prevAll.length) return null;
+    const set = new Set(M.days.map((d) => d.day)), same = prevAll.filter((d) => set.has(d.day)), sum = (L, k) => L.reduce((x, d) => x + d[k], 0);
+    if (!same.length) return null;
+    // dono taraf wahi tareekhein (jo dono mahino me hain) — warna 1 din vs 9 din jaisi galat tulna ban jati thi
+    const pset = new Set(same.map((d) => d.day)), curSame = M.days.filter((d) => pset.has(d.day));
+    const a = sum(same, 'amt'), n = sum(same, 'txn'), ca = sum(curSame, 'amt'), cn = sum(curSame, 'txn');
+    return { ym: pym, days: same.length, amt: a, txn: n, curAmt: ca, curTxn: cn, fullAmt: sum(prevAll, 'amt'), fullTxn: sum(prevAll, 'txn'), fullDays: prevAll.length, amtPct: a ? Math.round((ca - a) / a * 100) : null, txnPct: n ? Math.round((cn - n) / n * 100) : null };
+  }
+  /** Hafte ke din ka pattern (Mon…Sun ka average ₹). */
+  function weekdays(M) {
+    const N = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], o = N.map((k) => ({ k, n: 0, amt: 0, txn: 0 }));
+    M.days.forEach((d) => { const w = o[new Date(`${d.date}T00:00:00`).getDay()]; w.n++; w.amt += d.amt; w.txn += d.txn; });
+    return [1, 2, 3, 4, 5, 6, 0].map((i) => o[i]).filter((w) => w.n).map((w) => ({ ...w, avgAmt: w.amt / w.n, avgTxn: w.txn / w.n }));
+  }
+  const months = () => [...new Set(state.days.filter((d) => d.ok).map((d) => d.ym))].sort();
   const dLabel = (d) => { const dt = new Date(`${d}T00:00:00`); return `${Number(d.slice(8, 10))} ${dt.toLocaleString('en-IN', { month: 'short' })} · ${dt.toLocaleString('en-IN', { weekday: 'short' })}`; };
 
   const TONE = { VC4: '#2563eb', VC20: '#7c3aed', VC5: '#059669', VC6: '#d97706', VC7: '#db2777', VC12: '#dc2626', VC16: '#0891b2' };
   const PAL = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#db2777', '#dc2626', '#0891b2', '#65a30d', '#9333ea', '#ea580c', '#0d9488', '#be123c', '#4f46e5', '#ca8a04', '#475569'];
   const colorOf = (k, i) => TONE[k] || PAL[i % PAL.length];
   function paint(root) {
-    const M = month('', state.cch), dc = (d) => (state.cch ? d.cch : d.cls);
+    const M = month(state.ym || '', state.cch), dc = (d) => (state.cch ? d.cch : d.cls);
+    const WK = weeks(M, state.cch), CMP = compare(M), WD = weekdays(M), MS = months(), mxW = Math.max(1, ...WK.map((w) => w.avgAmt)), mxD = Math.max(1, ...WD.map((w) => w.avgAmt));
+    const chg = (p) => (p == null ? '<span class="dim">—</span>' : `<b style="color:${p >= 0 ? '#059669' : '#dc2626'}">${p >= 0 ? '▲' : '▼'} ${Math.abs(p)}%</b>`);
     const memb = (k) => (!state.cch && M.members[k] && (M.members[k].length > 1 || M.members[k][0] !== k) ? ` <small class="dim">(CCH ${M.members[k].join(' + ')})</small>` : '');
     const mName = M.ym ? new Date(`${M.ym}-01T00:00:00`).toLocaleString('en-IN', { month: 'long', year: 'numeric' }) : '';
     const kpi = (tone, icon, title, value, foot) => `<div class="kpi ${tone}"><div class="kpi-top"><span class="kpi-title">${esc(title)}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot || ''}</div></div>`;
@@ -119,6 +149,15 @@
         </tbody></table></div>
       </section>
       <section class="card">
+        <div class="card-head"><div><h3>📈 Hafte-wise trend + tulna</h3><span class="dim small">Hafta = Mon–Sun · roz ka average pichhle hafte se · hafte ke din ka pattern</span></div>
+          ${MS.length > 1 ? `<div class="card-actions"><select class="input" data-td="ym">${MS.slice().reverse().map((y) => `<option value="${y}"${y === M.ym ? ' selected' : ''}>${esc(new Date(`${y}-01T00:00:00`).toLocaleString('en-IN', { month: 'long', year: 'numeric' }))}</option>`).join('')}</select></div>` : ''}</div>
+        ${CMP ? `<div class="notice small" style="margin-bottom:10px">📅 <b>Pichhle mahine se (usi ${CMP.days} din par):</b> ₹ ${chg(CMP.amtPct)} (${rsShort(CMP.amt)} → ${rsShort(CMP.curAmt)}) · txn ${chg(CMP.txnPct)} (${fmt(CMP.txn)} → ${fmt(CMP.curTxn)}) · pichhla poora mahina ${rsShort(CMP.fullAmt)} (${CMP.fullDays} din)</div>` : `<div class="dim small" style="margin-bottom:10px">📅 Pichhle mahine se tulna tab dikhegi jab sheet me pichhle mahine ka data hoga (abhi data ${esc(M.days.length ? dLabel(M.days[0].date) : '')} se hai).</div>`}
+        <div class="table-wrap"><table class="tbl compact td-tbl"><thead><tr><th>Hafta</th><th class="num">Din</th><th class="num">Txn</th><th class="num">Toll ₹</th><th class="num">Roz ₹</th><th class="num">Pichhle hafte se</th><th>Top class</th><th style="width:24%">Roz ₹</th></tr></thead><tbody>
+          ${WK.map((w) => `<tr><td><b>${esc(dLabel(w.from).split(' · ')[0])} – ${esc(dLabel(w.to).split(' · ')[0])}</b></td><td class="num">${w.n}</td><td class="num">${fmt(w.txn)}</td><td class="num"><b>${rs(w.amt)}</b></td><td class="num">${rsShort(w.avgAmt)}</td><td class="num">${chg(w.chg)}</td><td>${w.top ? `<span class="td-chip" style="background:${colorOf(w.top.k, 0)}">${esc(w.top.k)}</span> <small class="dim">${w.top.share.toFixed(1)}%</small>` : '—'}</td><td><div class="td-bar"><i style="width:${Math.max(2, w.avgAmt / mxW * 100)}%"></i></div></td></tr>`).join('')}
+        </tbody></table></div>
+        <div class="td-wd">${WD.map((w) => `<div class="td-wd-c" title="${w.n} din ka average · ${fmt(Math.round(w.avgTxn))} txn"><i style="height:${Math.max(6, w.avgAmt / mxD * 100)}%;${w.k === 'Sun' ? 'background:linear-gradient(180deg,#f59e0b,#ef4444)' : ''}"></i><b>${w.k}</b><small>${rsShort(w.avgAmt)}</small></div>`).join('')}</div>
+      </section>
+      <section class="card">
         <div class="card-head"><div><h3>📆 Date-wise</h3><span class="dim small">Har din ki ginti + ₹ · class-wise transactions (gehra rang = us class ka bada din) · heading par click karke sort</span></div></div>
         <div class="table-wrap tall"><table class="tbl compact td-tbl"><thead><tr>${th('d', 'date', 'Date', sd)}${th('d', 'txn', 'Txn', sd, 'num')}${th('d', 'amt', 'Toll ₹', sd, 'num')}<th style="min-width:120px">₹ trend</th>${th('d', 'veh', 'Vehicles', sd, 'num')}${order.map((k) => th('d', `cls:${k}`, chipC(k), sd, 'num')).join('')}</tr></thead><tbody>
           ${dayRows.map((d) => { const hi = M.best && d.date === M.best.date, wk = /Sun/.test(dLabel(d.date)); return `<tr${hi ? ' class="td-best"' : ''}><td><b>${esc(dLabel(d.date))}</b>${hi ? ' 🏆' : ''}${wk ? ' <small class="dim">chhutti</small>' : ''}</td><td class="num">${fmt(d.txn)}</td><td class="num"><b>${rs(d.amt)}</b></td><td><div class="td-bar"><i style="width:${Math.max(1, d.amt / mxDay * 100)}%;background:${d.amt >= M.avgAmt ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#f59e0b,#f97316)'}"></i></div></td><td class="num">${d.veh ? fmt(d.veh) : '—'}</td>${order.map((k) => { const v = dc(d)[k]; return `<td class="num" style="${v ? heat(k, v.n) : ''}" title="${v ? `${esc(k)}: ${rs(v.amt)}` : ''}">${v ? fmt(v.n) : '—'}</td>`; }).join('')}</tr>`; }).join('')}
@@ -127,6 +166,7 @@
         </tbody></table></div>
       </section>`;
     root.querySelector('[data-td="refresh"]').addEventListener('click', async (e) => { e.target.disabled = true; try { await load(true); paint(root); } catch (err) { U.toast(String(err.message || err), 'error'); e.target.disabled = false; } });
+    { const ymSel = root.querySelector('[data-td="ym"]'); if (ymSel) ymSel.addEventListener('change', () => { state.ym = ymSel.value; paint(root); }); }
     root.querySelector('[data-td="mode"]').addEventListener('click', () => { state.cch = !state.cch; state.sortDay = null; paint(root); });
     root.querySelectorAll('[data-td-sort]').forEach((el) => el.addEventListener('click', () => {
       const [g, ...rest] = el.dataset.tdSort.split(':'), key = rest.join(':'), cur = g === 'c' ? state.sortCls : state.sortDay;
@@ -144,6 +184,6 @@
     if (!state.days.length) { root.innerHTML = `<section class="card"><p>"${esc(TAB)}" tab me abhi koi data nahi. Sheet me Apps Script (TollDebitDaily.gs) chala kar dekho.</p></section>`; return; }
     paint(root);
   }
-  FF.tollDebit = { load, month, parse, rs, rsShort, dLabel, _state: state };
+  FF.tollDebit = { load, month, weeks, compare, weekdays, parse, rs, rsShort, dLabel, _state: state };
   FF.pages.tollDebit = { title: 'Toll Debit', render };
 })(window.FF);

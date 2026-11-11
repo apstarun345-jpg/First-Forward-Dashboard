@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Stable feed snapshots (/api/today),
 // /api/auth/me and /api/settings are network-first with a cached fallback; raw /api/gviz stays live-only.
-const CACHE_NAME = 'apnapayment-v312681';
+const CACHE_NAME = 'apnapayment-v312682';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // A same-origin browser tab and an installed PWA are both WindowClients. Remember the display
@@ -150,9 +150,10 @@ self.addEventListener('push', e => {
     // Notification PEHLE (Chrome ki requirement + user ko turant dikhe), uske baad voice/badge.
     try { await self.registration.showNotification(title, options); }
     catch (err) { console.warn('showNotification:', err && err.message); }
-    // 🤖 v3.125.181 — khule hue page ko turant batao (robot 30s poll ka intezaar na kare)
-    try { await tellClients({ type: 'ff-push', id, pushType: String(data.type || ''), at: Date.now() }); } catch { /* ignore */ }
     if (job) { await voiceAdd(job); await tellClients({ type: 'ff-speak-push', item: job }); }
+    // 🤖 v3.125.181 — bina awaaz wali push par bhi khule page ko turant batao (robot 30s poll ka intezaar na kare);
+    //    awaaz wali push me upar ka 'ff-speak-push' hi signal hai (ek hi message — page do baar na jaage).
+    else { try { await tellClients({ type: 'ff-push', id, pushType: String(data.type || ''), at: Date.now() }); } catch { /* ignore */ } }
     if (data.badge !== undefined) await setBadge(data.badge);
   })());
 });

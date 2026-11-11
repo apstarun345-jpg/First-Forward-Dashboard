@@ -1739,8 +1739,12 @@
     } catch { /* ignore */ }
     try { // 3) kal ka din kamzor · 4) mahina last month se peeche
       const m = monthStats(); if (m && m.all && m.all.total) { const a = m.all, d1 = (a.days.get(a.rd) || {}).total || 0, d0 = (a.days.get(a.rd - 1) || {}).total || 0;
-        if (a.rd >= 3 && d1 > 0 && a.rate.total > 0 && d1 < a.rate.total * 0.8) out.push({ k: `day:${a.rd}`, sev: 2, icon: '📉', name: `Kal (${a.rd} tareekh) kamzor raha`, val: fmt(d1), sub: `run-rate ${r1(a.rate.total)}/din se ${Math.round((1 - d1 / a.rate.total) * 100)}% neeche${d0 ? ` · usse pehle din ${fmt(d0)}` : ''}`, say: `कल सिर्फ़ ${fmt(d1)} टैग्स हुए, जो रन रेट से ${Math.round((1 - d1 / a.rate.total) * 100)} प्रतिशत नीचे है` });
+        const sunY = (() => { try { const p = String(m.cur).split('-'); return new Date(Number(p[0]), Number(p[1]) - 1, a.rd).getDay() === 0; } catch { return false; } })(); // Sunday ko kam hona aam baat — alert nahi
+        if (!sunY && a.rd >= 3 && d1 > 0 && a.rate.total > 0 && d1 < a.rate.total * 0.8) out.push({ k: `day:${a.rd}`, sev: 2, icon: '📉', name: `Kal (${a.rd} tareekh) kamzor raha`, val: fmt(d1), sub: `run-rate ${r1(a.rate.total)}/din se ${Math.round((1 - d1 / a.rate.total) * 100)}% neeche${d0 ? ` · usse pehle din ${fmt(d0)}` : ''}`, say: `कल सिर्फ़ ${fmt(d1)} टैग्स हुए, जो रन रेट से ${Math.round((1 - d1 / a.rate.total) * 100)} प्रतिशत नीचे है` });
         if (a.prevSame > 0 && a.r.total < a.prevSame * 0.9) out.push({ k: `mon:${a.rd}`, sev: 2, icon: '🐢', name: 'Mahina last month se peeche', val: `-${fmt(a.prevSame - a.r.total)}`, sub: `${a.rd} tareekh tak ${fmt(a.r.total)} · last month ${fmt(a.prevSame)}`, say: `हम पिछले महीने से ${fmt(a.prevSame - a.r.total)} टैग्स पीछे हैं` }); }
+    } catch { /* ignore */ }
+    try { // 5) kal ka toll debit run-rate se 20% neeche (sirf tab jab toll data load ho chuka ho)
+      const T = FF.tollDebit; if (T && T._state.days.length) { const M = T.month(); const L = M.last; if (L && M.days.length >= 4) { const others = M.days.filter((d) => d !== L), avg = others.reduce((x, d) => x + d.amt, 0) / others.length; if (avg > 0 && L.amt < avg * 0.8 && new Date(`${L.date}T00:00:00`).getDay() !== 0) out.push({ k: `toll:${L.date}`, sev: 2, icon: '🛣', name: `Toll debit kam (${T.dLabel(L.date)})`, val: T.rsShort(L.amt), sub: `baaki dino ka average ${T.rsShort(avg)} se ${Math.round((1 - L.amt / avg) * 100)}% neeche`, say: `कल का टोल डेबिट औसत से ${Math.round((1 - L.amt / avg) * 100)} प्रतिशत कम रहा` }); } }
     } catch { /* ignore */ }
     const off = out.filter((x) => x.k.startsWith('off:')).sort((a, b) => (b.w || 0) - (a.w || 0)).slice(0, 4);
     return [...out.filter((x) => !x.k.startsWith('off:')), ...off].sort((a, b) => b.sev - a.sev);
@@ -1757,6 +1761,7 @@
       if (!allowed() || !cfg.on || cfg.alerts === false || cfg.snoozeDay === today() || busy || convo || asking || document.hidden) return;
       let st = {}; try { st = JSON.parse(localStorage.getItem('gemsAlert') || '{}'); } catch { st = {}; }
       if (Date.now() - (st.at || 0) < 2 * 3600e3) return;
+      try { if (FF.auth.can && FF.auth.can('tollDebit')) { if (!FF.tollDebit && FF.lazy && FF.lazy.inject) FF.lazy.inject('tollDebit').then(() => FF.tollDebit.load(false)).catch(() => {}); else if (FF.tollDebit) FF.tollDebit.load(false).catch(() => {}); } } catch { /* ignore */ }
       const it = alertsItem(false); if (!it) return;
       const seen = new Set(String(st.sig || '').split(',')), fresh = it.sig.split(',').filter((k) => !seen.has(k));
       if (!fresh.length && st.day === today()) return;
@@ -1814,7 +1819,7 @@
     if (!has(/ (toll|tol|टोल) /)) return null;
     if (!FF.tollDebit && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('tollDebit'); } catch { /* ignore */ } }
     if (!FF.tollDebit) return null;
-    const B = { key: `ans:${Date.now()}`, fun: true, mood: 'info', stay: 16000, sug: ['toll ka graph', 'vc4 ka toll kitna', 'kal kitna toll debit hua', 'toll debit page kholo'] };
+    const B = { key: `ans:${Date.now()}`, fun: true, mood: 'info', stay: 16000, sug: ['toll hafte wise', 'toll ka graph', 'vc4 ka toll kitna', 'toll debit page kholo'] };
     try { await FF.tollDebit.load(false); } catch (e) { return { ...B, icon: '🛣', title: 'Toll debit', head: String(e.message || e), view: 'text', say: 'टोल डेबिट का डेटा अभी नहीं मिल पाया।' }; }
     const cchQ = has(/ cch /), T = FF.tollDebit, M = T.month('', cchQ), dcl = (d) => (cchQ ? d.cch : d.cls), rs = T.rs, sh = T.rsShort, chip = (L) => L.map((x) => ({ ...x, sub: x.sub || '', tone: 'chip' }));
     if (!M.days.length) return { ...B, icon: '🛣', title: 'Toll debit', head: 'Sheet me abhi data nahi hai.', view: 'text', say: 'टोल डेबिट का डेटा अभी नहीं है।' };
@@ -1828,6 +1833,9 @@
       return { ...B, icon: '🛣', title: `Toll debit: ${T.dLabel(pick.date)}${ck ? ` · ${ck}` : ''}`, view: 'big', big: sh(c ? c.amt : pick.amt), head: `${fmt(c ? c.n : pick.txn)} transactions${!ck && pick.veh ? ` · ${fmt(pick.veh)} gaadiyan` : ''} · ${M.basis} wise`, chart: true,
         rows: chip(Object.entries(dcl(pick)).sort((a, b) => b[1].amt - a[1].amt).slice(0, 8).map(([k, v]) => ({ name: k, sub: `${fmt(v.n)} txn`, val: rs(v.amt) }))),
         say: `${pick.day} तारीख़ को ${ck ? `${ck} का ` : ''}टोल डेबिट ${spk(c ? c.amt : pick.amt)} रुपये रहा, ${fmt(c ? c.n : pick.txn)} ट्रांज़ैक्शन।` }; }
+    if (has(/ (hafte|hafta|week|weekly|saptah) /)) { const W = T.weeks(M, cchQ); return { ...B, icon: '📈', title: 'Toll debit: hafte-wise', view: 'big', big: sh(M.amt), head: `${W.length} hafte · roz ka average ${sh(M.avgAmt)}`, chart: true, rows: chip(W.map((w) => ({ name: `${T.dLabel(w.from).split(' · ')[0]} – ${T.dLabel(w.to).split(' · ')[0]}`, sub: `${w.n} din · roz ${sh(w.avgAmt)}${w.chg != null ? ` · ${w.chg >= 0 ? '▲' : '▼'}${Math.abs(w.chg)}%` : ''}`, val: rs(w.amt) }))), say: W.length ? `इस हफ़्ते अभी तक ${spk(W[W.length - 1].amt)} रुपये का टोल डेबिट हुआ, रोज़ औसतन ${spk(W[W.length - 1].avgAmt)} रुपये।${W[W.length - 1].chg != null ? ` पिछले हफ़्ते से ${Math.abs(W[W.length - 1].chg)} प्रतिशत ${W[W.length - 1].chg >= 0 ? 'ज़्यादा' : 'कम'}।` : ''}` : '' }; }
+    if (has(/ (pichle|pichhle|last|previous) /) && has(/ (mahine|mahina|month) /)) { const C = T.compare(M); if (!C) return { ...B, icon: '📅', title: 'Toll debit: pichhle mahine se', head: 'Sheet me pichhle mahine ka toll data nahi hai, isliye tulna abhi nahi ho sakti.', view: 'text', say: 'पिछले महीने का टोल डेटा शीट में नहीं है।' };
+      return { ...B, icon: C.amtPct >= 0 ? '📈' : '📉', mood: C.amtPct >= 0 ? 'excited' : 'alert', title: 'Toll debit: pichhle mahine se', view: 'big', big: `${C.amtPct >= 0 ? '+' : ''}${C.amtPct}%`, head: `wahi ${C.days} tareekhein: ${sh(C.amt)} → ${sh(C.curAmt)}`, rows: chip([{ name: `Is mahine (${C.days} din)`, val: rs(C.curAmt) }, { name: 'Pichhle mahine (wahi din)', val: rs(C.amt) }, { name: 'Txn', val: `${fmt(C.txn)} → ${fmt(C.curTxn)}` }, { name: 'Pichhla poora mahina', val: rs(C.fullAmt) }]), say: `पिछले महीने के इन्हीं दिनों से टोल डेबिट ${Math.abs(C.amtPct)} प्रतिशत ${C.amtPct >= 0 ? 'ज़्यादा' : 'कम'} है।` }; }
     if (has(/ (graph|chart|trend|din wise|dinwise|day wise|daywise|roz ka|daily) /)) return { ...B, icon: '📊', title: `Toll debit: din-wise${ck ? ` · ${ck}` : ''}`, view: 'big', big: sh(M.amt), head: `${M.days.length} din · roz ka average ${sh(M.avgAmt)}`, chart: true, rows: chip(M.days.map((d) => ({ name: T.dLabel(d.date), val: rs(ck ? (dcl(d)[ck] || { amt: 0 }).amt : d.amt) }))), say: `इस महीने रोज़ औसतन ${spk(M.avgAmt)} रुपये का टोल डेबिट हो रहा है।` };
     if (ck) { const c = M.classes.find((x) => x.k === ck); if (c) return { ...B, icon: '🚗', title: `Toll debit: ${ck} (is mahine)`, view: 'big', big: sh(c.amt), head: `${fmt(c.n)} transactions · total ka ${M.amt ? (c.amt / M.amt * 100).toFixed(1) : 0}% · avg ${rs(c.amt / Math.max(1, c.n))}/txn`, chart: true, rows: chip(M.days.map((d) => ({ name: T.dLabel(d.date), val: rs((dcl(d)[ck] || { amt: 0 }).amt) }))), say: `इस महीने ${ck} का टोल डेबिट ${spk(c.amt)} रुपये है, ${fmt(c.n)} ट्रांज़ैक्शन।` }; }
     if (has(/ (best|sabse zyada|sabse jyada|sabse bada|highest|record) /) && has(/ (din|day) /) && M.best) return { ...B, icon: '🏆', title: 'Toll debit: sabse bada din', view: 'big', big: sh(M.best.amt), head: `${T.dLabel(M.best.date)} · ${fmt(M.best.txn)} txn`, rows: [], say: `सबसे ज़्यादा टोल डेबिट ${M.best.day} तारीख़ को हुआ, ${spk(M.best.amt)} रुपये।` };
@@ -2516,13 +2524,27 @@
     if (ask && !ask.hidden) return true;
     return false;
   }
+  // 🎚 v3.125.182 — zaruri baat pehle, shor kam: har update ka darja (3 = dhyan do, 2 = mukhya number, 1 = baaki)
+  //    darja 3 pehle aata hai aur 3 ghante me dobara; darja 2 → 4 ghante; darja 1 → 8 ghante (pehle sab 3 ghante me ghoomte the).
+  function impOf(it) {
+    const k = String((it && it.key) || '');
+    if (/^(alerts:|notif:|audit:|ver:)/.test(k) || /(stockend|dispatch|inactive|inact|degrowth|kycdown|kyclow|nostock|deadstock|lowcover|biggestdrop|:low:|:tllow:|:stock|:inactive|:dead|:dispatch|:drop)/i.test(k) || (it && (it.mood === 'alert' || it.mood === 'sad'))) return 3;
+    if (/^(rr|exp|summary|sitetotal|ffvsgv|top|toptl|bestday|mtd)$/.test(k) || /(daystar|:high:|:tlhigh:|:total|:summary|:today|:record|:milestone)/i.test(k)) return 2;
+    return 1;
+  }
+  const IMP_GAP = { 3: 3 * 3600e3, 2: 4 * 3600e3, 1: 8 * 3600e3 };
   function nextItem(force) {
     if (prio.length) return prio.shift();
-    const list = insights();
-    // jo baat pichle 3 ghante me bata chuka (same numbers) wo dobara nahi
-    for (let k = 0; k < list.length; k++) {
-      const i = ((Number(cfg.idx) || 0) + k) % list.length;
-      if (force || !saidWithin(list[i], 3 * 3600e3)) { cfg.idx = i + 1; save(); return list[i]; }
+    const list = insights(), n = list.length; if (!n) return null;
+    const start = Number(cfg.idx) || 0, min = cfg.keyOnly ? 2 : 1;
+    // darja 3 → 2 → 1; har darje ke andar apni baari (rotation) se
+    for (const tier of [3, 2, 1]) {
+      if (tier < min && !force) break;
+      for (let k = 0; k < n; k++) {
+        const i = (start + k) % n, it = list[i];
+        if (impOf(it) !== tier) continue;
+        if (force || !saidWithin(it, IMP_GAP[tier])) { cfg.idx = i + 1; save(); return it; }
+      }
     }
     return null;
   }
@@ -2679,7 +2701,7 @@
     if (o && ('everySec' in o || 'on' in o)) schedule(1500);
     return getCfg();
   }
-  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake === true, alerts: cfg.alerts !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
+  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake === true, alerts: cfg.alerts !== false, keyOnly: !!cfg.keyOnly, brief: cfg.brief !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
   FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake === true, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
@@ -2699,6 +2721,19 @@
       setTimeout(checkVersions, 12e3);
       setInterval(checkVersions, 10 * 60e3);
       setTimeout(pollFeeds, 4e3);
+      // 🗞 v3.125.182 — din me pehli baar site kholte hi robot khud "Aaj ki briefing" de (ek hi baar; Settings se band ho sakta hai)
+      const autoBrief = async (tryN) => {
+        try {
+          if (cfg.brief === false || !cfg.on || !allowed() || cfg.briefDay === today() || cfg.snoozeDay === today() || new Date().getHours() < 7) return;
+          if (document.hidden || busy || convo || asking) { if (tryN < 8) setTimeout(() => autoBrief(tryN + 1), 20e3); return; }
+          await ensureData();
+          const it = intentItem('briefing do'); if (!it || !it.big) { if (tryN < 8) setTimeout(() => autoBrief(tryN + 1), 30e3); return; }
+          cfg.briefDay = today(); save();
+          it.key = `brief:${today()}`; it.fun = false; it.title = `🌅 ${firstName() ? `${firstName()} Sir, a` : 'A'}aj ki briefing`; it.fast = true;
+          enqueue({ ...it, id: it.key });
+        } catch { /* ignore */ }
+      };
+      setTimeout(() => autoBrief(0), 30e3);
       setInterval(pollFeeds, 12e3); // pehle 30s — ab 12s (halka call)
       // ⚡ v3.125.181 — push aate hi (service worker se signal) turant robot bataye; tab par wapas aate hi bhi
       let instT = 0; const instant = () => { clearTimeout(instT); instT = setTimeout(() => { try { pollFeeds(); } catch { /* ignore */ } }, 350); };
