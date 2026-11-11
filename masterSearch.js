@@ -2175,9 +2175,14 @@ FF.pages = FF.pages || {};
         ? `Run-rate vs ${esc(previousMonthLabel)} avg/day`
         : 'MTD growth';
     const projectedGrowthLabel = `Expected vs ${esc(previousMonthLabel)} full month`;
+    // 📅 pichhle se pichhla mahina (Nov → Sep): expected month-end uske poore total se
+    const l2 = (typeof last2 !== 'undefined' && last2 && last2.ym2 && last2.tot > 0) ? last2 : null;
+    const expForL2 = p1 ? (Number.isFinite(Number(p1.projectedCurrent)) ? Number(p1.projectedCurrent) : Number(p1.total)) : NaN;
+    const growthVsL2 = l2 && Number.isFinite(expForL2) && expForL2 > 0 ? ((expForL2 - l2.tot) / l2.tot) * 100 : null;
     const growth2Html = `<span class="msp-g2">
       <span class="msp-g2-row"><small>${mtdGrowthLabel}</small>${growthPill(growthNum)}</span>
-      <span class="msp-g2-row"><small>${projectedGrowthLabel}</small>${growthPill(projectedGrowthNum)}</span>
+      <span class="msp-g2-row"><small>${projectedGrowthLabel}</small>${growthPill(projectedGrowthNum)}</span>${l2 ? `
+      <span class="msp-g2-row"><small>Expected vs ${esc(ymLabel(l2.ym2))} full month</small>${growthPill(growthVsL2)}</span>` : ''}
     </span>`;
     const growthSub = (p1, m) => {
       const b = (p1 && p1.basis) || {}, parts = [];
@@ -2199,6 +2204,7 @@ FF.pages = FF.pages || {};
       } else {
         parts.push('Month-end comparison unavailable');
       }
+      if (l2 && Number.isFinite(expForL2)) parts.push(`${ymLabel(l2.ym2)} full month: ${U.fmt(l2.tot)} → expected ${U.fmt(expForL2)}`);
       return parts.join(' · ');
     };
     const growthHtml = growthNum === null ? '<span class="dim">—</span>' : U.pctHtml(growthNum, { decimals: 1 });
