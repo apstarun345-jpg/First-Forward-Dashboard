@@ -2162,28 +2162,46 @@ FF.pages = FF.pages || {};
         <tr class="tot"><td>Total</td><td>${U.fmt(dSum('need'))}</td><td>${U.fmt(dSum('stock'))}</td><td>${dFinal(dSum('dispatch'))}</td></tr></tbody></table></div>`;
       const sug = box('k4', `🎯 Dispatch · ${U.fmt(sDays)} din`, sugBody,
         `Need = run-rate/day × ${U.fmt(sDays)} din (Settings) · Final = Need − Stock${dl.some((x) => x.basis) ? ' · * pichhle mahine ka run-rate' : ''} · month-end expected ${U.fmt(expA + expB)}${pr.direct ? ` · ${esc(pr.directLabel || 'Direct')}` : ''}`, spec('mtd', m.cur));
-    /** 📈 Growth tile ka neeche wala text: kya compare hua + run-rate + expected month-end vs last month. */
+    /** 📈 Growth card: comparable MTD growth + expected month-end growth vs previous full month. */
+    const growthNum = (pr.growthNum !== null && pr.growthNum !== undefined && Number.isFinite(Number(pr.growthNum))) ? Number(pr.growthNum) : null;
+    const projectedGrowthNum = (p1 && p1.projectedGrowth !== null && p1.projectedGrowth !== undefined && Number.isFinite(Number(p1.projectedGrowth)))
+      ? Number(p1.projectedGrowth) : null;
+    const previousMonthLabel = m.last ? ymLabel(m.last) : 'previous month';
+    const growthPill = (v) => (v === null || v === undefined || !Number.isFinite(Number(v))
+      ? '<span class="dim">—</span>' : U.pctHtml(v, { decimals: 1 }));
+    const mtdGrowthLabel = p1 && p1.basis && p1.basis.growthSource === 'mtd'
+      ? `MTD vs ${esc(previousMonthLabel)} · same days`
+      : p1 && p1.basis && p1.basis.growthSource === 'runrate'
+        ? `Run-rate vs ${esc(previousMonthLabel)} avg/day`
+        : 'MTD growth';
+    const projectedGrowthLabel = `Expected vs ${esc(previousMonthLabel)} full month`;
+    const growth2Html = `<span class="msp-g2">
+      <span class="msp-g2-row"><small>${mtdGrowthLabel}</small>${growthPill(growthNum)}</span>
+      <span class="msp-g2-row"><small>${projectedGrowthLabel}</small>${growthPill(projectedGrowthNum)}</span>
+    </span>`;
     const growthSub = (p1, m) => {
-      const b = (p1 && p1.basis) || {};
-      const sgn = (v) => (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%';
-      const parts = [];
-      if (b.growthSource === 'mtd' && p1.comparableLast != null) parts.push(`1–${U.fmt(b.growthElapsed)} tareekh: ${U.fmt(p1.comparableCurrent)} vs pichhle mahine ${U.fmt(p1.comparableLast)}`);
-      else if (b.growthSource === 'runrate') parts.push(`run-rate ${U.fmt(b.ratePerDay, true)}/day vs pichhle mahine ${U.fmt(b.prevRatePerDay, true)}/day`);
-      else parts.push('pichhle mahine ka data nahi mila');
-      if (p1 && p1.total) parts.push(`expected month-end ${U.fmt(p1.total)}${Number.isFinite(Number(p1.projectedGrowth)) ? ` (${sgn(p1.projectedGrowth)} vs last month)` : ''}`);
+      const b = (p1 && p1.basis) || {}, parts = [];
+      const currentMonthLabel = m.cur ? ymLabel(m.cur) : 'this month';
+      const prevLabel = m.last ? ymLabel(m.last) : 'previous month';
+      if (b.growthSource === 'mtd' && p1.comparableLast != null) {
+        const day = U.fmt(b.growthElapsed);
+        parts.push(`MTD: ${currentMonthLabel} 1–${day} = ${U.fmt(p1.comparableCurrent)} vs ${prevLabel} 1–${day} = ${U.fmt(p1.comparableLast)}`);
+      } else if (b.growthSource === 'runrate') {
+        parts.push(`Comparable MTD rows unavailable · run-rate ${U.fmt(b.ratePerDay, true)}/day vs ${prevLabel} avg ${U.fmt(b.prevRatePerDay, true)}/day`);
+      } else {
+        parts.push('Same-day comparison unavailable');
+      }
+      const expected = p1 && Number.isFinite(Number(p1.projectedCurrent))
+        ? Number(p1.projectedCurrent) : (p1 && Number(p1.total));
+      const previousFull = Number(b.previousFull !== undefined ? b.previousFull : (p1 && p1.last));
+      if (Number.isFinite(Number(expected)) && Number.isFinite(previousFull) && previousFull > 0) {
+        parts.push(`Month-end forecast: ${U.fmt(expected)} vs ${prevLabel} full month: ${U.fmt(previousFull)}`);
+      } else {
+        parts.push('Month-end comparison unavailable');
+      }
       return parts.join(' · ');
     };
-      const growthNum = (pr.growthNum !== null && pr.growthNum !== undefined && Number.isFinite(Number(pr.growthNum))) ? Number(pr.growthNum) : null;
-      // v3.125.96 — do growth: last month se (sheet/runrate wala) + last-se-last month se (expected month-end vs us mahine ka total)
-      const g2 = (() => {
-        const expT = Number(expTotal) || (p1 && Number(p1.total)) || 0;
-        if (!last2.tot || !expT) return null;
-        return ((expT - last2.tot) / last2.tot) * 100;
-      })();
-      const growthPill = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? '<span class="dim">—</span>' : U.pctHtml(v, { decimals: 0 }));
-      const growth2Html = `<span class="msp-g2"><span class="msp-g2-row"><small>vs ${esc(m.last ? ymLabel(m.last).split(' ')[0] : 'last')}</small>${growthPill(growthNum)}</span><span class="msp-g2-row"><small>vs ${esc(last2.ym2 ? ymLabel(last2.ym2).split(' ')[0] : 'prev-2')}</small>${growthPill(g2)}</span></span>`;
-      const growth2Sub = last2.ym2 ? ` · ${esc(ymLabel(last2.ym2))}: ${U.fmt(last2.tot)}${expTotal ? ` → expected ${U.fmt(expTotal)}` : ''}` : '';
-      const growthHtml = (growthNum === null || growthNum === undefined || !Number.isFinite(Number(growthNum))) ? '<span class="dim">—</span>' : U.pctHtml(growthNum, { decimals: 0 });
+    const growthHtml = growthNum === null ? '<span class="dim">—</span>' : U.pctHtml(growthNum, { decimals: 1 });
       const notFound = pr.found === false
         ? `<p class="dim small msp-kpi-note">⚠️ ${ch === 'gv' ? 'GV REPORT' : 'REPORT'} tab me is ${isTl ? 'TL' : 'agent'} ki row nahi mili — stock / priority sheet se nahi aa paaye (naam ki spelling check karo); issuance tag-ledger (EIR) se hai.</p>` : '';
       // 🍩 v3.91 — class-wise donuts (last month · this month · stock) summary ke niche; har legend/segment clickable → kpi drill (rows + CSV).
@@ -2228,7 +2246,7 @@ FF.pages = FF.pages || {};
           ${last2Box}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
-          ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growth2Html, growthSub(p1, m) + growth2Sub, spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
+          ${box('k0', `📈 Growth${(p1 && (p1.growthThrough || (p1.basis && p1.basis.growthThrough) || (p1.basis && p1.basis.shortLabel))) ? ` <small class="dim">till ${esc(p1.growthThrough || (p1.basis && p1.basis.growthThrough) || p1.basis.shortLabel)}</small>` : ''}`, growth2Html, growthSub(p1, m), spec('mtd', m.cur), `data-msp-growth="${ch}"`)}
           ${box('k10', '🎯 Expected this month · Run-rate', U.fmt(expTotal), `${expGrid || (expTotal ? vcTiles(expSplit) : clsGrid({}, CLS7, true))}<span class="msp-mini-tail">run-rate ${U.fmt(c.rate, true)}/day × ${U.fmt(U.daysInMonth(m.cur || U.reportYm()))} days</span>`, spec('mtd', m.cur))}
           ${ageBoxHtml(pr, isTl, ch)}
           ${dispBoxHtml(pr, isTl, ch)}
