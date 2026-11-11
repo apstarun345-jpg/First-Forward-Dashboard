@@ -60,7 +60,7 @@ window.FF = window.FF || {};
     cur: { k: 'cur', l: 'This month', n: 1 }, last: { k: 'last', l: 'Last month', n: 1 },
     vc4: { k: 'vc4', l: 'VC4', n: 1 }, vc20: { k: 'vc20', l: 'VC20', n: 1 }, vc5: { k: 'vc5', l: 'VC5+', n: 1 },
     stock: { k: 'stock', l: 'Stock', n: 1 }, rate: { k: 'rate', l: '/day', n: 1, d: 1 }, need: { k: 'need', l: 'Dispatch need', n: 1 },
-    growth: { k: 'growth', l: 'Growth %', n: 1, p: 1 }, proj: { k: 'proj', l: 'Expected', n: 1 }, agents: { k: 'agents', l: 'Agents', n: 1 }, active: { k: 'active', l: 'Active agents', n: 1 }, inact: { k: 'inact', l: 'Inactive agents', n: 1 }, cover: { k: 'cover', l: 'Cover days', n: 1, d: 1 }, drop: { k: 'drop', l: 'Drop vs last', n: 1 }, status: { k: 'status', l: 'Status' }, lastActive: { k: 'lastActive', l: 'Last active' }
+    growth: { k: 'growth', l: 'Growth %', n: 1, p: 1 }, proj: { k: 'proj', l: 'Expected', n: 1 }, ratio: { k: 'ratio', l: 'Issue / stock', n: 1, p: 1 }, agents: { k: 'agents', l: 'Agents', n: 1 }, active: { k: 'active', l: 'Active agents', n: 1 }, inact: { k: 'inact', l: 'Inactive agents', n: 1 }, cover: { k: 'cover', l: 'Cover days', n: 1, d: 1 }, drop: { k: 'drop', l: 'Drop vs last', n: 1 }, status: { k: 'status', l: 'Status' }, lastActive: { k: 'lastActive', l: 'Last active' }
   };
 
   // ------------------------------------------------------------------ question catalog
@@ -68,34 +68,37 @@ window.FF = window.FF || {};
   const Q = [];
   function add(def) { ['ff', 'gv', 'all'].forEach((ch) => { if (def.only && !def.only.includes(ch)) return; Q.push({ ...def, ch, id: `${def.key}|${ch}` }); }); }
 
-  add({ key: 'inactive', title: 'Inactive this month', kw: 'inactive nahi chala band zero issuance no issuance dormant is month', n: false,
+  add({ key: 'inactive', title: 'Inactive this month', kw: 'inactive nahi chala band zero issuance no issuance dormant is month', n: false, tone: 'down',
     run: (rows) => rows.filter((r) => r.cur === 0 && (r.last > 0 || r.stock > 0)).sort((a, b) => b.last - a.last || b.stock - a.stock),
     cols: ['name', 'id', 'tl', 'last', 'stock', 'lastActive'], note: 'This month me 0 issuance — last month ya stock wale agents (last month ke hisaab se)' });
-  add({ key: 'top', title: 'Top agents (issuance)', kw: 'top best highest zyada total issuance agents', n: true,
+  add({ key: 'top', title: 'Top agents (issuance)', kw: 'top best highest zyada total issuance agents', n: true, tone: 'up',
     run: (rows, n) => rows.filter((r) => r.cur > 0).sort((a, b) => b.cur - a.cur).slice(0, n),
     cols: ['name', 'id', 'tl', 'cur', 'last', 'vc4', 'vc20', 'vc5', 'stock'], note: 'Is month ke total issuance ke hisaab se' });
-  add({ key: 'high', title: 'High growth agents', kw: 'high growth badhat growth badh rahe improving', n: true,
+  add({ key: 'high', title: 'High growth agents', kw: 'high growth badhat growth badh rahe improving', n: true, tone: 'up',
     run: (rows, n) => rows.filter((r) => r.high).sort((a, b) => (b.growth ?? -1e9) - (a.growth ?? -1e9) || b.cur - a.cur).slice(0, n),
     cols: ['name', 'id', 'tl', 'cur', 'last', 'growth', 'stock'], note: 'Expected month-end vs last month' });
-  add({ key: 'degrowth', title: 'De-growth agents', kw: 'de growth degrowth girawat kam ghat decline falling low', n: true,
-    run: (rows, n) => rows.filter((r) => r.de).sort((a, b) => (a.growth ?? 1e9) - (b.growth ?? 1e9) || b.last - a.last).slice(0, n),
-    cols: ['name', 'id', 'tl', 'cur', 'last', 'growth', 'stock'], note: 'Expected month-end last month se neeche' });
-  add({ key: 'dispatchDirect', title: 'Dispatch need · Direct agents', kw: 'dispatch need direct agents tag bhejne chahiye aps no tl', n: true,
+  add({ key: 'degrowth', title: 'De-growth agents', kw: 'de growth degrowth girawat kam ghat decline falling low', n: true, tone: 'down',
+    run: (rows, n) => rows.filter((r) => r.de && r.cur > 0).sort((a, b) => (a.growth ?? 1e9) - (b.growth ?? 1e9) || b.last - a.last).slice(0, n),
+    cols: ['name', 'id', 'tl', 'last', 'cur', 'proj', 'growth', 'stock'], note: 'Is speed se month-end last month se neeche rahega (is month issuance chal rahi hai)' });
+  add({ key: 'lowissue', title: 'Stock hai, speed kam', kw: 'low issuance stock hai speed kam slow dheemi stock zyada issue kam', n: true, tone: 'down',
+    run: (rows, n) => rows.filter((r) => r.stock >= 20 && r.cur > 0).map((r) => ({ ...r, ratio: Math.round((r.cur / r.stock) * 100) })).filter((r) => r.ratio < 50).sort((a, b) => a.ratio - b.ratio || b.stock - a.stock).slice(0, n),
+    cols: ['name', 'id', 'tl', 'stock', 'last', 'cur', 'ratio'], note: 'Stock ≥ 20 par is month issuance stock ka 50% se bhi kam' });
+  add({ key: 'dispatchDirect', title: 'Dispatch need · Direct agents', kw: 'dispatch need direct agents tag bhejne chahiye aps no tl', n: true, tone: 'warn',
     run: (rows, n) => rows.filter((r) => r.direct && r.need > 0).sort((a, b) => b.need - a.need).slice(0, n),
     cols: ['name', 'id', 'cur', 'rate', 'stock', 'need'], note: 'Direct agents: run-rate × Settings days − stock' });
-  add({ key: 'dispatch', title: 'Dispatch need · All agents', kw: 'dispatch need tag bhejne chahiye required kitne tag', n: true,
+  add({ key: 'dispatch', title: 'Dispatch need · All agents', kw: 'dispatch need tag bhejne chahiye required kitne tag', n: true, tone: 'warn',
     run: (rows, n) => rows.filter((r) => r.need > 0).sort((a, b) => b.need - a.need).slice(0, n),
     cols: ['name', 'id', 'tl', 'cur', 'rate', 'stock', 'need'], note: 'Run-rate × Settings days − stock' });
-  add({ key: 'vc4', title: 'Top VC4 agents', kw: 'top vc4 car jeep van agents', n: true,
+  add({ key: 'vc4', title: 'Top VC4 agents', kw: 'top vc4 car jeep van agents', n: true, tone: 'up',
     run: (rows, n) => rows.filter((r) => r.vc4 > 0).sort((a, b) => b.vc4 - a.vc4).slice(0, n),
     cols: ['name', 'id', 'tl', 'vc4', 'cur', 'stock'], note: 'VC4 issuance (this month)' });
-  add({ key: 'vc20', title: 'Top VC20 agents', kw: 'top vc20 agents', n: true,
+  add({ key: 'vc20', title: 'Top VC20 agents', kw: 'top vc20 agents', n: true, tone: 'up',
     run: (rows, n) => rows.filter((r) => r.vc20 > 0).sort((a, b) => b.vc20 - a.vc20).slice(0, n),
     cols: ['name', 'id', 'tl', 'vc20', 'cur', 'stock'], note: 'VC20 issuance (this month)' });
-  add({ key: 'vc5', title: 'Top VC5 agents', kw: 'top vc5 vc6 vc7 vc12 vc16 commercial agents', n: true,
+  add({ key: 'vc5', title: 'Top VC5 agents', kw: 'top vc5 vc6 vc7 vc12 vc16 commercial agents', n: true, tone: 'up',
     run: (rows, n) => rows.filter((r) => r.vc5 > 0).sort((a, b) => b.vc5 - a.vc5).slice(0, n),
     cols: ['name', 'id', 'tl', 'vc5', 'cur', 'stock'], note: 'VC5+ (VC5/6/7/12/16) issuance (this month)' });
-  add({ key: 'nostock', title: 'Issuing but stock zero', kw: 'zero stock stock khatam out of stock no stock khali', n: true,
+  add({ key: 'nostock', title: 'Issuing but stock zero', kw: 'zero stock stock khatam out of stock no stock khali', n: true, tone: 'down',
     run: (rows, n) => rows.filter((r) => r.cur > 0 && r.stock <= 0).sort((a, b) => b.cur - a.cur).slice(0, n),
     cols: ['name', 'id', 'tl', 'cur', 'rate', 'need'], note: 'Issuance chal rahi hai par stock 0' });
   add({ key: 'direct', title: 'Direct agents list', kw: 'direct agents aps no tl list', n: true,
@@ -118,54 +121,54 @@ window.FF = window.FF || {};
   const tlAdd = (def) => add({ ...def, tl: true, run: (rows, n) => def.run(tlRows(rows), n) });
   const TLC = ['name', 'agents', 'active', 'inact', 'cur', 'last', 'growth', 'stock'];
 
-  tlAdd({ key: 'toptl', title: 'Top TLs (issuance)', kw: 'top tl tls team leader best issuance zyada', n: true,
+  tlAdd({ key: 'toptl', title: 'Top TLs (issuance)', kw: 'top tl tls team leader best issuance zyada', n: true, tone: 'up',
     run: (t, n) => t.filter((x) => x.cur > 0).sort((a, b) => b.cur - a.cur).slice(0, n), cols: TLC, note: 'TL ke agents ka total (this month)' });
-  tlAdd({ key: 'inactivetl', title: 'Inactive TLs', kw: 'inactive tl tls team leader nahi chala zero issuance band', n: true,
+  tlAdd({ key: 'inactivetl', title: 'Inactive TLs', kw: 'inactive tl tls team leader nahi chala zero issuance band', n: true, tone: 'down',
     run: (t, n) => t.filter((x) => x.cur === 0).sort((a, b) => b.last - a.last || b.stock - a.stock).slice(0, n), cols: ['name', 'agents', 'last', 'stock'], note: 'TL ke saare agents ka is month 0 issuance' });
-  tlAdd({ key: 'degrowthtl', title: 'De-growth TLs', kw: 'de growth degrowth tl tls team leader girawat kam decline', n: true,
+  tlAdd({ key: 'degrowthtl', title: 'De-growth TLs', kw: 'de growth degrowth tl tls team leader girawat kam decline', n: true, tone: 'down',
     run: (t, n) => t.filter((x) => x.growth != null && x.growth < 0).sort((a, b) => a.growth - b.growth).slice(0, n), cols: ['name', 'agents', 'cur', 'last', 'proj', 'growth', 'stock'], note: 'Expected month-end last month se neeche' });
-  tlAdd({ key: 'highgrowthtl', title: 'High growth TLs', kw: 'high growth tl tls team leader badhat improving', n: true,
+  tlAdd({ key: 'highgrowthtl', title: 'High growth TLs', kw: 'high growth tl tls team leader badhat improving', n: true, tone: 'up',
     run: (t, n) => t.filter((x) => x.growth != null && x.growth >= 20).sort((a, b) => b.growth - a.growth).slice(0, n), cols: ['name', 'agents', 'cur', 'last', 'proj', 'growth', 'stock'], note: 'Expected month-end last month se 20%+ upar' });
   tlAdd({ key: 'stocktl', title: 'Highest stock TLs', kw: 'highest stock tl tls team leader zyada stock maal', n: true,
     run: (t, n) => t.sort((a, b) => b.stock - a.stock).slice(0, n), cols: ['name', 'agents', 'stock', 'cur', 'last'], note: 'TL ke agents ka total stock' });
-  tlAdd({ key: 'dispatchtl', title: 'Dispatch need · TLs', kw: 'dispatch need tl tls team leader tag bhejne chahiye required', n: true,
+  tlAdd({ key: 'dispatchtl', title: 'Dispatch need · TLs', kw: 'dispatch need tl tls team leader tag bhejne chahiye required', n: true, tone: 'warn',
     run: (t, n) => t.filter((x) => x.need > 0).sort((a, b) => b.need - a.need).slice(0, n), cols: ['name', 'agents', 'cur', 'stock', 'need'], note: 'Agents ke dispatch need ka jod' });
-  tlAdd({ key: 'inactagentstl', title: 'TLs with most inactive agents', kw: 'most inactive agents tl tls team leader zyada inactive', n: true,
+  tlAdd({ key: 'inactagentstl', title: 'TLs with most inactive agents', kw: 'most inactive agents tl tls team leader zyada inactive', n: true, tone: 'down',
     run: (t, n) => t.filter((x) => x.inact > 0).sort((a, b) => b.inact - a.inact).slice(0, n), cols: ['name', 'agents', 'active', 'inact', 'cur', 'last'], note: 'Jinke zyada agents is month inactive hain' });
   tlAdd({ key: 'lasttl', title: 'Top TLs (last month)', kw: 'top tl tls last month pichla month previous', n: true,
     run: (t, n) => t.filter((x) => x.last > 0).sort((a, b) => b.last - a.last).slice(0, n), cols: ['name', 'agents', 'last', 'cur', 'growth'], note: 'Last month ke total ke hisaab se' });
-  tlAdd({ key: 'vc4tl', title: 'Top VC4 TLs', kw: 'top vc4 tl tls team leader', n: true,
+  tlAdd({ key: 'vc4tl', title: 'Top VC4 TLs', kw: 'top vc4 tl tls team leader', n: true, tone: 'up',
     run: (t, n) => t.filter((x) => x.vc4 > 0).sort((a, b) => b.vc4 - a.vc4).slice(0, n), cols: ['name', 'agents', 'vc4', 'cur', 'stock'], note: 'VC4 issuance (this month)' });
-  tlAdd({ key: 'vc20tl', title: 'Top VC20 TLs', kw: 'top vc20 tl tls team leader', n: true,
+  tlAdd({ key: 'vc20tl', title: 'Top VC20 TLs', kw: 'top vc20 tl tls team leader', n: true, tone: 'up',
     run: (t, n) => t.filter((x) => x.vc20 > 0).sort((a, b) => b.vc20 - a.vc20).slice(0, n), cols: ['name', 'agents', 'vc20', 'cur', 'stock'], note: 'VC20 issuance (this month)' });
-  tlAdd({ key: 'vc5tl', title: 'Top VC5 TLs', kw: 'top vc5 vc6 vc7 vc12 vc16 commercial tl tls team leader', n: true,
+  tlAdd({ key: 'vc5tl', title: 'Top VC5 TLs', kw: 'top vc5 vc6 vc7 vc12 vc16 commercial tl tls team leader', n: true, tone: 'up',
     run: (t, n) => t.filter((x) => x.vc5 > 0).sort((a, b) => b.vc5 - a.vc5).slice(0, n), cols: ['name', 'agents', 'vc5', 'cur', 'stock'], note: 'VC5+ issuance (this month)' });
   tlAdd({ key: 'bigtl', title: 'Biggest teams (most agents)', kw: 'biggest teams most agents tl tls team leader zyada agents team size', n: true,
     run: (t, n) => t.sort((a, b) => b.agents - a.agents).slice(0, n), cols: ['name', 'agents', 'active', 'inact', 'cur', 'stock'], note: 'TL ke neeche agents ki ginti' });
 
   // ---- more agent questions
-  add({ key: 'stockhigh', title: 'Highest stock agents', kw: 'highest stock zyada stock maal most stock agents', n: true,
+  add({ key: 'stockhigh', title: 'Highest stock agents', kw: 'highest stock zyada stock maal most stock agents', n: true, tone: 'info',
     run: (rows, n) => rows.filter((r) => r.stock > 0).sort((a, b) => b.stock - a.stock).slice(0, n),
     cols: ['name', 'id', 'tl', 'stock', 'cur', 'rate'], note: 'Total stock ke hisaab se' });
-  add({ key: 'deadstock', title: 'Stock but inactive (dead stock)', kw: 'dead stock inactive stock pada hua sleeping idle stock but no issuance', n: true,
+  add({ key: 'deadstock', title: 'Stock but inactive (dead stock)', kw: 'dead stock inactive stock pada hua sleeping idle stock but no issuance', n: true, tone: 'warn',
     run: (rows, n) => rows.filter((r) => r.stock > 0 && r.cur === 0).sort((a, b) => b.stock - a.stock).slice(0, n),
     cols: ['name', 'id', 'tl', 'stock', 'last', 'lastActive'], note: 'Stock hai par is month issuance 0' });
-  add({ key: 'lowcover', title: 'Low stock cover (< 5 days)', kw: 'low stock cover khatam hone wala running out kam stock urgent critical', n: true,
+  add({ key: 'lowcover', title: 'Low stock cover (< 5 days)', kw: 'low stock cover khatam hone wala running out kam stock urgent critical', n: true, tone: 'warn',
     run: (rows, n) => rows.filter((r) => r.rate > 0 && r.stock / r.rate < 5).map((r) => ({ ...r, cover: r.stock / r.rate })).sort((a, b) => a.cover - b.cover || b.rate - a.rate).slice(0, n),
     cols: ['name', 'id', 'tl', 'stock', 'rate', 'cover', 'need'], note: 'Stock / run-rate 5 din se kam' });
   add({ key: 'lastmonth', title: 'Top agents (last month)', kw: 'top last month pichla month previous best agents', n: true,
     run: (rows, n) => rows.filter((r) => r.last > 0).sort((a, b) => b.last - a.last).slice(0, n),
     cols: ['name', 'id', 'tl', 'last', 'cur', 'growth'], note: 'Last month ke total ke hisaab se' });
-  add({ key: 'biggestdrop', title: 'Biggest drop vs last month', kw: 'biggest drop girawat sabse zyada gira ghata decline vs last month', n: true,
+  add({ key: 'biggestdrop', title: 'Biggest drop vs last month', kw: 'biggest drop girawat sabse zyada gira ghata decline vs last month', n: true, tone: 'down',
     run: (rows, n) => rows.map((r) => ({ ...r, drop: r.last - r.cur })).filter((r) => r.drop > 0).sort((a, b) => b.drop - a.drop).slice(0, n),
     cols: ['name', 'id', 'tl', 'last', 'cur', 'drop', 'stock'], note: 'Last month − this month (abhi tak)' });
-  add({ key: 'newagents', title: 'New / reactivated agents', kw: 'new agents naye reactivated restart shuru last month zero', n: true,
+  add({ key: 'newagents', title: 'New / reactivated agents', kw: 'new agents naye reactivated restart shuru last month zero', n: true, tone: 'up',
     run: (rows, n) => rows.filter((r) => r.cur > 0 && r.last === 0).sort((a, b) => b.cur - a.cur).slice(0, n),
     cols: ['name', 'id', 'tl', 'cur', 'vc4', 'stock'], note: 'Last month 0, is month issuance' });
-  add({ key: 'runrate', title: 'Highest run-rate (per day)', kw: 'highest run rate runrate per day daily speed fast', n: true,
+  add({ key: 'runrate', title: 'Highest run-rate (per day)', kw: 'highest run rate runrate per day daily speed fast', n: true, tone: 'up',
     run: (rows, n) => rows.filter((r) => r.rate > 0).sort((a, b) => b.rate - a.rate).slice(0, n),
     cols: ['name', 'id', 'tl', 'rate', 'cur', 'stock', 'need'], note: 'Roz ka average issuance' });
-  add({ key: 'noissue2', title: 'No issuance last + this month', kw: 'dead agents 2 months inactive both months no issuance sleeping', n: true,
+  add({ key: 'noissue2', title: 'No issuance last + this month', kw: 'dead agents 2 months inactive both months no issuance sleeping', n: true, tone: 'down',
     run: (rows, n) => rows.filter((r) => r.cur === 0 && r.last === 0 && r.stock > 0).sort((a, b) => b.stock - a.stock).slice(0, n),
     cols: ['name', 'id', 'tl', 'stock'], note: 'Dono months 0 par stock pada hai' });
 
@@ -230,8 +233,12 @@ window.FF = window.FF || {};
     const out = d.run(rows, lim);
     return { def: d, n: lim, rows: out, total: rows.length };
   }
-  const cell = (c, v) => {
+  const cell = (c, v, r) => {
+    if (c.k === 'ratio') return v == null ? '<span class="dim">—</span>' : `<span class="delta ${v >= 20 ? 'up' : 'down'}">${fmt(v)}%</span>`;
     if (c.p) return v == null || v === '' ? '<span class="dim">—</span>' : `<span class="${v >= 0 ? 'delta up' : 'delta down'}">${v > 0 ? '+' : ''}${fmt(v)}%</span>`;
+    if (c.k === 'cur' && r && r.last > 0) return `<b class="sq-cur ${v >= r.last ? 'ok' : 'bad'}">${fmt(v)}</b>`;
+    if (c.k === 'last') return `<span class="sq-last">${fmt(v)}</span>`;
+    if (c.k === 'stock') return `<b class="sq-stock">${fmt(v)}</b>`;
     if (c.n) return c.d ? U.fmt(v, true) : `<b>${fmt(v)}</b>`;
     return esc(v == null ? '' : v);
   };
@@ -240,11 +247,12 @@ window.FF = window.FF || {};
     const showCh = a.def.ch === 'all' && !a.def.sum;
     if (!a.rows.length) return '<div class="dim" style="padding:14px">Koi agent nahi mila — ya data abhi load ho raha hai (thodi der baad dobara try karo).</div>';
     const head = `<tr><th>#</th>${showCh ? '<th>Ch</th>' : ''}${cols.map((c) => `<th${c.n ? ' class="num"' : ''}>${esc(c.l)}</th>`).join('')}</tr>`;
-    const body = a.rows.map((r, i) => `<tr><td>${i + 1}</td>${showCh ? `<td><span class="badge ${r.ch === 'GV' ? 'gv' : 'ff'}">${esc(r.ch)}</span></td>` : ''}${cols.map((c) => {
+    const tn = a.def.tone ? ` sq-t-${a.def.tone}` : '';
+    const body = a.rows.map((r, i) => `<tr class="sq-row${tn}"><td>${i + 1}</td>${showCh ? `<td><span class="badge ${r.ch === 'GV' ? 'gv' : 'ff'}">${esc(r.ch)}</span></td>` : ''}${cols.map((c) => {
       if (c.k === 'name' && !a.def.sum && r.name) return `<td><a href="#" data-sq-open="${esc(r.name)}"><b>${esc(r.name)}</b></a></td>`;
-      return `<td${c.n ? ' class="num"' : ''}>${cell(c, r[c.k])}</td>`;
+      return `<td${c.n ? ' class="num"' : ''}>${cell(c, r[c.k], r)}</td>`;
     }).join('')}</tr>`).join('');
-    return `<div class="msp-dtable-wrap" style="overflow:auto"><table class="tbl compact"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    return `<div class="msp-dtable-wrap" style="overflow:auto"><table class="tbl compact sq-tbl"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
   function csv(a) {
     const cols = (a.def.cols || []).map((k) => C[k]).filter(Boolean);

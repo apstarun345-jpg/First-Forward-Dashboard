@@ -7940,3 +7940,17 @@ html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 9
 .td-wd-c { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 3px; font-size: 12px; }
 .td-wd-c i { display: block; width: 70%; max-width: 46px; border-radius: 8px 8px 3px 3px; background: linear-gradient(180deg, #6366f1, #2563eb); }
 .td-wd-c small { color: var(--muted, #64748b); font-size: 11px; }
+
+/* ❓ smartQ list — rangeen rows (robot update ki apni list) */
+#sq-panel .sq-tbl tr.sq-t-down td:first-child { box-shadow: inset 3px 0 0 #ef4444; }
+#sq-panel .sq-tbl tr.sq-t-up td:first-child { box-shadow: inset 3px 0 0 #22c55e; }
+#sq-panel .sq-tbl tr.sq-t-warn td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+#sq-panel .sq-tbl tr.sq-t-info td:first-child { box-shadow: inset 3px 0 0 #6366f1; }
+#sq-panel .sq-tbl tr.sq-t-down:nth-child(odd) td { background: rgba(254, 226, 226, .45); }
+#sq-panel .sq-tbl tr.sq-t-up:nth-child(odd) td { background: rgba(220, 252, 231, .5); }
+#sq-panel .sq-tbl tr.sq-t-warn:nth-child(odd) td { background: rgba(254, 243, 199, .55); }
+#sq-panel .sq-tbl .sq-cur.ok { color: #15803d; }
+#sq-panel .sq-tbl .sq-cur.bad { color: #b91c1c; }
+#sq-panel .sq-tbl .sq-last { color: #475569; font-weight: 700; }
+#sq-panel .sq-tbl .sq-stock { color: #1d4ed8; }
+#sq-panel .sq-tbl .delta { display: inline-block; padding: 2px 8px; border-radius: 999px; font-weight: 800; }

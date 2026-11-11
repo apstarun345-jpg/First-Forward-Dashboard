@@ -203,13 +203,13 @@
       head: (r) => `TL ${r.name} — ${fmt(r.vc4)} VC4`, sub: (x) => `${fmt(x.agents)} agents`, val: (x) => fmt(x.vc4),
       say: (r) => `वी सी 4 में टी एल ${nm(r.name)} की टीम सबसे आगे, ${fmt(r.vc4)}।` }),
     function lowIssue() { // stock hai par issuance bahut kam
-      const a = sq('top|all', 100000); if (!a || !a.rows.length) return null;
-      const rows = a.rows.filter((x) => x.stock >= 20 && x.cur > 0).sort((x, y) => x.cur / x.stock - y.cur / y.stock).slice(0, 5);
+      const a = sq('lowissue|all', 5); if (!a || !a.rows.length) return null;
+      const rows = a.rows;
       if (!rows.length) return null;
       const r = rows[0];
       return { key: 'lowissue', mood: 'sad', icon: '🐢', title: pick(['Low issuance', 'Stock hai, speed kam']), head: `${r.name}: stock ${fmt(r.stock)}, issue sirf ${fmt(r.cur)}`, view: 'list',
         rows: rows.map((x) => ({ name: x.name, sub: `stock ${fmt(x.stock)} · ${tlS(x)}`, val: fmt(x.cur), tone: 'down' })),
-        say: `${nm(r.name)} के पास ${fmt(r.stock)} टैग्स का स्टॉक है, पर इस महीने सिर्फ़ ${fmt(r.cur)} इशू हुए।`, q: 'top|all' };
+        say: `${nm(r.name)} के पास ${fmt(r.stock)} टैग्स का स्टॉक है, पर इस महीने सिर्फ़ ${fmt(r.cur)} इशू हुए।`, q: 'lowissue|all' };
     },
     function siteTotal() { // poori site ka hisaab
       const t = sq('summary|all'), act = sq('top|all', 100000), st = sq('stockhigh|all', 100000), ina = sq('inactive|all', 100000), dn = sq('dispatch|all', 100000);
