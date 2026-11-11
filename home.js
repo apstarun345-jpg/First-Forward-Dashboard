@@ -705,9 +705,9 @@ FF.pages = FF.pages || {};
     const sp = (arr, col) => (arr.length > 1 ? C.spark(arr.slice(-14), col) : '');
     return `<div class="mh-stats">
       ${stat('t1', '🏷️', `${U.labelYM(curKey, true)} · MTD`, U.fmt(total), pctChip(g(total, prevSame)), `vs ${U.labelYM(prevKey, true)} 1–${day}: ${U.fmt(prevSame)}`, sp(vals, '#6366f1'))}
-      ${stat('t2', '📅', `Last report day · ${dayLbl}`, U.fmt(lastVal), pctChip(g(lastVal, lastPrev)), `pichhle din: ${U.fmt(lastPrev)}`, sp(vals, '#0ea5e9'))}
-      ${stat('t3', '🎯', 'Expected month-end', U.fmt(exp), pctChip(g(exp, prevFull)), `${U.labelYM(prevKey, true)} full: ${U.fmt(prevFull)} · ${U.fmt(rate, true)}/din`, '')}
-      ${stat('t4', '⚡', 'Run-rate / din', U.fmt(rate, true), pctChip(g(rate, prevRate)), `${U.labelYM(prevKey, true)} avg: ${U.fmt(prevRate, true)}/din`, '')}
+      ${stat('t2', '📅', `Last report day · ${dayLbl}`, U.fmt(lastVal), pctChip(g(lastVal, lastPrev)), `previous day: ${U.fmt(lastPrev)}`, sp(vals, '#0ea5e9'))}
+      ${stat('t3', '🎯', 'Expected month-end', U.fmt(exp), pctChip(g(exp, prevFull)), `${U.labelYM(prevKey, true)} full: ${U.fmt(prevFull)} · ${U.fmt(rate, true)} per day`, '')}
+      ${stat('t4', '⚡', 'Run-rate / day', U.fmt(rate, true), pctChip(g(rate, prevRate)), `${U.labelYM(prevKey, true)} avg: ${U.fmt(prevRate, true)} per day`, '')}
     </div>`;
   }
   function overviewPanels() {
@@ -718,7 +718,7 @@ FF.pages = FF.pages || {};
     const hb = (rows, items) => (rows && rows.length ? C.hbars({ items, valueLabel: 'This month', compareLabel: 'Last month' }) : '<p class="dim small">Data load ho raha hai…</p>');
     const topCard = card('🏆 Top agents · is mahine', have ? hb(top.rows, top.rows.map((r) => ({ label: r.name, sub: `${r.ch}${r.tl ? ' · ' + r.tl : ''}`, value: r.cur, compare: r.last }))) : '<p class="dim small">Agents data load ho raha hai…</p>', `<button class="btn small" data-mh-sq="top|all">Poori list</button>`);
     const tlCard = card('👥 Top TL teams', tl && tl.rows && tl.rows.length ? hb(tl.rows, tl.rows.map((r) => ({ label: r.name, sub: `${U.fmt(r.agents)} agents`, value: r.cur, compare: r.last }))) : '<p class="dim small">TL data load ho raha hai…</p>', `<button class="btn small" data-mh-sq="toptl|all">Poori list</button>`);
-    const cnt = (id, f) => { const a = ans(id, 100000); return a && a.rows ? (f ? a.rows.filter(f).length : a.rows.length) : null; };
+    const cnt = (id, f) => { if (!have) return null; const a = ans(id, 100000); return a && a.rows ? (f ? a.rows.filter(f).length : a.rows.length) : null; };
     const items = [
       ['😴', 'Is mahine ek bhi tag nahi', cnt('inactive|all'), 'inactive|all', 'warn'],
       ['📉', 'De-growth agents', cnt('degrowth|all'), 'degrowth|all', 'down'],
@@ -736,7 +736,8 @@ FF.pages = FF.pages || {};
     const cur = M.dailySeries(sf.rows, curKey);
     const prev = M.dailySeries(lastRows, prevKey);
     const labels = cur.days.length ? cur.days.map(String) : ['1'];
-    const curVals = cur.totals;
+    const od = Math.max(1, Number(observedDay) || cur.days.length);
+    const curVals = cur.totals.map((v, i) => (i < od ? v : null)); // aaj/future din 0 par girta nahi dikhana
     const prevVals = prev.totals.slice(0, labels.length);
     const line = C.lines({
       labels,
@@ -1705,7 +1706,7 @@ FF.pages = FF.pages || {};
       try { pn = overviewPanels(); } catch { pn = { html: '', ready: true }; }
       ov.innerHTML = `${stats}<div class="mh-charts">${charts}</div>${pn.html}`;
       C.mount(ov);
-      if (!pn.ready && ovTries++ < 6) setTimeout(paintOverview, 5000); // agents data baad me aata hai
+      if (!pn.ready) { try { if (ovTries === 0) { const P = FF.pages && FF.pages.performance; if (P && P.ensureLoaded) Promise.resolve(P.ensureLoaded({ light: true })).catch(() => {}); if (FF.gv && FF.gv.need) Promise.resolve(FF.gv.need('report', { only: true })).catch(() => {}); } } catch { /* optional */ } if (ovTries++ < 12) setTimeout(paintOverview, 6000); } // agents data baad me aata hai
     }
     root.addEventListener('click', (ev) => { const b = ev.target.closest && ev.target.closest('[data-mh-sq]'); if (b && FF.smartQ) { ev.preventDefault(); FF.smartQ.open(b.dataset.mhSq, 'all'); } });
     function bindExplorerEvents() {
