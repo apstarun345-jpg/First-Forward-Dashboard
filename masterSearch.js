@@ -2009,7 +2009,8 @@ FF.pages = FF.pages || {};
         const d = Math.max(0, c), tone = d <= 10 ? 'r' : d <= 20 ? 'y' : 'g';
         const end = new Date(Date.now() + d * 864e5);
         const lbl = d > 3650 ? '10+ saal' : end.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: end.getFullYear() !== new Date().getFullYear() ? '2-digit' : undefined });
-        return `<span class="msp-cov ${tone}"><b>${U.fmt(c, true)} d</b><i>⏳ ${esc(lbl)}</i></span>`;
+        const longCover = d > 3650;
+        return `<span class="msp-cov ${tone}" title="${longCover ? `Estimated cover ${U.fmt(c, true)} days; shown as 10+ years to avoid false precision` : `Estimated cover ${U.fmt(c, true)} days`}"><b>${longCover ? '10+ years' : `${U.fmt(c, true)} d`}</b><i>${longCover ? 'very low demand' : `⏳ ${esc(lbl)}`}</i></span>`;
       };
       const prioBody = plan.map((x) => `<div class="msp-cls-line"><span class="c1">${esc(x.k)}</span><span class="c2">${chipOf(x.prio)}</span><span class="c3">${x.cover != null ? coverPill(x.cover) : '<span class="dim">no run-rate</span>'}</span></div>`).join('');
       const prioSub = plan.map((x) => `${esc(x.k)}: stock ${U.fmt(x.stock)} ÷ ${U.fmt(x.rate, true)}/day`).join(' · ');
@@ -2123,6 +2124,16 @@ FF.pages = FF.pages || {};
       })();
       const wd = workedDays(pr, isTl, ch, m.cur);
       const ownAgents = ts.own && ts.agents ? `own ${U.fmt(ts.own.total)} + agents ${U.fmt(ts.agents.total)}` : '';
+      // TL Summary: quick team-health snapshot; current-month issuance is the active definition.
+      const teamRows = isTl && Array.isArray(pr.agents) ? pr.agents : [];
+      const teamActive = teamRows.filter((a) => num(a.cur) > 0).length;
+      const teamNoMtd = Math.max(0, teamRows.length - teamActive);
+      const teamStockHolders = teamRows.filter((a) => num(a.stockTotal) > 0).length;
+      const teamTop3 = teamRows.filter((a) => num(a.cur) > 0)
+        .slice().sort((a, b) => num(b.cur) - num(a.cur)).slice(0, 3);
+      const agentSummarySub = teamRows.length
+        ? `<span class="msp-agent-stats"><span class="msp-agent-stat good">🟢 Active MTD ${U.fmt(teamActive)}</span><span class="msp-agent-stat muted">⚪ No MTD issuance ${U.fmt(teamNoMtd)}</span><span class="msp-agent-stat stock">📦 Stock holders ${U.fmt(teamStockHolders)}</span></span>${teamTop3.length ? `<span class="msp-agent-top">🏆 Top: ${teamTop3.map((a) => `${esc(a.name)} ${U.fmt(a.cur)}`).join(' · ')}</span>` : ''}<span class="msp-mini-tail">Click → complete agent list with stock and issuance</span>`
+        : 'click → agents list (with stock · issuance)';
       const tlName = (pr.tl && pr.tl.name) || '';
       // 🎯 v3.125.59 — Dispatch = run-rate/day × Settings ke din (Suggested dispatch days) − stock, class-wise.
       // Run-rate = is mahine ka issuance ÷ din (is mahine kuch nahi to pichhle mahine ka). Direct / priority se farak nahi.
@@ -2244,7 +2255,7 @@ FF.pages = FF.pages || {};
         <div class="card-body"><div class="mp-kpis msp-kpis msp-uni">
           ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${clsOr(clsSums(pr.classes, 'stock', false), TVC6, s.total, stockMix)}${(isTl && ownAgents) || c.cover != null ? `<span class="msp-mini-tail">${isTl && ownAgents ? `${ownAgents}` : ''}${isTl && ownAgents && c.cover != null ? ' · ' : ''}${c.cover != null ? `run-rate ${U.fmt(c.rate, true)}/day` : ''}</span>` : ''}`, spec('stock'))}
           ${isTl
-    ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
+    ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, agentSummarySub, peopleSpec)
     : box('k2', '📦 TL ke under stock', tsOk ? U.fmt(ts.total) : '—', tsOk ? `${tlClsRows(ts)}<span class="msp-mini-tail">${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}</span>` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), tsOk && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}${pr.tl && pr.tl.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.tl.id)}` : ''}` : '')}
           ${dayChip}
           ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${clsOr(clsSums(pr.classes, 'cur', true), CLS7, t.curTotal, curMix)}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(Math.max(elapsed, wd))} days</span></span>`, spec('mtd', m.cur))}
