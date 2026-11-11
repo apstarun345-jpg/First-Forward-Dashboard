@@ -8325,3 +8325,7 @@ html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 9
 .td-tbl tr.td-best td { background: rgba(250, 204, 21, .16); }
 .td-tbl tr.td-total td { background: rgba(99, 102, 241, .10); border-top: 2px solid rgba(99, 102, 241, .35); }
 .td-tbl tbody tr:hover td { filter: brightness(.97); }
+
+/* v3.125.180: Multiple Customer ID toolbar (.mcu-bar — .mc-bar robot ka hai) */
+.mcu-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.mcu-bar .input { max-width: 220px; }

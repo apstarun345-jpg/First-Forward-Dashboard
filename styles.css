@@ -7477,8 +7477,9 @@ html body .msp-kpi.msp-kyc-box .kyc-vrow { font-size: 12px; gap: 6px; }
 .mc-tile b { display: block; font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
 .mc-tile small { font-size: 12px; color: var(--muted); font-weight: 700; }
 .mc-tile.t1 { --mc: #2563eb; } .mc-tile.t2 { --mc: #7c3aed; } .mc-tile.t3 { --mc: #16a34a; } .mc-tile.t4 { --mc: #ea580c; }
-.mc-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
-.mc-bar .input { max-width: 220px; }
+/* v3.125.180: naam .mcu-bar — .mc-bar robot (mascot) ke board ki bar ka naam hai, wo is toolbar ko table ke upar chipka deta tha */
+.mcu-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.mcu-bar .input { max-width: 220px; }
 .mc-wrap { max-height: 70vh; overflow: auto; }
 .mc-tbl { font-variant-numeric: tabular-nums; font-size: 13px; }
 .mc-tbl thead th { position: sticky; top: 0; z-index: 1; background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff; white-space: nowrap; padding: 7px 10px; font-size: 12px; }
