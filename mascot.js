@@ -1417,6 +1417,20 @@
     // same type ki purani khabar line me ho to hatao — sirf sabse nayi dikhe (purani history me)
     if (it.grp) { for (let i = prio.length - 1; i >= 0; i--) if (prio[i].grp === it.grp) { const old = prio.splice(i, 1)[0]; if (!old.fun) histAdd(old, old.at); } }
     prio.push(it); if (prio.length > 40) prio.splice(0, prio.length - 40);
+    if (it.fast) urgentKick();
+  }
+  // ⚡ v3.125.181 — taaza notification (user activity waghairah): robot jo masti / purani khabar dikha raha ho use chhodkar turant ye bataye
+  let kickT = 0;
+  function urgentKick() {
+    clearTimeout(kickT);
+    kickT = setTimeout(() => {
+      try {
+        if (convo || asking || mode === 'hist' || document.hidden || !cfg.on) return;
+        if (busy) { const c = current; if (c && (c.fun || !c.fast) && !/^(ans|wake|alerts):/.test(String(c.key || ''))) { try { abortFun(); } catch { /* ignore */ } if (skip) skip('next'); } else if (!c) { try { abortFun(); } catch { /* ignore */ } } }
+        try { timerWin.clearTimeout(timer); } catch { /* ignore */ }
+        timerWin = tw(); timer = timerWin.setTimeout(() => tick(true), busy ? 900 : 150);
+      } catch { /* ignore */ }
+    }, 200);
   }
   // 🔔 v3.125.141 — site / app khulte hi: har type ki SIRF sabse nayi khabar board par; purani (raat wali) seedhe history me.
   //    v3.125.143: 20 min se purani khabar board par nahi aati (history me rehti hai).
@@ -2627,7 +2641,7 @@
   let funTurn = 0, lastUpd = 0;
   async function tick(force) {
     applyOn();
-    if (busy || asking || convo || mode === 'hist') return schedule(4e3);
+    if (busy || asking || convo || mode === 'hist') return schedule(prio.some((x) => x.fast) ? 700 : 4e3);
     // 🔔 site ka tab peeche (dusra tab / WhatsApp) aur pop-out nahi → system notification se update
     if (!force && document.hidden && !pipWin && extOn()) return schedule(30e3); // extension har 30 sec "pull" karta hai
     if (!force && document.hidden && !pipWin && cfg.on && allowed() && cfg.notify !== false && cfg.snoozeDay !== today()) { await notifyHidden(); return schedule(60e3); }
@@ -2685,7 +2699,12 @@
       setTimeout(checkVersions, 12e3);
       setInterval(checkVersions, 10 * 60e3);
       setTimeout(pollFeeds, 4e3);
-      setInterval(pollFeeds, 30e3);
+      setInterval(pollFeeds, 12e3); // pehle 30s — ab 12s (halka call)
+      // ⚡ v3.125.181 — push aate hi (service worker se signal) turant robot bataye; tab par wapas aate hi bhi
+      let instT = 0; const instant = () => { clearTimeout(instT); instT = setTimeout(() => { try { pollFeeds(); } catch { /* ignore */ } }, 350); };
+      try { if (navigator.serviceWorker && navigator.serviceWorker.addEventListener) navigator.serviceWorker.addEventListener('message', (e) => { const d = e && e.data; if (d && (d.type === 'ff-push' || d.type === 'ff-speak-push') && !/^robot/.test(String(d.pushType || ''))) instant(); }); } catch { /* ignore */ }
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) instant(); });
+      document.addEventListener('ff:notify', instant);
       armAutoPip();
       applyFestival(); setInterval(applyFestival, 30 * 60e3);
       setInterval(() => { if (Math.random() < 0.6) chChat(); }, 75e3);
