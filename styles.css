@@ -7903,6 +7903,10 @@ html[data-theme="dark"] .msp-cov.g { color: #86efac; background: rgba(34, 197, 9
 .rf-card { scroll-snap-align: start; }
 .rf-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: none; }
 .rf-time { font-size: 10.5px; font-weight: 700; opacity: .75; white-space: nowrap; }
+/* Full data update: card click opens Smart Sawaal's scrollable complete table (with CSV/Excel). */
+.rf-full { font-size: 10px; font-weight: 800; color: #fff; background: #4f46e5; border-radius: 999px; padding: 2px 7px; white-space: nowrap; }
+.rf-card[data-rf-full] > summary { cursor: pointer; }
+.rf-card[data-rf-full] > summary:hover .rf-full { background: #3730a3; }
 .rf-new { animation: rfNew 1.2s ease-out 2; }
 .rf-new .rf-time { color: #16a34a; opacity: 1; }
 .rf-tl { font-style: normal; font-size: 10.5px; font-weight: 700; color: #7c3aed; background: rgba(124, 58, 237, .1); padding: 1px 6px; border-radius: 99px; margin-left: 4px; }
