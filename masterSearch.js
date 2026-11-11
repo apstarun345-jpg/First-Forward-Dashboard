@@ -1106,7 +1106,7 @@ FF.pages = FF.pages || {};
       ${isTlKind
         ? `<div><small>Stock split (own + agents)</small><b>${splitChips ? 'click karo 👇' : tlStockDetail || U.fmt(q1.stock.total)}</b>${splitChips ? `<em>${splitChips}</em>` : ''}</div>
       <div${` class=\"ms-stat-click\" data-kpi=\"${esc(peopleSpec)}\" title=\"In agents ki poori list\"`}><small>Agents</small><b>${U.fmt(q1.agentCount)}${q1.selfAgent ? ' + TL' : ''}</b>${q1.selfAgent ? `<em>TL ka apna stock alag</em>` : ''}</div>`
-        : `<div${q1.tlStock && q1.tlStock.has ? ` class=\"ms-stat-click\" data-kpi=\"${esc(tlStockBaseSpec)}\" title=\"TL stock ki detail\"` : ''}><small>TL ke under stock</small><b>${q1.tlStock && q1.tlStock.has ? U.fmt(q1.tlStock.total) : '—'}</b>${splitChips || tlStockDetail ? `<em>${splitChips || tlStockDetail}</em>` : ''}</div>
+        : `<div${q1.tlStock && q1.tlStock.has ? ` class=\"ms-stat-click\" data-kpi=\"${esc(tlStockBaseSpec)}\" title=\"TL stock ki detail\"` : ''}><small>TL ke under stock</small><b>${q1.tlStock && q1.tlStock.has && !p.direct ? U.fmt(q1.tlStock.total) : '—'}</b>${p.direct ? '<em>Direct — koi TL nahi</em>' : (splitChips || tlStockDetail ? `<em>${splitChips || tlStockDetail}</em>` : '')}</div>
       <div><small>TL</small><b>${esc((q1.tl && q1.tl.name) ? tlText(q1.tl.name, q1.ch) : (p.direct ? (p.directLabel || 'Direct') : '—'))}</b></div>`}
       ${sugStats}
       <div><small>Run-rate / day <em>(÷ ${U.fmt(q1.calc.total.elapsed)} din)</em></small><b>${U.fmt(q1.calc.total.rate, true)}</b></div>
@@ -2211,6 +2211,8 @@ FF.pages = FF.pages || {};
         const one = (title, items, sub) => `<section class="card gs-card"><div class="card-head"><h3>${title}</h3><span class="dim small">click = rows</span></div><div class="card-body">${items.length ? C.donut({ items, size: 150, subtitle: sub }) : '<div class="empty">No data</div>'}</div></section>`;
         return `<div class="gs-grid3 msp-donuts">${one(`📅 Last month${mm.last ? ` · ${esc(mm.last)}` : ''}`, mk('last', 'month', mm.last, 'Last month'), 'tags')}${one(`🏷️ This month${mm.cur ? ` · ${esc(mm.cur)}` : ''}`, mk('cur', 'mtd', mm.cur, 'This month'), 'tags')}${one('📦 Stock in hand', mk('stock', 'stock', '', 'Stock in hand'), 'in stock')}</div>`;
       })();
+      // v3.125.186 — Direct agent ka koi TL nahi: pehle yahan saare "Direct" agents ka joda hua stock (jaise 617) "TL ke under stock" ban kar dikhta tha
+      const tsOk = !!(ts && ts.has && !pr.direct);
       return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
           <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL summary' : 'Agent summary'}</h3>
           <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
@@ -2219,9 +2221,9 @@ FF.pages = FF.pages || {};
           ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${clsOr(clsSums(pr.classes, 'stock', false), TVC6, s.total, stockMix)}${(isTl && ownAgents) || c.cover != null ? `<span class="msp-mini-tail">${isTl && ownAgents ? `${ownAgents}` : ''}${isTl && ownAgents && c.cover != null ? ' · ' : ''}${c.cover != null ? `run-rate ${U.fmt(c.rate, true)}/day` : ''}</span>` : ''}`, spec('stock'))}
           ${isTl
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, 'click → agents ki list (stock · issuance ke saath)', peopleSpec)
-    : box('k2', '📦 TL ke under stock', ts.has ? U.fmt(ts.total) : '—', ts.has ? `${tlClsRows(ts)}<span class="msp-mini-tail">${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}</span>` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), ts.has && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}${pr.tl && pr.tl.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.tl.id)}` : ''}` : '')}
+    : box('k2', '📦 TL ke under stock', tsOk ? U.fmt(ts.total) : '—', tsOk ? `${tlClsRows(ts)}<span class="msp-mini-tail">${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}</span>` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), tsOk && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}${pr.tl && pr.tl.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.tl.id)}` : ''}` : '')}
           ${dayChip}
-          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${clsOr(clsSums(pr.classes, 'cur', true), CLS7, t.curTotal, curMix)}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(elapsed)} days</span></span>`, spec('mtd', m.cur))}
+          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${clsOr(clsSums(pr.classes, 'cur', true), CLS7, t.curTotal, curMix)}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(Math.max(elapsed, wd))} days</span></span>`, spec('mtd', m.cur))}
           ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), clsOr(clsSums(pr.classes, 'last', true), CLS7, t.lastTotal, lastMix), spec('month', m.last))}
           ${last2Box}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
@@ -2351,8 +2353,8 @@ FF.pages = FF.pages || {};
           return `<div class="msp-det-card ${ch}"><div class="msp-det-h">${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${tlKind ? 'Team Leader' : 'Agent'}</div><div class="msp-det-grid">
             <div class="msp-det-f"><small>${tlKind ? 'TL mobile' : 'Mobile'}</small><b>${mob(q && q.mobile)}</b></div>
             ${tlKind ? '' : (pp.direct || !tlName ? f('TL name', pp.direct ? (pp.directLabel || 'Direct') : tlName) : `<div class="msp-det-f"><small>TL name</small><b><button type="button" class="mp-link-btn" data-ms-open-tl="1" data-ms-tl-name="${esc(tlName)}" data-ms-tl-id="${esc(tlId || '')}" data-ms-tl-ch="${ch}" title="${esc(tlName)} — Master Search me kholo">${esc(tlName)} ↗</button></b></div>`)}
-            ${tlKind ? '' : f('TL ID', tlId, true)}
-            ${tlKind ? '' : `<div class="msp-det-f"><small>TL mobile</small><b>${mob(tlMob)}</b></div>`}
+            ${tlKind ? '' : f('TL ID', pp.direct ? '' : tlId, true)}
+            ${tlKind ? '' : `<div class="msp-det-f"><small>TL mobile</small><b>${mob(pp.direct ? '' : tlMob)}</b></div>`}
             ${q && q.status ? f('Status', q.status) : ''}${q && q.lastActive ? f('Last active', q.lastActive) : ''}
             ${pp.last ? f('Last allocation', pp.last) : ''}
           </div></div>`;
