@@ -194,6 +194,14 @@ window.FF = window.FF || {};
   function warm() {
     if (warmed) return; warmed = true;
     const dev = deviceProfile();
+    // 🧾 v3.125.179 — Bulk Tag Status ka "EIR blank issuing agent" audit pehle se background me taiyaar
+    // (site khulne ke ~35s baad, phir har 20 min) — page kholte hi data turant. Phone / data-saver par nahi.
+    try {
+      if (!dev.saveData && !dev.coarse && FF.auth && FF.auth.can && FF.auth.can('bulkTagStatus')) {
+        const pre = () => { if (document.hidden) return; need('bulkTagStatus').then(() => { try { FF.bulkTagStatus.prewarmAudit(); } catch { /* optional */ } }).catch(() => {}); };
+        setTimeout(pre, 35000); setInterval(pre, 20 * 60e3);
+      }
+    } catch { /* optional */ }
     if (dev.saveData) return;                                   // data-saver / 2G → kuch bhi background me mat kheecho
     const list = dev.coarse ? (dev.lowEnd ? [] : WARM_TOUCH) : WARM;
     if (!list.length) return;

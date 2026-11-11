@@ -731,13 +731,17 @@ window.FF = window.FF || {};
     const audit = state.audit;
     if (audit.loading) return;
     const generation = ++audit.generation;
-    audit.loading = true; audit.loaded = false; audit.error = ''; audit.warnings = [];
-    audit.groups = []; audit.detailRows = []; audit.detailHeaders = []; audit.expandedDate = ''; audit.detailPage = 0;
-    audit.fresh = auto ? false : !!(root.querySelector('#bts-fresh') || {}).checked;
+    // 🚀 v3.125.179 — scan ab page se bandha nahi: background me (page khule bina) bhi chalta hai, aur
+    // dobara scan ke dauraan purana result dikhta rehta hai (keep) — page kholte hi data turant.
+    const keep = auto && audit.loaded && audit.groups.length > 0;
+    audit.loading = true; audit.error = ''; audit.warnings = keep ? audit.warnings : [];
+    if (!keep) { audit.loaded = false; audit.groups = []; audit.detailRows = []; audit.detailHeaders = []; audit.expandedDate = ''; audit.detailPage = 0; }
+    audit.fresh = auto ? false : !!((root && root.querySelector('#bts-fresh')) || {}).checked;
+    audit.startedAt = Date.now();
     audit.truncatedEir = false; audit.truncatedGv = false;
-    renderAudit(root);
-    const button = root.querySelector('#bts-audit-scan');
-    if (button) { button.disabled = true; button.textContent = '⏳ Scanning…'; }
+    renderAudit(state.root);
+    const btn = () => state.root && state.root.querySelector('#bts-audit-scan');
+    if (btn()) { btn().disabled = true; btn().textContent = '⏳ Scanning…'; }
     try {
       const eCfg = (FF.config && FF.config.eir) || {};
       const mCfg = (((FF.config || {}).gv || {}).master) || {};
@@ -760,7 +764,7 @@ window.FF = window.FF || {};
       const issuerCol = columnName(issuerIdx), tagCol = columnName(tagIdx), dateCol = columnName(dateIdx);
       audit.eirSheet = eirName; audit.eirCols = eirCols;
       audit.tagColumn = tagCol; audit.dateColumn = dateCol; audit.issuingColumn = issuerCol;
-      paintAuditProgress(root, 'GV Master ke Tag IDs load ho rahe hain…', 5);
+      auditProg('GV Master ke Tag IDs load ho rahe hain…', 5);
       const masterCols = await discoverColumns('GV Master', audit.fresh);
       let gvTagIdx = headerIndex(masterCols, ['TAG_ID_NUMBER', 'TAG_ID', 'TAGID', 'FASTAG_TAG_ID', 'FASTAG_ID']);
       if (gvTagIdx < 0) {
@@ -770,11 +774,11 @@ window.FF = window.FF || {};
       if (gvTagIdx < 0 || gvTagIdx >= masterCols.length) throw new Error('GV Master mein Tag ID column identify nahi hua.');
       const gvTagCol = columnName(gvTagIdx);
       audit.masterTagColumn = gvTagCol;
-      const master = await fetchMasterTagIds(gvTagCol, audit.fresh, (n) => paintAuditProgress(root, 'GV Master tag IDs loaded: ' + n.toLocaleString('en-IN'), 5 + Math.min(35, n / AUDIT_HARD_CAP * 35)));
+      const master = await fetchMasterTagIds(gvTagCol, audit.fresh, (n) => auditProg('GV Master tag IDs loaded: ' + n.toLocaleString('en-IN'), 5 + Math.min(35, n / AUDIT_HARD_CAP * 35)));
       audit.truncatedGv = master.truncated;
       if (master.truncated) audit.warnings.push('GV Master 2,50,000 rows scan limit tak pahunch gaya. Summary ko partial samjhein; sabhi tags exclude hone ki guarantee nahi hai.');
-      paintAuditProgress(root, 'EIR ke blank TAG_ISSUING_AGENT_ID rows scan ho rahe hain…', 42);
-      const eir = await fetchPagedRows(eirName, [tagCol, dateCol, issuerCol].join(', '), issuerCol + ' is null', audit.fresh, (n) => paintAuditProgress(root, 'EIR blank issuer rows scanned: ' + n.toLocaleString('en-IN'), 42 + Math.min(45, n / AUDIT_HARD_CAP * 45)));
+      auditProg('EIR ke blank TAG_ISSUING_AGENT_ID rows scan ho rahe hain…', 42);
+      const eir = await fetchPagedRows(eirName, [tagCol, dateCol, issuerCol].join(', '), issuerCol + ' is null', audit.fresh, (n) => auditProg('EIR blank issuer rows scanned: ' + n.toLocaleString('en-IN'), 42 + Math.min(45, n / AUDIT_HARD_CAP * 45)));
       const remapped = buildAuditGroups(eir.rows, master.ids, 0, 1, 2, eir.cols);
       audit.groups = remapped.groups;
       audit.eirBlankRows = remapped.eirBlankRows;
@@ -783,25 +787,52 @@ window.FF = window.FF || {};
       audit.truncatedEir = eir.truncated;
       if (audit.truncatedEir) audit.warnings.push('EIR scan 2,50,000 rows limit tak pahunch gaya. Date-wise counts partial hain.');
       if (audit.truncatedGv) audit.warnings.push('GV Master scan limit ki wajah se kuch IDs exclude na ho paaye hon; latest full check zaroor verify karein.');
-      audit.loaded = true;
+      if (keep) { audit.detailRows = []; audit.detailHeaders = []; audit.expandedDate = ''; audit.detailPage = 0; }
+      audit.loaded = true; audit.fromCache = false;
       audit.checkedAt = new Date().toISOString();
-      paintAuditProgress(root, 'Scan complete · ' + audit.groups.reduce((n, g) => n + g.count, 0).toLocaleString('en-IN') + ' eligible unique tags', 100);
-      renderAudit(root);
+      auditPersist();
+      auditProg('Scan complete · ' + audit.groups.reduce((n, g) => n + g.count, 0).toLocaleString('en-IN') + ' eligible unique tags', 100);
+      renderAudit(state.root);
       if (!auto) showToast('✅ Date-wise EIR audit complete: ' + audit.groups.reduce((n, g) => n + g.count, 0).toLocaleString('en-IN') + ' unique tags.', 'ok');
     } catch (err) {
       if (generation === audit.generation) {
+        if (keep) { audit.warnings = ['Background refresh nahi ho paya (' + clean(err && err.message || err) + ') — neeche purana result dikh raha hai. "Scan & Count by Date" dabakar dobara try karein.']; renderAudit(state.root); return; }
         audit.error = clean(err && err.message || err);
         audit.loaded = false;
-        renderAudit(root);
+        renderAudit(state.root);
         if (!auto) showToast('EIR blank-issuer audit fail: ' + audit.error, 'err');
       }
     } finally {
       if (generation === audit.generation) {
         audit.loading = false;
-        if (button) { button.disabled = false; button.textContent = '🔄 Scan & Count by Date'; }
-        renderAudit(root);
+        if (btn()) { btn().disabled = false; btn().textContent = '🔄 Scan & Count by Date'; }
+        renderAudit(state.root);
       }
     }
+  }
+  const AUDIT_LS = 'ffBtsAuditV1';
+  function auditProg(label, percent) { state.audit.prog = { label: label || '', pct: Number(percent) || 0 }; paintAuditProgress(state.root, label, percent); }
+  function auditPersist() {
+    const a = state.audit;
+    const base = { at: a.checkedAt, eirBlankRows: a.eirBlankRows, skippedNoTagId: a.skippedNoTagId, gvTagCount: a.gvTagCount, truncatedEir: a.truncatedEir, truncatedGv: a.truncatedGv, eirSheet: a.eirSheet, eirCols: a.eirCols, tagColumn: a.tagColumn, dateColumn: a.dateColumn, issuingColumn: a.issuingColumn, masterTagColumn: a.masterTagColumn, warnings: a.warnings };
+    try { localStorage.setItem(AUDIT_LS, JSON.stringify({ ...base, groups: a.groups })); }
+    catch { try { localStorage.setItem(AUDIT_LS, JSON.stringify({ ...base, groups: a.groups.map((g) => ({ ...g, normalizedIds: [] })) })); } catch { /* quota: sirf memory me */ } }
+  }
+  function auditRestore() { // reload ke baad bhi pichhla result turant (12 ghante tak)
+    try {
+      const o = JSON.parse(localStorage.getItem(AUDIT_LS) || 'null'), a = state.audit;
+      if (!o || !o.at || !Array.isArray(o.groups) || Date.now() - new Date(o.at).getTime() > 12 * 3600e3) return;
+      Object.assign(a, { groups: o.groups, eirBlankRows: o.eirBlankRows || 0, skippedNoTagId: o.skippedNoTagId || 0, gvTagCount: o.gvTagCount || 0, truncatedEir: !!o.truncatedEir, truncatedGv: !!o.truncatedGv, eirSheet: o.eirSheet || 'EIR', eirCols: o.eirCols || [], tagColumn: o.tagColumn || '', dateColumn: o.dateColumn || '', issuingColumn: o.issuingColumn || '', masterTagColumn: o.masterTagColumn || '', warnings: o.warnings || [], checkedAt: o.at, loaded: true, fromCache: true });
+    } catch { /* ignore */ }
+  }
+  const auditStale = (ms) => { const a = state.audit; return !a.checkedAt || (Date.now() - new Date(a.checkedAt).getTime()) > ms; };
+  /** Background me pehle se taiyaar rakho (site khulte hi + har 20 min) — page kholne par intezaar nahi. */
+  function prewarmAudit() {
+    const a = state.audit;
+    if (a.loading || a.error && !a.loaded) { if (a.loading) return; }
+    if (a.loaded && !auditStale(15 * 60e3)) return;
+    a.error = '';
+    runBlankIssuerAudit(state.root, { auto: true });
   }
   function paintAuditProgress(root, label, percent) {
     const wrap = root && root.querySelector('#bts-audit-progress');
@@ -891,7 +922,8 @@ window.FF = window.FF || {};
     const detailHost = root.querySelector('#bts-audit-details');
     const exportButton = root.querySelector('#bts-audit-export');
     if (exportButton) exportButton.disabled = !audit.groups.length;
-    paintAuditProgress(root, audit.loading ? 'EIR audit scan chal raha hai…' : '', audit.loaded ? 100 : 0);
+    { const pg = audit.prog || {}, ageMin = audit.checkedAt ? Math.max(0, Math.round((Date.now() - new Date(audit.checkedAt).getTime()) / 60e3)) : 0;
+      paintAuditProgress(root, audit.loading ? ((audit.loaded ? '🔄 Background me naya scan chal raha hai (neeche ' + ageMin + ' min purana result) · ' : '') + (pg.label || 'EIR audit scan chal raha hai…')) : (audit.loaded && ageMin >= 1 ? '✅ ' + ageMin + ' min pehle ka scan' : ''), audit.loading ? (pg.pct || 3) : (audit.loaded ? 100 : 0)); }
     if (!summaryHost) return;
     if (audit.error) {
       summaryHost.innerHTML = '<div class="bts-audit-error"><b>Audit scan nahi ho paya</b><p>' + esc(audit.error) + '</p><small>Exact EIR heading TAG_ISSUING_AGENT_ID, Tag ID aur date column verify karein.</small></div>';
@@ -1045,7 +1077,7 @@ window.FF = window.FF || {};
     // 🔄 Page khulte / refresh hote hi audit apne aap background me chalta hai (pehle har baar button dabana padta tha).
     // Purana result 10 min se naya ho to dobara scan nahi; manual button se fresh scan pehle jaisa chalta rahega.
     const a = state.audit;
-    const stale = !a.checkedAt || (Date.now() - new Date(a.checkedAt).getTime()) > 10 * 60e3;
+    const stale = auditStale(10 * 60e3);
     if (!a.loading && (!a.loaded || stale) && !a.error) setTimeout(() => { if (state.root === root && !state.audit.loading) runBlankIssuerAudit(root, { auto: true }); }, 400);
   }
   function bind(root) {
@@ -1146,8 +1178,10 @@ window.FF = window.FF || {};
   }
 
   FF.pages = FF.pages || {};
+  auditRestore();
   FF.pages.bulkTagStatus = { title: PAGE_TITLE, render };
   FF.bulkTagStatus = {
+    prewarmAudit,
     normalizeId: normId, parseInputText, parseDelimited, matrixToRecords,
     resolveStatus,
     get maxRecords() { return MAX_RECORDS; },
