@@ -2423,6 +2423,17 @@
     pool.forEach((x) => add(x, 0));
     return out;
   }
+  /** Home update par click → Smart Sawaal ka complete, scrollable table.
+   * `smartQ.open(..., 'all')` ke andar CSV aur Excel dono milte hain. Preview ke 5/7
+   * naam sirf card ko compact rakhne ke liye hain; yahan kabhi result truncate nahi hota. */
+  function openFullRobotList(it) {
+    const query = String((it && it.q) || '');
+    if (!/^[^#@]+\|(ff|gv|all)$/.test(query)) return false;
+    const open = () => { try { if (FF.smartQ && FF.smartQ.open) FF.smartQ.open(query, 'all'); } catch { /* optional */ } };
+    if (FF.smartQ && FF.smartQ.open) { open(); return true; }
+    if (FF.lazy && FF.lazy.inject) { FF.lazy.inject('smartQ').then(open).catch(() => {}); return true; }
+    return false;
+  }
   function homeRender() {
     const box = home.box;
     if (!box || !box.isConnected) { home.box = null; clearInterval(home.iv); return; }
@@ -2439,12 +2450,15 @@
     };
     const card = (x) => {
       const fresh = x.at && Date.now() - x.at < 15 * 60e3;
-      return `<details class="rf-card rf-${tone(x.mood)}${fresh ? ' rf-new' : ''}" data-k="${esc(x.key)}"${open.has(x.key) ? ' open' : ''}><summary><span class="rf-ic">${x.icon || '🤖'}</span><span class="rf-t"><b>${esc(x.title)}</b><small>${esc(sub(x))}</small></span>
-      <span class="rf-meta">${x.at ? `<span class="rf-time">${fresh ? '🆕 ' : '🕒 '}${ago(x.at)}${ago(x.at) === 'abhi' ? '' : ' pehle'}</span>` : ''}<span class="rf-cat">${esc((CATS.find((k) => k[0] === x.cat) || ['', ''])[1])}</span></span></summary>
+      // SmartQ wali updates (Dispatch / stock / agent / TL) ek click me complete list kholti hain.
+      // Server-only notices aur robot jokes normal expand hi hote hain.
+      const full = /^[^#@]+\|(ff|gv|all)$/.test(String(x.q || ''));
+      return `<details class="rf-card rf-${tone(x.mood)}${fresh ? ' rf-new' : ''}" data-k="${esc(x.key)}"${full ? ` data-rf-full="${esc(x.key)}"` : ''}${open.has(x.key) ? ' open' : ''}><summary><span class="rf-ic">${x.icon || '🤖'}</span><span class="rf-t"><b>${esc(x.title)}</b><small>${esc(sub(x))}</small></span>
+      <span class="rf-meta">${full ? '<span class="rf-full">📜 Puri list · CSV</span>' : ''}${x.at ? `<span class="rf-time">${fresh ? '🆕 ' : '🕒 '}${ago(x.at)}${ago(x.at) === 'abhi' ? '' : ' pehle'}</span>` : ''}<span class="rf-cat">${esc((CATS.find((k) => k[0] === x.cat) || ['', ''])[1])}</span></span></summary>
       ${(x.rows || []).length ? `<ol class="rf-rows">${x.rows.slice(0, 7).map((r) => `<li><span>${esc(r.name)}${r.tl ? ` <em class="rf-tl">TL ${esc(r.tl)}</em>` : ''}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><b class="rf-v ${esc(r.tone || '')}">${esc(r.val || '')}</b></li>`).join('')}</ol>` : ''}
       ${x.view === 'todo' ? `<ol class="rf-rows">${(x.todo || []).map((t) => `<li><span>${esc(t)}</span></li>`).join('')}</ol>` : ''}
       ${!(x.rows || []).length && x.view !== 'todo' ? `<div class="rf-foot">${esc(String(x.head || '').trim() && x.head !== x.title ? x.head : 'Is update ki list abhi load nahi hui — "Robot se sunao" dabao ya 1 minute me dobara kholo.')}</div>` : ''}
-      ${x.foot ? `<div class="rf-foot">${esc(x.foot)}</div>` : ''}<div class="rf-act"><button type="button" class="btn small ghost" data-rf-show="${esc(x.key)}">🤖 Robot se sunao</button></div></details>`;
+      ${x.foot ? `<div class="rf-foot">${esc(x.foot)}</div>` : ''}<div class="rf-act"><button type="button" class="btn small ghost" data-rf-show="${esc(x.key)}">🤖 Robot se sunao</button>${full ? `<button type="button" class="btn small primary" data-rf-list="${esc(x.key)}">📜 Puri list · CSV</button>` : ''}</div></details>`;
     };
     const saidN = all.filter((x) => x.at).length;
     box.innerHTML = `<section class="card rf-wrap"><div class="rf-head"><b>🤖 Robot ke updates</b><span class="dim small">${all.length} updates · ${saidN} bole gaye (24h) · live</span>
@@ -2452,6 +2466,12 @@
       <div class="rf-list">${L.slice(0, 120).map(card).join('') || '<div class="dim">Is category me abhi kuch nahi.</div>'}</div></section>`;
     const list = box.querySelector('.rf-list'); if (list) list.scrollTop = top;
     box.querySelector('.rf-sel').addEventListener('change', (e) => { cfg.homeCat = e.target.value; save(); homeRender(); });
+    // Update card par direct click = poori agent/TL list. `details` tabhi expand hota hai jab full data table available nahi hai.
+    box.querySelectorAll('[data-rf-full] > summary, [data-rf-list]').forEach((el) => el.addEventListener('click', (e) => {
+      const key = el.dataset.rfList || (el.closest('[data-rf-full]') && el.closest('[data-rf-full]').dataset.rfFull);
+      const it = all.find((x) => x.key === key);
+      if (it && openFullRobotList(it)) { e.preventDefault(); e.stopPropagation(); }
+    }));
     box.querySelectorAll('[data-rf-show]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); const it = all.find((x) => x.key === b.dataset.rfShow); if (it) { build(); if (skip) skip(); setTimeout(() => show(it), 400); } }));
   }
   async function mountHome(box) {
