@@ -710,11 +710,14 @@ FF.pages = FF.pages || {};
       ${stat('t4', '⚡', 'Run-rate / day', U.fmt(rate, true), pctChip(g(rate, prevRate)), `${U.labelYM(prevKey, true)} avg: ${U.fmt(prevRate, true)} per day`, '')}
     </div>`;
   }
-  function overviewPanels() {
+  function overviewPanels(force) {
     const sq = FF.smartQ;
     const ans = (id, n) => { try { return sq && sq.answer ? sq.answer(id, n) : null; } catch { return null; } };
     const top = ans('top|all', 6), tl = ans('toptl|all', 6);
-    const have = !!(top && top.rows && top.rows.length);
+    let nFf = 0, nGv = 0;
+    try { nFf = sq._rows.ffRows().length; nGv = sq._rows.gvRows().length; } catch { /* data not ready */ }
+    // FF + GV dono aane tak (ya ~30 sec baad jo mile) — warna sirf ek channel ka "Top" galat dikhta hai
+    const have = !!(top && top.rows && top.rows.length) && ((nFf > 0 && nGv > 0) || !!force);
     const hb = (rows, items) => (rows && rows.length ? C.hbars({ items, valueLabel: 'This month', compareLabel: 'Last month' }) : '<p class="dim small">Data load ho raha hai…</p>');
     const topCard = card('🏆 Top agents · is mahine', have ? hb(top.rows, top.rows.map((r) => ({ label: r.name, sub: `${r.ch}${r.tl ? ' · ' + r.tl : ''}`, value: r.cur, compare: r.last }))) : '<p class="dim small">Agents data load ho raha hai…</p>', `<button class="btn small" data-mh-sq="top|all">Poori list</button>`);
     const tlCard = card('👥 Top TL teams', tl && tl.rows && tl.rows.length ? hb(tl.rows, tl.rows.map((r) => ({ label: r.name, sub: `${U.fmt(r.agents)} agents`, value: r.cur, compare: r.last }))) : '<p class="dim small">TL data load ho raha hai…</p>', `<button class="btn small" data-mh-sq="toptl|all">Poori list</button>`);
@@ -728,7 +731,7 @@ FF.pages = FF.pages || {};
       ['🐢', 'Stock hai, speed kam', cnt('lowissue|all'), 'lowissue|all', 'warn']
     ];
     const att = `<div class="mh-attn">${items.map(([ic, t, n, id, tone]) => `<button type="button" class="mh-attn-row ${tone}" data-mh-sq="${id}"><span class="mh-attn-ic">${ic}</span><span class="mh-attn-t">${esc(t)}</span><b>${n == null ? '…' : U.fmt(n)}</b><span class="mh-attn-go">→</span></button>`).join('')}</div>`;
-    return { html: `<div class="mh-panels">${topCard}${tlCard}${card('🔔 Dhyan do', att, '')}</div>`, ready: have };
+    return { html: `<div class="mh-panels">${topCard}${tlCard}${card('🔔 Dhyan do', att, '')}</div>`, ready: have && nFf > 0 && nGv > 0 };
   }
   // ---------------------------------------------------------------- charts
   function monthCharts(ctx, sf, sc, lastRows, gvLive) {
@@ -1696,17 +1699,26 @@ FF.pages = FF.pages || {};
       C.mount(chartMount);
       paintOverview();
     }
-    let ovTries = 0;
+    let ovTries = 0, ovLoading = false;
+    function ovEnsure() {
+      if (ovLoading) return; ovLoading = true;
+      const again = () => setTimeout(paintOverview, 300);
+      setTimeout(() => { // pehle Home ke main cards/charts load hone do, phir agents data (site halki rahe)
+      try { const P = FF.pages && FF.pages.performance; if (P && P.ensureLoaded) Promise.resolve(P.ensureLoaded({ light: true })).then(again, again); } catch { /* optional */ }
+      try { if (FF.gv && FF.gv.need) Promise.resolve(FF.gv.need('report', { only: true })).then(again, again); } catch { /* optional */ }
+      }, 8000);
+    }
     function paintOverview() {
       const ov = U.$('#home-overview', root);
       if (!ov || !ov.isConnected || !ui.ready) return;
+      ovEnsure();
       let stats = '', charts = '';
       try { stats = overviewStats(ui); charts = monthCharts(ui.ctx, ui.sf, ui.sc, ui.sf.rows, { weekdayBars: ui.wdBars }); } catch (e) { stats = ''; charts = `<p class="dim small">Overview: ${esc(e && e.message || 'data')}</p>`; }
       let pn = { html: '', ready: true };
-      try { pn = overviewPanels(); } catch { pn = { html: '', ready: true }; }
+      try { pn = overviewPanels(ovTries >= 5); } catch { pn = { html: '', ready: true }; }
       ov.innerHTML = `${stats}<div class="mh-charts">${charts}</div>${pn.html}`;
       C.mount(ov);
-      if (!pn.ready) { try { if (ovTries === 0) { const P = FF.pages && FF.pages.performance; if (P && P.ensureLoaded) Promise.resolve(P.ensureLoaded({ light: true })).catch(() => {}); if (FF.gv && FF.gv.need) Promise.resolve(FF.gv.need('report', { only: true })).catch(() => {}); } } catch { /* optional */ } if (ovTries++ < 12) setTimeout(paintOverview, 6000); } // agents data baad me aata hai
+      if (!pn.ready && ovTries++ < 12) setTimeout(paintOverview, 6000); // agents data baad me aata hai
     }
     root.addEventListener('click', (ev) => { const b = ev.target.closest && ev.target.closest('[data-mh-sq]'); if (b && FF.smartQ) { ev.preventDefault(); FF.smartQ.open(b.dataset.mhSq, 'all'); } });
     function bindExplorerEvents() {
