@@ -8422,3 +8422,35 @@ html body .page-home .kpi.kpi .pct-inline.neg, html body .page-home .kpi.kpi .hm
 :root[data-theme="dark"] html body .page-home .kpi.kpi .kpi-title, :root[data-theme="dark"] html body .page-home .kpi.kpi .kpi-foot, :root[data-theme="dark"] html body .page-home .kpi.kpi .dim, :root[data-theme="dark"] html body .page-home .kpi.kpi small { color: #93a3bc !important; }
 :root[data-theme="dark"] .page-home .kpi .kpi-icon { background: color-mix(in srgb, var(--ac) 25%, #121a2e) !important; }
 :root[data-theme="dark"] .page-home .kpi .hm-split, :root[data-theme="dark"] .page-home .kpi .kyc-trow { background: rgba(255,255,255,.06) !important; border-color: rgba(255,255,255,.08) !important; }
+
+/* ✨ v3.125.190 — Home Overview dashboard (stat cards · bade charts · top agents/TL · dhyan do) */
+#home-overview { display: grid; gap: 16px; }
+.mh-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.mh-stat { position: relative; background: #fff; border: 1px solid var(--mh-line, #e7eaf3); border-radius: 20px; padding: 16px 18px 14px; box-shadow: var(--mh-sh, 0 8px 24px -12px rgba(15,23,42,.12)); overflow: hidden; --ac: #6366f1; }
+.mh-stat.t1 { --ac: #6366f1; } .mh-stat.t2 { --ac: #0ea5e9; } .mh-stat.t3 { --ac: #10b981; } .mh-stat.t4 { --ac: #f59e0b; }
+.mh-stat::after { content: ""; position: absolute; right: -30px; top: -30px; width: 110px; height: 110px; border-radius: 50%; background: color-mix(in srgb, var(--ac) 10%, transparent); }
+.mh-stat-top { display: flex; align-items: center; gap: 8px; position: relative; z-index: 1; }
+.mh-stat-ic { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--ac) 14%, #fff); font-size: 15px; }
+.mh-stat-t { flex: 1; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #64748b; line-height: 1.25; }
+.mh-chip { font-size: 11.5px; font-weight: 800; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.mh-chip.up { background: #dcfce7; color: #15803d; } .mh-chip.down { background: #fee2e2; color: #b91c1c; }
+.mh-stat-v { font-size: 34px; font-weight: 800; letter-spacing: -1.2px; color: #0f172a; margin: 10px 0 2px; position: relative; z-index: 1; }
+.mh-stat-s { font-size: 12px; color: #64748b; position: relative; z-index: 1; }
+.mh-stat .spark { position: absolute; right: 14px; bottom: 12px; opacity: .9; z-index: 1; max-width: 46%; height: 26px; }
+.mh-charts { display: grid; gap: 16px; }
+.mh-charts > .grid.g-2 { gap: 16px; margin: 0; }
+.mh-charts > .grid.g-2:first-child { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.mh-panels { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.mh-panels .card { margin: 0; height: 100%; }
+.mh-attn { display: grid; gap: 8px; }
+.mh-attn-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 14px; border: 1px solid #e7eaf3; background: #fff; cursor: pointer; font: inherit; color: #0f172a; transition: all .15s; }
+.mh-attn-row:hover { transform: translateX(2px); border-color: #c7d2fe; background: #f5f7ff; }
+.mh-attn-ic { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: #f1f5f9; }
+.mh-attn-row.warn .mh-attn-ic { background: #fef3c7; } .mh-attn-row.down .mh-attn-ic { background: #fee2e2; }
+.mh-attn-t { flex: 1; font-size: 13px; font-weight: 600; }
+.mh-attn-row b { font-size: 16px; font-weight: 800; }
+.mh-attn-go { color: #94a3b8; }
+@media (max-width: 1100px) { .mh-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mh-panels { grid-template-columns: 1fr; } .mh-charts > .grid.g-2:first-child { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .mh-stats { grid-template-columns: 1fr; } .mh-stat-v { font-size: 30px; } }
+:root[data-theme="dark"] .mh-stat, :root[data-theme="dark"] .mh-attn-row { background: #121a2e; border-color: #253352; color: #e2e8f0; }
+:root[data-theme="dark"] .mh-stat-v { color: #e2e8f0; }

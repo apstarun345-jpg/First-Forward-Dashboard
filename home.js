@@ -686,6 +686,50 @@ FF.pages = FF.pages || {};
       '</div>');
   }
 
+  // ---------------------------------------------------------------- ✨ v3.125.190 — Overview dashboard (top: stat cards + charts + top agents/TLs + dhyan do)
+  const pctChip = (g) => (g == null || !Number.isFinite(g) ? '' : `<span class="mh-chip ${g >= 0 ? 'up' : 'down'}">${g >= 0 ? '▲' : '▼'} ${Math.abs(g)}%</span>`);
+  function overviewStats(ui) {
+    const { curKey, prevKey, observedDay } = ui.ctx;
+    const eir = ui.daily || ui.sf.rows || [];
+    const cur = M.dailySeries(eir, curKey), prev = M.dailySeries(eir, prevKey);
+    const day = Math.max(1, observedDay || 1), dim = U.daysInMonth(curKey);
+    const vals = cur.totals.slice(0, day);
+    const total = U.sum(vals, (v) => v);
+    const prevSame = U.sum(prev.totals.slice(0, day), (v) => v), prevFull = U.sum(prev.totals, (v) => v);
+    const lastVal = vals.length ? vals[vals.length - 1] : 0, lastPrev = vals.length > 1 ? vals[vals.length - 2] : 0;
+    const rate = total / day, exp = Math.round(rate * dim);
+    const prevRate = prevFull / Math.max(1, U.daysInMonth(prevKey));
+    const g = (a, b) => (b > 0 ? Math.round((a / b - 1) * 100) : null);
+    const dayLbl = `${day} ${(U.MONTHS && U.MONTHS[Number(curKey.slice(5, 7)) - 1]) || ''}`.trim();
+    const stat = (tone, icon, title, value, chip, sub, spark) => `<div class="mh-stat ${tone}"><div class="mh-stat-top"><span class="mh-stat-ic">${icon}</span><span class="mh-stat-t">${esc(title)}</span>${chip}</div><div class="mh-stat-v">${value}</div><div class="mh-stat-s">${sub}</div>${spark || ''}</div>`;
+    const sp = (arr, col) => (arr.length > 1 ? C.spark(arr.slice(-14), col) : '');
+    return `<div class="mh-stats">
+      ${stat('t1', '🏷️', `${U.labelYM(curKey, true)} · MTD`, U.fmt(total), pctChip(g(total, prevSame)), `vs ${U.labelYM(prevKey, true)} 1–${day}: ${U.fmt(prevSame)}`, sp(vals, '#6366f1'))}
+      ${stat('t2', '📅', `Last report day · ${dayLbl}`, U.fmt(lastVal), pctChip(g(lastVal, lastPrev)), `pichhle din: ${U.fmt(lastPrev)}`, sp(vals, '#0ea5e9'))}
+      ${stat('t3', '🎯', 'Expected month-end', U.fmt(exp), pctChip(g(exp, prevFull)), `${U.labelYM(prevKey, true)} full: ${U.fmt(prevFull)} · ${U.fmt(rate, true)}/din`, '')}
+      ${stat('t4', '⚡', 'Run-rate / din', U.fmt(rate, true), pctChip(g(rate, prevRate)), `${U.labelYM(prevKey, true)} avg: ${U.fmt(prevRate, true)}/din`, '')}
+    </div>`;
+  }
+  function overviewPanels() {
+    const sq = FF.smartQ;
+    const ans = (id, n) => { try { return sq && sq.answer ? sq.answer(id, n) : null; } catch { return null; } };
+    const top = ans('top|all', 6), tl = ans('toptl|all', 6);
+    const have = !!(top && top.rows && top.rows.length);
+    const hb = (rows, items) => (rows && rows.length ? C.hbars({ items, valueLabel: 'This month', compareLabel: 'Last month' }) : '<p class="dim small">Data load ho raha hai…</p>');
+    const topCard = card('🏆 Top agents · is mahine', have ? hb(top.rows, top.rows.map((r) => ({ label: r.name, sub: `${r.ch}${r.tl ? ' · ' + r.tl : ''}`, value: r.cur, compare: r.last }))) : '<p class="dim small">Agents data load ho raha hai…</p>', `<button class="btn small" data-mh-sq="top|all">Poori list</button>`);
+    const tlCard = card('👥 Top TL teams', tl && tl.rows && tl.rows.length ? hb(tl.rows, tl.rows.map((r) => ({ label: r.name, sub: `${U.fmt(r.agents)} agents`, value: r.cur, compare: r.last }))) : '<p class="dim small">TL data load ho raha hai…</p>', `<button class="btn small" data-mh-sq="toptl|all">Poori list</button>`);
+    const cnt = (id, f) => { const a = ans(id, 100000); return a && a.rows ? (f ? a.rows.filter(f).length : a.rows.length) : null; };
+    const items = [
+      ['😴', 'Is mahine ek bhi tag nahi', cnt('inactive|all'), 'inactive|all', 'warn'],
+      ['📉', 'De-growth agents', cnt('degrowth|all'), 'degrowth|all', 'down'],
+      ['⛽', 'Stock 5 din se kam', cnt('lowcover|all'), 'lowcover|all', 'down'],
+      ['🚚', 'Dispatch chahiye', cnt('dispatch|all'), 'dispatch|all', 'warn'],
+      ['🪦', 'Stock pada, issuance zero', cnt('deadstock|all'), 'deadstock|all', 'warn'],
+      ['🐢', 'Stock hai, speed kam', cnt('lowissue|all'), 'lowissue|all', 'warn']
+    ];
+    const att = `<div class="mh-attn">${items.map(([ic, t, n, id, tone]) => `<button type="button" class="mh-attn-row ${tone}" data-mh-sq="${id}"><span class="mh-attn-ic">${ic}</span><span class="mh-attn-t">${esc(t)}</span><b>${n == null ? '…' : U.fmt(n)}</b><span class="mh-attn-go">→</span></button>`).join('')}</div>`;
+    return { html: `<div class="mh-panels">${topCard}${tlCard}${card('🔔 Dhyan do', att, '')}</div>`, ready: have };
+  }
   // ---------------------------------------------------------------- charts
   function monthCharts(ctx, sf, sc, lastRows, gvLive) {
     const { curKey, prevKey, observedDay } = ctx;
@@ -1262,6 +1306,7 @@ FF.pages = FF.pages || {};
   }
   const homeLayout = (() => {
     const SECTIONS = [
+      ['home-overview', '📈 Overview (stats · charts · top)'],
       ['home-target-alerts', '🎯 Target updates'],
       ['home-assign', '📌 Assigned work by RSM'],
       ['home-todo', "✅ Today's work"],
@@ -1377,6 +1422,7 @@ FF.pages = FF.pages || {};
           <button class="btn" id="home-customize" title="Reorder or hide Home sections" aria-expanded="false">⚙ Customize</button>
         </div>
       </div>
+      <div id="home-overview"></div>
       <div id="home-target-alerts"></div>
       <div id="home-assign"></div>
       <div id="home-todo"></div>
@@ -1645,9 +1691,23 @@ FF.pages = FF.pages || {};
       if (!chartMount || !chartMount.isConnected || !ui.ready) return;
       const allowedChannels = [canFf ? 'ff' : '', canGv ? 'gv' : ''].filter(Boolean);
       const explorer = explorerHtml(ui.sf.rows, allowedChannels);
-      chartMount.innerHTML = `${explorer}${monthCharts(ui.ctx, ui.sf, ui.sc, ui.sf.rows, { weekdayBars: ui.wdBars })}`;
+      chartMount.innerHTML = explorer;
       C.mount(chartMount);
+      paintOverview();
     }
+    let ovTries = 0;
+    function paintOverview() {
+      const ov = U.$('#home-overview', root);
+      if (!ov || !ov.isConnected || !ui.ready) return;
+      let stats = '', charts = '';
+      try { stats = overviewStats(ui); charts = monthCharts(ui.ctx, ui.sf, ui.sc, ui.sf.rows, { weekdayBars: ui.wdBars }); } catch (e) { stats = ''; charts = `<p class="dim small">Overview: ${esc(e && e.message || 'data')}</p>`; }
+      let pn = { html: '', ready: true };
+      try { pn = overviewPanels(); } catch { pn = { html: '', ready: true }; }
+      ov.innerHTML = `${stats}<div class="mh-charts">${charts}</div>${pn.html}`;
+      C.mount(ov);
+      if (!pn.ready && ovTries++ < 6) setTimeout(paintOverview, 5000); // agents data baad me aata hai
+    }
+    root.addEventListener('click', (ev) => { const b = ev.target.closest && ev.target.closest('[data-mh-sq]'); if (b && FF.smartQ) { ev.preventDefault(); FF.smartQ.open(b.dataset.mhSq, 'all'); } });
     function bindExplorerEvents() {
       if (!chartMount || chartMount.__homeExplorerBound) return;
       chartMount.__homeExplorerBound = true;
