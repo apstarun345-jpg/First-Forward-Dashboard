@@ -829,7 +829,8 @@
   function histAdd(it, at) {
     const sig = sigOf(it);
     const a = histLoad().filter((h) => h.sig !== sig); // same baat dobara → purani entry hatao, ek hi rahe
-    a.unshift({ sig, at: at || Date.now(), key: it.key, icon: it.icon, title: it.title, head: it.head, big: it.big || '', q: it.q || '', mood: it.mood });
+    const rows = (it.rows || []).slice(0, 7).map((r) => ({ name: String(r.name || '').slice(0, 60), sub: String(r.sub || '').slice(0, 110), val: String(r.val == null ? '' : r.val).slice(0, 40), tone: r.tone || '', tl: r.tl || '' })); // Home ki list ke liye (dropdown khali na rahe)
+    a.unshift({ sig, at: at || Date.now(), key: it.key, icon: it.icon, title: it.title, head: it.head, big: it.big || '', q: it.q || '', mood: it.mood, rows, foot: String(it.foot || '').slice(0, 160) });
     a.sort((x, y) => y.at - x.at);
     histSave(a);
     try { homeBump(it); } catch { /* home band */ }
@@ -2388,8 +2389,14 @@
     const add = (x, at) => { if (!x || !x.key || seen.has(x.key)) return; seen.add(x.key); out.push({ ...x, at: at || 0, cat: catOf(x.key) }); };
     // 1) jo robot ne bola (24h) — naya sabse upar
     const said = [...home.live.values()].map((x) => ({ x, at: x.at }));
-    histLoad().forEach((h) => { if (!home.live.has(h.key)) said.push({ x: pool.get(h.key) || { key: h.key, icon: h.icon, title: h.title, head: h.head, big: h.big, mood: h.mood, q: h.q }, at: h.at }); });
-    said.sort((a, b) => b.at - a.at).forEach((s) => add(pool.get(s.x.key) && !s.x.rows ? pool.get(s.x.key) : s.x, s.at));
+    const byTitle = new Map(); pool.forEach((x) => { if (x.title && !byTitle.has(x.title)) byTitle.set(x.title, x); });
+    histLoad().forEach((h) => {
+      if (home.live.has(h.key)) return;
+      // key roz badalti hai (date wali) → title se bhi dhoondo; warna history me rakhi list dikhao
+      const p = pool.get(h.key) || byTitle.get(h.title), base = { key: h.key, icon: h.icon, title: h.title, head: h.head, big: h.big, mood: h.mood, q: h.q, rows: h.rows || [], foot: h.foot || '' };
+      said.push({ x: p ? { ...p, key: h.key } : base, at: h.at });
+    });
+    said.sort((a, b) => b.at - a.at).forEach((s) => add(pool.get(s.x.key) && !(s.x.rows || []).length ? pool.get(s.x.key) : s.x, s.at));
     // 2) baaki saare (abhi tak nahi bole)
     pool.forEach((x) => add(x, 0));
     return out;
@@ -2414,6 +2421,7 @@
       <span class="rf-meta">${x.at ? `<span class="rf-time">${fresh ? '🆕 ' : '🕒 '}${ago(x.at)}${ago(x.at) === 'abhi' ? '' : ' pehle'}</span>` : ''}<span class="rf-cat">${esc((CATS.find((k) => k[0] === x.cat) || ['', ''])[1])}</span></span></summary>
       ${(x.rows || []).length ? `<ol class="rf-rows">${x.rows.slice(0, 7).map((r) => `<li><span>${esc(r.name)}${r.tl ? ` <em class="rf-tl">TL ${esc(r.tl)}</em>` : ''}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><b class="rf-v ${esc(r.tone || '')}">${esc(r.val || '')}</b></li>`).join('')}</ol>` : ''}
       ${x.view === 'todo' ? `<ol class="rf-rows">${(x.todo || []).map((t) => `<li><span>${esc(t)}</span></li>`).join('')}</ol>` : ''}
+      ${!(x.rows || []).length && x.view !== 'todo' ? `<div class="rf-foot">${esc(String(x.head || '').trim() && x.head !== x.title ? x.head : 'Is update ki list abhi load nahi hui — "Robot se sunao" dabao ya 1 minute me dobara kholo.')}</div>` : ''}
       ${x.foot ? `<div class="rf-foot">${esc(x.foot)}</div>` : ''}<div class="rf-act"><button type="button" class="btn small ghost" data-rf-show="${esc(x.key)}">🤖 Robot se sunao</button></div></details>`;
     };
     const saidN = all.filter((x) => x.at).length;
