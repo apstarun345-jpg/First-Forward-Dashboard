@@ -301,9 +301,11 @@ window.FF = window.FF || {};
   // 🔁 Auto-retry (v3.32) — GV ki fail hui sheets background me khud dobara load (4s · 10s · 20s · 40s · 75s).
   const RETRY_DELAYS = [4000, 10000, 20000, 40000, 75000];
   let retryTimer = null;
+  // 403 = "is link ko ye data mana hai" (public form) — dobara maangne se kabhi nahi milega, isliye retry nahi
+  const no403 = (k) => /HTTP 403/.test(String((state.errors[k] && state.errors[k].message) || ''));
   function scheduleRetry(version, round) {
     clearTimeout(retryTimer);
-    const failed = Object.keys(state.errors).filter((k) => DATASETS[k]);
+    const failed = Object.keys(state.errors).filter((k) => DATASETS[k] && !no403(k));
     const browser = typeof document !== 'undefined' && typeof window !== 'undefined' && !!window.addEventListener;
     if (!failed.length || version !== generation || (!browser && round >= RETRY_DELAYS.length)) { state.retrying = false; return; }
     // After the fast backoff, keep healing every 90s (visible tab only) instead of giving up.
@@ -312,7 +314,7 @@ window.FF = window.FF || {};
     retryTimer = setTimeout(async () => {
       if (version !== generation) return;
       if (typeof document !== 'undefined' && document.hidden && round >= RETRY_DELAYS.length) { scheduleRetry(version, round); return; }
-      const list = Object.keys(state.errors).filter((k) => DATASETS[k]);
+      const list = Object.keys(state.errors).filter((k) => DATASETS[k] && !no403(k));
       list.forEach((k) => { delete state.errors[k]; });
       await runQueue(list, true);
       if (version !== generation) return;

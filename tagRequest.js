@@ -324,10 +324,15 @@ FF.pages = FF.pages || {};
     // 🌐 Public form: sirf zaroori datasets (`only`) + light performance load — Google par kam load.
     const light = isPublic();
     const only = light ? { only: true } : undefined;
+    // 🚑 v3.125.185 — public form par GV ka sirf REPORT maango (`only`): bina iske GV ke saare loader (GV Master,
+    // Tag Assignment) shuru ho jate the, jo public link ke liye mana hain (403) aur baar-baar dobara try hote the →
+    // GV REPORT ki baari hi nahi aati thi aur "Sabhi agents ka stock" hamesha "data load ho raha hai" par atka rehta tha.
+    // Saath me har job par 45s ki had: koi ek source atke to bhi baaki data se list ban jaye.
+    const cap = (p, fallback) => Promise.race([p, new Promise((res) => setTimeout(() => res(fallback()), 45000))]);
     const jobs = [
-      S && S.need ? S.need('agentClass', only).catch(() => []) : Promise.resolve([]),
-      perf && perf.ensureLoaded ? perf.ensureLoaded(light ? { light: true } : undefined).then(() => (perf.agents ? perf.agents() : [])).catch(() => []) : Promise.resolve([]),
-      FF.gv && FF.gv.need ? FF.gv.need('report').then(() => (FF.gv.get('report') || [])).catch(() => []) : Promise.resolve([])
+      S && S.need ? cap(S.need('agentClass', only).catch(() => []), () => (S.get && S.get('agentClass')) || []) : Promise.resolve([]),
+      perf && perf.ensureLoaded ? cap(perf.ensureLoaded(light ? { light: true } : undefined).then(() => (perf.agents ? perf.agents() : [])).catch(() => []), () => { try { return (perf.agents && perf.agents()) || []; } catch { return []; } }) : Promise.resolve([]),
+      FF.gv && FF.gv.need ? cap(FF.gv.need('report', only).then(() => (FF.gv.get('report') || [])).catch(() => []), () => (FF.gv.get && FF.gv.get('report')) || []) : Promise.resolve([])
     ];
     state.indexPromise = Promise.all(jobs).then(([eirRows, ffAgents, gvRows]) => {
       idxMonths = null;
