@@ -1435,17 +1435,25 @@ async function cacheSaveDisk() {
   cacheDiskBusy = true; let n = 0;
   const tmp = `${CACHE_FILE}.tmp`;
   try {
+    mkdirSync(path.dirname(CACHE_FILE), { recursive: true });   // 🚑 folder na ho to pehle banao
     const gz = zlib.createGzip({ level: 1 }), out = createWriteStream(tmp);
+    // 🚑 v3.125.183 — stream ka 'error' pakdo. Pehle folder na hone par ENOENT "unhandled error event" ban kar
+    // poora server gira deta tha (har 3 min crash → site band).
+    let failed = null; const onErr = (e) => { failed = failed || e || new Error('stream error'); };
+    out.on('error', onErr); gz.on('error', onErr);
+    await new Promise((res, rej) => { out.once('open', res); out.once('error', rej); setTimeout(() => rej(new Error('cache file open timeout')), 10000).unref?.(); });
     gz.pipe(out);
     for (const [url, e] of [...cache.entries()]) {
       if (!e || typeof e.body !== 'string' || !(e.status >= 200 && e.status < 300) || Date.now() - e.at > CACHE_DISK_MAX_AGE_MS) continue;
-      if (!gz.write(`${JSON.stringify({ u: url, at: e.at, s: e.status, v: e.ver || '', b: e.body })}\n`)) await once(gz, 'drain');
+      if (failed) throw failed;
+      if (!gz.write(`${JSON.stringify({ u: url, at: e.at, s: e.status, v: e.ver || '', b: e.body })}\n`)) await Promise.race([once(gz, 'drain'), new Promise((r) => setTimeout(r, 15000))]);
       n++;
       await new Promise((r) => setImmediate(r));
     }
-    gz.end(); await once(out, 'finish');
+    gz.end(); await new Promise((res, rej) => { out.once('finish', res); out.once('error', rej); if (failed) rej(failed); setTimeout(() => rej(new Error('cache file finish timeout')), 60000).unref?.(); });
+    if (failed) throw failed;
     await fs.rename(tmp, CACHE_FILE);
-  } catch (err) { console.warn('gviz cache save:', err && err.message); try { await fs.unlink(tmp); } catch { /* nahi tha */ } }
+  } catch (err) { console.warn('gviz cache save:', err && err.message); try { await Promise.race([fs.unlink(tmp), new Promise((r) => setTimeout(r, 3000))]); } catch { /* nahi tha */ } }
   finally { cacheDiskBusy = false; }
   return n;
 }
@@ -1453,7 +1461,10 @@ async function cacheLoadDisk() {
   if (process.env.CACHE_DISK === '0' || !existsSync(CACHE_FILE)) return 0;
   let n = 0;
   try {
-    const rl = readline.createInterface({ input: createReadStream(CACHE_FILE).pipe(zlib.createGunzip()), crlfDelay: Infinity });
+    const src = createReadStream(CACHE_FILE), gun = zlib.createGunzip();
+    src.on('error', (e) => gun.destroy(e)); gun.on('error', () => { /* neeche for-await me pakda jata hai / adhoori file */ });
+    const rl = readline.createInterface({ input: src.pipe(gun), crlfDelay: Infinity });
+    rl.on('error', () => { /* ignore */ });
     for await (const line of rl) {
       if (!line) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
