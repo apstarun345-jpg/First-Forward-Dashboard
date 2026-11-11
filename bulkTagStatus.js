@@ -830,7 +830,7 @@ window.FF = window.FF || {};
   function prewarmAudit() {
     const a = state.audit;
     if (a.loading || a.error && !a.loaded) { if (a.loading) return; }
-    if (a.loaded && !auditStale(15 * 60e3)) return;
+    if (a.loaded && !auditStale(2 * 3600e3)) return;
     a.error = '';
     runBlankIssuerAudit(state.root, { auto: true });
   }
@@ -1077,7 +1077,7 @@ window.FF = window.FF || {};
     // 🔄 Page khulte / refresh hote hi audit apne aap background me chalta hai (pehle har baar button dabana padta tha).
     // Purana result 10 min se naya ho to dobara scan nahi; manual button se fresh scan pehle jaisa chalta rahega.
     const a = state.audit;
-    const stale = auditStale(10 * 60e3);
+    const stale = auditStale(30 * 60e3);
     if (!a.loading && (!a.loaded || stale) && !a.error) setTimeout(() => { if (state.root === root && !state.audit.loading) runBlankIssuerAudit(root, { auto: true }); }, 400);
   }
   function bind(root) {

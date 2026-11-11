@@ -6751,7 +6751,6 @@ async function handleGviz(req, res, params) {
  */
 async function handlePublicGviz(req, res, params) {
   const ip = clientIp(req);
-  if (!publicRateOk(`gviz:${ip}`, 120, 10 * 60e3)) return sendJson(res, 429, { error: 'Bahut zyada requests — thodi der baad try karo.' });
   const tabs = (db.settings && Array.isArray(db.settings.tabs) && db.settings.tabs.length) ? db.settings.tabs : DEFAULT_TABS;
   const sheet = String(params.get('sheet') || '');
   const gid = String(params.get('gid') || '');
@@ -6770,6 +6769,12 @@ async function handlePublicGviz(req, res, params) {
   }
   if (!clean.get('sheet') && !clean.get('gid')) clean.set('sheet', tab.tab);
   if (id) clean.set('id', id);
+  // 🚑 v3.125.184 — throttle: jo jawab server ke cache me pehle se hai wo Google par bojh nahi daalta, isliye use
+  // sakht ginti me nahi gina jata. Pehle har request ginti thi (120 / 10 min, IP ke hisaab se): site dheemi ho to
+  // form baar-baar dobara maangta tha → limit bhar jati → "Sabhi agents ka stock" kabhi load hi nahi hota tha
+  // (poora office ek hi IP se aata hai to sab ke liye band).
+  let cachedHit = false; try { cachedHit = cache.has(upstreamUrl(clean)); } catch { cachedHit = false; }
+  if (!publicRateOk(`gviz${cachedHit ? 'c' : ''}:${ip}`, cachedHit ? 3000 : 300, 10 * 60e3)) return sendJson(res, 429, { error: 'Bahut zyada requests — thodi der baad try karo.' });
   return handleGviz(req, res, clean);
 }
 

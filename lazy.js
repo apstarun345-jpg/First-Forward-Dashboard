@@ -198,8 +198,10 @@ window.FF = window.FF || {};
     // (site khulne ke ~35s baad, phir har 20 min) — page kholte hi data turant. Phone / data-saver par nahi.
     try {
       if (!dev.saveData && !dev.coarse && FF.auth && FF.auth.can && FF.auth.can('bulkTagStatus')) {
-        const pre = () => { if (document.hidden) return; need('bulkTagStatus').then(() => { try { FF.bulkTagStatus.prewarmAudit(); } catch { /* optional */ } }).catch(() => {}); };
-        setTimeout(pre, 35000); setInterval(pre, 20 * 60e3);
+        // v3.125.184: halka kiya — ye scan Google Sheet se lakhon rows padhta hai; sheet dheemi / rate-limit ho to bilkul nahi,
+        // aur pichhla result 2 ghante se naya ho to dobara nahi (pehle har 20 min + har page-load ke 35s baad chalta tha).
+        const pre = () => { if (document.hidden) return; try { const rl = FF.data && FF.data.rateLimitStatus && FF.data.rateLimitStatus(); if (rl && (rl.active || Date.now() - (rl.lastAt || 0) < 15 * 60e3)) return; } catch { /* optional */ } need('bulkTagStatus').then(() => { try { FF.bulkTagStatus.prewarmAudit(); } catch { /* optional */ } }).catch(() => {}); };
+        setTimeout(pre, 4 * 60e3); setInterval(pre, 30 * 60e3);
       }
     } catch { /* optional */ }
     if (dev.saveData) return;                                   // data-saver / 2G → kuch bhi background me mat kheecho
