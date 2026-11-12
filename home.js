@@ -1323,7 +1323,8 @@ FF.pages = FF.pages || {};
       ['home-charts', '📊 Charts'],
       ['home-stock', '📦 Stock'],
       ['home-stock-map', '🗺️ Stock mapping (FF · GV · Office)'],
-      ['home-freshness', '🕒 Sheets last update']
+      ['home-freshness', '🕒 Sheets last update'],
+      ['home-datainfo', '🕒 Data loaded · Sync']
     ];
     const ids = SECTIONS.map((x) => x[0]);
     const label = (id) => (SECTIONS.find((x) => x[0] === id) || [id, id])[1];
@@ -1418,8 +1419,6 @@ FF.pages = FF.pages || {};
           </div>
         </div>
         <div class="home-hero-side">
-          <div class="home-stat"><span class="dim">Data loaded</span><b id="home-loaded">${S.loadedAt || G.loadedAt ? U.timeLabel(S.loadedAt || G.loadedAt) : '—'}</b></div>
-          <div class="home-stat"><span class="dim">Sync</span><b id="home-sync">${FF.preloader && FF.preloader.done ? 'All sheets ready ✓' : 'Background sync…'}</b></div>
           <button class="btn primary" data-action="refresh">↻ Refresh</button>
           ${FF.auth.can('refresh') ? '<button class="btn" data-action="force-refresh" title="Server + browser ka poora cache saaf karke saari sheets (EIR, StockDataa, Tag Assignment, GV Master, stock index, dispatch) dobara padho">⚡ Force refresh</button>' : ''}
           ${FF.auth.can('aiAnalyst') ? '<a class="btn aa-home-btn" href="#/aiAnalyst" title="GV + FF poora review — growth, down, kya karein">🧠 AI Business Analyst</a>' : ''}
@@ -1443,6 +1442,10 @@ FF.pages = FF.pages || {};
       <div id="home-freshness"></div>
       <div id="home-robot-feed"></div>
       <div id="home-data-versions"></div>
+      <div id="home-datainfo" class="hero-stats">
+        <div class="home-stat"><span class="dim">Data loaded</span><b id="home-loaded">${S.loadedAt || G.loadedAt ? U.timeLabel(S.loadedAt || G.loadedAt) : '—'}</b></div>
+        <div class="home-stat"><span class="dim">Sync</span><b id="home-sync">${FF.preloader && FF.preloader.done ? 'All sheets ready ✓' : 'Background sync…'}</b></div>
+      </div>
       <p class="foot-note">🟩 GV aaj = <b>GV Master sheet</b> (live) · 🧾 Issuance history = <b>EIR</b> (GV = master ID ${esc(FF.config.eir.gvMasterId || '5845036')}, baaki FF) · 📦 Stock = <b>StockDataa</b> (FF) + <b>Tag Assignment</b> (GV) · 🟦 FF ka issuance T+1 aata hai · 🔎 Global search top bar par hai · full profile/results Management → Master Search me.</p>`;
 
     // ⚙ v3.79 — Customize Home: reorder / hide sections, saved per user on this device.
