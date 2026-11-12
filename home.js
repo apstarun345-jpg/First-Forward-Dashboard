@@ -1324,6 +1324,7 @@ FF.pages = FF.pages || {};
       ['home-stock', '📦 Stock'],
       ['home-stock-map', '🗺️ Stock mapping (FF · GV · Office)'],
       ['home-freshness', '🕒 Sheets last update'],
+      ['home-data-versions', '🕒 Site par kis time ka data hai'],
       ['home-datainfo', '🕒 Data loaded · Sync']
     ];
     const ids = SECTIONS.map((x) => x[0]);
