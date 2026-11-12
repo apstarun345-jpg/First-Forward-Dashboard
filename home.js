@@ -1311,13 +1311,14 @@ FF.pages = FF.pages || {};
   }
   const homeLayout = (() => {
     const SECTIONS = [
+      ['home-todo', "✅ Today's work · Smart Notification Center"],
+      ['home-robot-feed', '🤖 Robot ke updates'],
       ['home-stats', '📈 Top stats (MTD · last day · expected · run-rate)'],
       ['home-gv-live', '🟩 GV live today'],
       ['home-month', '📅 Month KPI cards'],
       ['home-overview', '📊 Overview (charts · top agents)'],
       ['home-target-alerts', '🎯 Target updates'],
       ['home-assign', '📌 Assigned work by RSM'],
-      ['home-todo', "✅ Today's work"],
       ['home-target-achievement', '🎯 Target achievement'],
       ['home-pulse', '📡 Management pulse'],
       ['home-charts', '📊 Charts'],
