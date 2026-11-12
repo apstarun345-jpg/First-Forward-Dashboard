@@ -1951,18 +1951,17 @@ async function gvApiReport(from, to, settings) {
   if (!secret) throw new HttpError(400, 'GV_API_SECRET Render env var set nahi hai.');
   const days = [];
   for (let d = new Date(`${from}T00:00:00Z`); d <= new Date(`${to}T00:00:00Z`) && days.length < 45; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
-  const out = [], errors = [];
+  const out = [], errors = [], seenAll = new Set();
   let idx = 0;
   const worker = async () => {
     while (idx < days.length) {
       const day = days[idx++];
       try {
         const data = await gvApiDayRecords(day, secret);
-        const seen = new Set();
         for (const r of data) {
           const tag = String(r.tag_id_number || r.tag_id || r.tagId || '').trim();
           const key = tag || String(r.unique_id || r.id || '') + '|' + String(r.sno || r.serial_no || '');
-          if (seen.has(key)) continue; seen.add(key);
+          if (seenAll.has(key)) continue; seenAll.add(key);
           const added = String(r.date_added || r.dateAdded || r.created_at || '').trim();
           const vno = String(r.vno || r.v_no || r.vehicle_no || '');
           const ex = {};
