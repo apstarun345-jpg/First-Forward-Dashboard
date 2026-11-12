@@ -580,6 +580,7 @@ function settingsFor(u) {
   delete s.personalLinks; // 🔗 secret tokens sirf admin ko
   delete s.schedules;     // 🗓 admin ke custom reminders
   delete s.dispatchEmail; // selected recipients + delivery schedule sirf admin ko
+  delete s.__tagSheetBackup; // tag-sheet config ki backup copy (sheet link) sirf admin ko
   return s;
 }
 /** sw.js ka CACHE_NAME — app version (update-toast ke liye). */
@@ -9133,6 +9134,16 @@ async function handleApi(req, res, url) {
   const TAG_SHEET_DEFAULT_COLUMNS = ['agent', 'agentId', 'date', 'time', 'tl', 'channel', 'cls', 'agentMobile', 'agentAddress', 'agentPincode', 'stock', 'last', 'cur', 'growth', 'approved', 'courier', 'itemName', 'status'];
   const tagSheetConfig = () => {
     const w = workspaceStore();
+    // 🛡️ v3.125.211 — notify record har kuch second me overwrite hota hai (history jaldi ghoom jaati hai) aur deploy/Sheet-busy par purani/default copy
+    // load ho sakti hai. Isliye config ki ek doosri copy `settings` me rakhte hain; notify me config default/purani mile to wahi se wapas.
+    const bk = db.settings && db.settings.__tagSheetBackup;
+    if (bk && typeof bk === 'object' && bk.updatedAt) {
+      const cur = w.tagRequestSheet && typeof w.tagRequestSheet === 'object' ? w.tagRequestSheet : null;
+      if (!cur || Date.parse(bk.updatedAt) > Date.parse(cur.updatedAt || 0)) {
+        w.tagRequestSheet = JSON.parse(JSON.stringify(bk));
+        console.warn('♻️ Tag Request sheet config settings-backup se wapas laya gaya.');
+      }
+    }
     if (!w.tagRequestSheet || typeof w.tagRequestSheet !== 'object') {
       w.tagRequestSheet = {
         enabled: false, tab: 'Tag Requests', sheetLink: '', spreadsheetId: '', onSubmit: false, onStatus: true, v: 5,
@@ -10676,7 +10687,8 @@ async function handleApi(req, res, url) {
       if (pc.maxRows !== undefined) pcfg.maxRows = Math.min(150, Math.max(5, Number(pc.maxRows) || 60));
     }
     cfg.updatedAt = new Date().toISOString(); cfg.updatedBy = user.username;
-    await persist('notify');
+    db.settings.__tagSheetBackup = JSON.parse(JSON.stringify(cfg));
+    await Promise.all([persist('notify'), persist('settings')]);
     logAudit(user, 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · target ${cfg.spreadsheetId || 'script-sheet'} · ${cfg.columns.length} cols${cfg.columnMap ? ' (by letter)' : ''} · ${cfg.rowMode}`, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, config: cfg, connected: !!sheetSyncStore(), publicForm: publicTagView(), targetId: cfg.spreadsheetId || '' });
   }
@@ -10697,8 +10709,9 @@ async function handleApi(req, res, url) {
     const w = workspaceStore();
     w.tagRequestSheet = JSON.parse(JSON.stringify(old));
     tagSheetConfig();
-    w.tagRequestSheet.restoredAt = new Date().toISOString(); w.tagRequestSheet.restoredFrom = String(hit.at);
-    await persist('notify');
+    w.tagRequestSheet.restoredAt = new Date().toISOString(); w.tagRequestSheet.restoredFrom = String(hit.at); w.tagRequestSheet.updatedAt = w.tagRequestSheet.restoredAt;
+    db.settings.__tagSheetBackup = JSON.parse(JSON.stringify(w.tagRequestSheet));
+    await Promise.all([persist('notify'), persist('settings')]);
     logAudit(user, 'tag_sheet_config_restored', { note: `from ${hit.at}`, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, config: w.tagRequestSheet });
   }
