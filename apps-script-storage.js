@@ -234,7 +234,7 @@ export class AppsScriptStore {
       let maxTry = 0;
       for (const [kind, entry] of batch) {
         const tries = (entry.retries || 0) + 1;
-        if (tries > (this.maxRequeue ?? 5) || this.pending.has(kind)) continue;
+        if (tries > (this.maxRequeue ?? 60) || this.pending.has(kind)) continue;
         this.pending.set(kind, { value: entry.value, waiters: [], retries: tries });
         maxTry = Math.max(maxTry, tries);
       }
