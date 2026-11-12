@@ -1095,7 +1095,7 @@ window.FF = window.FF || {};
         channel: 'GV Partner', cch, cls: normClass(cch || vc), group: configuredGroup(cch, vc || cch),
         status: U.clean(x.status) || 'Issuance', tagType: 'Other',
         tagId: x.tagId, vrn: U.clean(x.vrn), serial: U.clean(x.serial), customer: U.clean(x.customer), productId: U.clean(x.productId),
-        amount: Number(x.amount) || 0, commission: Number(x.commission) || 0, commissionHasValue: true, time: ''
+        amount: Number(x.amount) || 0, commission: Number(x.commission) || 0, commissionHasValue: true, time: String(x.added || '').slice(11, 19)
       });
     }
     return extra.length ? list.concat(extra) : list;
@@ -1128,7 +1128,7 @@ window.FF = window.FF || {};
         agentId: r.agentId || '', agentName: r.agentName || '', tlId: r.tlId || r.supervisorId || r.gvTlId || '', supervisorId: r.supervisorId || '', gvTlId: r.gvTlId || '', tlName: r.tlName || '',
         tagId: r.tagId || '', serial: r.serial || '', vrn: r.vrn || '',
         customer: r.customer || '', amount: Number(r.amount) || 0, commission: Number(r.commission) || 0,
-        live: true, source: 'gv-master', n: 1
+        live: true, source: 'gv-master', n: 1, time: r.time || ''
       });
     }
     return out;

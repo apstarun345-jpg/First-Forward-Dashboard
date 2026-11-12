@@ -2110,16 +2110,26 @@ FF.pages = FF.pages || {};
             label = 'Yesterday'; icon = '🕘'; tail = 'FF EIR data';
           }
           const vals = { VC4: 0, VC20: 0, 'VC5+': 0 }; let total = 0;
-          const byCls = [];
+          const byCls = []; let lastT = '';
           rows.forEach((r) => {
             const k = String(r.key || U.dateKey(r.date || r.d || new Date(0)));
             if (k !== key || !same(r)) return;
             const n = Number(r.n) || 0; total += n;
+            const tm = String(r.time || '').trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/); if (tm) { const hhmmss = `${tm[1].padStart(2, '0')}:${tm[2]}:${tm[3] || '00'}`; if (hhmmss > lastT) lastT = hhmmss; }
             vals[r.group === 'VC4' ? 'VC4' : r.group === 'VC20' ? 'VC20' : 'VC5+'] += n;
             byCls.push({ cls: r.cls || r.group, n });
           });
           const grid = clsOr(clsSums(byCls, 'n', true), CLS7, total, vcTiles(vals));
-          return box('k13', `${icon} ${label} · ${esc(U.labelDateKey ? U.labelDateKey(key) : key)}`, U.fmt(total), `${grid}${vc3Strip(vals)}<span class="msp-mini-tail">${esc(tail)}</span>`, `${spec('day', '')}&date=${encodeURIComponent(key)}`);
+          let lastTag = '';
+          if (lastT && total > 0) {
+            const [hh, mi, ss] = lastT.split(':').map(Number);
+            const ist = new Date(Date.now() + 5.5 * 3600e3), nowMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+            const ago = nowMin - (hh * 60 + mi);
+            const agoTxt = ago >= 0 ? (ago < 1 ? 'abhi' : ago < 60 ? `${ago} min pehle` : `${Math.floor(ago / 60)} ghante ${ago % 60} min pehle`) : '';
+            const h12 = ((hh + 11) % 12) + 1;
+            lastTag = `<span class="msp-lasttag">🕒 Last tag: <b>${String(h12).padStart(2, '0')}:${String(mi).padStart(2, '0')}:${String(ss || 0).padStart(2, '0')} ${hh >= 12 ? 'PM' : 'AM'}</b>${agoTxt ? ` <small>(${agoTxt})</small>` : ''}</span>`;
+          }
+          return box('k13', `${icon} ${label} · ${esc(U.labelDateKey ? U.labelDateKey(key) : key)}`, U.fmt(total), `${grid}${vc3Strip(vals)}${lastTag}<span class="msp-mini-tail">${esc(tail)}</span>`, `${spec('day', '')}&date=${encodeURIComponent(key)}`);
         } catch { return ''; }
       })();
       const wd = workedDays(pr, isTl, ch, m.cur);
