@@ -14730,6 +14730,8 @@ async function start() {
   if (STORAGE_BACKEND === 'appsscript') {
     // Google Sheet (via Apps Script web app) is authoritative. Never start with defaults if it can't be read.
     sheetsStore = appsScriptStoreFromEnv();
+    // 🔁 Pehla save timeout ho aur background retry baad me chal jaye → "Save not confirmed" banner turant hat jaye (pehle agle manual save tak atka rehta tha).
+    sheetsStore.onSaved = (kinds) => { for (const k of kinds) { if (storageFailures.delete(k)) console.log(`✅ ${k} Google Sheet me save ho gaya (retry) — warning hata di`); } };
     // AppsScriptStore.call() already performs bounded retry/backoff. Do NOT wrap read() in
     // another retry loop here — the old 5 × (4 internal attempts × 30s) could hold Render in
     // "Service is starting" for several minutes and trigger unhealthy/restart loops.

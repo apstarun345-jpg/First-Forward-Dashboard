@@ -1706,7 +1706,7 @@ FF.pages = FF.pages || {};
       setTimeout(() => { // pehle Home ke main cards/charts load hone do, phir agents data (site halki rahe)
       try { const P = FF.pages && FF.pages.performance; if (P && P.ensureLoaded) Promise.resolve(P.ensureLoaded({ light: true })).then(again, again); } catch { /* optional */ }
       try { if (FF.gv && FF.gv.need) Promise.resolve(FF.gv.need('report', { only: true })).then(again, again); } catch { /* optional */ }
-      }, 8000);
+      }, (FF.lazy && FF.lazy.deviceProfile && (FF.lazy.deviceProfile().coarse || FF.lazy.deviceProfile().lowEnd)) ? 20000 : 8000);
     }
     function paintOverview() {
       const ov = U.$('#home-overview', root);

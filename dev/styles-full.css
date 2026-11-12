@@ -8456,3 +8456,6 @@ html body .page-home .kpi.kpi .pct-inline.neg, html body .page-home .kpi.kpi .hm
 :root[data-theme="dark"] .mh-stat-v { color: #e2e8f0; }
 
 .mh-charts .grid.g-2 > .card:only-child { grid-column: 1 / -1; }
+
+/* v193 phone smooth: below-fold Home sections render lazily */
+.page-home .mh-panels,.page-home #home-charts{content-visibility:auto;contain-intrinsic-size:auto 600px}

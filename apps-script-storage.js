@@ -32,6 +32,9 @@ export class AppsScriptStore {
     // Environment overrides remain available for unusually slow tenants.
     this.attempts = Math.max(1, Number(process.env.APPS_SCRIPT_ATTEMPTS || 4));
     this.timeoutMs = Math.max(5000, Number(process.env.APPS_SCRIPT_TIMEOUT_MS || 20000));
+    // v3.125.193 — bade Sheet par WRITE 20s se upar jaata tha → "storage timeout"; abort + retry usi busy Sheet par pile hota tha. Sirf write ko 40s (boot read 20s hi rahe).
+    this.writeTimeoutMs = Math.max(this.timeoutMs, Number(process.env.APPS_SCRIPT_WRITE_TIMEOUT_MS || 40000));
+    this.onSaved = null; // (kinds) => void — background retry success par server 'not saved' banner hata sake
     this.pending = new Map(); // kind → { value, waiters: [] }
     this.timer = null;
     this.timerAt = 0;
@@ -217,8 +220,9 @@ export class AppsScriptStore {
     const records = {};
     const job = (async () => {
       for (const [kind, entry] of batch) records[kind] = this.encode(kind, entry.value);
-      const out = await this.call('write', { records });
+      const out = await this.call('write', { records }, { timeoutMs: this.writeTimeoutMs, attempts: this.attempts });
       this.lastSavedAt = String(out.savedAt || new Date().toISOString());
+      try { if (typeof this.onSaved === 'function') this.onSaved([...batch.keys()]); } catch { /* hook optional */ }
     })();
     this.flushing = job;
     try {
