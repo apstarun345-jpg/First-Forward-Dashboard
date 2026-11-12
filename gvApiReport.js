@@ -127,7 +127,7 @@ FF.pages = FF.pages || {};
     const dayN = new Set(list.map((r) => r.day)).size || 1;
     const chips = `<div class="gar-chips">
       <div class="gar-chip c1">Total tags<b>${n0(t.n)}</b><small>${n0(t.n - t.repl)} issuance · ${n0(t.repl)} replacement</small></div>
-      <div class="gar-chip c2">VC4<b>${n0(t.VC4)}</b></div><div class="gar-chip c3">VC20<b>${n0(t['VC20'])}</b></div><div class="gar-chip c5">VC5+<b>${n0(t['VC5+'])}</b></div>
+      ${[['VC4', 'c2'], ['VC20', 'c3'], ['VC5+', 'c5']].map(([c, cc]) => { const o = blank(); list.filter((r) => r.cls === c).forEach((r) => bump(o, r)); return `<div class="gar-chip ${cc}">${c}<b>${n0(o.n)}</b><small>💸 ${money(o.comm)} commission</small><small>avg ${money(o.commN ? o.comm / o.commN : 0)} / tag</small></div>`; }).join('')}
       <div class="gar-chip c4">Commission<b>${money(t.comm)}</b><small>avg ${money(t.commN ? t.comm / t.commN : 0)} / tag</small></div>
       <div class="gar-chip c7">Amount<b>${money(t.amount)}</b></div>
       <div class="gar-chip c8">Agents · TLs<b>${n0(agents.size)}</b><small>${n0(tls.size)} TLs</small></div>
@@ -233,15 +233,63 @@ FF.pages = FF.pages || {};
   }
   function distinct(key) { return [...new Set(st.rows.map((r) => r[key] || '—'))].sort(); }
 
+  const addDays = (k, n) => { const d = new Date(`${k}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const CHUNK = 15;
+  function mergeRows(into, seen, rows) { let add = 0; for (const r of rows) { const k = r.k || (r.tag + '|' + r.id + '|' + r.sno); if (seen.has(k)) continue; seen.add(k); into.push(r); add++; } return add; }
   async function load(root) {
-    const out = U.$('#gar-out', root); st.loading = true;
-    out.innerHTML = U.spinner('GV API se data aa raha hai… (har din ek call)');
+    const out = U.$('#gar-out', root); st.loading = true; st.abort = false;
+    const total = Math.max(1, Math.round((Date.parse(`${st.to}T00:00:00Z`) - Date.parse(`${st.from}T00:00:00Z`)) / 864e5) + 1);
+    const rows = [], seen = new Set(), errors = [], stats = { fetched: 0, dupes: 0, outside: 0, noDate: 0 };
+    let doneDays = 0;
+    const progress = () => { out.innerHTML = U.spinner(`GV API se data aa raha hai… ${doneDays}/${total} din · ${n0(rows.length)} records`) + '<div style="text-align:center;margin-top:6px"><button class="btn small" data-gar="stop">⏹ Roko (jitna aaya utna dikhao)</button></div>'; };
+    progress();
     try {
-      const d = await FF.auth.api(`/api/gv-api-report?from=${encodeURIComponent(st.from)}&to=${encodeURIComponent(st.to)}`);
-      if (!d || d.ok === false) throw new Error((d && d.error) || 'GV API report load nahi hua');
-      st.meta = d; st.rows = d.rows || []; st.shown = PAGE; st.loadedAt = Date.now();
+      for (let from = st.from; from <= st.to && !st.abort; from = addDays(from, CHUNK)) {
+        const to = addDays(from, CHUNK - 1) > st.to ? st.to : addDays(from, CHUNK - 1);
+        const d = await FF.auth.api(`/api/gv-api-report?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+        if (!d || d.ok === false) throw new Error((d && d.error) || 'GV API report load nahi hua');
+        mergeRows(rows, seen, d.rows || []);
+        (d.errors || []).forEach((e) => errors.push(e));
+        Object.keys(stats).forEach((k) => { stats[k] += (d.stats && d.stats[k]) || 0; });
+        doneDays += Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1;
+        if (!root.isConnected) return;
+        progress();
+      }
     } catch (err) { st.loading = false; if (root.isConnected) out.innerHTML = U.errorBox(err, 'data-gar="load"'); return; }
-    st.loading = false;
+    rows.sort((x, y) => (x.added < y.added ? -1 : x.added > y.added ? 1 : 0));
+    st.meta = { errors, stats, truncated: false, partial: st.abort }; st.rows = rows; st.shown = PAGE; st.loadedAt = Date.now(); st.loading = false;
+    if (!root.isConnected) return;
+    fillSelects(root); paint(root);
+  }
+  // 🔎 Multi-search: date range se bahar bhi — API me peeche tak (din-din) dhundo, jab tak sab mil na jaayein
+  async function searchApi(root) {
+    const tokens = [...new Set(String(st.f.multi || '').split(/[\s,;|]+/).map((t) => norm(t)).filter(Boolean))];
+    if (!tokens.length) { U.toast ? U.toast('Pehle multi-search box me VRN / tag / barcode daalo.') : alert('Pehle multi-search box me VRN / tag / barcode daalo.'); return; }
+    const out = U.$('#gar-out', root); st.abort = false; st.loading = true;
+    const days = Number(U.$('#gar-sdays', root).value) || 365;
+    const found = new Set(), rows = [], seen = new Set(), errors = [];
+    const q = encodeURIComponent(tokens.slice(0, 200).join(','));
+    let scanned = 0, to = today(), hitDay = '';
+    const prog = () => { out.innerHTML = U.spinner(`API me dhundh raha hoon… ${scanned}/${days} din peeche · ${found.size}/${tokens.length} mile`) + '<div style="text-align:center;margin-top:6px"><button class="btn small" data-gar="stop">⏹ Roko</button></div>'; };
+    prog();
+    try {
+      while (scanned < days && !st.abort && found.size < tokens.length) {
+        const from = addDays(to, -(CHUNK - 1));
+        const d = await FF.auth.api(`/api/gv-api-report?from=${from}&to=${to}&q=${q}`);
+        if (!d || d.ok === false) throw new Error((d && d.error) || 'API search nahi chala');
+        mergeRows(rows, seen, d.rows || []);
+        (d.errors || []).forEach((e) => errors.push(e));
+        for (const r of d.rows || []) { const keys = [norm(r.vno), norm(r.tag), norm(r.sno), norm(r.id), norm(r.name)]; tokens.forEach((t) => { if (keys.some((k) => k && (k === t || (t.length >= 6 && k.includes(t))))) found.add(t); }); }
+        scanned += CHUNK; to = addDays(from, -1); hitDay = from;
+        if (!root.isConnected) return;
+        prog();
+      }
+    } catch (err) { st.loading = false; if (root.isConnected) out.innerHTML = U.errorBox(err, 'data-gar="search"'); return; }
+    rows.sort((x, y) => (x.added < y.added ? -1 : x.added > y.added ? 1 : 0));
+    st.rows = rows; st.from = rows.length ? rows[0].day : st.from; st.to = rows.length ? rows[rows.length - 1].day : st.to;
+    st.meta = { errors, stats: null, truncated: false, searched: { scanned, until: hitDay, found: found.size, total: tokens.length } };
+    st.tab = 'rec'; st.shown = PAGE; st.loading = false;
+    const fi = U.$('#gar-from', root), ti = U.$('#gar-to', root); if (fi) fi.value = st.from; if (ti) ti.value = st.to;
     if (!root.isConnected) return;
     fillSelects(root); paint(root);
   }
@@ -252,11 +300,17 @@ FF.pages = FF.pages || {};
     set('#gar-cstatus', st.f.cstatus, [['', 'Commission status: all']].concat(distinct('cstatus').map((s) => [s, s])));
   }
 
+  function clearFilters(root) {
+    st.f = { agent: '', agentId: '', tl: '', tlId: '', cls: '', status: '', cstatus: '', vrn: '', multi: '', cid: '' };
+    root.querySelectorAll('[data-gar-f]').forEach((el) => { el.value = ''; });
+    const c = U.$('#gar-cid', root); if (c) c.value = '';
+    st.shown = PAGE; fillSelects(root); paint(root);
+  }
   async function render(root) {
     css();
     if (!st.from) { st.from = today(); st.to = today(); }
     root.innerHTML = `<div class="page-head"><div><h1>🛰️ GV API Report</h1><p class="sub">GV ki direct API se · date range · agent/TL filter · VRN / tag / barcode multi-search · commission class-wise</p></div>
-      <div class="head-actions">${FF.auth.can('export') ? '<button class="btn" data-gar="csv">⬇ CSV (is tab ka)</button>' : ''}<button class="btn primary" data-gar="load">↻ API se load</button></div></div>
+      <div class="head-actions">${FF.auth.can('export') ? '<button class="btn" data-gar="csv">⬇ CSV (is tab ka)</button>' : ''}<button class="btn" data-gar="clear">✖ Filters clear</button><button class="btn primary" data-gar="load">↻ API se load</button></div></div>
       <div class="gar-filters">
         <div><label class="gar-lbl">From date</label><input class="input" type="date" id="gar-from" value="${esc(st.from)}"></div>
         <div><label class="gar-lbl">To date</label><input class="input" type="date" id="gar-to" value="${esc(st.to)}"></div>
@@ -271,6 +325,7 @@ FF.pages = FF.pages || {};
       </div>
       <label class="gar-lbl">🔎 Multiple search — VRN · Tag ID · Barcode/SNO · Agent ID · Customer (ek ya bahut saare, space / comma / new line se alag)</label>
       <textarea class="input gar-multi" data-gar-f="multi" placeholder="MH12AB1234&#10;34161FA820…&#10;barcode…">${esc(st.f.multi)}</textarea>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0"><button class="btn primary small" data-gar="search">🛰️ API se dhundo (date range se bahar bhi)</button><select class="input" id="gar-sdays" style="max-width:190px"><option value="30">peeche 30 din</option><option value="90">peeche 90 din</option><option value="180">peeche 180 din</option><option value="365" selected>peeche 365 din</option><option value="730">peeche 730 din</option></select><span class="dim small">Box ke VRN/tag/barcode ko API me din-din peeche dhundta hai, sab milte hi ruk jaata hai.</span></div>
       <div id="gar-out" style="margin-top:8px">${U.spinner('GV API se data aa raha hai…')}</div>`;
     fillSelects(root);
     const redo = U.debounce ? U.debounce(() => { st.shown = PAGE; paint(root); }, 200) : () => { st.shown = PAGE; paint(root); };
@@ -288,6 +343,9 @@ FF.pages = FF.pages || {};
       if (so) { const [t, k] = so.dataset.garSort.split('|'); const cur = st.sort[t]; st.sort[t] = { k, dir: cur && cur.k === k ? -cur.dir : -1 }; paint(root); return; }
       const a = e.target.closest('[data-gar]'); if (!a) return;
       if (a.dataset.gar === 'load') { if (st.to < st.from) [st.from, st.to] = [st.to, st.from]; load(root); }
+      else if (a.dataset.gar === 'stop') st.abort = true;
+      else if (a.dataset.gar === 'search') searchApi(root);
+      else if (a.dataset.gar === 'clear') clearFilters(root);
       else if (a.dataset.gar === 'more') { st.shown += PAGE; paint(root); }
       else if (a.dataset.gar === 'csv') exportCsv();
     };

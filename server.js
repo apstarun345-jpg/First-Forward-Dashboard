@@ -1946,7 +1946,9 @@ async function gvApiDayRecords(day, secret) {
   } finally { clearTimeout(timer); }
 }
 const GV_API_KNOWN = new Set(['unique_id', 'id', 'agent_name', 'supervisor_agent_id', 'supervisor_name', 'vno', 'v_no', 'vehicle_no', 'vclass', 'v_class', 'cch', 'sno', 'serial_no', 'tag_id_number', 'tag_id', 'tagId', 'amount', 'name', 'customer_name', 'product_id', 'commission', 'status', 'commission_status', 'date_added', 'dateAdded', 'created_at']);
-async function gvApiReport(from, to, settings) {
+async function gvApiReport(from, to, settings, tokens) {
+  tokens = Array.isArray(tokens) ? tokens : [];
+  const nrm = (v) => String(v == null ? '' : v).toUpperCase().replace(/[^A-Z0-9]/g, '');
   const secret = process.env.GV_API_SECRET;
   if (!secret) throw new HttpError(400, 'GV_API_SECRET Render env var set nahi hai.');
   const days = [];
@@ -1954,7 +1956,7 @@ async function gvApiReport(from, to, settings) {
   const fromX = new Date(`${from}T00:00:00Z`); fromX.setUTCDate(fromX.getUTCDate() - 1);
   const toX = new Date(`${to}T00:00:00Z`); toX.setUTCDate(toX.getUTCDate() + 1);
   const spanDays = Math.round((new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 864e5) + 1;
-  for (let d = new Date(fromX); d <= toX && days.length < 47; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
+  for (let d = new Date(fromX); d <= toX && days.length < 24; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
   const stats = { fetched: 0, dupes: 0, outside: 0, noDate: 0 };
   const out = [], errors = [], seenAll = new Set();
   let idx = 0;
@@ -1974,10 +1976,11 @@ async function gvApiReport(from, to, settings) {
           if (!addedDay) stats.noDate++;
           const rowDay = addedDay || day;
           if (rowDay < from || rowDay > to) { stats.outside++; continue; }
+          if (tokens.length) { const ks = [nrm(r.vno || r.v_no || r.vehicle_no), nrm(tag), nrm(r.sno || r.serial_no), nrm(r.unique_id || r.id), nrm(r.name || r.customer_name)]; if (!tokens.some((t) => ks.some((k) => k && (k === t || (t.length >= 6 && k.includes(t)))))) continue; }
           const ex = {};
           for (const k of Object.keys(r)) if (!GV_API_KNOWN.has(k) && r[k] !== null && r[k] !== '') ex[k] = r[k];
           out.push({
-            day: rowDay, time: added.slice(11, 19), added,
+            k: key, day: rowDay, time: added.slice(11, 19), added,
             id: String(r.unique_id || r.id || ''), agent: String(r.agent_name || ''), supId: String(r.supervisor_agent_id || ''), supName: String(r.supervisor_name || ''),
             vno, vclass: String(r.vclass || r.v_class || ''), cch: String(r.cch || ''), sno: String(r.sno || r.serial_no || ''), tag,
             amount: Number(r.amount) || 0, name: String(r.name || r.customer_name || ''), product: String(r.product_id || ''),
@@ -1993,7 +1996,7 @@ async function gvApiReport(from, to, settings) {
   };
   await Promise.all([worker(), worker(), worker()]);
   out.sort((a, b) => (a.added < b.added ? -1 : a.added > b.added ? 1 : 0));
-  return { ok: true, from, to, days: spanDays, rows: out, errors, stats, truncated: spanDays > 45 };
+  return { ok: true, from, to, days: spanDays, rows: out, errors, stats, truncated: spanDays > 22 };
 }
 let gvApiRowsLast = null;
 async function gvTodayApiRows(settings, day, secret) {
@@ -7392,7 +7395,8 @@ async function handleApi(req, res, url) {
     let from = url.searchParams.get('from'), to = url.searchParams.get('to');
     if (!ok(from)) from = today; if (!ok(to)) to = from;
     if (to < from) [from, to] = [to, from];
-    try { return sendJson(res, 200, await gvApiReport(from, to, db.settings || {})); }
+    const tokens = String(url.searchParams.get('q') || '').split(/[\s,;|]+/).map((t) => t.toUpperCase().replace(/[^A-Z0-9]/g, '')).filter(Boolean).slice(0, 200);
+    try { return sendJson(res, 200, await gvApiReport(from, to, db.settings || {}, tokens)); }
     catch (err) { if (err instanceof HttpError) throw err; return sendJson(res, 200, { ok: false, error: String((err && err.message) || err).slice(0, 200), rows: [] }); }
   }
   if (p === '/api/gv-today-rows' && method === 'GET') {
