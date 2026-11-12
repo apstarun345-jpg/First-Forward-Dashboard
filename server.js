@@ -1924,6 +1924,33 @@ function gvTodayLastGood() {
   const b = gvTodayFeedCache.body;
   return b && b.date === dateKeyNow() ? b : null;
 }
+// 🟢 GV direct API (Apps Script wali hi API) — sheet ke 10-min gap ke bina. Secret sirf env var GV_API_SECRET me (code me nahi).
+async function gvTodayApiRows(settings, day, secret) {
+  const url = process.env.GV_API_URL || 'https://www.apnapayment.com/api/agent/dailytag/idfc-issued';
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Secret-Key': secret }, body: JSON.stringify({ report_date: day }), signal: ctl.signal });
+    if (!res.ok) throw new Error(`GV API HTTP ${res.status}`);
+    const json = await res.json();
+    if (!json || !json.success || !Array.isArray(json.data)) throw new Error('GV API bad response');
+    const seen = new Set(), rows = [];
+    for (const r of json.data) {
+      const tag = String(r.tag_id_number || r.tag_id || r.tagId || '').trim();
+      if (!tag || seen.has(tag)) continue;
+      const added = String(r.date_added || r.dateAdded || r.created_at || '').trim();
+      if (added && !added.startsWith(day)) continue;
+      seen.add(tag);
+      rows.push({
+        cls: classBucket(String(r.cch || ''), String(r.vclass || r.v_class || ''), settings.gvClassCch),
+        status: String(r.status || ''),
+        type: '',
+        vrnSt: vrnLengthStatus(String(r.vno || r.v_no || r.vehicle_no || ''), settings)
+      });
+    }
+    return rows;
+  } finally { clearTimeout(timer); }
+}
 async function gvTodayFeed(force, opts) {
   const ttl = 30e3; // live today: short cache, but never scan the full 30-day history
   if (!force && gvTodayFeedCache.body && Date.now() - gvTodayFeedCache.at < ttl) return { ...gvTodayFeedCache.body, cached: true };
@@ -1958,6 +1985,38 @@ async function gvTodayFeed(force, opts) {
       { tq: `select ${select} where toDate(${resolved.date}) >= date '${day}' and toDate(${resolved.date}) < date '${nextDay}' and ${resolved.tagId} is not null limit 100000`, kind: 'today-toDate' },
       { tq: `select ${select} where ${resolved.tagId} is not null limit 100000`, kind: 'today-bounded' }
     ];
+    const buildResult = (rows, kind, out) => {
+        // A successful filtered query with no rows means "no today's data" only after we know
+        // the date predicate worked. For the bounded fallback, empty is also a valid zero snapshot.
+        const classes = {};
+        let replacement = 0, chassis = 0, wrongVrn = 0;
+        const replacementBy = {}, chassisBy = {}, wrongVrnBy = {};
+        const bump = (o, k) => { o[k] = (o[k] || 0) + 1; };
+        for (const row of rows) {
+          classes[row.cls] = (classes[row.cls] || 0) + 1;
+          if (/repl/i.test(String(row.status || ''))) { replacement++; bump(replacementBy, row.cls); }
+          if (row.vrnSt === 'chassis' || (!row.vrnSt && /chassis/i.test(String(row.type || '')))) { chassis++; bump(chassisBy, row.cls); }
+          if (row.vrnSt === 'wrong') { wrongVrn++; bump(wrongVrnBy, row.cls); }
+        }
+        const result = {
+          ok: true, date: day, at: new Date().toISOString(),
+          gv: {
+            source: 'GV Master', live: true, total: rows.length,
+            vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
+            comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
+            replacement, chassis, wrongVrn, replacementBy, chassisBy, wrongVrnBy, classes,
+            classMapVersion,
+            cached: !!out.cached, stale: !!out.stale, query: kind
+          }
+        };
+      if (generation === liveFeedGeneration) { gvTodayFeedCache.body = result; gvTodayFeedCache.at = Date.now(); }
+      return result;
+    };
+    const apiSecret = process.env.GV_API_SECRET;
+    if (apiSecret) {
+      try { return buildResult(await gvTodayApiRows(settings, day, apiSecret), 'direct-api', {}); }
+      catch (err) { console.warn('GV direct API failed — sheet fallback:', err && err.message); }
+    }
     let lastErr = null;
     for (const attempt of attempts) {
       try {
@@ -1981,33 +2040,7 @@ async function gvTodayFeed(force, opts) {
             vrnSt: vrnLengthStatus(serverCell(row, typeIndex + 1), settings)
           });
         }
-        // A successful filtered query with no rows means "no today's data" only after we know
-        // the date predicate worked. For the bounded fallback, empty is also a valid zero snapshot.
-        const classes = {};
-        let replacement = 0, chassis = 0, wrongVrn = 0;
-        const replacementBy = {}, chassisBy = {}, wrongVrnBy = {};
-        const bump = (o, k) => { o[k] = (o[k] || 0) + 1; };
-        for (const row of rows) {
-          classes[row.cls] = (classes[row.cls] || 0) + 1;
-          if (/repl/i.test(String(row.status || ''))) { replacement++; bump(replacementBy, row.cls); }
-          if (row.vrnSt === 'chassis' || (!row.vrnSt && /chassis/i.test(String(row.type || '')))) { chassis++; bump(chassisBy, row.cls); }
-          if (row.vrnSt === 'wrong') { wrongVrn++; bump(wrongVrnBy, row.cls); }
-        }
-        const result = {
-          ok: true, date: day, at: new Date().toISOString(),
-          gv: {
-            source: 'GV Master', live: true, total: rows.length,
-            vc4: classes.VC4 || 0, vc20: classes.VC20 || 0, vc5p: classes['VC5+'] || 0,
-            comm: (classes.VC20 || 0) + (classes['VC5+'] || 0),
-            replacement, chassis, wrongVrn, replacementBy, chassisBy, wrongVrnBy, classes,
-            classMapVersion,
-            cached: !!out.cached, stale: !!out.stale, query: attempt.kind
-          }
-        };
-        if (generation === liveFeedGeneration) {
-          gvTodayFeedCache.body = result;
-          gvTodayFeedCache.at = Date.now();
-        }
+        const result = buildResult(rows, attempt.kind, out);
         return result;
       } catch (err) {
         lastErr = err;
