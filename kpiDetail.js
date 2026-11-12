@@ -1254,9 +1254,14 @@ window.FF = window.FF || {};
     const raw = String(a.id || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const dg = raw.replace(/\D/g, '').replace(/^0+/, '');
     const nk = String(a.name || '').toLowerCase().replace(/[^a-z]/g, '');
-    return (raw && d.ids[raw]) || (dg.length >= 3 && d.ids[`#${dg}`]) || (nk.length >= 4 && d.names[nk]) || '';
+    return (raw && d.ids[raw]) || (dg.length >= 3 && d.ids[`#${dg}`]) || '';
   }
-  FF.agentMobiles = { load: loadMobiles, of: (a) => mobileOf(MOB.data, a), canSee: canSeeMobile };
+  /** ID se na mile to naam se (sirf jab us naam ka ek hi number ho) — label "naam se" ke saath dikhate hain. */
+  function mobileByName(d, a) {
+    const nk = String((a && a.name) || '').toLowerCase().replace(/[^a-z]/g, '');
+    return (d && nk.length >= 4 && d.names[nk]) || '';
+  }
+  FF.agentMobiles = { load: loadMobiles, of: (a) => mobileOf(MOB.data, a) || mobileByName(MOB.data, a), canSee: canSeeMobile };
   async function listDetail(spec) {
     const fn = LISTS.get(String(spec.list || ''));
     if (!fn) return peopleDetail(spec);
@@ -1267,7 +1272,7 @@ window.FF = window.FF || {};
       const mob = await loadMobiles();
       const ai = cols.findIndex((c) => /^agent$/i.test(String(c[0])));
       cols = cols.slice();
-      cols.splice(ai >= 0 ? ai + 1 : cols.length, 0, ['Mobile', (r) => { const m = mobileOf(mob, out.agent(r)); return m ? `<span class="kd-mob">📞 ${esc(m)}</span>` : '<span class="dim">—</span>'; }]);
+      cols.splice(ai >= 0 ? ai + 1 : cols.length, 0, ['Mobile', (r) => { const a = out.agent(r); const m = mobileOf(mob, a); if (m) return `<span class="kd-mob">📞 ${esc(m)}</span>`; const n = mobileByName(mob, a); return n ? `<span class="kd-mob" title="Agent ID se nahi mila — sirf naam se match hua, ek baar confirm karein">📞 ${esc(n)} <small class="dim">naam se</small></span>` : '<span class="dim">—</span>'; }]);
     }
     state.spec = spec; state.rows = null; state.raw = null;
     const agentOf = out.agent || (() => null);
