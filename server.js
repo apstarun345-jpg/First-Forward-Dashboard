@@ -9893,6 +9893,41 @@ async function handleApi(req, res, url) {
       throw new HttpError(502, `Sheet history read nahi ho payi: ${err.message}`);
     }
   }
+  // 📥 Sheet ke "Tag Requests" tab se purani approved requests wapas import (admin). Body: {requests:[{date,agent,agentId,rows:[{cls,qty}],deviceName,serialNumber}]}
+  if (p === '/api/tag-requests/recovery/import-sheet' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const list = Array.isArray(body && body.requests) ? body.requests.slice(0, 2000) : [];
+    const w = workspaceStore();
+    const haveKeys = new Set((w.tagRequests || []).map((r) => r && r.importKey).filter(Boolean));
+    const usedIds = new Set((w.tagRequests || []).map(tagReqKeyOf));
+    const nowIso = new Date().toISOString();
+    const made = [];
+    for (const x of list) {
+      const date = String(x.date || '').slice(0, 10);
+      const name = shortText(x.agent, 120);
+      const rows = (Array.isArray(x.rows) ? x.rows : []).map((r) => ({ cls: shortText(r.cls, 12).toUpperCase(), approved: Math.max(0, Math.round(Number(r.qty) || 0)) })).filter((r) => r.cls || r.approved);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !name || !rows.length) continue;
+      const importKey = `sheet|${date}|${name.toLowerCase()}|${rows.map((r) => `${r.cls}:${r.approved}`).join(',')}|${x.seq || 0}`;
+      if (haveKeys.has(importKey)) continue;
+      haveKeys.add(importKey);
+      const at = new Date(`${date}T10:00:00+05:30`).toISOString();
+      const id = nextTagReqId(usedIds); usedIds.add(id);
+      made.push({
+        id, at, batch: workspaceId('tagbatch'), by: 'sheet-import', byName: 'Sheet import', employee: {}, employeeToken: '',
+        agent: { id: shortText(x.agentId, 40), agentId: shortText(x.agentId, 40), name, mobile: '', address: '', pincode: '', channel: '' },
+        itemName: x.deviceName ? 'Device' : 'FASTag', ...(x.deviceName ? { deviceName: shortText(x.deviceName, 80) } : {}), ...(x.serialNumber ? { serialNumber: shortText(x.serialNumber, 80) } : {}),
+        status: 'approved', note: 'Sheet se wapas import', adminNote: '', importKey, source: 'sheet-import',
+        rows: rows.map((r) => ({ agentId: shortText(x.agentId, 40), agentName: name, tl: '', channel: 'ff', cls: r.cls, last: 0, cur: 0, stock: 0, cover: null, priority: '', growth: 0, sugNet: 0, sugGross: 0, approved: r.approved, remark: '', requested: r.approved })),
+        total: rows.reduce((s2, r) => s2 + r.approved, 0), updatedAt: nowIso, updatedBy: user.username,
+        sheetSync: { at: nowIso }, sheetApprovalSync: { at: nowIso }
+      });
+    }
+    const merged = mergeMissingTagRequests(made);
+    await persist('notify');
+    logAudit(user, 'tag_request_recovered', { target: 'sheet', note: `${merged.added.length} requests · source Tag Requests sheet tab`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, received: list.length, added: merged.added.length, total: merged.total });
+  }
   if (p === '/api/tag-requests/recovery/restore' && method === 'POST') {
     requireAdmin(user);
     const body = await readBody(req);
