@@ -422,7 +422,7 @@ window.FF = window.FF || {};
     const url = `${base}${fresh ? '?fresh=1' : ''}`;
     // A hung request must not leave the card on "loading" — abort after 30s so the caller's auto-retry runs.
     const ctl = typeof AbortController === 'function' ? new AbortController() : null;
-    const timer = ctl ? setTimeout(() => ctl.abort(), 30000) : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), 55000) : null;
     const promise = fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' }, ...(ctl ? { signal: ctl.signal } : {}) })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`live feed HTTP ${res.status}`))))
       .catch((err) => { throw (err && err.name === 'AbortError') ? new Error('live feed timed out') : err; })

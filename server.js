@@ -14627,6 +14627,15 @@ server.listen(PORT, '0.0.0.0', () => {
   if (eirColLoop.unref) eirColLoop.unref();
 }
 
+// 🟩 GV live today: server har ~40 sec me khud refresh rakhta hai — deploy/restart ke baad pehla visitor Google ka wait na kare.
+{
+  const gvWarm = () => { try { if (db && db.settings) gvTodayFeed(false, { revalidate: true }).catch(() => {}); } catch { /* boot */ } };
+  const gvWarmBoot = setTimeout(gvWarm, 6e3);
+  const gvWarmLoop = setInterval(gvWarm, 40e3);
+  if (gvWarmBoot.unref) gvWarmBoot.unref();
+  if (gvWarmLoop.unref) gvWarmLoop.unref();
+}
+
 async function readLocalStore() {
   return {
     users: await readJson(FILES.users, []),

@@ -8461,3 +8461,11 @@ html body .page-home .kpi.kpi .pct-inline.neg, html body .page-home .kpi.kpi .hm
 .page-home .mh-panels,.page-home #home-charts{content-visibility:auto;contain-intrinsic-size:auto 600px}
 
 .mh-rr{display:flex;gap:10px;margin-top:4px;font-size:12px}.mh-rr .ff{color:#4f46e5}.mh-rr .gv{color:#059669}
+
+/* v195 colourful KPI cards */
+html body .page-home .kpi.kpi { background-image: linear-gradient(145deg, color-mix(in srgb, var(--ac) 22%, #fff) 0%, color-mix(in srgb, var(--ac) 8%, #fff) 55%, #fff 100%) !important; border: 1px solid color-mix(in srgb, var(--ac) 28%, #fff) !important; box-shadow: 0 10px 26px -16px color-mix(in srgb, var(--ac) 70%, transparent) !important; }
+.page-home .kpi::after { content: ""; position: absolute; right: -26px; top: -26px; width: 96px; height: 96px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--ac) 30%, transparent), transparent 70%); pointer-events: none; }
+html body .page-home .kpi.kpi .kpi-value, html body .page-home .kpi.kpi .kpi-value * { color: color-mix(in srgb, var(--ac) 82%, #0f172a) !important; }
+html body .page-home .kpi.kpi .kpi-title { color: color-mix(in srgb, var(--ac) 70%, #475569) !important; }
+.page-home .kpi .kpi-icon { background: color-mix(in srgb, var(--ac) 26%, #fff) !important; box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--ac) 60%, transparent); }
+:root[data-theme="dark"] html body .page-home .kpi.kpi { background-image: linear-gradient(145deg, color-mix(in srgb, var(--ac) 30%, #121a2e), #121a2e 70%) !important; }
