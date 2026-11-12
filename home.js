@@ -1847,7 +1847,9 @@ FF.pages = FF.pages || {};
       if (!root.isConnected) { clearInterval(liveRefresh); clearTimeout(liveTimer); return; }
       if (document.hidden || !canGv || !liveFromFeed) return;
       FF.data.gvToday().then((q) => { if (q && q.gv && feedMatchesCurrentClassMap(q.gv) && liveState.source !== 'master') { liveFromFeed = null; handleQuick(q); } }).catch(() => {});
+      if (FF.gv && FF.gv.syncApiToday) FF.gv.syncApiToday();
     }, 60000);
+    if (FF.gv && FF.gv.syncApiToday) setTimeout(() => FF.gv.syncApiToday(), 1500);
     if (liveRefresh && typeof liveRefresh.unref === 'function') liveRefresh.unref();
 
     // 30-day history is background only — it supplies Expected Today / same-weekday bars and

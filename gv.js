@@ -1071,11 +1071,52 @@ window.FF = window.FF || {};
   function todayKey() { return U.dateKey(new Date()); }
   const masterTodayReady = () => Array.isArray(state.data.master);
   /** Aaj ke GV Master rows — EIR daily row jaisa hi shape (downstream sab isi shape par chalta hai). */
+  // 🟢 v3.125.204 — GV direct API: jo aaj ke tags sheet me abhi nahi aaye (Apps Script 10-min gap) unhe bhi drill-down me jodo.
+  function withApiToday(list, tk) {
+    const a = state.apiToday;
+    if (!a || a.day !== tk || !Array.isArray(a.rows) || !a.rows.length) return list;
+    const have = new Set(), known = new Map();
+    for (const r of list) { if (r.agentId) known.set(r.agentId, r); if (r.tagId && r.date && U.dateKey(r.date) === tk) have.add(r.tagId); }
+    const extra = [];
+    for (const x of a.rows) {
+      if (!x.tagId || have.has(x.tagId)) continue;
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(x.added || ''));
+      const date = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date();
+      const k = known.get(x.agentId) || {};
+      const cch = U.clean(x.cch), vc = U.clean(x.vclass);
+      const tlId = k.gvTlId || k.tlId || U.clean(x.supervisorId);
+      const rawTl = U.clean(x.tlName);
+      const agentName = U.clean(x.agentName) || x.agentId;
+      extra.push({
+        date, ym: U.ymKey(date), day: date.getDate(),
+        agentId: x.agentId, agentName, tlId, gvTlId: k.gvTlId || '', supervisorId: U.clean(x.supervisorId),
+        tlName: k.tlName || rawTl || (tlId ? `TL ${tlId}` : 'Direct'),
+        directAgent: k.directAgent !== undefined ? k.directAgent : FF.config.isDirectAgent({ agentId: x.agentId, agentName, tlId, supervisorId: x.supervisorId, gvTlId: '', tlName: rawTl, channel: 'GV Partner' }, 'gv'),
+        channel: 'GV Partner', cch, cls: normClass(cch || vc), group: configuredGroup(cch, vc || cch),
+        status: U.clean(x.status) || 'Issuance', tagType: 'Other',
+        tagId: x.tagId, vrn: U.clean(x.vrn), serial: U.clean(x.serial), customer: U.clean(x.customer), productId: U.clean(x.productId),
+        amount: Number(x.amount) || 0, commission: Number(x.commission) || 0, commissionHasValue: true, time: ''
+      });
+    }
+    return extra.length ? list.concat(extra) : list;
+  }
+  /** Server se aaj ke API rows lao (Home har 60 s me bulata hai). Naya data aaya to true. */
+  async function syncApiToday() {
+    try {
+      const res = await fetch('/api/gv-today-rows', { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } });
+      if (!res.ok) return false;
+      const j = await res.json();
+      if (!j || !j.ok || !Array.isArray(j.rows)) return false;
+      const changed = !state.apiToday || state.apiToday.at !== j.at;
+      state.apiToday = { day: j.day, at: j.at, rows: j.rows };
+      return changed;
+    } catch { return false; }
+  }
   function masterTodayRows() {
     if (!masterTodayReady()) return [];
     const tk = todayKey();
     const out = [];
-    for (const r of rows()) {
+    for (const r of withApiToday(rows(), tk)) {
       if (!r.date || U.dateKey(r.date) !== tk) continue;
       const replacement = /replacement/i.test(r.status || '');
       out.push({
@@ -1129,11 +1170,11 @@ window.FF = window.FF || {};
     const eir = eirDailyRows();
     if (!masterTodayReady()) return eir;
     const tk = todayKey(), master = state.data.master;
-    if (liveDailyMemo && liveDailyMemo.src === eirRowsMemo && liveDailyMemo.master === master && liveDailyMemo.tk === tk && liveDailyMemo.n === master.length) return liveDailyMemo.out.slice();
+    if (liveDailyMemo && liveDailyMemo.src === eirRowsMemo && liveDailyMemo.master === master && liveDailyMemo.tk === tk && liveDailyMemo.n === master.length && liveDailyMemo.api === ((state.apiToday && state.apiToday.at) || 0)) return liveDailyMemo.out.slice();
     const live = masterTodayRows();
     const rest = eir.filter((r) => U.dateKey(r.date || r.d || new Date(0)) !== tk);
     const out = rest.concat(live).sort((a, b) => (a.d && b.d ? a.d - b.d : 0));
-    liveDailyMemo = { src: eirRowsMemo, master, tk, n: master.length, out };
+    liveDailyMemo = { src: eirRowsMemo, master, tk, n: master.length, api: (state.apiToday && state.apiToday.at) || 0, out };
     return out.slice();
   }
 
@@ -1480,7 +1521,7 @@ window.FF = window.FF || {};
     const daily = eirDaily();
     const d = state.data;
     // + the one admin setting that changes how rows are attributed (resolve() → isChannelTl), so a Settings edit is never served stale.
-    return [daily, lenOf(daily), d.master, lenOf(d.master), d.stockAgent, lenOf(d.stockAgent), d.report, lenOf(d.report), todayKey(), (FF.config && FF.config.eir && FF.config.eir.gvChannelTl) || ''];
+    return [daily, lenOf(daily), d.master, lenOf(d.master), d.stockAgent, lenOf(d.stockAgent), d.report, lenOf(d.report), todayKey(), (FF.config && FF.config.eir && FF.config.eir.gvChannelTl) || '', (state.apiToday && state.apiToday.at) || 0];
   }
   const sameKey = (a, b) => !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]);
   const latestMemo = { key: null, value: null };
@@ -1552,7 +1593,7 @@ window.FF = window.FF || {};
   const GV = {
     DATASETS, onConfig, preload, refresh, need, get, error, reset, enabled, wanted, retryNow, on,
     normClass, classGroup, clsNum, configuredGroup,
-    rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, masterTlIds, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
+    rows, masterRows: rows, issuanceRows, tlIssuanceRows, masterTlIdentity, masterTlIds, agentIssuanceRows, eirDailyRows, liveDailyRows, gvToday, masterTodayRows, syncApiToday, todayKey, months, latestDate, summary, dailySeries, weekly, byDim, agentRollup, tlRollup, directRollup, people,
     REPORT_COLS, REPORT_COLS_LABELS, reportMonthBins, reportSheetBins,
     mapping, mappingWarnings, ensureAssignmentMap, stockStatusKind,
     get labels() { return state.labels; },

@@ -1925,6 +1925,7 @@ function gvTodayLastGood() {
   return b && b.date === dateKeyNow() ? b : null;
 }
 // 🟢 GV direct API (Apps Script wali hi API) — sheet ke 10-min gap ke bina. Secret sirf env var GV_API_SECRET me (code me nahi).
+let gvApiRowsLast = null;
 async function gvTodayApiRows(settings, day, secret) {
   const url = process.env.GV_API_URL || 'https://www.apnapayment.com/api/agent/dailytag/idfc-issued';
   const ctl = new AbortController();
@@ -1934,13 +1935,14 @@ async function gvTodayApiRows(settings, day, secret) {
     if (!res.ok) throw new Error(`GV API HTTP ${res.status}`);
     const json = await res.json();
     if (!json || !json.success || !Array.isArray(json.data)) throw new Error('GV API bad response');
-    const seen = new Set(), rows = [];
+    const seen = new Set(), rows = [], recs = [];
     for (const r of json.data) {
       const tag = String(r.tag_id_number || r.tag_id || r.tagId || '').trim();
       if (!tag || seen.has(tag)) continue;
       const added = String(r.date_added || r.dateAdded || r.created_at || '').trim();
       if (added && !added.startsWith(day)) continue;
       seen.add(tag);
+      recs.push({ tagId: tag, agentId: String(r.unique_id || r.id || ''), agentName: String(r.agent_name || ''), supervisorId: String(r.supervisor_agent_id || ''), tlName: String(r.supervisor_name || ''), vrn: String(r.vno || r.v_no || r.vehicle_no || ''), vclass: String(r.vclass || r.v_class || ''), cch: String(r.cch || ''), serial: String(r.sno || r.serial_no || ''), amount: Number(r.amount) || 0, customer: String(r.name || r.customer_name || ''), productId: String(r.product_id || ''), commission: Number(r.commission) || 0, status: String(r.status || ''), added });
       rows.push({
         cls: classBucket(String(r.cch || ''), String(r.vclass || r.v_class || ''), settings.gvClassCch),
         status: String(r.status || ''),
@@ -1948,6 +1950,7 @@ async function gvTodayApiRows(settings, day, secret) {
         vrnSt: vrnLengthStatus(String(r.vno || r.v_no || r.vehicle_no || ''), settings)
       });
     }
+    gvApiRowsLast = { day, at: Date.now(), rows: recs };
     return rows;
   } finally { clearTimeout(timer); }
 }
@@ -7310,6 +7313,12 @@ async function handleApi(req, res, url) {
     } catch (err) {
       return sendJson(res, 200, { ok: false, error: String((err && err.message) || err).slice(0, 200) });
     }
+  }
+  if (p === '/api/gv-today-rows' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    try { await gvTodayFeed(false); } catch { /* last good rows below */ }
+    const g = gvApiRowsLast && gvApiRowsLast.day === dateKeyNow() ? gvApiRowsLast : null;
+    return sendJson(res, 200, { ok: !!g, day: g ? g.day : dateKeyNow(), at: g ? g.at : 0, rows: g ? g.rows : [] });
   }
   if (p === '/api/gv-today' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
