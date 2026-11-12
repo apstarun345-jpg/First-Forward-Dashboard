@@ -10680,6 +10680,28 @@ async function handleApi(req, res, url) {
     logAudit(user, 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · target ${cfg.spreadsheetId || 'script-sheet'} · ${cfg.columns.length} cols${cfg.columnMap ? ' (by letter)' : ''} · ${cfg.rowMode}`, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, config: cfg, connected: !!sheetSyncStore(), publicForm: publicTagView(), targetId: cfg.spreadsheetId || '' });
   }
+  // ⏪ Tag sheet config recovery: purani saves me se sirf "Google Sheet me direct entry" ki setting wapas lao (baaki data nahi chhuta).
+  if (p === '/api/tag-request-sheet/history' && method === 'GET') {
+    requireAdmin(user);
+    const r = await tagReqHistorySaves({ limit: 10, includeValues: true });
+    const brief = (c) => (c && typeof c === 'object' ? { enabled: !!c.enabled, tab: c.tab || '', sheetLink: c.sheetLink ? 'set' : '', spreadsheetId: c.spreadsheetId ? 'set' : '', rowMode: c.rowMode || '', cols: Array.isArray(c.columns) ? c.columns.length : 0, columnMap: c.columnMap ? Object.entries(c.columnMap).map(([k, v]) => `${k}=${v}`).join(' ') : '', columns: Array.isArray(c.columns) ? c.columns.join(',') : '', updatedAt: c.updatedAt || '', updatedBy: c.updatedBy || '', v: c.v || 0 } : null);
+    return sendJson(res, 200, { ok: true, current: brief(tagSheetConfig()), saves: (r.saves || []).map((x) => ({ at: x.at, unavailable: x.unavailable || '', cfg: brief(x.workspace && x.workspace.tagRequestSheet) })) });
+  }
+  if (p === '/api/tag-request-sheet/restore' && method === 'POST') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const r = await tagReqHistorySaves({ limit: 10, includeValues: true });
+    const hit = (r.saves || []).find((x) => String(x.at) === String(body.at || ''));
+    const old = hit && hit.workspace && hit.workspace.tagRequestSheet;
+    if (!old || typeof old !== 'object') throw new HttpError(404, 'Is save me tag sheet config nahi mili.');
+    const w = workspaceStore();
+    w.tagRequestSheet = JSON.parse(JSON.stringify(old));
+    tagSheetConfig();
+    w.tagRequestSheet.restoredAt = new Date().toISOString(); w.tagRequestSheet.restoredFrom = String(hit.at);
+    await persist('notify');
+    logAudit(user, 'tag_sheet_config_restored', { note: `from ${hit.at}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, config: w.tagRequestSheet });
+  }
   if (p === '/api/tag-request-sheet/test' && method === 'POST') {
     requireAdmin(user);
     const store = sheetSyncStore();
@@ -15113,11 +15135,13 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
     // Personal-link activity feed: write the pending tail before the process goes away (deploys).
     // v3.125.104 — notify sirf tab likho jab sach me kuch baaki ho (har deploy par likhne se naya instance beech ka adhura record padh leta tha)
     try { let dirty = !!notifyLazyTimer; if (plFlushTimer) { clearTimeout(plFlushTimer); plFlushTimer = null; db.notify.plLog = plActivityLog.slice(-500); dirty = true; } if (dirty) persist('notify', { force: true }).catch(() => {}); } catch { /* best effort */ }
-    if (sheetsStore && sheetsStore.drain) sheetsStore.drain().catch(() => {});
+    const drainP = (sheetsStore && sheetsStore.drain) ? sheetsStore.drain().catch(() => {}) : Promise.resolve();
     server.close(async () => {
       await Promise.allSettled([...writeQueue.values()]);
+      // v3.125.211 — deploy par pending Sheet save (settings / notify) beech me na mare: drain poora hone tak ruko (max ~22s).
+      await Promise.race([drainP, new Promise((r) => setTimeout(r, 22000))]);
       process.exit(0);
     });
-    setTimeout(() => process.exit(1), 10000).unref();
+    setTimeout(() => process.exit(1), 26000).unref();
   });
 }
