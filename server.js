@@ -9350,6 +9350,48 @@ async function handleApi(req, res, url) {
     }
     return filled;
   }
+  // 📞 v3.125.218 — Agent mobile directory: (1) "Agent Details - IDFC" sheet (Agent ID / New Agent ID / Name / Mobile),
+  // (2) Address book (memory + Address tab), (3) tag requests. Site ke master data me agent mobile nahi hota — KPI lists / labels isi se.
+  const AGENT_DETAILS_SHEET = String(process.env.AGENT_DETAILS_SHEET_ID || '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk').trim();
+  const AGENT_DETAILS_TAB = String(process.env.AGENT_DETAILS_TAB || 'Sheet4').trim();
+  const agentMobileRt = { at: 0, data: null, promise: null };
+  const mobIdKeys = (id) => { const raw = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!raw) return []; const dg = raw.replace(/\D/g, '').replace(/^0+/, ''); return [...new Set([raw, dg && dg.length >= 3 ? `#${dg}` : ''].filter(Boolean))]; };
+  const mobNameKey = (n) => String(n || '').toLowerCase().replace(/[^a-z]/g, '');
+  async function agentMobileData(force) {
+    if (!force && agentMobileRt.data && Date.now() - agentMobileRt.at < 3 * 3600e3) return agentMobileRt.data;
+    if (agentMobileRt.promise) return agentMobileRt.promise;
+    agentMobileRt.promise = (async () => {
+      const ids = {}, names = {}, nameClash = new Set();
+      let sources = { sheet: 0, address: 0, requests: 0 }, sheetError = '';
+      const put = (idList, name, mob, src, override) => {
+        const d = tagDigits(mob).slice(-10);
+        if (d.length !== 10 || /^0/.test(d)) return false;
+        idList.flatMap(mobIdKeys).forEach((k) => { if (override || !ids[k]) ids[k] = d; });
+        const nk = mobNameKey(name);
+        if (nk.length >= 4) { if (names[nk] && names[nk] !== d && !override) nameClash.add(nk); else names[nk] = d; }
+        sources[src]++; return true;
+      };
+      // 1) Agent Details sheet (purana record) — sabse pehle, baaki sources ise override kar sakte hain
+      const store = sheetSyncStore();
+      if (store && AGENT_DETAILS_SHEET) {
+        try {
+          const out = await store.call('readrange', { spreadsheetId: AGENT_DETAILS_SHEET, tab: AGENT_DETAILS_TAB, startRow: 2, columns: ['A', 'B', 'C', 'H'] });
+          (out.rows || []).forEach((r) => { if (Array.isArray(r)) put([r[0], r[1]], r[2], r[3], 'sheet', false); });
+        } catch (err) { sheetError = String(err && err.message || err).slice(0, 160); }
+      }
+      // 2) Address book (memory + Address tab) — taaza, override
+      let map = null; try { map = await addressBookMap(); } catch { map = null; }
+      const seen = new Map();
+      if (map) for (const [k, e] of map) seen.set(k, e);
+      for (const [k, e] of Object.entries(addressBookMemoryEntries())) seen.set(k, { ...(seen.get(k) || {}), ...e, mobile: (e && e.mobile) || (seen.get(k) || {}).mobile || '' });
+      for (const e of seen.values()) if (e) put([e.agentId], e.agent || e.agentName, e.mobile, 'address', true);
+      // 3) Tag requests (sabse nayi wali last me → override)
+      for (const r of (workspaceStore().tagRequests || [])) if (r && r.agent) put([r.agent.agentId, r.agent.id], r.agent.name, r.agent.mobile, 'requests', true);
+      nameClash.forEach((k) => { delete names[k]; });   // ek naam ke do alag number → naam se mat batao
+      return { ok: true, at: new Date().toISOString(), ids, names, count: Object.keys(ids).length, sources, sheetError };
+    })().then((d) => { agentMobileRt.data = d; agentMobileRt.at = Date.now(); return d; }).finally(() => { agentMobileRt.promise = null; });
+    return agentMobileRt.promise;
+  }
   async function syncAddressBookToSheet(requests) {
     const fresh = (Array.isArray(requests) ? requests : [requests]).map(addressEntryFromRequest).filter(Boolean);
     // Sheet ka maujooda data (Address tab — jahan mobile haath se bhi bhara ja sakta hai) bhi merge me lo.
@@ -9998,6 +10040,13 @@ async function handleApi(req, res, url) {
       if (err instanceof HttpError) throw err;
       throw new HttpError(502, `Sheet history read nahi ho payi: ${err.message}`);
     }
+  }
+  if (p === '/api/agent-mobiles' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required.');
+    if (user.role !== 'admin' && !(Array.isArray(user.permissions) && user.permissions.includes('contacts'))) throw new HttpError(403, 'Mobile numbers dekhne ki permission nahi hai.');
+    const d = await agentMobileData(url.searchParams.get('fresh') === '1' && user.role === 'admin');
+    res.setHeader('Cache-Control', 'private, max-age=600');
+    return sendJson(res, 200, d);
   }
   // 📇 Purani/imported requests me agent ka mobile+address+pincode Address book se bharo (admin). Dispatch label isi se bharta hai.
   if (p === '/api/tag-requests/recovery/fill-addresses' && method === 'POST') {

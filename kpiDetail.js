@@ -1237,11 +1237,38 @@ window.FF = window.FF || {};
   const LISTS = new Map();
   /** FF.kpiDetail.registerList(name, (spec) => ({ title, sub, unit, columns: [[label, (row) => html, num?]], rows, agent: (row) => ({ name, id, ch }) })) */
   function registerList(name, fn) { if (name && typeof fn === 'function') LISTS.set(String(name), fn); }
+  // 📞 v3.125.218 — agent mobile (server: Agent Details sheet + Address book + tag requests). Har agent list me Mobile column.
+  const MOB = { data: null, at: 0, p: null };
+  const canSeeMobile = () => { try { return FF.auth.isAdmin() || FF.auth.can('contacts'); } catch { return false; } };
+  function loadMobiles() {
+    if (MOB.data && Date.now() - MOB.at < 20 * 60e3) return Promise.resolve(MOB.data);
+    if (MOB.p) return MOB.p;
+    MOB.p = Promise.race([FF.auth.api('/api/agent-mobiles'), new Promise((ok) => setTimeout(() => ok(null), 20000))])
+      .then((d) => { if (d && d.ok) { MOB.data = d; MOB.at = Date.now(); } return MOB.data || { ids: {}, names: {} }; })
+      .catch(() => MOB.data || { ids: {}, names: {} })
+      .finally(() => { MOB.p = null; });
+    return MOB.p;
+  }
+  function mobileOf(d, a) {
+    if (!d || !a) return '';
+    const raw = String(a.id || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const dg = raw.replace(/\D/g, '').replace(/^0+/, '');
+    const nk = String(a.name || '').toLowerCase().replace(/[^a-z]/g, '');
+    return (raw && d.ids[raw]) || (dg.length >= 3 && d.ids[`#${dg}`]) || (nk.length >= 4 && d.names[nk]) || '';
+  }
+  FF.agentMobiles = { load: loadMobiles, of: (a) => mobileOf(MOB.data, a), canSee: canSeeMobile };
   async function listDetail(spec) {
     const fn = LISTS.get(String(spec.list || ''));
     if (!fn) return peopleDetail(spec);
     const out = (await fn(spec)) || {};
-    const rows = out.rows || [], cols = out.columns || [];
+    const rows = out.rows || [];
+    let cols = out.columns || [];
+    if (out.agent && canSeeMobile() && !cols.some((c) => /mobile/i.test(String(c[0])))) {
+      const mob = await loadMobiles();
+      const ai = cols.findIndex((c) => /^agent$/i.test(String(c[0])));
+      cols = cols.slice();
+      cols.splice(ai >= 0 ? ai + 1 : cols.length, 0, ['Mobile', (r) => { const m = mobileOf(mob, out.agent(r)); return m ? `<span class="kd-mob">📞 ${esc(m)}</span>` : '<span class="dim">—</span>'; }]);
+    }
     state.spec = spec; state.rows = null; state.raw = null;
     const agentOf = out.agent || (() => null);
     const tlOf = out.tl || (() => null);
