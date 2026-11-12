@@ -9307,7 +9307,7 @@ async function handleApi(req, res, url) {
     if (!store) { addressBookRuntime.map = fallback; addressBookRuntime.at = now; return fallback; }
     const cfg = tagSheetConfig();
     const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
-    addressBookRuntime.promise = store.call('readaddresses', { tab: ADDRESS_BOOK_TAB, ...(targetId ? { spreadsheetId: targetId } : {}) })
+    addressBookRuntime.promise = store.call('readaddresses', { tab: ADDRESS_BOOK_TAB }) // 📇 Address hamesha storage sheet ke apne tab me (tag-request sheet alag ho tab bhi)
       .then((out) => {
         const map = fallback;
         (out.rows || []).forEach((e) => { if (e && e.key) map.set(String(e.key), e); });
@@ -9320,6 +9320,30 @@ async function handleApi(req, res, url) {
       .finally(() => { addressBookRuntime.promise = null; });
     return addressBookRuntime.promise;
   }
+  /** Jin requests me agent ka mobile/address/pincode nahi hai (jaise sheet-import) unhe Address book se bharo. Naam/ID se match. */
+  async function fillRequestAddresses() {
+    const map = await addressBookMap();
+    const mem = addressBookMemoryEntries();
+    let filled = 0;
+    for (const r of (workspaceStore().tagRequests || [])) {
+      if (!r || typeof r !== 'object') continue;
+      const a = r.agent && typeof r.agent === 'object' ? r.agent : (r.agent = {});
+      if (a.address && a.mobile && a.pincode) continue;
+      const id = String(a.agentId || a.id || (r.rows && r.rows[0] && r.rows[0].agentId) || '').trim();
+      const name = tagNameKey(a.name || (r.rows && r.rows[0] && r.rows[0].agentName) || '');
+      const keys = [];
+      ['ff', 'gv'].forEach((ch) => { if (id) keys.push(`${ch}|id:${id}`); if (name) keys.push(`${ch}|n:${name}`); });
+      const e = keys.map((k) => mem[k] || map.get(k)).find((x) => x && (x.address || x.pincode || x.mobile));
+      if (!e) continue;
+      a.mobile = a.mobile || e.mobile || ''; a.address = a.address || e.address || ''; a.pincode = a.pincode || tagDigits(e.pincode).slice(0, 6);
+      if (e.dispatchName && !a.dispatchName) a.dispatchName = e.dispatchName;
+      if (e.tl && !a.tl) a.tl = e.tl;
+      if (!a.channel) a.channel = e.channel === 'gv' ? 'gv' : 'ff';
+      if (!a.agentId && e.agentId) { a.agentId = String(e.agentId); a.id = a.id || a.agentId; }
+      filled++;
+    }
+    return filled;
+  }
   async function syncAddressBookToSheet(requests) {
     const entries = (Array.isArray(requests) ? requests : [requests]).map(addressEntryFromRequest).filter(Boolean);
     rememberAddressBook(entries);
@@ -9329,7 +9353,7 @@ async function handleApi(req, res, url) {
     const cfg = tagSheetConfig();
     const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
     try {
-      const out = await store.call('upsertaddresses', { tab: ADDRESS_BOOK_TAB, rows: entries, ...(targetId ? { spreadsheetId: targetId } : {}) });
+      const out = await store.call('upsertaddresses', { tab: ADDRESS_BOOK_TAB, rows: entries });
       addressBookRuntime.map = null; addressBookRuntime.at = 0;
       return { ok: true, local: true, synced: true, count: entries.length, sheet: out };
     } catch (err) {
@@ -9957,6 +9981,15 @@ async function handleApi(req, res, url) {
       throw new HttpError(502, `Sheet history read nahi ho payi: ${err.message}`);
     }
   }
+  // 📇 Purani/imported requests me agent ka mobile+address+pincode Address book se bharo (admin). Dispatch label isi se bharta hai.
+  if (p === '/api/tag-requests/recovery/fill-addresses' && method === 'POST') {
+    requireAdmin(user);
+    const filled = await fillRequestAddresses();
+    for (const r of (workspaceStore().tagRequests || [])) if (r && r.by === 'sheet-import' && (!r.byName || r.byName === 'Sheet import')) r.byName = (r.agent && r.agent.name) || r.byName;
+    if (filled) await persist('notify');
+    const missing = (workspaceStore().tagRequests || []).filter((r) => r && !(r.agent && r.agent.address)).length;
+    return sendJson(res, 200, { ok: true, filled, stillWithoutAddress: missing, total: (workspaceStore().tagRequests || []).length });
+  }
   // 📥 Sheet ke "Tag Requests" tab se purani approved requests wapas import (admin). Body: {requests:[{date,agent,agentId,rows:[{cls,qty}],deviceName,serialNumber}]}
   if (p === '/api/tag-requests/recovery/import-sheet' && method === 'POST') {
     requireAdmin(user);
@@ -9981,7 +10014,7 @@ async function handleApi(req, res, url) {
       const mob = String(x.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), addr = shortText(String(x.address || '').replace(/\s+/g, ' '), 300), pin = tagDigits(x.pincode).slice(0, 6), tlName = shortText(x.tl, 120);
       const id = nextTagReqId(usedIds); usedIds.add(id);
       made.push({
-        id, at, batch: workspaceId('tagbatch'), by: 'sheet-import', byName: 'Sheet import', employee: {}, employeeToken: '',
+        id, at, batch: workspaceId('tagbatch'), by: 'sheet-import', byName: name, employee: {}, employeeToken: '',
         agent: { id: shortText(x.agentId, 40), agentId: shortText(x.agentId, 40), name, mobile: mob, address: addr, pincode: pin, channel: ch, tl: tlName },
         ...(x.courier ? { courier: shortText(x.courier, 40) } : {}),
         itemName: x.deviceName ? 'Device' : 'FASTag', ...(x.deviceName ? { deviceName: shortText(x.deviceName, 80) } : {}), ...(x.serialNumber ? { serialNumber: shortText(x.serialNumber, 80) } : {}),
@@ -9992,10 +10025,11 @@ async function handleApi(req, res, url) {
       });
     }
     const merged = mergeMissingTagRequests(made);
+    let filled = 0; try { filled = await fillRequestAddresses(); } catch (err) { console.warn('fill addresses:', err && err.message); }
     try { const ae = made.map(addressEntryFromRequest).filter(Boolean); if (ae.length) { rememberAddressBook(ae); addressBookRuntime.map = null; addressBookRuntime.at = 0; } } catch { /* optional */ }
     await persist('notify');
     logAudit(user, 'tag_request_recovered', { target: 'sheet', note: `${merged.added.length} requests · source Tag Requests sheet tab`, ip: clientIp(req) });
-    return sendJson(res, 200, { ok: true, received: list.length, added: merged.added.length, total: merged.total });
+    return sendJson(res, 200, { ok: true, received: list.length, added: merged.added.length, total: merged.total, addressFilled: filled });
   }
   if (p === '/api/tag-requests/recovery/restore' && method === 'POST') {
     requireAdmin(user);
