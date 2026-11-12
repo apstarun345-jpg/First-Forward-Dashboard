@@ -112,6 +112,7 @@ window.FF = window.FF || {};
     { id: 'gvPerformance', icon: '🏆', label: 'GV Performance', desc: 'GV agents & TLs (GV REPORT)', perm: 'gvPerformance', group: 'Reports', twinOf: 'performance' },
     { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'Reports', twinOf: 'stock' },
     { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStockReport', group: 'GV Partner' },
+    { id: 'gvApiReport', icon: '🛰️', label: 'GV API Report', desc: 'Direct API · date range · agent/TL filter · VRN/tag multi-search · commission class-wise', perm: 'gvApiReport', group: 'GV Partner', adminOnly: true },
     { id: 'gvPayout', icon: '💸', label: 'Commission Payout', desc: 'Agent / TL commission · class · last & current month tags', perm: 'gvPayout', group: 'GV Partner', adminOnly: true },
     { id: 'fastagMapping', icon: '🔗', label: 'FASTag Mapping', desc: 'StockDataa lookup · barcode range / tag ID / agent mapping · CSV', perm: 'fastagMapping', group: 'GV Partner', adminOnly: true },
     { id: 'dualChannel', icon: '🔗', label: 'Dual-channel Agents', desc: 'Verified GV + FF overlap · separate & combined', perm: 'dualChannel', group: 'Cross Channel' },

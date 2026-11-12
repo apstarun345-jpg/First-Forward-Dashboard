@@ -163,6 +163,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'gvPerformance', label: 'GV Partner · Performance', group: 'GV Partner' },
   { key: 'gvStock', label: 'GV Partner · Stock', group: 'GV Partner' },
   { key: 'gvStockReport', label: 'GV Partner · GV Stock Report (GV REPORT-wise)', group: 'GV Partner' },
+  { key: 'gvApiReport', label: 'GV Partner · GV API Report (direct API · date range · filters · commission)', group: 'GV Partner' },
   { key: 'gvPayout', label: 'GV Partner · Commission Payout (agent / TL commission + tags issued)', group: 'GV Partner' },
   { key: 'fastagMapping', label: 'GV Partner · FASTag Mapping (admin-only API mapping)', group: 'GV Partner' },
   { key: 'agentsOverview', label: 'Reports · GV & FF Agents Summary (stock agents · direct/TL · active/inactive)', group: 'Reports' },
@@ -762,7 +763,7 @@ function permissionDiff(before, after) {
 }
 const activityLast = new Map();
 // Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
-const CLIENT_PAGES = new Set(['gvPayout', 'home', 'tagIssued', 'tagRequest', 'targets', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'charts', 'dispatchPlan', 'tlScorecard']);
+const CLIENT_PAGES = new Set(['gvPayout', 'gvApiReport', 'home', 'tagIssued', 'tagRequest', 'targets', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'charts', 'dispatchPlan', 'tlScorecard']);
 /** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
 function pageLinkFor(option, query) {
   const t = String(option || '').trim();
@@ -1925,6 +1926,66 @@ function gvTodayLastGood() {
   return b && b.date === dateKeyNow() ? b : null;
 }
 // 🟢 GV direct API (Apps Script wali hi API) — sheet ke 10-min gap ke bina. Secret sirf env var GV_API_SECRET me (code me nahi).
+// 📊 GV API Report: kisi bhi date ke raw API records (din-wise cache; aaj ka 30 sec, purane din 1 ghanta).
+const gvApiDayCache = new Map();
+async function gvApiDayRecords(day, secret) {
+  const hit = gvApiDayCache.get(day);
+  const ttl = day === dateKeyNow() ? 30e3 : 60 * 60e3;
+  if (hit && Date.now() - hit.at < ttl) return hit.data;
+  const url = process.env.GV_API_URL || 'https://www.apnapayment.com/api/agent/dailytag/idfc-issued';
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 25000);
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Secret-Key': secret }, body: JSON.stringify({ report_date: day }), signal: ctl.signal });
+    if (!res.ok) throw new Error(`GV API HTTP ${res.status}`);
+    const json = await res.json();
+    if (!json || !json.success || !Array.isArray(json.data)) throw new Error('GV API bad response');
+    gvApiDayCache.set(day, { at: Date.now(), data: json.data });
+    if (gvApiDayCache.size > 120) gvApiDayCache.delete(gvApiDayCache.keys().next().value);
+    return json.data;
+  } finally { clearTimeout(timer); }
+}
+const GV_API_KNOWN = new Set(['unique_id', 'id', 'agent_name', 'supervisor_agent_id', 'supervisor_name', 'vno', 'v_no', 'vehicle_no', 'vclass', 'v_class', 'cch', 'sno', 'serial_no', 'tag_id_number', 'tag_id', 'tagId', 'amount', 'name', 'customer_name', 'product_id', 'commission', 'status', 'commission_status', 'date_added', 'dateAdded', 'created_at']);
+async function gvApiReport(from, to, settings) {
+  const secret = process.env.GV_API_SECRET;
+  if (!secret) throw new HttpError(400, 'GV_API_SECRET Render env var set nahi hai.');
+  const days = [];
+  for (let d = new Date(`${from}T00:00:00Z`); d <= new Date(`${to}T00:00:00Z`) && days.length < 45; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
+  const out = [], errors = [];
+  let idx = 0;
+  const worker = async () => {
+    while (idx < days.length) {
+      const day = days[idx++];
+      try {
+        const data = await gvApiDayRecords(day, secret);
+        const seen = new Set();
+        for (const r of data) {
+          const tag = String(r.tag_id_number || r.tag_id || r.tagId || '').trim();
+          const key = tag || String(r.unique_id || r.id || '') + '|' + String(r.sno || r.serial_no || '');
+          if (seen.has(key)) continue; seen.add(key);
+          const added = String(r.date_added || r.dateAdded || r.created_at || '').trim();
+          const vno = String(r.vno || r.v_no || r.vehicle_no || '');
+          const ex = {};
+          for (const k of Object.keys(r)) if (!GV_API_KNOWN.has(k) && r[k] !== null && r[k] !== '') ex[k] = r[k];
+          out.push({
+            day: /^\d{4}-\d{2}-\d{2}/.test(added) ? added.slice(0, 10) : day, time: added.slice(11, 19), added,
+            id: String(r.unique_id || r.id || ''), agent: String(r.agent_name || ''), supId: String(r.supervisor_agent_id || ''), supName: String(r.supervisor_name || ''),
+            vno, vclass: String(r.vclass || r.v_class || ''), cch: String(r.cch || ''), sno: String(r.sno || r.serial_no || ''), tag,
+            amount: Number(r.amount) || 0, name: String(r.name || r.customer_name || ''), product: String(r.product_id || ''),
+            commission: r.commission === null || r.commission === '' || r.commission === undefined ? null : Number(r.commission) || 0,
+            status: String(r.status || ''), cstatus: String(r.commission_status || ''),
+            cls: classBucket(String(r.cch || ''), String(r.vclass || r.v_class || ''), settings.gvClassCch),
+            vrnSt: vrnLengthStatus(vno, settings) || '',
+            ...(Object.keys(ex).length ? { ex } : {})
+          });
+        }
+      } catch (err) { errors.push({ day, error: String((err && err.message) || err).slice(0, 120) }); }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  out.sort((a, b) => (a.added < b.added ? -1 : a.added > b.added ? 1 : 0));
+  return { ok: true, from, to, days: days.length, rows: out, errors, truncated: days.length >= 45 && new Date(`${to}T00:00:00Z`) > new Date(`${days[days.length - 1]}T00:00:00Z`) };
+}
 let gvApiRowsLast = null;
 async function gvTodayApiRows(settings, day, secret) {
   const url = process.env.GV_API_URL || 'https://www.apnapayment.com/api/agent/dailytag/idfc-issued';
@@ -7313,6 +7374,17 @@ async function handleApi(req, res, url) {
     } catch (err) {
       return sendJson(res, 200, { ok: false, error: String((err && err.message) || err).slice(0, 200) });
     }
+  }
+  if (p === '/api/gv-api-report' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (user.role !== 'admin') throw new HttpError(403, 'GV API Report sirf admin ke liye hai.');
+    const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+    const today = dateKeyNow();
+    let from = url.searchParams.get('from'), to = url.searchParams.get('to');
+    if (!ok(from)) from = today; if (!ok(to)) to = from;
+    if (to < from) [from, to] = [to, from];
+    try { return sendJson(res, 200, await gvApiReport(from, to, db.settings || {})); }
+    catch (err) { if (err instanceof HttpError) throw err; return sendJson(res, 200, { ok: false, error: String((err && err.message) || err).slice(0, 200), rows: [] }); }
   }
   if (p === '/api/gv-today-rows' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
