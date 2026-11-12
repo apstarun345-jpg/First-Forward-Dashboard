@@ -8496,3 +8496,6 @@ html body .page-home .kpi.kpi[data-kpi-title^="Expected in"] .hm-expected-compar
 .msp-vc3 small { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; opacity: .92; }
 .msp-vc3 b { font-size: 19px; font-weight: 800; line-height: 1.1; }
 .msp-vc3 .a { background: linear-gradient(135deg, #4f46e5, #6366f1); } .msp-vc3 .b { background: linear-gradient(135deg, #7c3aed, #a855f7); } .msp-vc3 .c { background: linear-gradient(135deg, #ea580c, #f59e0b); }
+html body .msp-vc3 span, html body .msp-vc3 small, html body .msp-vc3 b { color: #fff !important; text-shadow: none !important; }
+html body .msp-vc3 small { font-size: 11px; opacity: .95; }
+html body .msp-vc3 b { font-size: 20px; }
