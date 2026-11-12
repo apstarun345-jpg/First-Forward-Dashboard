@@ -9167,6 +9167,10 @@ async function handleApi(req, res, url) {
     if (addressEntries.length) {
       syncAddressBookToSheet(created).then(() => persist('notify').catch(() => {})).catch((err) => console.warn('tag request address sync:', err && err.message));
     }
+    // 📇 Nayi request me mobile/address/pincode khaali reh gaya ho to Address book (memory + sheet) se turant bhar do — label par sab aaye.
+    if (created.some((r) => !(r.agent && r.agent.mobile && r.agent.address && r.agent.pincode))) {
+      fillRequestAddresses().then((n) => { if (n) persistBackground('notify'); }).catch(() => {});
+    }
     // v5: Batch Pending requests sync only after each request is approved by admin.
     return {
       batch, created,
@@ -9421,7 +9425,10 @@ async function handleApi(req, res, url) {
         dispatchName: ra.dispatchName || '', tl: ra.tl || '', lastRequestAt
       });
       if (fresh) {
-        const fallback = keys.map((key) => asContact(memory[key])).find(Boolean);
+        let sheetMap = null; try { sheetMap = await addressBookMap(); } catch { sheetMap = null; }
+        const cands = keys.flatMap((key) => [memory[key], sheetMap && sheetMap.get(key)]).filter(Boolean);
+        const pickF = (f) => { const c = cands.find((x) => String(x[f] || '').replace(/[^0-9A-Za-z]/g, '')); return c ? String(c[f]).trim() : ''; };
+        const fallback = cands.length ? { mobile: pickF('mobile'), address: pickF('address'), pincode: pickF('pincode'), dispatchName: pickF('dispatchName') } : null;
         return {
           ...fresh,
           mobile: fresh.mobile || (fallback && fallback.mobile) || '',
@@ -9432,13 +9439,11 @@ async function handleApi(req, res, url) {
       }
     }
 
-    for (const key of keys) { const contact = asContact(memory[key]); if (contact) return contact; }
-    const map = await addressBookMap();
-    for (const key of keys) {
-      const contact = asContact(memory[key] || map.get(key));
-      if (contact) return contact;
-    }
-    return null;
+    // Har field alag se: memory me address ho par mobile sirf sheet ke Address tab me ho, to bhi dono aayein.
+    let map = null; try { map = await addressBookMap(); } catch { map = null; }
+    const cands = keys.flatMap((key) => [memory[key], map && map.get(key)]).filter(Boolean);
+    const pickF = (f) => { const c = cands.find((x) => String(x[f] || '').replace(/[^0-9A-Za-z]/g, '')); return c ? String(c[f]).trim() : ''; };
+    return asContact({ mobile: pickF('mobile').replace(/[^\d+]/g, ''), address: pickF('address'), pincode: pickF('pincode'), dispatchName: pickF('dispatchName'), tl: pickF('tl'), lastRequestAt: pickF('lastRequestAt') });
   }
 
   /** Apps Script store — storage backend se independent (files backend par bhi sheet sync chale). */
