@@ -2092,7 +2092,7 @@ FF.pages = FF.pages || {};
         const tot = rows.reduce((a2, r) => a2 + (Number(r.n) || 1), 0);
         return { ym2, tot, map: clsSums(rows.map((r) => ({ cls: r.cls || r.group, n: Number(r.n) || 1 })), 'n', true) };
       })();
-      const last2Box = last2.ym2 ? box('k8 k8b', `📅 ${esc(ymLabel(last2.ym2))}`, U.fmt(last2.tot), clsOr(last2.map, CLS7, last2.tot, ''), spec('month', last2.ym2)) : '';
+      const last2Box = last2.ym2 ? box('k8 k8b', `📅 ${esc(ymLabel(last2.ym2))}`, U.fmt(last2.tot), clsOr(last2.map, CLS7, last2.tot, '') + vc3Strip(last2.map), spec('month', last2.ym2)) : '';
       const dayChip = (() => {
         try {
           const nk = normName(pr.name), pid = normName(pr.id || '');
@@ -2258,8 +2258,8 @@ FF.pages = FF.pages || {};
     ? box('k2', '🧑‍💼 Agents', `${U.fmt(pr.agentCount)}${pr.selfAgent ? ' + TL' : ''}`, agentSummarySub, peopleSpec)
     : box('k2', '📦 TL ke under stock', tsOk ? U.fmt(ts.total) : '—', tsOk ? `${tlClsRows(ts)}<span class="msp-mini-tail">${ownAgents ? `${ownAgents} · ` : ''}TL ${esc(tlName || '—')}</span>` : (pr.direct ? `🚫 ${esc(pr.directLabel || 'Direct — koi TL nahi')}` : 'TL ka stock nahi mila'), tsOk && tlName ? `src=${ch}&scope=stock&tl=${encodeURIComponent(tlName)}${pr.tl && pr.tl.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.tl.id)}` : ''}` : '')}
           ${dayChip}
-          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${clsOr(clsSums(pr.classes, 'cur', true), CLS7, t.curTotal, curMix)}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(Math.max(elapsed, wd))} days</span></span>`, spec('mtd', m.cur))}
-          ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), clsOr(clsSums(pr.classes, 'last', true), CLS7, t.lastTotal, lastMix), spec('month', m.last))}
+          ${box('k6', `🏷️ Issued this month${m.cur ? ` · ${esc(ymLabel(m.cur))}` : ''}`, U.fmt(t.curTotal), `${clsOr(clsSums(pr.classes, 'cur', true), CLS7, t.curTotal, curMix)}${vc3Strip(clsSums(pr.classes, 'cur', true))}<span class="msp-mini-tail">🗓️ Worked <span class="msp-hl blue">${U.fmt(wd)} of ${U.fmt(Math.max(elapsed, wd))} days</span></span>`, spec('mtd', m.cur))}
+          ${box('k8', `📅 Last month${m.last ? ` · ${esc(ymLabel(m.last))}` : ''}`, U.fmt(t.lastTotal), clsOr(clsSums(pr.classes, 'last', true), CLS7, t.lastTotal, lastMix) + vc3Strip(clsSums(pr.classes, 'last', true)), spec('month', m.last))}
           ${last2Box}
           ${box('k3', '🚦 Priority · by class', prioBody, prioSub, isTl ? peopleSpec : spec('stock'))}
           ${sug}
@@ -2687,6 +2687,14 @@ FF.pages = FF.pages || {};
     const o = {};
     (Array.isArray(list) ? list : []).forEach((x) => { const n = Math.max(0, Number(x && x[field]) || 0); if (!n) return; const k = clsKeyOf(x.cls, keep20); o[k] = (o[k] || 0) + n; });
     return o;
+  }
+  // v3.125.201 — Issued/Last month cards: VC4 · VC20 · VC5+ ka highlighted count (VC5+ = VC5…VC16)
+  function vc3Strip(map) {
+    map = map || {};
+    const n = (k) => Math.max(0, Number(map[k]) || 0);
+    const v4 = n('VC4'), v20 = n('VC20');
+    const v5p = Object.keys(map).reduce((a, k) => (k === 'VC4' || k === 'VC20' ? a : a + n(k)), 0);
+    return `<div class="msp-vc3"><span class="a"><small>VC4</small><b>${U.fmt(v4)}</b></span><span class="b"><small>VC20</small><b>${U.fmt(v20)}</b></span><span class="c"><small>VC5+</small><b>${U.fmt(v5p)}</b></span></div>`;
   }
   const clsKnown = (map, keys) => keys.some((k) => Number(map && map[k]) > 0);
   function clsGrid(map, keys, force) {
