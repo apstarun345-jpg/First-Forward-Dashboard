@@ -9269,8 +9269,8 @@ async function handleApi(req, res, url) {
     const name = shortText(a.name || a.agentName, 120);
     const agentId = shortText(a.agentId, 40);
     const channel = a.channel === 'gv' ? 'gv' : 'ff';
-    const mobile = String(a.mobile || a.phone || '').replace(/[^\\d+]/g, '').slice(0, 16);
-    const address = shortText(String(a.address || a.fullAddress || '').replace(/\\s+/g, ' '), 300);
+    const mobile = String(a.mobile || a.phone || '').replace(/[^\d+]/g, '').slice(0, 16); // 🐛 v3.125.217 — pehle /[^\\d+]/ tha: saare digits hat jaate the → Address me mobile kabhi save nahi hota tha
+    const address = shortText(String(a.address || a.fullAddress || '').replace(/\s+/g, ' '), 300);
     const pincode = tagDigits(a.pincode || a.pin).slice(0, 6);
     const tl = shortText(a.tl || a.tlName, 120);
     if ((!agentId && name.length < 2) || (!address && !pincode && tagDigits(mobile).length < 10)) return null;
@@ -9345,8 +9345,10 @@ async function handleApi(req, res, url) {
     return filled;
   }
   async function syncAddressBookToSheet(requests) {
-    const entries = (Array.isArray(requests) ? requests : [requests]).map(addressEntryFromRequest).filter(Boolean);
-    rememberAddressBook(entries);
+    const fresh = (Array.isArray(requests) ? requests : [requests]).map(addressEntryFromRequest).filter(Boolean);
+    const mem = rememberAddressBook(fresh);
+    // Sheet me hamesha MERGED entry jaaye — nayi request me mobile/address khaali ho to purana mobile/address mit na jaye.
+    const entries = fresh.map((e) => ({ ...e, ...(mem[e.key] || {}) }));
     addressBookRuntime.map = null; addressBookRuntime.at = 0;
     const store = sheetSyncStore();
     if (!store || !entries.length) return { ok: true, local: true, synced: false, count: entries.length };
@@ -9987,8 +9989,11 @@ async function handleApi(req, res, url) {
     const filled = await fillRequestAddresses();
     for (const r of (workspaceStore().tagRequests || [])) if (r && r.by === 'sheet-import' && (!r.byName || r.byName === 'Sheet import')) r.byName = (r.agent && r.agent.name) || r.byName;
     if (filled) await persist('notify');
+    // Jin requests me mobile hai unka mobile Address tab me bhi bhar do (purane bug ki wajah se wahan khaali tha).
+    let synced = null;
+    try { const withMob = (workspaceStore().tagRequests || []).filter((r) => r && r.agent && String(r.agent.mobile || '').replace(/\D/g, '').length >= 10); if (withMob.length) synced = await syncAddressBookToSheet(withMob); } catch (err) { synced = { error: String(err && err.message || err).slice(0, 160) }; }
     const missing = (workspaceStore().tagRequests || []).filter((r) => r && !(r.agent && r.agent.address)).length;
-    return sendJson(res, 200, { ok: true, filled, stillWithoutAddress: missing, total: (workspaceStore().tagRequests || []).length });
+    return sendJson(res, 200, { ok: true, filled, stillWithoutAddress: missing, total: (workspaceStore().tagRequests || []).length, mobileSync: synced });
   }
   // 📥 Sheet ke "Tag Requests" tab se purani approved requests wapas import (admin). Body: {requests:[{date,agent,agentId,rows:[{cls,qty}],deviceName,serialNumber}]}
   if (p === '/api/tag-requests/recovery/import-sheet' && method === 'POST') {
