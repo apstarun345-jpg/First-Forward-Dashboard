@@ -430,9 +430,11 @@ let tagReqForceVerify = false;
 // Admin ne jaan-bujh kar delete ki hui requests ko guard wapas na laaye (storage me purani copy
 // kuch der tak zinda rehti hai). 30 min tak un IDs ko merge list se hata do.
 const tagReqDeletedIds = new Map();
+const tagBackupDeletedIds = new Set(); // jaan-bujh kar delete ki gayi IDs — 2nd backup copy inhe kabhi wapas nahi layegi
 function tagReqMarkDeleted(id) {
   const key = String(id || '').trim();
   if (!key) return;
+  tagBackupDeletedIds.add(key);
   tagReqDeletedIds.set(key, Date.now());
   if (tagReqDeletedIds.size > 500) for (const [k, t] of tagReqDeletedIds) if (Date.now() - t > 30 * 60e3) tagReqDeletedIds.delete(k);
 }
@@ -526,7 +528,7 @@ function persist(kind, opts) {
         await fs.rename(tmp, file);
       }
       durableSnapshots.set(kind, snapshot);
-      if (kind === 'notify') { notifyTagBaseline = tagReqCount(); notifyLastWriteAt = Date.now(); try { const sn = JSON.parse(snapshot) || {}; notifyImpSig = JSON.stringify([sn.workspace || null, sn.push || null, sn.watch || null]); } catch { notifyImpSig = ''; } }
+      if (kind === 'notify') { tagBackupSchedule(); notifyTagBaseline = tagReqCount(); notifyLastWriteAt = Date.now(); try { const sn = JSON.parse(snapshot) || {}; notifyImpSig = JSON.stringify([sn.workspace || null, sn.push || null, sn.watch || null]); } catch { notifyImpSig = ''; } }
       storageFailures.delete(kind);
     } catch (err) {
       const cause = String(err && err.message || '').slice(0, 300);
@@ -581,6 +583,7 @@ function settingsFor(u) {
   delete s.schedules;     // 🗓 admin ke custom reminders
   delete s.dispatchEmail; // selected recipients + delivery schedule sirf admin ko
   delete s.__tagSheetBackup; // tag-sheet config ki backup copy (sheet link) sirf admin ko
+  delete s.__tagDataBackup;  // tag requests + address ki gzip backup copy sirf admin ko
   return s;
 }
 /** sw.js ka CACHE_NAME — app version (update-toast ke liye). */
@@ -2908,6 +2911,67 @@ function mergeMissingTagRequests(incoming, { addressBook = null } = {}) {
 function tagReqMissing(live, incoming) {
   const have = new Set((Array.isArray(live) ? live : []).map(tagReqKeyOf));
   return (Array.isArray(incoming) ? incoming : []).filter((r) => tagReqValid(r) && !have.has(tagReqKeyOf(r)));
+}
+
+// 🛡️ v3.125.215 — Tag Requests + Address book ki DOOSRI durable copy (settings record me, gzip). Notify record har kuch second me
+// overwrite hota hai aur deploy/Sheet-busy par purani copy load ho sakti hai — isliye yahan alag record me copy rehti hai jo SIRF BADHTI hai
+// (live ∪ purani copy, delete sirf jaan-bujh kar ki gayi IDs). Boot par + har 3 min me: live list me kuch kam ho to copy se id-wise wapas merge.
+const TAG_BACKUP_CAP = 1500;
+let tagBackupTimer = null, tagBackupBusy = false;
+function tagBackupGet() {
+  const bk = db.settings && db.settings.__tagDataBackup;
+  if (!bk || typeof bk.gz !== 'string') return null;
+  try { const o = JSON.parse(zlib.gunzipSync(Buffer.from(bk.gz, 'base64')).toString('utf8')); return o && typeof o === 'object' ? o : null; } catch { return null; }
+}
+async function tagBackupSave() {
+  if (tagBackupBusy) return;
+  tagBackupBusy = true;
+  try {
+    const w = workspaceStore();
+    const old = tagBackupGet() || {};
+    (old.deleted || []).forEach((id) => tagBackupDeletedIds.add(String(id)));
+    const byId = new Map();
+    (Array.isArray(old.tagRequests) ? old.tagRequests : []).filter(tagReqValid).forEach((r) => { if (!tagBackupDeletedIds.has(tagReqKeyOf(r))) byId.set(tagReqKeyOf(r), r); });
+    (w.tagRequests || []).filter(tagReqValid).forEach((r) => byId.set(tagReqKeyOf(r), r));
+    let list = [...byId.values()].sort((a, b) => (Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0));
+    if (list.length > TAG_BACKUP_CAP) list = list.slice(-TAG_BACKUP_CAP);
+    const addressBook = { ...(old.addressBook && typeof old.addressBook === 'object' ? old.addressBook : {}), ...(w.addressBook && typeof w.addressBook === 'object' ? w.addressBook : {}) };
+    const payload = JSON.stringify({ v: 1, tagRequests: list, addressBook, deleted: [...tagBackupDeletedIds].slice(-500) });
+    const cur = db.settings.__tagDataBackup;
+    const sig = crypto.createHash('sha1').update(payload).digest('hex');
+    if (cur && cur.sig === sig) return;
+    db.settings.__tagDataBackup = { at: new Date().toISOString(), count: list.length, addr: Object.keys(addressBook).length, sig, gz: zlib.gzipSync(Buffer.from(payload, 'utf8')).toString('base64') };
+    await persist('settings');
+  } catch (err) { console.warn('tag data backup skip:', err && err.message); }
+  finally { tagBackupBusy = false; }
+}
+function tagBackupSchedule(delayMs = 20e3) {
+  if (tagBackupTimer) return;
+  tagBackupTimer = setTimeout(() => { tagBackupTimer = null; tagBackupSave().catch(() => {}); }, delayMs);
+  if (tagBackupTimer.unref) tagBackupTimer.unref();
+}
+/** Live list me jo requests / address backup copy me hain par yahan nahi — id-wise merge (kuch delete nahi hota). */
+function tagBackupRestore() {
+  const bk = tagBackupGet();
+  if (!bk) return { added: [], addresses: 0 };
+  (bk.deleted || []).forEach((id) => tagBackupDeletedIds.add(String(id)));
+  const missing = tagReqMissing(workspaceStore().tagRequests, bk.tagRequests).filter((r) => !tagBackupDeletedIds.has(tagReqKeyOf(r)) && !tagReqSuppressed(r));
+  const w = workspaceStore();
+  const addrMissing = bk.addressBook && typeof bk.addressBook === 'object' ? Object.keys(bk.addressBook).filter((k) => !(w.addressBook && w.addressBook[k])).length : 0;
+  if (!missing.length && !addrMissing) return { added: [], addresses: 0 };
+  const merged = mergeMissingTagRequests(missing, { addressBook: bk.addressBook });
+  if (merged.added.length) {
+    try {
+      recordNotification({ type: 'settings', title: `🛡️ ${merged.added.length} tag request(s) backup se wapas aayi`, body: `Live list me kam thi — doosri backup copy se id-wise merge ki gayi (${merged.added.map(tagReqKeyOf).slice(0, 8).map((id) => `#${id}`).join(', ')}). Kuch delete nahi hua.`, target: 'admin', meta: { source: 'tagdata-backup', link: '#/tagRequest?view=requests' } });
+    } catch { /* optional */ }
+  }
+  console.warn(`🛡️ tag data backup: ${merged.added.length} request + ${merged.addresses} address wapas merge.`);
+  return merged;
+}
+async function tagBackupGuard() {
+  const r = tagBackupRestore();
+  if ((r.added && r.added.length) || r.addresses) await persist('notify').catch(() => {});
+  tagBackupSchedule(2e3);
 }
 /** Recovery preview — chhoti sample list (UI me dikhane ke liye; newest pehle). */
 function tagReqSamples(list, n = 6) {
@@ -9911,19 +9975,24 @@ async function handleApi(req, res, url) {
       const importKey = `sheet|${date}|${name.toLowerCase()}|${rows.map((r) => `${r.cls}:${r.approved}`).join(',')}|${x.seq || 0}`;
       if (haveKeys.has(importKey)) continue;
       haveKeys.add(importKey);
-      const at = new Date(`${date}T10:00:00+05:30`).toISOString();
+      const tm = /^\d{1,2}:\d{2}$/.test(String(x.time || '')) ? String(x.time).padStart(5, '0') : '10:00';
+      const at = new Date(`${date}T${tm}:00+05:30`).toISOString();
+      const ch = x.channel === 'gv' ? 'gv' : 'ff';
+      const mob = String(x.mobile || '').replace(/[^\d+]/g, '').slice(0, 16), addr = shortText(String(x.address || '').replace(/\s+/g, ' '), 300), pin = tagDigits(x.pincode).slice(0, 6), tlName = shortText(x.tl, 120);
       const id = nextTagReqId(usedIds); usedIds.add(id);
       made.push({
         id, at, batch: workspaceId('tagbatch'), by: 'sheet-import', byName: 'Sheet import', employee: {}, employeeToken: '',
-        agent: { id: shortText(x.agentId, 40), agentId: shortText(x.agentId, 40), name, mobile: '', address: '', pincode: '', channel: '' },
+        agent: { id: shortText(x.agentId, 40), agentId: shortText(x.agentId, 40), name, mobile: mob, address: addr, pincode: pin, channel: ch, tl: tlName },
+        ...(x.courier ? { courier: shortText(x.courier, 40) } : {}),
         itemName: x.deviceName ? 'Device' : 'FASTag', ...(x.deviceName ? { deviceName: shortText(x.deviceName, 80) } : {}), ...(x.serialNumber ? { serialNumber: shortText(x.serialNumber, 80) } : {}),
         status: 'approved', note: 'Sheet se wapas import', adminNote: '', importKey, source: 'sheet-import',
-        rows: rows.map((r) => ({ agentId: shortText(x.agentId, 40), agentName: name, tl: '', channel: 'ff', cls: r.cls, last: 0, cur: 0, stock: 0, cover: null, priority: '', growth: 0, sugNet: 0, sugGross: 0, approved: r.approved, remark: '', requested: r.approved })),
+        rows: rows.map((r) => ({ agentId: shortText(x.agentId, 40), agentName: name, tl: tlName, channel: ch, cls: r.cls, last: (r.cls === 'VC4' && Number(x.last)) || 0, cur: (r.cls === 'VC4' && Number(x.cur)) || 0, stock: (r.cls === 'VC4' && Number(x.stock)) || 0, cover: null, priority: '', growth: 0, sugNet: 0, sugGross: 0, approved: r.approved, remark: '', requested: r.approved })),
         total: rows.reduce((s2, r) => s2 + r.approved, 0), updatedAt: nowIso, updatedBy: user.username,
         sheetSync: { at: nowIso }, sheetApprovalSync: { at: nowIso }
       });
     }
     const merged = mergeMissingTagRequests(made);
+    try { const ae = made.map(addressEntryFromRequest).filter(Boolean); if (ae.length) { rememberAddressBook(ae); addressBookRuntime.map = null; addressBookRuntime.at = 0; } } catch { /* optional */ }
     await persist('notify');
     logAudit(user, 'tag_request_recovered', { target: 'sheet', note: `${merged.added.length} requests · source Tag Requests sheet tab`, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, received: list.length, added: merged.added.length, total: merged.total });
@@ -11838,7 +11907,7 @@ async function handleApi(req, res, url) {
       }
       cache.clear();
     }
-    const next = body.reset ? { ...DEFAULT_SETTINGS } : deepMerge(db.settings, patch);
+    const next = body.reset ? { ...DEFAULT_SETTINGS, ...(db.settings.__tagSheetBackup ? { __tagSheetBackup: db.settings.__tagSheetBackup } : {}), ...(db.settings.__tagDataBackup ? { __tagDataBackup: db.settings.__tagDataBackup } : {}) } : deepMerge(db.settings, patch);
     next.updatedAt = new Date().toISOString(); next.updatedBy = user.username;
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();
     const previousSettings = db.settings;
@@ -15063,6 +15132,8 @@ async function start() {
   }
   for (const kind of Object.keys(FILES)) durableSnapshots.set(kind, JSON.stringify(db[kind], null, 2));
   tagReqBaselineSync(); // 🛡️ v3.50 — notify guard ka base: jo tag requests abhi durable hain
+  await tagBackupGuard(); // 🛡️ v3.125.215 — live list kam ho to doosri backup copy se wapas
+  { const t = setInterval(() => { tagBackupGuard().catch(() => {}); }, 3 * 60e3); if (t.unref) t.unref(); }
   // Upgrade the known previous/default product title in durable settings; preserve admin custom names.
   if (/^First Forward Dashboard(?:\s*[-–—]\s*Robo\s*v?3\.2)?$/i.test(String(db.settings.appName || '').trim())) {
     db.settings.appName = 'First Forward & Gv Partner Dashboard';
