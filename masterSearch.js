@@ -2119,7 +2119,7 @@ FF.pages = FF.pages || {};
             byCls.push({ cls: r.cls || r.group, n });
           });
           const grid = clsOr(clsSums(byCls, 'n', true), CLS7, total, vcTiles(vals));
-          return box('k13', `${icon} ${label} · ${esc(U.labelDateKey ? U.labelDateKey(key) : key)}`, U.fmt(total), `${grid}<span class="msp-mini-tail">${esc(tail)}</span>`, `${spec('day', '')}&date=${encodeURIComponent(key)}`);
+          return box('k13', `${icon} ${label} · ${esc(U.labelDateKey ? U.labelDateKey(key) : key)}`, U.fmt(total), `${grid}${vc3Strip(vals)}<span class="msp-mini-tail">${esc(tail)}</span>`, `${spec('day', '')}&date=${encodeURIComponent(key)}`);
         } catch { return ''; }
       })();
       const wd = workedDays(pr, isTl, ch, m.cur);
