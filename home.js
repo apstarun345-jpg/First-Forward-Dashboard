@@ -699,6 +699,7 @@ FF.pages = FF.pages || {};
     const lastVal = vals.length ? vals[vals.length - 1] : 0, lastPrev = vals.length > 1 ? vals[vals.length - 2] : 0;
     const rate = total / day, exp = Math.round(rate * dim);
     const prevRate = prevFull / Math.max(1, U.daysInMonth(prevKey));
+    const chRate = (ch) => { let t = 0; for (const r of eir) if (r.ym === curKey && r.day <= day && r.channel === ch) t += r.n; return t / day; };
     const g = (a, b) => (b > 0 ? Math.round((a / b - 1) * 100) : null);
     const dayLbl = `${day} ${(U.MONTHS && U.MONTHS[Number(curKey.slice(5, 7)) - 1]) || ''}`.trim();
     const stat = (tone, icon, title, value, chip, sub, spark) => `<div class="mh-stat ${tone}"><div class="mh-stat-top"><span class="mh-stat-ic">${icon}</span><span class="mh-stat-t">${esc(title)}</span>${chip}</div><div class="mh-stat-v">${value}</div><div class="mh-stat-s">${sub}</div>${spark || ''}</div>`;
@@ -707,7 +708,7 @@ FF.pages = FF.pages || {};
       ${stat('t1', '🏷️', `${U.labelYM(curKey, true)} · MTD`, U.fmt(total), pctChip(g(total, prevSame)), `vs ${U.labelYM(prevKey, true)} 1–${day}: ${U.fmt(prevSame)}`, sp(vals, '#6366f1'))}
       ${stat('t2', '📅', `Last report day · ${dayLbl}`, U.fmt(lastVal), pctChip(g(lastVal, lastPrev)), `previous day: ${U.fmt(lastPrev)}`, sp(vals, '#0ea5e9'))}
       ${stat('t3', '🎯', 'Expected month-end', U.fmt(exp), pctChip(g(exp, prevFull)), `${U.labelYM(prevKey, true)} full: ${U.fmt(prevFull)} · ${U.fmt(rate, true)} per day`, '')}
-      ${stat('t4', '⚡', 'Run-rate / day', U.fmt(rate, true), pctChip(g(rate, prevRate)), `${U.labelYM(prevKey, true)} avg: ${U.fmt(prevRate, true)} per day`, '')}
+      ${stat('t4', '⚡', 'Run-rate / day', U.fmt(rate, true), pctChip(g(rate, prevRate)), `${U.labelYM(prevKey, true)} avg: ${U.fmt(prevRate, true)} per day<span class="mh-rr"><b class="ff">FF ${U.fmt(chRate('First Forward'), true)}</b><b class="gv">GV ${U.fmt(chRate('GV Partner'), true)}</b> /day</span>`, '')}
     </div>`;
   }
   function overviewPanels(force) {
@@ -1310,12 +1311,13 @@ FF.pages = FF.pages || {};
   }
   const homeLayout = (() => {
     const SECTIONS = [
-      ['home-overview', '📈 Overview (stats · charts · top)'],
+      ['home-stats', '📈 Top stats (MTD · last day · expected · run-rate)'],
+      ['home-gv-live', '🟩 GV live today'],
+      ['home-month', '📅 Month KPI cards'],
+      ['home-overview', '📊 Overview (charts · top agents)'],
       ['home-target-alerts', '🎯 Target updates'],
       ['home-assign', '📌 Assigned work by RSM'],
       ['home-todo', "✅ Today's work"],
-      ['home-gv-live', '🟩 GV live today'],
-      ['home-month', '📅 Month KPI cards'],
       ['home-target-achievement', '🎯 Target achievement'],
       ['home-pulse', '📡 Management pulse'],
       ['home-charts', '📊 Charts'],
@@ -1426,12 +1428,13 @@ FF.pages = FF.pages || {};
           <button class="btn" id="home-customize" title="Reorder or hide Home sections" aria-expanded="false">⚙ Customize</button>
         </div>
       </div>
+      <div id="home-stats"></div>
+      <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
+      <div id="home-month">${U.spinner('Building month KPI cards from the EIR sheet…')}</div>
       <div id="home-overview"></div>
       <div id="home-target-alerts"></div>
       <div id="home-assign"></div>
       <div id="home-todo"></div>
-      <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
-      <div id="home-month">${U.spinner('Building month KPI cards from the EIR sheet…')}</div>
       <div id="home-target-achievement">${U.spinner('Class-wise target achievement calculate ho raha hai…')}</div>
       <div id="home-pulse"></div>
       <div id="home-charts">${U.spinner('Charts…')}</div>
@@ -1716,7 +1719,8 @@ FF.pages = FF.pages || {};
       try { stats = overviewStats(ui); charts = monthCharts(ui.ctx, ui.sf, ui.sc, ui.sf.rows, { weekdayBars: ui.wdBars }); } catch (e) { stats = ''; charts = `<p class="dim small">Overview: ${esc(e && e.message || 'data')}</p>`; }
       let pn = { html: '', ready: true };
       try { pn = overviewPanels(ovTries >= 5); } catch { pn = { html: '', ready: true }; }
-      ov.innerHTML = `${stats}<div class="mh-charts">${charts}</div>${pn.html}`;
+      const sh = U.$('#home-stats', root); if (sh) sh.innerHTML = stats;
+      ov.innerHTML = `<div class="mh-charts">${charts}</div>${pn.html}`;
       C.mount(ov);
       if (!pn.ready && ovTries++ < 12) setTimeout(paintOverview, 6000); // agents data baad me aata hai
     }

@@ -8064,3 +8064,5 @@ html body .page-home .kpi.kpi .pct-inline.neg, html body .page-home .kpi.kpi .hm
 
 /* v193 phone smooth: below-fold Home sections render lazily */
 .page-home .mh-panels,.page-home #home-charts{content-visibility:auto;contain-intrinsic-size:auto 600px}
+
+.mh-rr{display:flex;gap:10px;margin-top:4px;font-size:12px}.mh-rr .ff{color:#4f46e5}.mh-rr .gv{color:#059669}
