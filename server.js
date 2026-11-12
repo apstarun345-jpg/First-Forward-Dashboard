@@ -9333,8 +9333,10 @@ async function handleApi(req, res, url) {
       const name = tagNameKey(a.name || (r.rows && r.rows[0] && r.rows[0].agentName) || '');
       const keys = [];
       ['ff', 'gv'].forEach((ch) => { if (id) keys.push(`${ch}|id:${id}`); if (name) keys.push(`${ch}|n:${name}`); });
-      const e = keys.map((k) => mem[k] || map.get(k)).find((x) => x && (x.address || x.pincode || x.mobile));
-      if (!e) continue;
+      const cands = keys.flatMap((k) => [mem[k], map.get(k)]).filter((x) => x && (x.address || x.pincode || x.mobile));
+      if (!cands.length) continue;
+      const firstOf = (f) => { const c = cands.find((x) => String(x[f] || '').replace(/[^0-9A-Za-z]/g, '')); return c ? String(c[f]).trim() : ''; };
+      const e = { ...cands[0], mobile: firstOf('mobile').replace(/[^\d+]/g, ''), address: firstOf('address'), pincode: firstOf('pincode'), dispatchName: firstOf('dispatchName'), tl: firstOf('tl'), agentId: firstOf('agentId') };
       a.mobile = a.mobile || e.mobile || ''; a.address = a.address || e.address || ''; a.pincode = a.pincode || tagDigits(e.pincode).slice(0, 6);
       if (e.dispatchName && !a.dispatchName) a.dispatchName = e.dispatchName;
       if (e.tl && !a.tl) a.tl = e.tl;
@@ -9346,9 +9348,18 @@ async function handleApi(req, res, url) {
   }
   async function syncAddressBookToSheet(requests) {
     const fresh = (Array.isArray(requests) ? requests : [requests]).map(addressEntryFromRequest).filter(Boolean);
+    // Sheet ka maujooda data (Address tab — jahan mobile haath se bhi bhara ja sakta hai) bhi merge me lo.
+    let sheetMap = null; try { sheetMap = await addressBookMap(); } catch { sheetMap = null; }
     const mem = rememberAddressBook(fresh);
-    // Sheet me hamesha MERGED entry jaaye — nayi request me mobile/address khaali ho to purana mobile/address mit na jaye.
-    const entries = fresh.map((e) => ({ ...e, ...(mem[e.key] || {}) }));
+    // Sheet me hamesha MERGED entry jaaye — har field me jo bhi non-empty mile (request → memory → sheet). Khaali value kabhi purana mobile/address nahi mitati.
+    const pick = (...vals) => { for (const v of vals) { const t = String(v ?? '').trim(); if (t && t !== '+') return t; } return ''; };
+    const entries = fresh.map((e) => {
+      const m = mem[e.key] || {}, sh = (sheetMap && sheetMap.get(e.key)) || {};
+      const out = { ...sh, ...m, ...e };
+      ['mobile', 'address', 'pincode', 'tl', 'dispatchName', 'agentId', 'agent'].forEach((k) => { out[k] = pick(e[k], m[k], sh[k]); });
+      if (mem[e.key]) Object.assign(mem[e.key], { mobile: out.mobile, address: out.address, pincode: out.pincode });
+      return out;
+    });
     addressBookRuntime.map = null; addressBookRuntime.at = 0;
     const store = sheetSyncStore();
     if (!store || !entries.length) return { ok: true, local: true, synced: false, count: entries.length };
@@ -9986,6 +9997,7 @@ async function handleApi(req, res, url) {
   // 📇 Purani/imported requests me agent ka mobile+address+pincode Address book se bharo (admin). Dispatch label isi se bharta hai.
   if (p === '/api/tag-requests/recovery/fill-addresses' && method === 'POST') {
     requireAdmin(user);
+    addressBookRuntime.map = null; addressBookRuntime.at = 0; // Address tab abhi-abhi badla ho sakta hai — taaza padho
     const filled = await fillRequestAddresses();
     for (const r of (workspaceStore().tagRequests || [])) if (r && r.by === 'sheet-import' && (!r.byName || r.byName === 'Sheet import')) r.byName = (r.agent && r.agent.name) || r.byName;
     if (filled) await persist('notify');
