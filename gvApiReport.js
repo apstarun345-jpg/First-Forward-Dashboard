@@ -156,6 +156,17 @@ FF.pages = FF.pages || {};
     rows.forEach((o) => { o.agents = new Set(list.filter((r) => (r.supId || r.supName || 'Direct') === o.key).map((r) => r.id)).size; });
     return tableHtml('tls', tlCols(), rows, { total: true, limit: st.shown });
   }
+  function viewHours(list) {
+    const rows = group(list.filter((r) => r.time), (r) => r.time.slice(0, 2), (r) => ({ hr: r.time.slice(0, 2) })).sort((a, b) => (a.hr < b.hr ? -1 : 1));
+    const max = Math.max(1, ...rows.map((r) => r.n));
+    rows.forEach((r) => { r.slot = `${r.hr}:00 – ${r.hr}:59`; });
+    return `<p class="dim small">Ghante-wise tags (date_added time se, IST) — 00:00:00 se 23:59:59.</p>` + tableHtml('hours', [
+      { k: 'slot', label: 'Ghanta', v: (r) => r.hr, f: (v, r) => (r ? esc(r.slot) : '') },
+      { k: 'bar', label: '', v: (r) => r.n, f: (v, r) => (r ? `<div style="min-width:160px;background:#e0e7ff;border-radius:6px"><div style="width:${Math.round(r.n / max * 100)}%;background:linear-gradient(90deg,#4f46e5,#a855f7);height:10px;border-radius:6px"></div></div>` : '') },
+      { k: 'VC4', label: 'VC4', n: 1 }, { k: 'VC20', label: 'VC20', n: 1 }, { k: 'VC5+', label: 'VC5+', n: 1 },
+      { k: 'n', label: 'Total', n: 1, tot: (l) => l.reduce((a, x) => a + x.n, 0) }, { k: 'repl', label: 'Replacement', n: 1 }, { k: 'comm', label: 'Commission', n: 1, f: money, tot: (l) => l.reduce((a, x) => a + x.comm, 0) }
+    ], rows, { total: true });
+  }
   function viewDays(list) { const rows = group(list, (r) => r.day, (r) => ({ day: r.day })).sort((a, b) => (a.day < b.day ? 1 : -1)); return tableHtml('days', dayCols(), rows, { total: true }); }
   function viewRecords(list) { return tableHtml('rec', recCols(), list, { limit: st.shown }); }
   // 💸 commission: ID daalo → class-wise kitna commission gaya
@@ -186,7 +197,7 @@ FF.pages = FF.pages || {};
       ${tableHtml('c-cls', [{ k: 'cls', label: 'Class' }, { k: 'n', label: 'Tags', n: 1, tot: (l) => l.reduce((a, x) => a + x.n, 0) }, { k: 'comm', label: 'Total commission', n: 1, f: money, tot: (l) => l.reduce((a, x) => a + x.comm, 0) }, { k: 'avg', label: 'Avg / tag', n: 1, v: (r) => (r.commN ? r.comm / r.commN : 0), f: money }], byCls, { total: true })}
       <h4 style="margin-top:14px">Agent × class</h4>${tableHtml('c-ag', commCols(), rows, { total: true, limit: st.shown })}`;
   }
-  const VIEWS = { summary: viewSummary, agents: viewAgents, tls: viewTls, days: viewDays, comm: viewComm, rec: viewRecords };
+  const VIEWS = { summary: viewSummary, agents: viewAgents, tls: viewTls, days: viewDays, hours: viewHours, comm: viewComm, rec: viewRecords };
 
   // ---- CSV ----------------------------------------------------------------------------------------
   function exportCsv() {
@@ -194,6 +205,7 @@ FF.pages = FF.pages || {};
     let cols, rows;
     if (st.tab === 'agents') { cols = agentCols(); rows = group(list, (r) => r.id, (r) => ({ id: r.id, agent: r.agent, supName: r.supName, supId: r.supId })); }
     else if (st.tab === 'tls') { cols = tlCols(); rows = group(list, (r) => r.supId || r.supName || 'Direct', (r) => ({ supId: r.supId, supName: r.supName || 'Direct' })); rows.forEach((o) => { o.agents = new Set(list.filter((r) => (r.supId || r.supName || 'Direct') === o.key).map((r) => r.id)).size; }); }
+    else if (st.tab === 'hours') { cols = [{ k: 'hr', label: 'Hour' }, { k: 'VC4', label: 'VC4' }, { k: 'VC20', label: 'VC20' }, { k: 'VC5+', label: 'VC5+' }, { k: 'n', label: 'Total' }, { k: 'repl', label: 'Replacement' }, { k: 'comm', label: 'Commission' }]; rows = group(list.filter((r) => r.time), (r) => r.time.slice(0, 2), (r) => ({ hr: r.time.slice(0, 2) })); }
     else if (st.tab === 'days') { cols = dayCols(); rows = group(list, (r) => r.day, (r) => ({ day: r.day })); }
     else if (st.tab === 'comm') { cols = commCols(); rows = commRows(list).rows; }
     else { cols = recCols(); rows = list; }
@@ -207,12 +219,16 @@ FF.pages = FF.pages || {};
     const list = filtered();
     let note = '';
     if (st.meta && st.meta.errors && st.meta.errors.length) note += `<div class="gar-note">⚠️ ${st.meta.errors.length} din ka data API se nahi aaya: ${esc(st.meta.errors.map((e) => e.day).join(', '))} — Reload karke dekho.</div>`;
-    if (st.meta && st.meta.truncated) note += '<div class="gar-note">⚠️ Ek baar me max 45 din. Date range chhoti karo.</div>';
+    if (st.meta && st.meta.truncated) note += '<div class="gar-note">⚠️ Ek baar me max 45 din (aakhri din kat gaye). Date range chhoti karo.</div>';
+    if (st.meta && st.meta.stats) {
+      const x = st.meta.stats, bad = st.rows.filter((r) => !CLS.includes(r.cls)).length, noC = st.rows.filter((r) => r.commission == null).length, direct = st.rows.filter((r) => !r.supId && !r.supName).length;
+      note += `<div class="gar-ok" style="background:#eff6ff;color:#1e3a8a">ℹ️ Date filter = <b>date_added 00:00:00 – 23:59:59 (IST)</b>. API ne ${n0(x.fetched)} records diye → ${n0(x.dupes)} repeat hataye · ${n0(x.outside)} doosre din ke alag kiye · ${n0(st.rows.length)} bache.${x.noDate ? ` ⚠️ ${n0(x.noDate)} me date_added nahi tha.` : ''}${bad ? ` ⚠️ ${n0(bad)} ki class pehchaan nahi hui.` : ''}${noC ? ` · ${n0(noC)} me commission khaali.` : ''}${direct ? ` · ${n0(direct)} bina TL (direct).` : ''}</div>`;
+    }
     if (multiInfo.tokens.length) {
       const nf = multiInfo.tokens.filter((t) => !multiInfo.found.has(t));
       note += `<div class="${nf.length ? 'gar-nf' : 'gar-ok'}">🔎 Multi-search: ${multiInfo.found.size}/${multiInfo.tokens.length} mile${nf.length ? ` · ❌ nahi mile (${nf.length}): ${esc(nf.slice(0, 60).join(', '))}${nf.length > 60 ? '…' : ''}` : ' ✓'}</div>`;
     }
-    host.innerHTML = `${note}<div class="gar-tabs">${[['summary', '📊 Summary'], ['agents', '👤 Agents'], ['tls', '🧑‍💼 TLs'], ['days', '📅 Day-wise'], ['comm', '💸 Commission'], ['rec', '📋 All records']].map(([k, l]) => `<button data-gar-tab="${k}" class="${st.tab === k ? 'on' : ''}">${l}</button>`).join('')}
+    host.innerHTML = `${note}<div class="gar-tabs">${[['summary', '📊 Summary'], ['agents', '👤 Agents'], ['tls', '🧑‍💼 TLs'], ['days', '📅 Day-wise'], ['hours', '🕐 Hour-wise'], ['comm', '💸 Commission'], ['rec', '📋 All records']].map(([k, l]) => `<button data-gar-tab="${k}" class="${st.tab === k ? 'on' : ''}">${l}</button>`).join('')}
       <span style="margin-left:auto" class="dim small">${n0(list.length)} / ${n0(st.rows.length)} records</span></div>${VIEWS[st.tab](list)}`;
   }
   function distinct(key) { return [...new Set(st.rows.map((r) => r[key] || '—'))].sort(); }

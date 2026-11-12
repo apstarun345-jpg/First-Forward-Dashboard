@@ -1950,7 +1950,12 @@ async function gvApiReport(from, to, settings) {
   const secret = process.env.GV_API_SECRET;
   if (!secret) throw new HttpError(400, 'GV_API_SECRET Render env var set nahi hai.');
   const days = [];
-  for (let d = new Date(`${from}T00:00:00Z`); d <= new Date(`${to}T00:00:00Z`) && days.length < 45; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
+  // ±1 din extra fetch: API kabhi pichhle din ke records report_date me de deti hai — final filter date_added (00:00:00–23:59:59) par hota hai.
+  const fromX = new Date(`${from}T00:00:00Z`); fromX.setUTCDate(fromX.getUTCDate() - 1);
+  const toX = new Date(`${to}T00:00:00Z`); toX.setUTCDate(toX.getUTCDate() + 1);
+  const spanDays = Math.round((new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 864e5) + 1;
+  for (let d = new Date(fromX); d <= toX && days.length < 47; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
+  const stats = { fetched: 0, dupes: 0, outside: 0, noDate: 0 };
   const out = [], errors = [], seenAll = new Set();
   let idx = 0;
   const worker = async () => {
@@ -1961,13 +1966,18 @@ async function gvApiReport(from, to, settings) {
         for (const r of data) {
           const tag = String(r.tag_id_number || r.tag_id || r.tagId || '').trim();
           const key = tag || String(r.unique_id || r.id || '') + '|' + String(r.sno || r.serial_no || '');
-          if (seenAll.has(key)) continue; seenAll.add(key);
+          stats.fetched++;
+          if (seenAll.has(key)) { stats.dupes++; continue; } seenAll.add(key);
           const added = String(r.date_added || r.dateAdded || r.created_at || '').trim();
           const vno = String(r.vno || r.v_no || r.vehicle_no || '');
+          const addedDay = /^\d{4}-\d{2}-\d{2}/.test(added) ? added.slice(0, 10) : '';
+          if (!addedDay) stats.noDate++;
+          const rowDay = addedDay || day;
+          if (rowDay < from || rowDay > to) { stats.outside++; continue; }
           const ex = {};
           for (const k of Object.keys(r)) if (!GV_API_KNOWN.has(k) && r[k] !== null && r[k] !== '') ex[k] = r[k];
           out.push({
-            day: /^\d{4}-\d{2}-\d{2}/.test(added) ? added.slice(0, 10) : day, time: added.slice(11, 19), added,
+            day: rowDay, time: added.slice(11, 19), added,
             id: String(r.unique_id || r.id || ''), agent: String(r.agent_name || ''), supId: String(r.supervisor_agent_id || ''), supName: String(r.supervisor_name || ''),
             vno, vclass: String(r.vclass || r.v_class || ''), cch: String(r.cch || ''), sno: String(r.sno || r.serial_no || ''), tag,
             amount: Number(r.amount) || 0, name: String(r.name || r.customer_name || ''), product: String(r.product_id || ''),
@@ -1983,7 +1993,7 @@ async function gvApiReport(from, to, settings) {
   };
   await Promise.all([worker(), worker(), worker()]);
   out.sort((a, b) => (a.added < b.added ? -1 : a.added > b.added ? 1 : 0));
-  return { ok: true, from, to, days: days.length, rows: out, errors, truncated: days.length >= 45 && new Date(`${to}T00:00:00Z`) > new Date(`${days[days.length - 1]}T00:00:00Z`) };
+  return { ok: true, from, to, days: spanDays, rows: out, errors, stats, truncated: spanDays > 45 };
 }
 let gvApiRowsLast = null;
 async function gvTodayApiRows(settings, day, secret) {
