@@ -311,7 +311,7 @@
       btns.push(b('profile', '👤 Profile', 'Agent ki profile kholo'));
       if (m) btns.push(`<a class="ops-btn" target="_blank" rel="noopener" href="https://wa.me/91${esc(String(m).slice(-10))}?text=${encodeURIComponent(waText(x))}" data-ops-log="wa:${id}">💬 WhatsApp</a>`);
       else btns.push(b('copy', '💬 Message copy', 'WhatsApp message copy karo (mobile nahi mila)'));
-      btns.push(b('follow', '📌 Follow-up', 'Follow-up banao — kal yaad dilaunga'));
+      btns.push(b('follow', '📌 Follow-up', 'Follow-up banao — 24 ghante baad yaad dilaunga'));
     }
     if (x.act === 'dispatch') btns.push(b('plan', '🚚 Dispatch plan', 'Dispatch Planner kholo'));
     if (x.act === 'data') btns.push(b('fresh', '🕒 Data check', 'Home par data freshness'));
@@ -363,9 +363,9 @@
     if (kind === 'plan') return go('#/dispatchPlan');
     if (kind === 'fresh') return go('#/home');
     if (kind === 'copy') { try { navigator.clipboard.writeText(waText(x)); } catch { /* ignore */ } return toast('📋 Copy ho gaya'); }
-    if (kind === 'follow') { const f = addFollow(x); return toast(`📌 Follow-up bana (kal ${new Date(f.due).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })})`); }
+    if (kind === 'follow') { const f = addFollow(x); return toast(`📌 Follow-up bana · ${dLbl(new Date(Date.parse(f.due) + 5.5 * 3600e3).toISOString().slice(0, 10))} ${new Date(f.due).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} ko yaad dilaunga`); }
     if (kind === 'fdone') { const f = closeFollow(id); return toast(f ? `✅ Ho gaya${measure(f) ? ' · ' + measure(f) : ''}` : 'Mila nahi'); }
-    if (kind === 'fsnooze') { const L = follows(); const f = L.find((z) => z.id === id); if (f) { f.due = new Date(Date.now() + 24 * 3600e3).toISOString(); LS.set(K.follow, L); } return toast('⏰ Kal phir yaad dilaunga'); }
+    if (kind === 'fsnooze') { const L = follows(); const f = L.find((z) => z.id === id); if (f) { f.due = new Date(Date.now() + 24 * 3600e3).toISOString(); LS.set(K.follow, L); } return toast('⏰ 24 ghante baad phir yaad dilaunga'); }
     return null;
   }
   document.addEventListener('click', (e) => {
@@ -384,7 +384,7 @@
     const m = measure(f);
     return { key: `ops:follow:${f.id}:${istToday()}`, mood: 'alert', icon: '📌', title: 'Follow-up pending', view: 'html',
       head: `${f.agent ? f.agent.name : 'Kaam'} — ${f.action === 'wa' ? 'WhatsApp' : f.action === 'dispatch' ? 'dispatch' : 'call'} (${dLbl(f.at.slice(0, 10))} ko bana). ${m}`,
-      html: `<div class="ops-acts"><button type="button" class="ops-btn" data-mc="ops:fdone:${esc(f.id)}">✅ Ho gaya</button><button type="button" class="ops-btn" data-mc="ops:fsnooze:${esc(f.id)}">⏰ Kal yaad dilao</button></div>`,
+      html: `<div class="ops-acts"><button type="button" class="ops-btn" data-mc="ops:fdone:${esc(f.id)}">✅ Ho gaya</button><button type="button" class="ops-btn" data-mc="ops:fsnooze:${esc(f.id)}">⏰ 24 ghante baad</button></div>`,
       say: `${f.agent ? f.agent.name : ''} ka follow-up abhi baaki hai.` };
   }
   function itRootCause() {
@@ -438,7 +438,7 @@
       { name: `🚚 Dispatch: ${P.send.length} agents (${P.urgent.length} urgent)`, val: fmt(P.send.length), tone: 'warn' },
       { name: `🚨 Critical alerts: ${crit.length}`, sub: crit.slice(0, 2).map((x) => x.text).join(' · '), val: fmt(crit.length), tone: crit.length ? 'down' : 'up' }
     ];
-    return { onShow: () => LS.set('ffOps.brief', t), key: `ops:brief:${t}`, mood: 'excited', cls: 'greet', icon: '🗞️', title: 'AI Morning Briefing', view: 'list', head: `Good morning! Kal (${dLbl(S.last)}) ka poora haal`, rows, stay: 20000,
+    return { onShow: () => LS.set('ffOps.brief', t), key: `ops:brief:${t}`, mood: 'excited', cls: 'greet', icon: '🗞️', title: 'AI Morning Briefing', view: 'list', head: `Good morning! ${dLbl(S.last)} ka poora haal`, rows, stay: 20000,
       say: `सुप्रभात! कल ${fmt(y.n)} टैग्स लगे। महीने की ग्रोथ ${R.g == null ? '' : (R.g >= 0 ? 'प्लस ' : 'माइनस ') + Math.abs(R.g) + ' प्रतिशत'}। ${P.urgent.length} एजेंट्स को अर्जेंट डिस्पैच चाहिए और ${crit.length} क्रिटिकल अलर्ट हैं।` };
   }
 
@@ -484,7 +484,7 @@
     const L = follows().filter((f) => f.status === 'open').slice(0, 8);
     const it = { key: `ops:flist:${Date.now()}`, fun: true, mood: 'info', icon: '📌', title: `Follow-ups (${L.length} open)`, view: 'html', stay: 20000,
       head: L.length ? 'Jo kaam baaki hain:' : 'Koi follow-up baaki nahi 👍',
-      html: L.map((f) => `<div class="ops-fl"><b>${esc(f.agent ? f.agent.name : '—')}</b> <small>${esc(f.action)} · due ${dLbl(f.due.slice(0, 10))}${Date.parse(f.due) < Date.now() ? ' <span class="ops-bad">overdue</span>' : ''}</small><div class="ops-acts"><button type="button" class="ops-btn" data-mc="ops:fdone:${esc(f.id)}">✅ Ho gaya</button><button type="button" class="ops-btn" data-mc="ops:fsnooze:${esc(f.id)}">⏰ Kal</button></div></div>`).join('') };
+      html: L.map((f) => `<div class="ops-fl"><b>${esc(f.agent ? f.agent.name : '—')}</b> <small>${esc(f.action)} · due ${dLbl(f.due.slice(0, 10))}${Date.parse(f.due) < Date.now() ? ' <span class="ops-bad">overdue</span>' : ''}</small><div class="ops-acts"><button type="button" class="ops-btn" data-mc="ops:fdone:${esc(f.id)}">✅ Ho gaya</button><button type="button" class="ops-btn" data-mc="ops:fsnooze:${esc(f.id)}">⏰ 24 ghante baad</button></div></div>`).join('') };
     if (FF.mascot && FF.mascot._show) FF.mascot._show(it);
   }
 
