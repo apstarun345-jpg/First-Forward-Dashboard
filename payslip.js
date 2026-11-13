@@ -219,9 +219,9 @@ window.FF = window.FF || {};
       rows.forEach((r, ri) => {
         if (y + rh > H - 18) { newPage(opt.title); head(); }
         const bold = opt.foot && ri === rows.length - 1;
-        rect(M, y, W - 2 * M, rh, bold ? tint(col, 0.14) : (ri % 2 ? '#f8fafc' : null), LINE);
+        rect(M, y, W - 2 * M, rh, bold ? tint(col, 0.14) : (opt.fill && ri % 2 === 0 ? opt.fill : (ri % 2 ? '#f8fafc' : null)), LINE);
         let x = M;
-        cols.forEach((c, ci) => { const v = r[ci] == null ? '' : String(r[ci]); let s = v; font(3, bold ? 800 : 400); const maxW = pg.px(c.w - 3); while (s.length > 3 && pg.ctx.measureText(s).width > maxW) s = s.slice(0, -2); if (s !== v) s += '…'; text(s, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 3, w: bold || ci === 0 ? 700 : 400, color: bold ? (c.c || col) : INK, align: c.a === 'r' ? 'right' : 'left' }); x += c.w; });
+        cols.forEach((c, ci) => { const v = r[ci] == null ? '' : String(r[ci]); let s = v; font(3, bold ? 800 : 400); const maxW = pg.px(c.w - 3); while (s.length > 3 && pg.ctx.measureText(s).width > maxW) s = s.slice(0, -2); if (s !== v) s += '…'; text(s, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 3, w: bold || ci === 0 ? 700 : 400, color: bold ? (c.c || col) : (opt.ink || INK), align: c.a === 'r' ? 'right' : 'left' }); x += c.w; });
         y += rh;
       });
       y += 3;
@@ -308,7 +308,7 @@ window.FF = window.FF || {};
       ['TL / Payee name (sheet)', d.payeeName || '—'], ['Pay period', period(m)],
       ...(one ? [['Agent ID', one.agentId], ['New agent ID', one.newId], ['Agent name', one.name], ['User ID', one.userId], ['Agent status', one.status], ['Edit remark', one.editRemark]] : []),
       ['Name as per PAN', bank.panName], ['PAN', bank.pan],
-      ['Bank', bank.bank], ['IFSC', bank.ifsc], ['Account no.', bank.account], ['Agents covered', String(d.agents.length)],
+      ['Bank', bank.bank], ['IFSC', bank.ifsc], ['Account no.', bank.account], ['Agents (active / inactive)', (() => { const ia = d.agents.filter((a) => /inactive|in\s*-?active|closed|blocked|deactiv/i.test(String(a.status || ''))).length; return `${d.agents.length - ia} / ${ia}`; })()],
       ['Generated on', `${nowIst()} IST`], ['Financial year', `FY 20${fyOf(m)}`]
     ]);
     // ---- tags
@@ -379,13 +379,24 @@ window.FF = window.FF || {};
     P.kv(filled.map((x) => (x.head ? x : (x[0] === '' ? ['', ''] : x))), 3);
     // ---- agent-wise (TL)
     if (d.agents.length > 1) {
-      if (P.y + 12 + Math.min(d.agents.length + 2, 8) * 5.6 > H - 18) P.newPage(title);
-      P.section(`Agent-wise breakdown (${d.agents.length} agents)`, C.agents);
-      const L = d.agents.slice().sort((a, b) => num(b.final) - num(a.final));
+      const inact = (a) => /in\s*-?active|inactive|closed|blocked|deactiv/i.test(String(a.status || ''));
+      const act = d.agents.filter((a) => !inact(a)), ina = d.agents.filter(inact);
+      if (P.y + 12 + Math.min(act.length + 2, 8) * 5.6 > H - 18) P.newPage(title);
+      P.section(`Active agents — payout breakdown (${act.length} agents)`, C.agents);
+      const L = act.slice().sort((a, b) => num(b.final) - num(a.final));
       P.table([{ t: '#', w: 8, a: 'r' }, { t: 'Agent name', w: 40 }, { t: 'Agent ID', w: 20 }, { t: 'Issued', w: 14, a: 'r' }, { t: 'Payable', w: 15, a: 'r' }, { t: 'KYV BL', w: 13, a: 'r', c: C.ded }, { t: 'MAX', w: 11, a: 'r', c: C.kyc }, { t: 'VC4 rate', w: 16, a: 'r', c: C.kyc }, { t: 'Payout', w: 24, a: 'r', c: C.earn }, { t: 'Final', w: 25, a: 'r', c: C.net }],
         [...L.map((a, i) => [i + 1, a.name, a.agentId, int(a.iss_total), int(a.pay_total), int(num(a.kb_vc4) + num(a.kb_vc20) + num(a.kb_rest)), int(a.max_n), inr(a.rate_vc4, 0), inr(a.po_total, 0), inr(a.final, 0)]),
-          ['', 'Total', '', int(t.iss_total), int(t.pay_total), int(num(t.kb_vc4) + num(t.kb_vc20) + num(t.kb_rest)), int(t.max_n), '', inr(t.po_total, 0), inr(t.final, 0)]],
+          (() => { const sm = (k) => L.reduce((x, a) => x + num(a[k]), 0); return ['', 'Total (active)', '', int(sm('iss_total')), int(sm('pay_total')), int(sm('kb_vc4') + sm('kb_vc20') + sm('kb_rest')), int(sm('max_n')), '', inr(sm('po_total'), 0), inr(sm('final'), 0)]; })()],
         { foot: true, title, rh: 5.6 });
+      // 🔴 Inactive agents — alag table, laal (payout sirf active ka calculate hota hai)
+      if (ina.length) {
+        if (P.y + 20 + Math.min(ina.length + 1, 6) * 5.6 > H - 18) P.newPage(title);
+        P.section(`Inactive agents — not counted in payout (${ina.length} agents)`, C.ded);
+        P.table([{ t: '#', w: 8, a: 'r' }, { t: 'Agent name', w: 46 }, { t: 'Agent ID', w: 22 }, { t: 'New agent ID', w: 24 }, { t: 'Status', w: 22 }, { t: 'Issued', w: 16, a: 'r' }, { t: 'Payable', w: 18, a: 'r' }, { t: 'Final', w: 30, a: 'r' }],
+          ina.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))).map((a, i) => [i + 1, a.name, a.agentId, a.newId, a.status || 'Inactive', int(a.iss_total), int(a.pay_total), inr(a.final, 0)]),
+          { title, rh: 5.6, ink: C.ded, fill: tint(C.ded, 0.06) });
+        P.text('Inactive agents are listed for reference only — commission is calculated for active agents.', M, P.y, { size: 2.6, color: C.ded }); P.y += 5;
+      }
     }
   }
   function drawSummary(P, sel, spec) {
