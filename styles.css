@@ -8221,3 +8221,4 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .ps-st-tbl tfoot td{position:sticky;bottom:0;background:color-mix(in srgb,var(--pc) 12%,var(--card,#fff));font-weight:800;border-top:2px solid var(--pc)}
 .ps-st-tbl a{color:#2563eb;font-weight:700;text-decoration:none}
 .ps-st-chip{display:inline-block;padding:2px 9px;border-radius:999px;font-weight:700;font-size:11px;background:color-mix(in srgb,var(--pc) 14%,var(--card,#fff));color:var(--pc);border:1px solid color-mix(in srgb,var(--pc) 35%,transparent);white-space:nowrap}
+.ps-st-tbl th:first-child,.ps-st-tbl td:first-child{width:34px;white-space:nowrap}.ps-st-tbl td:nth-child(3){min-width:160px}
