@@ -353,7 +353,7 @@ window.FF = window.FF || {};
 
   /** 📈 Chalu (running) mahina: MTD + run-rate se expected month-end, pichhle poore mahine se growth. */
   function curRows(cm) {
-    if (!cm || !cm.ym || !cm.cur) return null;
+    if (!cm || !cm.ym || !cm.cur || (!num(cm.cur.total) && !num(cm.prev && cm.prev.total))) return null;   // profile abhi poora load nahi
     const f = cm.days / Math.max(1, cm.elapsed);
     return [['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+ (rest class)', 'rest'], ['Overall', 'total']].map(([lab, k]) => {
       const last = num(cm.prev[k]), mtd = num(cm.cur[k]), exp = Math.round(mtd * f);
