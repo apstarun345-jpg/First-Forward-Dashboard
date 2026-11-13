@@ -38,15 +38,55 @@ window.FF = window.FF || {};
   // (APN + FNF, last 7 months) browser me padh kar compact + masked snapshot server par save. Search par instant (browser me match).
   let core = null, snap = null, snapP = null;
   const loadCore = async () => core || (core = await import('./payout-core.js'));
+  // 💾 v3.125.244 — snapshot browser me (IndexedDB) bhi: search par HAMESHA instant, network/429 ho tab bhi.
+  // Server se sirf background me check (ETag → 304, ghante me ek baar).
+  const IDB = { db: null };
+  function idb() {
+    if (IDB.db) return Promise.resolve(IDB.db);
+    return new Promise((ok, no) => { try { const rq = indexedDB.open('ffPayout', 1); rq.onupgradeneeded = () => rq.result.createObjectStore('kv'); rq.onsuccess = () => { IDB.db = rq.result; ok(IDB.db); }; rq.onerror = () => no(rq.error); } catch (e) { no(e); } });
+  }
+  const idbGet = async (k) => { try { const db = await idb(); return await new Promise((ok) => { const rq = db.transaction('kv').objectStore('kv').get(k); rq.onsuccess = () => ok(rq.result || null); rq.onerror = () => ok(null); }); } catch { return null; } };
+  const idbPut = async (k, v) => { try { const db = await idb(); await new Promise((ok) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = ok; tx.onerror = ok; }); } catch { /* optional */ } };
+  async function netSnap(etag) {
+    let r = null;
+    for (let k = 0; k < 3; k++) {
+      r = await fetch('/api/payout/snapshot', { credentials: 'same-origin', cache: 'no-store', headers: etag ? { 'If-None-Match': etag } : {} }).catch(() => null);
+      if (r && (r.ok || r.status === 304)) break;
+      if (r && r.status !== 429 && r.status < 500) break;
+      await new Promise((ok) => setTimeout(ok, 4000 * (k + 1)));
+    }
+    if (!r) throw new Error('Network nahi mila');
+    if (r.status === 304) return { same: true };
+    if (!r.ok) throw new Error(r.status === 429 ? 'Server abhi busy hai (429) — thodi der me khud dobara try hoga' : `HTTP ${r.status}`);
+    const j = await r.json();
+    return { j: j && j.months ? j : { empty: true }, etag: r.headers.get('ETag') || '' };
+  }
+  let revalAt = 0;
+  async function revalidate(local) {
+    if (Date.now() - revalAt < 60e3) return; revalAt = Date.now();
+    try {
+      const n = await netSnap(local && local.etag);
+      if (n.same) { await idbPut('snap', { ...local, checked: Date.now() }); return; }
+      snap = n.j; cache.clear();
+      await idbPut('snap', { etag: n.etag, checked: Date.now(), data: n.j });
+    } catch { /* local copy chalti rahe */ }
+  }
   async function getSnap(force) {
     if (snap && !force) return snap;
     if (snapP && !force) return snapP;
     snapP = (async () => {
       await loadCore();
-      const r = await fetch('/api/payout/snapshot', { credentials: 'same-origin', cache: 'no-cache' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const j = await r.json();
-      snap = j && j.months ? j : { empty: true };
+      if (!force) {
+        const local = await idbGet('snap');
+        if (local && local.data) {
+          snap = local.data;
+          if (Date.now() - (local.checked || 0) > 60 * 60e3) revalidate(local);   // background — wait nahi
+          return snap;
+        }
+      }
+      const n = await netSnap('');
+      snap = n.j;
+      if (!n.j.empty) idbPut('snap', { etag: n.etag, checked: Date.now(), data: n.j });
       return snap;
     })();
     try { return await snapP; } finally { snapP = null; }
@@ -104,7 +144,8 @@ window.FF = window.FF || {};
     const res = await fetch('/api/payout/snapshot', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' }, body: gz });
     let out = {}; try { out = await res.json(); } catch { /* */ }
     if (!res.ok || !out.ok) throw new Error(out.error || `HTTP ${res.status}`);
-    snap = null; cache.clear(); await getSnap(true);
+    snap = JSON.parse(json); cache.clear();
+    await idbPut('snap', { etag: out.etag || '', checked: Date.now(), data: snap });
     return { ...out, months: months.length };
   }
   async function status() { try { const S = await getSnap(); return S.empty ? null : { at: S.at, by: S.by, months: S.months.map((m) => m.label) }; } catch { return null; } }
@@ -145,6 +186,7 @@ window.FF = window.FF || {};
       fetchPayout(spec).then((d) => { if (box.isConnected) paint(box, d, spec); }).catch((err) => {
         const b = box.querySelector('.ps-body'); if (b) b.innerHTML = `<span class="dim small">⚠️ ${esc((err && err.message) || err)}</span>`;
         box.__payDone = false;
+        setTimeout(() => { if (box.isConnected && !box.__payDone) fill(box.parentNode); }, 30e3);   // khud dobara
       });
     });
   }

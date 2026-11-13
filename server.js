@@ -10241,7 +10241,7 @@ async function handleApi(req, res, url) {
     try { mkdirSync(DATA_DIR, { recursive: true }); writeFileSync(PAYOUT_SNAP_FILE, buf); writeFileSync(`${PAYOUT_SNAP_FILE}.meta`, JSON.stringify({ at: snap.at, by: snap.by, etag: snap.etag, months: snap.months })); } catch { /* disk optional */ }
     // Sheet backup background me (Apps Script lock busy ho to 5 baar tak, badhte gap ke saath) — user ko rukna nahi padta.
     (async () => { for (let k = 0; k < 5; k++) { if (payoutSnap.data !== snap) return; if (await payoutSnapSaveSheet(snap)) { console.log(`payout snapshot: sheet backup saved (${Math.round(buf.length / 1024)} KB)`); return; } await new Promise((r) => setTimeout(r, 20e3 * (k + 1))); } })();
-    return sendJson(res, 200, { ok: true, at: new Date(snap.at).toISOString(), kb: Math.round(buf.length / 1024), months: snap.months, durable: 'background' });
+    return sendJson(res, 200, { ok: true, at: new Date(snap.at).toISOString(), kb: Math.round(buf.length / 1024), months: snap.months, etag: snap.etag, durable: 'background' });
   }
   if (p === '/api/payout' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required.');
