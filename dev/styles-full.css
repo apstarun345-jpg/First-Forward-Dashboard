@@ -8585,3 +8585,8 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .msp-pay-box .ps-acts{display:flex;justify-content:flex-end;margin-top:10px}
 @media (max-width:600px){.msp-pay-box .ps-tbl{font-size:12px}.msp-pay-box .ps-tbl td,.msp-pay-box .ps-tbl th{padding:7px 6px}}
 .msp-pay-box .ps-tbl th{opacity:1}
+.msp-kpi.msp-pay-box .ps-tbl td.ps-mon{text-align:left!important;padding-left:14px}
+.msp-kpi.msp-pay-box .ps-tbl td.ps-tags{color:#2563eb!important;font-weight:700}
+.msp-kpi.msp-pay-box .ps-tbl td.ps-fin{color:#7c3aed!important;font-weight:800}
+.msp-kpi.msp-pay-box .ps-tbl td.ps-rel{color:#16a34a!important;font-weight:700}
+.msp-kpi.msp-pay-box .ps-tbl th:first-child{padding-left:14px}

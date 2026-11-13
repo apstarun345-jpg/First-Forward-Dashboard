@@ -10,7 +10,7 @@ window.FF = window.FF || {};
   const COMPANY = 'APNAPAYMENT SERVICES PRIVATE LIMITED';
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-  const inr = (v, dec) => { let n = num(v); n = dec === 0 ? Math.round(n) : Math.round(n * 100) / 100; if (Object.is(n, -0) || Math.abs(n) < 0.005) n = 0; return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: dec === 0 ? 0 : 2, maximumFractionDigits: dec === 0 ? 0 : 2 })}`; };
+  const inr = (v, dec) => { let n = num(v); n = dec === 0 ? Math.round(n) : Math.round(n * 100) / 100; if (Object.is(n, -0) || Math.abs(n) < 0.005) n = 0; return `${n < 0 ? '-' : ''}₹${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: dec === 0 ? 0 : 2, maximumFractionDigits: dec === 0 ? 0 : 2 })}`; };
   const int = (v) => Math.round(num(v)).toLocaleString('en-IN');
   const canSee = () => { try { return FF.auth.isAdmin() || FF.auth.can('payout'); } catch { return false; } };
   const cache = new Map();
@@ -189,10 +189,11 @@ window.FF = window.FF || {};
   const STATUS_COL = { paid: '#16a34a', proc: '#d97706', hold: '#dc2626', other: '#475569', none: '#64748b' };
   function pager(company) {
     const pages = [];
-    let pg = null, y = 0, col = C.tags;
+    let pg = null, y = 0, col = C.tags, lastTitle = '';
     const F = (FF.pdf && FF.pdf.FONT) || 'Arial, sans-serif';
     const font = (mm, w) => { pg.ctx.font = `${w || 400} ${pg.px(mm)}px ${F}`; };
     const newPage = (title) => {
+      title = title || lastTitle; lastTitle = title;
       pg = FF.pdf.page(W, H); pages.push(pg);
       const { ctx, px } = pg;
       ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, px(W), px(H));
@@ -321,7 +322,7 @@ window.FF = window.FF || {};
       { foot: true, title });
     P.kv([['KYC with 500 product', int(t.kyc500_n), C.kyc], ['KYC without 500 product', int(t.kycw500_n), C.kyc], ['MAX count', int(t.max_n), C.kyc], ['MAX payout', inr(t.po_max), C.kyc]], 2);
     // ---- earnings / deductions side by side
-    const earn = [['VC4 payout', t.po_vc4], ['VC20 payout', t.po_vc20], ['Rest class payout', t.po_rest], ['MAX FASTag payout', t.po_max], ['KYC payout', t.po_kyc], ['500 product payout', t.po_500], ['Replacement payout (VC20/VC5)', t.po_rep_a], ['Replacement payout (VC6–VC16)', t.po_rep_b], ['Salary', t.salary], ['Bonus / offer / incentive', t.bonus]].filter(([, v]) => num(v));
+    const earn = [['VC4 payout', t.po_vc4], ['VC20 payout', t.po_vc20], ['Rest class payout', t.po_rest], ['MAX FASTag payout', t.po_max], ['Replacement payout (VC20/VC5)', t.po_rep_a], ['Replacement payout (VC6–VC16)', t.po_rep_b], ['Salary', t.salary], ['Bonus / offer / incentive', t.bonus]].filter(([, v]) => num(v));
     const ded = [['TDS @ 2%', t.tds], ['Wrong VRN penalty', t.pen_wrongvrn], ['Tag closure penalty', t.pen_closure], ['Bank complaint', t.bank_complaint], ['Penalty (scanned tags)', t.pen_scanned], ['Secugen device charges', t.secugen], ['Unaffixed tag penalty', t.pen_unaffixed]].filter(([, v]) => num(v));
     const earnSum = earn.reduce((s, [, v]) => s + num(v), 0), adj = Math.round((num(t.gross) - earnSum) * 100) / 100;
     if (num(t.gross) && Math.abs(adj) >= 1) earn.push(['Adjustment (as per payout sheet)', adj]);   // sheet ka gross hi final — farak saaf dikhe
