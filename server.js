@@ -16,6 +16,7 @@ import readline from 'node:readline';
 import { once } from 'node:events';
 import path from 'node:path';
 import { en } from './enText.js';
+import * as payoutCore from './payout-core.js';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { sheetsStoreFromEnv } from './sheets-storage.js';
@@ -183,6 +184,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'share', label: 'WhatsApp / Email share', group: 'Actions' },
   { key: 'refresh', label: 'Force refresh from Google', group: 'Actions' },
   { key: 'contacts', label: 'See mobile numbers', group: 'Actions' },
+  { key: 'payout', label: 'See payout & download payslips', group: 'Actions' },
   { key: 'voiceAssistant', label: 'Voice assistant (🎙️ panel + 👂 wake word)', group: 'Actions' },
   // ⚙️ v234 — Settings ke sections bhi admin kisi bhi user ko de sakta hai (Users / Access / Links / Audit / Backup sirf admin)
   { key: 'settings:brand', label: 'Settings · Branding & images', group: 'Settings' },
@@ -9392,6 +9394,74 @@ async function handleApi(req, res, url) {
     })().then((d) => { agentMobileRt.data = d; agentMobileRt.at = Date.now(); return d; }).finally(() => { agentMobileRt.promise = null; });
     return agentMobileRt.promise;
   }
+  // 💰 v3.125.230 — IDFC payout: APN sheet (agent-wise payable) + FNF sheet (payment release / remark). Sirf admin / "payout" permission.
+  const PAYOUT_SHEETS = { apn: String(process.env.APN_PAYOUT_SHEET_ID || '1QyiXewYroY4ppqm2JFKfDmYybh5Un299kEG5mio2z00').trim(), fnf: String(process.env.FNF_PAYOUT_SHEET_ID || '1eZMV79IYrBvTfR5me2IFSbsENp3GzmhWTfB2JNGqjeU').trim() };
+  const payoutTabs = new Map(); // `${kind}|${tab}` → { at, data, miss, err, promise }
+  let payoutReadtab = null;      // null = pata nahi, true = Apps Script me readtab hai, false = purana script (chunked readrange)
+  const colLetter = (n) => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+  async function payoutGrid(kind, tab) {
+    const store = sheetSyncStore();
+    if (!store) throw new HttpError(503, 'Google Sheet connection (Apps Script) set nahi hai.');
+    const spreadsheetId = PAYOUT_SHEETS[kind];
+    if (payoutReadtab !== false) {
+      try {
+        const out = await store.call('readtab', { spreadsheetId, tab, maxRows: 6000, maxCols: 100 }, { timeoutMs: 120e3, attempts: 2 });
+        payoutReadtab = true;
+        return out.values || [];
+      } catch (err) {
+        const msg = String(err && err.message || err);
+        if (/nahi mila/i.test(msg)) throw Object.assign(new Error(msg), { missing: true });
+        if (!/unknown action/i.test(msg)) throw err;
+        payoutReadtab = false;   // purana Apps Script — neeche chunked fallback
+      }
+    }
+    // fallback: 8-8 column ke tukde (har call lock leta hai — isliye dheere, ek-ek karke)
+    const grid = [];
+    const maxCol = kind === 'apn' ? 72 : 48;
+    for (let c = 1; c <= maxCol; c += 8) {
+      const cols = []; for (let k = c; k < Math.min(maxCol + 1, c + 8); k++) cols.push(colLetter(k));
+      let out;
+      try { out = await store.call('readrange', { spreadsheetId, tab, startRow: 1, columns: cols }, { timeoutMs: 120e3, attempts: 2 }); }
+      catch (err) { const msg = String(err && err.message || err); if (/nahi mila/i.test(msg)) throw Object.assign(new Error(msg), { missing: true }); if (c === 1) throw err; break; }
+      (out.rows || []).forEach((r, i) => { grid[i] = grid[i] || []; r.forEach((v, j) => { grid[i][c - 1 + j] = v; }); });
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return grid;
+  }
+  async function payoutTab(kind, m) {
+    const key = `${kind}|${m.tab}`;
+    const c = payoutTabs.get(key) || {};
+    const fresh = c.at && Date.now() - c.at < (c.miss ? 60 * 60e3 : 3 * 3600e3);
+    if (fresh) return c;
+    if (c.promise) return c.promise;
+    const p = (async () => {
+      try {
+        let values;
+        try { values = await payoutGrid(kind, m.tab); }
+        catch (err) { if (err && err.missing && m.alt) values = await payoutGrid(kind, m.alt); else throw err; }
+        const data = payoutCore.parseGrid(values, kind);
+        const o = { at: Date.now(), data, miss: false };
+        payoutTabs.set(key, o); return o;
+      } catch (err) {
+        const o = { at: Date.now(), data: null, miss: !!(err && err.missing), err: String(err && err.message || err).slice(0, 200) };
+        if (o.miss) payoutTabs.set(key, o); else payoutTabs.delete(key);
+        return o;
+      }
+    })();
+    payoutTabs.set(key, { ...c, promise: p });
+    return p;
+  }
+  async function payoutFor(want, n) {
+    const now = new Date(Date.now() + 5.5 * 3600e3);
+    const months = payoutCore.monthTabs(now.toISOString().slice(0, 7), Math.min(13, Math.max(1, n || 7)));
+    const out = [];
+    for (const m of months) {        // ek-ek karke — Google par bojh kam
+      const [a, f] = [await payoutTab('apn', m), await payoutTab('fnf', m)];
+      const res = a.data || f.data ? payoutCore.matchMonth(a.data, f.data, want) : null;
+      out.push({ tab: m.tab, ym: m.ym, label: m.label, available: !!(a.data || f.data), missing: !!(a.miss && f.miss), err: !a.data && !a.miss ? a.err : '', data: res, status: res ? payoutCore.statusOf(res.fnf) : null });
+    }
+    return out;
+  }
   async function syncAddressBookToSheet(requests) {
     const fresh = (Array.isArray(requests) ? requests : [requests]).map(addressEntryFromRequest).filter(Boolean);
     // Sheet ka maujooda data (Address tab — jahan mobile haath se bhi bhara ja sakta hai) bhi merge me lo.
@@ -10040,6 +10110,16 @@ async function handleApi(req, res, url) {
       if (err instanceof HttpError) throw err;
       throw new HttpError(502, `Sheet history read nahi ho payi: ${err.message}`);
     }
+  }
+  if (p === '/api/payout' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required.');
+    if (user.role !== 'admin' && !(Array.isArray(user.permissions) && user.permissions.includes('payout'))) throw new HttpError(403, 'Payout dekhne ki permission nahi hai.');
+    const ids = String(url.searchParams.get('ids') || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20);
+    const name = String(url.searchParams.get('name') || '').slice(0, 120);
+    if (!ids.length && !name) throw new HttpError(400, 'ids ya name chahiye.');
+    const months = await payoutFor({ ids, name }, Number(url.searchParams.get('months')) || 7);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return sendJson(res, 200, { ok: true, company: 'APNAPAYMENT SERVICES PRIVATE LIMITED', months, readtab: payoutReadtab, at: new Date().toISOString() });
   }
   if (p === '/api/agent-mobiles' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required.');

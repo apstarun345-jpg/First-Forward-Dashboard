@@ -75,7 +75,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.75';
+const CODE_VERSION = 'v3.76';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -311,6 +311,28 @@ function doPost(e) {
     }
   }
   if (body.secret !== SECRET) return json_({ ok: false, error: 'unauthorized (secret mismatch) — Render env APPS_SCRIPT_SECRET aur yahan Script Property APPS_SCRIPT_SECRET exact same hone chahiye. Editor me checkSetup() chalao.' });
+
+  // 💰 v3.76 — readtab: poora tab ek call me (READ-ONLY, isliye LOCK NAHI — storage writes ko nahi rokta).
+  // Payout payslip (APN / FNF sheets) ke liye. body: { spreadsheetId, tab, maxRows?, maxCols? }
+  if (body.action === 'readtab') {
+    try {
+      var ssT = target_(body.spreadsheetId);
+      var shT = ssT.getSheetByName(String(body.tab || '').slice(0, 80));
+      if (!shT) return json_({ ok: false, error: 'Tab "' + body.tab + '" is sheet me nahi mila.' });
+      var lrT = Math.min(shT.getLastRow(), Math.max(1, Number(body.maxRows) || 6000));
+      var lcT = Math.min(shT.getLastColumn(), Math.max(1, Number(body.maxCols) || 120));
+      if (lrT < 1 || lcT < 1) return json_({ ok: true, values: [], tab: body.tab });
+      var valsT = shT.getRange(1, 1, lrT, lcT).getValues().map(function (r) {
+        return r.map(function (v) {
+          if (v === null || v === undefined) return '';
+          if (typeof v === 'number') return (Math.floor(v) === v && Math.abs(v) < 1e21) ? Utilities.formatString('%.0f', v) : String(v);
+          if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+          return String(v);
+        });
+      });
+      return json_({ ok: true, values: valsT, tab: body.tab, spreadsheet: ssT.getName() });
+    } catch (errT) { return json_({ ok: false, error: String(errT && errT.message || errT) }); }
+  }
 
   // 📧 Mail relay (HTTPS) — Render free blocks SMTP ports, so the dashboard can send its emails
   // (login OTP, daily digest, champion certificates, test mail) THROUGH this script via Gmail.

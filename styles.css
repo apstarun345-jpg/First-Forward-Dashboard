@@ -8142,3 +8142,20 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .ops-tower td:first-child { color: var(--muted, #64748b); width: 44%; }
 .ops-tw-f { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 6px; }
 .ops-tower small { color: var(--muted, #64748b); }
+/* 💰 v3.125.230 — payout box + payslip picker */
+.msp-pay-box{grid-column:1/-1;text-align:left}
+.msp-pay-box .ps-role{margin:2px 0 6px}
+.ps-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.ps-tbl th,.ps-tbl td{padding:5px 6px;border-bottom:1px solid var(--border,#e2e8f0);text-align:left;vertical-align:top}
+.ps-tbl th{font-size:11px;opacity:.75;font-weight:700}
+.ps-tbl .num{text-align:right;white-space:nowrap}
+.ps-chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.ps-ok{background:#dcfce7;color:#166534}.ps-warn{background:#fef3c7;color:#92400e}.ps-bad{background:#fee2e2;color:#991b1b}.ps-mute{background:#e2e8f0;color:#334155}
+.ps-acts{display:flex;justify-content:flex-end;margin-top:8px}
+.ps-pick{max-width:460px}
+.ps-mlist{display:flex;flex-direction:column;gap:6px;max-height:44vh;overflow:auto;margin:10px 0}
+.ps-m{display:flex;gap:8px;align-items:center;padding:7px 10px;border:1px solid var(--border,#e2e8f0);border-radius:10px;cursor:pointer}
+.ps-m small{margin-left:auto}
+.ps-quick{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.ps-mode{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;font-size:13px}
+@media (max-width:600px){.ps-tbl{font-size:11.5px}.ps-tbl th:nth-child(2),.ps-tbl td:nth-child(2){display:none}}

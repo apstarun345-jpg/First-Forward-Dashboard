@@ -2294,6 +2294,7 @@ FF.pages = FF.pages || {};
           ${dispBoxHtml(pr, isTl, ch)}
           ${kycBoxHtml(pr, isTl, ch)}
           ${issBoxHtml(pr, isTl, ch)}
+          ${payBoxHtml(pr, isTl, ch)}
           ${ch === 'gv' ? GVC.boxHtml(pr, isTl) : ''}
         </div>${notFound}</div></section>${donutBlock}`;
     }
@@ -2315,8 +2316,11 @@ FF.pages = FF.pages || {};
           fillDispBoxes(host);
           fillKycBoxes(host);
           fillIssBoxes(host);
+          if (FF.payslip) FF.payslip.fill(host);
         }
       };
+      // 💰 v3.125.230 — payout box module (payslip.js) on demand; aate hi KPI card dobara paint.
+      if (!FF.payslip && payCanSee() && FF.lazy && FF.lazy.inject) FF.lazy.inject('payslip').then(() => { if (FF.payslip && host.isConnected !== false) FF.payslip.fill(host); });
       REPORT_CTX.name = g.name; REPORT_CTX.prs = {};
       chans.forEach((c) => {
         let q = null;
@@ -2751,6 +2755,15 @@ FF.pages = FF.pages || {};
   function dispSpecOf(pr, isTl, ch) {
     const names = [pr.name], ids = [pr.id].filter(Boolean);
     return { ch, names, ids, title: pr.name, isTl: !!isTl };
+  }
+  // 💰 v3.125.230 — payout box placeholder; payslip.js (on demand) isse bharta hai.
+  function payCanSee() { try { return FF.auth.isAdmin() || FF.auth.can('payout'); } catch { return false; } }
+  function payBoxHtml(pr, isTl, ch) {
+    if (ch === 'gv' || !payCanSee()) return '';
+    const ids = [pr.id, pr.sub, ...(pr.ids ? [...pr.ids] : []), ...(pr.alias ? [...pr.alias] : []), ...(pr.tlIds ? [...pr.tlIds] : [])]
+      .map((x) => String(x || '').trim()).filter((x) => x && !/^APS\d/i.test(x) && x.length >= 3);
+    const sc = { ids: [...new Set(ids)].slice(0, 12), name: pr.name || '', tl: !!isTl };
+    return `<div class="mp-kpi msp-kpi k12 msp-pay-box" data-msp-pay-box="${esc(JSON.stringify(sc))}"><small>💰 IDFC payout · last 6 months <span class="dim">(APN + FNF sheet)</span></small><div class="ps-body"><span class="dim small">Loading payout…</span></div></div>`;
   }
   function dispBoxHtml(pr, isTl, ch) {
     const sc = dispSpecOf(pr, isTl, ch);
