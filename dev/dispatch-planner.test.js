@@ -186,3 +186,11 @@ test('v3.125.256 — VC4/VC20 aur VC5+ ka alag cover: kisi ek group me kam cover
   assert.ok(c.netA > 0 && c.netB === 0);
   assert.equal(c.net, c.netA + c.netB);
 });
+
+test('v3.125.257 — VC5+ ka cover 0 (stock 0) priority nahi banata', () => {
+  const r = { kind: 'agent', ch: 'gv', name: 'Y', id: 'Y1', tl: 'TL', direct: false, priority: '',
+    cur: { vc4: 50, comm: 5, total: 55 }, last: { vc4: 50, comm: 5, total: 55 }, stock: { vc4: 400, comm: 0, total: 400 } };
+  const c = DP.withCalc(r, 'total');
+  assert.equal(c.coverB, 0);
+  assert.notEqual(c.priority, 'High');
+});

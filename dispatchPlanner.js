@@ -325,7 +325,8 @@ FF.pages = FF.pages || {};
     const part = (o, k) => { const tot = Math.max(0, Number(o && o.total) || 0), cm = Math.max(0, Number(o && o.comm) || 0); return k === 'comm' ? Math.min(cm, tot || cm) : Math.max(0, tot - cm); };
     const gA = U.dispatchCalc({ cur: part(r.cur, 'core'), last: part(r.last, 'core'), stock: part(r.stock, 'core'), ch: r.ch, elapsed: chDays(r.ch) });
     const gB = U.dispatchCalc({ cur: part(r.cur, 'comm'), last: part(r.last, 'comm'), stock: part(r.stock, 'comm'), ch: r.ch, elapsed: chDays(r.ch) });
-    const covers = [gA, gB].filter((g) => g.rate > 0 && g.cover != null).map((g) => g.cover);
+    // VC5+ ka stock hi 0 ho (cover 0) to wo priority nahi banata — sirf VC4/VC20 ya VC5+ (stock > 0) ka kam cover.
+    const covers = [gA, gB].filter((g) => g.rate > 0 && g.cover != null && (g !== gB || g.stock > 0)).map((g) => g.cover);
     const coverMin = covers.length ? Math.min(...covers) : c.cover;
     let priority = r.priority;
     if (c.rate > 0) priority = coverMin == null ? 'Low' : coverMin < redD ? 'High' : coverMin < orgD ? 'Medium' : 'Low';
