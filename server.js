@@ -10280,8 +10280,18 @@ async function handleApi(req, res, url) {
     if (!tok) throw new HttpError(400, 'Delhivery API token set nahi hai — Delhivery Tracking page par admin token daalein.');
     const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 25e3);
     try {
-      const r = await fetch(urlStr, { headers: { Authorization: `Token ${tok}`, Accept: 'application/json' }, signal: ac.signal });
-      const txt = await r.text();
+      let r = await fetch(urlStr, { headers: { Authorization: `Token ${tok}`, Accept: 'application/json' }, signal: ac.signal });
+      let txt = await r.text();
+      // Render ka IP Delhivery reject kare (401/403) → wahi call Apps Script (Google server) se — jaise aapki sheet script chalti hai.
+      if (r.status === 401 || r.status === 403) {
+        const store = sheetSyncStore();
+        if (store) {
+          try {
+            const o = await store.call('dlvfetch', { url: urlStr, token: tok }, { timeoutMs: 40e3, attempts: 1 });
+            if (o && o.status) { r = { status: o.status, ok: o.status >= 200 && o.status < 300 }; txt = String(o.text || ''); }
+          } catch (e2) { if (!/unknown action/i.test(String(e2 && e2.message))) console.warn('dlvfetch:', String(e2 && e2.message).slice(0, 150)); }
+        }
+      }
       if (r.status === 401 || r.status === 403) { console.warn(`delhivery ${r.status}: ${String(txt).replace(/\s+/g, ' ').slice(0, 200)}`); throw new HttpError(502, `Delhivery ne request reject ki (HTTP ${r.status})${/cloudflare|access denied|forbidden|<html/i.test(txt) ? ' — server IP block lag raha hai' : ' — token check karo'}: ${String(txt).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)}`); }
       if (!r.ok) throw new HttpError(502, `Delhivery HTTP ${r.status}`);
       try { return JSON.parse(txt); } catch { throw new HttpError(502, 'Delhivery ka response samajh nahi aaya.'); }

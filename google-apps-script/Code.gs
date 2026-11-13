@@ -75,7 +75,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.78';
+const CODE_VERSION = 'v3.79';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -384,6 +384,17 @@ function doPost(e) {
       }
       return json_({ ok: true, rows: outC, scanned: vals.length });
     } catch (errC) { return json_({ ok: false, error: String(errC && errC.message || errC) }); }
+  }
+
+  // 🚚 v3.79 — dlvfetch: Delhivery API call Google ke server se (UrlFetchApp) — Render ka IP reject ho tab fallback.
+  // Sirf track.delhivery.com, READ-ONLY GET, LOCK NAHI. body: { url, token }
+  if (body.action === 'dlvfetch') {
+    try {
+      var u = String(body.url || '');
+      if (!/^https:\/\/track\.delhivery\.com\//.test(u)) return json_({ ok: false, error: 'url allowed nahi' });
+      var resp = UrlFetchApp.fetch(u, { method: 'get', headers: { Authorization: 'Token ' + String(body.token || '') }, muteHttpExceptions: true });
+      return json_({ ok: true, status: resp.getResponseCode(), text: resp.getContentText() });
+    } catch (errD) { return json_({ ok: false, error: String(errD && errD.message || errD) }); }
   }
 
   // 📧 Mail relay (HTTPS) — Render free blocks SMTP ports, so the dashboard can send its emails
