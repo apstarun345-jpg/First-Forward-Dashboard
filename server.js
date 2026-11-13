@@ -9466,7 +9466,9 @@ async function handleApi(req, res, url) {
     return p;
   }
   /** Ek mahine ka { data (parsed), miss, err } — readmatch se (chhota) ya fallback se (poora). */
+  let payoutProbeAt = 0;
   async function payoutTab(kind, m, keys) {
+    if (payoutReadtab === false && Date.now() - payoutProbeAt > 10 * 60e3) { payoutProbeAt = Date.now(); payoutReadtab = null; }
     for (const tab of [m.tab, m.alt].filter(Boolean)) {
       if (payoutReadtab !== false) {
         try {
@@ -9477,6 +9479,9 @@ async function handleApi(req, res, url) {
           if (payoutReadtab !== false) return { data: null, err: String(err && err.message || err).slice(0, 200) };
         }
       }
+      // Purana Apps Script: poora tab padhna bahut dheema (har tukda lock leta hai) + server memory bhar deta hai.
+      // Isliye sirf env PAYOUT_FULL_FALLBACK=1 par; warna saaf message.
+      if (process.env.PAYOUT_FULL_FALLBACK !== '1') return { data: null, err: 'Apps Script (Code.gs v3.77) ka naya version deploy karna baaki hai — uske baad payout turant aayega.' };
       const f = await payoutTabFull(kind, tab);
       if (f.miss) continue;
       return f;
