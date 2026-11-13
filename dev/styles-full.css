@@ -8505,3 +8505,15 @@ html body .msp-vc3 b { font-size: 20px; }
 html body .msp-uni .msp-lasttag, html body .msp-lasttag { display: inline-block !important; width: auto !important; margin: 8px 0 2px !important; padding: 3px 10px !important; border-radius: 999px !important; font-size: 11.5px !important; line-height: 1.5 !important; font-weight: 700 !important; letter-spacing: 0 !important; text-transform: none !important; white-space: nowrap; }
 html body .msp-lasttag b { display: inline !important; font-size: 12px !important; font-weight: 800 !important; letter-spacing: 0 !important; text-transform: none !important; }
 html body .msp-lasttag small { display: inline !important; font-size: 11px !important; text-transform: none !important; letter-spacing: 0 !important; }
+
+/* 🎉 v3.125.220 — robot: badi khushi (poori screen confetti) + chhupa robot ka 🤖 */
+.mc-party { position: fixed; inset: 0; pointer-events: none; z-index: 9990; overflow: hidden; }
+.mc-party i { position: absolute; top: -24px; width: 9px; height: 14px; border-radius: 2px; opacity: .95; animation: mcPartyFall 3s cubic-bezier(.25,.6,.4,1) forwards; }
+.mc-party i.emo { width: auto; height: auto; font-size: 22px; font-style: normal; background: none; }
+@keyframes mcPartyFall { 0% { transform: translate(0, 0) rotate(0); opacity: 1; } 85% { opacity: 1; } 100% { transform: translate(var(--dx, 0), 105vh) rotate(var(--rot, 720deg)); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .mc-party { display: none; } }
+.mc-peek { position: fixed; right: 14px; bottom: 14px; z-index: 56; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line, #e5e7eb); background: var(--card, #fff); box-shadow: 0 6px 18px rgba(15,23,42,.18); font-size: 20px; cursor: pointer; display: grid; place-items: center; transition: transform .2s; }
+.mc-peek:hover { transform: scale(1.12); }
+.mc-peek[hidden] { display: none; }
+@media (max-width: 759px) { .mc-peek { bottom: 84px; right: 10px; } }
+@media print { .mc-peek, .mc-party { display: none !important; } }

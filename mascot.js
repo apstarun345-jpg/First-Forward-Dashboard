@@ -923,9 +923,11 @@
     applyOn();
   }
   function applyOn() {
-    const on = !!cfg.on && allowed(); // 👑 sirf admin
+    const hid = cfg.hideDay === istToday(); // 🙈 v3.125.220 — "aaj ke liye chhupao"
+    const on = !!cfg.on && allowed() && !hid; // 👑 sirf admin
     root.classList.toggle('mc-on', on && !pipWin); // robot pop-out me ho to site par 🎙 button wapas
     if (el) el.hidden = !on;
+    showPeek(!!cfg.on && allowed() && hid && !pipWin);
   }
 
   function rowsHtml(it) {
@@ -953,7 +955,12 @@
         <label>Masti (dance + jokes) <input type="checkbox" data-mc="fun"${cfg.fun !== false ? ' checked' : ''}></label>
         <label>🤖 Chhotu (chhota dost) <input type="checkbox" data-mc="chhotu"${cfg.chhotu !== false ? ' checked' : ''}></label>
         <label>🎵 Dhun (jingle) <input type="checkbox" data-mc="jingle"${cfg.jingle !== false ? ' checked' : ''}></label>
+        <label>📏 Robot ka size
+          <select data-mc="size"><option value="s"${cfg.size === 's' ? ' selected' : ''}>Chhota</option><option value="m"${!cfg.size || cfg.size === 'm' ? ' selected' : ''}>Normal</option><option value="l"${cfg.size === 'l' ? ' selected' : ''}>Bada</option></select></label>
+        <label>💡 Page ke hisaab se tips <input type="checkbox" data-mc="tips"${cfg.tips !== false ? ' checked' : ''}></label>
+        <label>🎉 Badi khushi (poori screen confetti) <input type="checkbox" data-mc="party"${cfg.party !== false ? ' checked' : ''}></label>
         <button type="button" data-mc="home">🏠 Wapas kone me (default jagah)</button>
+        <button type="button" data-mc="hide">🙈 Aaj ke liye robot chhupao (kone me 🤖 se wapas)</button>
         <button type="button" data-mc="today">😴 Aaj ke liye updates band</button>
         <button type="button" data-mc="off">⛔ Robot band karo (purana 🎙 button)</button>
         <small>Wapas chalu: Settings → 🔔 Sound → 🤖 Robot dost (ya Gems panel → 🤖)</small>
@@ -999,6 +1006,7 @@
     else if (k === 'menu') { const m = board.querySelector('.mc-menu'); if (m) { m.hidden = !m.hidden; layoutBoard(geo(), el.dataset.side || 'left'); } hover = true; }
     else if (k === 'today') { cfg.snoozeDay = today(); save(); if (skip) skip(); closeHist(); }
     else if (k === 'off') { cfg.on = false; save(); if (skip) skip(); closeHist(); applyOn(); }
+    else if (k === 'hide') { cfg.hideDay = istToday(); save(); if (skip) skip(); closeHist(); applyOn(); }
     else if (k === 'home') { delete cfg.dock; save(); closeHist(); fly([pos, dockPos()], 900); }
     else if (k === 'ask') { closeHist(); openAssistant(); }
     else if (k === 'now') { closeHist(); now(true); }
@@ -1021,6 +1029,9 @@
     if (t.dataset.mc === 'fun') { cfg.fun = !!t.checked; save(); }
     if (t.dataset.mc === 'chhotu') { cfg.chhotu = !!t.checked; save(); if (el) el.classList.toggle('no-chhotu', !cfg.chhotu); }
     if (t.dataset.mc === 'jingle') { cfg.jingle = !!t.checked; save(); }
+    if (t.dataset.mc === 'size') { cfg.size = ['s', 'm', 'l'].includes(t.value) ? t.value : 'm'; save(); place(mode === 'dock' ? dockPos() : pos); }
+    if (t.dataset.mc === 'tips') { cfg.tips = !!t.checked; save(); }
+    if (t.dataset.mc === 'party') { cfg.party = !!t.checked; save(); }
   });
 
   // ---------------------------------------------------------------- 🗣 voice (v3.125.124: sahi Hindi uchcharan)
@@ -1141,7 +1152,8 @@
   // ---------------------------------------------------------------- motion
   function geo() {
     const w = win(), vw = w.innerWidth, vh = w.innerHeight, mob = vw < 760;
-    const W = mob ? 62 : 84, H = Math.round(W * 1.208);
+    const SZ = { s: 0.72, m: 1, l: 1.3 }[cfg.size] || 1; // 📏 v3.125.220 — robot chhota / bada (menu se)
+    const W = Math.round((mob ? 62 : 84) * SZ), H = Math.round(W * 1.208);
     const BW = Math.min(mob ? 260 : 330, vw - W - 30);
     if (pipWin) return { vw, vh, mob, W, H, BW, minY: 8, maxY: vh - H - 10 };
     return { vw, vh, mob, W, H, BW, minY: mob ? 64 : 72, maxY: vh - H - (mob ? 84 : 16) };
@@ -1370,6 +1382,7 @@
     let reason = '';
     const ended = new Promise((res) => { skip = (why) => { reason = why || 'skip'; res(); }; });
     if (it.fx) confetti(it.fx);
+    if (it.party || (it.fx === 'clap' && /mile|rec|srec|record|champ/.test(it.key || ''))) bigParty(it.key);
     const jk = /record|mile|badges|rec:|clap|champ/.test(it.key || '') || it.fx === 'clap' ? 'record' : /anom|late|stzero|nostock/.test(it.key || '') ? 'alert' : it.mood === 'excited' || it.mood === 'happy' ? 'win' : '';
     const jingled = jk ? jingle(jk) : 0;
     tw().setTimeout(() => { if (current === it) chotuSay(pick(CH_REACT[it.mood] || CH_REACT.info)); }, 700);
@@ -2723,6 +2736,134 @@
   }
   const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake === true, alerts: cfg.alerts !== false, keyOnly: !!cfg.keyOnly, brief: cfg.brief !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
+
+  // ================================================================ 🎉 v3.125.220 — badi khushi (poori screen confetti)
+  function bigParty(key) {
+    try {
+      if (cfg.party === false || reduced() || document.hidden) return;
+      const k = String(key || 'x');
+      const done = cfg.partyDone || (cfg.partyDone = {});
+      if (done[k]) return;                                   // ek khushi ek hi baar
+      done[k] = Date.now();
+      Object.keys(done).forEach((x) => { if (Date.now() - done[x] > 20 * 864e5) delete done[x]; });
+      save();
+      const doc = (el && el.ownerDocument) || document;
+      const layer = doc.createElement('div');
+      layer.className = 'mc-party'; layer.setAttribute('aria-hidden', 'true');
+      const COL = ['#f43f5e', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#06b6d4', '#facc15'];
+      const EMO = ['🎉', '🏆', '⭐', '🎊', '💯'];
+      for (let i = 0; i < 90; i++) {
+        const b = doc.createElement('i');
+        if (i % 9 === 0) { b.textContent = pick(EMO); b.className = 'emo'; } else b.style.background = pick(COL);
+        b.style.left = `${rnd(0, 100).toFixed(1)}%`;
+        b.style.setProperty('--dx', `${Math.round(rnd(-120, 120))}px`);
+        b.style.setProperty('--rot', `${Math.round(rnd(360, 1080))}deg`);
+        b.style.animationDelay = `${rnd(0, 0.9).toFixed(2)}s`;
+        b.style.animationDuration = `${rnd(2.4, 3.8).toFixed(2)}s`;
+        layer.appendChild(b);
+      }
+      doc.body.appendChild(layer);
+      setTimeout(() => layer.remove(), 5200);
+      if (el) { el.classList.add('mc-disco'); setTimeout(() => el && el.classList.remove('mc-disco'), 4200); }
+    } catch { /* masti optional */ }
+  }
+  // 🏅 site ka record din: aakhri din is mahine ka sabse best (kam se kam 5 din ho chuke)
+  BUILDERS.push(function siteRecordDay() {
+    const S = series(); if (!S || !S.last) return null;
+    const ym = S.last.slice(0, 7);
+    const days = [...S.site.entries()].filter(([d]) => d.startsWith(ym));
+    if (days.length < 5) return null;
+    const lastN = S.site.get(S.last) || 0;
+    const prevBest = Math.max(0, ...days.filter(([d]) => d !== S.last).map(([, n]) => n));
+    if (!lastN || lastN <= prevBest) return null;
+    return { key: `srec:${S.last}`, party: true, mood: 'excited', fx: 'clap', cls: 'mc-disco', icon: '🏆', title: 'Naya record din!', view: 'big', big: fmt(lastN),
+      head: `${S.last.slice(8)} ${new Date(S.last).toLocaleString('en-IN', { month: 'short' })} — is mahine ka sabse zyada (pichhla best ${fmt(prevBest)})`,
+      rows: [{ name: 'Record se upar', val: `+${fmt(lastN - prevBest)}`, tone: 'up' }],
+      say: `वाह! ${fmt(lastN)} टैग्स के साथ ये इस महीने का सबसे बढ़िया दिन रहा। पिछला सबसे अच्छा ${fmt(prevBest)} था।`, q: '#/tagIssued' };
+  });
+
+  // ================================================================ 🙈 chhupa robot → kone me chhota 🤖 (click = wapas)
+  var peek = null; // var: applyOn pehle bhi chal sakta hai (TDZ se bachao)
+  function showPeek(on) {
+    try {
+      if (!on) { if (peek) peek.hidden = true; return; }
+      if (!peek) {
+        peek = document.createElement('button');
+        peek.type = 'button'; peek.className = 'mc-peek'; peek.title = 'Robot wapas lao'; peek.setAttribute('aria-label', 'Robot wapas lao');
+        peek.textContent = '🤖';
+        peek.addEventListener('click', () => { cfg.hideDay = ''; save(); peek.hidden = true; build(); applyOn(); place(dockPos()); });
+        document.body.appendChild(peek);
+      }
+      peek.hidden = false;
+    } catch { /* ignore */ }
+  }
+
+  // ================================================================ 💡 page ke hisaab se tips
+  const tipSeen = new Map();
+  let tipTimer = 0;
+  const routeOf = () => { const h = location.hash || ''; return { r: (h.match(/^#\/([\w-]+)/) || [])[1] || 'home', q: new URLSearchParams(h.split('?')[1] || '') }; };
+  const tipApi = (path, m, b) => FF.auth.api(path, m, b);
+  const TIPS = {
+    async tagRequest() {
+      const d = await tipApi('/api/tag-requests'); const L = (d && d.requests) || [];
+      const pend = L.filter((r) => r.status === 'pending' || r.status === 'submitted').length;
+      const open = L.filter((r) => !/^(rejected|dispatched|delivered|cancelled)$/.test(String(r.status || '')) && Date.now() - (Date.parse(r.at || 0) || 0) < 15 * 864e5); // sirf pichhle 15 din ki khuli requests
+      const noMob = open.filter((r) => !(r.agent && String(r.agent.mobile || '').replace(/\D/g, '').length >= 10)).length;
+      const noAddr = open.filter((r) => !(r.agent && r.agent.address && r.agent.pincode)).length;
+      if (!pend && !noMob && !noAddr) return null;
+      const bits = [pend ? `${fmt(pend)} request approve ke liye ruki hain` : '', noMob ? `${fmt(noMob)} me mobile missing` : '', noAddr ? `${fmt(noAddr)} me address/PIN missing` : ''].filter(Boolean);
+      return { key: `tr:${pend}:${noMob}:${noAddr}`, icon: '🏷️', title: 'Tag Request — dhyan dein', head: bits.join(' · '), mood: pend ? 'alert' : 'curious',
+        say: `ध्यान दें: ${bits.join(', ')}।` };
+    },
+    async masterSearch(q) {
+      const id = q.get('id') || '', ch = (q.get('ch') || '').toLowerCase(), name = q.get('q') || '';
+      if (!id || !/^(gv|ff)$/.test(ch)) return null;
+      const d = await tipApi('/api/dispatch-by', 'POST', { ch, names: name ? [name] : [], ids: [id] });
+      let notAsg = 0, n = 0;
+      for (const r of ((d && d.recent) || []).slice(0, 3)) {
+        const rg = (r.ranges || []).map((x) => ({ first: x.first, last: x.last })); if (!rg.length) continue;
+        const st = await tipApi('/api/dispatch-status', 'POST', { ch, ranges: rg });
+        (st && st.rows || []).forEach((x) => { n++; if (x.status === 'stock' && /not assigned/i.test(String(x.agentId || ''))) notAsg++; });
+      }
+      if (!notAsg) return null;
+      return { key: `ms:${id}:${notAsg}`, icon: '📦', title: 'Tag assign nahi hue', mood: 'alert',
+        head: `Iske haal ke dispatch ke ${fmt(notAsg)} tag abhi "Not Assigned" hain — portal me ${id} par assign karwao, tab own stock me aayenge.`,
+        say: `इस एजेंट के ${fmt(notAsg)} टैग अभी असाइन नहीं हुए हैं। पोर्टल में असाइन करवाइए।` };
+    },
+    async tagIssued() {
+      const S = series(); if (!S || !S.last) return null;
+      const ks = [...S.site.keys()].sort(); const i = ks.indexOf(S.last); if (i < 1) return null;
+      const a = S.site.get(S.last) || 0, b = S.site.get(ks[i - 1]) || 0; if (!b) return null;
+      const pc = Math.round((a - b) / b * 100);
+      return { key: `ti:${S.last}`, icon: pc >= 0 ? '📈' : '📉', title: 'Aakhri din ka hisaab', mood: pc >= 0 ? 'happy' : 'sad',
+        head: `${S.last.slice(8)} tareekh: ${fmt(a)} tags — usse pehle ke din se ${pc >= 0 ? '▲' : '▼'} ${Math.abs(pc)}% (${fmt(b)})`,
+        say: `आख़िरी दिन ${fmt(a)} टैग्स लगे, पिछले दिन से ${Math.abs(pc)} प्रतिशत ${pc >= 0 ? 'ज़्यादा' : 'कम'}।` };
+    },
+    async agentsOverview() {
+      return { key: `aov:${istToday()}`, icon: '📞', title: 'Inactive agents ko call karo', mood: 'curious',
+        head: 'Kisi bhi card par click karo — list me har agent ka 📞 mobile hai. Inactive / de-growth agents ko aaj call karke activate karo.', say: '' };
+    },
+    async gvApiReport() {
+      return { key: `gvr:${istToday()}`, icon: '🔎', title: 'Tip', mood: 'curious',
+        head: 'Multiple search me bahut saare VRN / barcode / Tag ID ek saath paste karo — API se seedha check ho jayega.', say: '' };
+    }
+  };
+  async function pageTip() {
+    try {
+      if (!cfg.on || !allowed() || cfg.tips === false || cfg.hideDay === istToday() || cfg.snoozeDay === today() || document.hidden) return;
+      const { r, q } = routeOf();
+      const fn = TIPS[r]; if (!fn) return;
+      const it = await Promise.race([fn(q), wait(25000).then(() => null)]);
+      if (!it || routeOf().r !== r) return;                   // user aage badh gaya
+      const k = `tip:${it.key}`;
+      if (tipSeen.has(k) && Date.now() - tipSeen.get(k) < 45 * 60e3) return;
+      tipSeen.set(k, Date.now());
+      enqueue({ id: `${k}:${Date.now()}`, key: k, grp: 'pagetip', fast: true, mood: it.mood || 'curious', icon: it.icon || '💡', title: it.title, head: it.head, view: 'text', say: it.say || '', q: it.q || '' });
+    } catch { /* tip optional */ }
+  }
+  window.addEventListener('hashchange', () => { clearTimeout(tipTimer); tipTimer = setTimeout(pageTip, 2000); });
+  setTimeout(pageTip, 9000);
+
   FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake === true, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
