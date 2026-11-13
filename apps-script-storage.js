@@ -172,7 +172,25 @@ export class AppsScriptStore {
   async read() {
     // v3.125.229 — poori APP_STORAGE (bada Sheet ~20 MB + Apps Script lock ka intezaar ~23 s) 20 s me nahi aati thi →
     // boot par baar-baar "storage timeout" aur site "Unable to connect". Read ko 75 s do (Apps Script khud 6 min tak chal sakta hai).
-    const out = await this.call('read', {}, { timeoutMs: Math.max(this.timeoutMs, Number(process.env.APPS_SCRIPT_READ_TIMEOUT_MS || 75000)), attempts: 4 });   // v3.125.251 — 'busy, retry' (lock) par boot band nahi, dobara try
+    let out;
+    try { out = await this.call('read', {}, { timeoutMs: Math.max(this.timeoutMs, Number(process.env.APPS_SCRIPT_READ_TIMEOUT_MS || 75000)), attempts: 3 }); }   // v3.125.251 — 'busy, retry' (lock) par dobara
+    catch (err) {
+      // 🔓 Lock lamba busy (koi bada sheet kaam chal raha hai) → read ke liye lock ki zaroorat hi nahi: lock-free 'readtab' se
+      // APP_STORAGE tab padh kar wahi records banao (Code.gs v3.76+). Boot "busy" par kabhi band na ho.
+      if (!/busy|timeout/i.test(String(err && err.message || err))) throw err;
+      const t = await this.call('readtab', { spreadsheetId: '', tab: 'APP_STORAGE', maxRows: 200, maxCols: 2000 }, { timeoutMs: 90000, attempts: 2 }).catch(() => null);
+      if (!t || !Array.isArray(t.values)) throw err;
+      const recs = {};
+      t.values.slice(1).forEach((row) => {
+        const kind = String(row[0] || '');
+        if (!APPS_SCRIPT_KINDS.includes(kind)) return;
+        const count = Number(row[3]) || 0, parts = [];
+        for (let i = 0; i < count; i++) parts.push(String(row[4 + i] || '').replace(/^~/, ''));
+        recs[kind] = { v: String(row[1] || ''), data: parts.join(''), updatedAt: row[2] ? String(row[2]) : '' };
+      });
+      out = { records: recs, lockFree: true };
+      console.warn('APP_STORAGE: lock busy → lock-free readtab se padha');
+    }
     const records = out.records || {};
     const present = APPS_SCRIPT_KINDS.filter((k) => records[k]);
     if (!present.length) return null;
