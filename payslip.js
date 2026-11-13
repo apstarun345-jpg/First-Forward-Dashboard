@@ -73,7 +73,7 @@ window.FF = window.FF || {};
     await loadCore();
     const step = (t) => { try { onStep && onStep(t); } catch { /* ui */ } };
     const now = new Date(Date.now() + 5.5 * 3600e3);
-    const tabs = core.monthTabs(now.toISOString().slice(0, 7), 7);
+    const tabs = core.monthTabs(now.toISOString().slice(0, 7), 8);   // 7 mahine data — sabse purane ka bhi growth (pichhla mahina) mile
     const thin = (rows) => rows.map((r) => { const o = {}; for (const [k, v] of Object.entries(r)) { if (v === 0 || v === '') continue; o[k] = k === 'pan' ? core.maskPan(v) : (k === 'account' ? core.maskAcc(v) : v); } return o; });
     const readTab = async (kind, tab) => {
       const r = await fetch(`/api/payout/raw?kind=${kind}&tab=${encodeURIComponent(tab)}`, { credentials: 'same-origin', cache: 'no-store' });
@@ -151,7 +151,7 @@ window.FF = window.FF || {};
 
   // ---------------------------------------------------------------- picker (months + mode)
   function openPicker(d, spec) {
-    const months = (d.months || []).filter((m) => m.data);
+    const all = (d.months || []).filter((m) => m.data), months = all.slice(0, 6);
     let ov = document.getElementById('ps-picker');
     if (!ov) { ov = document.createElement('div'); ov.id = 'ps-picker'; ov.className = 'ops-ov'; document.body.appendChild(ov); }
     ov.innerHTML = `<div class="ops-tower ps-pick"><div class="ops-tw-h"><b>📄 Payslip — ${esc(spec.name || '')}</b><button type="button" class="ops-x" data-ps-x>✕</button></div>
@@ -176,7 +176,7 @@ window.FF = window.FF || {};
         const mode = (ov.querySelector('input[name=psmode]:checked') || {}).value || 'combined';
         go.disabled = true; go.textContent = '⏳ Creating PDF…';
         const fmt = (ov.querySelector('input[name=psfmt]:checked') || {}).value || 'pdf';
-        try { if (fmt !== 'xlsx') await download(spec, sel, mode, d.company); if (fmt !== 'pdf') await downloadExcel(spec, sel, mode); go.textContent = '✅ Downloaded'; }
+        try { if (fmt !== 'xlsx') await download(spec, sel, mode, d.company, all); if (fmt !== 'pdf') await downloadExcel(spec, sel, mode); go.textContent = '✅ Downloaded'; }
         catch (err) { go.textContent = `⚠️ ${(err && err.message) || err}`; }
         setTimeout(() => { go.disabled = false; go.textContent = '⬇ Download'; }, 2500);
       }
@@ -223,7 +223,7 @@ window.FF = window.FF || {};
         const bold = opt.foot && ri === rows.length - 1;
         rect(M, y, W - 2 * M, rh, bold ? tint(col, 0.14) : (opt.fill && ri % 2 === 0 ? opt.fill : (ri % 2 ? '#f8fafc' : null)), LINE);
         let x = M;
-        cols.forEach((c, ci) => { const v = r[ci] == null ? '' : String(r[ci]); let s = v; font(3, bold ? 800 : 400); const maxW = pg.px(c.w - 3); while (s.length > 3 && pg.ctx.measureText(s).width > maxW) s = s.slice(0, -2); if (s !== v) s += '…'; const cc = !bold && opt.cell ? opt.cell(ri, ci, v) : null; text(s, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 3, w: cc ? 800 : (bold || ci === 0 ? 700 : 400), color: cc || (bold ? (c.c || col) : (opt.ink || INK)), align: c.a === 'r' ? 'right' : 'left' }); x += c.w; });
+        cols.forEach((c, ci) => { const v = r[ci] == null ? '' : String(r[ci]); let s = v; font(3, bold ? 800 : 400); const maxW = pg.px(c.w - 3); while (s.length > 3 && pg.ctx.measureText(s).width > maxW) s = s.slice(0, -2); if (s !== v) s += '…'; const cc = opt.cell ? opt.cell(ri, ci, v) : null; text(s, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 3, w: cc ? 800 : (bold || ci === 0 ? 700 : 400), color: cc || (bold ? (c.c || col) : (opt.ink || INK)), align: c.a === 'r' ? 'right' : 'left' }); x += c.w; });
         y += rh;
       });
       y += 3;
@@ -297,7 +297,7 @@ window.FF = window.FF || {};
     ['Balance', C.net, [['opening', 'TL / agent opening balance', 'r'], ['final', 'Final amount (without opening)', 'r'], ['final_open', 'Final amount (with opening)', 'r'], ['payee_sum', 'TL + agents sum (w/o opening)', 'r']]]
   ];
 
-  function drawMonth(P, m, spec) {
+  function drawMonth(P, m, spec, prev) {
     const d = m.data, t = d.totals || {}, f = d.fnf, isPayee = d.role === 'payee';
     const one = d.agents.length === 1 ? d.agents[0] : null;
     const title = `PAYSLIP · ${m.label.toUpperCase()}`;
@@ -314,6 +314,26 @@ window.FF = window.FF || {};
       ['Generated on', `${nowIst()} IST`], ['Financial year', `FY 20${fyOf(m)}`]
     ]);
     // ---- tags
+    // ---- 📈 Growth: pichhla mahina vs ye mahina (class-wise)
+    {
+      const pt = prev && prev.data ? prev.data.totals || {} : null;
+      const pl = prev ? monTag(prev) : (() => { const [yy, mo] = m.ym.split('-').map(Number); return monTag({ ym: `${mo === 1 ? yy - 1 : yy}-${String(mo === 1 ? 12 : mo - 1).padStart(2, '0')}` }); })();
+      const cl = monTag(m);
+      P.section(`Growth — ${pl} vs ${cl}`, C.kyc);
+      const g = (a, b) => { a = num(a); b = num(b); if (!a && !b) return { s: '—', c: MUTE }; if (!a) return { s: 'New ▲', c: C.earn }; const p = ((b - a) / a) * 100; return { s: `${p > 0 ? '▲ +' : p < 0 ? '▼ ' : ''}${p.toFixed(1)}%`, c: p > 0 ? C.earn : p < 0 ? C.ded : MUTE }; };
+      const cls = [['VC4', 'iss_vc4', 'pay_vc4'], ['VC20', 'iss_vc20', 'pay_vc20'], ['VC5+ (rest class)', 'iss_rest', 'pay_rest'], ['Overall', 'iss_total', 'pay_total']];
+      const tot = (o, k) => (k === 'iss_total' ? (num(o.iss_total) || num(o.iss_vc4) + num(o.iss_vc20) + num(o.iss_rest)) : num(o[k]));
+      const gc = {};
+      const rows = cls.map(([lab, ik, pk], ri) => {
+        const a = pt ? tot(pt, ik) : null, b = tot(t, ik), pa = pt ? tot(pt, pk) : null, pb = tot(t, pk);
+        const gi = pt ? g(a, b) : { s: 'n/a', c: MUTE }, gp = pt ? g(pa, pb) : { s: 'n/a', c: MUTE };
+        gc[`${ri}:3`] = gi.c; gc[`${ri}:6`] = gp.c;
+        return [lab, pt ? int(a) : '—', int(b), gi.s, pt ? int(pa) : '—', int(pb), gp.s];
+      });
+      P.table([{ t: 'Class', w: 34 }, { t: `Issued ${pl}`, w: 24, a: 'r', c: C.tags }, { t: `Issued ${cl}`, w: 24, a: 'r', c: C.tags }, { t: 'Issuance growth', w: 30, a: 'r', c: C.kyc }, { t: `Payable ${pl}`, w: 24, a: 'r', c: C.earn }, { t: `Payable ${cl}`, w: 24, a: 'r', c: C.earn }, { t: 'Payable growth', w: 26, a: 'r', c: C.kyc }],
+        rows, { foot: true, title, cell: (ri, ci) => gc[`${ri}:${ci}`] || null });
+      if (!pt) { P.text(`Previous month (${pl}) data is not in the loaded payout snapshot.`, M, P.y, { size: 2.6, color: MUTE }); P.y += 5; }
+    }
     P.section('Issuance & payable tags', C.tags);
     const rate = (k) => (one ? inr(one[k]) : '');
     P.table([{ t: 'Class', w: 28 }, { t: 'Issued', w: 20, a: 'r' }, { t: 'Replacement', w: 22, a: 'r' }, { t: 'Wrong VRN', w: 21, a: 'r', c: C.ded }, { t: 'KYV blacklist', w: 24, a: 'r', c: C.ded }, { t: 'Chassis', w: 18, a: 'r' }, { t: 'Payable tags', w: 24, a: 'r', c: C.earn }, { t: one ? 'Rate / tag' : 'Amount', w: 29, a: 'r', c: C.earn }],
@@ -491,13 +511,14 @@ window.FF = window.FF || {};
     const ord = sel.slice().sort((a, b) => b.ym.localeCompare(a.ym));
     saveAs(FF.xlsx.build([xlSummary(ord, spec), ...ord.map(xlMonthSheet)]), xname(sel));
   }
-  async function download(spec, sel, mode, company) {
+  async function download(spec, sel, mode, company, all) {
+    const prevOf = (m) => { const [y, mo] = m.ym.split('-').map(Number); const pd = new Date(Date.UTC(y, mo - 2, 1)); const pym = `${pd.getUTCFullYear()}-${String(pd.getUTCMonth() + 1).padStart(2, '0')}`; return (all || sel).find((x) => x.ym === pym && x.data) || null; };
     if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf').catch(() => {});
     if (!FF.pdf || !FF.pdf.page) throw new Error('PDF module load nahi hua — page refresh karo');
     const foot = `${company || COMPANY} · Confidential — for the named payee only`;
     if (mode === 'separate') {
       for (const m of sel) {
-        const P = pager(company || COMPANY); drawMonth(P, m, spec);
+        const P = pager(company || COMPANY); drawMonth(P, m, spec, prevOf(m));
         saveAs(P.finish(foot), fileName([m], spec));
         await new Promise((r) => setTimeout(r, 700));
       }
@@ -505,7 +526,7 @@ window.FF = window.FF || {};
     }
     const P = pager(company || COMPANY);
     if (sel.length > 1) drawSummary(P, sel, spec);
-    sel.forEach((m) => drawMonth(P, m, spec));
+    sel.forEach((m) => drawMonth(P, m, spec, prevOf(m)));
     saveAs(P.finish(foot), fileName(sel, spec));
   }
 
