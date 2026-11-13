@@ -8517,3 +8517,23 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .mc-peek[hidden] { display: none; }
 @media (max-width: 759px) { .mc-peek { bottom: 84px; right: 10px; } }
 @media print { .mc-peek, .mc-party { display: none !important; } }
+
+/* 🧠 v3.125.221 — Gems AI Operations Manager (robot actions + control tower) */
+.mc-html .ops-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ops-btn { display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; border-radius: 999px; border: 1px solid var(--line, #e2e8f0); background: var(--card, #fff); color: var(--ink, #0f172a); font-size: 12px; font-weight: 700; cursor: pointer; text-decoration: none; line-height: 1.2; }
+.ops-btn:hover { border-color: var(--brand, #4f46e5); color: var(--brand, #4f46e5); }
+.ops-btn:disabled { opacity: .7; cursor: default; }
+.ops-sub { font-size: 12px; color: var(--muted, #64748b); margin-top: 4px; }
+.ops-fl { padding: 6px 0; border-bottom: 1px dashed var(--line, #e2e8f0); }
+.ops-bad { color: #dc2626; font-weight: 800; }
+.ops-ok { color: #16a34a; font-weight: 800; }
+.ops-ov { position: fixed; inset: 0; z-index: 9980; background: rgba(15, 23, 42, .45); display: grid; place-items: center; padding: 16px; }
+.ops-ov[hidden] { display: none; }
+.ops-tower { width: min(560px, 100%); max-height: 88vh; overflow: auto; background: var(--card, #fff); color: var(--ink, #0f172a); border-radius: 18px; padding: 16px 18px; box-shadow: 0 24px 60px rgba(15, 23, 42, .35); }
+.ops-tw-h { display: flex; justify-content: space-between; align-items: center; font-size: 16px; margin-bottom: 8px; }
+.ops-x { border: 0; background: transparent; font-size: 18px; cursor: pointer; color: inherit; }
+.ops-tower table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ops-tower td { padding: 7px 4px; border-bottom: 1px solid var(--line, #eef2f7); vertical-align: top; }
+.ops-tower td:first-child { color: var(--muted, #64748b); width: 44%; }
+.ops-tw-f { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 6px; }
+.ops-tower small { color: var(--muted, #64748b); }

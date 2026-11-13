@@ -989,6 +989,8 @@
       <div class="mc-ctl wide">
         <button type="button" class="mc-pill" data-mc="ask">🎙 Gems se poochho</button>
         <button type="button" class="mc-pill" data-mc="now">✨ Naya update</button>
+        <button type="button" class="mc-pill" data-mc="tower" title="Robot Control Tower — robot sach me kaam kar raha hai?">🛰 Control Tower</button>
+        <button type="button" class="mc-pill" data-mc="follows">📌 Follow-ups</button>
         ${pipWin ? '<button type="button" class="mc-pill pip" data-mc="popin">↩️ Wapas site par</button>' : pipOk() ? '<button type="button" class="mc-pill pip" data-mc="pop" title="Chhoti window — Chrome ke dusre tab, WhatsApp, kisi bhi app ke upar">📌 Har tab / WhatsApp par</button>' : ''}
         <span class="mc-go"></span>
         <button type="button" data-mc="sound" title="Bol kar sunao (on/off)">${cfg.sound ? '🔊' : '🔇'}</button>
@@ -1007,6 +1009,9 @@
     else if (k === 'today') { cfg.snoozeDay = today(); save(); if (skip) skip(); closeHist(); }
     else if (k === 'off') { cfg.on = false; save(); if (skip) skip(); closeHist(); applyOn(); }
     else if (k === 'hide') { cfg.hideDay = istToday(); save(); if (skip) skip(); closeHist(); applyOn(); }
+    else if (k === 'tower') { closeHist(); if (FF.ops) FF.ops.openTower(); }
+    else if (k === 'follows') { closeHist(); if (FF.ops) FF.ops.showFollowList(); }
+    else if (k.startsWith('ops:')) { hover = true; const r = k.slice(4), i = r.indexOf(':'); if (FF.ops) FF.ops.act(i < 0 ? r : r.slice(0, i), i < 0 ? '' : r.slice(i + 1), b); }
     else if (k === 'home') { delete cfg.dock; save(); closeHist(); fly([pos, dockPos()], 900); }
     else if (k === 'ask') { closeHist(); openAssistant(); }
     else if (k === 'now') { closeHist(); now(true); }
@@ -2046,6 +2051,7 @@
     q = deva(q);
     try { await ensureData(); } catch { /* ignore */ }
     if (!FF.smartQ && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('smartQ'); } catch { /* optional */ } }
+    for (const fn of ctxFns) { try { const it = fn(q); if (it) return it; } catch { /* next */ } }
     if (q === '@todo') return srvItem(/^srv:todo:/) || { key: 'todo-none', fun: true, mood: 'curious', icon: '📋', title: 'Aaj ke kaam', head: 'Abhi kaam list nahi bani — subah data aane do.', view: 'text', stay: 5000 };
     if (q === '@badges') return srvItem(/^srv:badges:/) || { key: 'bdg-none', fun: true, mood: 'curious', icon: '🎖', title: 'Badges', head: 'Abhi koi naya badge nahi.', view: 'text', stay: 5000 };
     if (q === '@rems') {
@@ -2800,6 +2806,7 @@
 
   // ================================================================ 💡 page ke hisaab se tips
   const tipSeen = new Map();
+  const extraTips = {}, ctxFns = []; // 🧠 v3.125.221 — opsBrain se aur pages ki tips + baat-cheet ka context
   let tipTimer = 0;
   const routeOf = () => { const h = location.hash || ''; return { r: (h.match(/^#\/([\w-]+)/) || [])[1] || 'home', q: new URLSearchParams(h.split('?')[1] || '') }; };
   const tipApi = (path, m, b) => FF.auth.api(path, m, b);
@@ -2852,7 +2859,7 @@
     try {
       if (!cfg.on || !allowed() || cfg.tips === false || cfg.hideDay === istToday() || cfg.snoozeDay === today() || document.hidden) return;
       const { r, q } = routeOf();
-      const fn = TIPS[r]; if (!fn) return;
+      const fn = TIPS[r] || extraTips[r]; if (!fn) return;
       const it = await Promise.race([fn(q), wait(25000).then(() => null)]);
       if (!it || routeOf().r !== r) return;                   // user aage badh gaya
       const k = `tip:${it.key}`;
@@ -2864,7 +2871,7 @@
   window.addEventListener('hashchange', () => { clearTimeout(tipTimer); tipTimer = setTimeout(pageTip, 2000); });
   setTimeout(pageTip, 9000);
 
-  FF.mascot = { mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake === true, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { addBuilder: (fn) => { if (typeof fn === 'function') BUILDERS.push(fn); }, addPageTips: (m) => Object.assign(extraTips, m || {}), addContext: (fn) => { if (typeof fn === 'function') ctxFns.push(fn); }, push: (it) => it && enqueue({ ...it, id: it.id || `${it.key}:${Date.now()}` }), mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake === true, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
@@ -2879,6 +2886,8 @@
         setTimeout(() => { if (!busy && !blocked()) show({ key: 'greet', fun: true, cls: 'greet', mood: 'happy', icon: '👋', title: `Namaste ${u}!`.trim(), head: 'Main Gems hoon — aaj site ki har khabar main board par dunga 😎', view: 'text', stay: 5500, say: `नमस्ते ${nm(u)}! मैं जेम्स हूँ। आज साइट की हर ख़बर मैं दूँगा।` }); }, 2500);
       }
       schedule(9e3);
+      // 🧠 v3.125.221 — Gems AI Operations Manager (alerts + TL + root cause + dispatch + prediction + briefing)
+      setTimeout(async () => { try { if (!FF.smartQ && FF.lazy) await FF.lazy.inject('smartQ'); if (!FF.ops && FF.lazy) await FF.lazy.inject('opsBrain'); } catch { /* optional */ } }, 6e3);
       setTimeout(checkVersions, 12e3);
       setInterval(checkVersions, 10 * 60e3);
       setTimeout(pollFeeds, 4e3);
