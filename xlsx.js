@@ -60,7 +60,7 @@ window.FF = window.FF || {};
   }
   /* 🎨 v3.125.98 — optional named styles (sheet.styleOf(rowIdx, colIdx, value) / sheet.headStyleOf(colIdx) → name).
      Ids 0-3 built-in (normal, header, date, datetime). Fill colours ARGB. */
-  const FILL = ['FFFEF3C7', 'FFDCFCE7', 'FFEFF6FF', 'FFFDF2F8', 'FFE5E7EB', 'FF1F2937', 'FF0F766E', 'FFB45309', 'FFF3F4F6', 'FF1D4ED8', 'FFECFDF5', 'FFFEF2F2', 'FFF5F3FF', 'FFF8FAFC', 'FF7C3AED', 'FFEDE9FE', 'FFEA580C', 'FFFFEDD5', 'FFE0E7FF'];
+  const FILL = ['FFFEF3C7', 'FFDCFCE7', 'FFEFF6FF', 'FFFDF2F8', 'FFE5E7EB', 'FF1F2937', 'FF0F766E', 'FFB45309', 'FFF3F4F6', 'FF1D4ED8', 'FFECFDF5', 'FFFEF2F2', 'FFF5F3FF', 'FFF8FAFC', 'FF7C3AED', 'FFEDE9FE', 'FFEA580C', 'FFFFEDD5', 'FFE0E7FF', 'FFDC2626', 'FF16A34A', 'FF2563EB', 'FF0D9488', 'FF475569', 'FFD97706'];
   const FILLID = (argb) => 3 + FILL.indexOf(argb);   // 0 none, 1 gray125, 2 header indigo
   // fonts: 0 normal, 1 bold white, 2 bold, 3 bold green, 4 bold red, 5 gray, 6 bold dark
   const NAMED = {
@@ -87,7 +87,13 @@ window.FF = window.FF || {};
     hCls:       { font: 1, fill: FILLID('FF7C3AED'), fmt: 0 },
     hAge:       { font: 1, fill: FILLID('FFEA580C'), fmt: 0 },
     age:        { font: 0, fill: FILLID('FFFFEDD5'), fmt: 3 },
-    section:    { font: 2, fill: FILLID('FFE0E7FF'), fmt: 0 }      // Summary ke "🟦 First Forward · Agent" jaise section rows
+    section:    { font: 2, fill: FILLID('FFE0E7FF'), fmt: 0 },      // Summary ke "🟦 First Forward · Agent" jaise section rows
+    // 💰 v3.125.239 — payout Excel (APN format, rangeen)
+    hRed:   { font: 1, fill: FILLID('FFDC2626'), fmt: 0 }, hGreen: { font: 1, fill: FILLID('FF16A34A'), fmt: 0 }, hBlue: { font: 1, fill: FILLID('FF2563EB'), fmt: 0 },
+    hTeal:  { font: 1, fill: FILLID('FF0D9488'), fmt: 0 }, hSlate: { font: 1, fill: FILLID('FF475569'), fmt: 0 }, hAmber: { font: 1, fill: FILLID('FFD97706'), fmt: 0 }, hPurple: { font: 1, fill: FILLID('FF7C3AED'), fmt: 0 },
+    amt:    { font: 0, fill: 0, fmt: 4 }, zebAmt: { font: 0, fill: FILLID('FFF8FAFC'), fmt: 4 }, totAmt: { font: 2, fill: FILLID('FFE5E7EB'), fmt: 4 },
+    inact:  { font: 4, fill: FILLID('FFFEF2F2'), fmt: 0 }, inactNum: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 3 }, inactAmt: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 4 },
+    gAmt:   { font: 3, fill: FILLID('FFECFDF5'), fmt: 4 }, rAmt: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 4 }, pAmt: { font: 6, fill: FILLID('FFEDE9FE'), fmt: 4 }
   };
   /* 🎨 v3.125.116 — har download rangeen: jis sheet ne apne styles nahi diye unhe auto-style
      (header colour column ke type se, TOTAL / GRAND TOTAL rows, Total column, class columns, % / growth ▲▼, zebra rows). */
@@ -138,7 +144,7 @@ window.FF = window.FF || {};
     if (header.length) { body += `<row r="${r}">${header.map((v, c) => cellXml(v, r, c, (hs && hs(c, v)) ? styleId(hs(c, v)) : 1)).join('')}</row>`; r++; }
     rows.forEach((row, ri) => {
       // styled rows: khaali cells bhi fill ho (total row poori rangeen dikhe)
-      body += `<row r="${r}">${row.map((v, c) => { const st = cs ? cs(ri, c, v) : ''; const id = st ? styleId(st) : 0; if (id && (v === '' || v === null || v === undefined) && /^row/.test(st)) return `<c r="${colName(c)}${r}" s="${id}"/>`; return cellXml(v, r, c, id); }).join('')}</row>`;
+      body += `<row r="${r}">${row.map((v, c) => { const st = cs ? cs(ri, c, v) : ''; const id = st ? styleId(st) : 0; if (id && (v === "" || v === null || v === undefined) && /^(row|inact|tot)/.test(st)) return `<c r="${colName(c)}${r}" s="${id}"/>`; return cellXml(v, r, c, id); }).join('')}</row>`;
       r++;
     });
     const lastCol = colName(Math.max(0, header.length - 1));

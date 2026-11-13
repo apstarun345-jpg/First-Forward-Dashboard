@@ -157,9 +157,10 @@ window.FF = window.FF || {};
     ov.innerHTML = `<div class="ops-tower ps-pick"><div class="ops-tw-h"><b>📄 Payslip — ${esc(spec.name || '')}</b><button type="button" class="ops-x" data-ps-x>✕</button></div>
       <div class="ps-mlist">${months.map((m, i) => `<label class="ps-m"><input type="checkbox" value="${esc(m.tab)}"${i === 0 ? ' checked' : ''}> ${esc(m.label)} <small class="dim">${inr(m.data.role === 'payee' && m.data.fnf ? m.data.fnf.final : m.data.totals.final, 0)} · ${esc((m.status && m.status.label) || '')}</small></label>`).join('')}</div>
       <div class="ps-quick"><button type="button" class="btn sm" data-ps-all>Select all</button><button type="button" class="btn sm" data-ps-none>Clear</button><button type="button" class="btn sm" data-ps-last3>Last 3 months</button></div>
-      <div class="ps-mode"><label><input type="radio" name="psmode" value="combined" checked> One PDF — all selected months (with summary page)</label><label><input type="radio" name="psmode" value="separate"> Separate PDF for each month</label></div>
-      <div class="ops-tw-f"><button type="button" class="btn primary" data-ps-go>⬇ Download PDF</button></div>
-      <small>PAN & bank account are masked. Figures exactly as in the APN payout sheet and FNF payment sheet.</small></div>`;
+      <div class="ps-mode"><b class="small">File</b><label><input type="radio" name="psfmt" value="pdf" checked> 📄 PDF payslip</label><label><input type="radio" name="psfmt" value="xlsx"> 📊 Excel (APN sheet format, rangeen)</label><label><input type="radio" name="psfmt" value="both"> Dono — PDF + Excel</label></div>
+      <div class="ps-mode"><b class="small">Months</b><label><input type="radio" name="psmode" value="combined" checked> Ek file — saare chune hue mahine (summary ke saath)</label><label><input type="radio" name="psmode" value="separate"> Har mahine ki alag file</label></div>
+      <div class="ops-tw-f"><button type="button" class="btn primary" data-ps-go>⬇ Download</button></div>
+      <small>PAN & bank account masked (Excel me account details nahi). Figures exactly as in the APN payout sheet and FNF payment sheet.</small></div>`;
     ov.hidden = false;
     const boxes = () => [...ov.querySelectorAll('.ps-m input')];
     ov.onclick = async (e) => {
@@ -174,9 +175,10 @@ window.FF = window.FF || {};
         if (!sel.length) { go.textContent = 'Select at least one month'; return; }
         const mode = (ov.querySelector('input[name=psmode]:checked') || {}).value || 'combined';
         go.disabled = true; go.textContent = '⏳ Creating PDF…';
-        try { await download(spec, sel, mode, d.company); go.textContent = '✅ Downloaded'; }
+        const fmt = (ov.querySelector('input[name=psfmt]:checked') || {}).value || 'pdf';
+        try { if (fmt !== 'xlsx') await download(spec, sel, mode, d.company); if (fmt !== 'pdf') await downloadExcel(spec, sel, mode); go.textContent = '✅ Downloaded'; }
         catch (err) { go.textContent = `⚠️ ${(err && err.message) || err}`; }
-        setTimeout(() => { go.disabled = false; go.textContent = '⬇ Download PDF'; }, 2500);
+        setTimeout(() => { go.disabled = false; go.textContent = '⬇ Download'; }, 2500);
       }
     };
   }
@@ -417,7 +419,76 @@ window.FF = window.FF || {};
     const ord = sel.slice().sort((a, b) => a.ym.localeCompare(b.ym));
     const fys = [...new Set(ord.map(fyOf))].join(' & ');
     const mon = ord.length > 1 ? `${monTag(ord[0])} to ${monTag(ord[ord.length - 1])}` : monTag(ord[0]);
-    return `APN_IDFC Payout FYR-${fys}_${mon} - ${name}.pdf`;
+    return `APN_IDFC Payout FYR-${fys.replace(/-/g, '\u2215')}_${mon} - ${name}.pdf`;   // ∕ (division slash) — "/" file naam me allowed nahi, ye bilkul "/" jaisa dikhta hai
+  }
+  /** Seedha isi naam se save (site ka generic downloader naam badal deta tha). */
+  function saveAs(blob, name) {
+    try { if (FF.util && FF.util.downloadStatus) FF.util.downloadStatus('Downloading…', name, false); } catch { /* optional */ }
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = name; a.rel = 'noopener'; document.body.appendChild(a);
+    try { a.click(); } finally { setTimeout(() => { try { a.remove(); } catch { /* */ } try { URL.revokeObjectURL(url); } catch { /* */ } }, 8000); }
+  }
+  // ---------------------------------------------------------------- Excel (APN format, account details ke bina)
+  const XL_ID = [['agentId', 'Agent ID'], ['newId', 'New Agent ID'], ['name', 'Agent Name'], ['userId', 'User ID'], ['payeeId', 'Agent/TL ID'], ['status', 'Agent Status'], ['payeeName', 'Agent/TL Name']];
+  const XL_HEAD = { Issuance: 'hBlue', Replacement: 'hBlue', 'Wrong VRN': 'hRed', 'KYV blacklist': 'hRed', Chassis: 'hBlue', KYC: 'hTeal', 'Payable tags': 'hGreen', 'Rates (₹ per tag)': 'hTeal', 'MAX FASTag': 'hTeal', Payouts: 'hGreen', Deductions: 'hRed', Balance: 'hPurple' };
+  function xlCols() {
+    const cols = XL_ID.map(([k, h]) => ({ k, h, hs: 'hSlate', t: 's' }));
+    APN_GROUPS.forEach(([g, , fields]) => fields.forEach(([k, label, ty]) => cols.push({ k, h: label, hs: XL_HEAD[g] || 'hSlate', t: ty, g })));
+    cols.push({ k: 'editRemark', h: 'Edit Remark', hs: 'hSlate', t: 's' });
+    return cols;
+  }
+  const isInact = (a) => /inactive|in\s*-?active|closed|blocked|deactiv/i.test(String(a.status || ''));
+  function xlMonthSheet(m) {
+    const d = m.data, cols = xlCols();
+    const act = d.agents.filter((a) => !isInact(a)).sort((a, b) => num(b.final) - num(a.final)), ina = d.agents.filter(isInact);
+    const val = (a, c) => (c.t === 's' ? (a[c.k] == null ? '' : String(a[c.k])) : (a[c.k] == null || a[c.k] === '' ? 0 : num(a[c.k])));
+    const rows = [...act, ...ina].map((a) => cols.map((c) => val(a, c)));
+    const tot = cols.map((c, i) => (i === 0 ? 'TOTAL' : i === 2 ? `${act.length} active · ${ina.length} inactive` : (c.t === 's' || /^rate_|max_rate/.test(c.k) ? '' : Math.round(act.reduce((x, a) => x + num(a[c.k]), 0) * 100) / 100)));
+    rows.push(tot);
+    const nAct = act.length, nRows = rows.length;
+    return {
+      name: `${monTag(m)}`.replace("'", ' '), header: cols.map((c) => c.h), rows,
+      headStyleOf: (ci) => cols[ci].hs,
+      styleOf: (ri, ci) => {
+        const c = cols[ci];
+        if (ri === nRows - 1) return c.t === 'r' ? 'totAmt' : 'rowTotal';
+        if (ri >= nAct) return c.t === 'r' ? 'inactAmt' : c.t === 'n' ? 'inactNum' : 'inact';
+        const z = ri % 2 === 1;
+        if (c.k === 'final' || c.k === 'final_open') return 'pAmt';
+        if (c.k === 'gross' || c.k === 'po_total') return 'gAmt';
+        if (c.g === 'Deductions' && c.t === 'r') return 'rAmt';
+        if (c.t === 'r') return z ? 'zebAmt' : 'amt';
+        if (c.t === 'n') return z ? 'zebNum' : 'num';
+        return z ? 'zeb' : '';
+      }
+    };
+  }
+  function xlSummary(sel, spec) {
+    const rows = sel.map((m) => { const t = m.data.totals, f = m.data.fnf, own = m.data.role === 'payee'; return [m.label, payeeNameOf(m.data, spec), m.data.payeeId, num(t.iss_total), num(t.pay_total), num(t.gross), Math.abs(num(t.tds)), num(t.final), num(t.opening), num(t.final_open), f && own ? num(f.releasing) : '', f ? (f.remark || '') : 'Not in FNF', f && f.utr ? f.utr : '']; });
+    const sum = (i) => Math.round(rows.reduce((x, r) => x + (typeof r[i] === 'number' ? r[i] : 0), 0) * 100) / 100;
+    rows.push(['TOTAL', '', '', sum(3), sum(4), sum(5), sum(6), sum(7), '', '', sum(10), '', '']);
+    const H = ['Month', 'Payee Name', 'Payee ID (APN)', 'Total Issuance', 'Payable Tags', 'Gross Payout', 'TDS', 'Net Payable', 'Opening Balance', 'Net incl. Opening', 'Released (FNF)', 'Payment Status', 'Payment UTR'];
+    const hs = ['hSlate', 'hSlate', 'hSlate', 'hBlue', 'hGreen', 'hGreen', 'hRed', 'hPurple', 'hPurple', 'hPurple', 'hGreen', 'hAmber', 'hSlate'];
+    const n = rows.length;
+    return { name: 'Summary', header: H, rows, headStyleOf: (c) => hs[c], styleOf: (ri, c, v) => {
+      if (ri === n - 1) return c >= 5 ? 'totAmt' : 'rowTotal';
+      if (c === 11) return /hold/i.test(v) ? 'down' : /process(ed)?$|paid|released/i.test(v) && !/processing/i.test(v) ? 'up' : /processing|pending/i.test(v) ? 'total' : '';
+      if (c === 7) return 'pAmt'; if (c === 6) return 'rAmt';
+      if (c >= 5 && c <= 10) return ri % 2 ? 'zebAmt' : 'amt';
+      if (c === 3 || c === 4) return ri % 2 ? 'zebNum' : 'num';
+      return ri % 2 ? 'zeb' : '';
+    } };
+  }
+  async function downloadExcel(spec, sel, mode) {
+    if (!FF.xlsx && FF.lazy && FF.lazy.inject) await FF.lazy.inject('xlsx');
+    if (!FF.xlsx) throw new Error('Excel module load nahi hua');
+    const xname = (ms) => fileName(ms, spec).replace(/\.pdf$/, '.xlsx');
+    if (mode === 'separate') {
+      for (const m of sel) { saveAs(FF.xlsx.build([xlSummary([m], spec), xlMonthSheet(m)]), xname([m])); await new Promise((r) => setTimeout(r, 700)); }
+      return;
+    }
+    const ord = sel.slice().sort((a, b) => b.ym.localeCompare(a.ym));
+    saveAs(FF.xlsx.build([xlSummary(ord, spec), ...ord.map(xlMonthSheet)]), xname(sel));
   }
   async function download(spec, sel, mode, company) {
     if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf').catch(() => {});
@@ -426,7 +497,7 @@ window.FF = window.FF || {};
     if (mode === 'separate') {
       for (const m of sel) {
         const P = pager(company || COMPANY); drawMonth(P, m, spec);
-        FF.pdf.download(P.finish(foot), fileName([m], spec));
+        saveAs(P.finish(foot), fileName([m], spec));
         await new Promise((r) => setTimeout(r, 700));
       }
       return;
@@ -434,8 +505,8 @@ window.FF = window.FF || {};
     const P = pager(company || COMPANY);
     if (sel.length > 1) drawSummary(P, sel, spec);
     sel.forEach((m) => drawMonth(P, m, spec));
-    FF.pdf.download(P.finish(foot), fileName(sel, spec));
+    saveAs(P.finish(foot), fileName(sel, spec));
   }
 
-  FF.payslip = { boxHtml, fill, openPicker, download, words, idsOf, refresh, status, getSnap, fileName, payeeNameOf };
+  FF.payslip = { boxHtml, fill, openPicker, download, downloadExcel, xlMonthSheet, words, idsOf, refresh, status, getSnap, fileName, payeeNameOf };
 })(window.FF);
