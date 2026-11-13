@@ -223,7 +223,7 @@ window.FF = window.FF || {};
         const bold = opt.foot && ri === rows.length - 1;
         rect(M, y, W - 2 * M, rh, bold ? tint(col, 0.14) : (opt.fill && ri % 2 === 0 ? opt.fill : (ri % 2 ? '#f8fafc' : null)), LINE);
         let x = M;
-        cols.forEach((c, ci) => { const v = r[ci] == null ? '' : String(r[ci]); let s = v; font(3, bold ? 800 : 400); const maxW = pg.px(c.w - 3); while (s.length > 3 && pg.ctx.measureText(s).width > maxW) s = s.slice(0, -2); if (s !== v) s += '…'; text(s, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 3, w: bold || ci === 0 ? 700 : 400, color: bold ? (c.c || col) : (opt.ink || INK), align: c.a === 'r' ? 'right' : 'left' }); x += c.w; });
+        cols.forEach((c, ci) => { const v = r[ci] == null ? '' : String(r[ci]); let s = v; font(3, bold ? 800 : 400); const maxW = pg.px(c.w - 3); while (s.length > 3 && pg.ctx.measureText(s).width > maxW) s = s.slice(0, -2); if (s !== v) s += '…'; const cc = !bold && opt.cell ? opt.cell(ri, ci, v) : null; text(s, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 3, w: cc ? 800 : (bold || ci === 0 ? 700 : 400), color: cc || (bold ? (c.c || col) : (opt.ink || INK)), align: c.a === 'r' ? 'right' : 'left' }); x += c.w; });
         y += rh;
       });
       y += 3;
@@ -308,7 +308,7 @@ window.FF = window.FF || {};
       ['Payee name', payeeNameOf(d, spec) || '—', C.id], ['Statement type', isPayee ? (d.agents.length > 1 ? 'TL / Payee statement' : 'Payee statement') : 'Agent statement'],
       ['Payee ID (APN)', d.payeeId], ['Payslip no.', slipNo(m, isPayee ? d.payeeId : (one ? one.agentId : d.payeeId))],
       ['TL / Payee name (sheet)', d.payeeName || '—'], ['Pay period', period(m)],
-      ...(one ? [['Agent ID', one.agentId], ['New agent ID', one.newId], ['Agent name', one.name], ['User ID', one.userId], ['Agent status', one.status], ['Edit remark', one.editRemark]] : []),
+      ...(one ? [['Agent ID', one.agentId], ['New agent ID', one.newId], ['Agent name', one.name], ['User ID', one.userId], ['Agent status', one.status, /^new$/i.test(String(one.status || '').trim()) ? '#1d4ed8' : null], ['Edit remark', one.editRemark]] : []),
       ['Name as per PAN', bank.panName], ['PAN', bank.pan],
       ['Bank', bank.bank], ['IFSC', bank.ifsc], ['Account no.', bank.account], ['Agents (active / inactive)', (() => { const ia = d.agents.filter((a) => /inactive|in\s*-?active|closed|blocked|deactiv/i.test(String(a.status || ''))).length; return `${d.agents.length - ia} / ${ia}`; })()],
       ['Generated on', `${nowIst()} IST`], ['Financial year', `FY 20${fyOf(m)}`]
@@ -386,10 +386,10 @@ window.FF = window.FF || {};
       if (P.y + 12 + Math.min(act.length + 2, 8) * 5.6 > H - 18) P.newPage(title);
       P.section(`Active agents — payout breakdown (${act.length} agents)`, C.agents);
       const L = act.slice().sort((a, b) => num(b.final) - num(a.final));
-      P.table([{ t: '#', w: 8, a: 'r' }, { t: 'Agent name', w: 40 }, { t: 'Agent ID', w: 20 }, { t: 'Issued', w: 14, a: 'r' }, { t: 'Payable', w: 15, a: 'r' }, { t: 'KYV BL', w: 13, a: 'r', c: C.ded }, { t: 'MAX', w: 11, a: 'r', c: C.kyc }, { t: 'VC4 rate', w: 16, a: 'r', c: C.kyc }, { t: 'Payout', w: 24, a: 'r', c: C.earn }, { t: 'Final', w: 25, a: 'r', c: C.net }],
-        [...L.map((a, i) => [i + 1, a.name, a.agentId, int(a.iss_total), int(a.pay_total), int(num(a.kb_vc4) + num(a.kb_vc20) + num(a.kb_rest)), int(a.max_n), inr(a.rate_vc4, 0), inr(a.po_total, 0), inr(a.final, 0)]),
-          (() => { const sm = (k) => L.reduce((x, a) => x + num(a[k]), 0); return ['', 'Total (active)', '', int(sm('iss_total')), int(sm('pay_total')), int(sm('kb_vc4') + sm('kb_vc20') + sm('kb_rest')), int(sm('max_n')), '', inr(sm('po_total'), 0), inr(sm('final'), 0)]; })()],
-        { foot: true, title, rh: 5.6 });
+      P.table([{ t: '#', w: 8, a: 'r' }, { t: 'Agent name', w: 34 }, { t: 'Agent ID', w: 18 }, { t: 'Status', w: 12 }, { t: 'Issued', w: 14, a: 'r' }, { t: 'Payable', w: 15, a: 'r' }, { t: 'KYV BL', w: 13, a: 'r', c: C.ded }, { t: 'MAX', w: 11, a: 'r', c: C.kyc }, { t: 'VC4 rate', w: 16, a: 'r', c: C.kyc }, { t: 'Payout', w: 22, a: 'r', c: C.earn }, { t: 'Final', w: 23, a: 'r', c: C.net }],
+        [...L.map((a, i) => [i + 1, a.name, a.agentId, a.status || '', int(a.iss_total), int(a.pay_total), int(num(a.kb_vc4) + num(a.kb_vc20) + num(a.kb_rest)), int(a.max_n), inr(a.rate_vc4, 0), inr(a.po_total, 0), inr(a.final, 0)]),
+          (() => { const sm = (k) => L.reduce((x, a) => x + num(a[k]), 0); return ['', 'Total (active)', '', '', int(sm('iss_total')), int(sm('pay_total')), int(sm('kb_vc4') + sm('kb_vc20') + sm('kb_rest')), int(sm('max_n')), '', inr(sm('po_total'), 0), inr(sm('final'), 0)]; })()],
+        { foot: true, title, rh: 5.6, cell: (ri, ci, v) => (ci === 3 && /^new$/i.test(String(v).trim()) ? '#1d4ed8' : null) });
       // 🔴 Inactive agents — alag table, laal (payout sirf active ka calculate hota hai)
       if (ina.length) {
         if (P.y + 20 + Math.min(ina.length + 1, 6) * 5.6 > H - 18) P.newPage(title);
@@ -454,6 +454,7 @@ window.FF = window.FF || {};
         if (ri === nRows - 1) return c.t === 'r' ? 'totAmt' : 'rowTotal';
         if (ri >= nAct) return c.t === 'r' ? 'inactAmt' : c.t === 'n' ? 'inactNum' : 'inact';
         const z = ri % 2 === 1;
+        if (c.k === 'status' && /^new$/i.test(String(rows[ri][ci] || '').trim())) return z ? 'zebNew' : 'newSt';
         if (c.k === 'final' || c.k === 'final_open') return 'pAmt';
         if (c.k === 'gross' || c.k === 'po_total') return 'gAmt';
         if (c.g === 'Deductions' && c.t === 'r') return 'rAmt';

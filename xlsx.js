@@ -93,6 +93,7 @@ window.FF = window.FF || {};
     hTeal:  { font: 1, fill: FILLID('FF0D9488'), fmt: 0 }, hSlate: { font: 1, fill: FILLID('FF475569'), fmt: 0 }, hAmber: { font: 1, fill: FILLID('FFD97706'), fmt: 0 }, hPurple: { font: 1, fill: FILLID('FF7C3AED'), fmt: 0 },
     amt:    { font: 0, fill: 0, fmt: 4 }, zebAmt: { font: 0, fill: FILLID('FFF8FAFC'), fmt: 4 }, totAmt: { font: 2, fill: FILLID('FFE5E7EB'), fmt: 4 },
     inact:  { font: 4, fill: FILLID('FFFEF2F2'), fmt: 0 }, inactNum: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 3 }, inactAmt: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 4 },
+    newSt: { font: 7, fill: 0, fmt: 0 }, zebNew: { font: 7, fill: FILLID('FFF8FAFC'), fmt: 0 },
     gAmt:   { font: 3, fill: FILLID('FFECFDF5'), fmt: 4 }, rAmt: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 4 }, pAmt: { font: 6, fill: FILLID('FFEDE9FE'), fmt: 4 }
   };
   /* 🎨 v3.125.116 — har download rangeen: jis sheet ne apne styles nahi diye unhe auto-style
@@ -160,7 +161,7 @@ window.FF = window.FF || {};
     const fonts = ['<font><sz val="11"/><name val="Calibri"/></font>', '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>',
       '<font><b/><sz val="11"/><name val="Calibri"/></font>', '<font><b/><sz val="11"/><color rgb="FF15803D"/><name val="Calibri"/></font>',
       '<font><b/><sz val="11"/><color rgb="FFB91C1C"/><name val="Calibri"/></font>', '<font><sz val="11"/><color rgb="FF6B7280"/><name val="Calibri"/></font>',
-      '<font><b/><sz val="11"/><color rgb="FF14532D"/><name val="Calibri"/></font>'];
+      '<font><b/><sz val="11"/><color rgb="FF14532D"/><name val="Calibri"/></font>', '<font><b/><sz val="11"/><color rgb="FF1D4ED8"/><name val="Calibri"/></font>'];
     const fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>', '<fill><patternFill patternType="solid"><fgColor rgb="FF4F46E5"/><bgColor indexed="64"/></patternFill></fill>',
       ...FILL.map((c) => `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor indexed="64"/></patternFill></fill>`)];
     const xf = (font, fill, fmt) => `<xf numFmtId="${fmt}" fontId="${font}" fillId="${fill}" borderId="${fill > 2 ? 1 : 0}" xfId="0"${font ? ' applyFont="1"' : ''}${fill ? ' applyFill="1"' : ''}${fmt ? ' applyNumberFormat="1"' : ''}${fill > 2 ? ' applyBorder="1"' : ''}/>`;
