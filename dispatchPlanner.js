@@ -320,17 +320,27 @@ FF.pages = FF.pages || {};
     // stays Low even for agents with issuance and no stock, so it is kept only as `sheetPriority`.
     const th = (FF.config && FF.config.thresholds) || {};
     const redD = th.coverRed || 7, orgD = th.coverOrange || 15;
+    // 🔀 v3.125.256 — VC4/VC20 aur VC5+ ka alag hisaab: kisi ke paas VC5+ zyada aur VC4 kam ho to total cover theek dikhta tha
+    // par VC4 khatam ho raha hota tha. Ab dono group ka apna cover + dispatch; jo bhi group kam ho → priority.
+    const part = (o, k) => { const tot = Math.max(0, Number(o && o.total) || 0), cm = Math.max(0, Number(o && o.comm) || 0); return k === 'comm' ? Math.min(cm, tot || cm) : Math.max(0, tot - cm); };
+    const gA = U.dispatchCalc({ cur: part(r.cur, 'core'), last: part(r.last, 'core'), stock: part(r.stock, 'core'), ch: r.ch, elapsed: chDays(r.ch) });
+    const gB = U.dispatchCalc({ cur: part(r.cur, 'comm'), last: part(r.last, 'comm'), stock: part(r.stock, 'comm'), ch: r.ch, elapsed: chDays(r.ch) });
+    const covers = [gA, gB].filter((g) => g.rate > 0 && g.cover != null).map((g) => g.cover);
+    const coverMin = covers.length ? Math.min(...covers) : c.cover;
     let priority = r.priority;
-    if (c.rate > 0) priority = c.cover == null ? 'Low' : c.cover < redD ? 'High' : c.cover < orgD ? 'Medium' : 'Low';
+    if (c.rate > 0) priority = coverMin == null ? 'Low' : coverMin < redD ? 'High' : coverMin < orgD ? 'Medium' : 'Low';
     else if (!KNOWN_PRIORITIES.has(priority) && !clean(priority)) priority = 'Low';
     else if (KNOWN_PRIORITIES.has(priority)) priority = 'Low';
     r = { ...r, sheetPriority: r.priority, priority };
     const tagged = r.direct && (r.priority === 'High' || r.priority === 'Medium');
     let action;
     if (r.direct) action = tagged ? { t: '🏷️ Tags chahiye', cls: 'violet' } : { t: 'No dispatch', cls: 'gray' };
-    else if (c.net > 0) action = { t: '🚚 Dispatch', cls: c.cover != null && c.cover < 7 ? 'red' : 'amber' };
-    else action = { t: '✅ Covered', cls: 'green' };
-    return { ...r, c, tagged, action, rate: c.rate, required: c.required, net: c.net, gross: c.gross, cover: c.cover, curV: c.cur, lastV: c.last, stockV: c.stock };
+    const split = basis === 'total';
+    const netA = split ? gA.net : (basis === 'vc4' ? c.net : 0), netB = split ? gB.net : (basis === 'comm' ? c.net : 0);
+    const net = split ? netA + netB : c.net;
+    if (!r.direct && net > 0) action = { t: '🚚 Dispatch', cls: coverMin != null && coverMin < 7 ? 'red' : 'amber' };
+    else if (!r.direct) action = { t: '✅ Covered', cls: 'green' };
+    return { ...r, c, gA, gB, tagged, action, rate: c.rate, required: c.required, net, netA, netB, gross: c.gross, cover: coverMin, coverAll: c.cover, coverA: gA.rate > 0 ? gA.cover : null, coverB: gB.rate > 0 ? gB.cover : null, curV: c.cur, lastV: c.last, stockV: c.stock };
   }
 
   // ---- filtering / sorting ------------------------------------------------------------------------------
@@ -354,7 +364,7 @@ FF.pages = FF.pages || {};
   });
   const SORTERS = {
     name: (r) => clean(r.name).toLowerCase(), tl: (r) => clean(r.direct ? r.directLabel : r.tl).toLowerCase(), prio: (r) => PRIO_RANK[r.priority],
-    last: (r) => r.lastV, cur: (r) => r.curV, rate: (r) => r.rate, required: (r) => r.required, stock: (r) => r.stockV, net: (r) => r.net, gross: (r) => r.gross, cover: (r) => r.cover,
+    last: (r) => r.lastV, cur: (r) => r.curV, rate: (r) => r.rate, required: (r) => r.required, stock: (r) => r.stockV, net: (r) => r.net, netA: (r) => r.netA, netB: (r) => r.netB, gross: (r) => r.gross, cover: (r) => r.cover, coverA: (r) => r.coverA, coverB: (r) => r.coverB,
     agents: (r) => r.agents || 0, growth: (r) => (r.c.growth == null ? -Infinity : r.c.growth)
   };
   function sortRows(list, s) {
@@ -372,7 +382,9 @@ FF.pages = FF.pages || {};
   function agg(list) {
     const cur = U.sum(list, (r) => r.curV), last = U.sum(list, (r) => r.lastV), stock = U.sum(list, (r) => r.stockV), rate = U.sum(list, (r) => r.rate);
     return {
-      count: list.length, cur, last, stock, rate, required: U.sum(list, (r) => r.required), net: U.sum(list, (r) => r.net), gross: U.sum(list, (r) => r.gross),
+      count: list.length, cur, last, stock, rate, required: U.sum(list, (r) => r.required), net: U.sum(list, (r) => r.net), netA: U.sum(list, (r) => r.netA || 0), netB: U.sum(list, (r) => r.netB || 0), gross: U.sum(list, (r) => r.gross),
+      coverA: (() => { const rt = U.sum(list, (r) => (r.gA ? r.gA.rate : 0)); return rt > 0 ? U.sum(list, (r) => (r.gA ? r.gA.stock : 0)) / rt : null; })(),
+      coverB: (() => { const rt = U.sum(list, (r) => (r.gB ? r.gB.rate : 0)); return rt > 0 ? U.sum(list, (r) => (r.gB ? r.gB.stock : 0)) / rt : null; })(),
       cover: rate > 0 ? stock / rate : null, growth: last > 0 ? ((cur - last) / last) * 100 : null,
       lowCover: list.filter((r) => r.cover != null && r.cover < 7).length, needy: list.filter((r) => !r.direct && r.net > 0).length,
       direct: list.filter((r) => r.direct).length, tagged: list.filter((r) => r.tagged).length,
@@ -408,9 +420,11 @@ FF.pages = FF.pages || {};
       { k: 'required', t: 'Required', num: 1, sub: `rate × ${days} din` },
       { k: 'stock', t: 'Stock', num: 1, sub: 'in field' },
       { k: '', t: view === 'tls' ? 'Agents stock' : 'All stock', sub: view === 'tls' ? 'agent class sum' : 'class-wise mix' },
-      { k: 'net', t: 'Dispatch', num: 1, sub: 'WITH stock', hot: 1 },
-      { k: 'gross', t: 'Dispatch', num: 1, sub: 'W/O stock', hot: 2 },
-      { k: 'cover', t: 'Cover', num: 1, sub: 'din' },
+      { k: 'net', t: 'Dispatch', num: 1, sub: 'total (WITH stock)', hot: 1 },
+      { k: 'netA', t: 'Dispatch', num: 1, sub: 'VC4 / VC20', hot: 2 },
+      { k: 'netB', t: 'Dispatch', num: 1, sub: 'VC5+', hot: 2 },
+      { k: 'coverA', t: 'Cover', num: 1, sub: 'VC4 / VC20 · din' },
+      { k: 'coverB', t: 'Cover', num: 1, sub: 'VC5+ · din' },
       { k: '', t: 'Status' }
     ];
     return c;
@@ -429,15 +443,15 @@ FF.pages = FF.pages || {};
     return `<tr class="dp2-row ${r.direct ? 'is-direct' : ''} ${r.cover != null && r.cover < 7 && !r.direct ? 'is-low' : ''} ${on ? 'is-picked' : ''}" data-dp-open="${r.uid}">
       <td class="dp2-pick"><input type="checkbox" data-dp-pick="${r.uid}" ${on ? 'checked' : ''} aria-label="Select ${esc(r.name)}"></td><td class="dp2-idx">${i + 1}</td><td>${nameCell}</td>${view === 'tls' ? `<td class="num">${fmt(r.agents)}</td>` : `<td>${tlCell}</td>`}<td>${prioBadge(r.priority)}</td>
       <td class="num">${fmt(r.lastV)}</td><td class="num"><b>${fmt(r.curV)}</b>${growthChip(r.c.growth)}</td><td class="num">${fmt(r.rate, true)}</td><td class="num">${fmt(r.required)}</td><td class="num">${fmt(r.stockV)}</td><td>${stockClassCell(r)}</td>
-      <td class="num dp2-hot1"><b>${fmt(r.net)}</b></td><td class="num dp2-hot2"><b>${fmt(r.gross)}</b></td><td class="num">${coverCell(r.cover)}</td>
+      <td class="num dp2-hot1"><b>${fmt(r.net)}</b></td><td class="num dp2-hot2"><b>${fmt(r.netA)}</b></td><td class="num dp2-hot2"><b>${fmt(r.netB)}</b></td><td class="num">${coverCell(r.coverA)}</td><td class="num">${coverCell(r.coverB)}</td>
       <td><span class="dp2-act ${r.action.cls}">${r.action.t}</span></td></tr>`;
   }
   function tableHtml(list, view) {
     const shown = list.slice(0, state.limit);
     const t = agg(list);
     const label = view === 'tls' ? 'TLs' : 'agents';
-    const foot = list.length ? `<tfoot><tr class="row-total"><td></td><td></td><td colspan="${view === 'tls' ? 1 : 1}">Total · ${fmt(list.length)} ${label}</td><td class="num">${view === 'tls' ? fmt(U.sum(list, (r) => r.agents)) : ''}</td><td></td><td class="num">${fmt(t.last)}</td><td class="num">${fmt(t.cur)}</td><td class="num">${fmt(t.rate, true)}</td><td class="num">${fmt(t.required)}</td><td class="num">${fmt(t.stock)}</td><td></td><td class="num dp2-hot1">${fmt(t.net)}</td><td class="num dp2-hot2">${fmt(t.gross)}</td><td class="num">${coverCell(t.cover)}</td><td></td></tr></tfoot>` : '';
-    const body = shown.map((r, i) => rowHtml(r, i, view)).join('') || `<tr><td colspan="15"><div class="empty-state">Is filter par koi ${label === 'TLs' ? 'TL' : 'agent'} nahi mila<br><span class="dim small">Filters clear karke dekho</span></div></td></tr>`;
+    const foot = list.length ? `<tfoot><tr class="row-total"><td></td><td></td><td colspan="${view === 'tls' ? 1 : 1}">Total · ${fmt(list.length)} ${label}</td><td class="num">${view === 'tls' ? fmt(U.sum(list, (r) => r.agents)) : ''}</td><td></td><td class="num">${fmt(t.last)}</td><td class="num">${fmt(t.cur)}</td><td class="num">${fmt(t.rate, true)}</td><td class="num">${fmt(t.required)}</td><td class="num">${fmt(t.stock)}</td><td></td><td class="num dp2-hot1">${fmt(t.net)}</td><td class="num dp2-hot2">${fmt(t.netA)}</td><td class="num dp2-hot2">${fmt(t.netB)}</td><td class="num">${coverCell(t.coverA)}</td><td class="num">${coverCell(t.coverB)}</td><td></td></tr></tfoot>` : '';
+    const body = shown.map((r, i) => rowHtml(r, i, view)).join('') || `<tr><td colspan="17"><div class="empty-state">Is filter par koi ${label === 'TLs' ? 'TL' : 'agent'} nahi mila<br><span class="dim small">Filters clear karke dekho</span></div></td></tr>`;
     return `<div class="table-wrap dp2-wrap"><table class="dp2-table">${head(view)}<tbody>${body}</tbody>${foot}</table></div>
       ${list.length > shown.length ? `<div class="dp2-more"><button class="btn small" data-dp-more="1">⬇ Aur dikhao (${fmt(list.length - shown.length)} baaki)</button><span class="dim small">Showing ${fmt(shown.length)} / ${fmt(list.length)} · sort karne par poori list sort hoti hai</span></div>` : ''}`;
   }
@@ -452,7 +466,7 @@ FF.pages = FF.pages || {};
       card('rate', 'k3', '⚡', 'Run-rate / day', fmt(t.rate, true), `issue ÷ ${el} (aaj − 1)`),
       card('required', 'k4', '🎯', `Required · ${fmt(days)} din`, fmt(t.required), `run-rate × ${fmt(days)} · stock ${fmt(t.stock)}`),
       card('net', 'k5', '🚚', 'Dispatch WITH stock', fmt(t.net), `Required − stock · ${fmt(t.needy)} ko chahiye`),
-      card('gross', 'k6', '📦', 'Dispatch W/O stock', fmt(t.gross), `bina stock ghataye · ${fmt(t.tagged)} direct ko tags`),
+      card('net', 'k6', '🔀', 'VC4/VC20 · VC5+', `${fmt(t.netA)} · ${fmt(t.netB)}`, `dispatch split · cover ${t.coverA == null ? '—' : fmt(t.coverA, true)} / ${t.coverB == null ? '—' : fmt(t.coverB, true)} din`),
       card('low', 'k7', '🚨', 'Cover < 7 din', fmt(t.lowCover), `overall cover ${t.cover == null ? '—' : `${fmt(t.cover, true)} din`}`)
     ].join('');
   }
@@ -493,8 +507,8 @@ FF.pages = FF.pages || {};
   }
 
   // ---- export / share -----------------------------------------------------------------------------------
-  const CSV_HEAD = (view) => [view === 'tls' ? 'TL' : 'Agent', 'ID', 'Channel', 'Type', view === 'tls' ? 'Agents' : 'TL', 'Priority', 'Last month', 'This month', 'Run-rate / day', `Required (× ${U.suggestDays()} din)`, 'Stock', view === 'tls' ? 'Agents stock · class-wise sum' : 'All stock · class-wise mix', 'Dispatch WITH stock', 'Dispatch W/O stock', 'Cover (din)', 'Status'];
-  const csvRow = (r, view) => [r.name, r.id, CH[r.ch].label, r.direct ? 'Direct' : 'TL-managed', view === 'tls' ? r.agents : (r.direct ? r.directLabel : r.tl), r.priority, r.lastV, r.curV, Number(r.rate.toFixed(2)), r.required, r.stockV, stockClassText(r), r.net, r.gross, r.cover == null ? '' : Number(r.cover.toFixed(1)), r.action.t.replace(/^\S+\s/, '')];
+  const CSV_HEAD = (view) => [view === 'tls' ? 'TL' : 'Agent', 'ID', 'Channel', 'Type', view === 'tls' ? 'Agents' : 'TL', 'Priority', 'Last month', 'This month', 'Run-rate / day', `Required (× ${U.suggestDays()} din)`, 'Stock', view === 'tls' ? 'Agents stock · class-wise sum' : 'All stock · class-wise mix', 'Dispatch WITH stock (total)', 'Dispatch VC4/VC20', 'Dispatch VC5+', 'Cover VC4/VC20 (din)', 'Cover VC5+ (din)', 'Status'];
+  const csvRow = (r, view) => [r.name, r.id, CH[r.ch].label, r.direct ? 'Direct' : 'TL-managed', view === 'tls' ? r.agents : (r.direct ? r.directLabel : r.tl), r.priority, r.lastV, r.curV, Number(r.rate.toFixed(2)), r.required, r.stockV, stockClassText(r), r.net, r.netA, r.netB, r.coverA == null ? '' : Number(r.coverA.toFixed(1)), r.coverB == null ? '' : Number(r.coverB.toFixed(1)), r.action.t.replace(/^\S+\s/, '')];
   /** Channel filter ka readable label — multi-select ke saath "First Forward + GV Partner". */
   function channelLabel() {
     const set = U.asValueSet(state.ch);

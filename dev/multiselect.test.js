@@ -157,7 +157,7 @@ test('table rows carry a pick checkbox and the footer keeps its column count', (
   // colspan="N" wale cell ko N columns maano, baaki har <td> ek.
   let footCount = 0;
   for (const m of footRow.matchAll(/<td(?:\s[^>]*)?>/g)) footCount += Number((m[0].match(/colspan="(\d+)"/) || [0, 1])[1]);
-  assert.equal(headCells, 15, 'pick + # + 13 data columns including class-wise stock mix');
+  assert.equal(headCells, 17, 'pick + # + 15 data columns (dispatch + cover VC4/VC20 · VC5+ split)');
   assert.equal(footCount, headCells, 'footer ka span header ke columns se match kare');
   const bodyRow = (html.match(/<tbody>[\s\S]*?<\/tbody>/) || [''])[0].split('</tr>')[0];
   assert.equal((bodyRow.match(/<td[\s>]/g) || []).length, headCells, 'har body row me bhi utne hi cells');

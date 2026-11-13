@@ -136,7 +136,7 @@ test('filters + sort + totals', () => {
 test('table html: sortable headers, clickable rows, formula columns', () => {
   const list = DP.sortRows(rows(), { key: 'net', dir: 'desc' });
   const html = DP.tableHtml(list, 'agents');
-  for (const s of ['data-dp-sort="net"', 'data-dp-sort="cover"', 'data-dp-open="', 'WITH stock', 'W/O stock', 'Last month', 'This month', '÷ 28 din', 'rate × 25 din', 'data-dp-tl="ff|TL One"']) assert.ok(html.includes(s), s);
+  for (const s of ['data-dp-sort="net"', 'data-dp-sort="coverA"', 'data-dp-sort="coverB"', 'data-dp-open="', 'WITH stock', 'VC4 / VC20', 'VC5+', 'Last month', 'This month', '÷ 28 din', 'rate × 25 din', 'data-dp-tl="ff|TL One"']) assert.ok(html.includes(s), s);
   assert.doesNotMatch(html, /NaN|undefined/);
   assert.match(DP.kpiHtml(DP.agg(list), 'agents'), /data-dp-kpi="net"/);
 });
@@ -173,4 +173,16 @@ test('class-wise stock summary: unmapped rows + TL aggregation + empty state', (
   assert.equal(tl.unmapped, 0, 'TL sheet total alag hota hai — unmapped bucket nahi');
   const none = DP.classMixHtml([{ kind: 'agent', ch: 'ff', stockClassAvailable: false, stock: { total: 0 } }]);
   assert.match(none, /class columns nahi/);
+});
+
+test('v3.125.256 — VC4/VC20 aur VC5+ ka alag cover: kisi ek group me kam cover ho to bhi High priority', () => {
+  // VC5+ stock bahut, VC4 stock khatam → total cover theek lagta tha, par VC4 group High hona chahiye
+  const r = { kind: 'agent', ch: 'gv', name: 'X', id: 'X1', tl: 'TL', direct: false, priority: '',
+    cur: { vc4: 100, comm: 10, total: 110 }, last: { vc4: 100, comm: 10, total: 110 }, stock: { vc4: 5, comm: 400, total: 405 } };
+  const c = DP.withCalc(r, 'total');
+  assert.ok(c.coverA != null && c.coverA < 7, 'VC4/VC20 cover kam');
+  assert.ok(c.coverB > 15, 'VC5+ cover zyada');
+  assert.equal(c.priority, 'High');
+  assert.ok(c.netA > 0 && c.netB === 0);
+  assert.equal(c.net, c.netA + c.netB);
 });
