@@ -170,7 +170,9 @@ export class AppsScriptStore {
 
   /** Returns null when the storage tab is still empty (first run), else { users, sessions, … }. */
   async read() {
-    const out = await this.call('read');
+    // v3.125.229 — poori APP_STORAGE (bada Sheet ~20 MB + Apps Script lock ka intezaar ~23 s) 20 s me nahi aati thi →
+    // boot par baar-baar "storage timeout" aur site "Unable to connect". Read ko 75 s do (Apps Script khud 6 min tak chal sakta hai).
+    const out = await this.call('read', {}, { timeoutMs: Math.max(this.timeoutMs, Number(process.env.APPS_SCRIPT_READ_TIMEOUT_MS || 75000)), attempts: 1 });
     const records = out.records || {};
     const present = APPS_SCRIPT_KINDS.filter((k) => records[k]);
     if (!present.length) return null;
