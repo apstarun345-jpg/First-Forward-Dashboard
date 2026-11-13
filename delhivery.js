@@ -88,10 +88,10 @@ FF.pages = FF.pages || {};
   // ---------------------------------------------------------------- page
   function tokenBox() {
     const c = st.cfg || {};
-    if (c.configured) return c.admin ? '<details class="dl-tok"><summary class="dim small">🔑 Delhivery API token badlo</summary><div class="dl-tok-row"><input class="input mono" type="password" data-dl-token placeholder="Naya token paste karo"><button type="button" class="btn sm" data-dl-save>Save</button></div></details>' : '';
+    if (c.configured) return c.admin ? '<details class="dl-tok"><summary class="dim small">🔑 Delhivery API token badlo</summary><div class="dl-tok-row"><input class="input mono" type="password" autocomplete="new-password" data-lpignore="true" data-dl-token placeholder="Naya token paste karo"><button type="button" class="btn sm" data-dl-save>Save</button></div></details>' : '';
     if (!c.admin) return '<div class="dl-alert">🔑 Delhivery API token abhi set nahi hai — admin se set karwao.</div>';
     return `<div class="dl-alert"><b>🔑 Delhivery API token set karo</b> (sirf ek baar — server par safe rehta hai, browser ko nahi jaata)
-      <div class="dl-tok-row"><input class="input mono" type="password" data-dl-token placeholder="Delhivery API token"><button type="button" class="btn primary sm" data-dl-save>💾 Save token</button></div></div>`;
+      <div class="dl-tok-row"><input class="input mono" type="password" autocomplete="new-password" data-lpignore="true" data-dl-token placeholder="Delhivery API token"><button type="button" class="btn primary sm" data-dl-save>💾 Save token</button></div></div>`;
   }
   async function render(root) {
     root.innerHTML = `<div class="page-head"><div><h1>🚚 Delhivery Tracking</h1><p class="dim">Pincode serviceability + AWB status — ek ya kai saath, turant.</p></div></div>
