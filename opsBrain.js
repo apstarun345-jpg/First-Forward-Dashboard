@@ -584,6 +584,6 @@
     return true;
   }
 
-  FF.ops = { commitAlert, refreshDq, dataQuality: () => dq, agents, series, rootCause, tlStats, tlInsights, dispatchPlan, predict, alerts: alertsAll, nextAlert, briefing, tower: towerData, openTower, follows, showFollowList, act, contextAnswer, rememberAgent, pageTips: PAGE, attach };
+  FF.ops = { item: (x) => itemFor(remember(x)), commitAlert, refreshDq, dataQuality: () => dq, agents, series, rootCause, tlStats, tlInsights, dispatchPlan, predict, alerts: alertsAll, nextAlert, briefing, tower: towerData, openTower, follows, showFollowList, act, contextAnswer, rememberAgent, pageTips: PAGE, attach };
   if (!attach()) { const t = setInterval(() => { if (attach()) clearInterval(t); }, 2000); setTimeout(() => clearInterval(t), 120e3); }
 })(window.FF);
