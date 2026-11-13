@@ -348,8 +348,12 @@ FF.pages = FF.pages || {};
         return g;
       };
       const put = (channel, name, id, tlName, patch) => {
-        const key = `${channel}|${norm(name) || digits(id)}`;
-        const rec = byKey.get(key) || { channel, name: name || id, agentId: digits(id), tlName: tlName || '', stock: {}, cur: {}, last: {}, eirCur: {}, eirLast: {}, priority: '', growth: null, grp: emptyGroups() };
+        // 🆔 v3.125.248 — ek hi naam ke do agent (jaise 2× "SURAJ KUMAR", alag ID) pehle ek me mil jaate the → doosra
+        // list se gayab. Ab naam same par ID alag ho to alag record (key = naam#ID).
+        const nk = `${channel}|${norm(name) || digits(id)}`, did = digits(id);
+        let key = nk, found = byKey.get(nk);
+        if (found && did && found.agentId && found.agentId !== did) { key = `${nk}#${did}`; found = byKey.get(key); }
+        const rec = found || { key, channel, name: name || id, agentId: did, tlName: tlName || '', stock: {}, cur: {}, last: {}, eirCur: {}, eirLast: {}, priority: '', growth: null, grp: emptyGroups() };
         if (id && !rec.agentId) rec.agentId = digits(id);
         if (name && (!rec.name || rec.name === key)) rec.name = name;
         if (tlName && !rec.tlName) rec.tlName = tlName;
@@ -422,7 +426,7 @@ FF.pages = FF.pages || {};
       const list = [...byKey.values()].map((r) => {
         const t = recTotals(r);
         return {
-          key: `${r.channel}|${norm(r.name)}`, channel: r.channel, name: r.name, agentId: r.agentId, tlName: r.tlName, priority: r.priority,
+          key: r.key || `${r.channel}|${norm(r.name)}`, channel: r.channel, name: r.name, agentId: r.agentId, tlName: r.tlName, priority: r.priority,
           stock: t.stock, last: t.last, cur: t.cur, core: t.core, comm: t.comm
         };
       });
@@ -522,7 +526,7 @@ FF.pages = FF.pages || {};
     if (!idx || !g) return [];
     const tlName = norm(g.name);
     return [...(g.agents || [])].map((k) => idx.byKey.get(k)).filter(Boolean)
-      .map((r) => { const m = groupMetrics(r); return { key: `${r.channel}|${norm(r.name)}`, name: r.name, agentId: r.agentId, channel: r.channel, stock: num(m.core.stock) + num(m.comm.stock), last: num(m.core.last) + num(m.comm.last), cur: num(m.core.cur) + num(m.comm.cur), priority: r.priority, isSelf: !!tlName && norm(r.name) === tlName }; })
+      .map((r) => { const m = groupMetrics(r); return { key: r.key || `${r.channel}|${norm(r.name)}`, name: r.name, agentId: r.agentId, channel: r.channel, stock: num(m.core.stock) + num(m.comm.stock), last: num(m.core.last) + num(m.comm.last), cur: num(m.core.cur) + num(m.comm.cur), priority: r.priority, isSelf: !!tlName && norm(r.name) === tlName }; })
       .sort((a, b) => (b.isSelf ? 1 : 0) - (a.isSelf ? 1 : 0) || b.cur - a.cur || b.stock - a.stock);
   }
   /** Saved request ke agent ka live record (admin table) — ID ya exact naam, channel same. */
@@ -674,13 +678,13 @@ FF.pages = FF.pages || {};
       if (!active.length && !useSuggestion && !anyListed) { problems.push(`${rec.name} — kam se kam ek class me qty daalo (0 ya khaali = skip).`); continue; }
       const classesToUse = active.length ? active : (useSuggestion || anyListed ? CLASS_LIST.filter((c) => (row.classes || []).includes(c)) : []);
       if (!classesToUse.length) { problems.push(`${rec.name} — kam se kam ek Tag Class chuno.`); continue; }
-      if (!out.some((x) => x.agentKey === `${rec.channel}|${norm(rec.name)}`)) serial++;
+      if (!out.some((x) => x.agentKey === (rec.key || `${rec.channel}|${norm(rec.name)}`))) serial++;
       for (const c of classesToUse) {
         const d = classData(rec, c);
         const asked = String(qty[c] === undefined ? '' : qty[c]).trim();
         const approved = asked !== '' && Number.isFinite(Number(asked)) ? Math.max(0, Math.round(Number(asked))) : (useSuggestion ? d.sugNet : 0);
         out.push({
-          id: rid(), agentKey: `${rec.channel}|${norm(rec.name)}`, agentId: rec.agentId, agentName: rec.name,
+          id: rid(), agentKey: rec.key || `${rec.channel}|${norm(rec.name)}`, agentId: rec.agentId, agentName: rec.name,
           tl: rec.tlName || '—', channel: rec.channel, cls: c, last: d.last, cur: d.cur, stock: d.stock, avg: d.avg, cover: d.cover, growth: d.growth, priority: d.priority,
           sugNet: d.sugNet, sugGross: d.sugGross, approved, remark: '', days: d.days
         });
@@ -2094,7 +2098,7 @@ body.colorful .from-hdr { color: #166534; }
       } else if (row.pincode && !/^\d{6}$/.test(digits(row.pincode))) mark(row.id, 'pincode', 'Pincode 6 digit ka hona chahiye');
       if (onlyFastag() && !rowTotal(row)) mark(row.id, 'qty', 'Kam se kam ek class me qty daalo');
       const rec = exactAgent(row);
-      const key = rec ? `${rec.channel}|${norm(rec.name)}` : `?|${norm(row.name || row.agentId)}`;
+      const key = rec ? (rec.key || `${rec.channel}|${norm(rec.name)}`) : `?|${norm(row.name || row.agentId)}`;
       if (isFastag() && String(row.name || row.agentId || '').trim()) {
         if (seen.has(key)) mark(row.id, 'agent', `Ye agent upar (Agent ${seen.get(key)}) me pehle se hai — wahi qty badha do`);
         else seen.set(key, n);

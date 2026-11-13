@@ -1295,6 +1295,17 @@ FF.pages = FF.pages || {};
         </div>
         <div class="chip-row"><span class="chip on">Latest = sabse nayi date ki row</span><span class="chip">TL = TL + uske agents ka max</span><span class="chip">Server par 10 min cache · search instant</span></div>
         <div class="save-bar"><button class="btn primary" data-save="gvAgentCommission">💾 Save commission box</button><span class="dim small" id="save-msg-gvAgentCommission"></span></div>`)}
+      ${section('📞 Agent mobile numbers <span class="dim">(FF + GV — kis sheet / tab se)</span>', `
+        <p class="dim small">Agent ke mobile kahan se aayein — tag request (labels / dispatch), KPI lists ka Mobile column, robot. Sirf <b>sheet link + tab ka naam</b> do: system header padh kar <b>Agent ID</b>, <b>naam</b> (ya First + Last name) aur <b>Mobile</b> column <b>khud</b> pehchanta hai. Ek agent ki kai rows hon to sabse upar wali (nayi) row ka number. Address tab / pichhli request ka number in sab se upar mana jata hai.</p>
+        <div class="form-grid">
+          ${field('🟦 FF — sheet link / ID', `<input class="input mono" data-path="mobileSources.ff.sheetLink" value="${esc(settings.mobileSources?.ff?.sheetLink || '')}" placeholder="khaali = Agent Details - IDFC sheet">`, 'Google Sheet ka poora link ya sirf ID')}
+          ${field('🟦 FF — tab', `<input class="input" data-path="mobileSources.ff.tab" value="${esc(settings.mobileSources?.ff?.tab || 'Sheet4')}" placeholder="Sheet4">`, 'Tab ka exact naam')}
+          ${field('🟩 GV — sheet link / ID', `<input class="input mono" data-path="mobileSources.gv.sheetLink" value="${esc(settings.mobileSources?.gv?.sheetLink ?? '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA')}" placeholder="GV mobile sheet">`, 'Google Sheet ka poora link ya sirf ID')}
+          ${field('🟩 GV — tab', `<input class="input" data-path="mobileSources.gv.tab" value="${esc(settings.mobileSources?.gv?.tab || 'agent_Mobile Number')}" placeholder="agent_Mobile Number">`, 'Tab ka exact naam')}
+        </div>
+        <div class="chip-row"><span class="chip on">ID + Mobile column auto-detect</span><span class="chip">Sheet par sirf padhne ka access chahiye (Apps Script wale account se share)</span></div>
+        <div class="ms-check-out small" id="ms-check-out"></div>
+        <div class="save-bar"><button class="btn primary" data-save="mobileSources">💾 Save mobile sources</button><button class="btn" type="button" data-ms-check>🔍 Check — kitne number mile</button><span class="dim small" id="save-msg-mobileSources"></span></div>`)}
       ${section('🧮 TVC → CCH classes <span class="dim">(Tag Request class-wise grid)</span>', `
         <p class="dim small">Har line: <b>TVC : CCH classes</b> (comma separated). Tag Request ke class-wise grid me count <b>TVC ke hisaab se</b> dikhega, aur us TVC ke saare CCH ka count usi me judega. Jo CCH yahan nahi hai wo "Other" me jayega.</p>
         <textarea class="input mono" id="tvc-groups-text" rows="7" placeholder="4 : VC4, VC20">${esc(((settings.tvcGroups && settings.tvcGroups.length) ? settings.tvcGroups : FF.config.tvcGroups || []).map((g) => g.tvc + ' : ' + (g.cch || []).join(', ')).join('\n'))}</textarea>
@@ -2954,6 +2965,16 @@ FF.pages = FF.pages || {};
           if (btn.dataset.save === 'gvAgentCommission' && FF.masterSearch && FF.masterSearch.reloadCommission) FF.masterSearch.reloadCommission().catch(() => {});
         }, 'Saving…');
       }));
+      // 📞 mobile sources — check (server sheet padh kar batata hai kaunsa column mila, kitne number)
+      U.$$('[data-ms-check]', body).forEach((btn) => btn.addEventListener('click', () => U.withButtonBusy(btn, async () => {
+        const out = U.$('#ms-check-out', body);
+        try {
+          const d = await A.api('/api/agent-mobiles?fresh=1');
+          const det = (d.sources && d.sources.detail) || {};
+          const line = (ch, lab) => { const x = det[ch]; if (!x) return `<div>${lab}: <span class="dim">set nahi</span></div>`; if (x.error) return `<div>${lab} · ${esc(x.tab)}: <b style="color:#dc2626">⚠️ ${esc(x.error)}</b></div>`; return `<div>${lab} · ${esc(x.tab)}: <b>${U.fmt(x.used)}</b> numbers (${U.fmt(x.rows)} rows) · columns → ID: <b>${esc((x.cols.ids || []).join(', '))}</b> · Naam: <b>${esc(x.cols.name || '—')}</b> · Mobile: <b>${esc(x.cols.mobile)}</b></div>`; };
+          out.innerHTML = `${line('ff', '🟦 FF')}${line('gv', '🟩 GV')}<div class="dim">Kul ${U.fmt(d.count)} agent IDs ke number · Address tab ${U.fmt(d.sources && d.sources.address)} · requests ${U.fmt(d.sources && d.sources.requests)}</div>`;
+        } catch (err) { out.innerHTML = `<b style="color:#dc2626">⚠️ ${esc(err.message)}</b>`; }
+      }, 'Checking…')));
       // 🔗 pair picker — FF / GV dropdown (Master Search index se)
       const cmState = { pairs: ((settings.crossMerge || FF.config.crossMerge || {}).pairs || []).map((x) => ({ ...x })), pick: { ff: null, gv: null } };
       const cmList = U.$('#cm-pair-list', body);

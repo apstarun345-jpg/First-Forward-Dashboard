@@ -111,6 +111,7 @@ const CLOUD_BACKEND = STORAGE_BACKEND === 'sheets' || STORAGE_BACKEND === 'appss
 // Missing/misconfigured cloud storage ko temporary files/default admin me silently downgrade mat karo.
 const REQUIRE_DURABLE_CLOUD = process.env.REQUIRE_DURABLE_CLOUD === '1' || !!process.env.RENDER;
 let sheetsStore = null;
+let resetAgentMobiles = null;   // 📞 settings save par mobile directory cache saaf
 if (REQUIRE_DURABLE_CLOUD && STORAGE_BACKEND !== 'appsscript') {
   throw new Error('Production storage guard: Render par APPS_SCRIPT_URL + APPS_SCRIPT_SECRET wala Google Sheet storage required hai. Temporary file/default storage intentionally disabled.');
 }
@@ -290,6 +291,8 @@ const DEFAULT_SETTINGS = {
   gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],   // v3.87 — TVC → CCH classes (Tag Request class grid)
   // v3.90 — GV agent / TL commission box (Master search + profile): sheet link, tab, columns sab Settings se badal sakte ho.
+  // 📞 v3.125.248 — agent mobile kis sheet / tab se (FF + GV) — ID + mobile + naam column system khud header se pehchanta hai
+  mobileSources: { ff: { sheetLink: '', tab: 'Sheet4' }, gv: { sheetLink: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA', tab: 'agent_Mobile Number' } },
   gvAgentCommission: { enabled: true, sheetLink: '', tab: 'GV Master', agentCol: 'A', tlCol: 'R', tlFallbackCol: 'C', productCol: 'L', commissionCol: 'M', dateCol: 'P', agentNameCol: 'B', tlNameCol: 'D', classCol: 'G', classFallbackCol: 'F', productId: '100000007832', label: 'VC4', suffix: '/tag', currency: '₹' },
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
@@ -9337,6 +9340,7 @@ async function handleApi(req, res, url) {
       if (a.address && a.mobile && a.pincode) continue;
       const id = String(a.agentId || a.id || (r.rows && r.rows[0] && r.rows[0].agentId) || '').trim();
       const name = tagNameKey(a.name || (r.rows && r.rows[0] && r.rows[0].agentName) || '');
+      if (!a.mobile) { const dm = directoryMobile(id, a.name || (r.rows && r.rows[0] && r.rows[0].agentName)); if (dm) { a.mobile = dm; filled++; if (a.address && a.pincode) continue; } }
       const keys = [];
       ['ff', 'gv'].forEach((ch) => { if (id) keys.push(`${ch}|id:${id}`); if (name) keys.push(`${ch}|n:${name}`); });
       const cands = keys.flatMap((k) => [mem[k], map.get(k)]).filter((x) => x && (x.address || x.pincode || x.mobile));
@@ -9359,6 +9363,36 @@ async function handleApi(req, res, url) {
   const agentMobileRt = { at: 0, data: null, promise: null };
   const mobIdKeys = (id) => { const raw = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!raw) return []; const dg = raw.replace(/\D/g, '').replace(/^0+/, ''); return [...new Set([raw, dg && dg.length >= 3 ? `#${dg}` : ''].filter(Boolean))]; };
   const mobNameKey = (n) => String(n || '').toLowerCase().replace(/[^a-z]/g, '');
+  resetAgentMobiles = () => { agentMobileRt.data = null; agentMobileRt.at = 0; };
+  /** Mobile sheet: header (pehli 5 rows me) se ID / naam / mobile column pehchano, phir sirf wahi columns padho. */
+  async function readMobileSheet(store, spreadsheetId, tab) {
+    const head = await store.call('readtab', { spreadsheetId, tab, maxRows: 5, maxCols: 60 }, { timeoutMs: 60e3, attempts: 2 });
+    const V = head.values || [];
+    const H = (r) => (V[r] || []).map((h) => String(h || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim());
+    let hr = -1, cols = null;
+    for (let r = 0; r < Math.min(V.length, 5) && hr < 0; r++) {
+      const h = H(r);
+      const mob = h.findIndex((x) => /(^|\s)(mobile|mob|phone|contact|whatsapp)(\s|$)|mobile ?no|contact ?no|phone ?no/.test(x) && !/(id|order|transaction|email)/.test(x));
+      const ids = h.map((x, i) => [x, i]).filter(([x]) => /(^|\s)(agent|user|retailer|partner|new agent|aps|gv|ff)?\s?id$|^id$|agent ?code|new ?id/.test(x) && !/(transaction|order|tl|email|txn|payment)/.test(x)).map(([, i]) => i).slice(0, 3);
+      if (mob >= 0 && ids.length) {
+        const nm = h.findIndex((x) => /(agent ?name|^name$|full ?name|retailer ?name)/.test(x));
+        const fn = h.findIndex((x) => /^first ?name$/.test(x)), ln = h.findIndex((x) => /^last ?name$/.test(x));
+        hr = r; cols = { ids, mobile: mob, name: nm, first: nm < 0 ? fn : -1, last: nm < 0 ? ln : -1, headers: { ids: ids.map((i) => V[r][i]), mobile: V[r][mob], name: nm >= 0 ? V[r][nm] : [fn, ln].filter((i) => i >= 0).map((i) => V[r][i]).join(' + ') } };
+      }
+    }
+    if (!cols) throw new Error('header me ID / Mobile column nahi mila');
+    const L = (i) => { let n = i + 1, t = ''; while (n > 0) { const m = (n - 1) % 26; t = String.fromCharCode(65 + m) + t; n = Math.floor((n - 1) / 26); } return t; };
+    const want = [...cols.ids, cols.mobile, cols.name, cols.first, cols.last].filter((i) => i >= 0);
+    const letters = [...new Set(want)].map(L);
+    const out = await store.call('readrange', { spreadsheetId, tab, startRow: hr + 2, columns: letters }, { timeoutMs: 120e3, attempts: 2 });
+    const at = (row, i) => (i < 0 ? '' : row[letters.indexOf(L(i))]);
+    const rows = (out.rows || []).filter(Array.isArray).map((row) => ({
+      ids: cols.ids.map((i) => at(row, i)).filter(Boolean),
+      mobile: at(row, cols.mobile),
+      name: cols.name >= 0 ? at(row, cols.name) : `${at(row, cols.first) || ''} ${at(row, cols.last) || ''}`.trim()
+    }));
+    return { rows, cols: cols.headers };
+  }
   async function agentMobileData(force) {
     if (!force && agentMobileRt.data && Date.now() - agentMobileRt.at < 3 * 3600e3) return agentMobileRt.data;
     if (agentMobileRt.promise) return agentMobileRt.promise;
@@ -9373,14 +9407,26 @@ async function handleApi(req, res, url) {
         if (nk.length >= 4) { if (names[nk] && names[nk] !== d && !override) nameClash.add(nk); else names[nk] = d; }
         sources[src]++; return true;
       };
-      // 1) Agent Details sheet (purana record) — sabse pehle, baaki sources ise override kar sakte hain
+      // 1) Settings → "Agent mobile sources" (FF + GV) — sheet ka header padh kar ID / naam / mobile column khud pehchano.
+      //    Sabse pehle, baaki sources (Address book / requests) ise override kar sakte hain.
       const store = sheetSyncStore();
-      if (store && AGENT_DETAILS_SHEET) {
-        try {
-          const out = await store.call('readrange', { spreadsheetId: AGENT_DETAILS_SHEET, tab: AGENT_DETAILS_TAB, startRow: 2, columns: ['A', 'B', 'C', 'H'] });
-          (out.rows || []).forEach((r) => { if (Array.isArray(r)) put([r[0], r[1]], r[2], r[3], 'sheet', false); });
-        } catch (err) { sheetError = String(err && err.message || err).slice(0, 160); }
+      const msCfg = { ...DEFAULT_SETTINGS.mobileSources, ...((db.settings && db.settings.mobileSources) || {}) };
+      const detail = {};
+      if (store) {
+        for (const ch of ['ff', 'gv']) {
+          const c = { ...DEFAULT_SETTINGS.mobileSources[ch], ...(msCfg[ch] || {}) };
+          const sid = sheetIdFromLink(c.sheetLink) || (ch === 'ff' ? AGENT_DETAILS_SHEET : '');
+          if (!sid || !c.tab) continue;
+          try {
+            const r = await readMobileSheet(store, sid, c.tab);
+            let n = 0;
+            r.rows.forEach((row) => { if (put(row.ids, row.name, row.mobile, 'sheet', false)) n++; });
+            sources[`sheet_${ch}`] = n;
+            detail[ch] = { tab: c.tab, rows: r.rows.length, used: n, cols: r.cols };
+          } catch (err) { const m = String(err && err.message || err).slice(0, 160); detail[ch] = { tab: c.tab, error: m }; sheetError = sheetError ? `${sheetError} · ${ch}: ${m}` : `${ch}: ${m}`; }
+        }
       }
+      sources.detail = detail;
       // 2) Address book (memory + Address tab) — taaza, override
       let map = null; try { map = await addressBookMap(); } catch { map = null; }
       const seen = new Map();
@@ -9393,6 +9439,15 @@ async function handleApi(req, res, url) {
       return { ok: true, at: new Date().toISOString(), ids, names, count: Object.keys(ids).length, sources, sheetError };
     })().then((d) => { agentMobileRt.data = d; agentMobileRt.at = Date.now(); return d; }).finally(() => { agentMobileRt.promise = null; });
     return agentMobileRt.promise;
+  }
+  setTimeout(() => { agentMobileData(false).catch(() => {}); }, 70e3);   // boot ke baad mobile directory taiyar
+  /** Mobile directory se number (ID pehle, phir unique naam). Data load na ho to background me load shuru, abhi '' . */
+  function directoryMobile(id, name) {
+    const d = agentMobileRt.data;
+    if (!d) { agentMobileData(false).catch(() => {}); return ''; }
+    for (const k of mobIdKeys(id)) if (d.ids[k]) return d.ids[k];
+    const nk = mobNameKey(name);
+    return nk.length >= 4 && d.names[nk] ? d.names[nk] : '';
   }
   // 💰 v3.125.230 — IDFC payout: APN sheet (agent-wise payable) + FNF sheet (payment release / remark). Sirf admin / "payout" permission.
   const PAYOUT_SHEETS = { apn: String(process.env.APN_PAYOUT_SHEET_ID || '1QyiXewYroY4ppqm2JFKfDmYybh5Un299kEG5mio2z00').trim(), fnf: String(process.env.FNF_PAYOUT_SHEET_ID || '1eZMV79IYrBvTfR5me2IFSbsENp3GzmhWTfB2JNGqjeU').trim() };
@@ -9576,7 +9631,14 @@ async function handleApi(req, res, url) {
       return { ok: false, local: true, synced: false, count: entries.length, error: String(err.message || err).slice(0, 180) };
     }
   }
-  async function lookupAgentAddress({ agentId, agentName, channel }) {
+  async function lookupAgentAddress(q) {
+    const r = await lookupAgentAddressRaw(q);
+    if (r && r.mobile) return r;
+    const dm = directoryMobile(q && q.agentId, q && q.agentName);
+    if (!dm) return r;
+    return r ? { ...r, mobile: dm } : { mobile: dm, address: '', pincode: '', dispatchName: '', tl: '', source: 'Mobile sheet', lastRequestAt: '' };
+  }
+  async function lookupAgentAddressRaw({ agentId, agentName, channel }) {
     const ch = String(channel || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
     const id = String(agentId || '').trim();
     const name = tagNameKey(agentName || '');
@@ -12019,6 +12081,13 @@ async function handleApi(req, res, url) {
       };
       Object.keys(cfg).forEach((k) => delete cfg[k]);
       Object.assign(cfg, out);
+    }
+    if (patch.mobileSources !== undefined) {
+      const m = patch.mobileSources;
+      if (!m || typeof m !== 'object' || Array.isArray(m)) throw new HttpError(400, 'mobileSources object hona chahiye.');
+      const one = (x, d) => ({ sheetLink: String((x && x.sheetLink) ?? d.sheetLink).trim().slice(0, 400), tab: String((x && x.tab) ?? d.tab).trim().slice(0, 100) || d.tab });
+      patch.mobileSources = { ff: one(m.ff, DEFAULT_SETTINGS.mobileSources.ff), gv: one(m.gv, DEFAULT_SETTINGS.mobileSources.gv) };
+      try { if (typeof resetAgentMobiles === 'function') resetAgentMobiles(); } catch { /* optional */ }
     }
     if (patch.crossMerge !== undefined) {
       const c = patch.crossMerge;
