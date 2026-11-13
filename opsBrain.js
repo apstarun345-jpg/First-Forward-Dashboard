@@ -57,7 +57,7 @@
     if (ensP || Date.now() - ensAt < 60e3) return ensP || Promise.resolve();
     ensAt = Date.now();
     const jobs = [];
-    try { if (FF.lazy && FF.lazy.need) jobs.push(Promise.resolve(FF.lazy.need('performance')).then(() => { const P = FF.pages && FF.pages.performance; return P && P.ensureLoaded ? P.ensureLoaded({ light: true }) : null; })); } catch { /* optional */ }
+    try { if (FF.lazy && FF.lazy.need) jobs.push(Promise.resolve(FF.lazy.need('performance')).then(() => { const P = FF.pages && FF.pages.performance; return P && P.ensureLoaded ? P.ensureLoaded().catch(() => P.ensureLoaded({ light: true })) : null; })); } catch { /* optional */ } // light mode beech me abort ho jaata hai → poora
     try { if (FF.gv && FF.gv.need) jobs.push(FF.gv.need('report')); } catch { /* optional */ }
     try { if (FF.store && FF.store.need) jobs.push(FF.store.need('daily')); } catch { /* optional */ }
     ensP = Promise.allSettled(jobs).then(() => { cache.ag = null; cache.s = null; ensP = null; });
