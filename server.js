@@ -9396,6 +9396,48 @@ async function handleApi(req, res, url) {
   }
   // 💰 v3.125.230 — IDFC payout: APN sheet (agent-wise payable) + FNF sheet (payment release / remark). Sirf admin / "payout" permission.
   const PAYOUT_SHEETS = { apn: String(process.env.APN_PAYOUT_SHEET_ID || '1QyiXewYroY4ppqm2JFKfDmYybh5Un299kEG5mio2z00').trim(), fnf: String(process.env.FNF_PAYOUT_SHEET_ID || '1eZMV79IYrBvTfR5me2IFSbsENp3GzmhWTfB2JNGqjeU').trim() };
+  const PAYOUT_SNAP_FILE = path.join(DATA_DIR, 'payout-snapshot.json.gz'), PAYOUT_SNAP_TAB = 'CACHE_PAYOUT';
+  const payoutSnap = { data: null, tried: false, loading: null };
+  async function payoutSnapSaveSheet(snap) {
+    const store = sheetSyncStore(); if (!store) return false;
+    try {
+      const body = snap.buf.toString('base64'), parts = [];
+      for (let i = 0; i < body.length; i += SNAP_CHUNK) parts.push(body.slice(i, i + SNAP_CHUNK));
+      if (parts.length > 400) return false;
+      const head = JSON.stringify({ v: 1, kind: 'payout', at: snap.at, by: snap.by, etag: snap.etag, months: snap.months, n: parts.length });
+      const writes = [{ row: 1, value: head }, ...parts.map((v, i) => ({ row: i + 2, value: `p${v}` })), ...Array.from({ length: 5 }, (_, j) => ({ row: parts.length + 2 + j, value: '' }))];   // 'p' = sheet '+'/'=' ko formula na samjhe
+      await store.call('writecells', { spreadsheetId: '', tab: PAYOUT_SNAP_TAB, column: 'A', writes }, { timeoutMs: 120e3, attempts: 3 });
+      return true;
+    } catch (err) { console.warn('payout snapshot sheet save:', String(err && err.message || err).slice(0, 200)); return false; }
+  }
+  /** Snapshot: memory → disk → storage sheet (CACHE_PAYOUT). Restart ke baad bhi wapas. */
+  async function payoutSnapGet() {
+    if (payoutSnap.data || payoutSnap.tried) return payoutSnap.data;
+    if (payoutSnap.loading) return payoutSnap.loading;
+    payoutSnap.loading = (async () => {
+      try {
+        if (existsSync(PAYOUT_SNAP_FILE) && existsSync(`${PAYOUT_SNAP_FILE}.meta`)) {
+          const meta = JSON.parse(readFileSync(`${PAYOUT_SNAP_FILE}.meta`, 'utf8'));
+          payoutSnap.data = { ...meta, buf: readFileSync(PAYOUT_SNAP_FILE) };
+          return payoutSnap.data;
+        }
+        const store = sheetSyncStore(); if (!store) return null;
+        const out = await store.call('readrange', { spreadsheetId: '', tab: PAYOUT_SNAP_TAB, startRow: 1, columns: ['A'] }, { timeoutMs: 90e3, attempts: 2 });
+        const rows = (out && out.rows) || [];
+        const head = JSON.parse((rows[0] && rows[0][0]) || 'null');
+        if (!head || head.kind !== 'payout') { payoutSnap.tried = true; return null; }
+        const buf = Buffer.from(rows.slice(1, 1 + head.n).map((r) => String(r[0] || '').replace(/^p/, '')).join(''), 'base64');
+        payoutSnap.data = { at: head.at, by: head.by, etag: head.etag, months: head.months, buf };
+        try { mkdirSync(DATA_DIR, { recursive: true }); writeFileSync(PAYOUT_SNAP_FILE, buf); writeFileSync(`${PAYOUT_SNAP_FILE}.meta`, JSON.stringify({ at: head.at, by: head.by, etag: head.etag, months: head.months })); } catch { /* optional */ }
+        return payoutSnap.data;
+      } catch (err) {
+        const msg = String(err && err.message || err);
+        if (/nahi mila/i.test(msg)) payoutSnap.tried = true; else console.warn('payout snapshot load:', msg.slice(0, 200));
+        return null;
+      }
+    })();
+    const r = await payoutSnap.loading; payoutSnap.loading = null; return r;
+  }
   const payoutTabs = new Map(); // fallback (purana Apps Script): `${kind}|${tab}` → { at, data, miss, err, promise } — max 3 tabs
   const payoutHits = new Map(); // readmatch: `${kind}|${tab}|${keys}` → { at, values, miss }
   let payoutReadtab = null;      // null = pata nahi, true = Apps Script me readmatch hai, false = purana script (chunked readrange)
@@ -10153,6 +10195,52 @@ async function handleApi(req, res, url) {
       if (err instanceof HttpError) throw err;
       throw new HttpError(502, `Sheet history read nahi ho payi: ${err.message}`);
     }
+  }
+  // 💰 v3.125.234 — Payout SNAPSHOT: mahine me ek baar Home se "Payout refresh" → browser poori APN/FNF tabs padhta hai
+  // (server sirf raw stream aage bhejta hai, parse nahi karta = memory safe), compact + masked snapshot banakar yahan PUT karta hai.
+  // Search par sab instant: client snapshot ek baar laata hai (ETag), phir matching browser me.
+  const payoutPerm = (u) => u && (u.role === 'admin' || (Array.isArray(u.permissions) && u.permissions.includes('payout')));
+  if (p === '/api/payout/raw' && method === 'GET') {
+    if (!payoutPerm(user)) throw new HttpError(user ? 403 : 401, 'Payout refresh ki permission nahi hai.');
+    const kind = url.searchParams.get('kind') === 'fnf' ? 'fnf' : 'apn';
+    const tab = String(url.searchParams.get('tab') || '').slice(0, 40);
+    if (!/^[A-Za-z]{3,9} \d{2}$/.test(tab)) throw new HttpError(400, 'tab galat hai.');
+    const aurl = (process.env.APPS_SCRIPT_URL || '').trim(), secret = (process.env.APPS_SCRIPT_SECRET || '').trim();
+    if (!aurl || !secret) throw new HttpError(503, 'Apps Script set nahi hai.');
+    const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 150e3);
+    try {
+      const r = await fetch(aurl, { method: 'POST', redirect: 'follow', signal: ac.signal, headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ secret, action: 'readtab', spreadsheetId: PAYOUT_SHEETS[kind], tab, maxRows: 6000, maxCols: 100 }) });
+      if (!r.ok || !r.body) throw new HttpError(502, `Apps Script HTTP ${r.status}`);
+      const gz = /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store', ...(gz ? { 'Content-Encoding': 'gzip' } : {}) });
+      const { Readable } = await import('node:stream');
+      const src = Readable.fromWeb(r.body);
+      await new Promise((ok, no) => { const out = gz ? src.pipe(zlib.createGzip({ level: 4 })) : src; out.pipe(res); out.on('end', ok); out.on('error', no); src.on('error', no); });
+    } finally { clearTimeout(timer); }
+    return;
+  }
+  if (p === '/api/payout/snapshot' && method === 'GET') {
+    if (!payoutPerm(user)) throw new HttpError(user ? 403 : 401, 'Payout dekhne ki permission nahi hai.');
+    const snap = await payoutSnapGet();
+    if (!snap) { res.setHeader('Cache-Control', 'private, no-store'); return sendJson(res, 200, { ok: true, empty: true }); }
+    if (String(req.headers['if-none-match'] || '') === snap.etag) { res.writeHead(304, { ETag: snap.etag, 'Cache-Control': 'private, no-cache' }); return res.end(); }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', ETag: snap.etag, 'Cache-Control': 'private, no-cache', 'Content-Length': snap.buf.length });
+    return res.end(snap.buf);
+  }
+  if (p === '/api/payout/snapshot' && method === 'PUT') {
+    if (!payoutPerm(user)) throw new HttpError(user ? 403 : 401, 'Payout refresh ki permission nahi hai.');
+    const chunks = []; let size = 0;
+    await new Promise((ok, no) => { req.on('data', (c) => { size += c.length; if (size > 12 * 1024 * 1024) { no(new HttpError(413, 'Snapshot bahut bada hai.')); req.destroy(); return; } chunks.push(c); }); req.on('end', ok); req.on('error', no); });
+    const buf = Buffer.concat(chunks);
+    let head;
+    try { const j = JSON.parse(zlib.gunzipSync(buf).toString('utf8')); head = { months: (j.months || []).map((m) => m.tab), at: j.at }; if (!head.months.length) throw new Error('empty'); }
+    catch { throw new HttpError(400, 'Snapshot data galat hai.'); }
+    const snap = { buf, at: Date.now(), by: user.name || user.email || '', etag: `"po-${crypto.createHash('sha1').update(buf).digest('hex').slice(0, 16)}"`, months: head.months };
+    payoutSnap.data = snap; payoutSnap.tried = true;
+    try { mkdirSync(DATA_DIR, { recursive: true }); writeFileSync(PAYOUT_SNAP_FILE, buf); writeFileSync(`${PAYOUT_SNAP_FILE}.meta`, JSON.stringify({ at: snap.at, by: snap.by, etag: snap.etag, months: snap.months })); } catch { /* disk optional */ }
+    const saved = await payoutSnapSaveSheet(snap);
+    return sendJson(res, 200, { ok: true, at: new Date(snap.at).toISOString(), kb: Math.round(buf.length / 1024), months: snap.months, durable: saved });
   }
   if (p === '/api/payout' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required.');

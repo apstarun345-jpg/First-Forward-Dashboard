@@ -85,7 +85,7 @@ export function parseGrid(values, kind) {
   return { rows, cols };
 }
 
-export const maskPan = (p) => { const s = String(p || '').trim().toUpperCase(); return /^[A-Z]{5}\d{4}[A-Z]$/.test(s) ? `${s.slice(0, 2)}XXX${s.slice(5, 7)}XX${s.slice(9)}` : (s ? 'XXXXXXXXXX' : ''); };
+export const maskPan = (p) => { const s = String(p || '').trim().toUpperCase(); if (/X{2}/.test(s)) return s; return /^[A-Z]{5}\d{4}[A-Z]$/.test(s) ? `${s.slice(0, 2)}XXX${s.slice(5, 7)}XX${s.slice(9)}` : (s ? 'XXXXXXXXXX' : ''); };
 export const maskAcc = (a) => { const s = String(a || '').replace(/\s/g, ''); return s.length >= 4 ? `XXXXXX${s.slice(-4)}` : ''; };
 const safe = (o) => { if (!o) return o; const x = { ...o }; if ('pan' in x) x.pan = maskPan(x.pan); if ('account' in x) x.account = maskAcc(x.account); return x; };
 

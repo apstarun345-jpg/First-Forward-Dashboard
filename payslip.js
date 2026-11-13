@@ -34,16 +34,74 @@ window.FF = window.FF || {};
       .map((x) => String(x || '').trim()).filter((x) => x && !/^APS\d/i.test(x) && x.length >= 3);
     return [...new Set(L)].slice(0, 12);
   }
-  async function fetchPayout(spec) {
-    const key = JSON.stringify(spec);
-    const c = cache.get(key);
-    if (c && Date.now() - c.at < 10 * 60e3) return c.p;
-    const q = new URLSearchParams({ ids: (spec.ids || []).join(','), name: spec.name || '', months: '7' });
-    const p = FF.auth.api(`/api/payout?${q}`);
-    cache.set(key, { at: Date.now(), p });
-    p.catch(() => cache.delete(key));
-    return p;
+  // 💰 v3.125.234 — SNAPSHOT: payout mahine me ek baar aata hai → Home par "Payout refresh" se ek baar poora data
+  // (APN + FNF, last 7 months) browser me padh kar compact + masked snapshot server par save. Search par instant (browser me match).
+  let core = null, snap = null, snapP = null;
+  const loadCore = async () => core || (core = await import('./payout-core.js'));
+  async function getSnap(force) {
+    if (snap && !force) return snap;
+    if (snapP && !force) return snapP;
+    snapP = (async () => {
+      await loadCore();
+      const r = await fetch('/api/payout/snapshot', { credentials: 'same-origin', cache: 'no-cache' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      snap = j && j.months ? j : { empty: true };
+      return snap;
+    })();
+    try { return await snapP; } finally { snapP = null; }
   }
+  async function fetchPayout(spec) {
+    const S = await getSnap();
+    if (S.empty) {   // snapshot abhi nahi bana → purana live tarika (sirf matching rows)
+      const q = new URLSearchParams({ ids: (spec.ids || []).join(','), name: spec.name || '', months: '7' });
+      const key = q.toString(), c = cache.get(key);
+      if (c && Date.now() - c.at < 10 * 60e3) return c.p;
+      const p = FF.auth.api(`/api/payout?${q}`).then((d) => ({ ...d, live: true }));
+      cache.set(key, { at: Date.now(), p }); p.catch(() => cache.delete(key));
+      return p;
+    }
+    const want = { ids: spec.ids || [], name: spec.name || '' };
+    const months = S.months.map((m) => {
+      const data = core.matchMonth(m.apn, m.fnf, want);
+      return { tab: m.tab, ym: m.ym, label: m.label, available: true, data, status: data ? core.statusOf(data.fnf) : null };
+    });
+    return { ok: true, company: COMPANY, months, snapAt: S.at, snapBy: S.by };
+  }
+  /** Home → "💰 Payout refresh": har mahine ka APN + FNF tab padho → parse → mask → compact → gzip → server. */
+  async function refresh(onStep) {
+    await loadCore();
+    const step = (t) => { try { onStep && onStep(t); } catch { /* ui */ } };
+    const now = new Date(Date.now() + 5.5 * 3600e3);
+    const tabs = core.monthTabs(now.toISOString().slice(0, 7), 7);
+    const thin = (rows) => rows.map((r) => { const o = {}; for (const [k, v] of Object.entries(r)) { if (v === 0 || v === '') continue; o[k] = k === 'pan' ? core.maskPan(v) : (k === 'account' ? core.maskAcc(v) : v); } return o; });
+    const readTab = async (kind, tab) => {
+      const r = await fetch(`/api/payout/raw?kind=${kind}&tab=${encodeURIComponent(tab)}`, { credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) { let e = ''; try { e = (await r.json()).error; } catch { /* */ } throw new Error(e || `HTTP ${r.status}`); }
+      const j = await r.json();
+      if (!j.ok) { if (/nahi mila/i.test(j.error || '')) return null; throw new Error(j.error || 'sheet read fail'); }
+      const g = core.parseGrid(j.values || [], kind);
+      return { rows: thin(g.rows) };
+    };
+    const months = [];
+    for (const m of tabs) {
+      step(`⏳ ${m.label} — APN + FNF padh raha hu…`);
+      const [apn, fnf] = await Promise.all([readTab('apn', m.tab), readTab('fnf', m.tab)]);
+      if (!apn && !fnf) { step(`— ${m.label}: sheet me tab nahi hai`); continue; }
+      months.push({ tab: m.tab, ym: m.ym, label: m.label, apn: apn || { rows: [] }, fnf: fnf || { rows: [] } });
+      step(`✅ ${m.label}: ${apn ? apn.rows.length : 0} agents · ${fnf ? fnf.rows.length : 0} payees`);
+    }
+    if (!months.length) throw new Error('Koi bhi mahine ka tab nahi mila');
+    const json = JSON.stringify({ v: 1, at: Date.now(), by: (FF.auth.user && FF.auth.user.name) || '', months });
+    step('⏳ Save ho raha hai…');
+    const gz = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+    const res = await fetch('/api/payout/snapshot', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' }, body: gz });
+    let out = {}; try { out = await res.json(); } catch { /* */ }
+    if (!res.ok || !out.ok) throw new Error(out.error || `HTTP ${res.status}`);
+    snap = null; cache.clear(); await getSnap(true);
+    return { ...out, months: months.length };
+  }
+  async function status() { try { const S = await getSnap(); return S.empty ? null : { at: S.at, by: S.by, months: S.months.map((m) => m.label) }; } catch { return null; } }
   const STATUS_CLS = { paid: 'ps-ok', hold: 'ps-bad', proc: 'ps-warn', other: 'ps-mute', none: 'ps-mute' };
 
   // ---------------------------------------------------------------- box (Master Search)
@@ -68,7 +126,8 @@ window.FF = window.FF || {};
       return `<tr><td><b>${esc(m.label.replace(/ (\d{4})$/, " '$1").replace(/'20/, "'"))}</b></td><td class="num">${int(t.pay_total)}</td><td class="num">${inr(final, 0)}</td><td class="num">${rel == null ? (f ? '<span class="dim" title="Payment TL / payee ke naam se release hota hai">via TL</span>' : '<span class="dim">—</span>') : inr(rel, 0)}</td><td><span class="ps-chip ${STATUS_CLS[st.key] || 'ps-mute'}" title="${esc(st.label)}">${esc(st.label.length > 14 ? st.label.slice(0, 13) + '…' : st.label)}</span>${f && f.utr ? `<br><small class="dim" title="Payment UTR">${esc(f.utr)}</small>` : ''}</td></tr>`;
     }).join('');
     const role = months[0].data.role === 'payee' ? `TL / payee ${esc(months[0].data.payeeId)}` : `Agent · paid via ${esc(months[0].data.payeeId)} ${esc(months[0].data.payeeName || '')}`;
-    body.innerHTML = `<div class="ps-role small dim">${role}</div><table class="ps-tbl"><thead><tr><th>Month</th><th class="num">Payable tags</th><th class="num">Final payout</th><th class="num">Released</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
+    const upd = d.snapAt ? ` · <span title="Home → 💰 Payout refresh">updated ${esc(new Date(d.snapAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }))}</span>` : (d.live ? ' · live' : '');
+    body.innerHTML = `<div class="ps-role small dim">${role}${upd}</div><table class="ps-tbl"><thead><tr><th>Month</th><th class="num">Payable tags</th><th class="num">Final payout</th><th class="num">Released</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
       <div class="ps-acts"><button type="button" class="btn sm primary" data-ps-open>📄 Payslip download</button></div>`;
     box.__pay = { d, spec };
   }
@@ -296,5 +355,5 @@ window.FF = window.FF || {};
     FF.pdf.download(P.finish(foot), `Payslip_${base}_${span}.pdf`);
   }
 
-  FF.payslip = { boxHtml, fill, openPicker, download, words, idsOf };
+  FF.payslip = { boxHtml, fill, openPicker, download, words, idsOf, refresh, status, getSnap };
 })(window.FF);

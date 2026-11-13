@@ -1443,6 +1443,7 @@ FF.pages = FF.pages || {};
       <div id="home-stock-map"></div>
       <div id="home-freshness"></div>
       <div id="home-robot-feed"></div>
+      <div id="home-payout"></div>
       <div id="home-data-versions"></div>
       <div id="home-datainfo" class="hero-stats">
         <div class="home-stat"><span class="dim">Data loaded</span><b id="home-loaded">${S.loadedAt || G.loadedAt ? U.timeLabel(S.loadedAt || G.loadedAt) : '—'}</b></div>
@@ -1454,6 +1455,26 @@ FF.pages = FF.pages || {};
     homeLayout.apply(root);
     freshness.mount(root, false);
     mountDataVersions(U.$('#home-data-versions', root));
+    // 💰 v3.125.234 — Payout refresh (mahine me ek baar) — admin / payout permission
+    (async () => { try {
+      const box = U.$('#home-payout', root);
+      if (!box || !(FF.auth && (FF.auth.isAdmin() || FF.auth.can('payout')))) return;
+      if (!FF.payslip && FF.lazy && FF.lazy.inject) await FF.lazy.inject('payslip');
+      if (!FF.payslip) return;
+      const st = await FF.payslip.status();
+      const when = st ? `${new Date(st.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}${st.by ? ` · ${esc(st.by)}` : ''} · ${st.months.length} mahine` : 'abhi load nahi hua';
+      box.innerHTML = `<section class="card ps-home"><div class="card-body"><div class="ps-home-row"><div><b>💰 Payout data (APN + FNF)</b><br><small class="dim">Last update: ${when}</small></div><button type="button" class="btn sm primary" data-ps-refresh>🔄 Payout refresh</button></div><div class="ps-home-log small dim"></div></div></section>`;
+      box.addEventListener('click', async (ev) => {
+        const b = ev.target.closest && ev.target.closest('[data-ps-refresh]'); if (!b || b.disabled) return;
+        const log = U.$('.ps-home-log', box); b.disabled = true; b.textContent = '⏳ Refresh ho raha hai…'; log.innerHTML = '';
+        try {
+          const out = await FF.payslip.refresh((t) => { log.innerHTML += `<div>${esc(t)}</div>`; });
+          log.innerHTML += `<div><b>✅ Ho gaya — ${out.months} mahine, ${out.kb} KB${out.durable ? ' (sheet backup ✓)' : ''}. Ab search par payout turant dikhega.</b></div>`;
+          b.textContent = '✅ Updated';
+        } catch (err) { log.innerHTML += `<div>⚠️ ${esc((err && err.message) || err)}</div>`; b.textContent = '🔄 Payout refresh'; }
+        b.disabled = false;
+      });
+    } catch { /* optional */ } })();
     // 🤖 v3.125.149 — robot ke saare updates Home par (dropdown, rangeen) — sirf admin
     (async () => { try { const box = U.$('#home-robot-feed', root); if (!box || !(FF.auth && FF.auth.isAdmin && FF.auth.isAdmin())) return; if (!FF.mascot && FF.lazy && FF.lazy.inject) await FF.lazy.inject('mascot'); if (FF.mascot && FF.mascot.mountHome) FF.mascot.mountHome(box); } catch { /* optional */ } })();
     root.addEventListener('click', (ev) => { const b = ev.target && ev.target.closest && ev.target.closest('[data-fresh-refresh]'); if (b) { freshness.mount(root, true); return; } const d = ev.target && ev.target.closest && ev.target.closest('[data-fresh-dismiss]'); if (d) freshness.dismiss(root); });

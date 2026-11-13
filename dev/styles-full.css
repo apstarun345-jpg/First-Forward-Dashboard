@@ -8554,3 +8554,5 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .ps-quick{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .ps-mode{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;font-size:13px}
 @media (max-width:600px){.ps-tbl{font-size:11.5px}.ps-tbl th:nth-child(2),.ps-tbl td:nth-child(2){display:none}}
+.ps-home .ps-home-row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.ps-home .ps-home-log{margin-top:6px;max-height:180px;overflow:auto}
