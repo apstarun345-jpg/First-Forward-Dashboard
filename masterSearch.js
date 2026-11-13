@@ -2763,7 +2763,7 @@ FF.pages = FF.pages || {};
     const ids = [pr.id, pr.sub, ...(pr.ids ? [...pr.ids] : []), ...(pr.alias ? [...pr.alias] : []), ...(pr.tlIds ? [...pr.tlIds] : [])]
       .map((x) => String(x || '').trim()).filter((x) => x && !/^APS\d/i.test(x) && x.length >= 3);
     const sc = { ids: [...new Set(ids)].slice(0, 12), name: pr.name || '', tl: !!isTl };
-    return `<div class="mp-kpi msp-kpi k12 msp-pay-box" data-msp-pay-box="${esc(JSON.stringify(sc))}"><small>💰 IDFC payout · last 6 months <span class="dim">(APN + FNF sheet)</span></small><div class="ps-body"><span class="dim small">Loading payout…</span></div></div>`;
+    return `<div class="mp-kpi msp-kpi k12 msp-pay-box" data-msp-pay-box="${esc(JSON.stringify(sc))}"><small>💰 IDFC payout · last 6 months</small><div class="ps-body"><span class="dim small">Loading payout…</span></div></div>`;
   }
   function dispBoxHtml(pr, isTl, ch) {
     const sc = dispSpecOf(pr, isTl, ch);

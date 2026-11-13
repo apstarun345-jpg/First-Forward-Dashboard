@@ -108,7 +108,7 @@ window.FF = window.FF || {};
   function boxHtml(pr, isTl, ch) {
     if (!canSee() || ch === 'gv') return '';
     const spec = { ids: idsOf(pr), name: pr.name || '', tl: !!isTl };
-    return `<div class="mp-kpi msp-kpi k12 msp-pay-box" data-msp-pay-box="${esc(JSON.stringify(spec))}"><small>💰 IDFC payout · last 6 months <span class="dim">(APN + FNF sheet)</span></small><div class="ps-body"><span class="dim small">Loading payout…</span></div></div>`;
+    return `<div class="mp-kpi msp-kpi k12 msp-pay-box" data-msp-pay-box="${esc(JSON.stringify(spec))}"><small>💰 IDFC payout · last 6 months</small><div class="ps-body"><span class="dim small">Loading payout…</span></div></div>`;
   }
   function paint(box, d, spec) {
     const body = box.querySelector('.ps-body'); if (!body) return;
@@ -123,11 +123,11 @@ window.FF = window.FF || {};
       const final = viaTl || !f ? num(t.final) : num(f.final);
       const rel = f && !viaTl ? num(f.releasing) : null;
       const st = m.status || { key: 'none', label: '—' };
-      return `<tr><td><b>${esc(m.label.replace(/ (\d{4})$/, " '$1").replace(/'20/, "'"))}</b></td><td class="num">${int(t.pay_total)}</td><td class="num">${inr(final, 0)}</td><td class="num">${rel == null ? (f ? '<span class="dim" title="Payment TL / payee ke naam se release hota hai">via TL</span>' : '<span class="dim">—</span>') : inr(rel, 0)}</td><td><span class="ps-chip ${STATUS_CLS[st.key] || 'ps-mute'}" title="${esc(st.label)}">${esc(st.label.length > 14 ? st.label.slice(0, 13) + '…' : st.label)}</span>${f && f.utr ? `<br><small class="dim" title="Payment UTR">${esc(f.utr)}</small>` : ''}</td></tr>`;
+      return `<tr class="ps-r-${esc(st.key)}"><td class="ps-mon"><b>${esc(m.label.replace(/ (\d{4})$/, " '$1").replace(/'20/, "'"))}</b></td><td class="num ps-tags">${int(t.pay_total)}</td><td class="num ps-fin">${inr(final, 0)}</td><td class="num ps-rel">${rel == null ? (f ? '<span class="dim" title="Payment TL / payee ke naam se release hota hai">via TL</span>' : '<span class="dim">—</span>') : inr(rel, 0)}</td><td><span class="ps-chip ${STATUS_CLS[st.key] || 'ps-mute'}" title="${esc(st.label)}">${esc(st.label.length > 14 ? st.label.slice(0, 13) + '…' : st.label)}</span>${f && f.utr ? `<br><small class="dim" title="Payment UTR">${esc(f.utr)}</small>` : ''}</td></tr>`;
     }).join('');
     const role = months[0].data.role === 'payee' ? `TL / payee ${esc(months[0].data.payeeId)}` : `Agent · paid via ${esc(months[0].data.payeeId)} ${esc(months[0].data.payeeName || '')}`;
     const upd = d.snapAt ? ` · <span title="Home → 💰 Payout refresh">updated ${esc(new Date(d.snapAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }))}</span>` : (d.live ? ' · live' : '');
-    body.innerHTML = `<div class="ps-role small dim">${role}${upd}</div><table class="ps-tbl"><thead><tr><th>Month</th><th class="num">Payable tags</th><th class="num">Final payout</th><th class="num">Released</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
+    body.innerHTML = `<div class="ps-role small dim">${role}${upd}</div><div class="ps-scroll"><table class="ps-tbl"><thead><tr><th>Month</th><th class="num">Payable tags</th><th class="num">Final payout</th><th class="num">Released</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="ps-acts"><button type="button" class="btn sm primary" data-ps-open>📄 Payslip download</button></div>`;
     box.__pay = { d, spec };
   }
@@ -181,64 +181,79 @@ window.FF = window.FF || {};
     };
   }
 
-  // ---------------------------------------------------------------- PDF drawing
+  // ---------------------------------------------------------------- PDF drawing (v3.125.236 — rangeen, har APN column)
   const W = 210, H = 297, M = 12;
-  const NAVY = '#0f2a4a', ACC = '#1d4ed8', LINE = '#d6dde8', SOFT = '#f3f6fb', INK = '#0f172a', MUTE = '#5b6475';
+  const NAVY = '#0f2a4a', LINE = '#d6dde8', INK = '#0f172a', MUTE = '#5b6475';
+  const C = { id: '#4f46e5', tags: '#2563eb', kyc: '#0d9488', earn: '#16a34a', ded: '#dc2626', net: '#7c3aed', pay: '#d97706', full: '#475569', agents: '#0891b2', sum: '#4f46e5' };
+  const tint = (hex, a) => { const n = parseInt(hex.slice(1), 16); const r = n >> 16, g = (n >> 8) & 255, b = n & 255; const m = (c) => Math.round(c + (255 - c) * (1 - a)); return `rgb(${m(r)},${m(g)},${m(b)})`; };
+  const STATUS_COL = { paid: '#16a34a', proc: '#d97706', hold: '#dc2626', other: '#475569', none: '#64748b' };
   function pager(company) {
     const pages = [];
-    let pg = null, y = 0;
+    let pg = null, y = 0, col = C.tags;
     const F = (FF.pdf && FF.pdf.FONT) || 'Arial, sans-serif';
     const font = (mm, w) => { pg.ctx.font = `${w || 400} ${pg.px(mm)}px ${F}`; };
     const newPage = (title) => {
       pg = FF.pdf.page(W, H); pages.push(pg);
       const { ctx, px } = pg;
       ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, px(W), px(H));
-      ctx.fillStyle = NAVY; ctx.fillRect(0, 0, px(W), px(26));
+      const gr = ctx.createLinearGradient(0, 0, px(W), 0); gr.addColorStop(0, '#0f2a4a'); gr.addColorStop(1, '#1e3a8a');
+      ctx.fillStyle = gr; ctx.fillRect(0, 0, px(W), px(26));
       ctx.fillStyle = '#c9a227'; ctx.fillRect(0, px(26), px(W), px(1.1));
       ctx.fillStyle = '#ffffff'; font(5.6, 800); ctx.fillText(company, px(M), px(11.5));
-      font(3, 400); ctx.fillStyle = '#cbd5e1'; ctx.fillText('FASTag Partner Programme · Commission Payout Statement', px(M), px(17.5));
-      ctx.textAlign = 'right'; ctx.fillStyle = '#ffffff'; font(4.6, 800); ctx.fillText(title || 'PAYSLIP', px(W - M), px(11.5));
+      font(3, 400); ctx.fillStyle = '#cbd5e1'; ctx.fillText('FASTag Partner Programme · IDFC Commission Payout Statement', px(M), px(17.5));
+      ctx.textAlign = 'right'; ctx.fillStyle = '#ffffff'; font(4.4, 800); ctx.fillText(title || 'PAYSLIP', px(W - M), px(11.5));
       ctx.textAlign = 'left';
       y = 33;
     };
     const need = (h, title) => { if (!pg || y + h > H - 18) newPage(title); };
     const text = (s, x, yy, o) => { const t = o || {}; font(t.size || 3.2, t.w || 400); pg.ctx.fillStyle = t.color || INK; pg.ctx.textAlign = t.align || 'left'; pg.ctx.fillText(String(s), pg.px(x), pg.px(yy)); pg.ctx.textAlign = 'left'; };
     const rect = (x, yy, w, h, fill, stroke) => { const { ctx, px } = pg; if (fill) { ctx.fillStyle = fill; ctx.fillRect(px(x), px(yy), px(w), px(h)); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = px(0.25); ctx.strokeRect(px(x), px(yy), px(w), px(h)); } };
-    const section = (t) => { need(12); text(t.toUpperCase(), M, y + 4, { size: 3.1, w: 800, color: ACC }); rect(M, y + 5.6, W - 2 * M, 0.35, ACC); y += 9; };
-    /** cols: [{t, w (mm), a:'l'|'r'}], rows: [[..]] , opts: {bold rows idx set, foot row} */
+    const pill = (s, xr, yy, color) => { font(2.8, 800); const w = pg.ctx.measureText(String(s)).width / pg.k + 5; const { ctx, px } = pg; ctx.fillStyle = tint(color, 0.16); const x = xr - w; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(px(x), px(yy - 3.6), px(w), px(5), px(2.5)); else ctx.rect(px(x), px(yy - 3.6), px(w), px(5)); ctx.fill(); text(s, x + w / 2, yy, { size: 2.8, w: 800, color, align: 'center' }); };
+    const section = (t, color, h) => { col = color || C.tags; need((h || 12) + 2); rect(M, y, 1.4, 6.2, col); rect(M + 1.4, y, W - 2 * M - 1.4, 6.2, tint(col, 0.1)); text(t.toUpperCase(), M + 4, y + 4.4, { size: 3.1, w: 800, color: col }); y += 8.5; };
+    /** cols: [{t, w (mm), a:'l'|'r', c: header color}], rows: [[..]] */
     const table = (cols, rows, o) => {
       const opt = o || {}, rh = opt.rh || 6.2;
-      const head = () => { need(rh * 2); rect(M, y, W - 2 * M, rh, SOFT, LINE); let x = M; cols.forEach((c) => { text(c.t, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 2.8, w: 800, color: MUTE, align: c.a === 'r' ? 'right' : 'left' }); x += c.w; }); y += rh; };
+      const head = () => { need(rh * 2); let x = M; cols.forEach((c) => { rect(x, y, c.w, rh, tint(c.c || col, 0.18), LINE); text(c.t, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 2.75, w: 800, color: c.c || col, align: c.a === 'r' ? 'right' : 'left' }); x += c.w; }); y += rh; };
       head();
       rows.forEach((r, ri) => {
         if (y + rh > H - 18) { newPage(opt.title); head(); }
         const bold = opt.foot && ri === rows.length - 1;
-        rect(M, y, W - 2 * M, rh, bold ? '#eaf0fb' : (ri % 2 ? '#fbfcfe' : null), LINE);
+        rect(M, y, W - 2 * M, rh, bold ? tint(col, 0.14) : (ri % 2 ? '#f8fafc' : null), LINE);
         let x = M;
-        cols.forEach((c, ci) => { const v = r[ci] == null ? '' : String(r[ci]); let s = v; font(3, bold ? 800 : 400); const maxW = pg.px(c.w - 3); while (s.length > 3 && pg.ctx.measureText(s).width > maxW) s = s.slice(0, -2); if (s !== v) s += '…'; text(s, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 3, w: bold ? 800 : 400, align: c.a === 'r' ? 'right' : 'left' }); x += c.w; });
+        cols.forEach((c, ci) => { const v = r[ci] == null ? '' : String(r[ci]); let s = v; font(3, bold ? 800 : 400); const maxW = pg.px(c.w - 3); while (s.length > 3 && pg.ctx.measureText(s).width > maxW) s = s.slice(0, -2); if (s !== v) s += '…'; text(s, c.a === 'r' ? x + c.w - 2 : x + 2, y + rh * 0.66, { size: 3, w: bold || ci === 0 ? 700 : 400, color: bold ? (c.c || col) : INK, align: c.a === 'r' ? 'right' : 'left' }); x += c.w; });
         y += rh;
       });
       y += 3;
     };
-    const kv = (pairs) => {      // 2 column info grid
-      const colW = (W - 2 * M) / 2, rh = 6.4;
-      for (let i = 0; i < pairs.length; i += 2) {
+    /** pairs: [label, value, color?]; ncol 2 ya 3 */
+    const kv = (pairs, ncol) => {
+      const n = ncol || 2, colW = (W - 2 * M) / n, rh = 6.2;
+      for (let i = 0, band = 0; i < pairs.length; i += n) {
+        const h0 = pairs[i];
+        if (h0 && h0.head) {        // group heading — poori line
+          need(rh * 2);
+          rect(M, y, W - 2 * M, rh - 1, tint(h0.color || col, 0.16)); rect(M, y, 1.2, rh - 1, h0.color || col);
+          text(h0.head.toUpperCase(), M + 3, y + 3.7, { size: 2.6, w: 800, color: h0.color || col });
+          y += rh - 1; band = 0; continue;
+        }
         need(rh);
-        [pairs[i], pairs[i + 1]].forEach((p, j) => {
-          if (!p) return;
+        for (let j = 0; j < n; j++) {
+          const p = pairs[i + j]; if (!p) continue;
           const x = M + j * colW;
-          rect(x, y, colW, rh, j ? null : null, LINE);
-          text(p[0], x + 2, y + 4.3, { size: 2.8, color: MUTE, w: 600 });
-          text(p[1] == null || p[1] === '' ? '—' : p[1], x + colW - 2, y + 4.3, { size: 3.1, w: 700, align: 'right' });
-        });
-        y += rh;
+          rect(x, y, colW, rh, band % 2 ? '#f8fafc' : null, LINE);
+          if (p[0] === '' && (p[1] === '' || p[1] == null)) continue;
+          text(p[0], x + 2, y + 4.2, { size: n === 3 ? 2.55 : 2.8, color: MUTE, w: 600 });
+          if (p[2] && p[3] === 'pill') pill(p[1], x + colW - 1.5, y + 4.3, p[2]);
+          else text(p[1] == null || p[1] === '' ? '—' : p[1], x + colW - 2, y + 4.2, { size: n === 3 ? 2.8 : 3.1, w: 700, align: 'right', color: p[2] || INK });
+        }
+        y += rh; band++;
       }
       y += 3;
     };
     const finish = (footer) => {
       pages.forEach((p, i) => {
         const { ctx, px } = p;
-        ctx.fillStyle = LINE; ctx.fillRect(px(M), px(H - 14), px(W - 2 * M), px(0.3));
+        ctx.fillStyle = '#c9a227'; ctx.fillRect(px(M), px(H - 14), px(W - 2 * M), px(0.4));
         ctx.fillStyle = MUTE; ctx.font = `400 ${px(2.5)}px ${F}`;
         ctx.fillText('This is a computer-generated statement and does not require a signature. Figures are as per the APN payout sheet and FNF payment records.', px(M), px(H - 9.5));
         ctx.fillText(footer || '', px(M), px(H - 6));
@@ -246,106 +261,160 @@ window.FF = window.FF || {};
       });
       return FF.pdf.build(pages.map((p) => p.canvas));
     };
-    return { newPage, need, text, rect, section, table, kv, finish, get y() { return y; }, set y(v) { y = v; } };
+    return { newPage, need, text, rect, pill, section, table, kv, finish, get y() { return y; }, set y(v) { y = v; } };
   }
 
   const nowIst = () => new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const slipNo = (m, id) => `APN/IDFC/${m.ym.replace('-', '').slice(2)}/${String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, '')}`;
   const period = (m) => { const [y, mo] = m.ym.split('-').map(Number); const last = new Date(Date.UTC(y, mo, 0)).getUTCDate(); const mn = new Date(Date.UTC(y, mo - 1, 1)).toLocaleString('en-IN', { month: 'short', timeZone: 'UTC' }); return `01 ${mn} ${y} – ${last} ${mn} ${y}`; };
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monTag = (m) => { const [y, mo] = m.ym.split('-').map(Number); return `${MON[mo - 1]}'${String(y).slice(2)}`; };
+  const fyOf = (m) => { const [y, mo] = m.ym.split('-').map(Number); const s = mo >= 4 ? y : y - 1; return `${String(s).slice(2)}-${String(s + 1).slice(2)}`; };
+  /** Payee name: TL naam me "APS" ho (company direct) to agent ka naam, warna TL ka naam. */
+  function payeeNameOf(d, spec) {
+    const tl = String(d.payeeName || '').trim();
+    const agentName = (d.role !== 'payee' && d.agents.length === 1 ? d.agents[0].name : '') || spec.name || (d.agents[0] && d.agents[0].name) || '';
+    if (!tl || /\bAPS\b|^APS|APS$/i.test(tl)) return agentName || tl;
+    return tl;
+  }
+  const n0 = (v) => int(v), r2 = (v) => inr(v);
+  // Har APN column — label + type (n = count, r = ₹ amount)
+  const APN_GROUPS = [
+    ['Issuance', C.tags, [['iss_vc4', 'VC4 issued', 'n'], ['iss_vc20', 'VC20 issued', 'n'], ['iss_rest', 'Rest class issued', 'n'], ['iss_total', 'Total issuance', 'n']]],
+    ['Replacement', C.tags, [['rep_vc4', 'Replacement VC4', 'n'], ['rep_vc20', 'Replacement VC20', 'n'], ['rep_rest', 'Replacement rest class', 'n']]],
+    ['Wrong VRN', C.ded, [['wv_vc4', 'Wrong VRN VC4', 'n'], ['wv_vc20', 'Wrong VRN VC20', 'n'], ['wv_rest', 'Wrong VRN rest class', 'n']]],
+    ['KYV blacklist', C.ded, [['kb_vc4', 'KYV blacklist VC4', 'n'], ['kb_vc20', 'KYV blacklist VC20', 'n'], ['kb_rest', 'KYV blacklist rest class', 'n']]],
+    ['Chassis', C.tags, [['ch_vc4', 'Chassis VC4', 'n'], ['ch_vc20', 'Chassis VC20', 'n'], ['ch_rest', 'Chassis rest class', 'n']]],
+    ['KYC', C.kyc, [['kyc500_n', 'KYC with 500 product', 'n'], ['kycw500_n', 'KYC without 500 product', 'n'], ['po_500', '500 product payout', 'r'], ['po_kyc', 'Normal KYC payout (non-VC4)', 'r']]],
+    ['Payable tags', C.tags, [['pay_vc4', 'Payable VC4', 'n'], ['pay_vc20', 'Payable VC20', 'n'], ['pay_rest', 'Payable rest class', 'n'], ['pay_total', 'Total payable tags', 'n']]],
+    ['Rates (₹ per tag)', C.kyc, [['rate_vc4', 'VC4 rate', 'r'], ['rate_vc20', 'VC20 rate', 'r'], ['rate_vc4max', 'VC4 rate with MAX issuance', 'r'], ['rate_rest', 'Rest class rate', 'r'], ['rate_kyc500', 'With 500 product rate', 'r'], ['rate_kycw500', 'Without 500 product rate', 'r']], true],
+    ['MAX FASTag', C.kyc, [['max_n', 'MAX count', 'n'], ['max_rate', 'MAX rate', 'r', true], ['po_max', 'MAX payout', 'r']]],
+    ['Payouts', C.earn, [['po_vc4', 'VC4 payout', 'r'], ['po_vc20', 'VC20 payout', 'r'], ['po_rest', 'Rest class payout', 'r'], ['po_total', 'Total payout', 'r'], ['po_rep_a', 'Replacement payout (VC20/VC5)', 'r'], ['po_rep_b', 'Replacement payout (VC6–VC16)', 'r'], ['salary', 'Salary per month', 'r'], ['bonus', 'Bonus / offer / incentive', 'r'], ['gross', 'Gross payout', 'r']]],
+    ['Deductions', C.ded, [['tds', 'TDS @ 2%', 'r'], ['pen_wrongvrn', 'Wrong VRN penalty (₹200)', 'r'], ['pen_closure', 'Tag closure penalty', 'r'], ['bank_complaint', 'Bank complaint', 'r'], ['pen_scanned', 'Penalty – scanned tags', 'r'], ['secugen', 'Secugen device charges', 'r'], ['pen_unaffixed', 'Unaffixed tag penalty', 'r']]],
+    ['Balance', C.net, [['opening', 'TL / agent opening balance', 'r'], ['final', 'Final amount (without opening)', 'r'], ['final_open', 'Final amount (with opening)', 'r'], ['payee_sum', 'TL + agents sum (w/o opening)', 'r']]]
+  ];
 
   function drawMonth(P, m, spec) {
     const d = m.data, t = d.totals || {}, f = d.fnf, isPayee = d.role === 'payee';
-    const one = !isPayee && d.agents.length === 1 ? d.agents[0] : null;
+    const one = d.agents.length === 1 ? d.agents[0] : null;
     const title = `PAYSLIP · ${m.label.toUpperCase()}`;
     P.newPage(title);
     const bank = d.bank || {};
+    P.section('Payee details', C.id);
     P.kv([
-      ['Payee name', (isPayee ? d.payeeName : (one ? one.name : spec.name)) || '—'], ['Statement type', isPayee ? 'TL / Payee statement' : 'Agent statement'],
+      ['Payee name', payeeNameOf(d, spec) || '—', C.id], ['Statement type', isPayee ? (d.agents.length > 1 ? 'TL / Payee statement' : 'Payee statement') : 'Agent statement'],
       ['Payee ID (APN)', d.payeeId], ['Payslip no.', slipNo(m, isPayee ? d.payeeId : (one ? one.agentId : d.payeeId))],
-      ...(one ? [['Agent ID', one.agentId], ['New agent ID', one.newId], ['Agent status', one.status], ['Paid via', `${d.payeeId} · ${d.payeeName || ''}`]] : []),
+      ['TL / Payee name (sheet)', d.payeeName || '—'], ['Pay period', period(m)],
+      ...(one ? [['Agent ID', one.agentId], ['New agent ID', one.newId], ['Agent name', one.name], ['User ID', one.userId], ['Agent status', one.status], ['Edit remark', one.editRemark]] : []),
       ['Name as per PAN', bank.panName], ['PAN', bank.pan],
-      ['Bank', bank.bank], ['IFSC', bank.ifsc], ['Account no.', bank.account], ['Pay period', period(m)],
-      ['Generated on', `${nowIst()} IST`], ['Agents covered', String(d.agents.length)]
+      ['Bank', bank.bank], ['IFSC', bank.ifsc], ['Account no.', bank.account], ['Agents covered', String(d.agents.length)],
+      ['Generated on', `${nowIst()} IST`], ['Financial year', `FY 20${fyOf(m)}`]
     ]);
     // ---- tags
-    P.section('Issuance & payable tags');
+    P.section('Issuance & payable tags', C.tags);
     const rate = (k) => (one ? inr(one[k]) : '');
-    P.table([{ t: 'Class', w: 30 }, { t: 'Issued', w: 21, a: 'r' }, { t: 'Replacement', w: 23, a: 'r' }, { t: 'Wrong VRN', w: 21, a: 'r' }, { t: 'KYC blacklist', w: 23, a: 'r' }, { t: 'Chassis', w: 19, a: 'r' }, { t: 'Payable tags', w: 24, a: 'r' }, { t: one ? 'Rate / tag' : 'Amount', w: 25, a: 'r' }],
+    P.table([{ t: 'Class', w: 28 }, { t: 'Issued', w: 20, a: 'r' }, { t: 'Replacement', w: 22, a: 'r' }, { t: 'Wrong VRN', w: 21, a: 'r', c: C.ded }, { t: 'KYV blacklist', w: 24, a: 'r', c: C.ded }, { t: 'Chassis', w: 18, a: 'r' }, { t: 'Payable tags', w: 24, a: 'r', c: C.earn }, { t: one ? 'Rate / tag' : 'Amount', w: 29, a: 'r', c: C.earn }],
       [['VC4', int(t.iss_vc4), int(t.rep_vc4), int(t.wv_vc4), int(t.kb_vc4), int(t.ch_vc4), int(t.pay_vc4), one ? rate('rate_vc4') : inr(t.po_vc4)],
         ['VC20', int(t.iss_vc20), int(t.rep_vc20), int(t.wv_vc20), int(t.kb_vc20), int(t.ch_vc20), int(t.pay_vc20), one ? rate('rate_vc20') : inr(t.po_vc20)],
         ['Rest class (VC5+)', int(t.iss_rest), int(t.rep_rest), int(t.wv_rest), int(t.kb_rest), int(t.ch_rest), int(t.pay_rest), one ? rate('rate_rest') : inr(t.po_rest)],
-        ['Total', int(t.iss_total || (t.iss_vc4 + t.iss_vc20 + t.iss_rest)), int(t.rep_vc4 + t.rep_vc20 + t.rep_rest), int(t.wv_vc4 + t.wv_vc20 + t.wv_rest), int(t.kb_vc4 + t.kb_vc20 + t.kb_rest), int(t.ch_vc4 + t.ch_vc20 + t.ch_rest), int(t.pay_total), one ? '' : inr(t.po_vc4 + t.po_vc20 + t.po_rest)]],
+        ['Total', int(t.iss_total || (num(t.iss_vc4) + num(t.iss_vc20) + num(t.iss_rest))), int(num(t.rep_vc4) + num(t.rep_vc20) + num(t.rep_rest)), int(num(t.wv_vc4) + num(t.wv_vc20) + num(t.wv_rest)), int(num(t.kb_vc4) + num(t.kb_vc20) + num(t.kb_rest)), int(num(t.ch_vc4) + num(t.ch_vc20) + num(t.ch_rest)), int(t.pay_total), one ? '' : inr(num(t.po_vc4) + num(t.po_vc20) + num(t.po_rest))]],
       { foot: true, title });
+    P.kv([['KYC with 500 product', int(t.kyc500_n), C.kyc], ['KYC without 500 product', int(t.kycw500_n), C.kyc], ['MAX count', int(t.max_n), C.kyc], ['MAX payout', inr(t.po_max), C.kyc]], 2);
     // ---- earnings / deductions side by side
     const earn = [['VC4 payout', t.po_vc4], ['VC20 payout', t.po_vc20], ['Rest class payout', t.po_rest], ['MAX FASTag payout', t.po_max], ['KYC payout', t.po_kyc], ['500 product payout', t.po_500], ['Replacement payout (VC20/VC5)', t.po_rep_a], ['Replacement payout (VC6–VC16)', t.po_rep_b], ['Salary', t.salary], ['Bonus / offer / incentive', t.bonus]].filter(([, v]) => num(v));
     const ded = [['TDS @ 2%', t.tds], ['Wrong VRN penalty', t.pen_wrongvrn], ['Tag closure penalty', t.pen_closure], ['Bank complaint', t.bank_complaint], ['Penalty (scanned tags)', t.pen_scanned], ['Secugen device charges', t.secugen], ['Unaffixed tag penalty', t.pen_unaffixed]].filter(([, v]) => num(v));
     const earnSum = earn.reduce((s, [, v]) => s + num(v), 0), adj = Math.round((num(t.gross) - earnSum) * 100) / 100;
     if (num(t.gross) && Math.abs(adj) >= 1) earn.push(['Adjustment (as per payout sheet)', adj]);   // sheet ka gross hi final — farak saaf dikhe
     const totDed = ded.reduce((s, [, v]) => s + Math.abs(num(v)), 0);
-    P.section('Earnings & deductions');
+    P.section('Earnings & deductions', C.earn);
     const n = Math.max(earn.length, ded.length, 1);
     const rows = [];
     for (let i = 0; i < n; i++) rows.push([earn[i] ? earn[i][0] : '', earn[i] ? inr(earn[i][1]) : '', ded[i] ? ded[i][0] : '', ded[i] ? inr(Math.abs(num(ded[i][1]))) : '']);
     rows.push(['Gross payout', inr(t.gross), 'Total deductions', inr(totDed)]);
-    P.table([{ t: 'Earnings', w: 58 }, { t: 'Amount', w: 35, a: 'r' }, { t: 'Deductions', w: 58 }, { t: 'Amount', w: 35, a: 'r' }], rows, { foot: true, title });
+    P.table([{ t: 'Earnings', w: 58, c: C.earn }, { t: 'Amount', w: 35, a: 'r', c: C.earn }, { t: 'Deductions', w: 58, c: C.ded }, { t: 'Amount', w: 35, a: 'r', c: C.ded }], rows, { foot: true, title });
     // ---- net
     const net = num(t.final), open = num(t.opening), withOpen = num(t.final_open) || net + open;
     P.need(30, title);
-    let y = P.y;
-    P.rect(M, y, W - 2 * M, 24, '#eef4ff', ACC);
-    P.text('NET PAYABLE (THIS MONTH)', M + 4, y + 7, { size: 3, w: 800, color: MUTE });
-    P.text(inr(net), M + 4, y + 15, { size: 6.2, w: 800, color: NAVY });
-    P.text(`Rupees ${words(net)} Only`, M + 4, y + 20.5, { size: 2.7, color: MUTE });
-    P.text(`Opening balance: ${inr(open)}`, W - M - 4, y + 9, { size: 3, w: 600, align: 'right' });
-    P.text(`Net incl. opening: ${inr(withOpen)}`, W - M - 4, y + 15.5, { size: 3.4, w: 800, align: 'right', color: NAVY });
-    P.y = y + 28;
+    const y0 = P.y;
+    P.rect(M, y0, W - 2 * M, 24, tint(C.net, 0.1), C.net); P.rect(M, y0, 1.6, 24, C.net);
+    P.text('NET PAYABLE (THIS MONTH)', M + 5, y0 + 7, { size: 3, w: 800, color: C.net });
+    P.text(inr(net), M + 5, y0 + 15, { size: 6.4, w: 800, color: NAVY });
+    P.text(`Rupees ${words(net)} Only`, M + 5, y0 + 20.5, { size: 2.7, color: MUTE });
+    P.text(`Opening balance: ${inr(open)}`, W - M - 4, y0 + 9, { size: 3, w: 600, align: 'right' });
+    P.text(`Net incl. opening: ${inr(withOpen)}`, W - M - 4, y0 + 15.5, { size: 3.4, w: 800, align: 'right', color: C.net });
+    P.y = y0 + 28;
     // ---- payment (FNF)
-    P.section('Payment details (FNF)');
+    P.section('Payment details (FNF)', C.pay);
+    const st = m.status || { key: 'none', label: '—' }, sc = STATUS_COL[st.key] || MUTE;
     if (f && !isPayee) {
-      P.kv([
-        ['Paid through', `${d.payeeId} · ${d.payeeName || ''}`], ['Payee payment status', f.remark || '—'],
-        ['Amount released to payee', inr(f.releasing)], ['Payment UTR', f.utr || '—']
-      ]);
+      P.kv([['Paid through', `${d.payeeId} · ${d.payeeName || ''}`], ['Payee payment status', st.label, sc, 'pill'], ['Amount released to payee', inr(f.releasing), C.earn], ['Payment UTR', f.utr || '—']]);
       P.text('Note: Commission for this agent is released to the payee (TL / partner) above, along with the other agents under that payee.', M, P.y, { size: 2.6, color: MUTE }); P.y += 5;
     } else if (f) {
       P.kv([
-        ['Payment status', f.remark || '—'], ['Amount released', inr(f.releasing)],
-        ['FNF gross payout', inr(f.gross)], ['TDS (FNF)', inr(Math.abs(num(f.tds)))],
-        ['GST', inr(f.gst)], ['Final payout (FNF)', inr(f.final)],
+        ['Payment status', st.label, sc, 'pill'], ['Amount released', inr(f.releasing), C.earn],
+        ['FNF opening', inr(f.opening)], ['FNF gross payout', inr(f.gross)],
+        ['TDS (FNF)', inr(Math.abs(num(f.tds))), C.ded], ['GST', inr(f.gst)],
+        ['Payout after TDS', inr(f.after_tds)], ['Final payout (FNF)', inr(f.final), C.net],
         ['Closing balance', inr(f.closing)], ['Payment UTR', f.utr || '—'],
         ['Invoice no.', f.invoice || '—'], ['Advice sent', [f.adviceSent, f.emailOn].filter(Boolean).join(' · ') || '—']
       ]);
-    } else P.kv([['Payment status', 'Not available in FNF sheet for this month'], ['', '']]);
+    } else P.kv([['Payment status', 'Not available in FNF sheet for this month', MUTE], ['', '']]);
+    // ---- har APN column (kuch bhi chhoote nahi)
+    const src = one || t;
+    const pairs = [];
+    APN_GROUPS.forEach(([g, color, fields, perAgent]) => {
+      if (perAgent && !one) return;                 // TL ke liye rates har agent ke alag — agent table me
+      const items = fields.filter((fd) => !(fd[3] && !one)).map(([k, label, ty]) => [label, ty === 'n' ? n0(src[k]) : r2(ty === 'r' && /^(tds|pen_|bank_complaint|secugen)/.test(k) ? Math.abs(num(src[k])) : src[k]), color]);
+      if (!items.length) return;
+      while (pairs.length % 3) pairs.push(null);
+      pairs.push({ head: g, color }, null, null);
+      items.forEach((x) => pairs.push(x));
+    });
+    const rowsNeeded = Math.ceil(pairs.length / 3) * 6.2 + 12;
+    if (P.y + Math.min(rowsNeeded, 60) > H - 18) P.newPage(title);
+    P.section(`Complete APN payout sheet details${one ? '' : ' (totals of all agents)'}`, C.full);
+    // null slot = khaali cell; kv ko 3 col me bharo
+    const filled = pairs.map((x) => x || ['', '']);
+    P.kv(filled.map((x) => (x.head ? x : (x[0] === '' ? ['', ''] : x))), 3);
     // ---- agent-wise (TL)
-    if (isPayee && d.agents.length) {
-      if (P.y + 12 + Math.min(d.agents.length + 2, 8) * 5.6 > H - 18) P.newPage(title);   // table ke 2-3 row akele na tootein
-      P.section(`Agent-wise breakdown (${d.agents.length} agents)`);
+    if (d.agents.length > 1) {
+      if (P.y + 12 + Math.min(d.agents.length + 2, 8) * 5.6 > H - 18) P.newPage(title);
+      P.section(`Agent-wise breakdown (${d.agents.length} agents)`, C.agents);
       const L = d.agents.slice().sort((a, b) => num(b.final) - num(a.final));
-      P.table([{ t: '#', w: 9, a: 'r' }, { t: 'Agent name', w: 52 }, { t: 'Agent ID', w: 26 }, { t: 'Issued', w: 18, a: 'r' }, { t: 'Payable', w: 18, a: 'r' }, { t: 'Payout', w: 31, a: 'r' }, { t: 'Final', w: 32, a: 'r' }],
-        [...L.map((a, i) => [i + 1, a.name, a.agentId, int(a.iss_total), int(a.pay_total), inr(a.po_total), inr(a.final)]), ['', 'Total', '', int(t.iss_total), int(t.pay_total), inr(t.po_total), inr(t.final)]],
+      P.table([{ t: '#', w: 8, a: 'r' }, { t: 'Agent name', w: 40 }, { t: 'Agent ID', w: 20 }, { t: 'Issued', w: 14, a: 'r' }, { t: 'Payable', w: 15, a: 'r' }, { t: 'KYV BL', w: 13, a: 'r', c: C.ded }, { t: 'MAX', w: 11, a: 'r', c: C.kyc }, { t: 'VC4 rate', w: 16, a: 'r', c: C.kyc }, { t: 'Payout', w: 24, a: 'r', c: C.earn }, { t: 'Final', w: 25, a: 'r', c: C.net }],
+        [...L.map((a, i) => [i + 1, a.name, a.agentId, int(a.iss_total), int(a.pay_total), int(num(a.kb_vc4) + num(a.kb_vc20) + num(a.kb_rest)), int(a.max_n), inr(a.rate_vc4, 0), inr(a.po_total, 0), inr(a.final, 0)]),
+          ['', 'Total', '', int(t.iss_total), int(t.pay_total), int(num(t.kb_vc4) + num(t.kb_vc20) + num(t.kb_rest)), int(t.max_n), '', inr(t.po_total, 0), inr(t.final, 0)]],
         { foot: true, title, rh: 5.6 });
     }
   }
   function drawSummary(P, sel, spec) {
     P.newPage('PAYOUT SUMMARY');
     const d0 = sel[0].data, bank = d0.bank || {};
-    P.kv([['Payee name', d0.role === 'payee' ? d0.payeeName : spec.name], ['Payee ID (APN)', d0.payeeId], ['Name as per PAN', bank.panName], ['PAN', bank.pan], ['Bank', bank.bank], ['Account no.', bank.account], ['Months included', String(sel.length)], ['Generated on', `${nowIst()} IST`]]);
-    P.section('Month-wise summary');
+    P.section('Payee details', C.id);
+    P.kv([['Payee name', payeeNameOf(d0, spec), C.id], ['Payee ID (APN)', d0.payeeId], ['Name as per PAN', bank.panName], ['PAN', bank.pan], ['Bank', bank.bank], ['Account no.', bank.account], ['Months included', String(sel.length)], ['Generated on', `${nowIst()} IST`]]);
+    P.section('Month-wise summary', C.sum);
     let g = 0, td = 0, nt = 0, rl = 0;
     const rows = sel.map((m) => { const t = m.data.totals, f = m.data.fnf; g += num(t.gross); td += Math.abs(num(t.tds)); nt += num(t.final); const own = m.data.role === 'payee'; rl += f && own ? num(f.releasing) : 0; return [m.label, int(t.pay_total), inr(t.gross), inr(Math.abs(num(t.tds))), inr(t.final), f ? (own ? inr(f.releasing) : 'via TL') : '—', f ? (f.remark || '—') : 'Not in FNF', f && f.utr ? f.utr : '']; });
     rows.push(['Total', int(sel.reduce((s, m) => s + num(m.data.totals.pay_total), 0)), inr(g), inr(td), inr(nt), inr(rl), '', '']);
-    P.table([{ t: 'Month', w: 27 }, { t: 'Payable tags', w: 20, a: 'r' }, { t: 'Gross', w: 24, a: 'r' }, { t: 'TDS', w: 19, a: 'r' }, { t: 'Net payable', w: 25, a: 'r' }, { t: 'Released', w: 24, a: 'r' }, { t: 'Status', w: 19 }, { t: 'UTR', w: 28 }], rows, { foot: true, title: 'PAYOUT SUMMARY' });
-    P.text(`Total net payable for the selected period: ${inr(nt)} (Rupees ${words(nt)} Only)`, M, P.y + 2, { size: 3, w: 700, color: NAVY }); P.y += 6;
+    P.table([{ t: 'Month', w: 27 }, { t: 'Payable tags', w: 20, a: 'r', c: C.tags }, { t: 'Gross', w: 24, a: 'r', c: C.earn }, { t: 'TDS', w: 19, a: 'r', c: C.ded }, { t: 'Net payable', w: 25, a: 'r', c: C.net }, { t: 'Released', w: 24, a: 'r', c: C.earn }, { t: 'Status', w: 19, c: C.pay }, { t: 'UTR', w: 28 }], rows, { foot: true, title: 'PAYOUT SUMMARY' });
+    P.text(`Total net payable for the selected period: ${inr(nt)} (Rupees ${words(nt)} Only)`, M, P.y + 2, { size: 3, w: 700, color: C.net }); P.y += 6;
+  }
+  /** File name: APN_IDFC Payout FYR-26-27_Oct'26 - NAME.pdf */
+  function fileName(sel, spec) {
+    const name = String(payeeNameOf(sel[0].data, spec) || 'Payee').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const ord = sel.slice().sort((a, b) => a.ym.localeCompare(b.ym));
+    const fys = [...new Set(ord.map(fyOf))].join(' & ');
+    const mon = ord.length > 1 ? `${monTag(ord[0])} to ${monTag(ord[ord.length - 1])}` : monTag(ord[0]);
+    return `APN_IDFC Payout FYR-${fys}_${mon} - ${name}.pdf`;
   }
   async function download(spec, sel, mode, company) {
     if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf').catch(() => {});
     if (!FF.pdf || !FF.pdf.page) throw new Error('PDF module load nahi hua — page refresh karo');
-    const base = String((sel[0].data.role === 'payee' ? sel[0].data.payeeName || sel[0].data.payeeId : spec.name) || 'payslip').replace(/[^\w]+/g, '_').replace(/^_|_$/g, '');
     const foot = `${company || COMPANY} · Confidential — for the named payee only`;
     if (mode === 'separate') {
       for (const m of sel) {
         const P = pager(company || COMPANY); drawMonth(P, m, spec);
-        FF.pdf.download(P.finish(foot), `Payslip_${base}_${m.tab.replace(' ', '')}.pdf`);
+        FF.pdf.download(P.finish(foot), fileName([m], spec));
         await new Promise((r) => setTimeout(r, 700));
       }
       return;
@@ -353,9 +422,8 @@ window.FF = window.FF || {};
     const P = pager(company || COMPANY);
     if (sel.length > 1) drawSummary(P, sel, spec);
     sel.forEach((m) => drawMonth(P, m, spec));
-    const span = sel.length > 1 ? `${sel[sel.length - 1].tab.replace(' ', '')}-${sel[0].tab.replace(' ', '')}` : sel[0].tab.replace(' ', '');
-    FF.pdf.download(P.finish(foot), `Payslip_${base}_${span}.pdf`);
+    FF.pdf.download(P.finish(foot), fileName(sel, spec));
   }
 
-  FF.payslip = { boxHtml, fill, openPicker, download, words, idsOf, refresh, status, getSnap };
+  FF.payslip = { boxHtml, fill, openPicker, download, words, idsOf, refresh, status, getSnap, fileName, payeeNameOf };
 })(window.FF);

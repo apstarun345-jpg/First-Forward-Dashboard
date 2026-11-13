@@ -8161,3 +8161,32 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 @media (max-width:600px){.ps-tbl{font-size:11.5px}.ps-tbl th:nth-child(2),.ps-tbl td:nth-child(2){display:none}}
 .ps-home .ps-home-row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .ps-home .ps-home-log{margin-top:6px;max-height:180px;overflow:auto}
+/* 💰 v3.125.236 — payout box: Master Search KPI style, rangeen */
+.msp-kpi.msp-pay-box{border-top-color:#16a34a;background:color-mix(in srgb,#16a34a 4%,var(--card))}
+.msp-pay-box .ps-role{font-size:11.5px;margin:4px 0 8px;color:var(--muted)}
+.msp-pay-box .ps-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.msp-pay-box .ps-tbl{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+.msp-pay-box .ps-tbl thead th{position:static;background:color-mix(in srgb,#4f46e5 10%,var(--card));color:#4338ca;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.msp-pay-box .ps-tbl th:nth-child(3){color:#7c3aed}.msp-pay-box .ps-tbl th:nth-child(4){color:#16a34a}.msp-pay-box .ps-tbl th:nth-child(5){color:#d97706}
+.msp-pay-box .ps-tbl td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle;color:var(--ink)}
+.msp-pay-box .ps-tbl tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--ink) 2.5%,var(--card))}
+.msp-pay-box .ps-tbl tbody tr:hover td{background:color-mix(in srgb,#4f46e5 7%,var(--card))}
+.msp-pay-box .ps-tbl tbody tr:last-child td{border-bottom:0}
+.msp-pay-box .ps-tbl .num{text-align:right;white-space:nowrap}
+.msp-pay-box .ps-tbl th:first-child,.msp-pay-box .ps-tbl td:first-child{text-align:left;white-space:nowrap}
+.msp-pay-box .ps-tbl th:last-child,.msp-pay-box .ps-tbl td:last-child{text-align:center}
+.msp-pay-box .ps-mon b{font-size:13px}
+.msp-pay-box .ps-tags{color:#2563eb;font-weight:700}
+.msp-pay-box .ps-fin{color:#7c3aed;font-weight:800}
+.msp-pay-box .ps-rel{color:#16a34a;font-weight:700}
+.msp-pay-box tr.ps-r-hold td:first-child{box-shadow:inset 3px 0 0 #dc2626}
+.msp-pay-box tr.ps-r-proc td:first-child{box-shadow:inset 3px 0 0 #d97706}
+.msp-pay-box tr.ps-r-paid td:first-child{box-shadow:inset 3px 0 0 #16a34a}
+.msp-pay-box .ps-chip{display:inline-block;min-width:78px;text-align:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid transparent}
+.msp-pay-box .ps-ok{background:#dcfce7;color:#166534;border-color:#86efac}
+.msp-pay-box .ps-warn{background:#fef3c7;color:#92400e;border-color:#fcd34d}
+.msp-pay-box .ps-bad{background:#fee2e2;color:#991b1b;border-color:#fca5a5}
+.msp-pay-box .ps-mute{background:#e2e8f0;color:#334155;border-color:#cbd5e1}
+.msp-pay-box .ps-acts{display:flex;justify-content:flex-end;margin-top:10px}
+@media (max-width:600px){.msp-pay-box .ps-tbl{font-size:12px}.msp-pay-box .ps-tbl td,.msp-pay-box .ps-tbl th{padding:7px 6px}}
+.msp-pay-box .ps-tbl th{opacity:1}
