@@ -120,6 +120,7 @@ window.FF = window.FF || {};
     { id: 'dispatchPlan', icon: '🚚', label: 'Dispatch Planner', desc: 'Auto box plan · printable pick-list · WhatsApp', perm: 'dispatchPlan', group: 'Cross Channel' },
     { id: 'multiCustomer', icon: '👥', label: 'Multiple Customer ID', desc: 'EIR customer ID jinke 2+ tags — month-wise count, issuing agent (GV Master se bhi), channel', perm: 'multiCustomer', group: 'Cross Channel' },
     { id: 'directAgents', icon: '🧍', label: 'Direct Agents & TLs', desc: 'FF: TL Name APS · GV: TL ID + Name blank — ek hi rule poore site par', perm: 'directAgents', group: 'Cross Channel' },
+    { id: 'delhivery', icon: '🚚', label: 'Delhivery Tracking', desc: 'Pincode serviceability · AWB status — ek ya kai saath, turant', perm: 'delhivery', group: 'Cross Channel' },
     { id: 'unusual', icon: '🚨', label: 'Unusual Activity', desc: 'High Wrong VRN · Replacement · Chassis · single-day spike — agent-wise flags (FF + GV)', perm: 'unusual', group: 'Cross Channel' },
     { id: 'tollDebit', icon: '🛣', label: 'Toll Debit', desc: 'Roz ka toll debit · date-wise · class-wise (TVC) · ginti + ₹', perm: 'tollDebit', group: 'Reports' },
     { id: 'agentsOverview', icon: '🧮', label: 'GV & FF Agents Summary', desc: 'Agents with stock · direct vs TL · active vs inactive · clickable lists', perm: 'agentsOverview', group: 'Reports' },
