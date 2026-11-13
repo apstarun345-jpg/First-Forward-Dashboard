@@ -75,7 +75,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.76';
+const CODE_VERSION = 'v3.77';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -332,6 +332,35 @@ function doPost(e) {
       });
       return json_({ ok: true, values: valsT, tab: body.tab, spreadsheet: ssT.getName() });
     } catch (errT) { return json_({ ok: false, error: String(errT && errT.message || errT) }); }
+  }
+
+  // 💰 v3.77 — readmatch: sirf matching rows (READ-ONLY, LOCK NAHI). Server ki memory bachane ke liye — poora tab
+  // Render par nahi aata. body: { spreadsheetId, tab, keys:[A-Z0-9 normalized], keyCols?:8, headerRows?:6, maxCols? }
+  // Ek row tab match jab pehle keyCols columns me se kisi cell ka normalized text keys me ho.
+  if (body.action === 'readmatch') {
+    try {
+      var ssM = target_(body.spreadsheetId);
+      var shM = ssM.getSheetByName(String(body.tab || '').slice(0, 80));
+      if (!shM) return json_({ ok: false, error: 'Tab "' + body.tab + '" is sheet me nahi mila.' });
+      var lrM = shM.getLastRow(), lcM = Math.min(shM.getLastColumn(), Math.max(1, Number(body.maxCols) || 120));
+      if (lrM < 1 || lcM < 1) return json_({ ok: true, head: [], rows: [] });
+      var keysM = {}; (Array.isArray(body.keys) ? body.keys : []).slice(0, 60).forEach(function (k) { var t = String(k || ''); if (t.length >= 3) keysM[t] = 1; });
+      var kc = Math.min(lcM, Math.max(1, Number(body.keyCols) || 8)), hr = Math.min(lrM, Math.max(1, Number(body.headerRows) || 6));
+      var fmtM = function (v) {
+        if (v === null || v === undefined) return '';
+        if (typeof v === 'number') return (Math.floor(v) === v && Math.abs(v) < 1e21) ? Utilities.formatString('%.0f', v) : String(v);
+        if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        return String(v);
+      };
+      var normM = function (v) { var t = String(v == null ? '' : fmtM(v)).toUpperCase().replace(/[^A-Z0-9]/g, ''); return /^\d+$/.test(t) ? t.replace(/^0+/, '') : t; };
+      var allM = shM.getRange(1, 1, lrM, lcM).getValues();
+      var outM = [];
+      for (var i = hr; i < allM.length && outM.length < 400; i++) {
+        var rM = allM[i];
+        for (var j = 0; j < kc; j++) { if (keysM[normM(rM[j])]) { outM.push(rM.map(fmtM)); break; } }
+      }
+      return json_({ ok: true, head: allM.slice(0, hr).map(function (r) { return r.map(fmtM); }), rows: outM, tab: body.tab });
+    } catch (errM) { return json_({ ok: false, error: String(errM && errM.message || errM) }); }
   }
 
   // 📧 Mail relay (HTTPS) — Render free blocks SMTP ports, so the dashboard can send its emails

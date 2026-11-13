@@ -9396,52 +9396,66 @@ async function handleApi(req, res, url) {
   }
   // 💰 v3.125.230 — IDFC payout: APN sheet (agent-wise payable) + FNF sheet (payment release / remark). Sirf admin / "payout" permission.
   const PAYOUT_SHEETS = { apn: String(process.env.APN_PAYOUT_SHEET_ID || '1QyiXewYroY4ppqm2JFKfDmYybh5Un299kEG5mio2z00').trim(), fnf: String(process.env.FNF_PAYOUT_SHEET_ID || '1eZMV79IYrBvTfR5me2IFSbsENp3GzmhWTfB2JNGqjeU').trim() };
-  const payoutTabs = new Map(); // `${kind}|${tab}` → { at, data, miss, err, promise }
-  let payoutReadtab = null;      // null = pata nahi, true = Apps Script me readtab hai, false = purana script (chunked readrange)
+  const payoutTabs = new Map(); // fallback (purana Apps Script): `${kind}|${tab}` → { at, data, miss, err, promise } — max 3 tabs
+  const payoutHits = new Map(); // readmatch: `${kind}|${tab}|${keys}` → { at, values, miss }
+  let payoutReadtab = null;      // null = pata nahi, true = Apps Script me readmatch hai, false = purana script (chunked readrange)
   const colLetter = (n) => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+  const payoutMissing = (msg) => /nahi mila/i.test(String(msg || ''));
+  /** 💰 Sirf matching rows (Apps Script readmatch, lock-free) → [head..., rows...] — Render ki memory par bojh nahi. */
+  async function payoutMatchRows(kind, tab, keys) {
+    const store = sheetSyncStore();
+    if (!store) throw new HttpError(503, 'Google Sheet connection (Apps Script) set nahi hai.');
+    const k = `${kind}|${tab}|${[...keys].sort().join(',')}`;
+    const c = payoutHits.get(k);
+    if (c && Date.now() - c.at < (c.miss ? 60 * 60e3 : 2 * 3600e3)) return c;
+    let o;
+    try {
+      const out = await store.call('readmatch', { spreadsheetId: PAYOUT_SHEETS[kind], tab, keys: [...keys], keyCols: 8, headerRows: kind === 'apn' ? 2 : 1, maxCols: 100 }, { timeoutMs: 90e3, attempts: 2 });
+      payoutReadtab = true;
+      o = { at: Date.now(), values: [...(out.head || []), ...(out.rows || [])] };
+    } catch (err) {
+      const msg = String(err && err.message || err);
+      if (payoutMissing(msg)) o = { at: Date.now(), miss: true, values: null };
+      else { if (/unknown action/i.test(msg)) payoutReadtab = false; throw err; }
+    }
+    if (payoutHits.size > 400) payoutHits.delete(payoutHits.keys().next().value);
+    payoutHits.set(k, o);
+    return o;
+  }
+  // fallback: purana Apps Script (readmatch nahi) → 8-8 column ke tukde, poora tab. Memory bhari — isliye sirf 3 tab cache.
   async function payoutGrid(kind, tab) {
     const store = sheetSyncStore();
     if (!store) throw new HttpError(503, 'Google Sheet connection (Apps Script) set nahi hai.');
+    const rss = process.memoryUsage().rss / 1048576;
+    if (rss > 380) throw new HttpError(503, 'Server memory busy — Apps Script (Code.gs v3.77) ka naya version deploy karo, phir payout turant aayega.');
     const spreadsheetId = PAYOUT_SHEETS[kind];
-    if (payoutReadtab !== false) {
-      try {
-        const out = await store.call('readtab', { spreadsheetId, tab, maxRows: 6000, maxCols: 100 }, { timeoutMs: 120e3, attempts: 2 });
-        payoutReadtab = true;
-        return out.values || [];
-      } catch (err) {
-        const msg = String(err && err.message || err);
-        if (/nahi mila/i.test(msg)) throw Object.assign(new Error(msg), { missing: true });
-        if (!/unknown action/i.test(msg)) throw err;
-        payoutReadtab = false;   // purana Apps Script — neeche chunked fallback
-      }
-    }
-    // fallback: 8-8 column ke tukde (har call lock leta hai — isliye dheere, ek-ek karke)
     const grid = [];
     const maxCol = kind === 'apn' ? 72 : 48;
     for (let c = 1; c <= maxCol; c += 8) {
       const cols = []; for (let k = c; k < Math.min(maxCol + 1, c + 8); k++) cols.push(colLetter(k));
       let out;
       try { out = await store.call('readrange', { spreadsheetId, tab, startRow: 1, columns: cols }, { timeoutMs: 120e3, attempts: 2 }); }
-      catch (err) { const msg = String(err && err.message || err); if (/nahi mila/i.test(msg)) throw Object.assign(new Error(msg), { missing: true }); if (c === 1) throw err; break; }
+      catch (err) { const msg = String(err && err.message || err); if (payoutMissing(msg)) throw Object.assign(new Error(msg), { missing: true }); if (c === 1) throw err; break; }
       (out.rows || []).forEach((r, i) => { grid[i] = grid[i] || []; r.forEach((v, j) => { grid[i][c - 1 + j] = v; }); });
       await new Promise((r) => setTimeout(r, 400));
     }
     return grid;
   }
-  async function payoutTab(kind, m) {
-    const key = `${kind}|${m.tab}`;
+  const sparse = (rows) => rows.map((r) => { const o = {}; for (const [k, v] of Object.entries(r)) if (v !== 0 && v !== '') o[k] = v; return o; });
+  async function payoutTabFull(kind, tab) {
+    const key = `${kind}|${tab}`;
     const c = payoutTabs.get(key) || {};
-    const fresh = c.at && Date.now() - c.at < (c.miss ? 60 * 60e3 : 3 * 3600e3);
-    if (fresh) return c;
+    if (c.at && Date.now() - c.at < (c.miss ? 60 * 60e3 : 3 * 3600e3)) return c;
     if (c.promise) return c.promise;
     const p = (async () => {
       try {
-        let values;
-        try { values = await payoutGrid(kind, m.tab); }
-        catch (err) { if (err && err.missing && m.alt) values = await payoutGrid(kind, m.alt); else throw err; }
-        const data = payoutCore.parseGrid(values, kind);
-        const o = { at: Date.now(), data, miss: false };
-        payoutTabs.set(key, o); return o;
+        let values = await payoutGrid(kind, tab);
+        const parsed = payoutCore.parseGrid(values, kind); values = null;
+        const o = { at: Date.now(), data: { rows: sparse(parsed.rows), cols: parsed.cols }, miss: false };
+        payoutTabs.delete(key); payoutTabs.set(key, o);
+        while ([...payoutTabs.values()].filter((x) => x.data).length > 3) payoutTabs.delete(payoutTabs.keys().next().value);
+        try { if (global.gc) global.gc(); } catch { /* optional */ }
+        return o;
       } catch (err) {
         const o = { at: Date.now(), data: null, miss: !!(err && err.missing), err: String(err && err.message || err).slice(0, 200) };
         if (o.miss) payoutTabs.set(key, o); else payoutTabs.delete(key);
@@ -9451,13 +9465,37 @@ async function handleApi(req, res, url) {
     payoutTabs.set(key, { ...c, promise: p });
     return p;
   }
+  /** Ek mahine ka { data (parsed), miss, err } — readmatch se (chhota) ya fallback se (poora). */
+  async function payoutTab(kind, m, keys) {
+    for (const tab of [m.tab, m.alt].filter(Boolean)) {
+      if (payoutReadtab !== false) {
+        try {
+          const r = await payoutMatchRows(kind, tab, keys);
+          if (r.miss) continue;
+          return { data: payoutCore.parseGrid(r.values, kind) };
+        } catch (err) {
+          if (payoutReadtab !== false) return { data: null, err: String(err && err.message || err).slice(0, 200) };
+        }
+      }
+      const f = await payoutTabFull(kind, tab);
+      if (f.miss) continue;
+      return f;
+    }
+    return { data: null, miss: true };
+  }
   async function payoutFor(want, n) {
     const now = new Date(Date.now() + 5.5 * 3600e3);
     const months = payoutCore.monthTabs(now.toISOString().slice(0, 7), Math.min(13, Math.max(1, n || 7)));
+    const keys = new Set([...(want.ids || []), want.name || ''].map(payoutCore.idNorm).filter((x) => x && x.length >= 3));
     const out = [];
     for (const m of months) {        // ek-ek karke — Google par bojh kam
-      const [a, f] = [await payoutTab('apn', m), await payoutTab('fnf', m)];
-      const res = a.data || f.data ? payoutCore.matchMonth(a.data, f.data, want) : null;
+      const a = await payoutTab('apn', m, keys);
+      let f = await payoutTab('fnf', m, keys);
+      let res = a.data || f.data ? payoutCore.matchMonth(a.data, f.data, want) : null;
+      if (res && !res.fnf && res.payeeId && payoutReadtab) {     // agent mila → uske TL / payee ki FNF row alag se
+        const f2 = await payoutTab('fnf', m, new Set([payoutCore.idNorm(res.payeeId)]));
+        if (f2.data) { f = f2; res = payoutCore.matchMonth(a.data, f2.data, want); }
+      }
       out.push({ tab: m.tab, ym: m.ym, label: m.label, available: !!(a.data || f.data), missing: !!(a.miss && f.miss), err: !a.data && !a.miss ? a.err : '', data: res, status: res ? payoutCore.statusOf(res.fnf) : null });
     }
     return out;

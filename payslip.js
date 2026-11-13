@@ -56,8 +56,8 @@ window.FF = window.FF || {};
     const body = box.querySelector('.ps-body'); if (!body) return;
     const months = (d.months || []).filter((m) => m.data).slice(0, 6);
     if (!months.length) {
-      const pending = (d.months || []).some((m) => m.err);
-      body.innerHTML = `<span class="dim small">${pending ? 'Payout sheet abhi load nahi hui — thodi der me dobara kholo.' : 'Is agent / TL ki payout APN / FNF sheet me nahi mili (last 6 months).'}</span>`;
+      const e1 = (d.months || []).find((m) => m.err);
+      body.innerHTML = `<span class="dim small">${e1 ? `⚠️ Payout sheet abhi load nahi hui: ${esc(e1.err)}` : 'Is agent / TL ki payout APN / FNF sheet me nahi mili (last 6 months).'}</span>`;
       return;
     }
     const rows = months.map((m) => {
