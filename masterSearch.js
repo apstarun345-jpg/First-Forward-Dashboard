@@ -537,7 +537,10 @@ FF.pages = FF.pages || {};
     const tok = (x) => normName(x).toUpperCase().split(/[^A-Z]+/).filter((w) => w.length >= 3 && !NAME_STOP.has(w));
     const A = tok(a), B = new Set(tok(b));
     if (!A.length || !B.size) return normName(a) === normName(b);
-    return A.some((w) => B.has(w));
+    if (A.some((w) => B.has(w))) return true;
+    // "SONUKHAN FST" ↔ "sonu khan": jude hue naam — ek ka shabd doosre ke jude naam me
+    const ja = A.join(''), jb = [...B].join('');
+    return A.some((w) => w.length >= 4 && jb.includes(w)) || [...B].some((w) => w.length >= 4 && ja.includes(w));
   }
   function canonicalPerson(p, idx) {
     if (!p || !idx) return p;
