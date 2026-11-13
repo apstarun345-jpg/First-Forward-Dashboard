@@ -75,7 +75,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.77';
+const CODE_VERSION = 'v3.78';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -361,6 +361,29 @@ function doPost(e) {
       }
       return json_({ ok: true, head: allM.slice(0, hr).map(function (r) { return r.map(fmtM); }), rows: outM, tab: body.tab });
     } catch (errM) { return json_({ ok: false, error: String(errM && errM.message || errM) }); }
+  }
+
+  // 📞 v3.78 — readcols: chune hue columns (READ-ONLY, LOCK NAHI) + pehle column par dedupe (pehli row jeetti hai).
+  // Bade transaction tabs (70k rows) se agent → mobile list bina lock ke, chhota response. body: { spreadsheetId, tab, columns:['A','L'], startRow }
+  if (body.action === 'readcols') {
+    try {
+      var ssC = target_(body.spreadsheetId);
+      var shC = ssC.getSheetByName(String(body.tab || '').slice(0, 80));
+      if (!shC) return json_({ ok: false, error: 'Tab "' + body.tab + '" is sheet me nahi mila.' });
+      var colsC = (Array.isArray(body.columns) ? body.columns : []).map(function (c) { return colIndex_(c); }).filter(function (n) { return n > 0; }).slice(0, 8);
+      if (!colsC.length) return json_({ ok: false, error: 'columns required' });
+      var startC = Math.max(1, Number(body.startRow) || 1), lastC = shC.getLastRow();
+      if (lastC < startC) return json_({ ok: true, rows: [] });
+      var vals = shC.getRange(startC, 1, lastC - startC + 1, Math.max.apply(null, colsC)).getValues();
+      var seenC = {}, outC = [];
+      for (var i = 0; i < vals.length; i++) {
+        var row = colsC.map(function (ci) { var v = vals[i][ci - 1]; if (v === null || v === undefined) return ''; if (typeof v === 'number') return (Math.floor(v) === v && Math.abs(v) < 1e21) ? Utilities.formatString('%.0f', v) : String(v); if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd'); return String(v); });
+        var k = String(row[0] || '').trim().toUpperCase();
+        if (!k || seenC[k]) continue;
+        seenC[k] = 1; outC.push(row);
+      }
+      return json_({ ok: true, rows: outC, scanned: vals.length });
+    } catch (errC) { return json_({ ok: false, error: String(errC && errC.message || errC) }); }
   }
 
   // 📧 Mail relay (HTTPS) — Render free blocks SMTP ports, so the dashboard can send its emails

@@ -9266,7 +9266,7 @@ async function handleApi(req, res, url) {
   };
   // 📇 Central Agent Address Book — Address tab in the configured request spreadsheet.
   const ADDRESS_BOOK_TAB = 'Address';
-  const addressBookRuntime = { at: 0, map: null, promise: null };
+  const addressBookRuntime = (globalThis.__ffAddrRt ||= { at: 0, map: null, promise: null });   // 🧠 v3.125.251 — ye sab handleApi ke andar hai (har request par chalta) → state global, warna cache kabhi nahi bachta
   const addressBookKey = (a) => {
     const channel = a && a.channel === 'gv' ? 'gv' : 'ff';
     const id = String((a && (a.agentId || a.id)) || '').trim();
@@ -9360,7 +9360,7 @@ async function handleApi(req, res, url) {
   // (2) Address book (memory + Address tab), (3) tag requests. Site ke master data me agent mobile nahi hota — KPI lists / labels isi se.
   const AGENT_DETAILS_SHEET = String(process.env.AGENT_DETAILS_SHEET_ID || '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk').trim();
   const AGENT_DETAILS_TAB = String(process.env.AGENT_DETAILS_TAB || 'Sheet4').trim();
-  const agentMobileRt = { at: 0, data: null, promise: null };
+  const agentMobileRt = (globalThis.__ffMobRt ||= { at: 0, data: null, promise: null });
   const mobIdKeys = (id) => { const raw = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!raw) return []; const dg = raw.replace(/\D/g, '').replace(/^0+/, ''); return [...new Set([raw, dg && dg.length >= 3 ? `#${dg}` : ''].filter(Boolean))]; };
   const mobNameKey = (n) => String(n || '').toLowerCase().replace(/[^a-z]/g, '');
   resetAgentMobiles = () => { agentMobileRt.data = null; agentMobileRt.at = 0; };
@@ -9384,7 +9384,15 @@ async function handleApi(req, res, url) {
     const L = (i) => { let n = i + 1, t = ''; while (n > 0) { const m = (n - 1) % 26; t = String.fromCharCode(65 + m) + t; n = Math.floor((n - 1) / 26); } return t; };
     const want = [...cols.ids, cols.mobile, cols.name, cols.first, cols.last].filter((i) => i >= 0);
     const letters = [...new Set(want)].map(L);
-    const out = await store.call('readrange', { spreadsheetId, tab, startRow: hr + 2, columns: letters }, { timeoutMs: 120e3, attempts: 2 });
+    // Pehle lock-free 'readcols' (Code.gs v3.78: dedupe Apps Script me hi) — bada transaction tab bhi chhota response;
+    // purana script ho to readrange (lock leta hai) — wo sirf jab server memory theek ho.
+    let out;
+    try { out = await store.call('readcols', { spreadsheetId, tab, startRow: hr + 2, columns: letters }, { timeoutMs: 150e3, attempts: 2 }); }
+    catch (err) {
+      if (!/unknown action/i.test(String(err && err.message || err))) throw err;
+      if (process.memoryUsage().rss / 1048576 > 380) throw new Error('Code.gs v3.78 deploy karo (bada mobile tab bina lock ke padhne ke liye)');
+      out = await store.call('readrange', { spreadsheetId, tab, startRow: hr + 2, columns: letters }, { timeoutMs: 120e3, attempts: 2 });
+    }
     const at = (row, i) => (i < 0 ? '' : row[letters.indexOf(L(i))]);
     const rows = (out.rows || []).filter(Array.isArray).map((row) => ({
       ids: cols.ids.map((i) => at(row, i)).filter(Boolean),
@@ -9440,7 +9448,10 @@ async function handleApi(req, res, url) {
     })().then((d) => { agentMobileRt.data = d; agentMobileRt.at = Date.now(); return d; }).finally(() => { agentMobileRt.promise = null; });
     return agentMobileRt.promise;
   }
-  setTimeout(() => { agentMobileData(false).catch(() => {}); }, 70e3);   // boot ke baad mobile directory taiyar
+  // 💾 mobile directory disk par bhi (restart / deploy ke baad sheet dobara nahi padhni) — 6 ghante tak valid.
+  const MOB_FILE = path.join(DATA_DIR, 'agent-mobiles.json');
+  if (!globalThis.__ffMobBoot) try { if (existsSync(MOB_FILE)) { const j = JSON.parse(readFileSync(MOB_FILE, 'utf8')); const age = Date.now() - Date.parse(j.at || 0); if (j && j.ids && age < 6 * 3600e3) { agentMobileRt.data = j; agentMobileRt.at = Date.now() - age; } } } catch { /* optional */ }
+  if (!globalThis.__ffMobBoot) { globalThis.__ffMobBoot = 1; setTimeout(() => { agentMobileData(false).then((d) => { try { if (d && d.ids) writeFileSync(MOB_FILE, JSON.stringify(d)); } catch { /* optional */ } }).catch(() => {}); }, 5 * 60e3); }   // boot ke 5 min baad (boot ke lock-race se door)
   /** Mobile directory se number (ID pehle, phir unique naam). Data load na ho to background me load shuru, abhi '' . */
   function directoryMobile(id, name) {
     const d = agentMobileRt.data;
@@ -9452,8 +9463,8 @@ async function handleApi(req, res, url) {
   // 💰 v3.125.230 — IDFC payout: APN sheet (agent-wise payable) + FNF sheet (payment release / remark). Sirf admin / "payout" permission.
   const PAYOUT_SHEETS = { apn: String(process.env.APN_PAYOUT_SHEET_ID || '1QyiXewYroY4ppqm2JFKfDmYybh5Un299kEG5mio2z00').trim(), fnf: String(process.env.FNF_PAYOUT_SHEET_ID || '1eZMV79IYrBvTfR5me2IFSbsENp3GzmhWTfB2JNGqjeU').trim() };
   const PAYOUT_SNAP_FILE = path.join(DATA_DIR, 'payout-snapshot.json.gz'), PAYOUT_SNAP_TAB = 'CACHE_PAYOUT';
-  const payoutSnap = { data: null, tried: false, loading: null };
-  setTimeout(() => { payoutSnapGet().catch(() => {}); }, 45e3);   // boot ke baad snapshot pehle se taiyar (search par wait na ho)
+  const payoutSnap = (globalThis.__ffPayoutSnap ||= { data: null, tried: false, loading: null });
+  if (!globalThis.__ffPayoutBoot) { globalThis.__ffPayoutBoot = 1; setTimeout(() => { payoutSnapGet().catch(() => {}); }, 45e3); }   // boot ke baad snapshot pehle se taiyar (search par wait na ho)
   async function payoutSnapSaveSheet(snap) {
     const store = sheetSyncStore(); if (!store) return false;
     try {
@@ -9494,9 +9505,9 @@ async function handleApi(req, res, url) {
     })();
     const r = await payoutSnap.loading; payoutSnap.loading = null; return r;
   }
-  const payoutTabs = new Map(); // fallback (purana Apps Script): `${kind}|${tab}` → { at, data, miss, err, promise } — max 3 tabs
-  const payoutHits = new Map(); // readmatch: `${kind}|${tab}|${keys}` → { at, values, miss }
-  let payoutReadtab = null;      // null = pata nahi, true = Apps Script me readmatch hai, false = purana script (chunked readrange)
+  const payoutTabs = (globalThis.__ffPayoutTabs ||= new Map()); // fallback (purana Apps Script): `${kind}|${tab}` → { at, data, miss, err, promise } — max 3 tabs
+  const payoutHits = (globalThis.__ffPayoutHits ||= new Map()); // readmatch: `${kind}|${tab}|${keys}` → { at, values, miss }
+  const PO = (globalThis.__ffPayoutState ||= { readtab: null, probeAt: 0 });      // PO.readtab: null = pata nahi, true = Apps Script me readmatch hai, false = purana script (chunked readrange)
   const colLetter = (n) => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
   const payoutMissing = (msg) => /nahi mila/i.test(String(msg || ''));
   /** 💰 Sirf matching rows (Apps Script readmatch, lock-free) → [head..., rows...] — Render ki memory par bojh nahi. */
@@ -9509,12 +9520,12 @@ async function handleApi(req, res, url) {
     let o;
     try {
       const out = await store.call('readmatch', { spreadsheetId: PAYOUT_SHEETS[kind], tab, keys: [...keys], keyCols: 8, headerRows: kind === 'apn' ? 2 : 1, maxCols: 100 }, { timeoutMs: 90e3, attempts: 2 });
-      payoutReadtab = true;
+      PO.readtab = true;
       o = { at: Date.now(), values: [...(out.head || []), ...(out.rows || [])] };
     } catch (err) {
       const msg = String(err && err.message || err);
       if (payoutMissing(msg)) o = { at: Date.now(), miss: true, values: null };
-      else { if (/unknown action/i.test(msg)) payoutReadtab = false; throw err; }
+      else { if (/unknown action/i.test(msg)) PO.readtab = false; throw err; }
     }
     if (payoutHits.size > 400) payoutHits.delete(payoutHits.keys().next().value);
     payoutHits.set(k, o);
@@ -9564,17 +9575,16 @@ async function handleApi(req, res, url) {
     return p;
   }
   /** Ek mahine ka { data (parsed), miss, err } — readmatch se (chhota) ya fallback se (poora). */
-  let payoutProbeAt = 0;
   async function payoutTab(kind, m, keys) {
-    if (payoutReadtab === false && Date.now() - payoutProbeAt > 10 * 60e3) { payoutProbeAt = Date.now(); payoutReadtab = null; }
+    if (PO.readtab === false && Date.now() - PO.probeAt > 10 * 60e3) { PO.probeAt = Date.now(); PO.readtab = null; }
     for (const tab of [m.tab, m.alt].filter(Boolean)) {
-      if (payoutReadtab !== false) {
+      if (PO.readtab !== false) {
         try {
           const r = await payoutMatchRows(kind, tab, keys);
           if (r.miss) continue;
           return { data: payoutCore.parseGrid(r.values, kind) };
         } catch (err) {
-          if (payoutReadtab !== false) return { data: null, err: String(err && err.message || err).slice(0, 200) };
+          if (PO.readtab !== false) return { data: null, err: String(err && err.message || err).slice(0, 200) };
         }
       }
       // Purana Apps Script: poora tab padhna bahut dheema (har tukda lock leta hai) + server memory bhar deta hai.
@@ -9595,7 +9605,7 @@ async function handleApi(req, res, url) {
       const a = await payoutTab('apn', m, keys);
       let f = await payoutTab('fnf', m, keys);
       let res = a.data || f.data ? payoutCore.matchMonth(a.data, f.data, want) : null;
-      if (res && !res.fnf && res.payeeId && payoutReadtab) {     // agent mila → uske TL / payee ki FNF row alag se
+      if (res && !res.fnf && res.payeeId && PO.readtab) {     // agent mila → uske TL / payee ki FNF row alag se
         const f2 = await payoutTab('fnf', m, new Set([payoutCore.idNorm(res.payeeId)]));
         if (f2.data) { f = f2; res = payoutCore.matchMonth(a.data, f2.data, want); }
       }
@@ -10317,7 +10327,7 @@ async function handleApi(req, res, url) {
     if (!ids.length && !name) throw new HttpError(400, 'ids ya name chahiye.');
     const months = await payoutFor({ ids, name }, Number(url.searchParams.get('months')) || 7);
     res.setHeader('Cache-Control', 'private, no-store');
-    return sendJson(res, 200, { ok: true, company: 'APNAPAYMENT SERVICES PRIVATE LIMITED', months, readtab: payoutReadtab, at: new Date().toISOString() });
+    return sendJson(res, 200, { ok: true, company: 'APNAPAYMENT SERVICES PRIVATE LIMITED', months, readtab: PO.readtab, at: new Date().toISOString() });
   }
   if (p === '/api/agent-mobiles' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required.');
