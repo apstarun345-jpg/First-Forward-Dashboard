@@ -2294,7 +2294,7 @@ FF.pages = FF.pages || {};
           ${dispBoxHtml(pr, isTl, ch)}
           ${kycBoxHtml(pr, isTl, ch)}
           ${issBoxHtml(pr, isTl, ch)}
-          ${payBoxHtml(pr, isTl, ch)}
+          ${payBoxHtml(pr, isTl, ch, { ym: m.cur, last: m.last, cur: clsSums(pr.classes, 'cur', true), prev: clsSums(pr.classes, 'last', true), elapsed, days: m.cur ? U.daysInMonth(m.cur) : 30, mtd: growthNum, exp: projectedGrowthNum })}
           ${ch === 'gv' ? GVC.boxHtml(pr, isTl) : ''}
         </div>${notFound}</div></section>${donutBlock}`;
     }
@@ -2758,11 +2758,20 @@ FF.pages = FF.pages || {};
   }
   // 💰 v3.125.230 — payout box placeholder; payslip.js (on demand) isse bharta hai.
   function payCanSee() { try { return FF.auth.isAdmin() || FF.auth.can('payout'); } catch { return false; } }
-  function payBoxHtml(pr, isTl, ch) {
+  function payBoxHtml(pr, isTl, ch, cmIn) {
     if (ch === 'gv' || !payCanSee()) return '';
     const ids = [pr.id, pr.sub, ...(pr.ids ? [...pr.ids] : []), ...(pr.alias ? [...pr.alias] : []), ...(pr.tlIds ? [...pr.tlIds] : [])]
       .map((x) => String(x || '').trim()).filter((x) => x && !/^APS\d/i.test(x) && x.length >= 3);
-    const sc = { ids: [...new Set(ids)].slice(0, 12), name: pr.name || '', tl: !!isTl };
+    // 📈 chalu mahine ka class-wise data (payslip growth ke liye): MTD, pichhla poora mahina, site ki MTD same-days growth
+    let cm = null;
+    try {
+      if (cmIn && cmIn.ym) {
+        const v3 = (mp) => { mp = mp || {}; const n = (k) => Math.max(0, Number(mp[k]) || 0); const vc4 = n('VC4'), vc20 = n('VC20'); const rest = Object.keys(mp).reduce((a, k) => (k === 'VC4' || k === 'VC20' ? a : a + n(k)), 0); return { vc4, vc20, rest, total: vc4 + vc20 + rest }; };
+        const fin = (x) => (x === null || x === undefined || !Number.isFinite(Number(x)) ? null : Math.round(Number(x) * 10) / 10);
+        cm = { ym: cmIn.ym, last: cmIn.last || '', cur: v3(cmIn.cur), prev: v3(cmIn.prev), elapsed: Number(cmIn.elapsed) || 1, days: Number(cmIn.days) || 30, mtd: fin(cmIn.mtd), exp: fin(cmIn.exp) };
+      }
+    } catch { cm = null; }
+    const sc = { ids: [...new Set(ids)].slice(0, 12), name: pr.name || '', tl: !!isTl, cm };
     return `<div class="mp-kpi msp-kpi k12 msp-pay-box" data-msp-pay-box="${esc(JSON.stringify(sc))}"><small>💰 IDFC payout · last 6 months</small><div class="ps-body"><span class="dim small">Loading payout…</span></div></div>`;
   }
   function dispBoxHtml(pr, isTl, ch) {

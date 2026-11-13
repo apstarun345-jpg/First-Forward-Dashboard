@@ -93,7 +93,7 @@ window.FF = window.FF || {};
     hTeal:  { font: 1, fill: FILLID('FF0D9488'), fmt: 0 }, hSlate: { font: 1, fill: FILLID('FF475569'), fmt: 0 }, hAmber: { font: 1, fill: FILLID('FFD97706'), fmt: 0 }, hPurple: { font: 1, fill: FILLID('FF7C3AED'), fmt: 0 },
     amt:    { font: 0, fill: 0, fmt: 4 }, zebAmt: { font: 0, fill: FILLID('FFF8FAFC'), fmt: 4 }, totAmt: { font: 2, fill: FILLID('FFE5E7EB'), fmt: 4 },
     inact:  { font: 4, fill: FILLID('FFFEF2F2'), fmt: 0 }, inactNum: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 3 }, inactAmt: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 4 },
-    newSt: { font: 7, fill: 0, fmt: 0 }, zebNew: { font: 7, fill: FILLID('FFF8FAFC'), fmt: 0 },
+    newSt: { font: 7, fill: 0, fmt: 0 }, pUp: { font: 3, fill: FILLID('FFECFDF5'), fmt: 10 }, pDown: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 10 }, pFlat: { font: 5, fill: 0, fmt: 10 }, curRow: { font: 2, fill: FILLID('FFE0E7FF'), fmt: 0 }, curNum: { font: 2, fill: FILLID('FFE0E7FF'), fmt: 3 }, zebNew: { font: 7, fill: FILLID('FFF8FAFC'), fmt: 0 },
     gAmt:   { font: 3, fill: FILLID('FFECFDF5'), fmt: 4 }, rAmt: { font: 4, fill: FILLID('FFFEF2F2'), fmt: 4 }, pAmt: { font: 6, fill: FILLID('FFEDE9FE'), fmt: 4 }
   };
   /* 🎨 v3.125.116 — har download rangeen: jis sheet ne apne styles nahi diye unhe auto-style

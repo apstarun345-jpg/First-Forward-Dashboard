@@ -230,7 +230,7 @@ window.FF = window.FF || {};
         const mode = (ov.querySelector('input[name=psmode]:checked') || {}).value || 'combined';
         go.disabled = true; go.textContent = '⏳ Creating PDF…';
         const fmt = (ov.querySelector('input[name=psfmt]:checked') || {}).value || 'pdf';
-        try { if (fmt !== 'xlsx') await download(spec, sel, mode, d.company, all); if (fmt !== 'pdf') await downloadExcel(spec, sel, mode); go.textContent = '✅ Downloaded'; }
+        try { if (fmt !== 'xlsx') await download(spec, sel, mode, d.company, all); if (fmt !== 'pdf') await downloadExcel(spec, sel, mode, all); go.textContent = '✅ Downloaded'; }
         catch (err) { go.textContent = `⚠️ ${(err && err.message) || err}`; }
         setTimeout(() => { go.disabled = false; go.textContent = '⬇ Download'; }, 2500);
       }
@@ -351,6 +351,30 @@ window.FF = window.FF || {};
     ['Balance', C.net, [['opening', 'TL / agent opening balance', 'r'], ['final', 'Final amount (without opening)', 'r'], ['final_open', 'Final amount (with opening)', 'r'], ['payee_sum', 'TL + agents sum (w/o opening)', 'r']]]
   ];
 
+  /** 📈 Chalu (running) mahina: MTD + run-rate se expected month-end, pichhle poore mahine se growth. */
+  function curRows(cm) {
+    if (!cm || !cm.ym || !cm.cur) return null;
+    const f = cm.days / Math.max(1, cm.elapsed);
+    return [['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+ (rest class)', 'rest'], ['Overall', 'total']].map(([lab, k]) => {
+      const last = num(cm.prev[k]), mtd = num(cm.cur[k]), exp = Math.round(mtd * f);
+      return { lab, last, mtd, exp, g: last ? ((exp - last) / last) * 100 : (exp ? null : 0) };
+    });
+  }
+  function drawCurrent(P, spec, title) {
+    const cm = spec && spec.cm, rows = curRows(cm);
+    if (!rows) return;
+    const cl = monTag({ ym: cm.ym }), pl = cm.last ? monTag({ ym: cm.last }) : 'last month';
+    P.section(`Current month — ${cl} (running, 1–${cm.elapsed} of ${cm.days} days) vs ${pl}`, C.pay);
+    const gs = (g) => (g === null ? { s: 'New ▲', c: C.earn } : { s: `${g > 0 ? '▲ +' : g < 0 ? '▼ ' : ''}${g.toFixed(1)}%`, c: g > 0 ? C.earn : g < 0 ? C.ded : MUTE });
+    const gc = {};
+    const body = rows.map((r, i) => { const x = gs(r.g); gc[`${i}:4`] = x.c; return [r.lab, int(r.last), int(r.mtd), int(r.exp), x.s]; });
+    P.table([{ t: 'Class', w: 40 }, { t: `${pl} full month`, w: 34, a: 'r', c: C.tags }, { t: `${cl} MTD (1–${cm.elapsed})`, w: 36, a: 'r', c: C.tags }, { t: `${cl} expected (run-rate)`, w: 40, a: 'r', c: C.kyc }, { t: 'Expected growth', w: 36, a: 'r', c: C.pay }],
+      body, { foot: true, title, cell: (ri, ci) => gc[`${ri}:${ci}`] || null });
+    const bits = [];
+    if (cm.mtd !== null && cm.mtd !== undefined) bits.push(`MTD vs ${pl} same days: ${cm.mtd > 0 ? '+' : ''}${cm.mtd}%`);
+    if (cm.exp !== null && cm.exp !== undefined) bits.push(`Dashboard forecast vs ${pl} full month: ${cm.exp > 0 ? '+' : ''}${cm.exp}%`);
+    P.text(`${bits.join('  ·  ')}${bits.length ? '  ·  ' : ''}Expected = MTD ÷ ${cm.elapsed} days × ${cm.days} days. Payout for ${cl} is not yet released.`, M, P.y, { size: 2.5, color: MUTE }); P.y += 5;
+  }
   function drawMonth(P, m, spec, prev) {
     const d = m.data, t = d.totals || {}, f = d.fnf, isPayee = d.role === 'payee';
     const one = d.agents.length === 1 ? d.agents[0] : null;
@@ -387,6 +411,7 @@ window.FF = window.FF || {};
       P.table([{ t: 'Class', w: 34 }, { t: `Issued ${pl}`, w: 24, a: 'r', c: C.tags }, { t: `Issued ${cl}`, w: 24, a: 'r', c: C.tags }, { t: 'Issuance growth', w: 30, a: 'r', c: C.kyc }, { t: `Payable ${pl}`, w: 24, a: 'r', c: C.earn }, { t: `Payable ${cl}`, w: 24, a: 'r', c: C.earn }, { t: 'Payable growth', w: 26, a: 'r', c: C.kyc }],
         rows, { foot: true, title, cell: (ri, ci) => gc[`${ri}:${ci}`] || null });
       if (!pt) { P.text(`Previous month (${pl}) data is not in the loaded payout snapshot.`, M, P.y, { size: 2.6, color: MUTE }); P.y += 5; }
+      drawCurrent(P, spec, title);
     }
     P.section('Issuance & payable tags', C.tags);
     const rate = (k) => (one ? inr(one[k]) : '');
@@ -486,6 +511,7 @@ window.FF = window.FF || {};
     rows.push(['Total', int(sel.reduce((s, m) => s + num(m.data.totals.pay_total), 0)), inr(g), inr(td), inr(nt), inr(rl), '', '']);
     P.table([{ t: 'Month', w: 27 }, { t: 'Payable tags', w: 20, a: 'r', c: C.tags }, { t: 'Gross', w: 24, a: 'r', c: C.earn }, { t: 'TDS', w: 19, a: 'r', c: C.ded }, { t: 'Net payable', w: 25, a: 'r', c: C.net }, { t: 'Released', w: 24, a: 'r', c: C.earn }, { t: 'Status', w: 19, c: C.pay }, { t: 'UTR', w: 28 }], rows, { foot: true, title: 'PAYOUT SUMMARY' });
     P.text(`Total net payable for the selected period: ${inr(nt)} (Rupees ${words(nt)} Only)`, M, P.y + 2, { size: 3, w: 700, color: C.net }); P.y += 6;
+    P.y += 2; drawCurrent(P, spec, 'PAYOUT SUMMARY');
   }
   /** File name: APN_IDFC Payout FYR-26-27_Oct'26 - NAME.pdf */
   function fileName(sel, spec) {
@@ -538,32 +564,50 @@ window.FF = window.FF || {};
       }
     };
   }
-  function xlSummary(sel, spec) {
-    const rows = sel.map((m) => { const t = m.data.totals, f = m.data.fnf, own = m.data.role === 'payee'; return [m.label, payeeNameOf(m.data, spec), m.data.payeeId, num(t.iss_total), num(t.pay_total), num(t.gross), Math.abs(num(t.tds)), num(t.final), num(t.opening), num(t.final_open), f && own ? num(f.releasing) : '', f ? (f.remark || '') : 'Not in FNF', f && f.utr ? f.utr : '']; });
+  function xlSummary(sel, spec, all) {
+    const ymPrev = (ym) => { const [y, mo] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, mo - 2, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
+    const pool = all || sel;
+    const tv = (t, k) => (k === 'total' ? (num(t.iss_total) || num(t.iss_vc4) + num(t.iss_vc20) + num(t.iss_rest)) : num(t[`iss_${k}`]));
+    const gr = (a, b) => (a ? Math.round(((b - a) / a) * 10000) / 10000 : '');
+    const rows = sel.map((m) => {
+      const t = m.data.totals, f = m.data.fnf, own = m.data.role === 'payee';
+      const pv = pool.find((x) => x.ym === ymPrev(m.ym) && x.data), pt = pv ? pv.data.totals : null;
+      const g = ['vc4', 'vc20', 'rest', 'total'].map((k) => (pt ? gr(tv(pt, k), tv(t, k)) : ''));
+      return [m.label, payeeNameOf(m.data, spec), m.data.payeeId, num(t.iss_total), num(t.pay_total), ...g, num(t.gross), Math.abs(num(t.tds)), num(t.final), num(t.opening), num(t.final_open), f && own ? num(f.releasing) : '', f ? (f.remark || '') : 'Not in FNF', f && f.utr ? f.utr : ''];
+    });
     const sum = (i) => Math.round(rows.reduce((x, r) => x + (typeof r[i] === 'number' ? r[i] : 0), 0) * 100) / 100;
-    rows.push(['TOTAL', '', '', sum(3), sum(4), sum(5), sum(6), sum(7), '', '', sum(10), '', '']);
-    const H = ['Month', 'Payee Name', 'Payee ID (APN)', 'Total Issuance', 'Payable Tags', 'Gross Payout', 'TDS', 'Net Payable', 'Opening Balance', 'Net incl. Opening', 'Released (FNF)', 'Payment Status', 'Payment UTR'];
-    const hs = ['hSlate', 'hSlate', 'hSlate', 'hBlue', 'hGreen', 'hGreen', 'hRed', 'hPurple', 'hPurple', 'hPurple', 'hGreen', 'hAmber', 'hSlate'];
+    rows.push(['TOTAL', '', '', sum(3), sum(4), '', '', '', '', sum(9), sum(10), sum(11), '', '', sum(14), '', '']);
+    // 📈 chalu mahina (running) — upar sabse pehle
+    const cm = spec && spec.cm, cr = curRows(cm);
+    let curIdx = -1;
+    if (cr) {
+      const row = [`${monTag({ ym: cm.ym })} — running (1–${cm.elapsed}/${cm.days}), expected`, payeeNameOf(sel[0].data, spec), sel[0].data.payeeId, cr[3].exp, '', ...cr.map((r) => (r.g === null ? '' : Math.round(r.g * 100) / 10000)), '', '', '', '', '', '', `MTD ${cr[3].mtd}${cm.mtd != null ? ` · same-days ${cm.mtd > 0 ? '+' : ''}${cm.mtd}%` : ''}`, 'Payout not released yet'];
+      rows.unshift(row); curIdx = 0;
+    }
+    const H = ['Month', 'Payee Name', 'Payee ID (APN)', 'Total Issuance', 'Payable Tags', 'VC4 Growth %', 'VC20 Growth %', 'VC5+ Growth %', 'Overall Growth %', 'Gross Payout', 'TDS', 'Net Payable', 'Opening Balance', 'Net incl. Opening', 'Released (FNF)', 'Payment Status', 'Payment UTR'];
+    const hs = ['hSlate', 'hSlate', 'hSlate', 'hBlue', 'hGreen', 'hTeal', 'hTeal', 'hTeal', 'hTeal', 'hGreen', 'hRed', 'hPurple', 'hPurple', 'hPurple', 'hGreen', 'hAmber', 'hSlate'];
     const n = rows.length;
     return { name: 'Summary', header: H, rows, headStyleOf: (c) => hs[c], styleOf: (ri, c, v) => {
-      if (ri === n - 1) return c >= 5 ? 'totAmt' : 'rowTotal';
-      if (c === 11) return /hold/i.test(v) ? 'down' : /process(ed)?$|paid|released/i.test(v) && !/processing/i.test(v) ? 'up' : /processing|pending/i.test(v) ? 'total' : '';
-      if (c === 7) return 'pAmt'; if (c === 6) return 'rAmt';
-      if (c >= 5 && c <= 10) return ri % 2 ? 'zebAmt' : 'amt';
+      if (c >= 5 && c <= 8) return v === '' || v == null ? (ri === curIdx ? 'curRow' : '') : v > 0 ? 'pUp' : v < 0 ? 'pDown' : 'pFlat';
+      if (ri === curIdx) return c === 3 ? 'curNum' : 'curRow';
+      if (ri === n - 1) return c >= 9 ? 'totAmt' : 'rowTotal';
+      if (c === 15) return /hold/i.test(v) ? 'down' : /processing|pending/i.test(v) ? 'total' : /processed|paid|released/i.test(v) ? 'up' : '';
+      if (c === 11) return 'pAmt'; if (c === 10) return 'rAmt';
+      if (c >= 9 && c <= 14) return ri % 2 ? 'zebAmt' : 'amt';
       if (c === 3 || c === 4) return ri % 2 ? 'zebNum' : 'num';
       return ri % 2 ? 'zeb' : '';
     } };
   }
-  async function downloadExcel(spec, sel, mode) {
+  async function downloadExcel(spec, sel, mode, all) {
     if (!FF.xlsx && FF.lazy && FF.lazy.inject) await FF.lazy.inject('xlsx');
     if (!FF.xlsx) throw new Error('Excel module load nahi hua');
     const xname = (ms) => fileName(ms, spec).replace(/\.pdf$/, '.xlsx');
     if (mode === 'separate') {
-      for (const m of sel) { saveAs(FF.xlsx.build([xlSummary([m], spec), xlMonthSheet(m)]), xname([m])); await new Promise((r) => setTimeout(r, 700)); }
+      for (const m of sel) { saveAs(FF.xlsx.build([xlSummary([m], spec, all), xlMonthSheet(m)]), xname([m])); await new Promise((r) => setTimeout(r, 700)); }
       return;
     }
     const ord = sel.slice().sort((a, b) => b.ym.localeCompare(a.ym));
-    saveAs(FF.xlsx.build([xlSummary(ord, spec), ...ord.map(xlMonthSheet)]), xname(sel));
+    saveAs(FF.xlsx.build([xlSummary(ord, spec, all), ...ord.map(xlMonthSheet)]), xname(sel));
   }
   async function download(spec, sel, mode, company, all) {
     const prevOf = (m) => { const [y, mo] = m.ym.split('-').map(Number); const pd = new Date(Date.UTC(y, mo - 2, 1)); const pym = `${pd.getUTCFullYear()}-${String(pd.getUTCMonth() + 1).padStart(2, '0')}`; return (all || sel).find((x) => x.ym === pym && x.data) || null; };
@@ -584,5 +628,5 @@ window.FF = window.FF || {};
     saveAs(P.finish(foot), fileName(sel, spec));
   }
 
-  FF.payslip = { boxHtml, fill, openPicker, download, downloadExcel, xlMonthSheet, words, idsOf, refresh, status, getSnap, fileName, payeeNameOf };
+  FF.payslip = { xlSummary, curRows, boxHtml, fill, openPicker, download, downloadExcel, xlMonthSheet, words, idsOf, refresh, status, getSnap, fileName, payeeNameOf };
 })(window.FF);
