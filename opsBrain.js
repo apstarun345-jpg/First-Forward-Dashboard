@@ -126,6 +126,15 @@
     if (stockOut.length) drivers.push({ w: stockOut.reduce((s, x) => s + x.prev, 0) * 0.5, t: `${stockOut.length} agents ke paas stock nahi` });
     if (workP.size - workC.size >= 2) drivers.push({ w: (workP.size - workC.size) * (tot.prev.n / Math.max(1, workP.size)), t: `${workP.size - workC.size} din kam kaam hua` });
     drivers.sort((a, b) => b.w - a.w);
+    // growth badhi ho to kaaran = badhne wale (sabse zyada badhe agents + class)
+    if (tot.cur.n >= tot.prev.n) {
+      const gain = [];
+      for (const [k, o] of S.ag) { if (!pick(k, o)) continue; const c = sumWin(o.days, S.cur, S.d).n, p = sumWin(o.days, S.prev, S.d).n; if (c > p) gain.push({ name: o.name, d: c - p }); }
+      gain.sort((x, y) => y.d - x.d);
+      const cls = tot.cur.vc4 - tot.prev.vc4 >= tot.cur.com - tot.prev.com ? `VC4 +${fmt(tot.cur.vc4 - tot.prev.vc4)}` : `Commercial +${fmt(tot.cur.com - tot.prev.com)}`;
+      drivers.length = 0;
+      drivers.push({ w: 1, t: `badhat ${cls}; sabse zyada badhe: ${gain.slice(0, 3).map((x) => `${x.name} (+${fmt(x.d)})`).join(', ')}${lost.length ? ` · dhyan: ${lost.length} agents band (${fmt(lostTags)} tags)` : ''}` });
+    }
     return { S, d: S.d, cur: tot.cur, prev: tot.prev, g, g4, gc, activeCur, activePrev, lost, dropped, lostTags, stockOut, workCur: workC.size, workPrev: workP.size, lines, mainCause: drivers[0] ? drivers[0].t : '' };
   }
 
@@ -380,7 +389,7 @@
   }
   function itRootCause() {
     const R = rootCause(); if (!R || R.g == null) return null;
-    return { key: `ops:root:${R.S.last}`, mood: R.g < 0 ? 'sad' : 'happy', icon: '🔬', title: `Growth ${sgn(R.g)} — kyun?`, view: 'list', head: R.mainCause ? `Sabse bada kaaran: ${R.mainCause}` : R.lines[0],
+    return { key: `ops:root:${R.S.last}`, mood: R.g < 0 ? 'sad' : 'happy', icon: '🔬', title: `Growth ${sgn(R.g)} — kyun?`, view: 'list', head: R.mainCause ? `${R.g >= 0 ? 'Kyun badhi' : 'Sabse bada kaaran'}: ${R.mainCause}` : R.lines[0],
       rows: R.lines.slice(0, 5).map((t) => ({ name: t, val: '' })),
       say: `इस महीने उतने ही दिनों में ${R.g >= 0 ? 'बढ़त' : 'गिरावट'} ${Math.abs(R.g)} प्रतिशत। ${R.mainCause ? 'सबसे बड़ा कारण: ' + R.mainCause.replace(/\(.*?\)/g, '') : ''}` };
   }
