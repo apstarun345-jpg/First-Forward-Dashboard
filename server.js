@@ -293,6 +293,7 @@ const DEFAULT_SETTINGS = {
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],   // v3.87 — TVC → CCH classes (Tag Request class grid)
   // v3.90 — GV agent / TL commission box (Master search + profile): sheet link, tab, columns sab Settings se badal sakte ho.
   // 📞 v3.125.248 — agent mobile kis sheet / tab se (FF + GV) — ID + mobile + naam column system khud header se pehchanta hai
+  delhivery: { token: '' },   // 🚚 Delhivery Tracking API token (sirf admin / server)
   mobileSources: { ff: { sheetLink: '', tab: 'Sheet4' }, gv: { sheetLink: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA', tab: 'agent_Mobile Number' } },
   gvAgentCommission: { enabled: true, sheetLink: '', tab: 'GV Master', agentCol: 'A', tlCol: 'R', tlFallbackCol: 'C', productCol: 'L', commissionCol: 'M', dateCol: 'P', agentNameCol: 'B', tlNameCol: 'D', classCol: 'G', classFallbackCol: 'F', productId: '100000007832', label: 'VC4', suffix: '/tag', currency: '₹' },
   gv: {

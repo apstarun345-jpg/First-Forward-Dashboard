@@ -106,7 +106,9 @@ export class AppsScriptStore {
         // 'busy, retry' = Apps Script lock contention (another write in flight) — retryable by design.
         const retry = lastErr.retry || /busy, retry|fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|socket/i.test(String(lastErr.message) + String(lastErr.cause || ''));
         if (!retry || attempt === maxAttempts - 1) break;
-        await this.wait(500 * 2 ** attempt + Math.floor(Math.random() * 200));
+        // 'busy, retry' = doosra Apps Script kaam lock pakde hai → thoda lamba ruko (2s, 4s, 8s…), warna turant fir busy
+        const busy = /busy, retry/i.test(String(lastErr.message));
+        await this.wait((busy ? 2000 : 500) * 2 ** attempt + Math.floor(Math.random() * 300));
       } finally { clearTimeout(timer); }
     }
     this.lastError = lastErr ? lastErr.message : 'Apps Script storage failed';
@@ -240,7 +242,7 @@ export class AppsScriptStore {
     const records = {};
     const job = (async () => {
       for (const [kind, entry] of batch) records[kind] = this.encode(kind, entry.value);
-      const out = await this.call('write', { records }, { timeoutMs: this.writeTimeoutMs, attempts: this.attempts });
+      const out = await this.call('write', { records }, { timeoutMs: this.writeTimeoutMs, attempts: (this.attempts || 3) >= 3 ? Math.max(5, this.attempts || 3) : this.attempts });   // v3.125.260 — lock busy par save chhoote nahi
       this.lastSavedAt = String(out.savedAt || new Date().toISOString());
       try { if (typeof this.onSaved === 'function') this.onSaved([...batch.keys()]); } catch { /* hook optional */ }
     })();
