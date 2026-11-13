@@ -9398,6 +9398,7 @@ async function handleApi(req, res, url) {
   const PAYOUT_SHEETS = { apn: String(process.env.APN_PAYOUT_SHEET_ID || '1QyiXewYroY4ppqm2JFKfDmYybh5Un299kEG5mio2z00').trim(), fnf: String(process.env.FNF_PAYOUT_SHEET_ID || '1eZMV79IYrBvTfR5me2IFSbsENp3GzmhWTfB2JNGqjeU').trim() };
   const PAYOUT_SNAP_FILE = path.join(DATA_DIR, 'payout-snapshot.json.gz'), PAYOUT_SNAP_TAB = 'CACHE_PAYOUT';
   const payoutSnap = { data: null, tried: false, loading: null };
+  setTimeout(() => { payoutSnapGet().catch(() => {}); }, 45e3);   // boot ke baad snapshot pehle se taiyar (search par wait na ho)
   async function payoutSnapSaveSheet(snap) {
     const store = sheetSyncStore(); if (!store) return false;
     try {
@@ -10222,7 +10223,10 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/payout/snapshot' && method === 'GET') {
     if (!payoutPerm(user)) throw new HttpError(user ? 403 : 401, 'Payout dekhne ki permission nahi hai.');
-    const snap = await payoutSnapGet();
+    // Kabhi latakna nahi: memory me nahi hai to background me load shuru karo, client 202 par thodi der me dobara poochhe.
+    const pend = payoutSnap.data ? null : payoutSnapGet();
+    const snap = payoutSnap.data || (pend ? await Promise.race([pend, new Promise((r) => setTimeout(() => r(undefined), 6000))]) : null);
+    if (snap === undefined) { res.setHeader('Cache-Control', 'private, no-store'); return sendJson(res, 202, { ok: true, loading: true }); }
     if (!snap) { res.setHeader('Cache-Control', 'private, no-store'); return sendJson(res, 200, { ok: true, empty: true }); }
     if (String(req.headers['if-none-match'] || '') === snap.etag) { res.writeHead(304, { ETag: snap.etag, 'Cache-Control': 'private, no-cache' }); return res.end(); }
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', ETag: snap.etag, 'Cache-Control': 'private, no-cache', 'Content-Length': snap.buf.length });

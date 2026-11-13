@@ -57,6 +57,12 @@ window.FF = window.FF || {};
     }
     if (!r) throw new Error('Network nahi mila');
     if (r.status === 304) return { same: true };
+    if (r.status === 202) {           // server abhi snapshot load kar raha hai → thoda ruk kar dobara
+      if ((netSnap.tries = (netSnap.tries || 0) + 1) > 12) throw new Error('Payout data server par load ho raha hai — thodi der me dobara kholo');
+      await new Promise((ok) => setTimeout(ok, 5000));
+      return netSnap(etag);
+    }
+    netSnap.tries = 0;
     if (!r.ok) throw new Error(r.status === 429 ? 'Server abhi busy hai (429) — thodi der me khud dobara try hoga' : `HTTP ${r.status}`);
     const j = await r.json();
     return { j: j && j.months ? j : { empty: true }, etag: r.headers.get('ETag') || '' };
