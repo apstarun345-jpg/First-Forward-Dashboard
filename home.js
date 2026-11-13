@@ -1459,10 +1459,11 @@ FF.pages = FF.pages || {};
     (async () => { try {
       const box = U.$('#home-payout', root);
       if (!box || !(FF.auth && (FF.auth.isAdmin() || FF.auth.can('payout')))) return;
+      box.innerHTML = '<section class="card ps-home"><div class="card-body small dim">💰 Payout data — loading…</div></section>';
       if (!FF.payslip && FF.lazy && FF.lazy.inject) await FF.lazy.inject('payslip');
       if (!FF.payslip) return;
       const st = await FF.payslip.status();
-      const when = st ? `${new Date(st.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}${st.by ? ` · ${esc(st.by)}` : ''} · ${st.months.length} mahine` : 'abhi load nahi hua';
+      const when = st ? `${new Date(st.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}${st.by ? ` · ${esc(st.by)}` : ''} · ${st.months.length} months` : 'not loaded yet — press refresh';
       box.innerHTML = `<section class="card ps-home"><div class="card-body"><div class="ps-home-row"><div><b>💰 Payout data (APN + FNF)</b><br><small class="dim">Last update: ${when}</small></div><button type="button" class="btn sm primary" data-ps-refresh>🔄 Payout refresh</button></div><div class="ps-home-log small dim"></div></div></section>`;
       box.addEventListener('click', async (ev) => {
         const b = ev.target.closest && ev.target.closest('[data-ps-refresh]'); if (!b || b.disabled) return;

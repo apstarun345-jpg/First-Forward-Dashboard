@@ -10,7 +10,7 @@ window.FF = window.FF || {};
   const COMPANY = 'APNAPAYMENT SERVICES PRIVATE LIMITED';
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-  const inr = (v, dec) => { const n = num(v); return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: dec === 0 ? 0 : 2, maximumFractionDigits: dec === 0 ? 0 : 2 })}`; };
+  const inr = (v, dec) => { let n = num(v); n = dec === 0 ? Math.round(n) : Math.round(n * 100) / 100; if (Object.is(n, -0) || Math.abs(n) < 0.005) n = 0; return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: dec === 0 ? 0 : 2, maximumFractionDigits: dec === 0 ? 0 : 2 })}`; };
   const int = (v) => Math.round(num(v)).toLocaleString('en-IN');
   const canSee = () => { try { return FF.auth.isAdmin() || FF.auth.can('payout'); } catch { return false; } };
   const cache = new Map();
@@ -279,6 +279,8 @@ window.FF = window.FF || {};
     // ---- earnings / deductions side by side
     const earn = [['VC4 payout', t.po_vc4], ['VC20 payout', t.po_vc20], ['Rest class payout', t.po_rest], ['MAX FASTag payout', t.po_max], ['KYC payout', t.po_kyc], ['500 product payout', t.po_500], ['Replacement payout (VC20/VC5)', t.po_rep_a], ['Replacement payout (VC6–VC16)', t.po_rep_b], ['Salary', t.salary], ['Bonus / offer / incentive', t.bonus]].filter(([, v]) => num(v));
     const ded = [['TDS @ 2%', t.tds], ['Wrong VRN penalty', t.pen_wrongvrn], ['Tag closure penalty', t.pen_closure], ['Bank complaint', t.bank_complaint], ['Penalty (scanned tags)', t.pen_scanned], ['Secugen device charges', t.secugen], ['Unaffixed tag penalty', t.pen_unaffixed]].filter(([, v]) => num(v));
+    const earnSum = earn.reduce((s, [, v]) => s + num(v), 0), adj = Math.round((num(t.gross) - earnSum) * 100) / 100;
+    if (num(t.gross) && Math.abs(adj) >= 1) earn.push(['Adjustment (as per payout sheet)', adj]);   // sheet ka gross hi final — farak saaf dikhe
     const totDed = ded.reduce((s, [, v]) => s + Math.abs(num(v)), 0);
     P.section('Earnings & deductions');
     const n = Math.max(earn.length, ded.length, 1);
