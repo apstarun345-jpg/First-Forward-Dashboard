@@ -471,7 +471,8 @@ FF.pages = FF.pages || {};
     if (!text) return null;
     const d = digits(text);
     if (d.length >= 4) {
-      const hit = idx.list.find((a) => a.agentId && (a.agentId === d || a.agentId.endsWith(d)));
+      const fam = idFamily(text);
+      const hit = idx.list.find((a) => a.agentId && (a.agentId === d || a.agentId.endsWith(d))) || idx.list.find((a) => a.agentId && fam.includes(a.agentId));
       if (hit) return idx.byKey.get(hit.key) || null;
     }
     const n = norm(text);
@@ -501,7 +502,7 @@ FF.pages = FF.pages || {};
     if (row.isTl) return tlRecord(row.channel, row.name);
     const pick = (list) => { if (!list.length) return null; const hit = (row.channel && list.find((a) => a.channel === row.channel)) || list[0]; return idx.byKey.get(hit.key) || null; };
     const id = digits(row.agentId);
-    if (id.length >= 3) { const r = pick(idx.list.filter((a) => a.agentId && a.agentId === id)); if (r) return r; }
+    if (id.length >= 3) { const fam = idFamily(row.agentId); const r = pick(idx.list.filter((a) => a.agentId && a.agentId === id)) || pick(idx.list.filter((a) => a.agentId && fam.includes(a.agentId))); if (r) return r; }
     const text = String(row.name || '').trim();
     if (!text) return null;
     const d = digits(text);
@@ -537,6 +538,7 @@ FF.pages = FF.pages || {};
     if (a.kind === 'tl') return tlRecord(ch, a.name);
     const id = digits(a.agentId);
     let hit = id ? idx.list.find((x) => x.agentId === id && x.channel === ch) : null;
+    if (!hit && id) { const fam = idFamily(a.agentId); hit = idx.list.find((x) => x.channel === ch && fam.includes(x.agentId)) || null; }
     if (!hit && a.name) hit = idx.list.find((x) => x.channel === ch && norm(x.name) === norm(a.name)) || idx.list.find((x) => norm(x.name) === norm(a.name));
     return hit ? idx.byKey.get(hit.key) || null : null;
   }
@@ -1268,15 +1270,30 @@ body.colorful .from-hdr { color: #166534; }
       </div></section>`;
   }
   /** Search dropdown ke liye items — TL + AGENTS dono (TL pehle, taaki sirf agent hi na dikhein). */
+  /** 🔗 v3.125.249 — ek agent ki saari IDs (New ID ⇄ purani Agent ID ⇄ Assistant ID, Sheet4 aliases).
+   *  Search box ID ko New ID me badal deta hai, jabki REPORT purani Agent ID rakhta hai → dono se match. */
+  function idFamily(v) {
+    const out = new Set([digits(v)]);
+    try {
+      const A = FF.aliases;
+      if (A) {
+        (A.hits ? A.hits(v) : []).forEach((h) => { [h.row && h.row.a, h.row && h.row.b, h.to].forEach((x) => { if (x) out.add(digits(x)); }); });
+        const o = A.of ? A.of(v) : null;
+        if (o && o.row) [o.row.a, o.row.b].forEach((x) => { if (x) out.add(digits(x)); });
+      }
+    } catch { /* aliases optional */ }
+    return [...out].filter((x) => x && x.length >= 3);
+  }
   function suggestItems(query, row) {
     const idx = state.index;
     if (!idx) return [];
     const q = norm(query);
     const dq = digits(query);
+    const fam = dq.length >= 4 ? idFamily(String(query).trim()) : [];
     const agents = (idx.list || []).filter((a) => {
       if (row.tlFilter && norm(a.tlName) !== norm(row.tlFilter)) return false;
       if (!q) return true;
-      return norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)) || norm(a.tlName).includes(q);
+      return norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)) || (fam.length > 1 && fam.includes(digits(a.agentId))) || norm(a.tlName).includes(q);
     }).slice(0, 24).map((a) => ({
       kind: 'agent', name: a.name, agentId: a.agentId, tlName: a.tlName, channel: a.channel,
       stock: num(a.stock), last: num(a.last), cur: num(a.cur)
@@ -1410,7 +1427,7 @@ body.colorful .from-hdr { color: #166534; }
     const rows = idx.list.filter((a) => {
       if (ch !== 'both' && a.channel !== ch) return false;
       if (!q) return true;
-      return norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)) || norm(a.tlName).includes(q);
+      return norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)) || (fam.length > 1 && fam.includes(digits(a.agentId))) || norm(a.tlName).includes(q);
     });
     return rows.sort((a, b) => num(b.cur) - num(a.cur) || num(b.stock) - num(a.stock) || norm(a.name).localeCompare(norm(b.name)));
   }
