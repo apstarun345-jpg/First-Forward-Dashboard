@@ -645,5 +645,77 @@ window.FF = window.FF || {};
     saveAs(P.finish(foot), fileName(sel, spec));
   }
 
-  FF.payslip = { xlSummary, curRows, boxHtml, fill, openPicker, download, downloadExcel, xlMonthSheet, words, idsOf, refresh, status, getSnap, fileName, payeeNameOf };
+  // ---------------------------------------------------------------- 🧾 FNF payment status (Home · Smart Notification Center)
+  const PST = [
+    { key: 'hold', label: 'Hold', icon: '⛔', color: '#dc2626', test: (r) => /hold/i.test(r) },
+    { key: 'missing', label: 'Account details missing', icon: '🏦', color: '#ea580c', test: (r) => /account|bank|detail|missing|kyc|pan/i.test(r) },
+    { key: 'neg', label: 'Negative', icon: '➖', color: '#9f1239', test: (r) => /negative|neg\b/i.test(r) },
+    { key: 'proc', label: 'Processing', icon: '⏳', color: '#d97706', test: (r) => /processing|pending|in\s*process|under/i.test(r) },
+    { key: 'processed', label: 'Processed', icon: '✅', color: '#0d9488', test: (r) => /processed/i.test(r) },
+    { key: 'paid', label: 'Paid', icon: '💸', color: '#16a34a', test: (r) => /paid|released|done|success/i.test(r) },
+    { key: 'blank', label: 'No remark', icon: '❔', color: '#64748b', test: (r) => !String(r || '').trim() },
+    { key: 'other', label: 'Other', icon: '•', color: '#475569', test: () => true }
+  ];
+  const pstOf = (remark) => PST.find((x) => x.test(String(remark || '').trim())) || PST[PST.length - 1];
+  /** Latest (ya diye) mahine ke FNF rows → status-wise counts. */
+  async function payStatus(tab) {
+    const S = await getSnap();
+    if (!S || S.empty || !S.months || !S.months.length) return null;
+    const m = (tab && S.months.find((x) => x.tab === tab)) || S.months[0];
+    const groups = {};
+    (m.fnf.rows || []).forEach((r) => { const st = pstOf(r.remark); (groups[st.key] = groups[st.key] || []).push(r); });
+    return { tab: m.tab, label: m.label, months: S.months.map((x) => ({ tab: x.tab, label: x.label })), groups, total: (m.fnf.rows || []).length, at: S.at };
+  }
+  function payChipHtml(d) {
+    if (!d) return '';
+    const amt = (rows) => rows.reduce((s, r) => s + num(r.releasing || r.final), 0);
+    const pills = PST.filter((x) => d.groups[x.key] && d.groups[x.key].length).map((x) => {
+      const rows = d.groups[x.key];
+      return `<button type="button" class="sc-pill sc-pay-pill" data-pay-st="${x.key}" style="--pc:${x.color}" title="${esc(x.label)} — ${rows.length} payees · ${inr(amt(rows), 0)} · click = table + CSV"><span>${x.icon}</span><b>${rows.length}</b> ${esc(x.label)} <i>›</i></button>`;
+    }).join('');
+    return `<div class="sc-chip sc-pay"><div class="sc-chip-t">💰 Payout status · ${esc(d.label)} <small>FNF remark · ${d.total} payees</small></div><div class="sc-seg sc-pay-seg">${pills}</div></div>`;
+  }
+  const CSV_COLS = [['payeeId', 'Payee ID'], ['tlName', 'TL / Payee name'], ['agentName', 'Agent name'], ['opening', 'Opening'], ['gross', 'Gross payout'], ['tds', 'TDS'], ['gst', 'GST'], ['after_tds', 'Payout after TDS'], ['final', 'Final payout'], ['closing', 'Closing balance'], ['releasing', 'Releasing amount'], ['remark', 'Remark'], ['utr', 'Payment UTR'], ['bank', 'Bank'], ['ifsc', 'IFSC'], ['account', 'Account (masked)'], ['invoice', 'Invoice']];
+  async function openPayStatus(key, tab) {
+    let d = await payStatus(tab);
+    if (!d) { if (FF.util && FF.util.toast) FF.util.toast('Payout data load nahi hua — Home par 💰 Payout refresh dabao', 'warn'); return; }
+    let ov = document.getElementById('ps-status');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'ps-status'; ov.className = 'ops-ov'; document.body.appendChild(ov); }
+    const st = { key, q: '' };
+    const rowsOf = () => {
+      const base = st.key === 'all' ? Object.values(d.groups).flat() : (d.groups[st.key] || []);
+      const q = st.q.trim().toLowerCase();
+      return (q ? base.filter((r) => [r.payeeId, r.tlName, r.agentName, r.nameId, r.remark].join(' ').toLowerCase().includes(q)) : base).slice().sort((a, b) => num(b.releasing || b.final) - num(a.releasing || a.final));
+    };
+    const paint = () => {
+      const meta = PST.find((x) => x.key === st.key) || { label: 'All', color: '#4f46e5', icon: '📋' };
+      const rows = rowsOf();
+      const sum = (k) => rows.reduce((s, r) => s + num(r[k]), 0);
+      const tabs = [{ key: 'all', label: 'All', icon: '📋', color: '#4f46e5', n: d.total }, ...PST.filter((x) => d.groups[x.key] && d.groups[x.key].length).map((x) => ({ ...x, n: d.groups[x.key].length }))];
+      ov.innerHTML = `<div class="ops-tower ps-st-box" style="--pc:${meta.color}"><div class="ops-tw-h"><b>${meta.icon} ${esc(meta.label)} · ${esc(d.label)} <small class="dim">(${rows.length} payees)</small></b><button type="button" class="ops-x" data-pst-x>✕</button></div>
+        <div class="ps-st-bar"><select class="input" data-pst-month>${d.months.map((m) => `<option value="${esc(m.tab)}"${m.tab === d.tab ? ' selected' : ''}>${esc(m.label)}</option>`).join('')}</select>
+          <input class="input" data-pst-q placeholder="Search payee / TL / agent / remark…" value="${esc(st.q)}">
+          <button type="button" class="btn sm primary" data-pst-csv>⬇ CSV</button></div>
+        <div class="ps-st-tabs">${tabs.map((x) => `<button type="button" class="ps-st-tab${x.key === st.key ? ' on' : ''}" data-pst-tab="${x.key}" style="--pc:${x.color}">${x.icon} ${esc(x.label)} <b>${x.n}</b></button>`).join('')}</div>
+        <div class="ps-st-sum"><span>Final payout <b>${inr(sum('final'), 0)}</b></span><span>Releasing <b>${inr(sum('releasing'), 0)}</b></span><span>Gross <b>${inr(sum('gross'), 0)}</b></span><span>Closing <b>${inr(sum('closing'), 0)}</b></span></div>
+        <div class="ps-st-scroll"><table class="ps-st-tbl"><thead><tr><th>#</th><th>Payee ID</th><th>TL / Payee</th><th class="num">Opening</th><th class="num">Gross</th><th class="num">TDS</th><th class="num">Final payout</th><th class="num">Closing</th><th class="num">Releasing</th><th>Remark</th><th>UTR</th></tr></thead><tbody>
+        ${rows.map((r, i) => { const s2 = pstOf(r.remark); return `<tr><td class="dim">${i + 1}</td><td><a href="#/masterSearch?q=${encodeURIComponent(r.tlName || r.agentName || r.payeeId)}&id=${encodeURIComponent(r.payeeId)}&ch=ff" data-pst-go>${esc(r.payeeId)}</a></td><td><b>${esc(r.tlName || r.agentName || '')}</b>${r.agentName && r.agentName !== r.tlName ? `<br><small class="dim">${esc(r.agentName)}</small>` : ''}</td><td class="num">${inr(r.opening, 0)}</td><td class="num">${inr(r.gross, 0)}</td><td class="num neg">${inr(Math.abs(num(r.tds)), 0)}</td><td class="num fin">${inr(r.final, 0)}</td><td class="num">${inr(r.closing, 0)}</td><td class="num rel">${inr(r.releasing, 0)}</td><td><span class="ps-st-chip" style="--pc:${s2.color}">${esc(r.remark || '—')}</span></td><td class="dim">${esc(r.utr || '')}</td></tr>`; }).join('') || '<tr><td colspan="11" class="dim">Koi payee nahi</td></tr>'}
+        </tbody><tfoot><tr><td></td><td>Total</td><td>${rows.length} payees</td><td class="num">${inr(sum('opening'), 0)}</td><td class="num">${inr(sum('gross'), 0)}</td><td class="num">${inr(Math.abs(sum('tds')), 0)}</td><td class="num">${inr(sum('final'), 0)}</td><td class="num">${inr(sum('closing'), 0)}</td><td class="num">${inr(sum('releasing'), 0)}</td><td></td><td></td></tr></tfoot></table></div></div>`;
+    };
+    paint(); ov.hidden = false;
+    ov.onclick = async (e) => {
+      if (e.target === ov || e.target.closest('[data-pst-x]') || e.target.closest('[data-pst-go]')) { ov.hidden = true; return; }
+      const t = e.target.closest('[data-pst-tab]'); if (t) { st.key = t.dataset.pstTab; paint(); return; }
+      if (e.target.closest('[data-pst-csv]')) {
+        const rows = rowsOf();
+        const name = `FNF payout ${d.label} - ${(PST.find((x) => x.key === st.key) || { label: 'All' }).label}.csv`;
+        const body = rows.map((r) => CSV_COLS.map(([k]) => (k === 'tds' ? Math.abs(num(r[k])) : (r[k] == null ? '' : r[k]))));
+        if (FF.util && FF.util.downloadCsv) FF.util.downloadCsv(name, CSV_COLS.map(([, h]) => h), body);
+      }
+    };
+    ov.oninput = (e) => { if (e.target.matches('[data-pst-q]')) { st.q = e.target.value; const pos = e.target.selectionStart; paint(); const i = ov.querySelector('[data-pst-q]'); if (i) { i.focus(); try { i.setSelectionRange(pos, pos); } catch { /* */ } } } };
+    ov.onchange = async (e) => { if (e.target.matches('[data-pst-month]')) { d = await payStatus(e.target.value); paint(); } };
+  }
+
+  FF.payslip = { payStatus, payChipHtml, openPayStatus, xlSummary, curRows, boxHtml, fill, openPicker, download, downloadExcel, xlMonthSheet, words, idsOf, refresh, status, getSnap, fileName, payeeNameOf };
 })(window.FF);

@@ -8195,3 +8195,29 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .msp-kpi.msp-pay-box .ps-tbl td.ps-fin{color:#7c3aed!important;font-weight:800}
 .msp-kpi.msp-pay-box .ps-tbl td.ps-rel{color:#16a34a!important;font-weight:700}
 .msp-kpi.msp-pay-box .ps-tbl th:first-child{padding-left:14px}
+/* 💰 v3.125.254 — Smart center payout status + table */
+.sc-chip.sc-pay{border-color:rgba(22,163,74,.35);border-top-color:#16a34a;background:color-mix(in srgb,#16a34a 5%,var(--card,#fff))}
+.sc-chip.sc-pay .sc-chip-t{color:#15803d;flex-direction:column;align-items:flex-start;gap:2px}
+.sc-chip.sc-pay .sc-chip-t small{font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted,#64748b);font-size:11.5px}
+.sc-pay-seg{gap:8px!important}
+.sc-pay-pill{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;border:1px solid color-mix(in srgb,var(--pc) 45%,transparent);background:color-mix(in srgb,var(--pc) 12%,var(--card,#fff));color:var(--pc);font-weight:700;font-size:12.5px;cursor:pointer;transition:transform .12s,box-shadow .12s}
+.sc-pay-pill b{font-size:14px}.sc-pay-pill i{font-style:normal;opacity:.7}
+.sc-pay-pill:hover{transform:translateY(-1px);box-shadow:0 4px 12px color-mix(in srgb,var(--pc) 30%,transparent)}
+.ps-st-box{width:min(1180px,96vw);max-width:none;max-height:90vh;display:flex;flex-direction:column;border-top:5px solid var(--pc)}
+.ps-st-bar{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.ps-st-bar select{max-width:180px}.ps-st-bar input{flex:1 1 220px}
+.ps-st-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.ps-st-tab{border:1px solid color-mix(in srgb,var(--pc) 40%,transparent);background:var(--card,#fff);color:var(--pc);border-radius:999px;padding:5px 11px;font-weight:700;font-size:12px;cursor:pointer}
+.ps-st-tab.on{background:var(--pc);color:#fff}
+.ps-st-sum{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:8px}.ps-st-sum b{color:var(--ink)}
+.ps-st-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;flex:1 1 auto;min-height:120px}
+.ps-st-tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.ps-st-tbl th{position:sticky;top:0;background:color-mix(in srgb,var(--pc) 14%,var(--card,#fff));color:var(--pc);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;padding:8px;text-align:left;white-space:nowrap;z-index:1}
+.ps-st-tbl td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.ps-st-tbl tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--ink) 2.5%,var(--card))}
+.ps-st-tbl tbody tr:hover td{background:color-mix(in srgb,var(--pc) 7%,var(--card))}
+.ps-st-tbl .num{text-align:right;white-space:nowrap}
+.ps-st-tbl td.fin{color:#7c3aed;font-weight:800}.ps-st-tbl td.rel{color:#16a34a;font-weight:700}.ps-st-tbl td.neg{color:#dc2626}
+.ps-st-tbl tfoot td{position:sticky;bottom:0;background:color-mix(in srgb,var(--pc) 12%,var(--card,#fff));font-weight:800;border-top:2px solid var(--pc)}
+.ps-st-tbl a{color:#2563eb;font-weight:700;text-decoration:none}
+.ps-st-chip{display:inline-block;padding:2px 9px;border-radius:999px;font-weight:700;font-size:11px;background:color-mix(in srgb,var(--pc) 14%,var(--card,#fff));color:var(--pc);border:1px solid color-mix(in srgb,var(--pc) 35%,transparent);white-space:nowrap}

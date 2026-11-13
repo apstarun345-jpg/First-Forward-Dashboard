@@ -178,14 +178,31 @@ window.FF = window.FF || {};
         cache = null;
       });
     }
-    if (cache && Date.now() - cache.at < 60e3) { el.innerHTML = cache.html; return; }
+    if (cache && Date.now() - cache.at < 60e3) { el.innerHTML = cache.html; payMount(el); return; }
     el.innerHTML = shell('<div class="sc-chip"><div class="sc-chip-t">🎯 Dispatch priority</div><div class="sc-seg"><span class="dim small">load ho raha hai…</span></div></div>', '', 'data load ho raha hai…');
     try { await Promise.allSettled([G && G.need && G.need('master'), S && S.need && S.need('daily')]); } catch { /* ignore */ }
     const alerts = alertsHtml(alertsAll());
     const counts = await dispatchCounts();
     const html = shell(counts ? dispatchHtml(counts) : '', alerts, 'GV + FF · live');
     if (counts) cache = { at: Date.now(), html };
-    if (el.isConnected) el.innerHTML = html;
+    if (el.isConnected) { el.innerHTML = html; payMount(el); }
+  }
+  /** 💰 v3.125.254 — FNF payout status chips (Hold / Account details missing / Processing / Negative / Paid …).
+   *  Sirf admin / payout permission. Click = rangeen table + CSV (payslip.js). */
+  async function payMount(el) {
+    try {
+      if (!(FF.auth && (FF.auth.isAdmin() || FF.auth.can('payout')))) return;
+      const wrap = el.querySelector('.sc-wrap'); if (!wrap || wrap.querySelector('.sc-pay')) return;
+      if (!FF.payslip && FF.lazy && FF.lazy.inject) await FF.lazy.inject('payslip');
+      if (!FF.payslip || !FF.payslip.payStatus) return;
+      const d = await FF.payslip.payStatus();
+      if (!d || !el.isConnected || wrap.querySelector('.sc-pay')) return;
+      const host = document.createElement('div'); host.innerHTML = FF.payslip.payChipHtml(d);
+      const chip = host.firstElementChild; if (!chip) return;
+      const first = wrap.querySelector('.sc-chip');
+      if (first && first.nextSibling) wrap.insertBefore(chip, first.nextSibling); else wrap.appendChild(chip);
+      chip.addEventListener('click', (e) => { const b = e.target.closest('[data-pay-st]'); if (b) FF.payslip.openPayStatus(b.dataset.paySt, d.tab); });
+    } catch { /* optional */ }
   }
 
   FF.smartCenter = { mount, suddenDown, alertsAll, dispatchCounts, _cfg: { RECENT, BASE, DROP, MIN_AGENT, MIN_TL } };
