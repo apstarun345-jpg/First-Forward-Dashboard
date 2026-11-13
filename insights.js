@@ -2239,6 +2239,14 @@ FF.pages = FF.pages || {};
     const badFfGvIds = ffReport.filter((r) => { const id = normId(r.gvIdFound); return id && !/^(NOTFOUND|NA|NONE)$/.test(id) && !knownGvUnique.has(id); });
     add('medium','Cross-sheet mismatch','FF REPORT ↔ StockDataa','REPORT agents absent from StockDataa assignment',ffMissingStock.length,ffMissingStock.map((r) => `${r.agentId} ${r.name}`),'Verify ID format or confirm zero-stock state.','Agent ID · agent name');
     add('high','Cross-sheet mismatch','FF REPORT ↔ GV identity','“GV ID Found” values absent from GV Master/Tag Assignment',badFfGvIds.length,badFfGvIds.map((r) => `${r.agentId}: ${r.gvIdFound}`),'Correct the GV unique ID; do not substitute an agent name.','Agent ID: GV ID Found');
+    // 🛡 v3.125.226 — "GV ID Found" jo kisi DOOSRE naam ke GV agent ka hai (jaise Ashish Yadav Aps → APS020683 = RAKESH YADAV)
+    const gvNameById = new Map();
+    [...gvReport, ...master].forEach((r) => { const id = normId(r.agentId); const nm = String(r.name || r.agentName || '').trim(); if (id && nm && !gvNameById.has(id)) gvNameById.set(id, nm); });
+    const NSTOP = new Set(['APS', 'FF', 'GV', 'DT', 'JI', 'MR', 'MRS', 'SHRI', 'KUMAR', 'SINGH', 'BHAI', 'BEN', 'US', 'SS', 'JS', 'CN', 'KS', 'NA']);
+    const ntok = (x) => String(x || '').toUpperCase().split(/[^A-Z]+/).filter((w) => w.length >= 3 && !NSTOP.has(w));
+    const sameHuman = (a, b) => { const A = ntok(a), B = new Set(ntok(b)); return !A.length || !B.size ? String(a).trim().toUpperCase() === String(b).trim().toUpperCase() : A.some((w) => B.has(w)); };
+    const wrongFfGvIds = ffReport.filter((r) => { const id = normId(r.gvIdFound); const g = id && gvNameById.get(id); return g && r.name && !sameHuman(r.name, g); });
+    add('high','Cross-sheet mismatch','FF REPORT ↔ GV identity','“GV ID Found” kisi doosre naam ke GV agent ka hai (search me galat agent dikhta tha)',wrongFfGvIds.length,wrongFfGvIds.map((r) => `${r.agentId} ${r.name} → ${r.gvIdFound} = ${gvNameById.get(normId(r.gvIdFound))}`),'FF REPORT me us agent ka sahi GV ID likho ya khaali chhodo.','Agent ID name → GV ID = GV agent');
     add('medium','Cross-sheet mismatch','GV Master ↔ Tag Assignment','Issuing GV agents absent from Tag Assignment',masterNotAssigned.length,masterNotAssigned,'Normalize agent IDs across GV tabs.','Agent ID');
     add('medium','Cross-sheet mismatch','GV REPORT ↔ Tag Assignment','GV REPORT agents absent from Tag Assignment',reportNotAssigned.length,reportNotAssigned,'Normalize agent IDs or confirm zero-stock state.','Agent ID');
     const latestGv = master.reduce((d, r) => r.date && (!d || r.date > d) ? r.date : d, null);

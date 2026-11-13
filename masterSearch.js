@@ -530,6 +530,15 @@ FF.pages = FF.pages || {};
    * - FF row me gvIdFound / alias ho aur wahi ID GV canonical registry me ho to GV person return karo.
    * - same-name duplicates ko bina identity proof ke merge nahi karta.
    */
+  /** 🛡 v3.125.226 — do naam ek hi insaan ke lagte hain? (APS / FF / DT / JI jaise suffix hata kar, koi asli shabd common ho).
+   *  FF REPORT ka "GV ID Found" kabhi galat hota hai (Ashish Yadav Aps → APS020683 = RAKESH YADAV) — naam na mile to merge nahi. */
+  const NAME_STOP = new Set(['APS', 'FF', 'GV', 'DT', 'JI', 'MR', 'MRS', 'SHRI', 'KUMAR', 'SINGH', 'BHAI', 'BEN', 'US', 'SS', 'JS', 'CN', 'KS', 'NA']);
+  function sameHuman(a, b) {
+    const tok = (x) => normName(x).toUpperCase().split(/[^A-Z]+/).filter((w) => w.length >= 3 && !NAME_STOP.has(w));
+    const A = tok(a), B = new Set(tok(b));
+    if (!A.length || !B.size) return normName(a) === normName(b);
+    return A.some((w) => B.has(w));
+  }
   function canonicalPerson(p, idx) {
     if (!p || !idx) return p;
     // A GV person that is both agent and TL keeps its own kind (separate suggestion rows).
@@ -538,6 +547,7 @@ FF.pages = FF.pages || {};
     for (const id of ids) {
       const canonical = idx.ids && idx.ids.get(id);
       if (!canonical || !/^gv-/.test(String(canonical.kind || ''))) continue;
+      if (!sameHuman(p.name, canonical.name)) continue;      // galat "GV ID Found" → FF agent ko kisi aur ke GV card me mat chhupao
       const gv = [...idx.people.values()].find((x) => /^gv-agent$|^gv-tl$/.test(String(x.kind || ''))
         && normName(x.name) === normName(canonical.name || p.name)
         && ([x.sub, ...(x.ids || []), ...(x.alias || [])].map(normId).includes(id)));
