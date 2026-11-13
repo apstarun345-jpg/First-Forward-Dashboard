@@ -10507,7 +10507,10 @@ async function handleApi(req, res, url) {
       tagline: db.settings.tagline || 'Dashboard',
       logo: db.settings.logo || '',
       requireEmployeeName: true,
-      hasSheetSync: !!sheet.enabled
+      hasSheetSync: !!sheet.enabled,
+      // 🌐 v3.125.253 — public form ko bhi admin wali DATA mapping (EIR / tabs / GV REPORT columns) chahiye; pehle
+      // config.js ke purane default (EIR TL = BA = time column → "30 Dec 1899" TL) se list bigad jaati thi.
+      data: (() => { const S = db.settings || {}, o = {}; ['sheetId', 'gvSheetId', 'excludeTls', 'directPlaceholderTls', 'direct', 'eir', 'eirSheet', 'tabs', 'reportGid', 'stock', 'stockSheet', 'stockGid', 'tvcGroups', 'gvClassCch', 'gv'].forEach((k) => { if (S[k] !== undefined && S[k] !== null) o[k] = S[k]; }); return o; })()
     };
   };
   // v3.30 — naye format (agent block wali) requests bhi ID se mil jaati hain, chahe login form se bani hon.

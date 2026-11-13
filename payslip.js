@@ -565,35 +565,52 @@ window.FF = window.FF || {};
     };
   }
   function xlSummary(sel, spec, all) {
-    const ymPrev = (ym) => { const [y, mo] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, mo - 2, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
-    const pool = all || sel;
-    const tv = (t, k) => (k === 'total' ? (num(t.iss_total) || num(t.iss_vc4) + num(t.iss_vc20) + num(t.iss_rest)) : num(t[`iss_${k}`]));
-    const gr = (a, b) => (a ? Math.round(((b - a) / a) * 10000) / 10000 : '');
+    const pool = (all || sel).filter((m) => m && m.data).slice().sort((x, y) => y.ym.localeCompare(x.ym));
     const rows = sel.map((m) => {
       const t = m.data.totals, f = m.data.fnf, own = m.data.role === 'payee';
-      const pv = pool.find((x) => x.ym === ymPrev(m.ym) && x.data), pt = pv ? pv.data.totals : null;
-      const g = ['vc4', 'vc20', 'rest', 'total'].map((k) => (pt ? gr(tv(pt, k), tv(t, k)) : ''));
-      return [m.label, payeeNameOf(m.data, spec), m.data.payeeId, num(t.iss_total), num(t.pay_total), ...g, num(t.gross), Math.abs(num(t.tds)), num(t.final), num(t.opening), num(t.final_open), f && own ? num(f.releasing) : '', f ? (f.remark || '') : 'Not in FNF', f && f.utr ? f.utr : ''];
+      return [m.label, payeeNameOf(m.data, spec), m.data.payeeId, num(t.iss_total), num(t.pay_total), num(t.gross), Math.abs(num(t.tds)), num(t.final), num(t.opening), num(t.final_open), f && own ? num(f.releasing) : '', f ? (f.remark || '') : 'Not in FNF', f && f.utr ? f.utr : ''];
     });
     const sum = (i) => Math.round(rows.reduce((x, r) => x + (typeof r[i] === 'number' ? r[i] : 0), 0) * 100) / 100;
-    rows.push(['TOTAL', '', '', sum(3), sum(4), '', '', '', '', sum(9), sum(10), sum(11), '', '', sum(14), '', '']);
-    // 📈 chalu mahina (running) — upar sabse pehle
-    const cm = spec && spec.cm, cr = curRows(cm);
-    let curIdx = -1;
-    if (cr) {
-      const row = [`${monTag({ ym: cm.ym })} — running (1–${cm.elapsed}/${cm.days}), expected`, payeeNameOf(sel[0].data, spec), sel[0].data.payeeId, cr[3].exp, '', ...cr.map((r) => (r.g === null ? '' : Math.round(r.g * 100) / 10000)), '', '', '', '', '', '', `MTD ${cr[3].mtd}${cm.mtd != null ? ` · same-days ${cm.mtd > 0 ? '+' : ''}${cm.mtd}%` : ''}`, 'Payout not released yet'];
-      rows.unshift(row); curIdx = 0;
+    rows.push(['TOTAL', '', '', sum(3), sum(4), sum(5), sum(6), sum(7), '', '', sum(10), '', '']);
+    const nMain = rows.length;
+    // ---- 📈 Growth — alag table (summary ke niche): before-last → last (payout sheet) → current (running, expected)
+    const W = 13, blank = () => Array(W).fill('');
+    const tv = (t, k) => (k === 'total' ? (num(t.iss_total) || num(t.iss_vc4) + num(t.iss_vc20) + num(t.iss_rest)) : num(t[`iss_${k}`]));
+    const gr = (a, b) => (a ? Math.round(((b - a) / a) * 10000) / 10000 : '');
+    const last = pool[0], prev = pool[1], cm = spec && spec.cm, cr = curRows(cm);
+    const gStyle = {};      // `${ri}:${c}` → style
+    if (last) {
+      rows.push(blank());
+      const sec = blank(); sec[0] = '📈 GROWTH — issuance by class'; rows.push(sec); gStyle[`${rows.length - 1}:*`] = 'section';
+      const ln = monTag(last), pn = prev ? monTag(prev) : '', cn = cm && cm.ym ? monTag({ ym: cm.ym }) : '';
+      const head = ['Class', pn ? `${pn} issued` : '—', `${ln} issued`, pn ? `Growth ${pn} → ${ln}` : 'Growth', ...(cr ? [`${cn} MTD (1–${cm.elapsed})`, `${cn} expected (${cm.days} days)`, `Growth ${ln} → ${cn} (expected)`] : []), ...Array(W).fill('')].slice(0, W);
+      rows.push(head); const hr = rows.length - 1;
+      const hcol = ['hSlate', 'hBlue', 'hBlue', 'hTeal', 'hAmber', 'hAmber', 'hTeal'];
+      head.forEach((h, c) => { if (h) gStyle[`${hr}:${c}`] = hcol[c] || 'hSlate'; });
+      [['VC4', 'vc4'], ['VC20', 'vc20'], ['VC5+ (rest class)', 'rest'], ['Overall', 'total']].forEach(([lab, k], i) => {
+        const r = blank();
+        const a = prev ? tv(prev.data.totals, k) : '', b = tv(last.data.totals, k);
+        r[0] = lab; r[1] = a; r[2] = b; r[3] = prev ? gr(a, b) : '';
+        if (cr) { const c = cr[i]; r[4] = c.mtd; r[5] = c.exp; r[6] = c.g === null ? '' : Math.round(c.g * 100) / 10000; }
+        rows.push(r);
+        const ri = rows.length - 1, tot = k === 'total';
+        [0, 1, 2, 4, 5].forEach((c) => { gStyle[`${ri}:${c}`] = c === 0 ? (tot ? 'rowTotal' : 'label') : (tot ? 'curNum' : (i % 2 ? 'zebNum' : 'num')); });
+        [3, 6].forEach((c) => { const v = r[c]; gStyle[`${ri}:${c}`] = v === '' ? (tot ? 'rowTotal' : '') : v > 0 ? 'pUp' : v < 0 ? 'pDown' : 'pFlat'; });
+      });
+      if (cr && (cm.mtd != null || cm.exp != null)) {
+        const note = blank();
+        note[0] = `Dashboard: MTD vs ${ln} same days ${cm.mtd != null ? `${cm.mtd > 0 ? '+' : ''}${cm.mtd}%` : '—'} · forecast vs ${ln} full month ${cm.exp != null ? `${cm.exp > 0 ? '+' : ''}${cm.exp}%` : '—'} · Expected = MTD ÷ ${cm.elapsed} × ${cm.days} days`;
+        rows.push(note); gStyle[`${rows.length - 1}:0`] = 'flat';
+      }
     }
-    const H = ['Month', 'Payee Name', 'Payee ID (APN)', 'Total Issuance', 'Payable Tags', 'VC4 Growth %', 'VC20 Growth %', 'VC5+ Growth %', 'Overall Growth %', 'Gross Payout', 'TDS', 'Net Payable', 'Opening Balance', 'Net incl. Opening', 'Released (FNF)', 'Payment Status', 'Payment UTR'];
-    const hs = ['hSlate', 'hSlate', 'hSlate', 'hBlue', 'hGreen', 'hTeal', 'hTeal', 'hTeal', 'hTeal', 'hGreen', 'hRed', 'hPurple', 'hPurple', 'hPurple', 'hGreen', 'hAmber', 'hSlate'];
-    const n = rows.length;
-    return { name: 'Summary', header: H, rows, headStyleOf: (c) => hs[c], styleOf: (ri, c, v) => {
-      if (c >= 5 && c <= 8) return v === '' || v == null ? (ri === curIdx ? 'curRow' : '') : v > 0 ? 'pUp' : v < 0 ? 'pDown' : 'pFlat';
-      if (ri === curIdx) return c === 3 ? 'curNum' : 'curRow';
-      if (ri === n - 1) return c >= 9 ? 'totAmt' : 'rowTotal';
-      if (c === 15) return /hold/i.test(v) ? 'down' : /processing|pending/i.test(v) ? 'total' : /processed|paid|released/i.test(v) ? 'up' : '';
-      if (c === 11) return 'pAmt'; if (c === 10) return 'rAmt';
-      if (c >= 9 && c <= 14) return ri % 2 ? 'zebAmt' : 'amt';
+    const H = ['Month', 'Payee Name', 'Payee ID (APN)', 'Total Issuance', 'Payable Tags', 'Gross Payout', 'TDS', 'Net Payable', 'Opening Balance', 'Net incl. Opening', 'Released (FNF)', 'Payment Status', 'Payment UTR'];
+    const hs = ['hSlate', 'hSlate', 'hSlate', 'hBlue', 'hGreen', 'hGreen', 'hRed', 'hPurple', 'hPurple', 'hPurple', 'hGreen', 'hAmber', 'hSlate'];
+    return { name: 'Summary', header: H, rows, filterRows: nMain + 1, headStyleOf: (c) => hs[c], styleOf: (ri, c, v) => {
+      if (ri >= nMain) { const st = gStyle[`${ri}:${c}`] || gStyle[`${ri}:*`]; return st || ''; }
+      if (ri === nMain - 1) return c >= 5 ? 'totAmt' : 'rowTotal';
+      if (c === 11) return /hold/i.test(v) ? 'down' : /processing|pending/i.test(v) ? 'total' : /processed|paid|released/i.test(v) ? 'up' : '';
+      if (c === 7) return 'pAmt'; if (c === 6) return 'rAmt';
+      if (c >= 5 && c <= 10) return ri % 2 ? 'zebAmt' : 'amt';
       if (c === 3 || c === 4) return ri % 2 ? 'zebNum' : 'num';
       return ri % 2 ? 'zeb' : '';
     } };

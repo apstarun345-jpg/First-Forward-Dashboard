@@ -290,6 +290,7 @@ window.FF = window.FF || {};
         '<button class="btn primary" onclick="location.reload()">↻ Dobara koshish karo</button>')}</div>`;
       return false;
     }
+    try { if (cfg.data && FF.config.apply) FF.config.apply(cfg.data); } catch { /* data mapping optional */ }   // admin wali column mapping (EIR / tabs / GV)
     if (cfg.brand) { const b = U.$('#brand-name'); if (b) b.textContent = cfg.brand; }
     if (cfg.enabled === false) {
       if (main) main.innerHTML = `<div class="tr-public-wrap">${messageCard('🔒 Ye form abhi band hai',

@@ -875,7 +875,9 @@ window.FF = window.FF || {};
     return rows;
   }
   function loadReport(opts) {
-    return reportCfg().source === 'sheet' ? loadReportSheet(opts) : loadReportComputed(opts);
+    // 🌐 Public (employee) form: GV Master / Tag Assignment public ke liye band (403) → GV REPORT sheet hi padho.
+    const pub = /\/api\/public\//.test(String(FF.config.proxyPath || ''));
+    return pub || reportCfg().source === 'sheet' ? loadReportSheet(opts) : loadReportComputed(opts);
   }
   const LOADERS = { master: loadMaster, stockClass: loadStockClass, stockTl: loadStockTl, stockTlClass: loadStockTlClass, stockAgent: loadStockAgent, stockAgentClass: loadStockAgentClass, report: loadReport };
 

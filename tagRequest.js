@@ -341,13 +341,15 @@ FF.pages = FF.pages || {};
       const tls = new Map();
       const tlOf = (channel, tlName) => {
         const t = String(tlName || '').trim();
-        if (!t || !FF.config.isRealTl(t)) return null;
+        if (!t || !FF.config.isRealTl(t) || /^\d{1,2}[ -][A-Za-z]{3}[ -]\d{4}$|^\d{4}-\d{2}-\d{2}|^Date\(|^\d{1,2}:\d{2}|\b1899\b/.test(t)) return null;   // date / time galti se TL column me
         const key = `${channel}|${norm(t)}`;
         const g = tls.get(key) || { key, name: t, channel, stock: {}, cur: {}, last: {}, agents: new Set(), priority: '', grp: emptyGroups() };
         tls.set(key, g);
         return g;
       };
+      const DATEISH = /^\d{1,2}[ -][A-Za-z]{3}[ -]\d{4}$|^\d{4}-\d{2}-\d{2}|^Date\(|^\d{1,2}:\d{2}|\b1899\b/;
       const put = (channel, name, id, tlName, patch) => {
+        if (DATEISH.test(String(tlName || '').trim())) tlName = '';
         // 🆔 v3.125.248 — ek hi naam ke do agent (jaise 2× "SURAJ KUMAR", alag ID) pehle ek me mil jaate the → doosra
         // list se gayab. Ab naam same par ID alag ho to alag record (key = naam#ID).
         const nk = `${channel}|${norm(name) || digits(id)}`, did = digits(id);
@@ -397,9 +399,10 @@ FF.pages = FF.pages || {};
       // 🗂️ EIR class-month rows — authoritative issuance (FF + GV dono channel)
       (eirRows || []).forEach((row) => {
         const channel = row.channel === 'GV Partner' ? 'gv' : 'ff';
-        addEir(byKey, channel, row.name, '', row.tlName, row);
+        const eTl = DATEISH.test(String(row.tlName || '').trim()) ? '' : row.tlName;
+        addEir(byKey, channel, row.name, '', eTl, row);
         const rec = byKey.get(`${channel}|${norm(row.name)}`);
-        const g = tlOf(channel, row.tlName || (rec && rec.tlName));
+        const g = tlOf(channel, eTl || (rec && rec.tlName));
         if (g && rec) g.agents.add(`${channel}|${norm(rec.name)}`);
       });
       // Final: EIR (agar mila) REPORT se upar — issuance ka canonical source; warna REPORT value.
