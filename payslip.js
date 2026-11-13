@@ -137,7 +137,7 @@ window.FF = window.FF || {};
       ctx.fillStyle = NAVY; ctx.fillRect(0, 0, px(W), px(26));
       ctx.fillStyle = '#c9a227'; ctx.fillRect(0, px(26), px(W), px(1.1));
       ctx.fillStyle = '#ffffff'; font(5.6, 800); ctx.fillText(company, px(M), px(11.5));
-      font(3, 400); ctx.fillStyle = '#cbd5e1'; ctx.fillText('IDFC FIRST Bank FASTag Programme · Commission Payout Statement', px(M), px(17.5));
+      font(3, 400); ctx.fillStyle = '#cbd5e1'; ctx.fillText('FASTag Partner Programme · Commission Payout Statement', px(M), px(17.5));
       ctx.textAlign = 'right'; ctx.fillStyle = '#ffffff'; font(4.6, 800); ctx.fillText(title || 'PAYSLIP', px(W - M), px(11.5));
       ctx.textAlign = 'left';
       y = 33;
@@ -257,6 +257,7 @@ window.FF = window.FF || {};
     } else P.kv([['Payment status', 'Not available in FNF sheet for this month'], ['', '']]);
     // ---- agent-wise (TL)
     if (isPayee && d.agents.length) {
+      if (P.y + 12 + Math.min(d.agents.length + 2, 8) * 5.6 > H - 18) P.newPage(title);   // table ke 2-3 row akele na tootein
       P.section(`Agent-wise breakdown (${d.agents.length} agents)`);
       const L = d.agents.slice().sort((a, b) => num(b.final) - num(a.final));
       P.table([{ t: '#', w: 9, a: 'r' }, { t: 'Agent name', w: 52 }, { t: 'Agent ID', w: 26 }, { t: 'Issued', w: 18, a: 'r' }, { t: 'Payable', w: 18, a: 'r' }, { t: 'Payout', w: 31, a: 'r' }, { t: 'Final', w: 32, a: 'r' }],
@@ -272,7 +273,7 @@ window.FF = window.FF || {};
     let g = 0, td = 0, nt = 0, rl = 0;
     const rows = sel.map((m) => { const t = m.data.totals, f = m.data.fnf; g += num(t.gross); td += Math.abs(num(t.tds)); nt += num(t.final); const own = m.data.role === 'payee'; rl += f && own ? num(f.releasing) : 0; return [m.label, int(t.pay_total), inr(t.gross), inr(Math.abs(num(t.tds))), inr(t.final), f ? (own ? inr(f.releasing) : 'via TL') : '—', f ? (f.remark || '—') : 'Not in FNF', f && f.utr ? f.utr : '']; });
     rows.push(['Total', int(sel.reduce((s, m) => s + num(m.data.totals.pay_total), 0)), inr(g), inr(td), inr(nt), inr(rl), '', '']);
-    P.table([{ t: 'Month', w: 27 }, { t: 'Payable tags', w: 20, a: 'r' }, { t: 'Gross', w: 24, a: 'r' }, { t: 'TDS', w: 19, a: 'r' }, { t: 'Net payable', w: 25, a: 'r' }, { t: 'Released', w: 24, a: 'r' }, { t: 'Status', w: 22 }, { t: 'UTR', w: 25 }], rows, { foot: true, title: 'PAYOUT SUMMARY' });
+    P.table([{ t: 'Month', w: 27 }, { t: 'Payable tags', w: 20, a: 'r' }, { t: 'Gross', w: 24, a: 'r' }, { t: 'TDS', w: 19, a: 'r' }, { t: 'Net payable', w: 25, a: 'r' }, { t: 'Released', w: 24, a: 'r' }, { t: 'Status', w: 19 }, { t: 'UTR', w: 28 }], rows, { foot: true, title: 'PAYOUT SUMMARY' });
     P.text(`Total net payable for the selected period: ${inr(nt)} (Rupees ${words(nt)} Only)`, M, P.y + 2, { size: 3, w: 700, color: NAVY }); P.y += 6;
   }
   async function download(spec, sel, mode, company) {
