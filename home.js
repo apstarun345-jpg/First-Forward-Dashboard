@@ -1470,7 +1470,7 @@ FF.pages = FF.pages || {};
         const log = U.$('.ps-home-log', box); b.disabled = true; b.textContent = '⏳ Refresh ho raha hai…'; log.innerHTML = '';
         try {
           const out = await FF.payslip.refresh((t) => { log.innerHTML += `<div>${esc(t)}</div>`; });
-          log.innerHTML += `<div><b>✅ Ho gaya — ${out.months} mahine, ${out.kb} KB${out.durable ? ' (sheet backup ✓)' : ''}. Ab search par payout turant dikhega.</b></div>`;
+          log.innerHTML += `<div><b>✅ Ho gaya — ${out.months} mahine, ${out.kb} KB${out.durable ? ' (sheet backup ho raha hai)' : ''}. Ab search par payout turant dikhega.</b></div>`;
           b.textContent = '✅ Updated';
         } catch (err) { log.innerHTML += `<div>⚠️ ${esc((err && err.message) || err)}</div>`; b.textContent = '🔄 Payout refresh'; }
         b.disabled = false;
