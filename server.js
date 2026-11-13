@@ -10281,7 +10281,7 @@ async function handleApi(req, res, url) {
     try {
       const r = await fetch(urlStr, { headers: { Authorization: `Token ${tok}`, Accept: 'application/json' }, signal: ac.signal });
       const txt = await r.text();
-      if (r.status === 401 || r.status === 403) throw new HttpError(502, 'Delhivery ne token reject kiya (401/403) — token check karo.');
+      if (r.status === 401 || r.status === 403) { console.warn(`delhivery ${r.status}: ${String(txt).replace(/\s+/g, ' ').slice(0, 200)}`); throw new HttpError(502, `Delhivery ne request reject ki (HTTP ${r.status})${/cloudflare|access denied|forbidden|<html/i.test(txt) ? ' — server IP block lag raha hai' : ' — token check karo'}: ${String(txt).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)}`); }
       if (!r.ok) throw new HttpError(502, `Delhivery HTTP ${r.status}`);
       try { return JSON.parse(txt); } catch { throw new HttpError(502, 'Delhivery ka response samajh nahi aaya.'); }
     } catch (err) { if (err.name === 'AbortError') throw new HttpError(504, 'Delhivery ne time par jawab nahi diya.'); throw err; }
