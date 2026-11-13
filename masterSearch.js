@@ -537,10 +537,12 @@ FF.pages = FF.pages || {};
     const tok = (x) => normName(x).toUpperCase().split(/[^A-Z]+/).filter((w) => w.length >= 3 && !NAME_STOP.has(w));
     const A = tok(a), B = new Set(tok(b));
     if (!A.length || !B.size) return normName(a) === normName(b);
-    if (A.some((w) => B.has(w))) return true;
-    // "SONUKHAN FST" ↔ "sonu khan": jude hue naam — ek ka shabd doosre ke jude naam me
-    const ja = A.join(''), jb = [...B].join('');
-    return A.some((w) => w.length >= 4 && jb.includes(w)) || [...B].some((w) => w.length >= 4 && ja.includes(w));
+    // pehla naam milna chahiye (sirf surname "YADAV" common hona kaafi nahi: Ashish Yadav ≠ Rakesh Yadav)
+    const Bl = [...B];
+    if (A[0] === Bl[0]) return true;
+    // "SONUKHAN FST" ↔ "sonu khan": jude hue naam
+    const ja = A.join(''), jb = Bl.join('');
+    return (ja.length >= 6 && (ja.startsWith(jb) || jb.startsWith(ja))) || (A[0].length >= 5 && jb.startsWith(A[0])) || (Bl[0].length >= 5 && ja.startsWith(Bl[0]));
   }
   function canonicalPerson(p, idx) {
     if (!p || !idx) return p;
