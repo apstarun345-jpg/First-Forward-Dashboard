@@ -76,7 +76,13 @@ window.FF = window.FF || {};
     const tabs = core.monthTabs(now.toISOString().slice(0, 7), 8);   // 7 mahine data — sabse purane ka bhi growth (pichhla mahina) mile
     const thin = (rows) => rows.map((r) => { const o = {}; for (const [k, v] of Object.entries(r)) { if (v === 0 || v === '') continue; o[k] = k === 'pan' ? core.maskPan(v) : (k === 'account' ? core.maskAcc(v) : v); } return o; });
     const readTab = async (kind, tab) => {
-      const r = await fetch(`/api/payout/raw?kind=${kind}&tab=${encodeURIComponent(tab)}`, { credentials: 'same-origin', cache: 'no-store' });
+      let r;
+      for (let k = 0; k < 3; k++) {     // Google / server ki kabhi-kabhar wali galti par 2 baar aur
+        r = await fetch(`/api/payout/raw?kind=${kind}&tab=${encodeURIComponent(tab)}`, { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
+        if (r && r.ok) break;
+        await new Promise((ok) => setTimeout(ok, 2500 * (k + 1)));
+      }
+      if (!r) throw new Error('Network error');
       if (!r.ok) { let e = ''; try { e = (await r.json()).error; } catch { /* */ } throw new Error(e || `HTTP ${r.status}`); }
       const j = await r.json();
       if (!j.ok) { if (/nahi mila/i.test(j.error || '')) return null; throw new Error(j.error || 'sheet read fail'); }
