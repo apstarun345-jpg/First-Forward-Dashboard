@@ -37,7 +37,7 @@
   const cache = { ag: null, agAt: 0, s: null, sAt: 0 };
   /** Har agent: ch, name, id, tl, direct, cur, last, vc4, vc20, vc5, stock, rate (/din), cover (din), need … */
   function agents() {
-    if (cache.ag && Date.now() - cache.agAt < 60e3) return cache.ag;
+    if (cache.ag && Date.now() - cache.agAt < (cache.agFull ? 60e3 : 8e3)) return cache.ag;
     const R = FF.smartQ && FF.smartQ._rows;
     if (!R) return [];
     let L = [];
@@ -47,8 +47,21 @@
       return { ...a, ch: String(a.ch || '').toLowerCase() === 'gv' ? 'gv' : 'ff', key: `${String(a.ch || '').toLowerCase() === 'gv' ? 'gv' : 'ff'}|${NK(a.name)}`,
         tl: clean(a.tl) || (a.direct ? 'Direct' : '—'), rate, stock, cover: rate > 0 ? stock / rate : (stock > 0 ? Infinity : 0) };
     });
-    if (L.length) { cache.ag = L; cache.agAt = Date.now(); }
+    if (L.length) { cache.ag = L; cache.agAt = Date.now(); cache.agFull = L.some((a) => a.ch === 'ff') && L.some((a) => a.ch === 'gv'); }
+    if (!cache.agFull) ensureData();
     return L;
+  }
+  /** FF performance agents + GV REPORT + EIR daily load karwao (robot har page par chalta hai, data shayad abhi load na ho). */
+  let ensP = null, ensAt = 0;
+  function ensureData() {
+    if (ensP || Date.now() - ensAt < 60e3) return ensP || Promise.resolve();
+    ensAt = Date.now();
+    const jobs = [];
+    try { if (FF.lazy && FF.lazy.need) jobs.push(Promise.resolve(FF.lazy.need('performance')).then(() => { const P = FF.pages && FF.pages.performance; return P && P.ensureLoaded ? P.ensureLoaded({ light: true }) : null; })); } catch { /* optional */ }
+    try { if (FF.gv && FF.gv.need) jobs.push(FF.gv.need('report')); } catch { /* optional */ }
+    try { if (FF.store && FF.store.need) jobs.push(FF.store.need('daily')); } catch { /* optional */ }
+    ensP = Promise.allSettled(jobs).then(() => { cache.ag = null; cache.s = null; ensP = null; });
+    return ensP;
   }
   const agentMap = () => { const m = new Map(); agents().forEach((a) => { m.set(a.key, a); if (a.id) m.set(`${a.ch}#${NK(a.id)}`, a); }); return m; };
 
@@ -511,10 +524,12 @@
   function rememberAgent(a) { if (!a || !a.name) return; ctx.agent = { name: a.name, id: a.id || '', ch: a.ch || '' }; ctx.at = Date.now(); LS.set(K.ctx, ctx); }
   /** "isko kitna bhejna chahiye", "stock kitna hai" — naam nahi hai to pichhla agent */
   function contextAnswer(q) {
-    const t = ` ${String(q || '').toLowerCase()} `;
+    const norm = (x) => ` ${String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+    const t = norm(q);
     const A = agents(); if (!A.length) return null;
-    // naam mila? → yaad rakho
-    const hit = A.filter((a) => a.name.length >= 4 && t.includes(` ${a.name.toLowerCase()} `)).sort((x, y) => y.name.length - x.name.length)[0];
+    // naam / ID mila? → yaad rakho (lamba naam pehle: "mohit tiwari" > "mohit"; barabar ho to zyada issuance wala)
+    const hit = A.filter((a) => { const n = norm(a.name); return (n.trim().length >= 4 && t.includes(n)) || (a.id && String(a.id).length >= 4 && t.includes(norm(a.id))); })
+      .sort((x, y) => norm(y.name).length - norm(x.name).length || y.cur - x.cur)[0];
     let a = hit;
     const pron = /\b(isko|isse|iska|iski|iske|usko|uska|uski|uske|ise|use|unka|inka|inko|unko)\b/.test(t) || /^\s*(stock|kitna|kitne|bhejna|dispatch|growth|mobile|number|call)\b/.test(t.trim());
     if (!a && pron && ctx.agent && Date.now() - num(ctx.at) < 30 * 60e3) a = A.find((x) => NK(x.name) === NK(ctx.agent.name) && (!ctx.agent.ch || x.ch === ctx.agent.ch));
@@ -525,7 +540,9 @@
       const P = dispatchPlan(); const x = P && P.send.find((s) => s.a.key === a.key);
       if (x) return { ...base, title: `${a.name} — dispatch`, view: 'text', head: `${x.parts.map(([c, n]) => `${c} ${n}`).join(' + ')} = ${fmt(x.need)} tags bhejne ki salah (stock ${fmt(a.stock)}, roz ~${r1(a.rate)}, ${suggestDays()} din ke hisaab se).`, say: `${a.name} को ${fmt(x.need)} टैग्स भेजने की सलाह है।` };
       const h = P && (P.hold.find((s) => s.a.key === a.key) || P.excess.find((s) => s.a.key === a.key));
-      return { ...base, title: `${a.name} — dispatch`, view: 'text', head: h ? `Abhi mat bhejo — stock ${fmt(a.stock)} pada hai (roz ~${r1(a.rate)}).` : `Abhi zaroorat nahi — stock ${fmt(a.stock)} ~${Number.isFinite(a.cover) ? Math.floor(a.cover) : '∞'} din chalega.`, say: 'अभी भेजने की ज़रूरत नहीं है।' };
+      if (h) return { ...base, title: `${a.name} — dispatch`, view: 'text', head: `Abhi mat bhejo — stock ${fmt(a.stock)} pada hai (roz ~${r1(a.rate)}, is mahine ${fmt(a.cur)} issue).`, say: 'अभी मत भेजो, स्टॉक पड़ा है।' };
+      if (a.stock <= Math.max(2, a.rate * 3) && (a.cur > 0 || a.last > 0)) { const n = Math.max(5, Math.ceil(Math.max(a.rate * suggestDays(), a.last / 3) / 5) * 5); return { ...base, title: `${a.name} — dispatch`, view: 'text', head: `Stock ${fmt(a.stock)} — speed kam hai (roz ~${r1(a.rate)}), isliye chhota lot: ~${fmt(n)} tags (VC4). Pehle call karke demand pakki karo.`, say: `छोटा लॉट, लगभग ${fmt(n)} टैग्स।` }; }
+      return { ...base, title: `${a.name} — dispatch`, view: 'text', head: `Abhi zaroorat nahi — stock ${fmt(a.stock)} ~${Number.isFinite(a.cover) ? Math.floor(a.cover) : '∞'} din chalega.`, say: 'अभी भेजने की ज़रूरत नहीं है।' };
     }
     if (/(stock|maal)/.test(t)) return { ...base, title: `${a.name} — stock`, view: 'text', head: `${fmt(a.stock)} tags stock · roz ~${r1(a.rate)} → ~${Number.isFinite(a.cover) ? Math.floor(a.cover) : '∞'} din ka.`, say: `${a.name} के पास ${fmt(a.stock)} टैग्स हैं।` };
     if (/(mobile|number|call|phone)/.test(t)) { const m = mobOf(a); return { ...base, title: `${a.name} — mobile`, view: 'text', head: m ? `📞 ${m}` : 'Mobile nahi mila (Address tab / Agent Details me nahi).', say: m ? `नंबर है ${m.split('').join(' ')}` : 'नंबर नहीं मिला।' }; }
@@ -563,7 +580,7 @@
   // ================================================================ RUN + robot se jodna
   let started = false;
   function run() {
-    try { series(); agents(); mark('lastBrain'); mark('nextScan', new Date(Date.now() + 10 * 60e3).toISOString()); } catch { bump('failed'); }
+    try { ensureData(); series(); agents(); mark('lastBrain'); mark('nextScan', new Date(Date.now() + 10 * 60e3).toISOString()); } catch { bump('failed'); }
   }
   function attach() {
     const M = FF.mascot;
