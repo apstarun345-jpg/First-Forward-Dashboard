@@ -1423,6 +1423,7 @@ body.colorful .from-hdr { color: #166534; }
     if (!idx || !idx.list) return [];
     const q = norm(state.stockBoard.q);
     const dq = digits(state.stockBoard.q);
+    const fam = dq.length >= 4 ? idFamily(String(state.stockBoard.q).trim()) : [];
     const ch = state.stockBoard.channel || 'both';
     const rows = idx.list.filter((a) => {
       if (ch !== 'both' && a.channel !== ch) return false;
