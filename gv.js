@@ -229,12 +229,14 @@ window.FF = window.FF || {};
     // 🧹 v3.62 — executive / forecast / gvCommission pages hata di gayi, isliye unke perms se ab
     // koi dataset load nahi hota (warna bina use ke GV data bhi download hota rehta tha).
     const pages = ['home', 'dataQuality', 'tagIssued', 'gvDashboard', 'gvTrend', 'gvStock', 'gvPerformance', 'dualChannel', 'compare'];
-    const anyPage = pages.some(can);
+    const isAdmin = !!(FF.auth && FF.auth.isAdmin && FF.auth.isAdmin());
+    const anyGvDataPage = pages.some((page) => page !== 'tagIssued' && can(page));
     const list = [];
-    if (anyPage || can('sheet:GV Master')) list.push('master');
+    // Tag Issued's public-facing KPI view uses EIR aggregates; only admins need GV Master rows for agent/TL search and drilldowns.
+    if (isAdmin || anyGvDataPage || can('sheet:GV Master')) list.push('master');
     if (can('gvStock') || can('gvDashboard') || can('dualChannel') || can('dataQuality') || can('compare') || can('sheet:Tag Assignment')) list.push('stockClass', 'stockTl', 'stockTlClass', 'stockAgent', 'stockAgentClass');
     if (can('gvPerformance') || can('gvDashboard') || can('dualChannel') || can('compare') || can('sheet:GV REPORT')) list.push('report');
-    return list.length ? list : (anyPage ? Object.keys(DATASETS) : []);
+    return list.length ? list : (anyGvDataPage ? Object.keys(DATASETS) : []);
   }
   /** True when this user can see anything from the GV sheet. */
   function enabled() {
