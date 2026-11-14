@@ -500,6 +500,13 @@ window.FF = window.FF || {};
       const t = ensure('gv-tl', r.tlName || `TL ${r.tlId}`, r.tlId, {});
       if (t) t.stock = Math.max(t.stock, Number(r.n) || 0);
     }
+    // 🧮 v3.125.275 — list / dropdown me bhi TL stock = Tag Assignment TL total + TL ki apni holder row jo kisi aur TL / Direct ke neeche hai
+    //    (tlStock() jaisa hi; Sumit Dixit: 36 + 246 = 282).
+    for (const t of map.values()) {
+      if (t.kind !== 'gv-tl' || !t.id) continue;
+      const own = lookup(ix.stock.byAgentId, [idKey(t.id)]).filter((r) => idKey(r && r.tlId) !== idKey(t.id));
+      if (own.length) t.stock += sum(own, (r) => r.n);
+    }
     for (const r of reportRows()) {
       const a = ensure('gv-agent', r.agentName, r.agentId, { tlName: r.tlName, tlId: r.tlId });
       if (a) {
