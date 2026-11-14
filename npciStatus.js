@@ -32,7 +32,7 @@ FF.pages = FF.pages || {};
   }
   /** Chassis / Tag ID diya tha → result REGNUMBER 1-10 akshar = VRN update ho chuka; baaki not updated. */
   const vrnUpdated = (reg) => { const r = String(reg || '').replace(/[^A-Z0-9]/gi, ''); return r.length >= 1 && r.length <= 10; };
-  const statusKey = (rec) => (rec ? (rec.npci_ExcCode || rec.tagDetails_npci_ExcCode || '—') : 'Not found');
+  const statusKey = (rec) => (rec ? (rec.npci_ExcCode || rec.tagDetails_npci_ExcCode || 'Blank (NPCI ne status nahi diya)') : 'Not found');
   const tone = (s) => (/^active$/i.test(s) ? 'green' : /low balance/i.test(s) ? 'amber' : /black|hot/i.test(s) ? 'red' : /closed|replaced|dispos|surrender/i.test(s) ? 'gray' : /not found|fail|unregister/i.test(s) ? 'red' : 'violet');
 
   /** Flat rows (table / exports). allTags=false → har input ki ek (primary) row. */
@@ -118,7 +118,7 @@ FF.pages = FF.pages || {};
     if (f === 'upd') return rows.filter((r) => r.vrnUpd === 'Updated');
     if (f === 'notupd') return rows.filter((r) => r.vrnUpd === 'Not updated');
     if (f === 'retry') return rows.filter((r) => r.failed && r.failLab === 'Check fail — dobara karo');
-    if (f.startsWith('st:')) { const want = f.slice(3); return rows.filter((r) => (r.failed ? r.failLab : (r.npci_ExcCode || r.tagDetails_npci_ExcCode || '—')) === want); }
+    if (f.startsWith('st:')) { const want = f.slice(3); return rows.filter((r) => (r.failed ? r.failLab : (r.npci_ExcCode || r.tagDetails_npci_ExcCode || 'Blank (NPCI ne status nahi diya)')) === want); }
     return rows;
   }
 
