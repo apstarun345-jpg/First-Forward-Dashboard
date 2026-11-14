@@ -789,7 +789,12 @@ FF.pages = FF.pages || {};
 
   function search(q) {
     const idx = state.full || state.light;
-    const query = clean(q);
+    // v3.125.283 — "varsha kanwar TL" / "TL varsha" / "ramesh agent" → role shabd hata ke naam se dhoondo, sirf wahi role
+    let roleWant = '';
+    let query = clean(q);
+    const roleRx = /(^|\s)(tl|t\.l\.?|team\s*leader|agent)(?=\s|$)/i;
+    const rm = roleRx.exec(query);
+    if (rm && query.replace(roleRx, ' ').trim().length >= 2) { roleWant = /agent/i.test(rm[2]) ? 'agent' : 'tl'; query = clean(query.replace(roleRx, ' ')); }
     const out = { q: query, people: [], tags: [], ids: [], heavy: !!(state.full && state.full.fullLoaded), matched: 0 };
     if (!query) return out;
     const nql = query.toLowerCase();
@@ -806,6 +811,7 @@ FF.pages = FF.pages || {};
       //    Pehle "varsha" par Varsha Kanwar ke 300 agents stock se upar aa jaate the aur TL khud 60 ke bahar kat jaata tha.
       const nameRank = (p) => { const n = normName(p.name || ''); return n === nn ? 0 : n.startsWith(nn) ? 1 : n.includes(nn) ? 2 : String(p.sub || '').toUpperCase().includes(query.toUpperCase()) ? 2 : 3; };
       const tlBoost = (p) => (/-tl$/.test(p.kind || '') ? 0 : 1);
+      if (roleWant) out.people = out.people.filter((p) => (roleWant === 'tl' ? /-tl$/.test(p.kind || '') : /-agent$/.test(p.kind || '')));
       out.people.sort((a, b) => (nameRank(a) - nameRank(b)) || (tlBoost(a) - tlBoost(b)) || (b.bars.size - a.bars.size) || (b.n - a.n));
       if (out.people.length > 60) out.people.length = 60;
     }
