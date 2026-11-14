@@ -78,7 +78,32 @@ html body #app-boot.app-boot .boot-progress::after { background: linear-gradient
 @keyframes ap3dPulse { 0%, 100% { transform: translateX(0) scale(1); } 50% { transform: translateX(5px) scale(1.06); } }
 @keyframes ap3dSpin { to { transform: rotate(360deg); } }
 @keyframes ap3dFloor { from { background-position: 0 0, 0 0; } to { background-position: 0 0, 0 64px; } }
-@media (prefers-reduced-motion: reduce) {
-  .ap3d, .ap3d-word::after, .ap3d-play, html body #app-boot.app-boot::before, html body #app-boot.app-boot::after { animation: none !important; }
+/* 🎬 v3.125.282 — Mac me "Reduce motion" ON ho tab bhi opening screen ki animation + effect dikhe (Tarun ka kehna).
+   Global reduce-motion rules (styles.css / pwa-premium.css / a11y-motion / ff-no-anim) ko yahan zyada specific selector se wapas chalu kiya. */
+html body #app-boot.app-boot .ap3d { animation: ap3dIn .9s cubic-bezier(.2,.9,.2,1) both, ap3dFloat 4s ease-in-out .9s infinite !important; }
+html body #app-boot.app-boot .ap3d-word::after { animation: ap3dShine 3.2s ease-in-out 1s infinite !important; }
+html body #app-boot.app-boot .ap3d-play { animation: ap3dPulse 1.6s ease-in-out infinite !important; }
+html body #app-boot.app-boot::before { animation: ap3dSpin 14s linear infinite !important; }
+html body #app-boot.app-boot::after { animation: ap3dFloor 3.2s linear infinite !important; }
+html body #app-boot.app-boot .boot-progress::after { animation-play-state: running !important; }
+html body #app-boot.app-boot .ap3d-word::before { animation: ap3dGlow 2.6s ease-in-out infinite !important; }
+
+/* 💎 v3.125.282 — animation band ho tab bhi text me 3D dikhe: zyada gehra extrude, halka tilt, peeche golden glow */
+html body #app-boot.app-boot .ap3d-row { transform: perspective(700px) rotateX(10deg); }
+html body #app-boot.app-boot .ap3d-word::before {
+  content: ''; position: absolute; left: -6%; right: -6%; top: 20%; bottom: -10%; z-index: -1; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 60%, rgba(250,204,21,.35), rgba(168,85,247,.18) 45%, transparent 70%);
+  filter: blur(18px);
 }
+html body #app-boot.app-boot .ap3d-a {
+  background: linear-gradient(180deg, #ffffff 0%, #ffffff 45%, #dbe4f0 55%, #ffffff 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px 0 #cbd5e1) drop-shadow(0 1px 0 #b6c1d1) drop-shadow(0 1px 0 #94a3b8) drop-shadow(0 1px 0 #7a869d) drop-shadow(0 1px 0 #64748b) drop-shadow(0 1px 0 #475569) drop-shadow(0 8px 10px rgba(0,0,0,.55));
+  text-shadow: none;
+}
+html body #app-boot.app-boot .ap3d-b {
+  background: linear-gradient(180deg, #fff7c2 0%, #fde047 30%, #facc15 52%, #eab308 70%, #fbbf24 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px 0 #eaa20a) drop-shadow(0 1px 0 #dc8f08) drop-shadow(0 1px 0 #cc7b06) drop-shadow(0 1px 0 #b86a05) drop-shadow(0 1px 0 #a35a04) drop-shadow(0 1px 0 #8c4b03) drop-shadow(0 8px 10px rgba(0,0,0,.55)) drop-shadow(0 0 18px rgba(250,204,21,.35));
+  text-shadow: none;
+}
+@keyframes ap3dGlow { 0%, 100% { opacity: .65; } 50% { opacity: 1; } }
 @media (max-width: 520px) { .ap3d-tag { letter-spacing: .16em; font-size: 10.5px; white-space: nowrap; } }

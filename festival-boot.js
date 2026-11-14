@@ -8,7 +8,8 @@
     if (!boot) return;
     try { if (localStorage.getItem('ff_fest') === 'off') return; } catch (e) { /* storage blocked */ }
     var H = document.documentElement;
-    if ((window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) || H.classList.contains('a11y-motion') || H.classList.contains('ff-no-anim')) return;
+    // v3.125.282 — Mac ka "Reduce motion" ON ho tab bhi opening fireworks (sirf site ki apni setting se band)
+    if (H.classList.contains('a11y-motion') || H.classList.contains('ff-no-anim')) return;
 
     var cv = document.createElement('canvas');
     cv.className = 'boot-fw-canvas'; cv.setAttribute('aria-hidden', 'true');

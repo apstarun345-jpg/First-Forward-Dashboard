@@ -802,7 +802,11 @@ FF.pages = FF.pages || {};
     if (idx && nn.length >= 2) {
       const candidates = idx.personGrams ? (idx.personGrams.get(nn.slice(0, 2)) || []) : idx.people.values();
       for (const p of candidates) if ((p._searchHay || '').includes(nn)) out.people.push(p);
-      out.people.sort((a, b) => (b.bars.size - a.bars.size) || (b.n - a.n));
+      // v3.125.282 — jiske NAAM me query ho (TL ho ya agent) wo pehle; sirf TL-naam se match hue agents baad me.
+      //    Pehle "varsha" par Varsha Kanwar ke 300 agents stock se upar aa jaate the aur TL khud 60 ke bahar kat jaata tha.
+      const nameRank = (p) => { const n = normName(p.name || ''); return n === nn ? 0 : n.startsWith(nn) ? 1 : n.includes(nn) ? 2 : String(p.sub || '').toUpperCase().includes(query.toUpperCase()) ? 2 : 3; };
+      const tlBoost = (p) => (/-tl$/.test(p.kind || '') ? 0 : 1);
+      out.people.sort((a, b) => (nameRank(a) - nameRank(b)) || (tlBoost(a) - tlBoost(b)) || (b.bars.size - a.bars.size) || (b.n - a.n));
       if (out.people.length > 60) out.people.length = 60;
     }
     // exact / prefix ID hits — only inspect IDs sharing the first 4 normalized characters.

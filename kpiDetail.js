@@ -543,6 +543,8 @@ window.FF = window.FF || {};
     const wrongRule = String(spec.f || '').split(',').map((x) => x.trim()).includes('wrong') && !spec.agent && !spec.agentId && !spec.tl && !spec.tlId && spec.scope === 'mtd' && String(spec.eir) === '1' && FF.model.loadWrongVrn && FF.config.vrnRules().enabled;
     if (wrongRule) { try { all = await FF.model.loadDaily({ wrongVrn: true }); } catch { all = null; } }
     if (!all) all = await issuanceRows(spec.src, spec);
+    // GV agent-wise ke liye GV Master ledger (EIR ki GV rows me agent nahi hota) — max 8s wait, na mile to Unknown hi
+    if (spec.src !== 'ff' && FF.gv && FF.gv.need) { try { await Promise.race([Promise.resolve(FF.gv.need('master', { only: true })).catch(() => null), new Promise((r) => setTimeout(r, 8000))]); } catch { /* optional */ } }
     const p = period(spec, all);
     const pp = previousPeriod(p);
     const filt = filterOf(spec.f);
@@ -691,6 +693,32 @@ window.FF = window.FF || {};
       map.clear();
       for (const [k, v] of sheetMap.entries()) map.set(k, v);
     }
+    // 🟩 v3.125.282 — EIR ki GV rows me agent nahi hota ("Unknown") → GV Master ledger se usi date / class ke agent-wise numbers
+    try {
+      const isUnk = (r) => r.channel === 'GV Partner' && !r.agentId && !r.agentName;
+      const unkRows = cur.filter(isUnk);
+      const ledgerFn = FF.gv && typeof FF.gv.rows === 'function' ? FF.gv.rows : null;
+      if (unkRows.length && ledgerFn && !unkRows.every((r) => r.type === 'REPLACEMENT')) {
+        const keys = new Set(unkRows.map((r) => r.key)), groups = new Set(unkRows.map((r) => r.group).filter(Boolean));
+        const unkTot = unkRows.reduce((x, r) => x + (Number(r.n) || 0), 0);
+        const led = (ledgerFn() || []).filter((x) => x && x.date && keys.has(U.dateKey(new Date(x.date))) && (!groups.size || groups.has(x.group)));
+        if (led.length) {
+          for (const [k, v] of [...map.entries()]) if (v.channel === 'GV Partner' && !v.id && (!v.name || v.name === 'Unknown')) map.delete(k);
+          let ledTot = 0;
+          led.forEach((x) => {
+            const name = x.agentName || x.agentId || 'Unknown';
+            const key = `GV Partner|${personKey(x.agentId || name)}`;
+            const a = map.get(key) || { name, channel: 'GV Partner', tl: x.tlName || '', id: x.agentId || '', n: 0, vc4: 0, comm: 0, repl: 0, chassis: 0, days: new Set(), fromMaster: true };
+            a.n += 1; ledTot += 1; a.days.add(U.dateKey(new Date(x.date)));
+            if (x.group === 'VC4') a.vc4 += 1; else a.comm += 1;
+            if (!a.tl && x.tlName) a.tl = x.tlName;
+            map.set(key, a);
+          });
+          const left = unkTot - ledTot;
+          if (left > 0) map.set('GV Partner|__unk', { name: 'GV — agent pata nahi (GV Master me row nahi)', channel: 'GV Partner', tl: '', id: '', n: left, vc4: 0, comm: 0, repl: 0, chassis: 0, days: new Set() });
+        }
+      }
+    } catch { /* GV Master ledger optional */ }
     const all = [...map.values()].sort((a, b) => b.n - a.n);
     const gv = all.filter((a) => a.channel === 'GV Partner');
     const ff = all.filter((a) => a.channel !== 'GV Partner');
