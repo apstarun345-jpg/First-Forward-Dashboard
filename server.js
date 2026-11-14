@@ -6912,7 +6912,7 @@ const EIR_RAW_DIR = path.join(DATA_DIR, 'eir-raw');
 const EIR_RAW_MEM = new Map();          // day → { rows, sig, at }  (chhota LRU)
 const EIR_RAW_MEM_MAX = 8;            // baaki disk se (memory guard)
 const EIR_RAW_INFLIGHT = new Map();     // span key → promise
-let eirRawPrewarming = null;
+let eirRawPrewarming = null, eirRawLastErr = null;
 function eirRawCfg() {
   const s = db.settings || {}, e = { ...(DEFAULT_SETTINGS.eir || {}), ...(s.eir || {}) };
   const L = (k, d) => colLetter(e[k], d);
@@ -6955,8 +6955,16 @@ async function eirRawFetchSpan(a, b, cfg) {
   const job = (async () => {
     const date = cfg.cols[0];
     const tq = `select ${cfg.cols.join(', ')} where toDate(${date}) >= date '${a}' and toDate(${date}) <= date '${b}' order by ${date} desc limit 60000`;
-    const qp = new URLSearchParams({ id: cfg.id, sheet: cfg.tab, tq });
-    const r = await gvizPageServerInner(qp, cfg.tab);
+    const qp = new URLSearchParams({ id: cfg.id, sheet: cfg.tab, tq, headers: '1' });
+    let r = null, lastErr = null;
+    for (let k = 0; k < 4 && !r; k++) {
+      try { r = await gvizPageServerInner(qp, cfg.tab); } catch (err) {
+        lastErr = err;
+        console.log(`🗂️ EIR raw ${a}…${b} try ${k + 1}: ${String((err && err.message) || err).slice(0, 200)}`);
+        if (k < 3) await new Promise((res) => setTimeout(res, err && err.rateLimited ? Math.max(15e3, Number(err.retryAfterMs) || 0) : 5e3 * (k + 1)));
+      }
+    }
+    if (!r) throw lastErr || new Error('EIR rows nahi aayi');
     const byDay = new Map();
     for (let d = a; d <= b; d = addDayKey(d, 1)) byDay.set(d, []);
     for (const row of r.rows || []) {
@@ -6984,11 +6992,12 @@ async function eirRawRows(from, to, opts = {}) {
   const out = new Map(); const missing = [];
   for (let d = from; d <= to; d = addDayKey(d, 1)) { const ent = eirRawRead(d, cfg); if (ent) { if (!opts.noCollect) out.set(d, ent.rows); } else missing.push(d); }
   const spans = [];
-  for (const d of missing) { const last = spans[spans.length - 1]; if (last && addDayKey(last[1], 1) === d && last[2] < 4) { last[1] = d; last[2]++; } else spans.push([d, d, 1]); }
+  for (const d of missing) { const last = spans[spans.length - 1]; if (last && addDayKey(last[1], 1) === d && last[2] < (opts.spanDays || 8)) { last[1] = d; last[2]++; } else spans.push([d, d, 1]); }
   let next = 0; const errors = [];
   const worker = async () => { while (next < spans.length) { const [a, b] = spans[next++]; try { const m = await eirRawFetchSpan(a, b, cfg); if (!opts.noCollect) for (const [d, rows] of m) out.set(d, rows); } catch (err) { errors.push(`${a}…${b}: ${err.message || err}`); } } };
   await Promise.all(Array.from({ length: Math.min(opts.parallel || 3, spans.length) }, worker));
   const rows = []; for (let d = to; d >= from; d = addDayKey(d, -1)) { const r = out.get(d); if (r) for (const x of r) rows.push(x); }
+  if (errors.length) eirRawLastErr = { at: new Date().toISOString(), errors: errors.slice(0, 5) };
   return { rows, cachedDays: missingCount(from, to) - missing.length, fetchedDays: missing.length, errors };
   function missingCount(a, b) { let n = 0; for (let d = a; d <= b; d = addDayKey(d, 1)) n++; return n; }
 }
@@ -6997,8 +7006,8 @@ function eirRawPrewarm(reason) {
   if (eirRawPrewarming) return eirRawPrewarming;
   const today = istTodayKey(), to = addDayKey(today, -1);
   const from = `${addDayKey(`${today.slice(0, 7)}-01`, -1).slice(0, 7)}-01`;
-  eirRawPrewarming = eirRawRows(from, to, { parallel: 2, noCollect: true })
-    .then((r) => { if (r.fetchedDays) console.log(`🗂️ EIR raw cache (${reason}): ${r.fetchedDays} din bhare${r.errors.length ? ` · ${r.errors.length} error` : ''}`); })
+  eirRawPrewarming = eirRawRows(from, to, { parallel: 1, noCollect: true, spanDays: 8 })
+    .then((r) => { if (r.fetchedDays) console.log(`🗂️ EIR raw cache (${reason}): ${r.fetchedDays} din missing the${r.errors.length ? ` · ${r.errors.length} span fail: ${r.errors[0].slice(0, 200)}` : ' · sab saved'}`); })
     .catch(() => {}).finally(() => { eirRawPrewarming = null; });
   return eirRawPrewarming;
 }
@@ -10463,6 +10472,12 @@ async function handleApi(req, res, url) {
   //    browser har ~1.5s me progress + naye rows le jaata hai, "Ruko" turant job band karta hai.
   const NPCI_JOBS = globalThis.__ffNpciJobs || (globalThis.__ffNpciJobs = new Map());
   const npciJobGc = () => { const now = Date.now(); for (const [k, j] of NPCI_JOBS) if (now - j.touched > 60 * 60e3) NPCI_JOBS.delete(k); };
+  if (p === '/api/eir-raw/status' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login karo.');
+    const cfg = eirRawCfg(), today = istTodayKey(); const saved = [];
+    for (let d = addDayKey(today, -62); d < today; d = addDayKey(d, 1)) if (eirRawRead(d, cfg)) saved.push(d);
+    return sendJson(res, 200, { ok: true, savedDays: saved.length, first: saved[0] || '', last: saved[saved.length - 1] || '', prewarming: !!eirRawPrewarming, lastError: eirRawLastErr, cols: cfg.cols });
+  }
   if (p === '/api/eir-raw' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login karo.');
     const from = String(url.searchParams.get('from') || ''), to = String(url.searchParams.get('to') || '');
@@ -15832,7 +15847,8 @@ async function start() {
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
-    setTimeout(() => eirRawPrewarm('boot'), 150e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
+    setTimeout(() => eirRawPrewarm('boot'), 240e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
+    setInterval(() => eirRawPrewarm('30 min'), 30 * 60e3).unref();   // jo din fail / missing hain wahi dobara (baaki disk se)
     setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();
     // 🤖 robot brain (server): dashboard band ho tab bhi admins ko push — boot ke 3 min baad, phir har 30 min; push 45 sec me ek
     setTimeout(() => robotBrainRun('boot').catch(() => {}), 180e3).unref?.();

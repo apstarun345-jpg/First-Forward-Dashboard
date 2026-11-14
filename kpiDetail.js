@@ -906,7 +906,15 @@ window.FF = window.FF || {};
       let t = null; state.rawCache = null;
       try {
         prog('⏳ Rows aa rahi hain… (kal tak ka data saved hai, aaj ka live)');
-        const j = await FF.auth.api(`/api/eir-raw?from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`);
+        // auth.api ka 60s timeout yahan chhota — pehli baar (din save nahi) server Google se laata hai, 3 min tak ruko.
+        const t0 = Date.now(); const tick = setInterval(() => prog(`⏳ Rows aa rahi hain… ${Math.round((Date.now() - t0) / 1000)}s (pehli baar save ho rahi hain — agli baar turant)`), 1000);
+        const ac = new AbortController(); const tmo = setTimeout(() => ac.abort(), 180000);
+        let j;
+        try {
+          const res = await fetch(`/api/eir-raw?from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`, { credentials: 'same-origin', cache: 'no-store', signal: ac.signal });
+          j = await res.json().catch(() => null);
+          if (!res.ok) throw new Error((j && j.error) || `HTTP ${res.status}`);
+        } finally { clearInterval(tick); clearTimeout(tmo); }
         if (j && Array.isArray(j.rows)) { t = { rows: j.rows }; state.rawCache = { cached: j.cachedDays, fetched: j.fetchedDays, ms: j.ms, errors: (j.errors || []).length }; }
       } catch { t = null; }
       if (!t) {
@@ -963,7 +971,7 @@ window.FF = window.FF || {};
     const top = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `<span class="kd-chip">${esc(k)} <b>${U.fmt(v)}</b></span>`).join('');
     el.innerHTML = `<div class="kd-raw-tools"><input class="input" id="kd-raw-q" placeholder="Search: tag / VRN / barcode / agent / TL / class…" value="${esc(filter || '')}">${FF.auth.can('export') ? '<button class="btn small" data-kd-xlsx>⬇ Excel (all rows)</button><button class="btn small" data-kd-csv>⬇ CSV</button>' : ''}</div>
       <div class="kd-chips"><span class="dim small">Top TLs:</span>${top(byTl)}</div><div class="kd-chips"><span class="dim small">Top agents:</span>${top(byAgent)}</div>
-      <p class="dim small">${U.fmt(rows.length)} rows${q ? ` (search "${esc(q)}")` : ''}${rows.length > show.length ? ` · pehli ${show.length} dikh rahi hain — sab ke liye Excel download karo` : ''} · Source: <b>${esc(state.rawSrc || 'sheet')}</b>${state.rawCache ? ` · ${state.rawCache.cached} din saved cache se, ${state.rawCache.fetched} din live (${Math.round((state.rawCache.ms || 0) / 100) / 10}s)` : ''} · GV agent / ID / TL = GV Master.</p>
+      <p class="dim small">${U.fmt(rows.length)} rows${q ? ` (search "${esc(q)}")` : ''}${rows.length > show.length ? ` · pehli ${show.length} dikh rahi hain — sab ke liye Excel download karo` : ''} · Source: <b>${esc(state.rawSrc || 'sheet')}</b>${state.rawCache ? ` · ${state.rawCache.cached} din saved cache se, ${state.rawCache.fetched} din live (${Math.round((state.rawCache.ms || 0) / 100) / 10}s)${state.rawCache.errors ? ` · <b style="color:#dc2626">⚠ ${state.rawCache.errors} hissa Google se nahi aaya — drawer band karke dobara kholo</b>` : ''}` : ''} · GV agent / ID / TL = GV Master.</p>
       <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${RAW_HEAD.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${show.map((r) => `<tr class="clickable" data-kd-tag="${esc(r[1] || '')}" data-kd-tag-date="${esc(r[0] || '')}" title="Click for this tag’s details">${r.map((v, i) => `<td${i === 0 ? ' class="nowrap"' : ''}>${esc(i === 11 ? U.barcode(v) : (v || ''))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${RAW_HEAD.length}" class="empty">Koi row nahi mili.</td></tr>`}</tbody></table></div>`;
     const input = U.$('#kd-raw-q');
     if (input) { input.addEventListener('input', U.debounce(() => { renderRaw(input.value); const again = U.$('#kd-raw-q'); if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); } }, 300)); }
