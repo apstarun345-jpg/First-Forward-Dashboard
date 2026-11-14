@@ -83,7 +83,7 @@ test('non-admin page markup hides person-level details and KPI drilldown; app gl
   assert.match(src, /\$\{admin \? driversShell\(m, preset\) : ''\}/);
   assert.match(src, /\$\{admin \? `<details class="tix-people"/);
   assert.match(src, /cardModel = admin && selectedPerson \? personCardModel\(/);
-  assert.match(src, /kpiCard\(k, cardModel, admin && !cardModel\.personFilter\)/);
+  assert.match(src, /kpiCard\(k, cardModel, admin\)/);   // v3.125.262 — search ke baad bhi boxes clickable
   assert.ok(!src.includes('personSearchHtml'), 'search result should live inside the existing KPI cards, not in a separate card');
   assert.match(src, /data-admin-only="1"/);
   const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
@@ -146,4 +146,21 @@ test('v201: top search bar watchdog re-mounts #master-search when the module fai
   assert.match(app, /window\.addEventListener\('hashchange'/);
   assert.match(app, /setInterval\(\(\) => \{ if \(document\.visibilityState !== 'hidden'\) ensureSearchTopbar\(\); \}, 6000\)/);
   assert.match(app, /shellExtrasStarted = true;\n    startSearchWatchdog\(\);/);
+});
+
+test('v3.125.262 — search me saare GV + FF agents / TLs (range ke bahar bhi) + filtered box drill spec', () => {
+  const dir = T.personDirectory({
+    ffRows: [{ key: '2026-09-01', agentName: 'Old FF Agent', tlName: 'FF TL A', n: 3 }, { key: '2026-10-10', agentName: 'Live FF', tlName: 'FF TL A', n: 2 }],
+    gvMasterRows: [{ key: '2026-10-10', agentName: 'GV One', tlName: 'GV TL', n: 4 }],
+    ffAgents: [{ name: 'Report Only Agent', id: '123', tlName: 'FF TL B' }],
+    gvReport: [{ agentName: 'GV Report Agent', agentId: 'APS1', tlName: 'APS' }]
+  }, '2026-10-10', '2026-10-11');
+  const names = dir.map((o) => `${o.channel}:${o.type}:${o.name}`);
+  for (const n of ['ff:agent:Old FF Agent', 'ff:agent:Report Only Agent', 'ff:tl:FF TL B', 'gv:agent:GV Report Agent', 'gv:tl:GV TL']) assert.ok(names.includes(n), n);
+  assert.ok(!names.includes('gv:tl:APS'), 'APS (direct) TL nahi');
+  assert.equal(dir[0].name, 'GV One', 'range me zyada tags wale upar');
+  const spec = T.specFor({ from: '2026-10-10', to: '2026-10-10', personFilter: { channel: 'ff', type: 'agent', name: 'Live FF' } }, 'both', 'VC4');
+  assert.match(spec, /src=ff/); assert.match(spec, /agent=Live%20FF/); assert.match(spec, /pf=1/); assert.match(spec, /eir=1/);
+  const gvSpec = T.specFor({ from: '2026-10-10', to: '2026-10-11', personFilter: { channel: 'gv', type: 'tl', name: 'GV TL' } }, 'both', '');
+  assert.match(gvSpec, /src=gv/); assert.match(gvSpec, /tl=GV%20TL/); assert.doesNotMatch(gvSpec, /eir=1/);
 });

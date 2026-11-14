@@ -332,6 +332,11 @@ window.FF = window.FF || {};
     }
     if (spec.channel === 'gv' && r.channel !== 'GV Partner') return false;
     if (spec.channel === 'ff' && r.channel === 'GV Partner') return false;
+    // 🔎 v3.125.262 — Tag Issued search (pf=1): agent ka naam / ID strict match (FF EIR rows me bhi)
+    if (String(spec.pf || '') === '1' && (spec.agent || spec.agentId)) {
+      const wa = personKey(spec.agent), wi = personKey(spec.agentId);
+      if (!((wa && personKey(r.agentName) === wa) || (wi && personKey(r.agentId) === wi))) return false;
+    }
     return true;
   }
   function tally(rows, keyFn) {

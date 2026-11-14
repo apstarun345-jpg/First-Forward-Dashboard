@@ -8665,3 +8665,14 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .tix-filter-context { overflow-wrap: anywhere; }
 .tix-person-empty { padding: 10px; color: var(--muted); font-size: 12px; }
 @media (max-width: 560px) { .tix-person-search { flex-basis: 100%; width: 100%; max-width: none; } .tix-person-input-wrap > input { min-width: 0; width: 100%; } }
+/* 🔎 v3.125.262 — GV / FF agent / TL dropdown */
+.tix-person-options { max-height: min(420px, 60vh); min-width: min(420px, 92vw); }
+.tix-person-head { position: sticky; top: -5px; z-index: 1; margin: -5px -5px 4px; padding: 7px 12px; font-size: 11px; font-weight: 700; color: var(--muted); background: color-mix(in srgb, var(--brand) 6%, var(--card)); border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; }
+.tix-person-options button.tix-opt { justify-content: flex-start; gap: 10px; }
+.tix-person-options button.tix-opt[aria-selected="true"] { background: color-mix(in srgb, var(--brand) 14%, transparent); }
+.tix-opt-ch { flex: 0 0 auto; font-size: 10.5px; font-weight: 800; padding: 2px 7px; border-radius: 999px; }
+.tix-opt-ch.ff { background: #dbeafe; color: #1e40af; }
+.tix-opt-ch.gv { background: #dcfce7; color: #166534; }
+.tix-opt-main { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.tix-opt-main small { font-size: 11px; color: var(--muted); }
+.tix-opt-n { flex: 0 0 auto; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ink); min-width: 34px; text-align: right; }
