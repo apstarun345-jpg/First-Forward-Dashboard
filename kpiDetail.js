@@ -885,8 +885,26 @@ window.FF = window.FF || {};
         if (id) [e.agentId, e.gvId].filter(Boolean).forEach((c) => ors.push(`${c} = '${id}'`));
         if (ors.length) pre = ` and (${ors.join(' or ')})`;
       }
-      const tq = `select ${cols.join(', ')} where toDate(${e.date}) >= date '${p.from}' and toDate(${e.date}) <= date '${p.to}'${pre} order by ${e.date} desc limit 60000`;
-      const t = await FF.data.query(e.sheet, tq, {});
+      // ⚡ v3.125.289 — EIR sheet bahut badi hai: ek query (1 din ki bhi) ~25-30s leti hai, poora mahina ~90s+.
+      //    Isliye range ko 7-7 din ke tukdon me baant kar 3 ek saath — mahina ~40s me, aur progress dikhti hai.
+      const spans = [];
+      const addK = (k, n) => { const d = U.fromDateKey(k); d.setDate(d.getDate() + n); return U.dateKey(d); };
+      for (let a = p.from; a <= p.to && spans.length < 60;) { const b0 = addK(a, 6); const b = b0 > p.to ? p.to : b0; spans.push([a, b]); a = addK(b, 1); }
+      const parts = new Array(spans.length); let nextSpan = 0, doneSpans = 0, gotRows = 0;
+      const prog = (msg) => { const el = U.$('#kd-raw-body'); const sp = el && el.querySelector('.kd-raw-prog'); if (sp) sp.textContent = msg; else if (el && keep) el.insertAdjacentHTML('afterbegin', `<p class="dim small kd-raw-prog">${esc(msg)}</p>`); };
+      const tqFor = (a, b) => `select ${cols.join(', ')} where toDate(${e.date}) >= date '${a}' and toDate(${e.date}) <= date '${b}'${pre} order by ${e.date} desc limit 60000`;
+      const worker = async () => {
+        while (nextSpan < spans.length) {
+          const k = nextSpan++;
+          const [a, b] = spans[k];
+          parts[k] = await FF.data.query(e.sheet, tqFor(a, b), { timeoutMs: 120000 });
+          doneSpans++; gotRows += (parts[k].rows || []).length;
+          if (spans.length > 1) prog(`⏳ ${doneSpans} / ${spans.length} hafte aa gaye · ${U.fmt(gotRows)} rows… (Google Sheet badi hai, thoda time lagta hai)`);
+        }
+      };
+      if (spans.length > 1) prog(`⏳ 0 / ${spans.length} hafte… Google Sheet se tag-level rows aa rahi hain`);
+      await Promise.all(Array.from({ length: Math.min(3, spans.length) }, worker));
+      const t = { rows: parts.reduce((acc, x) => (x && x.rows ? acc.concat(x.rows) : acc), []) };
       const D = FF.data;
       const filt = filterOf(spec.f);
       for (const r of t.rows) {
