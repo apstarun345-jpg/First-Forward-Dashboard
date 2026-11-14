@@ -1470,9 +1470,11 @@ FF.pages = FF.pages || {};
     const params = { q: name };
     if (id) params.id = id;
     if (ch) params.ch = ch;
+    // v3.125.278 — TL aur agent ki ID same ho sakti hai (Sumit Dixit APS016090): jo chuna wahi khule
+    if (/tl$/i.test(kind)) params.k = 'tl'; else if (/agent$/i.test(kind)) params.k = 'agent';
     // Canonical route: every topbar / Master Search selection opens the same Master Search renderer.
     try { if (FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', params); return true; } } catch {}
-    try { const extra = `${id ? `&id=${encodeURIComponent(id)}` : ''}${ch ? `&ch=${encodeURIComponent(ch)}` : ''}`; location.hash = `#/masterSearch?q=${encodeURIComponent(name)}${extra}`; return true; } catch { return false; }
+    try { const extra = `${id ? `&id=${encodeURIComponent(id)}` : ''}${ch ? `&ch=${encodeURIComponent(ch)}` : ''}${params.k ? `&k=${params.k}` : ''}`; location.hash = `#/masterSearch?q=${encodeURIComponent(name)}${extra}`; return true; } catch { return false; }
   }
 
   function mountTopbar(force) {
@@ -1537,7 +1539,9 @@ FF.pages = FF.pages || {};
         if (it.q && FF.smartQ) { if (it.q === '__catalog') FF.smartQ.openCatalog(); else FF.smartQ.open(it.q, it.qn || 10); return; }
         try { remember(it.label || (it.person && it.person.name) || it.barcode); } catch { /* optional */ }
         if (it.barcode) { openPanel(it.barcode); return; }              // 🏷️ barcode/tag = tag-level rows (list yahan theek)
-        if (it.person && it.person.name) { openSearchPage(it.person.name, it.person); return; }
+        // v3.125.278 — click turant: input blur (dropdown wapas na khule) + agle frame me profile (click hang na lage)
+        try { input.blur(); } catch { /* ignore */ }
+        if (it.person && it.person.name) { const pp = it.person; requestAnimationFrame(() => openSearchPage(pp.name, pp)); return; }
         openSearchPage(it.label);
       },
       onEnter: (q) => {
@@ -1691,12 +1695,17 @@ FF.pages = FF.pages || {};
   //   Report component FF.searchReport.render() ka hai (numbers 100% masterProfile / GV truth se).
   // -------------------------------------------------------------------------------------------------
   function pageRender(root, params) {
-    try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(); } catch { /* stale suggestion portals */ }
+    // v3.125.278 — topbar search ka dropdown mat todo (pehle har page render par wo bhi destroy ho jaata tha)
+    try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(suggestApi || undefined); } catch { /* stale suggestion portals */ }
+    // v3.125.278 — page dobara render ho (data update / same-link click) to jo type kar rahe the wo na mite
+    const prevQ = root.querySelector ? root.querySelector('#msp-q') : null;
+    const keepTyped = prevQ && prevQ.isConnected ? { v: prevQ.value, focus: document.activeElement === prevQ, pos: prevQ.selectionStart } : null;
     try { if (root.__mspSuggestDestroy) root.__mspSuggestDestroy(); } catch { /* stale suggestion portal */ }
     root.__mspSuggestDestroy = null;
     const asked = clean((params && (params.q || params.name)) || '');
     const askedId = clean((params && (params.id || params.agentId || params.tlId)) || '');
     let chFilter = (params && (params.ch || params.channel)) || '';   // '' = dono · 'ff' · 'gv'
+    const askedKind = String((params && params.k) || '').toLowerCase();   // 'tl' | 'agent' | ''
     const wantMerged = !!(params && String(params.mg) === '1');
     let groups = [];
     let current = null;
@@ -1729,6 +1738,10 @@ FF.pages = FF.pages || {};
     </div>`;
 
     const input = U.$('#msp-q', root);
+    if (keepTyped && keepTyped.focus && keepTyped.v && keepTyped.v !== asked && input) {
+      input.value = keepTyped.v;
+      try { input.focus(); if (keepTyped.pos != null) input.setSelectionRange(keepTyped.pos, keepTyped.pos); } catch { /* ignore */ }
+    }
     const out = U.$('#msp-out', root);
     const quick = U.$('#msp-quick', root);
     const stateEl = U.$('#msp-state', root);
@@ -2497,7 +2510,8 @@ FF.pages = FF.pages || {};
         // Kai match hon to typed naam wala pehle.
         const cands = idx && idx.people ? [...idx.people.values()].filter((p) => chOfP(p) === chFilter && ownIdMatch(p, want)) : [];
         const qn = normName(q);
-        exactRequestedPerson = cands.find((p) => normName(p.name) === qn) || cands.find((p) => isTlP(p)) || cands[0] || null;
+        const kindOk = (p) => !askedKind || (askedKind === 'tl' ? isTlP(p) : !isTlP(p));
+        exactRequestedPerson = cands.find((p) => kindOk(p) && normName(p.name) === qn) || cands.find((p) => kindOk(p)) || cands.find((p) => normName(p.name) === qn) || cands.find((p) => isTlP(p)) || cands[0] || null;
       }
       const channelPeople = exactRequestedPerson ? [exactRequestedPerson] : (res.people || []).filter((p) => !chFilter || chOfP(p) === chFilter);
       const people0 = preferNameMatches(channelPeople, q);

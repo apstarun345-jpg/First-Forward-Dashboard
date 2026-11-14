@@ -39,3 +39,10 @@ test('Charts: din wale bars ke neeche "13 Nov" jaisi date (ym ya tipLabels se ma
   assert.match(c, /shownLabels = labels\.map\(\(l\) => `\$\{Number\(l\)\} \$\{mon\}`\)/);
   assert.match(read('masterSearch.js'), /showValues: true, ym,/);
 });
+
+test('Master Search: TL aur agent ki ID same ho to URL me k=tl/agent — jo chuna wahi khule', () => {
+  const ms = read('masterSearch.js');
+  assert.match(ms, /if \(\/tl\$\/i\.test\(kind\)\) params\.k = 'tl'; else if \(\/agent\$\/i\.test\(kind\)\) params\.k = 'agent';/);
+  assert.match(ms, /const kindOk = \(p\) => !askedKind \|\| \(askedKind === 'tl' \? isTlP\(p\) : !isTlP\(p\)\);/);
+  assert.match(ms, /U\.destroyAllSuggestions\(suggestApi \|\| undefined\)/);
+});
