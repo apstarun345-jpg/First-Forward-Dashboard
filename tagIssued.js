@@ -1092,7 +1092,25 @@ FF.pages = FF.pages || {};
     const personInput = admin ? U.$('#ti-person-search', root) : null;
     const personOptionsBox = admin ? U.$('#ti-person-options', root) : null;
     const personClear = admin ? U.$('#ti-person-clear', root) : null;
-    let activePersonOptions = [];
+    let activePersonOptions = [], lastDirRows = null, dirExtraAsked = false;
+    /** Dropdown pehli baar khule to GV REPORT + FF REPORT (agents list) bhi laao — jinke is mahine tags nahi, wo bhi mile. */
+    function ensureFullDirectory() {
+      if (dirExtraAsked || !admin) return; dirExtraAsked = true;
+      const jobs = [];
+      if (G && G.need && !(G.get && (G.get('report') || []).length)) jobs.push(G.need('report', { only: true }).catch(() => null));
+      if (FF.lazy && FF.lazy.need && !(FF.pages.performance && FF.pages.performance.agents)) jobs.push(FF.lazy.need('performance').catch(() => null));
+      if (!jobs.length) return;
+      Promise.all(jobs).then(async () => {
+        try { if (FF.pages.performance && FF.pages.performance.ensureLoaded) await FF.pages.performance.ensureLoaded({ light: true }).catch(() => null); } catch { /* optional */ }
+        if (!lastDirRows || !root.isConnected) return;
+        activePersonOptions = personDirectory({
+          ffRows: lastDirRows.ffRows, gvMasterRows: lastDirRows.gvMasterRows, gvRows: lastDirRows.gvRows,
+          ffAgents: (FF.pages.performance && FF.pages.performance.agents) ? (() => { try { return FF.pages.performance.agents() || []; } catch { return []; } })() : [],
+          gvReport: (G && G.get) ? (G.get('report') || []) : []
+        }, from, to);
+        if (personOptionsBox && !personOptionsBox.hidden) paintPersonSuggestions();
+      });
+    }
     function paintPersonSuggestions() {
       if (!personInput || !personOptionsBox) return;
       const q = personKey(personInput.value);
@@ -1110,6 +1128,7 @@ FF.pages = FF.pages || {};
       paintPresets();
       fromInput.value = from; toInput.value = to;
       const rows = channelRows();
+      lastDirRows = rows;
       activePersonOptions = admin ? personDirectory({
         ffRows: rows.ffRows, gvMasterRows: rows.gvMasterRows, gvRows: rows.gvRows,
         ffAgents: (FF.pages.performance && FF.pages.performance.agents) ? (() => { try { return FF.pages.performance.agents() || []; } catch { return []; } })() : [],
@@ -1293,7 +1312,7 @@ FF.pages = FF.pages || {};
 
     if (personInput && personOptionsBox) {
       personInput.addEventListener('input', paintPersonSuggestions);
-      personInput.addEventListener('focus', paintPersonSuggestions);
+      personInput.addEventListener('focus', () => { ensureFullDirectory(); paintPersonSuggestions(); });
       personInput.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false'); return; }
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
