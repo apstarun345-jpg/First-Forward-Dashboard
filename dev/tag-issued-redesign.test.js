@@ -53,13 +53,23 @@ test('GV name suggestions and agent/TL summaries obey the selected date range', 
   ];
   const options = T.personSearchOptions(rows, '2026-10-10', '2026-10-11');
   assert.deepEqual(JSON.parse(JSON.stringify(options)), [
-    { type: 'agent', name: 'Asha Singh' }, { type: 'agent', name: 'Ravi Kumar' }, { type: 'tl', name: 'TL Neha' }
+    { channel: 'gv', type: 'agent', name: 'Asha Singh' }, { channel: 'gv', type: 'agent', name: 'Ravi Kumar' }, { channel: 'gv', type: 'tl', name: 'TL Neha' }
   ]);
   const agent = T.personSearchSummary(rows, { type: 'agent', name: 'asha singh' }, '2026-10-10', '2026-10-11');
   assert.equal(agent.totals.total, 5); assert.equal(agent.totals.vc4, 2); assert.equal(agent.totals.vc20, 3);
   const tl = T.personSearchSummary(rows, { type: 'tl', name: 'TL Neha' }, '2026-10-10', '2026-10-11');
   assert.equal(tl.totals.total, 9); assert.equal(tl.totals.vc5p, 4);
   assert.equal(T.personSearchSummary(rows, { type: 'agent', name: 'Asha Singh' }, '2026-10-12', '2026-10-12').totals.total, 99);
+  const base = T.buildModel({ ffRows: [], gvRows: [], gvLatest: '2026-10-11' }, '2026-10-10', '2026-10-11');
+  const inCards = T.personCardModel(base, rows, [], { channel: 'gv', type: 'agent', name: 'Asha Singh' });
+  assert.equal(inCards.gv.total, 5, 'searched agent total is routed into the existing GV KPI cards');
+  assert.equal(inCards.gv.vc4, 2); assert.equal(inCards.gv.vc20, 3); assert.equal(inCards.ff.total, 0);
+  assert.equal(inCards.personFilter.name, 'Asha Singh');
+  const ffRows = [{ key: '2026-10-10', agentName: 'FF Agent One', tlName: 'FF TL', group: 'VC4', n: 7 }];
+  const ffModel = T.personCardModel(base, rows, ffRows, { channel: 'ff', type: 'agent', name: 'FF Agent One' });
+  assert.equal(ffModel.ff.total, 7, 'First Forward person rows populate the same cards too');
+  assert.equal(ffModel.gv.total, 0);
+  assert.equal(JSON.stringify(T.personSearchOptions(ffRows, '2026-10-10', '2026-10-11', 'ff')[0]), JSON.stringify({ channel: 'ff', type: 'agent', name: 'FF Agent One' }));
 });
 
 test('non-admin Tag Issued-only access does not preload GV Master rows', () => {
@@ -69,10 +79,12 @@ test('non-admin Tag Issued-only access does not preload GV Master rows', () => {
 });
 
 test('non-admin page markup hides person-level details and KPI drilldown; app globally guards admin-only KPI clicks', () => {
-  assert.match(src, /admin \? `.*GV agent \/ TL/s);
+  assert.match(src, /admin \? `.*GV \/ FF agent \/ TL/s);
   assert.match(src, /\$\{admin \? driversShell\(m, preset\) : ''\}/);
   assert.match(src, /\$\{admin \? `<details class="tix-people"/);
-  assert.match(src, /kpiCard\(k, m, admin\)/);
+  assert.match(src, /cardModel = admin && selectedPerson \? personCardModel\(/);
+  assert.match(src, /kpiCard\(k, cardModel, admin && !cardModel\.personFilter\)/);
+  assert.ok(!src.includes('personSearchHtml'), 'search result should live inside the existing KPI cards, not in a separate card');
   assert.match(src, /data-admin-only="1"/);
   const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   assert.match(app, /kpi\.dataset\.adminOnly === '1'.*FF\.auth\.isAdmin\(\)/s);

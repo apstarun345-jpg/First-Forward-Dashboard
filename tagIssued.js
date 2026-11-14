@@ -119,8 +119,8 @@ FF.pages = FF.pages || {};
   }
 
   const personKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
-  /** Unique GV names that actually have rows inside the selected date range. */
-  function personSearchOptions(rows, from, to) {
+  /** Unique channel-specific agent/TL names that have rows inside the selected date range. */
+  function personSearchOptions(rows, from, to, channel) {
     const found = new Map();
     for (const r of rows || []) {
       const key = r.key || (r.date ? U.dateKey(r.date) : '');
@@ -129,11 +129,12 @@ FF.pages = FF.pages || {};
         const name = String(rawName || '').trim().replace(/\s+/g, ' ');
         const norm = personKey(name);
         if (!norm || norm === 'unknown' || norm === 'unassigned') continue;
-        const id = `${type}:${norm}`;
-        if (!found.has(id)) found.set(id, { type, name });
+        const ch = channel === 'ff' ? 'ff' : 'gv';
+        const id = `${ch}:${type}:${norm}`;
+        if (!found.has(id)) found.set(id, { channel: ch, type, name });
       }
     }
-    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.type.localeCompare(b.type));
+    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.channel.localeCompare(b.channel) || a.type.localeCompare(b.type));
   }
   function personSearchSummary(rows, selected, from, to) {
     if (!selected || !selected.name || !['agent', 'tl'].includes(selected.type)) return null;
@@ -145,12 +146,28 @@ FF.pages = FF.pages || {};
     });
     return { type: selected.type, name: String(selected.name).trim(), rows: matches, totals: scan(matches, from, to) };
   }
-  function personSearchHtml(summary, from, to) {
-    if (!summary) return '';
-    const { totals, rows, type, name } = summary;
-    const tlNames = U.uniq(rows.map((r) => String(r.tlName || '').trim()).filter(Boolean));
-    const label = type === 'tl' ? 'GV team / TL' : 'GV agent';
-    return `<section class="card tix-person-result" aria-live="polite"><div class="card-head"><h3>👤 ${label}: ${esc(name)}</h3><span class="badge indigo">${esc(rangeLabel(from, to, true))}</span></div><div class="card-body"><div class="tix-person-kpis"><div><small>Total GV tags</small><b>${U.fmt(totals.total)}</b></div><div><small>VC4</small><b>${U.fmt(totals.vc4)}</b></div><div><small>VC20</small><b>${U.fmt(totals.vc20)}</b></div><div><small>VC5+</small><b>${U.fmt(totals.vc5p)}</b></div></div><p class="dim small">${type === 'agent' ? `TL: ${esc(tlNames.join(', ') || '—')} · ` : ''}${U.fmt(rows.length)} GV Master rows · selected date range only</p>${totals.total ? '' : '<p class="dim small">Is date range me is naam ka data nahi mila.</p>'}</div></section>`;
+  function personCardModel(m, gvRows, ffRows, selected) {
+    if (!selected || !selected.name || !['agent', 'tl'].includes(selected.type)) return m;
+    const channel = selected.channel === 'ff' ? 'ff' : 'gv';
+    const sourceRows = channel === 'ff' ? (ffRows || []) : (gvRows || []);
+    const target = personKey(selected.name);
+    const matches = sourceRows.filter((r) => personKey(selected.type === 'tl' ? r.tlName : (r.agentName || r.agentId || r.name)) === target);
+    const empty = (from, to) => scan([], from || '', to || '');
+    const withinRange = (from, to) => matches.filter((r) => { const key = r.key || r.dateKey || (r.date ? U.dateKey(r.date) : ''); return !!key && key >= from && key <= to; });
+    const current = scan(withinRange(m.from, m.to), m.from, m.to);
+    const prevRange = channel === 'ff' ? m.prevFfRange : m.prevGvRange;
+    const prev2Range = channel === 'ff' ? m.prevFf2Range : m.prevGv2Range;
+    const previous = prevRange ? scan(withinRange(prevRange[0], prevRange[1]), prevRange[0], prevRange[1]) : empty('', '');
+    const previous2 = prev2Range ? scan(withinRange(prev2Range[0], prev2Range[1]), prev2Range[0], prev2Range[1]) : empty('', '');
+    const blank = empty(m.from, m.to);
+    const selectedChannel = channel === 'ff'
+      ? { ff: current, ffPrev: previous, ffPrev2: previous2, gv: blank, gvPrev: empty('', ''), gvPrev2: empty('', '') }
+      : { ff: blank, ffPrev: empty('', ''), ffPrev2: empty('', ''), gv: current, gvPrev: previous, gvPrev2: previous2 };
+    return {
+      ...m, ...selectedChannel,
+      personFilter: { channel, type: selected.type, name: String(selected.name).trim() },
+      ffComparable: true, gvComparable: true, ffPending: false, gvPending: false
+    };
   }
 
   /** Dono channels ka current + previous period (FF T+1: FF like-for-like). */
@@ -238,20 +255,23 @@ FF.pages = FF.pages || {};
       const priorRange = src === 'ff' ? m.prevFfRange : m.prevGvRange;
       const prior = priorRange ? rangeLabel(priorRange[0], priorRange[1]) : 'range unavailable';
       const earlier = oldRange ? rangeLabel(oldRange[0], oldRange[1]) : '2 periods ago';
-      const drill = canDrill ? ` data-kpi="${esc(specFor(m, src, k.f))}" data-kpi-title="${esc(`${name} · ${k.short}`)}" data-admin-only="1" role="button" tabindex="0" title="Admin: ${esc(name)} ki rows dekhein"` : '';
+      const notSelected = !!m.personFilter && src !== m.personFilter.channel;
+      const filteredName = m.personFilter && src === m.personFilter.channel
+        ? `${name} · ${m.personFilter.type === 'tl' ? 'TL' : 'Agent'}: ${m.personFilter.name}` : name;
+      const drill = canDrill && !m.personFilter ? ` data-kpi="${esc(specFor(m, src, k.f))}" data-kpi-title="${esc(`${name} · ${k.short}`)}" data-admin-only="1" role="button" tabindex="0" title="Admin: ${esc(name)} ki rows dekhein"` : '';
       return `<div class="tix-row ${cls}"${drill}>
-        <span class="tix-dot"></span><span class="tix-name">${name}</span><b class="tix-num">${U.fmt(v)}</b><span class="tix-pct">${sum ? U.fmtPct(share, 0) : '—'}</span><span class="tix-gr">${na ? growthBadge(v, prev, na) : drvBadge(growthBadge(v, prev, na), src, k.key, dirOf(v, prev), canDrill)}</span>
-        <span class="tix-prev">${na ? 'Previous: —' : `Previous (${esc(prior)}): ${U.fmt(prev)} · Earlier (${esc(earlier)}): ${U.fmt(oldValue)}`}</span></div>`;
+        <span class="tix-dot"></span><span class="tix-name" title="${esc(filteredName)}">${esc(filteredName)}</span><b class="tix-num">${notSelected ? '—' : U.fmt(v)}</b><span class="tix-pct">${notSelected || !sum ? '—' : U.fmtPct(share, 0)}</span><span class="tix-gr">${notSelected ? '<span class="badge gray">—</span>' : na ? growthBadge(v, prev, na) : drvBadge(growthBadge(v, prev, na), src, k.key, dirOf(v, prev), canDrill && !m.personFilter)}</span>
+        <span class="tix-prev">${notSelected ? 'Not applicable to selected channel/person' : na ? 'Previous: —' : `Previous (${esc(prior)}): ${U.fmt(prev)} · Earlier (${esc(earlier)}): ${U.fmt(oldValue)}`}</span></div>`;
     };
-    const drill = canDrill ? ` data-kpi="${esc(specFor(m, 'both', k.f))}" data-kpi-title="${esc(`${k.label} · ${rangeLabel(m.from, m.to)}`)}" data-admin-only="1" role="button" tabindex="0" title="Admin: is number ki rows dekhein"` : '';
-    return `<div class="tix-card ${d2(sumD)}" style="--accent:${k.accent}"${drill}>
-      <div class="tix-card-top"><span class="tix-title"><span class="tix-ico">${k.icon}</span>${esc(k.label)}${k.sub ? `<small>${esc(k.sub)}</small>` : ''}</span>${ofTotal === null ? '' : `<span class="tix-chip" title="Total issuance me is class ka hissa">${U.fmtPct(ofTotal, 0)} of total</span>`}</div>
-      <div class="tix-big"><span class="tix-big-n">${U.fmt(sum)}</span><span class="tix-big-g">${drvBadge(growthBadge(sum, sumP), 'all', k.key, sumD, canDrill)}</span></div>
+    const drill = canDrill && !m.personFilter ? ` data-kpi="${esc(specFor(m, 'both', k.f))}" data-kpi-title="${esc(`${k.label} · ${rangeLabel(m.from, m.to)}`)}" data-admin-only="1" role="button" tabindex="0" title="Admin: is number ki rows dekhein"` : '';
+    return `<div class="tix-card ${d2(sumD)}${m.personFilter ? ' tix-filtered-card' : ''}" style="--accent:${k.accent}"${drill}>
+      <div class="tix-card-top"><span class="tix-title"><span class="tix-ico">${k.icon}</span>${esc(k.label)}${k.sub ? `<small>${esc(k.sub)}</small>` : ''}${m.personFilter ? `<small class="tix-filter-context">${m.personFilter.channel === 'ff' ? 'First Forward' : 'GV'} ${m.personFilter.type === 'tl' ? 'TL' : 'Agent'}: ${esc(m.personFilter.name)}</small>` : ''}</span>${ofTotal === null ? '' : `<span class="tix-chip" title="${m.personFilter ? 'Selected agent/TL ke total me share' : 'Total issuance me is class ka hissa'}">${U.fmtPct(ofTotal, 0)}${m.personFilter ? ' of selected' : ' of total'}</span>`}</div>
+      <div class="tix-big"><span class="tix-big-n">${U.fmt(sum)}</span><span class="tix-big-g">${drvBadge(growthBadge(sum, sumP), 'all', k.key, sumD, canDrill && !m.personFilter)}</span></div>
       <div class="tix-bigsub">Current: ${esc(rangeLabel(m.from, m.to))} · Previous: ${U.fmt(sumP)} (${esc(periodRangeLabel(m.prevFfRange, m.prevGvRange))}) · Earlier: ${U.fmt(sumP2)} (${esc(periodRangeLabel(m.prevFf2Range, m.prevGv2Range))})</div>
       <div class="tix-split" title="FF vs GV share">${sum ? `<i class="ff" style="width:${ffShare.toFixed(1)}%"></i><i class="gv" style="width:${gvShare.toFixed(1)}%"></i>` : ''}</div>
       ${row('ff', 'First Forward', ffV, ffShare, ffP, ffD, ffNA, 'ff')}
       ${row('gv', 'GV Partner', gvV, gvShare, gvP, gvD, gvNA, 'gv')}
-      <div class="tix-verdict">${verdictHtml(ffV, gvV, ffD, gvD, ffNA, gvNA)}</div>
+      <div class="tix-verdict">${m.personFilter ? `<span class="tix-v">Showing ${m.personFilter.channel === 'ff' ? 'First Forward' : 'GV'} ${m.personFilter.type === 'tl' ? 'TL/team' : 'agent'} · <b>${esc(m.personFilter.name)}</b></span>` : verdictHtml(ffV, gvV, ffD, gvD, ffNA, gvNA)}</div>
     </div>`;
   }
   const d2 = (d) => (d === 'up' ? 'is-up' : d === 'down' ? 'is-down' : '');
@@ -1008,7 +1028,7 @@ FF.pages = FF.pages || {};
           <label>📅 From <input type="date" class="input" id="ti-from" value="${esc(from)}" max="${todayKey()}"></label>
           <label>To <input type="date" class="input" id="ti-date" value="${esc(to)}" max="${todayKey()}"></label>
           <button class="btn small" type="button" id="ti-apply">Apply</button>
-          ${admin ? `<div class="tix-person-search" id="ti-person-search-wrap"><label for="ti-person-search">👥 GV agent / TL</label><div class="tix-person-input-wrap"><input type="search" class="input" id="ti-person-search" placeholder="Naam search karein…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ti-person-options"><button type="button" class="btn small" id="ti-person-clear" title="Search clear karein" hidden>✕</button><div class="tix-person-options" id="ti-person-options" role="listbox" hidden></div></div></div>` : ''}
+          ${admin ? `<div class="tix-person-search" id="ti-person-search-wrap"><label for="ti-person-search">👥 GV / FF agent / TL</label><div class="tix-person-input-wrap"><input type="search" class="input" id="ti-person-search" placeholder="GV / FF agent ya TL naam search…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ti-person-options"><button type="button" class="btn small" id="ti-person-clear" title="Search clear karein" hidden>✕</button><div class="tix-person-options" id="ti-person-options" role="listbox" hidden></div></div></div>` : ''}
           ${admin ? `<div class="tix-report" id="ti-report">
             <button class="btn primary" type="button" id="ti-report-btn" aria-haspopup="true" aria-expanded="false">📥 Report ▾</button>
             <div class="tix-report-menu" id="ti-report-menu" hidden role="menu">
@@ -1042,7 +1062,7 @@ FF.pages = FF.pages || {};
       const q = personKey(personInput.value);
       if (!q) { personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false'); return; }
       const matches = activePersonOptions.filter((o) => personKey(o.name).includes(q)).slice(0, 12);
-      personOptionsBox.innerHTML = matches.length ? matches.map((o, i) => `<button type="button" role="option" aria-selected="false" data-person-index="${i}" data-person-type="${esc(o.type)}" data-person-name="${esc(o.name)}"><b>${esc(o.name)}</b><small>${o.type === 'tl' ? 'TL / team' : 'Agent'}</small></button>`).join('') : '<div class="tix-person-empty">Is date range me matching GV naam nahi mila.</div>';
+      personOptionsBox.innerHTML = matches.length ? matches.map((o, i) => `<button type="button" role="option" aria-selected="false" data-person-index="${i}" data-person-channel="${esc(o.channel)}" data-person-type="${esc(o.type)}" data-person-name="${esc(o.name)}"><b>${esc(o.name)}</b><small>${o.channel === 'ff' ? 'First Forward' : 'GV'} · ${o.type === 'tl' ? 'TL / team' : 'Agent'}</small></button>`).join('') : '<div class="tix-person-empty">Is date range me GV/FF ka matching naam nahi mila.</div>';
       personOptionsBox.hidden = false;
       personInput.setAttribute('aria-expanded', 'true');
     }
@@ -1051,20 +1071,22 @@ FF.pages = FF.pages || {};
       paintPresets();
       fromInput.value = from; toInput.value = to;
       const rows = channelRows();
-      activePersonOptions = admin ? personSearchOptions(rows.gvMasterRows, from, to) : [];
+      activePersonOptions = admin
+        ? personSearchOptions(rows.gvMasterRows, from, to, 'gv').concat(personSearchOptions(rows.ffRows, from, to, 'ff'))
+        : [];
       if (personClear) personClear.hidden = !selectedPerson;
       rows.ffMap = scanDays(rows.ffRows);
       rows.gvMap = scanDays(rows.gvRows);
       const m = buildModel(rows, from, to);
+      const cardModel = admin && selectedPerson ? personCardModel(m, rows.gvMasterRows, rows.ffRows, selectedPerson) : m;
       const prevTxt = m.prevGvRange ? `vs ${esc(rangeLabel(m.prevGvRange[0], m.prevGvRange[1], true))}` : '';
-      info.innerHTML = `<span class="badge indigo">${esc(rangeLabel(from, to, true))}</span> <span class="dim">${m.days} din ${prevTxt ? `· ${prevTxt}` : ''}</span> ${m.ffPending || m.gvPending ? `<span class="badge amber" title="The EIR sheet is T+1 — data after ${esc(lbl(m.ffThrough, true))} arrives tomorrow. So growth is shown like-for-like (same number of days).">🧾 EIR T+1 · ${m.ffComparable || m.gvComparable ? 'latest data tak' : 'kal aayega'}</span>` : ''} ${admin ? '' : '<span class="dim small">🔒 Agent/TL details aur box drilldown sirf admin ke liye.</span>'}`;
+      info.innerHTML = `<span class="badge indigo">${esc(rangeLabel(from, to, true))}</span> <span class="dim">${m.days} din ${prevTxt ? `· ${prevTxt}` : ''}</span> ${m.ffPending || m.gvPending ? `<span class="badge amber" title="The EIR sheet is T+1 — data after ${esc(lbl(m.ffThrough, true))} arrives tomorrow. So growth is shown like-for-like (same number of days).">🧾 EIR T+1 · ${m.ffComparable || m.gvComparable ? 'latest data tak' : 'kal aayega'}</span>` : ''} ${admin && selectedPerson ? `<span class="badge teal">Filtered KPI boxes · ${selectedPerson.channel === 'ff' ? 'First Forward' : 'GV'} ${selectedPerson.type === 'tl' ? 'TL' : 'Agent'}: ${esc(selectedPerson.name)}</span>` : ''} ${admin ? '' : '<span class="dim small">🔒 Agent/TL details aur box drilldown sirf admin ke liye.</span>'}`;
       const total = m.ff.total + m.gv.total;
       const totalP = m.ffPrev.total + m.gvPrev.total;
 
       body.innerHTML = `
         ${healthStrip(rows)}
-        ${admin && selectedPerson ? personSearchHtml(personSearchSummary(rows.gvMasterRows, selectedPerson, from, to), from, to) : ''}
-        <div class="tix-grid">${KPIS.map((k) => kpiCard(k, m, admin)).join('')}</div>
+        <div class="tix-grid">${KPIS.map((k) => kpiCard(k, cardModel, admin && !cardModel.personFilter)).join('')}</div>
         ${card(`⚔️ Head-to-head · FF vs GV · ${esc(rangeLabel(from, to, true))}`, h2hTable(m), `<span class="badge indigo">${U.fmt(total)} tags</span> <span class="dim small">prev ${U.fmt(totalP)}</span> <button class="btn small" data-action="export" data-name="tag-issued-${esc(from)}-${esc(to)}">⬇ CSV</button>`)}
         ${admin ? driversShell(m, preset) : ''}
         ${chartsHtml(m, rows)}
@@ -1229,18 +1251,18 @@ FF.pages = FF.pages || {};
     }
 
     if (personInput && personOptionsBox) {
-      personInput.addEventListener('input', () => { selectedPerson = null; if (personClear) personClear.hidden = true; paintPersonSuggestions(); });
+      personInput.addEventListener('input', paintPersonSuggestions);
       personInput.addEventListener('focus', paintPersonSuggestions);
       personInput.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false'); return; }
         if (e.key === 'Enter') {
           const option = personOptionsBox.querySelector('[data-person-name]');
-          if (option) { e.preventDefault(); selectedPerson = { type: option.dataset.personType, name: option.dataset.personName }; personInput.value = selectedPerson.name; personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false'); draw(); }
+          if (option) { e.preventDefault(); selectedPerson = { channel: option.dataset.personChannel, type: option.dataset.personType, name: option.dataset.personName }; personInput.value = selectedPerson.name; personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false'); draw(); }
         }
       });
       personOptionsBox.addEventListener('click', (e) => {
         const option = e.target.closest('[data-person-name]'); if (!option) return;
-        selectedPerson = { type: option.dataset.personType, name: option.dataset.personName };
+        selectedPerson = { channel: option.dataset.personChannel, type: option.dataset.personType, name: option.dataset.personName };
         personInput.value = selectedPerson.name;
         personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false');
         draw();
@@ -1259,5 +1281,5 @@ FF.pages = FF.pages || {};
   }
 
   FF.pages.tagIssued = { title: 'GV & FF Tag Issued', render };
-  FF.pages.tagIssued._test = { buildAgentReport, reportInputs, reportSheets, reportCsv, tlPivot, presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey, reconHtml, healthStrip, personSearchOptions, personSearchSummary };
+  FF.pages.tagIssued._test = { buildAgentReport, reportInputs, reportSheets, reportCsv, tlPivot, presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey, reconHtml, healthStrip, personSearchOptions, personSearchSummary, personCardModel };
 })(window.FF);
