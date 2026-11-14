@@ -1353,9 +1353,10 @@
     board.style.width = `${g.BW}px`;
     const bh = board.offsetHeight || 170;
     const yLo = Math.min(g.maxY, g.minY + bh - g.W * 0.85 + 10);
-    const rest = pipWin ? dockPos() : rs && rs.fx != null ? [Math.max(6, Math.min(g.vw - g.W - 6, rs.fx * g.vw)), Math.max(g.minY, Math.min(g.maxY, rs.fy * g.vh))] : [goLeft ? 12 : g.vw - g.W - 12, Math.round(rnd(Math.min(yLo, g.maxY), g.maxY))];
+    const still = cfg.roam === false && !rs;   // 🛑 'Idhar-udhar ghoomna' band → robot apni jagah par hi rahe, board wahin khule
+    const rest = still ? [pos[0], pos[1]] : pipWin ? dockPos() : rs && rs.fx != null ? [Math.max(6, Math.min(g.vw - g.W - 6, rs.fx * g.vw)), Math.max(g.minY, Math.min(g.maxY, rs.fy * g.vh))] : [goLeft ? 12 : g.vw - g.W - 12, Math.round(rnd(Math.min(yLo, g.maxY), g.maxY))];
     const style = pick(['arc', 'zigzag', 'loop', 'up', 'hop']);
-    if (rs) place(rest); else await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
+    if (rs || still) place(rest); else await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
     layoutBoard(g, pipWin ? 'pip' : goLeft ? 'right' : 'left');
     if (rs) { el.dataset.mood = it.mood || 'happy'; el.classList.add('rest'); } else dance(it.mood);
     if (!rs) { clearTimeout(extSayT); pendSay = null; stopSpeech(); } // purani / extension wali awaaz band — ab sirf isi board ki (resume me awaaz chhedna nahi)
@@ -2714,7 +2715,8 @@
     if (it) { const why = await show(it); lastUpd = Date.now(); return schedule(why === 'next' ? 600 : 1500); }
     if (cfg.fun !== false) {
       funTurn += 1;
-      if (funTurn % 4 === 0) await show(joke()); else await funAct();
+      // 🛑 roam band → udne wali masti (dance / moonwalk / peek…) nahi; sirf jokes, robot apni jagah par
+      if (funTurn % 4 === 0) await show(joke()); else if (cfg.roam !== false) await funAct(); else return schedule(6000);
       return schedule(1500);
     }
     if (cfg.roam !== false) { await funAct(); return schedule(4000); }
