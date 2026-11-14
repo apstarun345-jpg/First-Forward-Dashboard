@@ -540,15 +540,19 @@ window.FF = window.FF || {};
       const k = idKey(agentId) || nameKey(agentName);
       if (!k) return null;
       let e = map.get(k);
-      if (!e) { e = { key: k, name: clean(agentName) || clean(agentId), id: clean(agentId), isSelf: isSelf(agentId, agentName), cur: 0, last: 0, today: 0, stock: 0, sheetCur: null, sheetLast: null, sheetStock: null, classes: {} }; map.set(k, e); }
+      if (!e) { e = { key: k, name: clean(agentName) || clean(agentId), id: clean(agentId), isSelf: isSelf(agentId, agentName), cur: 0, last: 0, today: 0, stock: 0, lastDate: '', sheetCur: null, sheetLast: null, sheetStock: null, classes: {} }; map.set(k, e); }
       if (!e.id && agentId) e.id = clean(agentId);
       if (!e.name && agentName) e.name = clean(agentName);
       return e;
     };
-    for (const r of mergeLookups(lookup(index().ledger.byTlId, id.ids), lookup(index().ledger.byTlName, id.names))) {
+    // 🧮 v3.125.279 — TL ki APNI rows (agent ID == TL ID) bhi team me (isSelf) — chahe GV Master / Tag Assignment me
+    //    wo kisi aur TL / "Direct" ke neeche hon (Sumit Dixit: apna issuance 41 + stock 246).
+    const ownLedger = id.ids.length ? lookup(index().ledger.byAgentId, id.ids) : [];
+    for (const r of mergeLookups(mergeLookups(lookup(index().ledger.byTlId, id.ids), lookup(index().ledger.byTlName, id.names)), ownLedger)) {
       const e = ensure(r.agentId, r.agentName);
       if (!e) continue;
       const n = Number(r.n) || 1;
+      const dk = rowKey(r); if (dk && dk > e.lastDate) e.lastDate = dk;
       if (r.ym === ym) e.cur += n;
       else if (r.ym === prevYmOf(ym)) e.last += n;
       if (rowKey(r) === todayKey()) e.today += n;
@@ -556,7 +560,7 @@ window.FF = window.FF || {};
       e.classes[cls] = (e.classes[cls] || 0) + n;
     }
     for (const r of stockAgentRows()) {
-      if (!(id.ids.includes(idKey(r.tlId)) || id.names.includes(nameKey(r.tlName)))) continue;
+      if (!(id.ids.includes(idKey(r.tlId)) || id.names.includes(nameKey(r.tlName)) || (id.ids.length && id.ids.includes(idKey(r.agentId))))) continue;
       const e = ensure(r.agentId, r.agentName);
       if (e) e.stock += Number(r.n) || 0;
     }

@@ -2002,7 +2002,7 @@ FF.pages = FF.pages || {};
       const lastMix = mix(bins.last) || mix(cb.last) || vcTiles({ VC4: t.lastVc4, 'VC5+': t.lastComm });
       const who = isTl ? `tl=${encodeURIComponent(pr.name)}${pr.id && ch === 'gv' ? `&tlId=${encodeURIComponent(pr.id)}` : ''}` : `agent=${encodeURIComponent(pr.name)}${pr.id ? `&agentId=${encodeURIComponent(pr.id)}` : ''}`;
       const spec = (scope, ym) => `src=${ch}&scope=${scope}${ym ? `&ym=${encodeURIComponent(ym)}` : ''}&${who}`;
-      const peopleSpec = `src=${ch}&scope=people&tl=${encodeURIComponent(pr.name)}&self=0&sort=stock`;
+      const peopleSpec = `src=${ch}&scope=people&tl=${encodeURIComponent(pr.name)}${pr.id ? `&tlId=${encodeURIComponent(pr.id)}` : ''}&self=0&sort=stock`;
       const box = (cls, label, value, sub, kpi, attrs) => `<div class="mp-kpi msp-kpi ${cls}${kpi || attrs ? ' kpi-clickable' : ''}"${attrs ? ` ${attrs} role="button" tabindex="0" title="Click for details"` : (kpi ? ` data-kpi="${esc(kpi)}" role="button" tabindex="0" title="Detail kholo"` : '')}><small>${label}</small><b>${value}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
       // Class-wise plan: two groups — VC4 / VC20 (combined) and VC5+ — each with its own run-rate and stock.
       const days = num(c.days) || num(d.days) || 25, elapsed = Math.max(1, num(c.elapsed) || 1);

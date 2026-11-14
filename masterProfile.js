@@ -2451,7 +2451,7 @@ window.FF = window.FF || {};
     const lastSpec = `src=${pr.ch}&scope=month&ym=${encodeURIComponent(m.last || '')}&${scopeParam}${masterTlParam}`;
     // v3.40 — har KPI/cell ki apni detail: card ka number == drawer ka number (`self=0` se TL ki apni row
     // agents ki list me se bahar rehti hai, isliye "Agents 2" par click 2 agents hi dikhayega).
-    const peopleSpec = `src=${pr.ch}&scope=people&${isTl ? `tl=${encodeURIComponent(pr.name)}&self=0&sort=stock` : `agent=${encodeURIComponent(pr.name)}`}`;
+    const peopleSpec = `src=${pr.ch}&scope=people&${isTl ? `tl=${encodeURIComponent(pr.name)}${pr.id ? `&tlId=${encodeURIComponent(pr.id)}` : ''}&self=0&sort=stock` : `agent=${encodeURIComponent(pr.name)}`}`;
     const split = pr.stockSplit || {};
     const ownBase = isTl ? stockSpec : tlStockSpec;
     const ownAgentsChips = ts.own && ts.agents && ownBase
