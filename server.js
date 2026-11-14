@@ -10418,7 +10418,7 @@ async function handleApi(req, res, url) {
   const npciKind = (v) => (/^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
   // ⏱ v3.125.287 — ApnaPayment API rate-limit (HTTP 429) deti hai: poore server par ek hi "gate" —
   //    calls ke beech kam se kam npciGap ms; 429 aaye to sab calls ruk ke (Retry-After / 4s→ badhta) phir wahi item dobara.
-  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 180, chain: Promise.resolve() });
+  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 120, chain: Promise.resolve(), cut: 0, ok: 0 });
   function npciSlot() {
     const g = npciGate;
     const p2 = g.chain.then(async () => { const w = g.next - Date.now(); if (w > 0) await new Promise((r) => setTimeout(r, w)); g.next = Date.now() + g.gap; });
@@ -10429,25 +10429,27 @@ async function handleApi(req, res, url) {
     const v = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     const kind = npciKind(v);
     const body = kind === 'Tag ID' ? { tagId: v } : { vrn: v };
-    let lastErr = '';
-    for (let a = 0; a < 5; a++) {
-      if (a) await new Promise((r) => setTimeout(r, 800 * a));
+    let lastErr = '', tries = 0, rl = 0;
+    // 429 = sirf "thoda ruko" — attempt me nahi ginte (15 baar tak, ya ~90s), baaki errors 5 attempt.
+    while (tries < 5 && rl < 15) {
+      if (tries) await new Promise((r) => setTimeout(r, 800 * tries));
       await npciSlot();
       const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20e3);
       try {
         const r = await fetch(NPCI_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body), signal: ac.signal });
         const txt = await r.text();
         if (r.status === 429) {
+          rl++;
           const ra = Number(r.headers.get('retry-after')) || 0;
-          const pause = Math.min(30e3, Math.max(ra * 1000, 4000 * (a + 1)));
+          const pause = Math.min(12e3, Math.max(ra * 1000, 1500 * Math.min(rl, 6)));
           npciGate.next = Math.max(npciGate.next, Date.now() + pause);   // sab calls thodi der ruko
-          npciGate.gap = Math.min(1500, npciGate.gap + 150);             // aage thoda dheere
-          lastErr = 'HTTP 429 — API ne "bahut zyada requests" kaha (rate limit); dobara try kiya';
+          if (Date.now() - npciGate.cut > 4000) { npciGate.cut = Date.now(); npciGate.gap = Math.min(2000, Math.round(npciGate.gap * 1.8)); npciGate.ok = 0; }   // ek burst me ek hi baar dheere
+          lastErr = 'HTTP 429 — API ne "bahut zyada requests" kaha (rate limit)';
           continue;
         }
-        if (/^\s*</.test(txt)) { lastErr = `HTTP ${r.status} — HTML aaya (server ne JSON nahi diya)`; continue; }
-        if (npciGate.gap > 180) npciGate.gap = Math.max(180, npciGate.gap - 15);
-        let j; try { j = JSON.parse(txt); } catch { lastErr = 'Response samajh nahi aaya'; continue; }
+        if (/^\s*</.test(txt)) { tries++; lastErr = `HTTP ${r.status} — HTML aaya (server ne JSON nahi diya)`; continue; }
+        if (++npciGate.ok >= 15 && npciGate.gap > 100) { npciGate.ok = 0; npciGate.gap = Math.max(100, Math.round(npciGate.gap * 0.85)); }   // theek chala to dheere dheere tez
+        let j; try { j = JSON.parse(txt); } catch { tries++; lastErr = 'Response samajh nahi aaya'; continue; }
         const m = Array.isArray(j) ? (j[0] || {}) : (j || {});
         const td = (m.res && Array.isArray(m.res.tagDetails)) ? m.res.tagDetails : [];
         const tdBy = new Map(td.map((x) => [String(x.tagId || '').toUpperCase(), x]));
@@ -10457,7 +10459,7 @@ async function handleApi(req, res, url) {
         });
         if (!recs.length && td.length) recs = td.map((x) => ({ TAGID: x.tagId || '', BANKID: x.npci_BankId || '', REGNUMBER: x.regNumber || '', custId: x.custId || '', cch: x.cch || '', commVeh: x.commVeh || '', activationDt: x.activationDt || '', closeDt: x.closeDt || '', ENTITYID: x.entityId || '', tagDetails_cardStage: x.cardStage || '', tagDetails_npci_ExcCode: x.npci_ExcCode || '', npci_ExcCode: x.npci_ExcCode || '', TAGSTATUS: x.npci_TagStatus || '' }));
         return { input: v, kind, ok: m.STATUS === 'Success' && recs.length > 0, msg: m.APIRESPMSG || m.STATUS || '', records: recs };
-      } catch (err) { lastErr = err && err.name === 'AbortError' ? 'Time out (20s) — API ne jawab nahi diya' : String((err && err.message) || err); }
+      } catch (err) { tries++; lastErr = err && err.name === 'AbortError' ? 'Time out (20s) — API ne jawab nahi diya' : String((err && err.message) || err); }
       finally { clearTimeout(t); }
     }
     return { input: v, kind, ok: false, retry: !!lastErr && !/samajh nahi/i.test(lastErr), msg: lastErr || 'Fail', records: [] };
@@ -10505,8 +10507,19 @@ async function handleApi(req, res, url) {
     const job = { id, owner: user.username, items, rows: [], done: false, stop: false, started: Date.now(), touched: Date.now() };
     NPCI_JOBS.set(id, job);
     let next = 0;
-    const worker = async () => { while (!job.stop && next < items.length) { const i = next++; job.rows.push(await npciOne(items[i])); } };
-    Promise.all(Array.from({ length: 4 }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); });
+    // 8 ek saath; jo item fail hua wo queue ke AAKHIR me dobara (tab tak API ka rate settle ho jaata hai) — user ko error tab dikhta hai jab 2 baar fail ho.
+    const queue = items.slice(), requeued = new Set(); let inflight = 0;
+    const worker = async () => {
+      while (!job.stop) {
+        if (next >= queue.length) { if (inflight > 0) { await new Promise((r) => setTimeout(r, 150)); continue; } break; }
+        const it = queue[next++]; inflight++;
+        try {
+          const r = await npciOne(it);
+          if (r.retry && !requeued.has(it) && !job.stop) { requeued.add(it); queue.push(it); } else job.rows.push(r);
+        } finally { inflight--; }
+      }
+    };
+    Promise.all(Array.from({ length: 8 }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); });
     return sendJson(res, 200, { ok: true, id, total: items.length });
   }
   {
