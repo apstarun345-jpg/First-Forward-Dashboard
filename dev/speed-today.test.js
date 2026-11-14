@@ -189,7 +189,7 @@ test('server: /api/today (GV Master + EIR), /api/perf diagnostics, ETag/304', as
   assert.match(src, /kind: 'full-tab'/, 'aakhri fallback: poora chhota tab');
   assert.match(src, /todayFeedCache/, 'today feed server par cached (45s)');
   assert.match(src, /async function fetchUpstreamCached\(url, options\)/, 'per-query cache age override hai');
-  assert.match(src, /liveQueryCacheMs = force \? 0 : 30e3/, 'GV live feed 30s se zyada stale cache use nahi karta; force bypass karta hai');
+  assert.match(src, /liveQueryCacheMs = force \? 0 : Math\.max\(30e3, gvLiveMs\(\)\)/, 'GV live feed Settings ke gap (default 1 min, kam se kam 30s) se zyada stale cache use nahi karta; force bypass karta hai');
   assert.match(src, /successful-but-empty result/, 'text-date column par empty date query toDate fallback try karti hai');
   assert.match(src, /p === '\/api\/perf'/, 'admin ke liye query timing diagnostics');
   assert.match(src, /function perfReport\(\)/, 'perfReport() slowest queries + cache hit rate deta hai');
