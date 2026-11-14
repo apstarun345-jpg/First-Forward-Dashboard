@@ -902,10 +902,26 @@ window.FF = window.FF || {};
           if (spans.length > 1) prog(`⏳ ${doneSpans} / ${spans.length} hisse aa gaye · ${U.fmt(gotRows)} rows… (Google Sheet badi hai, thoda time lagta hai)`);
         }
       };
-      if (spans.length > 1) prog(`⏳ 0 / ${spans.length} hisse… Google Sheet se tag-level rows aa rahi hain`);
-      await Promise.all(Array.from({ length: Math.min(4, spans.length) }, worker));
-      const t = { rows: parts.reduce((acc, x) => (x && x.rows ? acc.concat(x.rows) : acc), []) };
+      // 🗂️ v3.125.291 — pehle server ka din-wise cache (kal tak ke din disk par saved, aaj live) → click par seconds me.
+      let t = null; state.rawCache = null;
+      try {
+        prog('⏳ Rows aa rahi hain… (kal tak ka data saved hai, aaj ka live)');
+        const j = await FF.auth.api(`/api/eir-raw?from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`);
+        if (j && Array.isArray(j.rows)) { t = { rows: j.rows }; state.rawCache = { cached: j.cachedDays, fetched: j.fetchedDays, ms: j.ms, errors: (j.errors || []).length }; }
+      } catch { t = null; }
+      if (!t) {
+        if (spans.length > 1) prog(`⏳ 0 / ${spans.length} hisse… Google Sheet se tag-level rows aa rahi hain`);
+        await Promise.all(Array.from({ length: Math.min(4, spans.length) }, worker));
+        t = { rows: parts.reduce((acc, x) => (x && x.rows ? acc.concat(x.rows) : acc), []) };
+      }
       const D = FF.data;
+      // 🟩 v3.125.291 — EIR ki GV rows me agent / ID khaali aur TL = "ApnaPayment" aata tha → Tag ID se GV Master
+      //    me agent naam, agent ID aur GV TL bhar do (master load nahi hua to 12s tak ruko).
+      let gvByTag = null;
+      if (wantGv && FF.gv && typeof FF.gv.rows === 'function') {
+        if (typeof FF.gv.need === 'function' && !Array.isArray(FF.gv.get && FF.gv.get('master'))) await Promise.race([FF.gv.need('master').catch(() => null), new Promise((r) => setTimeout(r, 12000))]);
+        try { gvByTag = new Map(); for (const g of FF.gv.rows() || []) { const k = String(g.tagId || '').toUpperCase().trim(); if (k) gvByTag.set(k, g); } } catch { gvByTag = null; }
+      }
       const filt = filterOf(spec.f);
       for (const r of t.rows) {
         const d = D.cellDate(r[0]);
@@ -915,20 +931,23 @@ window.FF = window.FF || {};
         if (channel === 'GV Partner' ? !wantGv || gvFromMaster : !wantFf) continue;
         // 🔁 FF T+1: jo FF rows abhi reported nahi (aaj) wo FF/both list me bhi nahi aati.
         if (channel !== 'GV Partner' && FF.filters && FF.filters.ffLagOn && FF.filters.ffLagOn() && !FF.filters.ffVisible({ key: d ? U.dateKey(d) : '', channel })) continue;
-        const agentName = channel === 'GV Partner' ? (D.cellText(r[11]) || D.cellText(r[7])) : (D.cellText(r[7]) || D.cellText(r[11]));
-        const agentId = channel === 'GV Partner' ? (D.cellText(r[12]) || D.cellText(r[8])) : (D.cellText(r[8]) || D.cellText(r[12]));
+        const gm = channel === 'GV Partner' && gvByTag ? gvByTag.get(D.cellText(r[1]).toUpperCase().trim()) : null;
+        const agentName = channel === 'GV Partner' ? ((gm && gm.agentName) || D.cellText(r[11]) || D.cellText(r[7])) : (D.cellText(r[7]) || D.cellText(r[11]));
+        const agentId = channel === 'GV Partner' ? ((gm && gm.agentId) || D.cellText(r[12]) || D.cellText(r[8])) : (D.cellText(r[8]) || D.cellText(r[12]));
+        const tlName = channel === 'GV Partner' ? (gm ? (gm.tlName || 'Direct (no TL)') : D.cellText(r[9])) : D.cellText(r[9]);
         const wanted = [spec.agent, spec.agentId].map(personKey).filter(Boolean);
         if (wanted.length && ![agentName, agentId].map(personKey).some((key) => wanted.includes(key))) continue;
-        const row = { key: d ? U.dateKey(d) : '', tagId: D.cellText(r[1]), cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: (channel === 'GV Partner' && FF.config.vrnStatus(D.cellText(r[2]))) || D.cellText(r[5]), vrnRule: channel === 'GV Partner' && !!FF.config.vrnStatus(D.cellText(r[2])), channel, agentName, agentId, tlName: D.cellText(r[9]), n: 1, barcode: '' };
+        const row = { key: d ? U.dateKey(d) : '', tagId: D.cellText(r[1]), cls, group: FF.model.classGroup(cls), type: D.cellText(r[4]).toUpperCase() || 'ISSUANCE', vrnType: (channel === 'GV Partner' && FF.config.vrnStatus(D.cellText(r[2]))) || D.cellText(r[5]), vrnRule: channel === 'GV Partner' && !!FF.config.vrnStatus(D.cellText(r[2])), channel, agentName, agentId, tlName, n: 1, barcode: (gm && gm.serial) || '' };
         { const vs = FF.config.vrnStatus(D.cellText(r[2])); if (vs) row.ruleWrong = vs === 'Wrong VRN'; } // Wrong VRN = VRN length rule, FF + GV both
         if (filt && !filt.fn(row)) continue;
         if (!rowMatchesSpec(row, spec)) continue;
-        out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), agentName, agentId, D.cellText(r[9]), channel, '']);
+        out.push([row.key, D.cellText(r[1]), D.cellText(r[2]), cls, row.type, row.vrnType, D.cellText(r[6]), agentName, agentId, tlName, channel, row.barcode]);
       }
     }
     out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
     if (!keep) return out;
     state.raw = out;
+    if (!needsEir) state.rawCache = null;
     state.rawGv = gvRows.length;
     state.rawSrc = eirOnly ? 'EIR (FF + GV · master ID rows = GV)' : gvFromMaster && wantGv ? (wantFf ? 'EIR (FF) + GV Master (GV)' : 'GV Master') : (wantGv && wantFf ? 'EIR (FF + GV)' : wantFf ? 'EIR' : 'EIR');
     return out;
@@ -944,7 +963,7 @@ window.FF = window.FF || {};
     const top = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `<span class="kd-chip">${esc(k)} <b>${U.fmt(v)}</b></span>`).join('');
     el.innerHTML = `<div class="kd-raw-tools"><input class="input" id="kd-raw-q" placeholder="Search: tag / VRN / barcode / agent / TL / class…" value="${esc(filter || '')}">${FF.auth.can('export') ? '<button class="btn small" data-kd-xlsx>⬇ Excel (all rows)</button><button class="btn small" data-kd-csv>⬇ CSV</button>' : ''}</div>
       <div class="kd-chips"><span class="dim small">Top TLs:</span>${top(byTl)}</div><div class="kd-chips"><span class="dim small">Top agents:</span>${top(byAgent)}</div>
-      <p class="dim small">${U.fmt(rows.length)} rows${q ? ` (search "${esc(q)}")` : ''}${rows.length > show.length ? ` · pehli ${show.length} dikh rahi hain — sab ke liye Excel download karo` : ''} · Source: <b>${esc(state.rawSrc || 'sheet')}</b> (ye rows seedha Google Sheet se aayi hain).</p>
+      <p class="dim small">${U.fmt(rows.length)} rows${q ? ` (search "${esc(q)}")` : ''}${rows.length > show.length ? ` · pehli ${show.length} dikh rahi hain — sab ke liye Excel download karo` : ''} · Source: <b>${esc(state.rawSrc || 'sheet')}</b>${state.rawCache ? ` · ${state.rawCache.cached} din saved cache se, ${state.rawCache.fetched} din live (${Math.round((state.rawCache.ms || 0) / 100) / 10}s)` : ''} · GV agent / ID / TL = GV Master.</p>
       <div class="table-wrap kd-scroll tall"><table class="tbl compact kd-tbl"><thead><tr>${RAW_HEAD.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${show.map((r) => `<tr class="clickable" data-kd-tag="${esc(r[1] || '')}" data-kd-tag-date="${esc(r[0] || '')}" title="Click for this tag’s details">${r.map((v, i) => `<td${i === 0 ? ' class="nowrap"' : ''}>${esc(i === 11 ? U.barcode(v) : (v || ''))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${RAW_HEAD.length}" class="empty">Koi row nahi mili.</td></tr>`}</tbody></table></div>`;
     const input = U.$('#kd-raw-q');
     if (input) { input.addEventListener('input', U.debounce(() => { renderRaw(input.value); const again = U.$('#kd-raw-q'); if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); } }, 300)); }

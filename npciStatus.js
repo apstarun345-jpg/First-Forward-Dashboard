@@ -7,8 +7,8 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, esc = U.esc;
   const COLS = ['BANKID', 'REGNUMBER', 'custId', 'cch', 'commVeh', 'activationDt', 'closeDt', 'ENTITYID', 'tagDetails_cardStage', 'tagDetails_npci_ExcCode', 'npci_ExcCode'];
-  const CHUNK = 10, MAX = 5000;   // 10-10 ka batch → result live aate rehte hain
-  const st = { rows: [], busy: false, stop: false, allTags: false, filter: '', total: 0 };
+  const MAX = 5000;   // server job chalata hai, browser 1.5s me naye rows leta hai
+  const st = { rows: [], busy: false, stop: false, allTags: false, filter: '', total: 0, job: null };
   const isRetry = (r) => !r.ok && (r.retry || /busy|429|HTML|time out|fetch|fail$/i.test(r.msg || ''));
   const FAIL_LAB = (r) => (isRetry(r) ? 'Check fail — dobara karo' : 'Not found (NPCI me nahi)');
 
@@ -100,14 +100,15 @@ FF.pages = FF.pages || {};
       ${s.retry && !st.busy ? `<div class="np-acts" style="margin:0 0 10px"><button type="button" class="btn primary" data-np-retry>↻ ${U.fmt(s.retry)} fail wale dobara check karo</button><span class="dim small">API ne "busy" bola tha — ab dheere dobara jayenge</span></div>` : ''}`;
     const chips = `<div class="np-chips"><b class="small" style="align-self:center">NPCI status:</b>${Object.entries(s.status).sort((a, b) => b[1] - a[1]).map(([lab, n]) => `<button type="button" class="np-chip ${tone(lab)}${st.filter === `st:${lab}` ? ' on' : ''}" data-np-f="st:${esc(lab)}">${esc(lab)} <b>${U.fmt(n)}</b></button>`).join('')}</div>`;
     const rows = filtered(flatRows(st.allTags));
-    const body = rows.slice(0, 3000).map((r) => {
+    const cap = st.busy ? 300 : 3000;   // chalte waqt halka table (har 1.5s re-render), khatam hone par 3000
+    const body = rows.slice(0, cap).map((r) => {
       const stx = r.npci_ExcCode || '';
       return `<tr class="${r.failed ? 'bad' : r.primary ? '' : 'old'}"><td class="dim">${r.n}</td><td><b>${esc(r.input)}</b></td><td>${esc(r.kind)}</td><td>${esc(r.TAGID || '')}</td>${COLS.map((c) => (c === 'npci_ExcCode' || c === 'tagDetails_npci_ExcCode') && r[c] ? `<td><span class="np-pill ${tone(r[c])}">${esc(r[c])}</span></td>` : `<td${r.failed && c === 'npci_ExcCode' ? ' class="np-err"' : ''}>${esc(r[c] || '')}</td>`).join('')}<td class="${r.vrnUpd === 'Updated' ? 'np-upd' : r.vrnUpd === 'Not updated' ? 'np-nupd' : 'dim'}">${esc(r.vrnUpd)}</td></tr>`;
     }).join('');
     return `${cards}${chips}
       <div class="np-acts" style="margin:0 0 8px">${s.multi ? `<label class="small" title="Gaadi number (VRN) daalne par NPCI us gaadi par ab tak lage SAARE tags bhejta hai — purane Replaced/Closed bhi. Default me sirf abhi wala (Active) tag dikhta hai."><input type="checkbox" data-np-all${st.allTags ? ' checked' : ''}> VRN wali gaadi ke purane tags bhi dikhao (${s.multi} VRN par 1 se zyada tag mile)</label>` : ''}
         <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="btn small" data-np-dl="csv">⬇ CSV</button><button type="button" class="btn small" data-np-dl="xlsx">📊 Excel</button><button type="button" class="btn small" data-np-dl="pdf">📄 PDF</button></span></div>
-      <p class="dim small" style="margin:0 0 6px">${U.fmt(rows.length)} rows${st.filter ? ' (filter laga hai — card / chip dobara dabao to hatega)' : ''}${rows.length > 3000 ? ' · table me pehli 3000, poora download me' : ''}</p>
+      <p class="dim small" style="margin:0 0 6px">${U.fmt(rows.length)} rows${st.filter ? ' (filter laga hai — card / chip dobara dabao to hatega)' : ''}${rows.length > cap ? ` · table me pehli ${U.fmt(cap)}, poora download me` : ''}</p>
       <div class="np-scroll"><table class="np-tbl"><thead><tr><th>#</th><th>Input</th><th>Input type</th><th>TAGID</th>${COLS.map((c) => `<th>${esc(c)}</th>`).join('')}<th>VRN update</th></tr></thead><tbody>${body}</tbody></table></div>`;
   }
   function filtered(rows) {
@@ -173,30 +174,44 @@ FF.pages = FF.pages || {};
     if (!items.length) { out.innerHTML = '<p class="np-err">Tag ID / VRN / Chassis daalo.</p>'; return; }
     if (items.length > MAX) { items = items.slice(0, MAX); U.toast && U.toast(`Pehle ${MAX} hi check honge`, 'warn'); }
     const again = !!opts.retry;
-    st.busy = true; st.stop = false; st.filter = '';
+    st.busy = true; st.stop = false; st.filter = ''; st.job = null;
     if (!again) { st.rows = []; st.total = items.length; }
     const go = root.querySelector('[data-np-go]'); if (go) go.disabled = true;
-    const stopB = root.querySelector('[data-np-stop]'); if (stopB) stopB.hidden = false;
+    const stopB = root.querySelector('[data-np-stop]'); if (stopB) { stopB.hidden = false; stopB.disabled = false; stopB.textContent = '⏹ Ruko'; }
     prog.hidden = false;
     if (out && !again) out.innerHTML = resultHtml();
-    for (let i = 0; i < items.length && !st.stop; i += CHUNK) {
-      const part = items.slice(i, i + CHUNK);
-      { const s0 = summary(); lab.textContent = `⏳ ${U.fmt(st.rows.length)} / ${U.fmt(items.length)} check hue · ✅ ${U.fmt(s0.found)} mile · ❌ ${U.fmt(s0.notFound)} nahi mile${s0.retry ? ` · ⚠ ${U.fmt(s0.retry)} fail` : ''} — beech me bhi download kar sakte ho`; }
-      prog.querySelector('i').style.width = `${Math.round((i / items.length) * 100)}%`;
-      let d = null;
-      for (let a = 0; a < 3 && !d; a++) {
-        try { d = await FF.auth.api('/api/npci/check', 'POST', { items: part }); } catch (err) { if (a === 2) { part.forEach((x) => { const row = { input: x, kind: kindOf(x), ok: false, retry: true, msg: err.message || 'Fail', records: [] }; const at = again ? st.rows.findIndex((y) => y.input === x) : -1; if (at >= 0) st.rows[at] = row; else st.rows.push(row); }); } else await new Promise((r) => setTimeout(r, 1500 * (a + 1))); }
+    const put = (r) => { const row = { ...r, records: r.records || [] }; const at = again ? st.rows.findIndex((x) => x.input === row.input) : -1; if (at >= 0) st.rows[at] = row; else st.rows.push(row); };
+    const t0 = Date.now();
+    const label = (n, done) => {
+      const s0 = summary(); const sec = (Date.now() - t0) / 1000; const rate = n && sec ? n / sec : 0;
+      const eta = !done && rate ? Math.round((items.length - n) / rate) : 0;
+      lab.textContent = `${done ? (st.stop ? '⏹ Ruk gaya' : '✅ Ho gaya') : '⏳'} ${U.fmt(n)} / ${U.fmt(items.length)} check hue · ✅ ${U.fmt(s0.found)} mile · ❌ ${U.fmt(s0.notFound)} nahi mile${s0.retry ? ` · ⚠ ${U.fmt(s0.retry)} fail` : ''}${eta ? ` · ~${eta >= 60 ? `${Math.round(eta / 60)} min` : `${eta}s`} baaki` : ''}${done ? '' : ' — beech me bhi download kar sakte ho'}`;
+      prog.querySelector('i').style.width = `${Math.round((n / items.length) * 100)}%`;
+    };
+    label(0, false);
+    let got = 0, err = '';
+    try {
+      const j = await FF.auth.api('/api/npci/job', 'POST', { items });
+      st.job = j.id;
+      let fails = 0;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, got ? 1500 : 800));
+        let d;
+        try { d = await FF.auth.api(`/api/npci/job/${j.id}?from=${got}`); fails = 0; } catch (e) { if (e && e.status === 404) throw e; if (++fails > 6) throw e; continue; }
+        (d.rows || []).forEach(put); got += (d.rows || []).length;
+        label(got, false);
+        if (root.isConnected) out.innerHTML = resultHtml();
+        if (d.done) break;
       }
-      if (d && d.rows) d.rows.forEach((r) => {
-        const row = { ...r, records: r.records || [] };
-        const at = again ? st.rows.findIndex((x) => x.input === row.input) : -1;
-        if (at >= 0) st.rows[at] = row; else st.rows.push(row);
-      });
-      if (root.isConnected) out.innerHTML = resultHtml();
+    } catch (e) { err = (e && e.message) || 'Fail'; }
+    // jo check nahi hue (stop / error) — "dobara" ke liye fail rows
+    if (err) {
+      const seen = new Set(st.rows.filter((r) => !isRetry(r)).map((r) => r.input));
+      items.filter((x) => !seen.has(x)).forEach((x) => put({ input: x, kind: kindOf(x), ok: false, retry: true, msg: err, records: [] }));
+      U.toast && U.toast(`NPCI: ${err}`, 'warn');
     }
-    prog.querySelector('i').style.width = '100%';
-    { const s1 = summary(); lab.textContent = `${st.stop ? '⏹ Ruk gaya' : '✅ Ho gaya'} — ${U.fmt(st.rows.length)} check hue · ${U.fmt(s1.found)} mile · ${U.fmt(s1.notFound)} nahi mile${s1.retry ? ` · ${U.fmt(s1.retry)} fail (neeche "dobara" button)` : ''}`; }
-    st.busy = false; if (go) go.disabled = false; if (stopB) stopB.hidden = true;
+    st.busy = false; st.job = null; if (go) go.disabled = false; if (stopB) stopB.hidden = true;
+    label(got, true);
     if (root.isConnected) out.innerHTML = resultHtml();
   }
 
@@ -231,7 +246,7 @@ FF.pages = FF.pages || {};
     });
     root.addEventListener('click', (e) => {
       if (e.target.closest('[data-np-go]')) { run(root, splitInputs(ta.value)); return; }
-      if (e.target.closest('[data-np-stop]')) { st.stop = true; return; }
+      if (e.target.closest('[data-np-stop]')) { st.stop = true; const b = e.target.closest('[data-np-stop]'); b.disabled = true; b.textContent = '⏹ Ruk raha…'; if (st.job) FF.auth.api(`/api/npci/job/${st.job}/stop`, 'POST', {}).catch(() => {}); return; }
       if (e.target.closest('[data-np-retry]')) { if (!st.busy) run(root, st.rows.filter(isRetry).map((r) => r.input), { retry: true }); return; }
       if (e.target.closest('[data-np-clear]')) { ta.value = ''; st.rows = []; st.filter = ''; recount(); root.querySelector('[data-np-out]').innerHTML = resultHtml(); return; }
       const f = e.target.closest('[data-np-f]');

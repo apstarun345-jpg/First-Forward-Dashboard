@@ -6880,6 +6880,7 @@ async function checkDailyVersions(reason) {
         }
       } catch { /* agli baar */ }
     }
+    if (changed.some((t) => t.label === 'EIR')) setTimeout(() => eirRawPrewarm('EIR naya data'), 30e3);
     if (changed.length) {
       console.log(`🗓️ daily data aaya (${reason || 'check'}): ${changed.map((t) => `${t.label} → ${dailyVer.get(t.key).rows} rows (${dailyVer.get(t.key).sig})`).join(', ')}`);
       // us tab ki cached queries peeche se naye data se bhar do (pehla user purana na dekhe)
@@ -6902,6 +6903,104 @@ function cacheFresh(url, hit) {
   const k = dailyKeyOfUrl(url);
   if (k && dailySig(k)) return hit.ver === dailySig(k) && Date.now() - hit.at < DAILY_MAX_MS;
   return Date.now() - hit.at < cacheMs();
+}
+// 🗂️ v3.125.291 — EIR tag-level rows ka DIN-WISE cache (KPI drawer "Load all rows").
+//    EIR sheet bahut badi hai: Google par ek mahine ki raw query ~90s. EIR me sirf kal tak ka data aata hai (T+1),
+//    isliye har din ki rows ek baar disk par save (gz) — phir click par turant. Naya EIR data aaye (daily signature
+//    badle) to sirf aakhri 3 din dobara; subah prewarm is mahine + pichhle mahine ko pehle se bhar deta hai.
+const EIR_RAW_DIR = path.join(DATA_DIR, 'eir-raw');
+const EIR_RAW_MEM = new Map();          // day → { rows, sig, at }  (chhota LRU)
+const EIR_RAW_MEM_MAX = 8;            // baaki disk se (memory guard)
+const EIR_RAW_INFLIGHT = new Map();     // span key → promise
+let eirRawPrewarming = null;
+function eirRawCfg() {
+  const s = db.settings || {}, e = { ...(DEFAULT_SETTINGS.eir || {}), ...(s.eir || {}) };
+  const L = (k, d) => colLetter(e[k], d);
+  const cols = [L('date', 'AA'), L('tagId', 'A'), L('vrn', 'B'), L('cls', 'D'), L('type', 'P'), L('vrnType', 'BC'), L('status', 'Z'), L('agentName', 'L'), L('agentId', 'J'), L('tlName', 'BA'), L('masterId', 'AU'), L('gvName', 'AX'), L('gvId', 'AW')];
+  const id = cleanId(s.sheetId) || DEFAULT_SHEET_ID, tab = s.eirSheet || 'EIR';
+  return { id, tab, cols, sigKey: `${id}|${tab}`, colSig: cols.join(',') };
+}
+const istTodayKey = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+const addDayKey = (k, n) => { const d = new Date(`${k}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+function gvizCellDayKey(c) {
+  if (!c || c.v == null) return '';
+  const m = /^Date\((\d+),(\d+),(\d+)/.exec(String(c.v));
+  if (m) return `${m[1]}-${String(Number(m[2]) + 1).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+  const t = String(c.f || c.v); const m2 = /^(\d{4})-(\d{2})-(\d{2})/.exec(t); if (m2) return m2[0];
+  const m3 = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/.exec(t); return m3 ? `${m3[3]}-${m3[2].padStart(2, '0')}-${m3[1].padStart(2, '0')}` : '';
+}
+function eirRawValid(day, ent, cfg) {
+  if (!ent || ent.colSig !== cfg.colSig) return false;
+  const today = istTodayKey();
+  if (day >= today) return Date.now() - ent.at < 5 * 60e3;      // aaj ka (GV live) — sirf 5 min memory me
+  if (day <= addDayKey(today, -4)) return true;                 // purane din badalte nahi
+  const sig = dailySig(cfg.sigKey);
+  return sig ? ent.sig === sig : Date.now() - ent.at < 3 * 3600e3;   // kal / parso: naya EIR data aaya to dobara
+}
+function eirRawRead(day, cfg) {
+  const m = EIR_RAW_MEM.get(day);
+  if (m && eirRawValid(day, m, cfg)) return m;
+  try {
+    const f = path.join(EIR_RAW_DIR, `${day}.json.gz`);
+    if (!existsSync(f)) return null;
+    const ent = JSON.parse(zlib.gunzipSync(readFileSync(f)).toString('utf8'));
+    if (!eirRawValid(day, ent, cfg)) return null;
+    EIR_RAW_MEM.set(day, ent); if (EIR_RAW_MEM.size > EIR_RAW_MEM_MAX) EIR_RAW_MEM.delete(EIR_RAW_MEM.keys().next().value);
+    return ent;
+  } catch { return null; }
+}
+async function eirRawFetchSpan(a, b, cfg) {
+  const key = `${cfg.colSig}|${a}|${b}`;
+  if (EIR_RAW_INFLIGHT.has(key)) return EIR_RAW_INFLIGHT.get(key);
+  const job = (async () => {
+    const date = cfg.cols[0];
+    const tq = `select ${cfg.cols.join(', ')} where toDate(${date}) >= date '${a}' and toDate(${date}) <= date '${b}' order by ${date} desc limit 60000`;
+    const qp = new URLSearchParams({ id: cfg.id, sheet: cfg.tab, tq });
+    const r = await gvizPageServerInner(qp, cfg.tab);
+    const byDay = new Map();
+    for (let d = a; d <= b; d = addDayKey(d, 1)) byDay.set(d, []);
+    for (const row of r.rows || []) {
+      const cells = (row.c || []).map((c) => (c ? (c.f != null ? { v: c.v, f: c.f } : { v: c.v }) : null));
+      const k = gvizCellDayKey(cells[0]);
+      if (byDay.has(k)) byDay.get(k).push(cells);
+    }
+    const sig = dailySig(cfg.sigKey), at = Date.now(), today = istTodayKey();
+    try { mkdirSync(EIR_RAW_DIR, { recursive: true }); } catch { /* optional */ }
+    for (const [day, rows] of byDay) {
+      const ent = { day, rows, sig, at, colSig: cfg.colSig };
+      EIR_RAW_MEM.set(day, ent); if (EIR_RAW_MEM.size > EIR_RAW_MEM_MAX) EIR_RAW_MEM.delete(EIR_RAW_MEM.keys().next().value);
+      if (day < today) {
+        try { writeFileSync(path.join(EIR_RAW_DIR, `${day}.json.gz`), zlib.gzipSync(Buffer.from(JSON.stringify(ent)))); } catch { /* disk optional */ }
+      }
+    }
+    return byDay;
+  })().finally(() => EIR_RAW_INFLIGHT.delete(key));
+  EIR_RAW_INFLIGHT.set(key, job);
+  return job;
+}
+/** from..to (YYYY-MM-DD) ki rows — cache se, jo din nahi hain wo 4-4 din ke tukdon me Google se (3 ek saath). */
+async function eirRawRows(from, to, opts = {}) {
+  const cfg = eirRawCfg();
+  const out = new Map(); const missing = [];
+  for (let d = from; d <= to; d = addDayKey(d, 1)) { const ent = eirRawRead(d, cfg); if (ent) { if (!opts.noCollect) out.set(d, ent.rows); } else missing.push(d); }
+  const spans = [];
+  for (const d of missing) { const last = spans[spans.length - 1]; if (last && addDayKey(last[1], 1) === d && last[2] < 4) { last[1] = d; last[2]++; } else spans.push([d, d, 1]); }
+  let next = 0; const errors = [];
+  const worker = async () => { while (next < spans.length) { const [a, b] = spans[next++]; try { const m = await eirRawFetchSpan(a, b, cfg); if (!opts.noCollect) for (const [d, rows] of m) out.set(d, rows); } catch (err) { errors.push(`${a}…${b}: ${err.message || err}`); } } };
+  await Promise.all(Array.from({ length: Math.min(opts.parallel || 3, spans.length) }, worker));
+  const rows = []; for (let d = to; d >= from; d = addDayKey(d, -1)) { const r = out.get(d); if (r) for (const x of r) rows.push(x); }
+  return { rows, cachedDays: missingCount(from, to) - missing.length, fetchedDays: missing.length, errors };
+  function missingCount(a, b) { let n = 0; for (let d = a; d <= b; d = addDayKey(d, 1)) n++; return n; }
+}
+/** Subah / naya EIR data aane par: is mahine + pichhle mahine ke din pehle se cache me (dheere, 2 ek saath). */
+function eirRawPrewarm(reason) {
+  if (eirRawPrewarming) return eirRawPrewarming;
+  const today = istTodayKey(), to = addDayKey(today, -1);
+  const from = `${addDayKey(`${today.slice(0, 7)}-01`, -1).slice(0, 7)}-01`;
+  eirRawPrewarming = eirRawRows(from, to, { parallel: 2, noCollect: true })
+    .then((r) => { if (r.fetchedDays) console.log(`🗂️ EIR raw cache (${reason}): ${r.fetchedDays} din bhare${r.errors.length ? ` · ${r.errors.length} error` : ''}`); })
+    .catch(() => {}).finally(() => { eirRawPrewarming = null; });
+  return eirRawPrewarming;
 }
 async function handleGviz(req, res, params) {
   const fresh = params.get('fresh') === '1';
@@ -10306,7 +10405,7 @@ async function handleApi(req, res, url) {
   const npciKind = (v) => (/^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
   // ⏱ v3.125.287 — ApnaPayment API rate-limit (HTTP 429) deti hai: poore server par ek hi "gate" —
   //    calls ke beech kam se kam npciGap ms; 429 aaye to sab calls ruk ke (Retry-After / 4s→ badhta) phir wahi item dobara.
-  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 350, chain: Promise.resolve() });
+  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 180, chain: Promise.resolve() });
   function npciSlot() {
     const g = npciGate;
     const p2 = g.chain.then(async () => { const w = g.next - Date.now(); if (w > 0) await new Promise((r) => setTimeout(r, w)); g.next = Date.now() + g.gap; });
@@ -10318,10 +10417,10 @@ async function handleApi(req, res, url) {
     const kind = npciKind(v);
     const body = kind === 'Tag ID' ? { tagId: v } : { vrn: v };
     let lastErr = '';
-    for (let a = 0; a < 6; a++) {
+    for (let a = 0; a < 5; a++) {
       if (a) await new Promise((r) => setTimeout(r, 800 * a));
       await npciSlot();
-      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 25e3);
+      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20e3);
       try {
         const r = await fetch(NPCI_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body), signal: ac.signal });
         const txt = await r.text();
@@ -10334,7 +10433,7 @@ async function handleApi(req, res, url) {
           continue;
         }
         if (/^\s*</.test(txt)) { lastErr = `HTTP ${r.status} — HTML aaya (server ne JSON nahi diya)`; continue; }
-        if (npciGate.gap > 350) npciGate.gap = Math.max(350, npciGate.gap - 10);
+        if (npciGate.gap > 180) npciGate.gap = Math.max(180, npciGate.gap - 15);
         let j; try { j = JSON.parse(txt); } catch { lastErr = 'Response samajh nahi aaya'; continue; }
         const m = Array.isArray(j) ? (j[0] || {}) : (j || {});
         const td = (m.res && Array.isArray(m.res.tagDetails)) ? m.res.tagDetails : [];
@@ -10345,7 +10444,7 @@ async function handleApi(req, res, url) {
         });
         if (!recs.length && td.length) recs = td.map((x) => ({ TAGID: x.tagId || '', BANKID: x.npci_BankId || '', REGNUMBER: x.regNumber || '', custId: x.custId || '', cch: x.cch || '', commVeh: x.commVeh || '', activationDt: x.activationDt || '', closeDt: x.closeDt || '', ENTITYID: x.entityId || '', tagDetails_cardStage: x.cardStage || '', tagDetails_npci_ExcCode: x.npci_ExcCode || '', npci_ExcCode: x.npci_ExcCode || '', TAGSTATUS: x.npci_TagStatus || '' }));
         return { input: v, kind, ok: m.STATUS === 'Success' && recs.length > 0, msg: m.APIRESPMSG || m.STATUS || '', records: recs };
-      } catch (err) { lastErr = err && err.name === 'AbortError' ? 'Time out (25s)' : String((err && err.message) || err); }
+      } catch (err) { lastErr = err && err.name === 'AbortError' ? 'Time out (20s) — API ne jawab nahi diya' : String((err && err.message) || err); }
       finally { clearTimeout(t); }
     }
     return { input: v, kind, ok: false, retry: !!lastErr && !/samajh nahi/i.test(lastErr), msg: lastErr || 'Fail', records: [] };
@@ -10359,6 +10458,49 @@ async function handleApi(req, res, url) {
     const worker = async () => { while (next < items.length) { const i = next++; out[i] = await npciOne(items[i]); } };
     await Promise.all([worker(), worker()]);
     return sendJson(res, 200, { ok: true, rows: out, at: new Date().toISOString() });
+  }
+  // 🛰️ v3.125.291 — NPCI background JOB: browser 60s timeout / "signal is aborted" khatam. Server khud chalata hai,
+  //    browser har ~1.5s me progress + naye rows le jaata hai, "Ruko" turant job band karta hai.
+  const NPCI_JOBS = globalThis.__ffNpciJobs || (globalThis.__ffNpciJobs = new Map());
+  const npciJobGc = () => { const now = Date.now(); for (const [k, j] of NPCI_JOBS) if (now - j.touched > 60 * 60e3) NPCI_JOBS.delete(k); };
+  if (p === '/api/eir-raw' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login karo.');
+    const from = String(url.searchParams.get('from') || ''), to = String(url.searchParams.get('to') || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw new HttpError(400, 'from / to (YYYY-MM-DD) chahiye.');
+    const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1;
+    if (days > 124) throw new HttpError(400, 'Ek baar me 4 mahine tak.');
+    const t0 = Date.now();
+    const r = await eirRawRows(from, to);
+    if (r.errors.length && !r.rows.length) throw new HttpError(502, `Google Sheet se rows nahi aayi: ${r.errors[0]}`);
+    return sendJson(res, 200, { ok: true, rows: r.rows, cachedDays: r.cachedDays, fetchedDays: r.fetchedDays, errors: r.errors, ms: Date.now() - t0 });
+  }
+  if (p === '/api/npci/job' && method === 'POST') {
+    if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
+    npciJobGc();
+    const body = await readBody(req);
+    const items = [...new Set((Array.isArray(body.items) ? body.items : String(body.items || '').split(/[\s,;]+/)).map((x) => String(x || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')).filter((x) => x.length >= 4 && x.length <= 30))].slice(0, 5000);
+    if (!items.length) throw new HttpError(400, 'Tag ID / VRN / Chassis daalo.');
+    // ek user ka purana chalta job band (do job ek saath API ko 429 dilate the)
+    for (const j0 of NPCI_JOBS.values()) if (j0.owner === user.username && !j0.done) j0.stop = true;
+    const id = crypto.randomBytes(8).toString('hex');
+    const job = { id, owner: user.username, items, rows: [], done: false, stop: false, started: Date.now(), touched: Date.now() };
+    NPCI_JOBS.set(id, job);
+    let next = 0;
+    const worker = async () => { while (!job.stop && next < items.length) { const i = next++; job.rows.push(await npciOne(items[i])); } };
+    Promise.all(Array.from({ length: 4 }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); });
+    return sendJson(res, 200, { ok: true, id, total: items.length });
+  }
+  {
+    const mj = /^\/api\/npci\/job\/([a-f0-9]{16})(\/stop)?$/.exec(p);
+    if (mj) {
+      if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
+      const job = NPCI_JOBS.get(mj[1]);
+      if (!job || (job.owner !== user.username && user.role !== 'admin')) throw new HttpError(404, 'Job nahi mila (server restart hua hoga) — bache hue dobara check karo.');
+      job.touched = Date.now();
+      if (mj[2]) { job.stop = true; return sendJson(res, 200, { ok: true }); }
+      const from = Math.max(0, Number(url.searchParams.get('from')) || 0);
+      return sendJson(res, 200, { ok: true, total: job.items.length, checked: job.rows.length, done: job.done, stopped: job.stop, rows: job.rows.slice(from), ms: (job.ended || Date.now()) - job.started });
+    }
   }
   // 💰 v3.125.234 — Payout SNAPSHOT: mahine me ek baar Home se "Payout refresh" → browser poori APN/FNF tabs padhta hai
   // (server sirf raw stream aage bhejta hai, parse nahi karta = memory safe), compact + masked snapshot banakar yahan PUT karta hai.
@@ -15690,6 +15832,7 @@ async function start() {
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
+    setTimeout(() => eirRawPrewarm('boot'), 150e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
     setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();
     // 🤖 robot brain (server): dashboard band ho tab bhi admins ko push — boot ke 3 min baad, phir har 30 min; push 45 sec me ek
     setTimeout(() => robotBrainRun('boot').catch(() => {}), 180e3).unref?.();
