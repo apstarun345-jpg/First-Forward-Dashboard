@@ -89,7 +89,7 @@ window.FF = window.FF || {};
     agentsOverview: ['kpiDetail', 'performance', 'agentsOverview'],   // KPI drill lists kpiDetail me register hoti hain
     aiAnalyst: [...INSIGHT_DEPS, 'aiAnalyst'],
     unusual: ['pdf', 'unusual-scan', 'unusual'],
-    delhivery: ['delhivery'],
+    npciStatus: ['npciStatus'],
     ffAgentSummary: [...SUMMARY_DEPS, 'agentSummary', 'gvTruth', 'summaryUI'],
     gvAgentSummary: [...SUMMARY_DEPS, 'gvpages', 'agentSummary', 'gvTruth', 'agentBoard', 'masterSearch', 'summaryUI'],
     settings: [...PROFILE_DEPS, 'agentSummary', 'unusual-scan', 'unusual', 'settings']

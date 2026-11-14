@@ -174,7 +174,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'multiCustomer', label: 'Cross-channel · Multiple Customer ID (EIR customer × month · issuing agent)', group: 'Cross Channel' },
   { key: 'aiAnalyst', label: 'Management · AI Business Analyst (GV + FF review)', group: 'Management' },
   { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
-  { key: 'delhivery', label: 'Cross-channel · Delhivery Tracking (pincode serviceability · AWB status)', group: 'Cross Channel' },
+  { key: 'npci', label: 'Cross-channel · NPCI Status (Tag ID / VRN / Chassis)', group: 'Cross Channel' },
   { key: 'ffAgentSummary', label: 'First Forward · Agent / TL Summary (share / PDF)', group: 'First Forward' },
   { key: 'gvAgentSummary', label: 'GV Partner · Agent / TL Summary (share / PDF)', group: 'GV Partner' },
   // Legacy key kept so existing saved permissions remain valid during migration.
@@ -10296,80 +10296,46 @@ async function handleApi(req, res, url) {
       throw new HttpError(502, `Sheet history read nahi ho payi: ${err.message}`);
     }
   }
-  // 🚚 v3.125.258 — Delhivery Tracking (Cross Channel): pincode serviceability + AWB status. Token server par hi rehta hai.
-  const dlvPerm = (u) => u && (u.role === 'admin' || (Array.isArray(u.permissions) && u.permissions.includes('delhivery')));
-  const dlvToken = () => String((db.settings && db.settings.delhivery && db.settings.delhivery.token) || process.env.DELHIVERY_TOKEN || '').trim();
-  async function dlvGet(urlStr) {
-    const tok = dlvToken();
-    if (!tok) throw new HttpError(400, 'Delhivery API token set nahi hai — Delhivery Tracking page par admin token daalein.');
-    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 25e3);
-    try {
-      let r = await fetch(urlStr, { headers: { Authorization: `Token ${tok}`, Accept: 'application/json' }, signal: ac.signal });
-      let txt = await r.text();
-      // Render ka IP Delhivery reject kare (401/403) → wahi call Apps Script (Google server) se — jaise aapki sheet script chalti hai.
-      if (r.status === 401 || r.status === 403) {
-        const store = sheetSyncStore();
-        if (store) {
-          try {
-            const o = await store.call('dlvfetch', { url: urlStr, token: tok }, { timeoutMs: 40e3, attempts: 1 });
-            if (o && o.status) { r = { status: o.status, ok: o.status >= 200 && o.status < 300 }; txt = String(o.text || ''); }
-          } catch (e2) { if (!/unknown action/i.test(String(e2 && e2.message))) console.warn('dlvfetch:', String(e2 && e2.message).slice(0, 150)); }
-        }
-      }
-      if (r.status === 401 || r.status === 403) { console.warn(`delhivery ${r.status}: ${String(txt).replace(/\s+/g, ' ').slice(0, 200)}`); throw new HttpError(502, `Delhivery ne request reject ki (HTTP ${r.status})${/cloudflare|access denied|forbidden|<html/i.test(txt) ? ' — server IP block lag raha hai' : ' — token check karo'}: ${String(txt).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)}`); }
-      if (!r.ok) throw new HttpError(502, `Delhivery HTTP ${r.status}`);
-      try { return JSON.parse(txt); } catch { throw new HttpError(502, 'Delhivery ka response samajh nahi aaya.'); }
-    } catch (err) { if (err.name === 'AbortError') throw new HttpError(504, 'Delhivery ne time par jawab nahi diya.'); throw err; }
-    finally { clearTimeout(t); }
-  }
-  if (p === '/api/delhivery/status' && method === 'GET') {
-    if (!dlvPerm(user)) throw new HttpError(user ? 403 : 401, 'Delhivery Tracking ki permission nahi hai.');
-    return sendJson(res, 200, { ok: true, configured: !!dlvToken(), admin: user.role === 'admin' });
-  }
-  if (p === '/api/delhivery/pincode' && method === 'POST') {
-    if (!dlvPerm(user)) throw new HttpError(user ? 403 : 401, 'Delhivery Tracking ki permission nahi hai.');
-    const body = await readBody(req);
-    const pins = [...new Set((Array.isArray(body.pins) ? body.pins : String(body.pins || '').split(/[^0-9]+/)).map((x) => String(x).replace(/\D/g, '')).filter((x) => /^\d{6}$/.test(x)))].slice(0, 300);
-    if (!pins.length) throw new HttpError(400, '6-digit pincode daalo.');
-    const found = new Map();
-    for (let i = 0; i < pins.length; i += 50) {
-      const part = pins.slice(i, i + 50);
-      const j = await dlvGet(`https://track.delhivery.com/c/api/pin-codes/json/?filter_codes=${part.join(',')}`);
-      (j.delivery_codes || []).forEach((x) => { const pc = x && x.postal_code; if (pc && pc.pin) found.set(String(pc.pin), pc); });
-    }
-    const yn = (v) => /^y/i.test(String(v || ''));
-    const rows = pins.map((pin) => {
-      const pc = found.get(pin);
-      if (!pc) return { pin, serviceable: false, reason: 'Delhivery list me nahi' };
-      const embargo = /embargo/i.test(String(pc.remarks || ''));
-      const prepaid = yn(pc.pre_paid), cod = yn(pc.cod), pickup = yn(pc.pickup), repl = yn(pc.repl), cash = yn(pc.cash);
-      return { pin, serviceable: !embargo && (prepaid || cod), prepaid, cod, cash, pickup, repl, oda: yn(pc.is_oda), city: pc.city || '', district: pc.district || '', state: pc.state_code || '', sortCode: pc.sort_code || '', remarks: pc.remarks || '' };
-    });
-    return sendJson(res, 200, { ok: true, rows, at: new Date().toISOString() });
-  }
-  if (p === '/api/delhivery/track' && method === 'POST') {
-    if (!dlvPerm(user)) throw new HttpError(user ? 403 : 401, 'Delhivery Tracking ki permission nahi hai.');
-    const body = await readBody(req);
-    const awbs = [...new Set((Array.isArray(body.awbs) ? body.awbs : String(body.awbs || '').split(/[\s,;]+/)).map((x) => String(x).trim().toUpperCase()).filter((x) => /^[A-Z0-9]{6,20}$/.test(x)))].slice(0, 200);
-    if (!awbs.length) throw new HttpError(400, 'AWB number daalo.');
-    const got = new Map();
-    for (let i = 0; i < awbs.length; i += 25) {
-      const part = awbs.slice(i, i + 25);
-      const j = await dlvGet(`https://track.delhivery.com/api/v1/packages/json/?waybill=${encodeURIComponent(part.join(','))}`);
-      (j.ShipmentData || []).forEach((x) => {
-        const sh = x && x.Shipment; if (!sh) return;
-        const st = sh.Status || {}, cn = sh.Consignee || {};
-        const scans = (sh.Scans || []).map((z) => z && z.ScanDetail).filter(Boolean).map((z) => ({ at: z.ScanDateTime || z.StatusDateTime || '', scan: z.Scan || '', type: z.ScanType || '', loc: z.ScannedLocation || '', note: z.Instructions || '' }));
-        got.set(String(sh.AWB || '').toUpperCase(), {
-          awb: String(sh.AWB || ''), status: st.Status || '', statusType: st.StatusType || '', statusAt: st.StatusDateTime || '', location: st.StatusLocation || '', instructions: st.Instructions || '',
-          origin: sh.Origin || '', destination: sh.Destination || '', pickupAt: sh.PickUpDate || '', expected: sh.ExpectedDeliveryDate || sh.PromisedDeliveryDate || '', deliveredAt: sh.DeliveryDate || '', rtoAt: sh.RTOStartedDate || '', returnedAt: sh.ReturnedDate || '',
-          orderType: sh.OrderType || '', ref: sh.ReferenceNo || '', consignee: cn.Name || '', city: cn.City || '', state: cn.State || '', pin: cn.PinCode ? String(cn.PinCode) : '',
-          scans: scans.slice(-30).reverse()
+  // 🛰️ v3.125.284 — NPCI Status (Cross Channel): Tag ID / VRN / Chassis → ApnaPayment verifyNpciStatus API (server se, bina token).
+  const npciPerm = (u) => u && (u.role === 'admin' || (Array.isArray(u.permissions) && (u.permissions.includes('npci') || u.permissions.includes('delhivery'))));
+  const NPCI_URL = process.env.NPCI_API_URL || 'https://www.apnapayment.com/api/agent/idfc/verifyNpciStatus';
+  const npciKind = (v) => (/^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
+  async function npciOne(raw) {
+    const v = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const kind = npciKind(v);
+    const body = kind === 'Tag ID' ? { tagId: v } : { vrn: v };
+    let lastErr = '';
+    for (let a = 0; a < 3; a++) {
+      if (a) await new Promise((r) => setTimeout(r, 1200 * a));
+      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 25e3);
+      try {
+        const r = await fetch(NPCI_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body), signal: ac.signal });
+        const txt = await r.text();
+        if (/^\s*</.test(txt)) { lastErr = `HTTP ${r.status} — HTML aaya (server ne JSON nahi diya)`; continue; }
+        let j; try { j = JSON.parse(txt); } catch { lastErr = 'Response samajh nahi aaya'; continue; }
+        const m = Array.isArray(j) ? (j[0] || {}) : (j || {});
+        const td = (m.res && Array.isArray(m.res.tagDetails)) ? m.res.tagDetails : [];
+        const tdBy = new Map(td.map((x) => [String(x.tagId || '').toUpperCase(), x]));
+        let recs = (Array.isArray(m.NPCIVehicleDetails) ? m.NPCIVehicleDetails : []).map((d) => {
+          const tg = tdBy.get(String(d.TAGID || '').toUpperCase()) || {};
+          return { TAGID: d.TAGID || '', BANKID: d.BANKID || '', REGNUMBER: d.REGNUMBER || '', custId: d.custId || '', cch: d.cch || d.VEHICLECLASS || '', commVeh: d.commVeh || d.COMVEHICLE || '', activationDt: d.activationDt || '', closeDt: d.closeDt || '', ENTITYID: d.ENTITYID || '', tagDetails_cardStage: tg.cardStage || '', tagDetails_npci_ExcCode: tg.npci_ExcCode || '', npci_ExcCode: d.npci_ExcCode || '', TAGSTATUS: d.TAGSTATUS || '' };
         });
-      });
+        if (!recs.length && td.length) recs = td.map((x) => ({ TAGID: x.tagId || '', BANKID: x.npci_BankId || '', REGNUMBER: x.regNumber || '', custId: x.custId || '', cch: x.cch || '', commVeh: x.commVeh || '', activationDt: x.activationDt || '', closeDt: x.closeDt || '', ENTITYID: x.entityId || '', tagDetails_cardStage: x.cardStage || '', tagDetails_npci_ExcCode: x.npci_ExcCode || '', npci_ExcCode: x.npci_ExcCode || '', TAGSTATUS: x.npci_TagStatus || '' }));
+        return { input: v, kind, ok: m.STATUS === 'Success' && recs.length > 0, msg: m.APIRESPMSG || m.STATUS || '', records: recs };
+      } catch (err) { lastErr = err && err.name === 'AbortError' ? 'Time out (25s)' : String((err && err.message) || err); }
+      finally { clearTimeout(t); }
     }
-    const rows = awbs.map((a) => got.get(a) || { awb: a, status: '', notFound: true });
-    return sendJson(res, 200, { ok: true, rows, at: new Date().toISOString() });
+    return { input: v, kind, ok: false, msg: lastErr || 'Fail', records: [] };
+  }
+  if (p === '/api/npci/check' && method === 'POST') {
+    if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
+    const body = await readBody(req);
+    const items = [...new Set((Array.isArray(body.items) ? body.items : String(body.items || '').split(/[\s,;]+/)).map((x) => String(x || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')).filter((x) => x.length >= 4 && x.length <= 30))].slice(0, 60);
+    if (!items.length) throw new HttpError(400, 'Tag ID / VRN / Chassis daalo.');
+    const out = new Array(items.length); let next = 0;
+    const worker = async () => { while (next < items.length) { const i = next++; out[i] = await npciOne(items[i]); } };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    return sendJson(res, 200, { ok: true, rows: out, at: new Date().toISOString() });
   }
   // 💰 v3.125.234 — Payout SNAPSHOT: mahine me ek baar Home se "Payout refresh" → browser poori APN/FNF tabs padhta hai
   // (server sirf raw stream aage bhejta hai, parse nahi karta = memory safe), compact + masked snapshot banakar yahan PUT karta hai.
