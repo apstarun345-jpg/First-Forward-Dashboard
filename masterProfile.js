@@ -1624,21 +1624,25 @@ window.FF = window.FF || {};
       const avgVc4 = gvDaily(r, r.curVc4), avgComm = gvDaily(r, r.curComm);
       // GV Master (final) me supervisor mila to wahi TL — GV REPORT ka blank TL "Direct" nahi banata.
       const lTl = truth && truth.ledgerTl;
-      const direct = lTl ? false : safeCall(() => FF.config.isDirectAgent(r, 'gv'), false);
+      // 🚫 v3.125.277 — "Direct" / blank jaisa placeholder TL asli TL nahi: aise agent Direct hain (TL ke under stock nahi dikhta).
+      const lTlReal = !!(lTl && lTl.name && (!FF.config.isRealTl || FF.config.isRealTl(lTl.name)));
+      const direct = lTlReal ? false : (lTl && lTl.name ? true : safeCall(() => FF.config.isDirectAgent(r, 'gv'), false));
       const given = num(r.suggestedDispatch);
       Object.assign(out, {
         mobile: mobileFor(r.agentName, r.agentId, r.mobile), tl: { name: direct ? '' : ((lTl && lTl.name) || r.tlName), id: (lTl && lTl.id) || r.tlId, mobile: '' }, status: r.agentStatus || '', lastActive: '', priority: prioOf(r.priority), growth: r.growth != null ? `${r.growth}%` : '',
         direct, directLabel: direct ? FF.config.directLabel(r, 'gv') : '',
         stock: { vc4: num(r.stockVc4), comm: num(r.stockComm), total: num(r.stockTotal) || num(r.stockVc4) + num(r.stockComm) },
-        tlStock: { vc4: num(r.tlStockVc4), comm: num(r.tlStockComm), total: num(r.tlStockTotal), has: !direct && (r.tlStockTotal != null) },
+        // GV REPORT ka "TL stock" snapshot nahi — TL stock neeche Tag Assignment se (sirf asli TL ho to)
+        tlStock: { vc4: 0, comm: 0, total: 0, has: false },
         dispatch: { days: suggestDays(), avgVc4, avgComm, cover: avgVc4 > 0 ? num(r.stockVc4) / avgVc4 : null, given, minRequired: num(r.minRequired), sugVc4: suggest(avgVc4, r.stockVc4), sugComm: suggest(avgComm, r.stockComm), sugVc4Gross: suggestGro(avgVc4), sugCommGross: suggestGro(avgComm) },
         totals: { curVc4: num(r.curVc4), curComm: num(r.curComm), curTotal: num(r.curTotal), lastVc4: num(r.lastVc4), lastComm: num(r.lastComm), lastTotal: num(r.lastTotal) }
       });
     } else {
       Object.assign(out, { mobile: '', tl: { name: [...(p.tlSet || [])][0] || '' }, priority: '', direct: !!p.direct, directLabel: p.directLabel || '', stock: { vc4: 0, comm: 0, total: 0 }, tlStock: { has: false }, dispatch: { days: suggestDays(), sugVc4: 0, sugComm: 0, sugVc4Gross: 0, sugCommGross: 0 }, totals: {} });
     }
-    if (r && !out.direct && r.tlName && (!FF.config.isRealTl || FF.config.isRealTl(r.tlName))) {
-      const teamStock = tlStockComposition('gv', r.tlName, r.tlId, gvPeopleLookup().rows, gvRows('stockAgent'), gvRows('stockAgentClass'));
+    const tlNm = (out.tl && out.tl.name) || '', tlIdv = (out.tl && out.tl.id) || (r && r.tlId) || '';
+    if (r && !out.direct && tlNm && (!FF.config.isRealTl || FF.config.isRealTl(tlNm))) {
+      const teamStock = tlStockComposition('gv', tlNm, tlIdv, gvPeopleLookup().rows, gvRows('stockAgent'), gvRows('stockAgentClass'));
       out.tlStock = { ...teamStock.stock, has: true, own: teamStock.own, agents: teamStock.agents, classRows: teamStock.classRows };
     }
     // 📦 GV individual-agent card must use the same Tag Assignment stock source as the clicked class-wise detail.
