@@ -6768,7 +6768,12 @@ function markHot(url) {
 const goodGvizBody = (body) => typeof body === 'string' && body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(body);
 async function upstreamOnce(url) {
   let p = inflight.get(url);
-  if (!p) { p = fetchUpstream(url).finally(() => inflight.delete(url)); inflight.set(url, p); }
+  if (!p) {
+    // v3.125.290 — raw row-list query (group by nahi, bada limit) Google par 45s+ le sakti hai — usko 110s do.
+    let heavy = false;
+    try { const tq = String(new URL(url).searchParams.get('tq') || '').toLowerCase(); heavy = !!tq && !/group\s+by/.test(tq) && /limit\s+(\d{4,})/.test(tq); } catch { heavy = false; }
+    p = fetchUpstream(url, heavy ? { timeoutMs: 110_000 } : undefined).finally(() => inflight.delete(url)); inflight.set(url, p);
+  }
   return p;
 }
 /** Cache me daalo (dedupe + cap ke saath). */
