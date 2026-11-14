@@ -41,17 +41,20 @@
   <link rel="stylesheet" href="themes.css?v=7">
   <link rel="stylesheet" href="native-security.css?v=1">
   <!-- Clean workspace surfaces, channel badges and controls; last so theme/mobile repairs remain predictable. -->
+  <!-- ✨ v3.125.281 — opening screen: 3D ApnaPayment text + premium background (strong selectors se purane boot rules override) -->
+  <link rel="stylesheet" href="boot3d.css?v=1">
   <link rel="stylesheet" href="ui-polish.css?v=1">
 </head>
 <body>
   <div id="app-boot" class="app-boot" role="status" aria-live="polite">
-    <!-- 🖼️ v3.61: boot logo pehle 874 KB PNG tha (1408×768, 280×153 par dikhta tha) — har app start
-         par phone 0.9 MB sirf logo ke liye download karta tha. Ab 560px WebP 7.8 KB (+ PNG fallback
-         sirf purane browsers ke liye). Boot screen = pehla paint, isliye ye sabse bada quick win tha. -->
-    <picture>
-      <source srcset="logos/apna-payment-boot.webp" type="image/webp">
-      <img src="logos/apna-payment-boot.png" alt="ApnaPayment" width="280" height="153">
-    </picture>
+    <!-- ✨ v3.125.281 — 3D text logo (image nahi): crystal-clear ApnaPayment + golden play arrow -->
+    <div class="ap3d" role="img" aria-label="ApnaPayment — Revolutionary Payment Solution">
+      <div class="ap3d-row">
+        <span class="ap3d-word" data-text="ApnaPayment"><span class="ap3d-a">Apna</span><span class="ap3d-b">Payment</span></span>
+        <svg class="ap3d-play" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="ap3dG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff59d"/><stop offset=".45" stop-color="#facc15"/><stop offset="1" stop-color="#d97706"/></linearGradient><linearGradient id="ap3dS" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><path d="M18 12 Q12 9 12 16 L12 84 Q12 91 18 88 L88 54 Q94 50 88 46 Z" fill="#92400e" transform="translate(3 5)"/><path d="M18 12 Q12 9 12 16 L12 84 Q12 91 18 88 L88 54 Q94 50 88 46 Z" fill="url(#ap3dG)" stroke="#b45309" stroke-width="2"/><path d="M20 20 L20 50 L70 44 Z" fill="url(#ap3dS)"/></svg>
+      </div>
+      <div class="ap3d-tag">Revolutionary <i>•</i> Payment <i>•</i> Solution</div>
+    </div>
     <div class="boot-fireworks" aria-hidden="true">
       <i class="fw fw-a"></i><i class="fw fw-b"></i><i class="fw fw-c"></i>
     </div>

@@ -1,0 +1,84 @@
+/* ✨ v3.125.281 — Opening screen: crystal-clear 3D "ApnaPayment" text + premium animated background.
+   Sabse aakhir me load hota hai — purane boot (image logo, blue bg) rules ko override karta hai. */
+html body #app-boot.app-boot {
+  background:
+    radial-gradient(ellipse 60% 45% at 50% 46%, rgba(250, 204, 21, .16), transparent 70%),
+    radial-gradient(ellipse 45% 40% at 18% 18%, rgba(124, 58, 237, .30), transparent 70%),
+    radial-gradient(ellipse 50% 45% at 85% 82%, rgba(14, 165, 233, .22), transparent 70%),
+    linear-gradient(160deg, #04050d 0%, #0b0d1f 45%, #140a1f 100%) !important;
+  color: #fff !important;
+  overflow: hidden !important;
+  perspective: 900px;
+}
+/* chamakti golden-violet aurora (dheere ghoomti) */
+html body #app-boot.app-boot::before {
+  content: '' !important; position: absolute !important; inset: -40% !important; z-index: 0 !important;
+  background: conic-gradient(from 0deg at 50% 50%, rgba(250,204,21,.0), rgba(250,204,21,.16), rgba(168,85,247,.18), rgba(56,189,248,.14), rgba(250,204,21,.0)) !important;
+  filter: blur(60px) !important; opacity: .9 !important;
+  animation: ap3dSpin 14s linear infinite !important;
+}
+/* neeche chamakta perspective grid floor */
+html body #app-boot.app-boot::after {
+  content: '' !important; position: absolute !important; left: -50% !important; right: -50% !important; top: auto !important; bottom: -8% !important;
+  width: auto !important; height: 46% !important; z-index: 0 !important; filter: none !important;
+  background:
+    repeating-linear-gradient(90deg, rgba(250,204,21,.22) 0 1px, transparent 1px 64px),
+    repeating-linear-gradient(0deg, rgba(250,204,21,.18) 0 1px, transparent 1px 64px) !important;
+  transform: rotateX(68deg) !important; transform-origin: 50% 100% !important;
+  -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 85%); mask-image: linear-gradient(to top, #000 0%, transparent 85%);
+  animation: ap3dFloor 3.2s linear infinite !important;
+}
+html body #app-boot.app-boot > * { position: relative; z-index: 3; }
+html body #app-boot.app-boot .boot-fireworks { z-index: 1 !important; }
+
+.ap3d { display: flex; flex-direction: column; align-items: center; gap: 14px; animation: ap3dIn .9s cubic-bezier(.2,.9,.2,1) both, ap3dFloat 4s ease-in-out .9s infinite; }
+.ap3d-row { display: flex; align-items: center; gap: clamp(6px, 1.2vw, 14px); }
+.ap3d-word {
+  position: relative; display: inline-block;
+  font-family: "Poppins", "Montserrat", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  font-weight: 900; font-size: clamp(38px, 8.4vw, 92px); line-height: 1; letter-spacing: -.02em;
+  -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision;
+}
+/* "Apna" — chandi-safed, 3D extrude (har layer 1px neeche) */
+.ap3d-a {
+  color: #ffffff;
+  text-shadow:
+    0 1px 0 #e2e8f0, 0 2px 0 #cbd5e1, 0 3px 0 #b6c1d1, 0 4px 0 #a3afc2, 0 5px 0 #8e9ab0, 0 6px 0 #7a869d, 0 7px 0 #67728a,
+    0 9px 6px rgba(0,0,0,.45), 0 16px 28px rgba(0,0,0,.55), 0 0 26px rgba(255,255,255,.18);
+}
+/* "Payment" — sunehra (gold), 3D extrude */
+.ap3d-b {
+  color: #facc15;
+  text-shadow:
+    0 1px 0 #f5b70c, 0 2px 0 #eaa20a, 0 3px 0 #dc8f08, 0 4px 0 #cc7b06, 0 5px 0 #b86a05, 0 6px 0 #a35a04, 0 7px 0 #8c4b03,
+    0 9px 6px rgba(0,0,0,.45), 0 16px 28px rgba(0,0,0,.55), 0 0 30px rgba(250,204,21,.35);
+}
+/* upar se chamak (shine) guzarti hai — text saaf rehta hai, sirf ek patli roshni */
+.ap3d-word::after {
+  content: attr(data-text); position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 0%, transparent 40%, rgba(255,255,255,.95) 50%, transparent 60%, transparent 100%);
+  background-size: 250% 100%; background-position: 150% 0;
+  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+  animation: ap3dShine 3.2s ease-in-out 1s infinite;
+}
+.ap3d-play { width: clamp(40px, 8vw, 86px); height: auto; filter: drop-shadow(0 10px 14px rgba(0,0,0,.55)) drop-shadow(0 0 18px rgba(250,204,21,.45)); animation: ap3dPulse 1.6s ease-in-out infinite; }
+.ap3d-tag {
+  font-family: "Poppins", "Segoe UI", system-ui, Arial, sans-serif; font-weight: 700;
+  font-size: clamp(11px, 1.7vw, 17px); letter-spacing: .32em; text-transform: uppercase; color: #e2e8f0;
+  text-shadow: 0 1px 0 #64748b, 0 2px 6px rgba(0,0,0,.6);
+}
+.ap3d-tag i { color: #facc15; font-style: normal; margin: 0 .25em; }
+html body #app-boot.app-boot .boot-welcome { margin-top: 18px; color: #fde047 !important; }
+html body #app-boot.app-boot .boot-progress { width: 220px !important; height: 4px !important; background: rgba(255,255,255,.12) !important; }
+html body #app-boot.app-boot .boot-progress::after { background: linear-gradient(90deg, #facc15, #f472b6, #60a5fa) !important; }
+
+@keyframes ap3dIn { from { opacity: 0; transform: translateY(18px) rotateX(35deg) scale(.92); } to { opacity: 1; transform: none; } }
+@keyframes ap3dFloat { 0%, 100% { transform: translateY(0) rotateX(0deg); } 50% { transform: translateY(-6px) rotateX(6deg); } }
+@keyframes ap3dShine { 0% { background-position: 150% 0; } 60%, 100% { background-position: -60% 0; } }
+@keyframes ap3dPulse { 0%, 100% { transform: translateX(0) scale(1); } 50% { transform: translateX(5px) scale(1.06); } }
+@keyframes ap3dSpin { to { transform: rotate(360deg); } }
+@keyframes ap3dFloor { from { background-position: 0 0, 0 0; } to { background-position: 0 0, 0 64px; } }
+@media (prefers-reduced-motion: reduce) {
+  .ap3d, .ap3d-word::after, .ap3d-play, html body #app-boot.app-boot::before, html body #app-boot.app-boot::after { animation: none !important; }
+}
+@media (max-width: 520px) { .ap3d-tag { letter-spacing: .16em; font-size: 10.5px; white-space: nowrap; } }
