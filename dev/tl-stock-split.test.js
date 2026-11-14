@@ -299,6 +299,7 @@ test('people drawer: TL ke Agents card par click = wahi agents (TL ki apni row c
   const withTl = await K._peopleDetail({ src: 'ff', scope: 'people', tl: 'TL One', self: '1', sort: 'stock' });
   assert.equal((withoutTl.body.match(/data-kd-agent="/g) || []).length, 2, 'agents list me 2 rows (TL khud nahi)');
   assert.match(withoutTl.body, /Agents total [(]2 agents[)]/);
-  assert.match(withoutTl.body, /= TL TOTAL — agents 80 \+ TL ka apna stock 40/, 'drawer ke neeche bhi reconcile footer');
+  assert.match(withoutTl.body, /= TL TOTAL \(2 agents \+ TL TL One\)/, 'drawer ke neeche TL TOTAL (agents + TL) footer');
+  assert.match(withoutTl.body, /<td class="num"><b>120<\/b><\/td><\/tr>/, 'TL TOTAL stock = agents 80 + TL 40');
   assert.equal((withTl.body.match(/data-kd-agent="/g) || []).length, 3, 'self=1 par TL ki row bhi dikhti hai');
 });
