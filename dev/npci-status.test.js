@@ -37,6 +37,10 @@ test('primary = Active tag; VRN update = REGNUMBER 1-10 chars; summary', () => {
   assert.equal(s.total, 4); assert.equal(s.found, 3); assert.equal(s.failed, 1);
   assert.equal(s.upd, 1); assert.equal(s.notUpd, 1);
   assert.equal(s.status.Active, 2); assert.equal(s.status['Low Balance'], 1);
+  assert.equal(s.notFound, 1, 'Unregistered = NPCI me nahi'); assert.equal(s.retry, 0); assert.equal(s.active, 2);
+  T.st.rows.push({ input: 'BUSY1234567', kind: 'Chassis', ok: false, retry: true, msg: 'HTTP 429', records: [] });
+  assert.equal(T.summary().retry, 1, '429 = check fail (dobara), not "not found"');
+  T.st.rows.pop();
   assert.equal(T.flatRows(false).length, 4, 'har input ki ek row');
   assert.equal(T.flatRows(true).length, 5, 'VRN ke saare tags');
 });

@@ -7,8 +7,10 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, esc = U.esc;
   const COLS = ['BANKID', 'REGNUMBER', 'custId', 'cch', 'commVeh', 'activationDt', 'closeDt', 'ENTITYID', 'tagDetails_cardStage', 'tagDetails_npci_ExcCode', 'npci_ExcCode'];
-  const CHUNK = 40, MAX = 5000;
-  const st = { rows: [], busy: false, stop: false, allTags: false, filter: '' };
+  const CHUNK = 10, MAX = 5000;   // 10-10 ka batch → result live aate rehte hain
+  const st = { rows: [], busy: false, stop: false, allTags: false, filter: '', total: 0 };
+  const isRetry = (r) => !r.ok && (r.retry || /busy|429|HTML|time out|fetch|fail$/i.test(r.msg || ''));
+  const FAIL_LAB = (r) => (isRetry(r) ? 'Check fail — dobara karo' : 'Not found (NPCI me nahi)');
 
   /** Text / CSV → unique inputs (har cell; header jaise "tag id" chhod do). */
   function splitInputs(t) {
@@ -40,20 +42,21 @@ FF.pages = FF.pages || {};
       const prim = primaryOf(r.records);
       const recs = all ? r.records : (prim ? [prim] : []);
       const updCell = r.kind === 'VRN' ? '—' : (prim ? (vrnUpdated(prim.REGNUMBER) ? 'Updated' : 'Not updated') : '—');
-      if (!recs.length) out.push({ n: i + 1, input: r.input, kind: r.kind, primary: true, TAGID: '', ...Object.fromEntries(COLS.map((c) => [c, ''])), npci_ExcCode: r.ok ? '' : (r.msg || 'Not found'), vrnUpd: updCell, failed: true });
+      if (!recs.length) out.push({ n: i + 1, input: r.input, kind: r.kind, primary: true, TAGID: '', ...Object.fromEntries(COLS.map((c) => [c, ''])), npci_ExcCode: isRetry(r) ? `Check fail — ${r.msg || ''}` : `Not found — ${r.msg || ''}`, failLab: FAIL_LAB(r), vrnUpd: updCell, failed: true });
       else recs.forEach((d) => out.push({ n: i + 1, input: r.input, kind: r.kind, primary: d === prim, ...d, vrnUpd: updCell }));
     });
     return out;
   }
   function summary() {
-    const s = { total: st.rows.length, kind: { 'Tag ID': 0, VRN: 0, Chassis: 0 }, found: 0, failed: 0, upd: 0, notUpd: 0, updBase: 0, status: {}, multi: 0 };
+    const s = { total: Math.max(st.total, st.rows.length), checked: st.rows.length, kind: { 'Tag ID': 0, VRN: 0, Chassis: 0 }, found: 0, failed: 0, notFound: 0, retry: 0, upd: 0, notUpd: 0, updBase: 0, status: {}, multi: 0, active: 0 };
     st.rows.forEach((r) => {
       s.kind[r.kind] = (s.kind[r.kind] || 0) + 1;
       const prim = primaryOf(r.records);
-      if (prim) s.found++; else s.failed++;
+      if (prim) s.found++; else { s.failed++; if (isRetry(r)) s.retry++; else s.notFound++; }
+      if (prim && /^active$/i.test(statusKey(prim))) s.active++;
       if (r.records.length > 1) s.multi++;
       if (r.kind !== 'VRN' && prim) { s.updBase++; if (vrnUpdated(prim.REGNUMBER)) s.upd++; else s.notUpd++; }
-      const k = prim ? statusKey(prim) : 'Not found / fail';
+      const k = prim ? statusKey(prim) : FAIL_LAB(r);
       s.status[k] = (s.status[k] || 0) + 1;
     });
     return s;
@@ -89,11 +92,12 @@ FF.pages = FF.pages || {};
     const k = (cls, key, lab, val, sub) => `<button type="button" class="np-k ${cls}${st.filter === key ? ' on' : ''}" data-np-f="${esc(key)}">${esc(lab)}<b>${U.fmt(val)}</b>${sub ? `<small>${sub}</small>` : ''}</button>`;
     const pctOf = (a, b) => (b ? `${Math.round((a / b) * 1000) / 10}%` : '—');
     const cards = `<div class="np-sum">
-      ${k('c1', '', 'Total input', s.total, `Tag ID ${s.kind['Tag ID']} · VRN ${s.kind.VRN} · Chassis ${s.kind.Chassis}`)}
-      ${k('c2', 'found', 'NPCI me mile', s.found, `${s.multi} VRN par kai tags`)}
+      ${k('c1', '', 'Total input', s.total, `${st.busy ? `⏳ ${U.fmt(s.checked)} check hue · ${U.fmt(s.total - s.checked)} baaki · ` : ''}Tag ID ${s.kind['Tag ID']} · VRN ${s.kind.VRN} · Chassis ${s.kind.Chassis}`)}
+      ${k('c2', 'found', 'NPCI me mile', s.found, `Active ${U.fmt(s.active)}${s.multi ? ` · ${s.multi} VRN par kai tags` : ''}`)}
       ${k('c4', 'upd', 'VRN updated', s.upd, `Tag ID / Chassis me se · ${pctOf(s.upd, s.updBase)}`)}
       ${k('c3', 'notupd', 'VRN not updated', s.notUpd, `REGNUMBER 10 akshar se lamba (chassis hi) · ${pctOf(s.notUpd, s.updBase)}`)}
-      ${k('c5', 'fail', 'Not found / fail', s.failed, '')}</div>`;
+      ${k('c5', 'fail', 'Not found / fail', s.failed, `NPCI me nahi ${U.fmt(s.notFound)}${s.retry ? ` · check fail ${U.fmt(s.retry)}` : ''}`)}</div>
+      ${s.retry && !st.busy ? `<div class="np-acts" style="margin:0 0 10px"><button type="button" class="btn primary" data-np-retry>↻ ${U.fmt(s.retry)} fail wale dobara check karo</button><span class="dim small">API ne "busy" bola tha — ab dheere dobara jayenge</span></div>` : ''}`;
     const chips = `<div class="np-chips"><b class="small" style="align-self:center">NPCI status:</b>${Object.entries(s.status).sort((a, b) => b[1] - a[1]).map(([lab, n]) => `<button type="button" class="np-chip ${tone(lab)}${st.filter === `st:${lab}` ? ' on' : ''}" data-np-f="st:${esc(lab)}">${esc(lab)} <b>${U.fmt(n)}</b></button>`).join('')}</div>`;
     const rows = filtered(flatRows(st.allTags));
     const body = rows.slice(0, 3000).map((r) => {
@@ -101,7 +105,7 @@ FF.pages = FF.pages || {};
       return `<tr class="${r.failed ? 'bad' : r.primary ? '' : 'old'}"><td class="dim">${r.n}</td><td><b>${esc(r.input)}</b></td><td>${esc(r.kind)}</td><td>${esc(r.TAGID || '')}</td>${COLS.map((c) => (c === 'npci_ExcCode' || c === 'tagDetails_npci_ExcCode') && r[c] ? `<td><span class="np-pill ${tone(r[c])}">${esc(r[c])}</span></td>` : `<td${r.failed && c === 'npci_ExcCode' ? ' class="np-err"' : ''}>${esc(r[c] || '')}</td>`).join('')}<td class="${r.vrnUpd === 'Updated' ? 'np-upd' : r.vrnUpd === 'Not updated' ? 'np-nupd' : 'dim'}">${esc(r.vrnUpd)}</td></tr>`;
     }).join('');
     return `${cards}${chips}
-      <div class="np-acts" style="margin:0 0 8px"><label class="small"><input type="checkbox" data-np-all${st.allTags ? ' checked' : ''}> VRN ke saare tags dikhao (purane Replaced/Closed bhi)</label>
+      <div class="np-acts" style="margin:0 0 8px">${s.multi ? `<label class="small" title="Gaadi number (VRN) daalne par NPCI us gaadi par ab tak lage SAARE tags bhejta hai — purane Replaced/Closed bhi. Default me sirf abhi wala (Active) tag dikhta hai."><input type="checkbox" data-np-all${st.allTags ? ' checked' : ''}> VRN wali gaadi ke purane tags bhi dikhao (${s.multi} VRN par 1 se zyada tag mile)</label>` : ''}
         <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="btn small" data-np-dl="csv">⬇ CSV</button><button type="button" class="btn small" data-np-dl="xlsx">📊 Excel</button><button type="button" class="btn small" data-np-dl="pdf">📄 PDF</button></span></div>
       <p class="dim small" style="margin:0 0 6px">${U.fmt(rows.length)} rows${st.filter ? ' (filter laga hai — card / chip dobara dabao to hatega)' : ''}${rows.length > 3000 ? ' · table me pehli 3000, poora download me' : ''}</p>
       <div class="np-scroll"><table class="np-tbl"><thead><tr><th>#</th><th>Input</th><th>Input type</th><th>TAGID</th>${COLS.map((c) => `<th>${esc(c)}</th>`).join('')}<th>VRN update</th></tr></thead><tbody>${body}</tbody></table></div>`;
@@ -113,7 +117,8 @@ FF.pages = FF.pages || {};
     if (f === 'fail') return rows.filter((r) => r.failed);
     if (f === 'upd') return rows.filter((r) => r.vrnUpd === 'Updated');
     if (f === 'notupd') return rows.filter((r) => r.vrnUpd === 'Not updated');
-    if (f.startsWith('st:')) { const want = f.slice(3); return rows.filter((r) => (r.failed ? 'Not found / fail' : (r.npci_ExcCode || r.tagDetails_npci_ExcCode || '—')) === want); }
+    if (f === 'retry') return rows.filter((r) => r.failed && r.failLab === 'Check fail — dobara karo');
+    if (f.startsWith('st:')) { const want = f.slice(3); return rows.filter((r) => (r.failed ? r.failLab : (r.npci_ExcCode || r.tagDetails_npci_ExcCode || '—')) === want); }
     return rows;
   }
 
@@ -123,9 +128,15 @@ FF.pages = FF.pages || {};
   const fname = () => `NPCI Status - ${U.dateKey(new Date())}${st.filter ? ` - ${st.filter.replace(/^st:/, '')}` : ''}`;
   function summaryRows() {
     const s = summary();
-    const out = [['Total input', s.total], ['Tag ID input', s.kind['Tag ID']], ['VRN input', s.kind.VRN], ['Chassis input', s.kind.Chassis], ['NPCI me mile', s.found], ['Not found / fail', s.failed],
-      ['— VRN update (sirf Tag ID / Chassis input) —', ''], ['VRN updated (REGNUMBER 1-10 akshar)', s.upd], ['VRN not updated', s.notUpd], ['— NPCI status —', '']];
-    Object.entries(s.status).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => out.push([k, n]));
+    const pct = (a, b) => (b ? `${Math.round((a / b) * 1000) / 10}%` : '');
+    const out = [
+      ['Input', 'Total input', s.total, ''], ['Input', 'Check ho gaye', s.checked, pct(s.checked, s.total)], ...(s.total > s.checked ? [['Input', 'Baaki (check nahi hue)', s.total - s.checked, pct(s.total - s.checked, s.total)]] : []),
+      ['Input', 'Tag ID input', s.kind['Tag ID'], ''], ['Input', 'VRN input', s.kind.VRN, ''], ['Input', 'Chassis input', s.kind.Chassis, ''],
+      ['Result', 'NPCI me mile', s.found, pct(s.found, s.checked)], ['Result', 'NPCI me nahi mile', s.notFound, pct(s.notFound, s.checked)], ...(s.retry ? [['Result', 'Check fail (dobara karo)', s.retry, pct(s.retry, s.checked)]] : []),
+      ['VRN update (Tag ID / Chassis input)', 'VRN updated (REGNUMBER 1-10 akshar)', s.upd, pct(s.upd, s.updBase)], ['VRN update (Tag ID / Chassis input)', 'VRN not updated', s.notUpd, pct(s.notUpd, s.updBase)],
+      ['NPCI status', 'Active', s.active, pct(s.active, s.checked)]
+    ];
+    Object.entries(s.status).filter(([k]) => !/^active$/i.test(k)).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => out.push(['NPCI status', k, n, pct(n, s.checked)]));
     return out;
   }
   async function download(kind, btn) {
@@ -135,7 +146,7 @@ FF.pages = FF.pages || {};
     if (kind === 'xlsx') {
       if (!FF.xlsx && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('xlsx'); } catch { /* */ } }
       if (!FF.xlsx) { U.toast && U.toast('Excel module load nahi hua', 'err'); return; }
-      FF.xlsx.download(fname(), [{ name: 'Summary', header: ['Item', 'Count'], rows: summaryRows() }, { name: 'NPCI Results', header: HEAD, rows: rows.map(rowArr) }]);
+      FF.xlsx.download(fname(), [{ name: 'Summary', header: ['Section', 'Item', 'Count', '%'], rows: summaryRows() }, { name: 'NPCI Results', header: HEAD, rows: rows.map(rowArr) }]);
       return;
     }
     try {
@@ -157,27 +168,34 @@ FF.pages = FF.pages || {};
   }
 
   // ---------------------------------------------------------------- run
-  async function run(root, items) {
+  async function run(root, items, opts = {}) {
     const out = root.querySelector('[data-np-out]'), prog = root.querySelector('[data-np-prog]'), lab = root.querySelector('[data-np-plab]');
     if (!items.length) { out.innerHTML = '<p class="np-err">Tag ID / VRN / Chassis daalo.</p>'; return; }
     if (items.length > MAX) { items = items.slice(0, MAX); U.toast && U.toast(`Pehle ${MAX} hi check honge`, 'warn'); }
-    st.busy = true; st.stop = false; st.rows = []; st.filter = '';
+    const again = !!opts.retry;
+    st.busy = true; st.stop = false; st.filter = '';
+    if (!again) { st.rows = []; st.total = items.length; }
     const go = root.querySelector('[data-np-go]'); if (go) go.disabled = true;
     const stopB = root.querySelector('[data-np-stop]'); if (stopB) stopB.hidden = false;
     prog.hidden = false;
+    if (out && !again) out.innerHTML = resultHtml();
     for (let i = 0; i < items.length && !st.stop; i += CHUNK) {
       const part = items.slice(i, i + CHUNK);
-      lab.textContent = `${U.fmt(Math.min(i + part.length, items.length))} / ${U.fmt(items.length)} check ho rahe hain…`;
+      { const s0 = summary(); lab.textContent = `⏳ ${U.fmt(st.rows.length)} / ${U.fmt(items.length)} check hue · ✅ ${U.fmt(s0.found)} mile · ❌ ${U.fmt(s0.notFound)} nahi mile${s0.retry ? ` · ⚠ ${U.fmt(s0.retry)} fail` : ''} — beech me bhi download kar sakte ho`; }
       prog.querySelector('i').style.width = `${Math.round((i / items.length) * 100)}%`;
       let d = null;
       for (let a = 0; a < 3 && !d; a++) {
-        try { d = await FF.auth.api('/api/npci/check', 'POST', { items: part }); } catch (err) { if (a === 2) { part.forEach((x) => st.rows.push({ input: x, kind: kindOf(x), ok: false, msg: err.message || 'Fail', records: [] })); } else await new Promise((r) => setTimeout(r, 1500 * (a + 1))); }
+        try { d = await FF.auth.api('/api/npci/check', 'POST', { items: part }); } catch (err) { if (a === 2) { part.forEach((x) => { const row = { input: x, kind: kindOf(x), ok: false, retry: true, msg: err.message || 'Fail', records: [] }; const at = again ? st.rows.findIndex((y) => y.input === x) : -1; if (at >= 0) st.rows[at] = row; else st.rows.push(row); }); } else await new Promise((r) => setTimeout(r, 1500 * (a + 1))); }
       }
-      if (d && d.rows) d.rows.forEach((r) => st.rows.push({ ...r, records: r.records || [] }));
+      if (d && d.rows) d.rows.forEach((r) => {
+        const row = { ...r, records: r.records || [] };
+        const at = again ? st.rows.findIndex((x) => x.input === row.input) : -1;
+        if (at >= 0) st.rows[at] = row; else st.rows.push(row);
+      });
       if (root.isConnected) out.innerHTML = resultHtml();
     }
     prog.querySelector('i').style.width = '100%';
-    lab.textContent = st.stop ? `Ruk gaya — ${U.fmt(st.rows.length)} check hue` : `✅ ${U.fmt(st.rows.length)} check ho gaye`;
+    { const s1 = summary(); lab.textContent = `${st.stop ? '⏹ Ruk gaya' : '✅ Ho gaya'} — ${U.fmt(st.rows.length)} check hue · ${U.fmt(s1.found)} mile · ${U.fmt(s1.notFound)} nahi mile${s1.retry ? ` · ${U.fmt(s1.retry)} fail (neeche "dobara" button)` : ''}`; }
     st.busy = false; if (go) go.disabled = false; if (stopB) stopB.hidden = true;
     if (root.isConnected) out.innerHTML = resultHtml();
   }
@@ -214,6 +232,7 @@ FF.pages = FF.pages || {};
     root.addEventListener('click', (e) => {
       if (e.target.closest('[data-np-go]')) { run(root, splitInputs(ta.value)); return; }
       if (e.target.closest('[data-np-stop]')) { st.stop = true; return; }
+      if (e.target.closest('[data-np-retry]')) { if (!st.busy) run(root, st.rows.filter(isRetry).map((r) => r.input), { retry: true }); return; }
       if (e.target.closest('[data-np-clear]')) { ta.value = ''; st.rows = []; st.filter = ''; recount(); root.querySelector('[data-np-out]').innerHTML = resultHtml(); return; }
       const f = e.target.closest('[data-np-f]');
       if (f) { const k = f.dataset.npF; st.filter = st.filter === k ? '' : k; root.querySelector('[data-np-out]').innerHTML = resultHtml(); return; }

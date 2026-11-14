@@ -212,7 +212,7 @@ test('masterSearch invalidates its cached indexes after a data refresh', async (
     MS.invalidate();
     await MS.buildLight();
   }
-  assert.equal(MS.search('Naya Agent').people.length, 0, 'removed person must not survive a rebuild');
+  assert.ok(!MS.search('Naya Agent').people.some((p) => p.name === 'Naya Agent'), 'removed person must not survive a rebuild');
 });
 
 // ---- wowzone -------------------------------------------------------------------------------

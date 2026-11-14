@@ -790,11 +790,19 @@ FF.pages = FF.pages || {};
   function search(q) {
     const idx = state.full || state.light;
     // v3.125.283 — "varsha kanwar TL" / "TL varsha" / "ramesh agent" → role shabd hata ke naam se dhoondo, sirf wahi role
+    //    (lekin agar poora text kisi ke NAAM me hai — jaise "Naya Agent" — to role shabd mat hatao)
     let roleWant = '';
     let query = clean(q);
     const roleRx = /(^|\s)(tl|t\.l\.?|team\s*leader|agent)(?=\s|$)/i;
     const rm = roleRx.exec(query);
-    if (rm && query.replace(roleRx, ' ').trim().length >= 2) { roleWant = /agent/i.test(rm[2]) ? 'agent' : 'tl'; query = clean(query.replace(roleRx, ' ')); }
+    if (rm && query.replace(roleRx, ' ').trim().length >= 2) {
+      const full = normName(query);
+      const idx0 = state.full || state.light;
+      const pool = idx0 ? (idx0.personGrams ? (idx0.personGrams.get(full.slice(0, 2)) || []) : idx0.people.values()) : [];
+      let nameHit = false;
+      for (const p of pool) { if (normName(p.name || '').includes(full)) { nameHit = true; break; } }
+      if (!nameHit) { roleWant = /agent/i.test(rm[2]) ? 'agent' : 'tl'; query = clean(query.replace(roleRx, ' ')); }
+    }
     const out = { q: query, people: [], tags: [], ids: [], heavy: !!(state.full && state.full.fullLoaded), matched: 0 };
     if (!query) return out;
     const nql = query.toLowerCase();

@@ -10299,18 +10299,37 @@ async function handleApi(req, res, url) {
   const npciPerm = (u) => u && (u.role === 'admin' || (Array.isArray(u.permissions) && u.permissions.includes('npci')));
   const NPCI_URL = process.env.NPCI_API_URL || 'https://www.apnapayment.com/api/agent/idfc/verifyNpciStatus';
   const npciKind = (v) => (/^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
+  // ⏱ v3.125.287 — ApnaPayment API rate-limit (HTTP 429) deti hai: poore server par ek hi "gate" —
+  //    calls ke beech kam se kam npciGap ms; 429 aaye to sab calls ruk ke (Retry-After / 4s→ badhta) phir wahi item dobara.
+  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 350, chain: Promise.resolve() });
+  function npciSlot() {
+    const g = npciGate;
+    const p2 = g.chain.then(async () => { const w = g.next - Date.now(); if (w > 0) await new Promise((r) => setTimeout(r, w)); g.next = Date.now() + g.gap; });
+    g.chain = p2.catch(() => {});
+    return p2;
+  }
   async function npciOne(raw) {
     const v = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     const kind = npciKind(v);
     const body = kind === 'Tag ID' ? { tagId: v } : { vrn: v };
     let lastErr = '';
-    for (let a = 0; a < 3; a++) {
-      if (a) await new Promise((r) => setTimeout(r, 1200 * a));
+    for (let a = 0; a < 6; a++) {
+      if (a) await new Promise((r) => setTimeout(r, 800 * a));
+      await npciSlot();
       const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 25e3);
       try {
         const r = await fetch(NPCI_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body), signal: ac.signal });
         const txt = await r.text();
+        if (r.status === 429) {
+          const ra = Number(r.headers.get('retry-after')) || 0;
+          const pause = Math.min(30e3, Math.max(ra * 1000, 4000 * (a + 1)));
+          npciGate.next = Math.max(npciGate.next, Date.now() + pause);   // sab calls thodi der ruko
+          npciGate.gap = Math.min(1500, npciGate.gap + 150);             // aage thoda dheere
+          lastErr = 'HTTP 429 — API ne "bahut zyada requests" kaha (rate limit); dobara try kiya';
+          continue;
+        }
         if (/^\s*</.test(txt)) { lastErr = `HTTP ${r.status} — HTML aaya (server ne JSON nahi diya)`; continue; }
+        if (npciGate.gap > 350) npciGate.gap = Math.max(350, npciGate.gap - 10);
         let j; try { j = JSON.parse(txt); } catch { lastErr = 'Response samajh nahi aaya'; continue; }
         const m = Array.isArray(j) ? (j[0] || {}) : (j || {});
         const td = (m.res && Array.isArray(m.res.tagDetails)) ? m.res.tagDetails : [];
@@ -10324,16 +10343,16 @@ async function handleApi(req, res, url) {
       } catch (err) { lastErr = err && err.name === 'AbortError' ? 'Time out (25s)' : String((err && err.message) || err); }
       finally { clearTimeout(t); }
     }
-    return { input: v, kind, ok: false, msg: lastErr || 'Fail', records: [] };
+    return { input: v, kind, ok: false, retry: !!lastErr && !/samajh nahi/i.test(lastErr), msg: lastErr || 'Fail', records: [] };
   }
   if (p === '/api/npci/check' && method === 'POST') {
     if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
     const body = await readBody(req);
-    const items = [...new Set((Array.isArray(body.items) ? body.items : String(body.items || '').split(/[\s,;]+/)).map((x) => String(x || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')).filter((x) => x.length >= 4 && x.length <= 30))].slice(0, 60);
+    const items = [...new Set((Array.isArray(body.items) ? body.items : String(body.items || '').split(/[\s,;]+/)).map((x) => String(x || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')).filter((x) => x.length >= 4 && x.length <= 30))].slice(0, 25);
     if (!items.length) throw new HttpError(400, 'Tag ID / VRN / Chassis daalo.');
     const out = new Array(items.length); let next = 0;
     const worker = async () => { while (next < items.length) { const i = next++; out[i] = await npciOne(items[i]); } };
-    await Promise.all([worker(), worker(), worker(), worker()]);
+    await Promise.all([worker(), worker()]);
     return sendJson(res, 200, { ok: true, rows: out, at: new Date().toISOString() });
   }
   // 💰 v3.125.234 — Payout SNAPSHOT: mahine me ek baar Home se "Payout refresh" → browser poori APN/FNF tabs padhta hai
