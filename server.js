@@ -1945,17 +1945,27 @@ async function gvApiDayRecords(day, secret) {
   const ttl = day === dateKeyNow() ? 30e3 : 60 * 60e3;
   if (hit && Date.now() - hit.at < ttl) return hit.data;
   const url = process.env.GV_API_URL || 'https://www.apnapayment.com/api/agent/dailytag/idfc-issued';
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 25000);
-  try {
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Secret-Key': secret }, body: JSON.stringify({ report_date: day }), signal: ctl.signal });
-    if (!res.ok) throw new Error(`GV API HTTP ${res.status}`);
-    const json = await res.json();
-    if (!json || !json.success || !Array.isArray(json.data)) throw new Error('GV API bad response');
-    gvApiDayCache.set(day, { at: Date.now(), data: json.data });
-    if (gvApiDayCache.size > 120) gvApiDayCache.delete(gvApiDayCache.keys().next().value);
-    return json.data;
-  } finally { clearTimeout(timer); }
+  // v3.125.264 — ek din fail ho to 4 baar tak retry (1.5s → 3s → 6s); timeout 40s. Purana cache ho to fail par wahi do.
+  let lastErr = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 1500 * 2 ** (attempt - 1)));
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 40000);
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Secret-Key': secret }, body: JSON.stringify({ report_date: day }), signal: ctl.signal });
+      if (!res.ok) throw new Error(`GV API HTTP ${res.status}`);
+      const json = await res.json();
+      if (!json || !json.success || !Array.isArray(json.data)) throw new Error('GV API bad response');
+      gvApiDayCache.set(day, { at: Date.now(), data: json.data });
+      if (gvApiDayCache.size > 120) gvApiDayCache.delete(gvApiDayCache.keys().next().value);
+      return json.data;
+    } catch (err) {
+      lastErr = err;
+      if (/HTTP 4(0[0-3]|1\d)/.test(String(err && err.message))) break; // auth / bad request — retry se nahi sudhrega
+    } finally { clearTimeout(timer); }
+  }
+  if (hit && hit.data) return hit.data;
+  throw lastErr || new Error('GV API fail');
 }
 const GV_API_KNOWN = new Set(['unique_id', 'id', 'agent_name', 'supervisor_agent_id', 'supervisor_name', 'vno', 'v_no', 'vehicle_no', 'vclass', 'v_class', 'cch', 'sno', 'serial_no', 'tag_id_number', 'tag_id', 'tagId', 'amount', 'name', 'customer_name', 'product_id', 'commission', 'status', 'commission_status', 'date_added', 'dateAdded', 'created_at']);
 async function gvApiReport(from, to, settings, tokens) {
@@ -2006,7 +2016,14 @@ async function gvApiReport(from, to, settings, tokens) {
       } catch (err) { errors.push({ day, error: String((err && err.message) || err).slice(0, 120) }); }
     }
   };
-  await Promise.all([worker(), worker(), worker()]);
+  await Promise.all([worker(), worker()]);
+  // fail hue din ek-ek karke dobara (thoda ruk kar) — taaki selected range poori aaye
+  if (errors.length) {
+    const again = errors.splice(0).map((e) => e.day);
+    await new Promise((r) => setTimeout(r, 2000));
+    days.length = 0; days.push(...again); idx = 0;
+    await worker();
+  }
   out.sort((a, b) => (a.added < b.added ? -1 : a.added > b.added ? 1 : 0));
   return { ok: true, from, to, days: spanDays, rows: out, errors, stats, truncated: spanDays > 22 };
 }
