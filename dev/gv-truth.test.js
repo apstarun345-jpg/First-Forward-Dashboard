@@ -205,13 +205,11 @@ test('gvTruth: ledger-final numbers + GV REPORT cross-check + farq', async () =>
   assert.equal(t.ledger.cur.chassis, 1, 'chassis tag type alag');
   assert.equal(t.ledger.last.total, 3, 'last month = 3 tag rows');
   assert.equal(t.stock.total, 2, 'stock = Tag Assignment in-stock');
-  assert.ok(t.sheet && t.sheet.curAvailable, 'GV REPORT sheet cross-check mila');
-  assert.equal(t.sheet.cur, 3, 'sheet me us agent ka current month 3 likha hai');
+  // v3.125.276 — GV REPORT bilkul use nahi hota (sirf GV Master + Tag Assignment)
+  assert.ok(!t.sheet || !t.sheet.curAvailable, 'GV REPORT ka koi number nahi');
   const curCheck = t.checks.find((c) => /is mahine/i.test(c.metric));
   assert.equal(curCheck.final, t.ledger.cur.total, 'final number ledger ka hai');
-  const sheetPart = curCheck.others.find((o) => /GV REPORT/.test(o.label));
-  assert.ok(sheetPart, 'sheet ka number saath dikhta hai');
-  assert.equal(sheetPart.diff, t.ledger.cur.total - 3, 'farq calculate hota hai');
+  assert.ok(!curCheck.others.some((o) => /GV REPORT/.test(o.label)), 'GV REPORT ka number kahin nahi');
   assert.ok(t.ledger.cur.daily.length, 'day-wise series bani');
   const todayRows = MASTER.filter((r) => String(cell(r, 0).v) === A1.id).filter((r) => {
     const m = /Date\((\d+),(\d+),(\d+)\)/.exec(String((cell(r, 15) || {}).v || ''));
@@ -251,7 +249,7 @@ test('gvTruth: TL ka stock = TL ke paas + agents ke paas · team rollup ledger s
   const a1 = team.find((a) => a.id === A1.id);
   assert.equal(a1.cur, 5);
   assert.equal(a1.stock, 2);
-  assert.equal(a1.sheetCur, 3, 'sheet ka number bhi saath');
+  assert.equal(a1.sheetCur, null, 'v3.125.276: GV REPORT use nahi hota — sheet number nahi');
 });
 
 test('Tag Assignment TL/agent totals and drill-down prefer exact IDs when display names collide', async () => {
@@ -294,9 +292,8 @@ test('gvTruth.people: list me agents + TL dono, ledger aur stock ke saath', asyn
   assert.ok(agent && tl, 'agent aur TL dono list me');
   assert.equal(agent.cur, 5, 'agent ka MTD ledger se');
   assert.equal(agent.stock, 2, 'agent ka stock');
-  assert.equal(agent.sheetCur, 3, 'sheet ka number list me cross-check ke liye');
+  assert.equal(agent.sheetCur, null, 'v3.125.276: GV REPORT use nahi hota');
   assert.equal(tl.stock, 5, 'TL ka stock (own + agents)');
-  assert.ok(agent.mobile, 'mobile number bhi mila (GV REPORT se)');
 });
 
 test('Tag Assignment: labels me heading ki jagah pehli data row aaye to re-probe → sahi headings', async () => {

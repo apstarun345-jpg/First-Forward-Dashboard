@@ -33,7 +33,8 @@ window.FF = window.FF || {};
 
   // ---- source accessors ----------------------------------------------------------------------------
   const ledgerRows = () => { try { return (G() && G().rows()) || []; } catch { return []; } };
-  const reportRows = () => { try { return (G() && G().get('report')) || []; } catch { return []; } };
+  // 🚫 v3.125.276 — GV ke liye GV REPORT se kuch nahi liya jaata: issuance = GV Master, stock = Tag Assignment (Tarun ka faisla).
+  const reportRows = () => [];
   const stockAgentRows = () => { try { return (G() && G().get('stockAgent')) || []; } catch { return []; } };
   const stockAgentClassRows = () => { try { return (G() && G().get('stockAgentClass')) || []; } catch { return []; } };
   const stockTlRows = () => { try { return (G() && G().get('stockTl')) || []; } catch { return []; } };
@@ -410,8 +411,6 @@ window.FF = window.FF || {};
     const stock = stockFor(spec);
     const eir = eirFor(spec, ym);
     const warnings = [];
-    if (!sheet && !isTl) warnings.push('Is agent ka row GV REPORT sheet me nahi mila — sirf GV Master ledger numbers dikh rahe hain.');
-    if (sheet && !sheet.curAvailable && !sheet.lastAvailable) warnings.push('GV REPORT me is person ke month cells khaali hain — sheet cross-check available nahi.');
     if (stock.excluded > 0) warnings.push(`Tag Assignment me ${stock.excluded} tag rows ka status out-of-stock (issued/returned) hai — wo stock me nahi gine gaye.`);
     if (!all.length) warnings.push('GV Master me is person ki koi tag row nahi mili — naam/ID check karein (ya sheet me hi data nahi hai).');
     const checks = [
@@ -682,8 +681,7 @@ window.FF = window.FF || {};
       datasets: m, warnings,
       tabs: [
         { key: 'master', label: 'GV Master · issuance (final)', labels: labels.master || [] },
-        { key: 'assignment', label: 'Tag Assignment · stock (final)', labels: labels.assignment || [] },
-        { key: 'report', label: 'GV REPORT · performance (cross-check)', labels: labels.report || [] }
+        { key: 'assignment', label: 'Tag Assignment · stock (final)', labels: labels.assignment || [] }
       ],
       checkedAt: Date.now()
     };

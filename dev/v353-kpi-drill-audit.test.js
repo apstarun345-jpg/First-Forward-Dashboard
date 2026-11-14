@@ -296,7 +296,7 @@ test('Agent / TL Summary cards: Expected · Active days · Replacement · REPORT
   assert.match(gvBlock, /key: 'expected'[\s\S]{0,600}drill: \{ scope: 'days'/);
   assert.match(gvBlock, /key: 'days'[\s\S]{0,400}drill: \{ scope: 'days'/);
   assert.match(gvBlock, /key: 'repl'[\s\S]{0,400}drill: \{ scope: 'repl'/);
-  assert.match(gvBlock, /key: 'sheet'[\s\S]{0,700}drill: \{ scope: 'sheet'/);
+  assert.doesNotMatch(gvBlock, /key: 'sheet'/, 'v3.125.276: GV me GV REPORT sheet card nahi');
   const ffBlock = s.slice(s.indexOf('async function ffView'), s.indexOf('FF.summaryUI ='));
   assert.match(ffBlock, /key: 'expected'[\s\S]{0,500}drill: \{ scope: 'days'/);
   assert.match(ffBlock, /key: 'days'[\s\S]{0,700}drill: isTl \? \{ scope: 'agents'/);

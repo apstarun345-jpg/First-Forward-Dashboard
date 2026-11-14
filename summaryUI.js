@@ -61,7 +61,7 @@ window.FF = window.FF || {};
           ${v.priority ? `<span class="gs-pill ${/high/i.test(v.priority) ? 'bad' : /med/i.test(v.priority) ? 'mid' : 'ok'}">🔺 ${esc(v.priority)}</span>` : ''}
           ${v.activity ? `<span class="gs-pill ${/active/i.test(v.activity) ? 'ok' : 'bad'}">${esc(v.activity)}${v.inactive ? ` · ${esc(v.inactive)}` : ''}</span>` : ''}
           ${srcChip(isGv ? '🧾 GV Master final' : '🧾 EIR ledger', 'ledger')}
-          ${srcChip(isGv ? '📑 GV REPORT cross-check' : '📑 REPORT sheet', 'sheet')}
+          ${isGv ? srcChip('📦 Tag Assignment stock', 'stock') : srcChip('📑 REPORT sheet', 'sheet')}
         </div>
         <h2>${esc(v.name)} <button type="button" class="cp-btn" data-copy="${esc(v.name)}" title="Copy name" aria-label="Copy name">📋</button>${v.kind === 'tl' ? '' : `<span class="new-agent-slot" data-new-agent="${esc(v.ch || '')}|${esc(v.id || '')}|${esc(String(v.name || '').replace(/\|/g, ' '))}">${FF.newAgentTag ? FF.newAgentTag.html(v.ch, v.id, v.name) : ''}</span>`}</h2>
         <p class="gs-hero-line">${v.id ? `<span>ID <b>${esc(v.id)}</b> <button type="button" class="cp-btn" data-copy="${esc(v.id)}" title="Copy ID" aria-label="Copy ID">📋</button></span>` : ''}
@@ -124,13 +124,14 @@ window.FF = window.FF || {};
       <td><b>${esc(a.name)}</b>${a.id ? `<br><small class="mono dim">${esc(a.id)}</small>` : ''}</td>
       <td class="num">${fmt(a.last)}</td><td class="num"><b>${fmt(a.cur)}</b></td>
       <td class="num">${fmt(a.stock)}</td>
-      <td class="num">${a.sheetCur === null || a.sheetCur === undefined ? '<span class="dim">—</span>' : (a.sheetCur === a.cur ? `<span class="gs-growth good">✓ ${fmt(a.sheetCur)}</span>` : `<span class="gs-growth bad">${fmt(a.sheetCur)}</span>`)}</td>
+      ${v.ch === 'gv' ? '' : `<td class="num">${a.sheetCur === null || a.sheetCur === undefined ? '<span class="dim">—</span>' : (a.sheetCur === a.cur ? `<span class="gs-growth good">✓ ${fmt(a.sheetCur)}</span>` : `<span class="gs-growth bad">${fmt(a.sheetCur)}</span>`)}</td>`}
       <td class="gs-barcell">${bar(a.cur || a.stock, max, 'in')}</td></tr>`).join('');
-    const sheetNote = v.ch === 'gv' ? 'Sheet column = GV REPORT ka us agent ka number · ✓ = ledger se match' : 'Sheet column = REPORT sheet ka number (jahan mila) · ✓ = ledger se match';
+    const gv = v.ch === 'gv';
+    const sheetNote = gv ? 'Issuance = GV Master · Stock = Tag Assignment' : 'Sheet column = REPORT sheet ka number (jahan mila) · ✓ = ledger se match';
     return `<section class="card gs-card"><div class="card-head"><h3>👥 Team agents (${fmt(v.team.length)})</h3><span class="dim small">${sheetNote}</span></div>
-      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">${esc(v.lastYm)}</th><th class="num">${esc(v.ym)}</th><th class="num">Stock</th><th class="num">Sheet</th><th></th></tr></thead>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">${esc(v.lastYm)}</th><th class="num">${esc(v.ym)}</th><th class="num">Stock</th>${gv ? '' : '<th class="num">Sheet</th>'}<th></th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr class="row-total"><td><b>TL total (agents)</b></td><td class="num"><b>${fmt(v.totals.last)}</b></td><td class="num"><b>${fmt(v.totals.cur)}</b></td><td class="num"><b>${fmt(v.totals.stock)}</b></td><td class="num">${v.sheetTotals && v.sheetTotals.cur !== null ? fmt(v.sheetTotals.cur) : '—'}</td><td></td></tr></tfoot></table></div></section>`;
+      <tfoot><tr class="row-total"><td><b>TL total (agents)</b></td><td class="num"><b>${fmt(v.totals.last)}</b></td><td class="num"><b>${fmt(v.totals.cur)}</b></td><td class="num"><b>${fmt(v.totals.stock)}</b></td>${gv ? '' : `<td class="num">${v.sheetTotals && v.sheetTotals.cur !== null ? fmt(v.sheetTotals.cur) : '—'}</td>`}<td></td></tr></tfoot></table></div></section>`;
   }
 
   function ageingHtml(v) {
@@ -172,11 +173,10 @@ window.FF = window.FF || {};
       </div>`;
     };
     const loaded = m.loaded || {};
-    return `<details class="card gs-card gs-check"><summary><b>🔍 Data check</b> <span class="dim small">GV Master / GV REPORT / Tag Assignment headings, mapping aur farq — yahan sab khula hai</span></summary>
+    return `<details class="card gs-card gs-check"><summary><b>🔍 Data check</b> <span class="dim small">GV Master / Tag Assignment headings, mapping aur farq — yahan sab khula hai</span></summary>
       <div class="card-body">
         <div class="gs-check-stat">
           <span>GV Master rows <b>${fmt(loaded.ledger || 0)}</b></span>
-          <span>GV REPORT rows <b>${fmt(loaded.sheet || 0)}</b></span>
           <span>Tag Assignment agents <b>${fmt(loaded.stockAgents || 0)}</b></span>
           <span>Months: <b>${(m.months || []).slice(-4).join(' · ') || '—'}</b></span>
         </div>
@@ -253,15 +253,16 @@ window.FF = window.FF || {};
         return { cls, cur, last, stock: stockBy.get(cls) || 0, growth: last ? ((cur - last) / last) * 100 : null };
       }).sort((a, b) => (b.cur + b.last + b.stock) - (a.cur + a.last + a.stock));
     })();
-    const checks = t.checks.map((c, i) => ({ ...c, metric: c.metric }));
-    const checkOf = (i) => checks[i];
+    // 🚫 v3.125.276 — GV me koi cross-check badge nahi (GV REPORT / EIR nahi): sirf GV Master + Tag Assignment
+    const checks = [];
+    const checkOf = () => undefined;
     const cards = [
       card({ key: 'cur', icon: '🏷️', tone: 'g1', label: `Issuance · ${ym}`, value: lt.cur.total, unit: 'tags',
         sub: `${clsSplitSub(lt.cur.byClass)}<br>${fmt(lt.cur.days)} din active`,
         check: checkOf(0), why: 'GV Master ledger ki tag rows ka jod (final)', explain: `GV Master ki ${fmt(lt.cur.rowCount || 0)} tag rows (${ym}). Click = poori list VRN/TAG_ID ke saath.` }),
       card({ key: 'last', icon: '📅', tone: 'g3', label: `Last month · ${lastYm}`, value: lt.last.total, unit: 'tags',
         sub: `${clsSplitSub(lt.last.byClass)}<br>growth <span class="gs-growth ${growthTone(growth)}">${pct(growth)}</span>`,
-        check: checkOf(1), why: 'GV Master ledger (final) · GV REPORT sirf cross-check', explain: `${lastYm} ki tag rows. Sheet me ${sh.lastAvailable ? fmt(sh.last) : 'blank'} likha hai.` }),
+        check: checkOf(1), why: 'GV Master ledger (final)', explain: `${lastYm} ki GV Master tag rows.` }),
       ...(lt.last2 ? [card({ key: 'last2', icon: '🗓️', tone: 'g9', label: `Month before · ${t.last2Ym || ''}`, value: lt.last2.total, unit: 'tags',
         sub: `${clsSplitSub(lt.last2.byClass)}`, why: 'GV Master ledger (final)', explain: `${t.last2Ym || ''} ki tag rows (pichhle se pichhla mahina).` })] : []),
       card({ key: 'today', icon: '⚡', tone: 'g10', label: 'Today issued', value: lt.today.total, unit: 'tags',
@@ -291,11 +292,7 @@ window.FF = window.FF || {};
           valueHtml: `<span data-gvc="${esc(key)}" data-gvc-mode="val">${G.inner(t.id, isTl, 'val')}</span>`,
           sub: `<span data-gvc="${esc(key)}" data-gvc-mode="sub">${G.inner(t.id, isTl, 'sub')}</span>`,
           why: 'GV Master · product ID ka latest commission', explain: 'GV Master (settings wali product ID) ka latest commission.' });
-      })(),
-      card({ key: 'sheet', icon: '📑', tone: 'g12', label: 'GV REPORT sheet', value: sh.cur !== null && sh.cur !== undefined ? sh.cur : '—', unit: 'tags',
-        sub: sh.found ? `Stock <b>${sh.stockAvailable ? fmt(sh.stock) : '—'}</b> · Last <b>${sh.lastAvailable ? fmt(sh.last) : '—'}</b>` : 'sheet me row nahi mili',
-        why: 'Sirf cross-check (final nahi)', explain: sh.found ? `Sheet me is (${sh.agentId || t.id}) ke liye current month ${sh.curAvailable ? fmt(sh.cur) : 'blank'} hai.` : 'Is person ka row GV REPORT me nahi mila.',
-        drill: { scope: 'sheet', title: '📑 GV REPORT sheet vs GV Master ledger' } })
+      })()
     ].filter(Boolean);
     const m = { y: 0 };
     return {
@@ -303,18 +300,15 @@ window.FF = window.FF || {};
       direct: t.direct, ym, lastYm, cards, classes, months: monthsTrend(lt.rows.all, ym), team: isTl ? FF.gvTruth.team({ ...person, ym }) : null,
       checks, warnings: t.warnings, ageing: null, ageState: 'idle',
       totals: { cur: lt.cur.total, last: lt.last.total, stock: st.total, growth },
-      sheetTotals: { cur: sh.curAvailable ? sh.cur : null, last: sh.lastAvailable ? sh.last : null, stock: sh.stockAvailable ? sh.stock : null },
+      sheetTotals: null,
       sources: [
         { name: '🧾 GV Master (issuance ledger)', role: 'FINAL', tone: 'ledger', note: 'Column A = agent ID, I = TAG_ID, E = VRN barcode, F = class, P = date.', values: [
           { label: `Is mahine (${ym})`, value: lt.cur.total }, { label: `Last month (${lastYm})`, value: lt.last.total },
           { label: 'Aaj', value: lt.today.total }, { label: 'Total rows', value: lt.rows.all.length }] },
         { name: '📦 Tag Assignment (stock)', role: 'FINAL stock', tone: 'stock', note: 'Ek row = ek tag; status out-of-stock ho to stock me nahi ginta.', values: [
-          { label: 'Stock in hand', value: st.total }, { label: 'VC4', value: st.vc4 }, { label: 'Commercial', value: st.comm }] },
-        { name: '📑 GV REPORT (sheet)', role: 'CROSS-CHECK', tone: 'sheet', note: 'Sheet ke bane hue numbers — sirf verify karne ke liye.', values: [
-          { label: 'Current month', value: sh.curAvailable ? sh.cur : null }, { label: 'Last month', value: sh.lastAvailable ? sh.last : null },
-          { label: 'Stock', value: sh.stockAvailable ? sh.stock : null }] }
+          { label: 'Stock in hand', value: st.total }, { label: 'VC4', value: st.vc4 }, { label: 'Commercial', value: st.comm }] }
       ],
-      sourceNote: 'Har card par sheet ka number aur farq likha hai — final number ledger (GV Master) ka hai.',
+      sourceNote: 'GV: issuance = GV Master, stock = Tag Assignment. GV REPORT use nahi hota.',
       sourceShort: 'GV Master ledger',
       dataCheck: (() => { try { const h = FF.gvTruth.health(); return h; } catch { return null; } })(),
       truth: t, person
