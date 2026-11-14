@@ -1262,6 +1262,12 @@ FF.pages = FF.pages || {};
         <p class="dim small">GV sheet me column aage-peeche hone par app <b>heading padh kar</b> sahi column pakadta hai. Yahan dikhta hai ki har field kis column se padha gaya — aur koi mismatch ho to warning. Yahi wajah hoti hai jab GV page par number galat lage.</p>
         <div id="gv-map-out">${gvMappingHtml()}</div>
         <div class="save-bar"><button class="btn" id="gv-map-check">🔎 Ab check karo (GV data load)</button><span class="dim small" id="gv-map-msg"></span></div>`)}
+      ${section('🟩 GV live data — kitni der me aaye', `
+        <p class="dim small">GV ka <b>aaj ka live data (GV API se)</b> Home / GV pages par kitni der me naya aaye. Zyada gap = GV API par kam load, par number thoda der se badlega. ↻ button hamesha turant naya laata hai.</p>
+        <div class="form-grid">
+          ${field('Refresh gap', `<select class="input" data-path="gvLiveEverySec">${[[60, '1 min (default)'], [120, '2 min'], [300, '5 min'], [600, '10 min'], [900, '15 min'], [1800, '30 min']].map(([v, l]) => `<option value="${v}" ${Number(settings.gvLiveEverySec || 60) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`, 'Save ke baad server aur Home dono isi gap par chalenge')}
+        </div>
+        ${saveBar('gvLiveEverySec')}`)}
       ${section('🎯 GV CCH → Class mapping <span class="dim">(Admin controls)</span>', `
         <p class="dim small">GV Master ke <b>CCH / CCH_CLASS (Column G)</b> ke exact values ko yahan vehicle group me map karo. <b>VC5</b> ka matlab site ka Commercial bucket <b>VC5+</b> hai. Blank group me existing VCLASS/CLASS fallback chalega.</p>
         <div class="form-grid">

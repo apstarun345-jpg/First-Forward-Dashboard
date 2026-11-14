@@ -290,6 +290,7 @@ const DEFAULT_SETTINGS = {
     }
   },
   gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
+  gvLiveEverySec: 60,   // 🟩 GV live (aaj ka) data GV API se kitni der me aaye: 60 / 120 / 300 / 600 / 900 / 1800 sec (Settings → GV)
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],   // v3.87 — TVC → CCH classes (Tag Request class grid)
   // v3.90 — GV agent / TL commission box (Master search + profile): sheet link, tab, columns sab Settings se badal sakte ho.
   // 📞 v3.125.248 — agent mobile kis sheet / tab se (FF + GV) — ID + mobile + naam column system khud header se pehchanta hai
@@ -1932,6 +1933,12 @@ async function gvTodayVrnCounts(settings, resolved, day, nextDay, cacheMs) {
   }
   return null;
 }
+// ⏱ GV live refresh gap — Settings → GV me chuna hua (default 1 min); 1 min se kam nahi.
+const GV_LIVE_ALLOWED = [60, 120, 300, 600, 900, 1800];
+function gvLiveMs() {
+  const v = Number(db && db.settings && db.settings.gvLiveEverySec);
+  return (GV_LIVE_ALLOWED.includes(v) ? v : 60) * 1000;
+}
 const GV_TODAY_SWR_MS = 10 * 60e3;   // serve a same-day snapshot up to 10 min old instantly, refresh behind it
 function gvTodayLastGood() {
   const b = gvTodayFeedCache.body;
@@ -2057,7 +2064,7 @@ async function gvTodayApiRows(settings, day, secret) {
   } finally { clearTimeout(timer); }
 }
 async function gvTodayFeed(force, opts) {
-  const ttl = 30e3; // live today: short cache, but never scan the full 30-day history
+  const ttl = Math.max(30e3, gvLiveMs()); // live today: chuni hui der tak cache (default 1 min), full 30-day history kabhi scan nahi
   if (!force && gvTodayFeedCache.body && Date.now() - gvTodayFeedCache.at < ttl) return { ...gvTodayFeedCache.body, cached: true };
   // ⚡ Stale-while-revalidate: Home never waits on Google when a recent same-day snapshot exists.
   const lastGood = gvTodayLastGood();
@@ -2228,7 +2235,7 @@ async function todayFeed(force) {
     const from30 = `${dayStart30.getUTCFullYear()}-${pad2(dayStart30.getUTCMonth() + 1)}-${pad2(dayStart30.getUTCDate())}`;
     // Live feed freshness is intentionally independent of the general gviz cache setting.
     // A manual admin refresh bypasses both the feed snapshot and per-query cache.
-    const liveQueryCacheMs = force ? 0 : 30e3;
+    const liveQueryCacheMs = force ? 0 : Math.max(30e3, gvLiveMs());
     const sum = (rows, filter) => rows.reduce((a, r) => a + (!filter || filter(r) ? r.n : 0), 0);
     const result = { ok: true, date: day, at: new Date().toISOString(), gv: null, ff: null };
 
@@ -12225,6 +12232,11 @@ async function handleApi(req, res, url) {
         return { tvc, cch };
       }).filter((g) => g.tvc && g.cch.length && !seen.has(g.tvc) && seen.add(g.tvc));
     }
+    if (patch.gvLiveEverySec !== undefined) {
+      const v = Math.round(Number(patch.gvLiveEverySec));
+      if (!GV_LIVE_ALLOWED.includes(v)) throw new HttpError(400, 'GV live refresh: 1, 2, 5, 10, 15 ya 30 min chuno.');
+      patch.gvLiveEverySec = v;
+    }
     if (patch.gvClassCch !== undefined) {
       const cfg = patch.gvClassCch;
       if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new HttpError(400, 'gvClassCch object hona chahiye.');
@@ -15402,7 +15414,7 @@ server.listen(PORT, '0.0.0.0', () => {
 {
   const gvWarm = () => { try { if (db && db.settings) gvTodayFeed(false, { revalidate: true }).catch(() => {}); } catch { /* boot */ } };
   const gvWarmBoot = setTimeout(gvWarm, 6e3);
-  const gvWarmLoop = setInterval(gvWarm, 40e3);
+  const gvWarmLoop = setInterval(gvWarm, 20e3);   // har 20s dekhta hai; asli API call tabhi jab cache gvLiveMs() se purana ho
   if (gvWarmBoot.unref) gvWarmBoot.unref();
   if (gvWarmLoop.unref) gvWarmLoop.unref();
 }

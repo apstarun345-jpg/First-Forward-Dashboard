@@ -1865,12 +1865,17 @@ FF.pages = FF.pages || {};
     }
     liveP.then(handleQuick).catch((err) => retryLive(err && err.message ? err.message : 'GV today feed failed'));
     // Live numbers keep refreshing while Home is open (every 60s, visible tab only).
+    let liveLast = Date.now();
     const liveRefresh = setInterval(() => {
       if (!root.isConnected) { clearInterval(liveRefresh); clearTimeout(liveTimer); return; }
       if (document.hidden || !canGv || !liveFromFeed) return;
+      // ⏱ Settings → GV live refresh (1 / 2 / 5 / 10 / 15 / 30 min, default 1 min)
+      const gap = ([60, 120, 300, 600, 900, 1800].includes(Number(FF.config && FF.config.gvLiveEverySec)) ? Number(FF.config.gvLiveEverySec) : 60) * 1000;
+      if (Date.now() - liveLast < gap - 1000) return;
+      liveLast = Date.now();
       FF.data.gvToday().then((q) => { if (q && q.gv && feedMatchesCurrentClassMap(q.gv) && liveState.source !== 'master') { liveFromFeed = null; handleQuick(q); } }).catch(() => {});
       if (FF.gv && FF.gv.syncApiToday) FF.gv.syncApiToday();
-    }, 60000);
+    }, 15000);
     if (FF.gv && FF.gv.syncApiToday) setTimeout(() => FF.gv.syncApiToday(), 1500);
     if (liveRefresh && typeof liveRefresh.unref === 'function') liveRefresh.unref();
 
