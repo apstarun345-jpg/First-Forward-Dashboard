@@ -2053,6 +2053,11 @@ window.FF = window.FF || {};
       // Card ke ANDAR ke alag button/link (CSV, share, link…) par abhi bhi drawer nahi khulta.
       const innerCtl = kpi ? e.target.closest('a,button:not(.kpi)') : null;
       const kpiIsButton = !!innerCtl && innerCtl === kpi && innerCtl.tagName === 'BUTTON';
+      if (kpi && kpi.dataset.adminOnly === '1' && !(FF.auth && FF.auth.isAdmin && FF.auth.isAdmin())) {
+        e.preventDefault(); e.stopPropagation();
+        if (U.toast) U.toast('Is box ki detailed rows sirf admin dekh sakta hai.', 'err');
+        return;
+      }
       if (kpi && (!innerCtl || kpiIsButton) && !kpi.closest('[data-kpi-self]')) {
         if (FF.kpiDetail) { FF.kpiDetail.open(kpi); return; }
         // Drill drawer ka module first paint ke baad load hota hai — click par load karke kholo.

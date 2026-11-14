@@ -44,6 +44,40 @@ test('previous period: equal length, month-aligned for month ranges', () => {
   assert.equal(T.prevRange('2026-10-19', '2026-10-18'), null);
 });
 
+test('GV name suggestions and agent/TL summaries obey the selected date range', () => {
+  const rows = [
+    { key: '2026-10-10', agentName: '  Asha   Singh  ', tlName: 'TL Neha', group: 'VC4', n: 2 },
+    { key: '2026-10-11', agentName: 'Asha Singh', tlName: 'TL Neha', group: 'VC20', n: 3 },
+    { key: '2026-10-10', agentName: 'Ravi Kumar', tlName: 'TL Neha', group: 'VC5+', n: 4 },
+    { key: '2026-10-12', agentName: 'Asha Singh', tlName: 'TL Other', group: 'VC5+', n: 99 }
+  ];
+  const options = T.personSearchOptions(rows, '2026-10-10', '2026-10-11');
+  assert.deepEqual(JSON.parse(JSON.stringify(options)), [
+    { type: 'agent', name: 'Asha Singh' }, { type: 'agent', name: 'Ravi Kumar' }, { type: 'tl', name: 'TL Neha' }
+  ]);
+  const agent = T.personSearchSummary(rows, { type: 'agent', name: 'asha singh' }, '2026-10-10', '2026-10-11');
+  assert.equal(agent.totals.total, 5); assert.equal(agent.totals.vc4, 2); assert.equal(agent.totals.vc20, 3);
+  const tl = T.personSearchSummary(rows, { type: 'tl', name: 'TL Neha' }, '2026-10-10', '2026-10-11');
+  assert.equal(tl.totals.total, 9); assert.equal(tl.totals.vc5p, 4);
+  assert.equal(T.personSearchSummary(rows, { type: 'agent', name: 'Asha Singh' }, '2026-10-12', '2026-10-12').totals.total, 99);
+});
+
+test('non-admin Tag Issued-only access does not preload GV Master rows', () => {
+  const gv = fs.readFileSync(path.join(root, 'gv.js'), 'utf8');
+  assert.match(gv, /anyGvDataPage = pages\.some\(\(page\) => page !== 'tagIssued' && can\(page\)\)/);
+  assert.match(gv, /if \(isAdmin \|\| anyGvDataPage \|\| can\('sheet:GV Master'\)\) list\.push\('master'\)/);
+});
+
+test('non-admin page markup hides person-level details and KPI drilldown; app globally guards admin-only KPI clicks', () => {
+  assert.match(src, /admin \? `.*GV agent \/ TL/s);
+  assert.match(src, /\$\{admin \? driversShell\(m, preset\) : ''\}/);
+  assert.match(src, /\$\{admin \? `<details class="tix-people"/);
+  assert.match(src, /kpiCard\(k, m, admin\)/);
+  assert.match(src, /data-admin-only="1"/);
+  const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  assert.match(app, /kpi\.dataset\.adminOnly === '1'.*FF\.auth\.isAdmin\(\)/s);
+});
+
 test('scan sums VC4 / VC20 / VC5+ / commercial and per-day totals inside the range only', () => {
   const rows = [
     { key: '2026-10-10', group: 'VC4', cls: 'VC4', n: 5 }, { key: '2026-10-10', group: 'VC20', cls: 'VC20', n: 2 },

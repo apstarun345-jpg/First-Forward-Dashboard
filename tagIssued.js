@@ -118,6 +118,41 @@ FF.pages = FF.pages || {};
     return { ffRows, gvRows, gvLatest, ffLatest, masterRows, masterLatest, gvMasterRows, dailyRows };
   }
 
+  const personKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  /** Unique GV names that actually have rows inside the selected date range. */
+  function personSearchOptions(rows, from, to) {
+    const found = new Map();
+    for (const r of rows || []) {
+      const key = r.key || (r.date ? U.dateKey(r.date) : '');
+      if (!key || key < from || key > to) continue;
+      for (const [type, rawName] of [['agent', r.agentName || r.agentId], ['tl', r.tlName]]) {
+        const name = String(rawName || '').trim().replace(/\s+/g, ' ');
+        const norm = personKey(name);
+        if (!norm || norm === 'unknown' || norm === 'unassigned') continue;
+        const id = `${type}:${norm}`;
+        if (!found.has(id)) found.set(id, { type, name });
+      }
+    }
+    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.type.localeCompare(b.type));
+  }
+  function personSearchSummary(rows, selected, from, to) {
+    if (!selected || !selected.name || !['agent', 'tl'].includes(selected.type)) return null;
+    const target = personKey(selected.name);
+    const matches = (rows || []).filter((r) => {
+      const key = r.key || (r.date ? U.dateKey(r.date) : '');
+      if (!key || key < from || key > to) return false;
+      return personKey(selected.type === 'tl' ? r.tlName : (r.agentName || r.agentId)) === target;
+    });
+    return { type: selected.type, name: String(selected.name).trim(), rows: matches, totals: scan(matches, from, to) };
+  }
+  function personSearchHtml(summary, from, to) {
+    if (!summary) return '';
+    const { totals, rows, type, name } = summary;
+    const tlNames = U.uniq(rows.map((r) => String(r.tlName || '').trim()).filter(Boolean));
+    const label = type === 'tl' ? 'GV team / TL' : 'GV agent';
+    return `<section class="card tix-person-result" aria-live="polite"><div class="card-head"><h3>👤 ${label}: ${esc(name)}</h3><span class="badge indigo">${esc(rangeLabel(from, to, true))}</span></div><div class="card-body"><div class="tix-person-kpis"><div><small>Total GV tags</small><b>${U.fmt(totals.total)}</b></div><div><small>VC4</small><b>${U.fmt(totals.vc4)}</b></div><div><small>VC20</small><b>${U.fmt(totals.vc20)}</b></div><div><small>VC5+</small><b>${U.fmt(totals.vc5p)}</b></div></div><p class="dim small">${type === 'agent' ? `TL: ${esc(tlNames.join(', ') || '—')} · ` : ''}${U.fmt(rows.length)} GV Master rows · selected date range only</p>${totals.total ? '' : '<p class="dim small">Is date range me is naam ka data nahi mila.</p>'}</div></section>`;
+  }
+
   /** Dono channels ka current + previous period (FF T+1: FF like-for-like). */
   function buildModel(rows, from, to) {
     const ffThrough = (FF.filters && FF.filters.isFfPending && FF.filters.ffReportedThrough) ? FF.filters.ffReportedThrough() : to;
@@ -188,7 +223,7 @@ FF.pages = FF.pages || {};
     return `<span class="tix-v">${lead}</span>${trend ? `<span class="tix-v">${trend}</span>` : ''}`;
   }
 
-  function kpiCard(k, m) {
+  function kpiCard(k, m, canDrill) {
     const ffV = m.ff[k.key], gvV = m.gv[k.key];
     const ffP = m.ffPrev[k.key], gvP = m.gvPrev[k.key];
     const sum = ffV + gvV, sumP = ffP + gvP;
@@ -203,13 +238,15 @@ FF.pages = FF.pages || {};
       const priorRange = src === 'ff' ? m.prevFfRange : m.prevGvRange;
       const prior = priorRange ? rangeLabel(priorRange[0], priorRange[1]) : 'range unavailable';
       const earlier = oldRange ? rangeLabel(oldRange[0], oldRange[1]) : '2 periods ago';
-      return `<div class="tix-row ${cls}" data-kpi="${esc(specFor(m, src, k.f))}" data-kpi-title="${esc(`${name} · ${k.short}`)}" role="button" tabindex="0" title="Click karo — ${esc(name)} ki rows">
-        <span class="tix-dot"></span><span class="tix-name">${name}</span><b class="tix-num">${U.fmt(v)}</b><span class="tix-pct">${sum ? U.fmtPct(share, 0) : '—'}</span><span class="tix-gr">${na ? growthBadge(v, prev, na) : drvBadge(growthBadge(v, prev, na), src, k.key, dirOf(v, prev))}</span>
+      const drill = canDrill ? ` data-kpi="${esc(specFor(m, src, k.f))}" data-kpi-title="${esc(`${name} · ${k.short}`)}" data-admin-only="1" role="button" tabindex="0" title="Admin: ${esc(name)} ki rows dekhein"` : '';
+      return `<div class="tix-row ${cls}"${drill}>
+        <span class="tix-dot"></span><span class="tix-name">${name}</span><b class="tix-num">${U.fmt(v)}</b><span class="tix-pct">${sum ? U.fmtPct(share, 0) : '—'}</span><span class="tix-gr">${na ? growthBadge(v, prev, na) : drvBadge(growthBadge(v, prev, na), src, k.key, dirOf(v, prev), canDrill)}</span>
         <span class="tix-prev">${na ? 'Previous: —' : `Previous (${esc(prior)}): ${U.fmt(prev)} · Earlier (${esc(earlier)}): ${U.fmt(oldValue)}`}</span></div>`;
     };
-    return `<div class="tix-card ${d2(sumD)}" style="--accent:${k.accent}" data-kpi="${esc(specFor(m, 'both', k.f))}" data-kpi-title="${esc(`${k.label} · ${rangeLabel(m.from, m.to)}`)}" role="button" tabindex="0" title="Click karo — is number ki rows">
+    const drill = canDrill ? ` data-kpi="${esc(specFor(m, 'both', k.f))}" data-kpi-title="${esc(`${k.label} · ${rangeLabel(m.from, m.to)}`)}" data-admin-only="1" role="button" tabindex="0" title="Admin: is number ki rows dekhein"` : '';
+    return `<div class="tix-card ${d2(sumD)}" style="--accent:${k.accent}"${drill}>
       <div class="tix-card-top"><span class="tix-title"><span class="tix-ico">${k.icon}</span>${esc(k.label)}${k.sub ? `<small>${esc(k.sub)}</small>` : ''}</span>${ofTotal === null ? '' : `<span class="tix-chip" title="Total issuance me is class ka hissa">${U.fmtPct(ofTotal, 0)} of total</span>`}</div>
-      <div class="tix-big"><span class="tix-big-n">${U.fmt(sum)}</span><span class="tix-big-g">${drvBadge(growthBadge(sum, sumP), 'all', k.key, sumD)}</span></div>
+      <div class="tix-big"><span class="tix-big-n">${U.fmt(sum)}</span><span class="tix-big-g">${drvBadge(growthBadge(sum, sumP), 'all', k.key, sumD, canDrill)}</span></div>
       <div class="tix-bigsub">Current: ${esc(rangeLabel(m.from, m.to))} · Previous: ${U.fmt(sumP)} (${esc(periodRangeLabel(m.prevFfRange, m.prevGvRange))}) · Earlier: ${U.fmt(sumP2)} (${esc(periodRangeLabel(m.prevFf2Range, m.prevGv2Range))})</div>
       <div class="tix-split" title="FF vs GV share">${sum ? `<i class="ff" style="width:${ffShare.toFixed(1)}%"></i><i class="gv" style="width:${gvShare.toFixed(1)}%"></i>` : ''}</div>
       ${row('ff', 'First Forward', ffV, ffShare, ffP, ffD, ffNA, 'ff')}
@@ -490,7 +527,8 @@ FF.pages = FF.pages || {};
   };
   const typeLabel = (o) => (DRV.level === 'tls' ? (o.direct ? 'Direct agents' : 'TL team') : (o.sourceAdjustment ? 'Source reconciliation' : o.direct ? 'Direct agent' : 'Agent under TL'));
 
-  function drvBadge(html, ch, key, dir) {
+  function drvBadge(html, ch, key, dir, canDrill) {
+    if (!canDrill) return html;
     return `<span class="tix-drvlink" data-drv="${ch}" data-drvcls="${key}" data-drvdir="${dir}" role="button" tabindex="0" title="Click — who caused this change (agents / TLs)">${html}</span>`;
   }
   const dsign = (n) => `${n > 0 ? '+' : ''}${U.fmt(n)}`;
@@ -949,6 +987,8 @@ FF.pages = FF.pages || {};
   }
   async function render(root, params) {
     params = params || {};
+    const admin = !!(FF.auth && FF.auth.isAdmin && FF.auth.isAdmin());
+    let selectedPerson = null;
     const now = new Date();
     let from, to, preset;
     if (params.from || params.to || params.date) {
@@ -963,18 +1003,19 @@ FF.pages = FF.pages || {};
     root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">GV Partner (EIR master ID 5845036) vs First Forward — VC4 · VC20 · VC5+ · Commercial, share %, up/down and graphs</p></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div class="card tix-toolbar">
-        <div class="tix-presets" id="ti-presets" role="group" aria-label="Date shortcuts">${PRESETS.map(([id, label]) => `<button type="button" class="tix-chipbtn" data-preset="${id}">${label}</button>`).join('')}<button type="button" class="tix-chipbtn" data-preset="custom">Custom</button><span class="tix-chipsep" aria-hidden="true"></span>${Object.entries(REPORTS).map(([k, [label]]) => `<button type="button" class="tix-chipbtn tix-repchip ${k}" data-rep-view="${k}" title="Show this report on screen for the selected dates">${k === 'gv' ? '🟩' : k === 'ff' ? '🟦' : '⚖️'} ${label}</button>`).join('')}</div>
+        <div class="tix-presets" id="ti-presets" role="group" aria-label="Date shortcuts">${PRESETS.map(([id, label]) => `<button type="button" class="tix-chipbtn" data-preset="${id}">${label}</button>`).join('')}<button type="button" class="tix-chipbtn" data-preset="custom">Custom</button><span class="tix-chipsep" aria-hidden="true"></span>${admin ? Object.entries(REPORTS).map(([k, [label]]) => `<button type="button" class="tix-chipbtn tix-repchip ${k}" data-rep-view="${k}" title="Show this report on screen for the selected dates">${k === 'gv' ? '🟩' : k === 'ff' ? '🟦' : '⚖️'} ${label}</button>`).join('') : ''}</div>
         <div class="tix-dates">
           <label>📅 From <input type="date" class="input" id="ti-from" value="${esc(from)}" max="${todayKey()}"></label>
           <label>To <input type="date" class="input" id="ti-date" value="${esc(to)}" max="${todayKey()}"></label>
           <button class="btn small" type="button" id="ti-apply">Apply</button>
-          <div class="tix-report" id="ti-report">
+          ${admin ? `<div class="tix-person-search" id="ti-person-search-wrap"><label for="ti-person-search">👥 GV agent / TL</label><div class="tix-person-input-wrap"><input type="search" class="input" id="ti-person-search" placeholder="Naam search karein…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ti-person-options"><button type="button" class="btn small" id="ti-person-clear" title="Search clear karein" hidden>✕</button><div class="tix-person-options" id="ti-person-options" role="listbox" hidden></div></div></div>` : ''}
+          ${admin ? `<div class="tix-report" id="ti-report">
             <button class="btn primary" type="button" id="ti-report-btn" aria-haspopup="true" aria-expanded="false">📥 Report ▾</button>
             <div class="tix-report-menu" id="ti-report-menu" hidden role="menu">
               ${Object.entries(REPORTS).map(([k, [label]]) => `<div class="tix-report-item"><b>${k === 'gv' ? '🟩' : k === 'ff' ? '🟦' : '⚖️'} ${label}</b><span><button type="button" class="btn small" data-rep="${k}" data-fmt="xlsx">Excel</button><button type="button" class="btn small" data-rep="${k}" data-fmt="csv">CSV</button></span></div>`).join('')}
               <p class="dim small">Uses the dates selected above · TL agents and direct agents on separate sheets · highest → lowest.</p>
             </div>
-          </div>
+          </div>` : ''}
         </div>
         <div class="tix-rangeinfo" id="ti-info"></div>
       </div>
@@ -983,7 +1024,7 @@ FF.pages = FF.pages || {};
     const body = U.$('#ti-body', root), fromInput = U.$('#ti-from', root), toInput = U.$('#ti-date', root), info = U.$('#ti-info', root), presetBox = U.$('#ti-presets', root);
 
     try {
-      await Promise.all([S.need('daily').catch(() => []), G.need('master').catch(() => [])]);
+      await Promise.all([S.need('daily').catch(() => []), admin ? G.need('master').catch(() => []) : Promise.resolve([])]);
     } catch (e) {
       body.innerHTML = U.errorBox(e, 'data-action="refresh"');
       return;
@@ -992,34 +1033,50 @@ FF.pages = FF.pages || {};
     function paintPresets() {
       U.$$('[data-preset]', presetBox).forEach((b) => b.classList.toggle('active', b.getAttribute('data-preset') === preset));
     }
+    const personInput = admin ? U.$('#ti-person-search', root) : null;
+    const personOptionsBox = admin ? U.$('#ti-person-options', root) : null;
+    const personClear = admin ? U.$('#ti-person-clear', root) : null;
+    let activePersonOptions = [];
+    function paintPersonSuggestions() {
+      if (!personInput || !personOptionsBox) return;
+      const q = personKey(personInput.value);
+      if (!q) { personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false'); return; }
+      const matches = activePersonOptions.filter((o) => personKey(o.name).includes(q)).slice(0, 12);
+      personOptionsBox.innerHTML = matches.length ? matches.map((o, i) => `<button type="button" role="option" aria-selected="false" data-person-index="${i}" data-person-type="${esc(o.type)}" data-person-name="${esc(o.name)}"><b>${esc(o.name)}</b><small>${o.type === 'tl' ? 'TL / team' : 'Agent'}</small></button>`).join('') : '<div class="tix-person-empty">Is date range me matching GV naam nahi mila.</div>';
+      personOptionsBox.hidden = false;
+      personInput.setAttribute('aria-expanded', 'true');
+    }
 
     function draw() {
       paintPresets();
       fromInput.value = from; toInput.value = to;
       const rows = channelRows();
+      activePersonOptions = admin ? personSearchOptions(rows.gvMasterRows, from, to) : [];
+      if (personClear) personClear.hidden = !selectedPerson;
       rows.ffMap = scanDays(rows.ffRows);
       rows.gvMap = scanDays(rows.gvRows);
       const m = buildModel(rows, from, to);
       const prevTxt = m.prevGvRange ? `vs ${esc(rangeLabel(m.prevGvRange[0], m.prevGvRange[1], true))}` : '';
-      info.innerHTML = `<span class="badge indigo">${esc(rangeLabel(from, to, true))}</span> <span class="dim">${m.days} din ${prevTxt ? `· ${prevTxt}` : ''}</span> ${m.ffPending || m.gvPending ? `<span class="badge amber" title="The EIR sheet is T+1 — data after ${esc(lbl(m.ffThrough, true))} arrives tomorrow. So growth is shown like-for-like (same number of days).">🧾 EIR T+1 · ${m.ffComparable || m.gvComparable ? 'latest data tak' : 'kal aayega'}</span>` : ''}`;
+      info.innerHTML = `<span class="badge indigo">${esc(rangeLabel(from, to, true))}</span> <span class="dim">${m.days} din ${prevTxt ? `· ${prevTxt}` : ''}</span> ${m.ffPending || m.gvPending ? `<span class="badge amber" title="The EIR sheet is T+1 — data after ${esc(lbl(m.ffThrough, true))} arrives tomorrow. So growth is shown like-for-like (same number of days).">🧾 EIR T+1 · ${m.ffComparable || m.gvComparable ? 'latest data tak' : 'kal aayega'}</span>` : ''} ${admin ? '' : '<span class="dim small">🔒 Agent/TL details aur box drilldown sirf admin ke liye.</span>'}`;
       const total = m.ff.total + m.gv.total;
       const totalP = m.ffPrev.total + m.gvPrev.total;
 
       body.innerHTML = `
         ${healthStrip(rows)}
-        <div class="tix-grid">${KPIS.map((k) => kpiCard(k, m)).join('')}</div>
+        ${admin && selectedPerson ? personSearchHtml(personSearchSummary(rows.gvMasterRows, selectedPerson, from, to), from, to) : ''}
+        <div class="tix-grid">${KPIS.map((k) => kpiCard(k, m, admin)).join('')}</div>
         ${card(`⚔️ Head-to-head · FF vs GV · ${esc(rangeLabel(from, to, true))}`, h2hTable(m), `<span class="badge indigo">${U.fmt(total)} tags</span> <span class="dim small">prev ${U.fmt(totalP)}</span> <button class="btn small" data-action="export" data-name="tag-issued-${esc(from)}-${esc(to)}">⬇ CSV</button>`)}
-        ${driversShell(m, preset)}
+        ${admin ? driversShell(m, preset) : ''}
         ${chartsHtml(m, rows)}
         <div class="grid g-2">
           ${card('💡 Insights · data ko dekh kar', insightsHtml(m, rows, preset))}
           ${card('📋 Class-wise detail', classTable(m), '')}
         </div>
         ${card(`🔎 Data check · GV EIR vs GV Master`, reconHtml(m, rows), '<span class="dim small">dashboard totals = EIR</span>')}
-        <details class="tix-people" open><summary>👥 Agents & Teams</summary>${peopleHtml(m, rows)}</details>
+        ${admin ? `<details class="tix-people" open><summary>👥 Agents & Teams</summary>${peopleHtml(m, rows)}</details>` : ''}
         <p class="foot-note">Source: EIR sheet (FF + GV = master ID 5845036, T+1) · Top agents: GV Master · ${esc(rangeLabel(from, to, true))} · Data ${U.timeLabel(S.loadedAt || G.loadedAt || Date.now())} · ↻ se fresh data</p>`;
       C.mount(body);
-      paintDrivers(body, m, preset, rows);
+      if (admin) paintDrivers(body, m, preset, rows);
 
       const newHash = `#/tagIssued?from=${from}&to=${to}&date=${to}`;
       if (location.hash !== newHash) { try { history.replaceState(null, '', newHash); } catch (e) { /* ignore */ } }
@@ -1088,6 +1145,7 @@ FF.pages = FF.pages || {};
 
     // 📊 Report on screen (same data as the download)
     async function makeReport(which) {
+      if (!admin) throw new Error('Ye detailed report sirf admin ke liye hai.');
       const rows0 = channelRows();
       const m = buildModel(rows0, from, to);
       return { m, rep: buildAgentReport(reportInputs(rows0, await reportDirectory()), m, which) };
@@ -1106,6 +1164,7 @@ FF.pages = FF.pages || {};
       return `<tr class="${cls}">${r.map((v, k) => repCell(v, k, sh.header)).join('')}</tr>`;
     }).join('')}</tbody></table></div>`;
     async function openReportView(which) {
+      if (!admin) { U.toast('Detailed agent/TL report sirf admin dekh sakta hai.', 'err'); return; }
       const title = `${REPORTS[which][0]} · ${rangeLabel(from, to, true)}`;
       FF.app.openDrawer({ kicker: '📊 Report', title, sub: 'Preparing…', body: U.spinner('Building the report…'), wide: true, loading: true });
       let m, rep;
@@ -1145,28 +1204,53 @@ FF.pages = FF.pages || {};
 
     // 📥 Report dropdown
     const repBtn = U.$('#ti-report-btn', root), repMenu = U.$('#ti-report-menu', root);
-    const repClose = () => { repMenu.hidden = true; repBtn.setAttribute('aria-expanded', 'false'); };
-    const repPlace = () => { const b = repBtn.getBoundingClientRect(); const w = Math.min(330, window.innerWidth - 16); repMenu.style.width = `${w}px`; repMenu.style.top = `${Math.round(b.bottom + 6)}px`; repMenu.style.left = `${Math.max(8, Math.round(Math.min(b.right - w, window.innerWidth - w - 8)))}px`; };
-    repBtn.addEventListener('click', (e) => { e.stopPropagation(); if (repMenu.parentNode !== document.body) { document.querySelectorAll('body > .tix-report-menu').forEach((x) => { if (x !== repMenu) x.remove(); }); document.body.appendChild(repMenu); } repMenu.hidden = !repMenu.hidden; if (!repMenu.hidden) repPlace(); repBtn.setAttribute('aria-expanded', String(!repMenu.hidden)); });
-    window.addEventListener('scroll', () => { if (!repMenu.hidden) repClose(); if (!root.isConnected) repMenu.remove(); }, { passive: true });
-    window.addEventListener('resize', () => { if (!repMenu.hidden) repPlace(); });
-    document.addEventListener('click', (e) => { if (!root.isConnected) { repMenu.remove(); return; } if (!e.target.closest || (!e.target.closest('#ti-report') && !repMenu.contains(e.target))) repClose(); });
-    repMenu.addEventListener('click', async (e) => {
-      const b = e.target.closest('[data-rep]'); if (!b) return;
-      const which = b.dataset.rep, fmt = b.dataset.fmt;
-      repClose();
-      await U.withButtonBusy(repBtn, async () => {
-        try {
-          const { m, rep } = await makeReport(which);
-          if (!rep.list.length) { U.toast('No agents found for this period.', 'err'); return; }
-          const base = `${REPORTS[which][0].replace(/[^A-Za-z0-9+]+/g, '-')}_${from}_to_${to}`;
-          if (fmt === 'csv') { const c = reportCsv(rep); U.downloadCsv(`${base}.csv`, c.head, c.rows); }
-          else FF.xlsx.download(`${base}.xlsx`, reportSheets(rep, m, which));
-          U.toast(`📥 ${REPORTS[which][0]} · ${U.fmt(rep.list.length)} agents · ${U.fmt(rep.grandTotal)} tags`, 'ok');
-        } catch (err) { U.toast(err.message || 'Report failed', 'err'); }
-      }, 'Preparing…');
-    });
+    if (admin && repBtn && repMenu) {
+      const repClose = () => { repMenu.hidden = true; repBtn.setAttribute('aria-expanded', 'false'); };
+      const repPlace = () => { const b = repBtn.getBoundingClientRect(); const w = Math.min(330, window.innerWidth - 16); repMenu.style.width = `${w}px`; repMenu.style.top = `${Math.round(b.bottom + 6)}px`; repMenu.style.left = `${Math.max(8, Math.round(Math.min(b.right - w, window.innerWidth - w - 8)))}px`; };
+      repBtn.addEventListener('click', (e) => { e.stopPropagation(); if (repMenu.parentNode !== document.body) { document.querySelectorAll('body > .tix-report-menu').forEach((x) => { if (x !== repMenu) x.remove(); }); document.body.appendChild(repMenu); } repMenu.hidden = !repMenu.hidden; if (!repMenu.hidden) repPlace(); repBtn.setAttribute('aria-expanded', String(!repMenu.hidden)); });
+      window.addEventListener('scroll', () => { if (!repMenu.hidden) repClose(); if (!root.isConnected) repMenu.remove(); }, { passive: true });
+      window.addEventListener('resize', () => { if (!repMenu.hidden) repPlace(); });
+      document.addEventListener('click', (e) => { if (!root.isConnected) { repMenu.remove(); return; } if (!e.target.closest || (!e.target.closest('#ti-report') && !repMenu.contains(e.target))) repClose(); });
+      repMenu.addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-rep]'); if (!b) return;
+        const which = b.dataset.rep, fmt = b.dataset.fmt;
+        repClose();
+        await U.withButtonBusy(repBtn, async () => {
+          try {
+            const { m, rep } = await makeReport(which);
+            if (!rep.list.length) { U.toast('No agents found for this period.', 'err'); return; }
+            const base = `${REPORTS[which][0].replace(/[^A-Za-z0-9+]+/g, '-')}_${from}_to_${to}`;
+            if (fmt === 'csv') { const c = reportCsv(rep); U.downloadCsv(`${base}.csv`, c.head, c.rows); }
+            else FF.xlsx.download(`${base}.xlsx`, reportSheets(rep, m, which));
+            U.toast(`📥 ${REPORTS[which][0]} · ${U.fmt(rep.list.length)} agents · ${U.fmt(rep.grandTotal)} tags`, 'ok');
+          } catch (err) { U.toast(err.message || 'Report failed', 'err'); }
+        }, 'Preparing…');
+      });
+    }
 
+    if (personInput && personOptionsBox) {
+      personInput.addEventListener('input', () => { selectedPerson = null; if (personClear) personClear.hidden = true; paintPersonSuggestions(); });
+      personInput.addEventListener('focus', paintPersonSuggestions);
+      personInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false'); return; }
+        if (e.key === 'Enter') {
+          const option = personOptionsBox.querySelector('[data-person-name]');
+          if (option) { e.preventDefault(); selectedPerson = { type: option.dataset.personType, name: option.dataset.personName }; personInput.value = selectedPerson.name; personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false'); draw(); }
+        }
+      });
+      personOptionsBox.addEventListener('click', (e) => {
+        const option = e.target.closest('[data-person-name]'); if (!option) return;
+        selectedPerson = { type: option.dataset.personType, name: option.dataset.personName };
+        personInput.value = selectedPerson.name;
+        personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false');
+        draw();
+      });
+      if (personClear) personClear.addEventListener('click', () => { selectedPerson = null; personInput.value = ''; personClear.hidden = true; personOptionsBox.hidden = true; draw(); personInput.focus(); });
+      document.addEventListener('click', (e) => {
+        if (!root.isConnected) return;
+        if (!e.target.closest || !e.target.closest('#ti-person-search-wrap')) { personOptionsBox.hidden = true; personInput.setAttribute('aria-expanded', 'false'); }
+      });
+    }
     fromInput.addEventListener('change', applyCustom);
     toInput.addEventListener('change', applyCustom);
     U.$('#ti-apply', root).addEventListener('click', applyCustom);
@@ -1175,5 +1259,5 @@ FF.pages = FF.pages || {};
   }
 
   FF.pages.tagIssued = { title: 'GV & FF Tag Issued', render };
-  FF.pages.tagIssued._test = { buildAgentReport, reportInputs, reportSheets, reportCsv, tlPivot, presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey, reconHtml, healthStrip };
+  FF.pages.tagIssued._test = { buildAgentReport, reportInputs, reportSheets, reportCsv, tlPivot, presetRange, prevRange, detectPreset, scan, buildModel, dayCount, shiftKey, reconHtml, healthStrip, personSearchOptions, personSearchSummary };
 })(window.FF);
