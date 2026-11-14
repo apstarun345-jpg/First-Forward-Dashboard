@@ -1049,9 +1049,13 @@ window.FF = window.FF || {};
     const cacheKey = `${ch}|${norm(name)}|${clean(id).toUpperCase()}`;
     if (tlStockCache.has(cacheKey)) return tlStockCache.get(cacheKey);
     const wantName = norm(name), wantId = clean(id).toUpperCase();
+    // 🧮 v3.125.272 — TL ki APNI agent-row (agent ID == TL ID) kisi aur TL / Direct ke neeche ho tab bhi TL ke own stock me ginti:
+    //    pehle belongsToTl() se wo row kat jaati thi (Sumit Dixit: agent stock 246 par TL stock sirf 36). TL total = TL own + uske agents.
+    const isOwnId = (r) => !!wantId && rowAgentId(r) === wantId;
+    const ownOk = (r) => belongsToTl(r, name, id) || isOwnId(r);
     const rep = reportIndex(reportRows, ch);
     const selfReports = pickIndexed([[rep.idx.byAgentId, wantId], [rep.idx.byAgentName, wantName]])
-      .filter((r) => belongsToTl(r, name, id) && isSameAgent(r, name, id));
+      .filter((r) => ownOk(r) && isSameAgent(r, name, id));
     const teamReports = pickIndexed([[rep.idx.byTlName, wantName], [rep.idx.byTlId, wantId]])
       .filter((r) => belongsToTl(r, name, id) && (isSameAgent(r, name, id) || !isDirectStockRow(r, ch)));
     const memberReports = teamReports.filter((r) => !isSameAgent(r, name, id));
@@ -1068,7 +1072,7 @@ window.FF = window.FF || {};
     const detailList = detailRows || [];
     const didx = stockIndex(detailList);
     const selfDetails = (didx ? pickIndexed([[didx.byAgentId, wantId], [didx.byAgentName, wantName]]) : detailList)
-      .filter((r) => belongsToTl(r, name, id) && isSameAgent(r, name, id));
+      .filter((r) => ownOk(r) && isSameAgent(r, name, id));
     const memberDetails = (didx ? pickIndexed([[didx.byTlName, wantName], [didx.byTlId, wantId]]) : detailList)
       .filter((r) => belongsToTl(r, name, id) && !isSameAgent(r, name, id) && !isDirectStockRow(r, ch));
     const detailMemberTotal = stockRowsTotal(memberDetails);
@@ -1079,7 +1083,7 @@ window.FF = window.FF || {};
         const holderId = rowAgentId(holder), holderName = rowAgentName(holder);
         let matches = holderId ? classList.filter((r) => rowAgentId(r) === holderId) : [];
         if (!holderId && holderName) matches = classList.filter((r) => rowAgentName(r) === holderName);
-        matches.filter((r) => belongsToTl(r, name, id)).forEach((r) => { if (!seen.has(r)) { seen.add(r); out.push(r); } });
+        matches.filter((r) => ownOk(r)).forEach((r) => { if (!seen.has(r)) { seen.add(r); out.push(r); } });
       }
       return out;
     };

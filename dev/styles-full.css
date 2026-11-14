@@ -195,7 +195,7 @@ html[data-theme="dark"] .pct.neg { color: #f87171; }
 .msp-tsum { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 11px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); border-left: 4px solid var(--brand); min-width: 0; }
 .msp-tsum small { color: var(--muted); font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
 .msp-tsum b { font-size: 16px; font-weight: 900; }
-.msp-tsum.vc4 { border-left-color: #6366f1; } .msp-tsum.vc20 { border-left-color: #f59e0b; } .msp-tsum.vc5p { border-left-color: #10b981; }
+.msp-tsum.vc4 { border-left-color: #6366f1; } .msp-tsum.vc20 { border-left-color: #fb923c; } .msp-tsum.vc5p { border-left-color: #c2410c; }
 .msp-tsum.total { border-left-color: #0ea5e9; } .msp-tsum.peak { border-left-color: #ec4899; }
 
 /* 📦 v3.52 — Master Search: search ke turant neeche har channel ka KPI card
@@ -336,8 +336,8 @@ html[data-theme="dark"] .sug-result.gross > small { color: #5eead4; }
 .vgrid { position: absolute; inset: 0 0 20px 40px; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
 .vgrid-line { border-top: 1px dashed #e6e8f2; position: relative; height: 0; }
 .vgrid-line span { position: absolute; left: -40px; top: -7px; font-size: 10px; color: var(--muted); width: 34px; text-align: right; }
-.vbars-cols { position: absolute; inset: 0 0 20px 40px; display: flex; align-items: stretch; gap: 3px; padding: 0 4px; }
-.vcol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; cursor: default; position: relative; }
+.vbars-cols { position: absolute; inset: 0 0 20px 40px; display: flex; align-items: stretch; justify-content: flex-start; gap: 3px; padding: 0 4px; }
+.vcol { flex: 0 0 var(--cw, 30px); width: var(--cw, 30px); min-width: 0; display: flex; flex-direction: column; cursor: default; position: relative; }
 .vcol-bars { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; position: relative; }
 .vcol-stack { display: flex; flex-direction: column-reverse; border-radius: 6px 6px 2px 2px; overflow: hidden; transition: filter .15s; min-height: 0; }
 .vcol:hover .vcol-stack { filter: brightness(1.08) saturate(1.15); }

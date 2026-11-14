@@ -143,8 +143,9 @@ window.FF = window.FF || {};
     const series = opts.series.map((s, i) => ({ ...s, color: cc(s.name) || tc(s.color) || color(s.name, i) }));
     const totals = labels.map((_, i) => U.sum(series, (s) => s.values[i] || 0));
     const max = niceMax(Math.max(...totals, 0));
-    const height = opts.height || 220;
     const n = labels.length;
+    // 📐 v3.125.272 — time-series (8+ bars) charts thode kam unche: height ≈ 75% (max 170px)
+    const height = n > 8 ? Math.min(170, Math.round((opts.height || 220) * 0.75)) : (opts.height || 220);
     // 📅 v3.125.271 — 31 din tak har bar ke neeche uski date / label; usse zyada ho to hi beech-beech me
     const every = n <= 31 ? 1 : (opts.labelEvery || (n > 40 ? 5 : n > 20 ? 2 : 1));
     const showValues = opts.showValues !== undefined ? opts.showValues : n <= 45;
@@ -167,7 +168,7 @@ window.FF = window.FF || {};
     const grid = [1, 0.75, 0.5, 0.25, 0].map((f) => `<div class="vgrid-line"><span>${U.fmtShort(max * f)}</span></div>`).join('');
     const cid = `ch${++seq}`;
     // 📏 v3.125.271 — bar ki chaudai har jagah ek-si (data kam ho ya zyada): ≤8 bars = 52px, usse zyada = 30px; jagah kam ho to scroll
-    const colW = n <= 8 ? 52 : 30;
+    const colW = n <= 8 ? 64 : 44;
     const minPlotWidth = Math.max(40 + 8 + n * (colW + 3), Number(opts.minPlotWidth) || 0);
     const plotStyle = ` style="min-width:${minPlotWidth}px"`;
     specs.set(cid, { kind: 'bars', opts: { ...opts, series } });

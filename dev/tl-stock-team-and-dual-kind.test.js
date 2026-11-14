@@ -19,3 +19,10 @@ test('TL stock drill: colourful team table with TL header, own row, class column
   assert.match(kd, /data-tm-go/);
   assert.match(read('dev/styles-full.css'), /\.tm-sec/);
 });
+
+test('TL own stock: TL ki apni agent-row (agent ID == TL ID) kisi aur TL ke neeche ho tab bhi TL total me judti hai', () => {
+  const mp = read('masterProfile.js');
+  assert.match(mp, /const isOwnId = \(r\) => !!wantId && rowAgentId\(r\) === wantId;/);
+  assert.match(mp, /const ownOk = \(r\) => belongsToTl\(r, name, id\) \|\| isOwnId\(r\);/);
+  assert.equal((mp.match(/ownOk\(r\)/g) || []).length >= 3, true);
+});
