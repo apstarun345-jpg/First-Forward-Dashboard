@@ -63,7 +63,7 @@ FF.pages = FF.pages || {};
     if (document.getElementById('np-css')) return;
     const el = document.createElement('style'); el.id = 'np-css';
     el.textContent = `.np-hero{display:flex;gap:14px;align-items:center;padding:18px 20px;border-radius:18px;background:linear-gradient(135deg,#1e1b4b,#4338ca 55%,#0ea5e9);color:#fff;margin-bottom:14px}
-.np-hero h2{margin:0;font-size:22px}.np-hero p{margin:4px 0 0;opacity:.9;font-size:13px}.np-ico{font-size:34px}
+.np-hero h2{margin:0;font-size:22px;color:#fff!important}.np-hero p{margin:4px 0 0;opacity:.92;font-size:13px;color:#e0e7ff!important}.np-ico{font-size:34px}
 .np-in{display:grid;grid-template-columns:2fr 1fr;gap:12px}@media(max-width:820px){.np-in{grid-template-columns:1fr}}
 .np-in textarea{width:100%;min-height:150px;font-family:ui-monospace,Menlo,monospace;font-size:13px}
 .np-up{border:2px dashed var(--line,#cbd5e1);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;align-items:flex-start;justify-content:center}
