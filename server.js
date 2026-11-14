@@ -10418,7 +10418,7 @@ async function handleApi(req, res, url) {
   const npciKind = (v) => (/^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
   // ⏱ v3.125.287 — ApnaPayment API rate-limit (HTTP 429) deti hai: poore server par ek hi "gate" —
   //    calls ke beech kam se kam npciGap ms; 429 aaye to sab calls ruk ke (Retry-After / 4s→ badhta) phir wahi item dobara.
-  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 120, chain: Promise.resolve(), cut: 0, ok: 0 });
+  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 70, chain: Promise.resolve(), cut: 0, ok: 0, n429: 0, calls: 0 });
   function npciSlot() {
     const g = npciGate;
     const p2 = g.chain.then(async () => { const w = g.next - Date.now(); if (w > 0) await new Promise((r) => setTimeout(r, w)); g.next = Date.now() + g.gap; });
@@ -10441,14 +10441,16 @@ async function handleApi(req, res, url) {
         if (r.status === 429) {
           rl++;
           const ra = Number(r.headers.get('retry-after')) || 0;
-          const pause = Math.min(12e3, Math.max(ra * 1000, 1500 * Math.min(rl, 6)));
+          npciGate.n429++;
+          const pause = Math.min(10e3, Math.max(ra * 1000, 800 * Math.min(rl, 6)));
           npciGate.next = Math.max(npciGate.next, Date.now() + pause);   // sab calls thodi der ruko
-          if (Date.now() - npciGate.cut > 4000) { npciGate.cut = Date.now(); npciGate.gap = Math.min(2000, Math.round(npciGate.gap * 1.8)); npciGate.ok = 0; }   // ek burst me ek hi baar dheere
+          if (Date.now() - npciGate.cut > 3000) { npciGate.cut = Date.now(); npciGate.gap = Math.min(1500, Math.round(npciGate.gap * 1.5) + 20); npciGate.ok = 0; }   // ek burst me ek hi baar dheere
           lastErr = 'HTTP 429 — API ne "bahut zyada requests" kaha (rate limit)';
           continue;
         }
         if (/^\s*</.test(txt)) { tries++; lastErr = `HTTP ${r.status} — HTML aaya (server ne JSON nahi diya)`; continue; }
-        if (++npciGate.ok >= 15 && npciGate.gap > 100) { npciGate.ok = 0; npciGate.gap = Math.max(100, Math.round(npciGate.gap * 0.85)); }   // theek chala to dheere dheere tez
+        npciGate.calls++;
+        if (++npciGate.ok >= 6 && npciGate.gap > 50) { npciGate.ok = 0; npciGate.gap = Math.max(50, Math.round(npciGate.gap * 0.8)); }   // theek chala to dheere dheere tez
         let j; try { j = JSON.parse(txt); } catch { tries++; lastErr = 'Response samajh nahi aaya'; continue; }
         const m = Array.isArray(j) ? (j[0] || {}) : (j || {});
         const td = (m.res && Array.isArray(m.res.tagDetails)) ? m.res.tagDetails : [];
@@ -10519,7 +10521,8 @@ async function handleApi(req, res, url) {
         } finally { inflight--; }
       }
     };
-    Promise.all(Array.from({ length: 8 }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); });
+    const g0 = { n429: npciGate.n429, calls: npciGate.calls };
+    Promise.all(Array.from({ length: 12 }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); const sec = (job.ended - job.started) / 1000; console.log(`🛰️ NPCI job: ${job.rows.length}/${items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${npciGate.n429 - g0.n429} · gap ${npciGate.gap}ms · fail ${job.rows.filter((r) => r.retry).length}`); });
     return sendJson(res, 200, { ok: true, id, total: items.length });
   }
   {

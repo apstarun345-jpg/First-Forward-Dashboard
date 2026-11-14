@@ -212,9 +212,29 @@ FF.pages = FF.pages || {};
     }
     st.busy = false; st.job = null; if (go) go.disabled = false; if (stopB) stopB.hidden = true;
     label(got, true);
-    if (root.isConnected) out.innerHTML = resultHtml();
+    hSave((Date.now() - t0) / 1000, again);
+    if (root.isConnected) { out.innerHTML = resultHtml(); const hh = root.querySelector('[data-np-hist]'); if (hh) hh.innerHTML = histHtml(); }
   }
 
+  // 🕘 v3.125.295 — pichhli 3 checks ki history (is browser me): kitne input the, kya status nikla, kitna time laga.
+  const HKEY = 'ff.npci.hist.v1';
+  const hLoad = () => { try { const a = JSON.parse(localStorage.getItem(HKEY) || '[]'); return Array.isArray(a) ? a.slice(0, 3) : []; } catch { return []; } };
+  function hSave(sec, replace) {
+    try {
+      const s = summary(); if (!s.checked) return;
+      const e = { at: Date.now(), total: s.total, checked: s.checked, sec: Math.round(sec), found: s.found, notFound: s.notFound, retry: s.retry, upd: s.upd, notUpd: s.notUpd, updBase: s.updBase, active: s.active, kind: s.kind, status: s.status };
+      let a = hLoad(); if (replace && a.length) a[0] = { ...e, sec: a[0].sec + e.sec }; else a.unshift(e);
+      localStorage.setItem(HKEY, JSON.stringify(a.slice(0, 3)));
+    } catch { /* storage band ho sakta hai */ }
+  }
+  function histHtml() {
+    const a = hLoad(); if (!a.length) return '';
+    const when = (t) => new Date(t).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const dur = (x) => (x >= 60 ? `${Math.floor(x / 60)}m ${x % 60}s` : `${x}s`);
+    const top = (o) => Object.entries(o || {}).sort((x, y) => y[1] - x[1]).map(([k, n]) => `<span class="np-pill gray" style="margin:1px 3px 1px 0">${U.esc(k)} <b>${U.fmt(n)}</b></span>`).join('');
+    return `<section class="card"><div class="card-body"><b>🕘 Pichhli ${a.length} checks</b> <span class="dim small">(is browser me save)</span>
+      <div class="np-scroll" style="margin-top:8px;max-height:none"><table class="np-tbl"><thead><tr><th>Kab</th><th>Input</th><th>Check hue</th><th>Time</th><th>NPCI me mile</th><th>Nahi mile</th><th>VRN updated</th><th>Not updated</th><th>Status</th></tr></thead><tbody>${a.map((h) => `<tr><td>${when(h.at)}</td><td><b>${U.fmt(h.total)}</b><br><span class="dim small">Tag ${U.fmt(h.kind['Tag ID'] || 0)} · VRN ${U.fmt(h.kind.VRN || 0)} · Chassis ${U.fmt(h.kind.Chassis || 0)}</span></td><td>${U.fmt(h.checked)}</td><td>${dur(h.sec)}</td><td>${U.fmt(h.found)}</td><td>${U.fmt(h.notFound)}${h.retry ? ` · ⚠ ${U.fmt(h.retry)} fail` : ''}</td><td class="np-upd">${U.fmt(h.upd)}</td><td class="np-nupd">${U.fmt(h.notUpd)}</td><td style="white-space:normal;min-width:260px">${top(h.status)}</td></tr>`).join('')}</tbody></table></div></div></section>`;
+  }
   function render(root) {
     css();
     root.innerHTML = `<div class="np-page">
@@ -230,7 +250,7 @@ FF.pages = FF.pages || {};
         <div class="np-prog" data-np-prog hidden><i style="width:0"></i></div><small class="dim" data-np-plab></small>
         <p class="dim small" style="margin:8px 0 0">Tag ID = 19-24 akshar (34161F…) · VRN = 10 akshar tak · baaki = Chassis. <b>VRN update</b>: Tag ID / Chassis diya ho aur NPCI ka REGNUMBER 1-10 akshar ka ho = <b>Updated</b>, warna <b>Not updated</b>.</p>
       </div></section>
-      <section class="card"><div class="card-body" data-np-out>${resultHtml()}</div></section></div>`;
+      <section class="card"><div class="card-body" data-np-out>${resultHtml()}</div></section><div data-np-hist>${histHtml()}</div></div>`;
     const ta = root.querySelector('[data-np-ta]'), cnt = root.querySelector('[data-np-count]');
     const recount = () => { const n = splitInputs(ta.value).length; cnt.textContent = n ? `${U.fmt(n)} unique` : ''; };
     ta.addEventListener('input', recount);
