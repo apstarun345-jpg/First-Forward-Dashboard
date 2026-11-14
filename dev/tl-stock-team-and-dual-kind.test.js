@@ -26,3 +26,16 @@ test('TL own stock: TL ki apni agent-row (agent ID == TL ID) kisi aur TL ke neec
   assert.match(mp, /const ownOk = \(r\) => belongsToTl\(r, name, id\) \|\| isOwnId\(r\);/);
   assert.equal((mp.match(/ownOk\(r\)/g) || []).length >= 3, true);
 });
+
+test('GV Tag Assignment truth: TL ki apni holder row (agent ID == TL ID, kisi aur TL / Direct ke neeche) TL total me judti hai', () => {
+  const gt = read('gvTruth.js');
+  assert.match(gt, /const ownOutside = tlId \? lookup\(ix\.stock\.byAgentId, \[idKey\(tlId\)\]\)/);
+  assert.match(gt, /const exactTotal = exactBase === null \? null : exactBase \+ ownOutsideTotal;/);
+  assert.match(gt, /concat\(ownOutside\)/);
+});
+
+test('Charts: din wale bars ke neeche "13 Nov" jaisi date (ym ya tipLabels se mahina)', () => {
+  const c = read('charts.js');
+  assert.match(c, /shownLabels = labels\.map\(\(l\) => `\$\{Number\(l\)\} \$\{mon\}`\)/);
+  assert.match(read('masterSearch.js'), /showValues: true, ym,/);
+});

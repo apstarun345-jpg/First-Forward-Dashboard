@@ -289,7 +289,7 @@ FF.pages = FF.pages || {};
       const series = seriesFor(map, buckets);
       const tips = buckets.map((d) => `<b>${U.labelYM(cur, true)} · day ${d}</b><br>${series.map((s) => `<i style="background:${s.color || ''}"></i>${esc(s.name)}: <b>${s.values[d - 1] || 0}</b>`).join('<br>')}<br>Total: <b>${U.fmt(U.sum(series, (s) => s.values[d - 1] || 0))}</b>`);
       const totals = buckets.map((_, i) => U.sum(series, (s) => s.values[i]));
-      html += card(`📅 Daily · ${U.labelYM(cur, true)} <span class="dim">${esc(dim.label)}</span>`, C.bars({ labels: buckets.map(String), series, height: 260, tips, tipsAlways: true }), { right: exportBtn('gv-trend-daily') })
+      html += card(`📅 Daily · ${U.labelYM(cur, true)} <span class="dim">${esc(dim.label)}</span>`, C.bars({ labels: buckets.map(String), ym: cur, series, height: 260, tips, tipsAlways: true }), { right: exportBtn('gv-trend-daily') })
  + card('🔢 Daily table', tableHtml(['Day', 'Total', ...keys], buckets.map((d, i) => `<tr><td>Day ${d}</td><td class="num"><b>${U.fmt(totals[i])}</b></td>${keys.map((k) => `<td class="num">${U.fmt((map.get(d) && map.get(d).get(k)) || 0)}</td>`).join('')}</tr>`), 1));
     } else if (mode === 'weekly') {
       const weeks = G.weekly(cur);

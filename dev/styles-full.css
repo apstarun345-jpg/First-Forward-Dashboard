@@ -8676,3 +8676,6 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .tix-opt-main { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .tix-opt-main small { font-size: 11px; color: var(--muted); }
 .tix-opt-n { flex: 0 0 auto; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ink); min-width: 34px; text-align: right; }
+/* 🔽 v3.125.273 — card ke andar ka search dropdown (Agent/TL Summary, Master Search, Tag Issued…) card me kat-ta nahi:
+   .card ka content-visibility:auto paint-clip karta tha. Jab card me typing / focus ho to poora dikhe aur neeche ke cards ke upar rahe. */
+.card:focus-within, .panel:focus-within, .report-card:focus-within { content-visibility: visible; contain: none; position: relative; z-index: 40; }

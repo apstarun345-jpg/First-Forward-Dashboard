@@ -268,7 +268,12 @@ window.FF = window.FF || {};
     const tlClassRows = preferredRows(ix.stock.classByTlId, ix.stock.classByTl, tlId, tlName, 'tlId');
     const agentRows = preferredRows(ix.stock.byTlId, ix.stock.byTlName, tlId, tlName, 'tlId');
     const assignmentAuthoritative = assignmentLoaded('stockTl') || assignmentLoaded('stockTlClass');
-    const exactTotal = directRows.length ? sum(directRows, (r) => r.n) : tlClassRows.length ? sum(tlClassRows, (r) => r.n) : null;
+    // 🧮 v3.125.273 — TL ki APNI holder row (agent ID == TL ID) Tag Assignment me kisi aur TL / "Direct" ke neeche ho
+    //    (Sumit Dixit APS016090: apne paas 246, sheet ka TL total sirf agents ka 36) → TL total = own + agents.
+    const ownOutside = tlId ? lookup(ix.stock.byAgentId, [idKey(tlId)]).filter((r) => !agentRows.includes(r) && idKey(r && r.tlId) !== idKey(tlId)) : [];
+    const ownOutsideTotal = sum(ownOutside, (r) => r.n);
+    const exactBase = directRows.length ? sum(directRows, (r) => r.n) : tlClassRows.length ? sum(tlClassRows, (r) => r.n) : null;
+    const exactTotal = exactBase === null ? null : exactBase + ownOutsideTotal;
 
     // Agent × class is keyed by holder IDs and TL IDs (not just a shared display name).
     const classRows = stockAgentClassRows();
@@ -295,14 +300,15 @@ window.FF = window.FF || {};
       }
       return picked;
     };
-    const selfRows = agentRows.filter((r) => sameSelf(r, tlId, tlName));
+    const ownOutsideClass = ownOutside.length ? classRows.filter((r) => idKey(r && r.agentId) === idKey(tlId) && !scopedClassRows.includes(r)) : [];
+    const selfRows = agentRows.filter((r) => sameSelf(r, tlId, tlName)).concat(ownOutside);
     const members = agentRows.filter((r) => !sameSelf(r, tlId, tlName)
       && !(r.directAgent === true || safeDirectAgent(r)));
-    const selfClassRows = peopleForClass(selfRows);
+    const selfClassRows = peopleForClass(selfRows).concat(ownOutsideClass);
     const memberClassRows = peopleForClass(members);
-    const classSource = tlClassRows.length ? tlClassRows : scopedClassRows;
+    const classSource = (tlClassRows.length ? tlClassRows : scopedClassRows).concat(ownOutsideClass.length ? ownOutsideClass : ownOutside);
     const rawClass = classSplit(classSource);
-    const derivedTotal = sum(agentRows, (r) => r.n);
+    const derivedTotal = sum(agentRows, (r) => r.n) + ownOutsideTotal;
     const total = exactTotal === null ? (rawClass.total || derivedTotal) : exactTotal;
     const split = fitClassSplit(rawClass, total);
 

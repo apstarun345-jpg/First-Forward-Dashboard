@@ -148,6 +148,17 @@ window.FF = window.FF || {};
     const height = n > 8 ? Math.min(170, Math.round((opts.height || 220) * 0.75)) : (opts.height || 220);
     // 📅 v3.125.271 — 31 din tak har bar ke neeche uski date / label; usse zyada ho to hi beech-beech me
     const every = n <= 31 ? 1 : (opts.labelEvery || (n > 40 ? 5 : n > 20 ? 2 : 1));
+    // 🗓 v3.125.273 — din wale charts (labels = 1…31) me bar ke neeche "13 Nov" jaisi poori date: mahina opts.ym se,
+    //    warna tipLabels ("13 Nov 2026" / "01 Nov") se pehchaan kar.
+    let shownLabels = labels;
+    if (n > 1 && labels.every((l) => /^\d{1,2}$/.test(String(l).trim()))) {
+      const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      let mon = '';
+      const ymM = /^(\d{4})-(\d{2})/.exec(String(opts.ym || ''));
+      if (ymM) mon = MON[Number(ymM[2]) - 1] || '';
+      if (!mon && opts.tipLabels) { const mm = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.exec(String(opts.tipLabels[0] || '')); if (mm) mon = mm[1][0].toUpperCase() + mm[1].slice(1, 3).toLowerCase(); }
+      if (mon) shownLabels = labels.map((l) => `${Number(l)} ${mon}`);
+    }
     const showValues = opts.showValues !== undefined ? opts.showValues : n <= 45;
     // 🌈 v224 — ek hi series wale class charts (VC4 · VC5 · …) har bar alag rang me; har bar par halka gradient
     const classy = series.length === 1 && opts.multicolor !== false && n > 1 && n <= 12 && labels.every((l) => /^(N?VC\s?\d+\+?|all|comm)/i.test(String(l)));
@@ -159,11 +170,11 @@ window.FF = window.FF || {};
         const c = classy ? (cc(label) || PALETTE[i % PALETTE.length]) : s.color;
         return `<div class="vseg" style="flex:0 0 ${(v / total) * 100}%;background:linear-gradient(180deg, color-mix(in srgb, ${c} 72%, #fff), ${c})"></div>`;
       }).join('');
-      const tip = opts.tips && opts.tips[i] ? opts.tips[i] : `<b>${esc(opts.tipLabels ? opts.tipLabels[i] : label)}</b><br>${series.length > 1 ? series.map((s) => `<i style="background:${s.color}"></i>${esc(s.name)}: <b>${fmtVal(s.values[i] || 0, opts.format)}</b>`).join('<br>') + '<br>' : ''}Total: <b>${fmtVal(total, opts.format)}</b>`;
+      const tip = opts.tips && opts.tips[i] ? opts.tips[i] : `<b>${esc(opts.tipLabels ? opts.tipLabels[i] : shownLabels[i])}</b><br>${series.length > 1 ? series.map((s) => `<i style="background:${s.color}"></i>${esc(s.name)}: <b>${fmtVal(s.values[i] || 0, opts.format)}</b>`).join('<br>') + '<br>' : ''}Total: <b>${fmtVal(total, opts.format)}</b>`;
       const hl = opts.highlight === i ? ' hl' : '';
       return `<div class="vcol${hl}" data-tip="${esc(tip)}" ${opts.onClickAttr ? opts.onClickAttr(i) : ''}>
         <div class="vcol-bars">${showValues && total > 0 ? `<div class="vcol-val">${total >= 100000 ? U.fmtShort(total) : U.fmt(total)}</div>` : ''}<div class="vcol-stack" style="height:${max ? Math.max(total > 0 ? 1.5 : 0, (total / max) * 100) : 0}%">${segs}</div></div>
-        <div class="vcol-label">${i % every === 0 ? esc(label) : ''}</div></div>`;
+        <div class="vcol-label">${i % every === 0 ? esc(shownLabels[i]) : ''}</div></div>`;
     }).join('');
     const grid = [1, 0.75, 0.5, 0.25, 0].map((f) => `<div class="vgrid-line"><span>${U.fmtShort(max * f)}</span></div>`).join('');
     const cid = `ch${++seq}`;
