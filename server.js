@@ -6954,13 +6954,16 @@ async function eirRawFetchSpan(a, b, cfg) {
   if (EIR_RAW_INFLIGHT.has(key)) return EIR_RAW_INFLIGHT.get(key);
   const job = (async () => {
     const date = cfg.cols[0];
-    const tq = `select ${cfg.cols.join(', ')} where toDate(${date}) >= date '${a}' and toDate(${date}) <= date '${b}' order by ${date} desc limit 60000`;
+    // Settings me do field ek hi column par ho sakte hain (jaise agentName = gvName = L) — Google "COLUMN_ONLY_ONCE" deta hai.
+    const uniq = [...new Set(cfg.cols)], idx = cfg.cols.map((c) => uniq.indexOf(c));
+    const tq = `select ${uniq.join(', ')} where toDate(${date}) >= date '${a}' and toDate(${date}) <= date '${b}' order by ${date} desc limit 60000`;
     const qp = new URLSearchParams({ id: cfg.id, sheet: cfg.tab, tq, headers: '1' });
     let r = null, lastErr = null;
     for (let k = 0; k < 4 && !r; k++) {
       try { r = await gvizPageServerInner(qp, cfg.tab); } catch (err) {
         lastErr = err;
         console.log(`🗂️ EIR raw ${a}…${b} try ${k + 1}: ${String((err && err.message) || err).slice(0, 200)}`);
+        if (/invalid query/i.test(String(err && err.message))) break;   // query hi galat — retry bekaar
         if (k < 3) await new Promise((res) => setTimeout(res, err && err.rateLimited ? Math.max(15e3, Number(err.retryAfterMs) || 0) : 5e3 * (k + 1)));
       }
     }
@@ -6968,7 +6971,8 @@ async function eirRawFetchSpan(a, b, cfg) {
     const byDay = new Map();
     for (let d = a; d <= b; d = addDayKey(d, 1)) byDay.set(d, []);
     for (const row of r.rows || []) {
-      const cells = (row.c || []).map((c) => (c ? (c.f != null ? { v: c.v, f: c.f } : { v: c.v }) : null));
+      const raw = (row.c || []).map((c) => (c ? (c.f != null ? { v: c.v, f: c.f } : { v: c.v }) : null));
+      const cells = idx.map((i) => raw[i] || null);
       const k = gvizCellDayKey(cells[0]);
       if (byDay.has(k)) byDay.get(k).push(cells);
     }
