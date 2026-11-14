@@ -949,6 +949,7 @@
   const EVERY = [[10, '10 sec'], [20, '20 sec'], [30, '30 sec'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']];
   const menuHtml = () => `
       <div class="mc-menu" hidden>
+        <label>📣 Updates ON (OFF = koi update nahi) <input type="checkbox" data-mc="updates"${cfg.updates !== false ? ' checked' : ''}></label>
         <label>Naya update kitni der me
           <select data-mc="every">${EVERY.map(([v, l]) => `<option value="${v}"${(Number(cfg.everySec) || 10) === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
         <label>Idhar-udhar ghoomna <input type="checkbox" data-mc="roam"${cfg.roam !== false ? ' checked' : ''}></label>
@@ -1030,6 +1031,7 @@
     const t = e.target;
     if (!t || !t.closest || !t.closest('#ff-mascot')) return;
     if (t.dataset.mc === 'every') { cfg.everySec = Number(t.value) || 10; save(); schedule(); }
+    if (t.dataset.mc === 'updates') { cfg.updates = !!t.checked; if (cfg.updates) cfg.snoozeDay = ''; save(); if (!cfg.updates && skip) skip(); schedule(cfg.updates ? 1500 : undefined); }
     if (t.dataset.mc === 'roam') { cfg.roam = !!t.checked; save(); }
     if (t.dataset.mc === 'fun') { cfg.fun = !!t.checked; save(); }
     if (t.dataset.mc === 'chhotu') { cfg.chhotu = !!t.checked; save(); if (el) el.classList.toggle('no-chhotu', !cfg.chhotu); }
