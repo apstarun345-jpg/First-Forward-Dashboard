@@ -801,9 +801,10 @@ FF.pages = FF.pages || {};
     const M = FF.mascot;
     const c = M ? M.getCfg() : { on: true, sound: false, everySec: 10, roam: true, fun: true, autoPip: true, notify: true, voice: {} };
     const opts = [[10, '10 sec'], [20, '20 sec'], [30, '30 sec'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']];
-    return section('🤖 Robot dost (sirf admin ko dikhta hai)', `<p class="dim small">Gems robot site par ghoomta, naachta aur board par <b>site ki har khabar</b> batata hai — agents/TL growth &amp; de-growth, inactive, low stock, naya data, 🔔 alerts (tag request, search, login…), ⚙️ settings / users ke badlaav (audit), kaun online aaya, naya site version. Robot par click → last 24h ki unique history. <b>📌 Har tab / WhatsApp par</b> dabao to robot ek chhoti window me aa jaata hai jo Chrome ke dusre tab, WhatsApp ya kisi bhi app ke upar rehti hai (Chrome/Edge computer).</p>
+    return section('🤖 Robot dost (sirf admin ko dikhta hai)', `<p class="dim small">Gems robot site par ghoomta, naachta aur board par <b>site ki har khabar</b> batata hai — agents/TL growth &amp; de-growth, inactive, low stock, naya data, 🔔 alerts (tag request, search, login…), ⚙️ settings / users ke badlaav (audit), kaun online aaya, naya site version. Robot par click → last 24h ki unique history.</p>
       <div class="form-grid mc-set">
         <label class="check"><input type="checkbox" data-mcs="on" ${c.on ? 'checked' : ''}> 🤖 <b>Robot ON</b></label>
+        <label class="check"><input type="checkbox" data-mcs="updates" ${c.updates !== false ? 'checked' : ''}> 📣 <b>Updates ON</b> — ON: robot lagatar site ki khabar / update deta rahega (sab khabar bata chuka ho to bhi purani dobara). OFF: koi update, alert, briefing ya notification nahi — sirf robot dikhega.</label>
         <label class="fld"><span>⏱ Har update / activity ke beech</span><select class="input" data-mcs="everySec">${opts.map(([v, l]) => `<option value="${v}" ${c.everySec === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="check"><input type="checkbox" data-mcs="sound" ${c.sound ? 'checked' : ''}> 🔊 <b>Bol kar sunao</b></label>
         <label class="check"><input type="checkbox" data-mcs="brief" ${c.brief !== false ? 'checked' : ''}> 🗞 <b>Subah ki briefing</b> — din me pehli baar site kholte hi robot ek baar poora haal bataye (total, run-rate, andaza, top agent, stock, alerts). Phone par roz ka 🌅 Daily digest push alag se aata hai (Features → digest hour).</label>
@@ -812,7 +813,6 @@ FF.pages = FF.pages || {};
         <label class="check"><input type="checkbox" data-mcs="wake" ${c.wake === true ? 'checked' : ''}> 🎙 <b>"Hey Gems / Hii Gems" bolo</b> — robot jawab dega "hii Tarun Sir, main aapki kya help karu?" phir site ka kuch bhi poochho (dashboard tab khula + mic permission). <b>Default OFF</b> — ON karne par mic hamesha sunta hai (battery zyada lagti hai); OFF me bhi 🎙 button dabakar baat kar sakte ho.</label>
         <label class="check"><input type="checkbox" data-mcs="roam" ${c.roam ? 'checked' : ''}> 🛸 <b>Idhar-udhar ghoomna</b></label>
         <label class="check"><input type="checkbox" data-mcs="fun" ${c.fun ? 'checked' : ''}> 🕺 <b>Masti</b> — dance, moonwalk, jokes (jab nayi khabar na ho)</label>
-        <label class="check"><input type="checkbox" data-mcs="autoPip" ${c.autoPip !== false ? 'checked' : ''}> 📌 <b>Site par pehla click → robot pop-out window me</b> — phir Chrome ke dusre tab / WhatsApp / kisi bhi app ke upar</label>
         <label class="check"><input type="checkbox" data-mcs="push" ${c.push !== false ? 'checked' : ''}> 📱 <b>Robot ki har khabar app + web notification me</b> — agent ke TL naam ke saath (phone app band ho tab bhi; dashboard kahin khula hona chahiye)</label>
         <label class="check"><input type="checkbox" data-mcs="notify" ${c.notify !== false ? 'checked' : ''}> 🔔 <b>Site band / peeche ho aur pop-out na ho</b> → computer ki notification me update (har 1 min max)</label>
       </div>
@@ -825,7 +825,7 @@ FF.pages = FF.pages || {};
         <p class="dim small" style="margin:6px 0 0">💡 Sabse natural awaaz: <b>Microsoft Edge</b> browser me "Swara (ladki) / Madhur (ladka) Online (Natural)" — insaan jaisi. Mac par: System Settings → Accessibility → Spoken Content → System voice → <b>Lekha (Enhanced)</b> download. Chrome me "Google हिन्दी".</p>
       </div>
       <div class="card-sub" style="margin:8px 0;padding:10px;border:1px dashed var(--line);border-radius:10px"><b>🧩 Sirf robot, bina window — har tab par (Claude, WhatsApp Web, Sheets…)</b><br><span class="dim small">Chrome extension lagao: <a href="./gems-robot-extension.zip?v=8" download>⬇️ gems-robot-extension.zip</a> → unzip → Chrome me <code>chrome://extensions</code> → upar <b>Developer mode</b> ON → <b>Load unpacked</b> → unzip wala folder chuno. Bas — dashboard ka tab khula rakho (peeche bhi chalega), robot har dusre tab par ghoomega aur har 30 sec updates dega. Extension laga ho to pop-out window apne aap nahi khulti.</span></div>
-      <div class="btn-row"><button type="button" class="btn small" data-mcs-act="now">▶ Abhi update dikhao</button><button type="button" class="btn small ghost" data-mcs-act="hist">🕘 24h history</button><button type="button" class="btn small ghost" data-mcs-act="clear">🗑 History saaf</button><button type="button" class="btn small ghost" data-mcs-act="brain" title="Server wala robot abhi chalao aur status dikhao">📡 Server robot check</button>${'documentPictureInPicture' in window ? '<button type="button" class="btn small" data-mcs-act="pop" title="Chhoti always-on-top window — Chrome ke dusre tab, WhatsApp ya kisi bhi app ke upar robot">📌 Har tab / WhatsApp par robot</button>' : ''}<span class="dim small" id="mcs-msg"></span></div>`);
+      <div class="btn-row"><button type="button" class="btn small" data-mcs-act="now">▶ Abhi update dikhao</button><button type="button" class="btn small ghost" data-mcs-act="hist">🕘 24h history</button><button type="button" class="btn small ghost" data-mcs-act="clear">🗑 History saaf</button><button type="button" class="btn small ghost" data-mcs-act="brain" title="Server wala robot abhi chalao aur status dikhao">📡 Server robot check</button>${'documentPictureInPicture' in window ? '' : ''}<span class="dim small" id="mcs-msg"></span></div>`);
   }
   function bindMascot(body) {
     if (!A.isAdmin()) return;
@@ -836,7 +836,6 @@ FF.pages = FF.pages || {};
       const k = el.dataset.mcs;
       M.setCfg({ [k]: el.type === 'checkbox' ? el.checked : Number(el.value) });
       if (k === 'notify' && el.checked && 'Notification' in window && Notification.permission === 'default') { try { await Notification.requestPermission(); } catch { /* ignore */ } }
-      if (k === 'autoPip' && el.checked && !M.popped) { const ok = await M.popOut(); if (ok) return msg('📌 Robot pop-out window me ✓'); }
       msg('Saved ✓');
     }));
     // 🗣 awaaz

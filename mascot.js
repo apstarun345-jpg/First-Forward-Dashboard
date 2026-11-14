@@ -770,7 +770,7 @@
   const CLIENT_PUSH = /^(lowcover|stockend|nostock|deadstock|stockhigh|dispatchneed|stocktl|dispatchtl|kyclow|kycup|kycdown|dispfx|rephigh|hours|chassis|oneday|late|lowissue|inacttl|runrate|vc4tl)\b/;
   // 📱 robot ki khabar → app + web push (server dedupe + rate limit karta hai)
   function pushRobot(it) {
-    if (!it || it.fun || cfg.push === false || !allowed() || !FF.auth || !FF.auth.api) return;
+    if (!it || it.fun || cfg.push === false || !updatesOn() || !allowed() || !FF.auth || !FF.auth.api) return;
     // issuance / growth / TL / champions / record / milestone / dispatch / stock total ab SERVER khud bhejta hai (dashboard band ho tab bhi);
     // yahan se sirf wo jo server nahi banata — agent-wise stock, KYC, dispatch ka asar, replacement, busy time, chassis, data late…
     if (!CLIENT_PUSH.test(String(it.key || ''))) return;
@@ -991,7 +991,7 @@
         <button type="button" class="mc-pill" data-mc="now">✨ Naya update</button>
         <button type="button" class="mc-pill" data-mc="tower" title="Robot Control Tower — robot sach me kaam kar raha hai?">🛰 Control Tower</button>
         <button type="button" class="mc-pill" data-mc="follows">📌 Follow-ups</button>
-        ${pipWin ? '<button type="button" class="mc-pill pip" data-mc="popin">↩️ Wapas site par</button>' : pipOk() ? '<button type="button" class="mc-pill pip" data-mc="pop" title="Chhoti window — Chrome ke dusre tab, WhatsApp, kisi bhi app ke upar">📌 Har tab / WhatsApp par</button>' : ''}
+        ${pipWin ? '<button type="button" class="mc-pill pip" data-mc="popin">↩️ Wapas site par</button>' : ''}
         <span class="mc-go"></span>
         <button type="button" data-mc="sound" title="Bol kar sunao (on/off)">${cfg.sound ? '🔊' : '🔇'}</button>
         <button type="button" data-mc="menu" title="Robot settings">⚙</button>
@@ -1777,7 +1777,7 @@
   // khud batana: naya alert aaye to (2 ghante me ek baar se zyada nahi; wahi purani baat dobara nahi)
   setInterval(() => {
     try {
-      if (!allowed() || !cfg.on || cfg.alerts === false || cfg.snoozeDay === today() || busy || convo || asking || document.hidden) return;
+      if (!allowed() || !cfg.on || !updatesOn() || cfg.alerts === false || cfg.snoozeDay === today() || busy || convo || asking || document.hidden) return;
       let st = {}; try { st = JSON.parse(localStorage.getItem('gemsAlert') || '{}'); } catch { st = {}; }
       if (Date.now() - (st.at || 0) < 2 * 3600e3) return;
       try { if (FF.auth.can && FF.auth.can('tollDebit')) { if (!FF.tollDebit && FF.lazy && FF.lazy.inject) FF.lazy.inject('tollDebit').then(() => FF.tollDebit.load(false)).catch(() => {}); else if (FF.tollDebit) FF.tollDebit.load(false).catch(() => {}); } } catch { /* ignore */ }
@@ -2573,7 +2573,10 @@
     return 1;
   }
   const IMP_GAP = { 3: 3 * 3600e3, 2: 4 * 3600e3, 1: 8 * 3600e3 };
+  const updatesOn = () => cfg.updates !== false;   // ⚙️ Settings → 🤖 Robot → "Updates ON/OFF"
+  const lastSaidAt = (it) => { const sig = sigOf(it); let t = 0; for (const h of histLoad()) if (h.sig === sig && h.at > t) t = h.at; return t; };
   function nextItem(force) {
+    if (!force && !updatesOn()) { prio.length = 0; return null; }   // updates OFF → robot kuch announce nahi karta (sirf masti / jokes)
     if (prio.length) return prio.shift();
     const list = insights(), n = list.length; if (!n) return null;
     const start = Number(cfg.idx) || 0, min = cfg.keyOnly ? 2 : 1;
@@ -2586,6 +2589,14 @@
         if (force || !saidWithin(it, IMP_GAP[tier])) { cfg.idx = i + 1; save(); return it; }
       }
     }
+    // 🔁 Updates ON hain par sab purani-nayi khabar abhi bata chuka (3-8 ghante ka gap) → robot chup na baithe:
+    //    sabse purani bataayi hui khabar (kam se kam 15 min purani) dobara, taaki update lagatar milte rahein.
+    let best = null, bestAt = Infinity;
+    for (let k = 0; k < n; k++) {
+      const it = list[(start + k) % n], at = lastSaidAt(it);
+      if (Date.now() - at >= 15 * 60e3 && at < bestAt) { best = it; bestAt = at; }
+    }
+    if (best) { cfg.idx = list.indexOf(best) + 1; save(); return best; }
     return null;
   }
   const gapMs = () => Math.max(10, Number(cfg.everySec) || 10) * 1e3;
@@ -2685,7 +2696,7 @@
   // 📌 site par pehla click → robot apne aap pop-out window me (browser click ke bina window kholne nahi deta)
   function armAutoPip() {
     const go = () => {
-      if (!cfg.on || !allowed() || cfg.autoPip === false || pipWin || pipClosedByUser || !pipOk() || extOn()) return; // extension hai to window ki zarurat nahi
+      if (!cfg.on || !allowed() || true || pipWin || pipClosedByUser || !pipOk() || extOn()) return; // extension hai to window ki zarurat nahi
       popOut();
     };
     const once = (e) => {
@@ -2697,7 +2708,7 @@
     document.addEventListener('pointerup', once, true);
     document.addEventListener('keydown', once, true);
     // Chrome (naye version) tab badalne par khud PiP de sakta hai — mil gaya to badhiya
-    try { navigator.mediaSession && navigator.mediaSession.setActionHandler('enterpictureinpicture', () => { if (!pipWin && cfg.on && allowed() && cfg.autoPip !== false) popOut(); }); } catch { /* unsupported */ }
+    try { navigator.mediaSession && navigator.mediaSession.setActionHandler('enterpictureinpicture', () => { /* 📌 pop-out hata diya */ void 0; }); } catch { /* unsupported */ }
   }
 
   let funTurn = 0, lastUpd = 0;
@@ -2706,7 +2717,7 @@
     if (busy || asking || convo || mode === 'hist') return schedule(prio.some((x) => x.fast) ? 700 : 4e3);
     // 🔔 site ka tab peeche (dusra tab / WhatsApp) aur pop-out nahi → system notification se update
     if (!force && document.hidden && !pipWin && extOn()) return schedule(30e3); // extension har 30 sec "pull" karta hai
-    if (!force && document.hidden && !pipWin && cfg.on && allowed() && cfg.notify !== false && cfg.snoozeDay !== today()) { await notifyHidden(); return schedule(60e3); }
+    if (!force && document.hidden && !pipWin && cfg.on && allowed() && updatesOn() && cfg.notify !== false && cfg.snoozeDay !== today()) { await notifyHidden(); return schedule(60e3); }
     if (!force && blocked()) return schedule(15e3);
     if (!FF.smartQ && FF.lazy && FF.lazy.inject) { try { await FF.lazy.inject('smartQ'); } catch { /* optional */ } }
     // update ka time (default 10 sec) ho gaya → agli khabar; beech ka time masti me, kabhi khaali khada nahi
@@ -2742,7 +2753,7 @@
     if (o && ('everySec' in o || 'on' in o)) schedule(1500);
     return getCfg();
   }
-  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, autoPip: cfg.autoPip !== false, wake: cfg.wake === true, alerts: cfg.alerts !== false, keyOnly: !!cfg.keyOnly, brief: cfg.brief !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
+  const getCfg = () => ({ on: !!cfg.on, sound: !!cfg.sound, everySec: Number(cfg.everySec) || 10, roam: cfg.roam !== false, fun: cfg.fun !== false, updates: cfg.updates !== false, autoPip: false, wake: cfg.wake === true, alerts: cfg.alerts !== false, keyOnly: !!cfg.keyOnly, brief: cfg.brief !== false, notify: cfg.notify !== false, push: cfg.push !== false, voice: cfg.voice || {} });
   function clearHistory() { histSave([]); dot(false); }
 
   // ================================================================ 🎉 v3.125.220 — badi khushi (poori screen confetti)
@@ -2896,7 +2907,7 @@
       // 🗞 v3.125.182 — din me pehli baar site kholte hi robot khud "Aaj ki briefing" de (ek hi baar; Settings se band ho sakta hai)
       const autoBrief = async (tryN) => {
         try {
-          if (cfg.brief === false || !cfg.on || !allowed() || cfg.briefDay === today() || cfg.snoozeDay === today() || new Date().getHours() < 7) return;
+          if (cfg.brief === false || !updatesOn() || !cfg.on || !allowed() || cfg.briefDay === today() || cfg.snoozeDay === today() || new Date().getHours() < 7) return;
           if (document.hidden || busy || convo || asking) { if (tryN < 8) setTimeout(() => autoBrief(tryN + 1), 20e3); return; }
           await ensureData();
           const it = intentItem('briefing do'); if (!it || !it.big) { if (tryN < 8) setTimeout(() => autoBrief(tryN + 1), 30e3); return; }
