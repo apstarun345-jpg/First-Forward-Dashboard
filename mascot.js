@@ -1351,12 +1351,39 @@
     board.classList.remove('in', 'hist', 'instant');
     el.classList.remove('rest', 'talk');
     // jahan hai uske ulti taraf jao — left↔right, kabhi pehle upar
-    const goLeft = rs && rs.side ? rs.side === 'right' : pos[0] + g.W / 2 > g.vw / 2;
+    let goLeft = rs && rs.side ? rs.side === 'right' : pos[0] + g.W / 2 > g.vw / 2;
     board.style.width = `${g.BW}px`;
     const bh = board.offsetHeight || 170;
     const yLo = Math.min(g.maxY, g.minY + bh - g.W * 0.85 + 10);
+    // 🧭 roam ON → har update par alag jagah: left / right / top / bottom (pichli jagah dobara nahi); board hamesha screen ke andar
+    let spot = null;
+    if (!rs && !pipWin && cfg.roam !== false) {
+      const zones = ['left', 'right', 'top', 'bottom'].filter((z) => z !== cfg.lastZone);
+      const z = pick(zones); cfg.lastZone = z; save();
+      const fitR = (x) => x + g.W + 10 + g.BW <= g.vw - 6, fitL = (x) => x - g.BW - 10 >= 6;
+      let x, y;
+      if (z === 'left') { x = 12; y = Math.round(rnd(Math.min(yLo, g.maxY), g.maxY)); }
+      else if (z === 'right') { x = g.vw - g.W - 12; y = Math.round(rnd(Math.min(yLo, g.maxY), g.maxY)); }
+      else {
+        x = Math.round(rnd(12, Math.max(13, g.vw - g.W - 12)));
+        y = z === 'top' ? Math.round(rnd(g.minY, g.minY + 40)) : g.maxY;
+      }
+      // board kis taraf khule: jahan jagah ho (dono me ho to screen ke beech ki taraf)
+      let side = x + g.W / 2 > g.vw / 2 ? 'left' : 'right';
+      if (side === 'right' && !fitR(x)) side = fitL(x) ? 'left' : 'right';
+      else if (side === 'left' && !fitL(x)) side = fitR(x) ? 'right' : 'left';
+      if (side === 'right' && !fitR(x)) x = Math.max(6, g.vw - g.W - g.BW - 16);   // chhoti screen — robot ko khisko
+      if (side === 'left' && !fitL(x)) x = Math.min(g.vw - g.W - 6, g.BW + 16);
+      spot = { rest: [x, Math.max(g.minY, Math.min(g.maxY, y))], side };
+      goLeft = side === 'right';   // (purana naam: goLeft=true ⇒ board robot ke daayen)
+    }
     const still = cfg.roam === false && !rs;   // 🛑 'Idhar-udhar ghoomna' band → robot apni jagah par hi rahe, board wahin khule
-    const rest = still ? [pos[0], pos[1]] : pipWin ? dockPos() : rs && rs.fx != null ? [Math.max(6, Math.min(g.vw - g.W - 6, rs.fx * g.vw)), Math.max(g.minY, Math.min(g.maxY, rs.fy * g.vh))] : [goLeft ? 12 : g.vw - g.W - 12, Math.round(rnd(Math.min(yLo, g.maxY), g.maxY))];
+    if (still && !pipWin) {   // board robot ke paas, screen ke andar: jis taraf jagah ho (dono me ho to screen ke beech ki taraf)
+      const x = pos[0], fitR = x + g.W + 10 + g.BW <= g.vw - 6, fitL = x - g.BW - 10 >= 6;
+      const side = fitR && fitL ? (x + g.W / 2 > g.vw / 2 ? 'left' : 'right') : fitR ? 'right' : fitL ? 'left' : (x + g.W / 2 > g.vw / 2 ? 'left' : 'right');
+      goLeft = side === 'right';
+    }
+    const rest = still ? [pos[0], pos[1]] : spot ? spot.rest : pipWin ? dockPos() : rs && rs.fx != null ? [Math.max(6, Math.min(g.vw - g.W - 6, rs.fx * g.vw)), Math.max(g.minY, Math.min(g.maxY, rs.fy * g.vh))] : [goLeft ? 12 : g.vw - g.W - 12, Math.round(rnd(Math.min(yLo, g.maxY), g.maxY))];
     const style = pick(['arc', 'zigzag', 'loop', 'up', 'hop']);
     if (rs || still) place(rest); else await fly(path(pos, rest, style), (it.fast || it.fun ? 1700 : 2400) + (style === 'loop' ? 900 : 300), { spin: style === 'loop' ? false : Math.random() < 0.25 });
     layoutBoard(g, pipWin ? 'pip' : goLeft ? 'right' : 'left');
