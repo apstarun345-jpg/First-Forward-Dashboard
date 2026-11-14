@@ -198,7 +198,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'settings:features', label: 'Settings · Features & alerts', group: 'Settings' },
   { key: 'settings:contacts', label: 'Settings · Contacts & sharing', group: 'Settings' },
 ];
-const SETTINGS_ADMIN_ONLY_KEYS = ['delhivery', 'email', 'personalLinks', 'schedules', 'dispatchEmail', 'storage', 'users', 'sessions'];
+const SETTINGS_ADMIN_ONLY_KEYS = ['email', 'personalLinks', 'schedules', 'dispatchEmail', 'storage', 'users', 'sessions'];
 const hasSettingsPerm = (u) => !!(u && Array.isArray(u.permissions) && u.permissions.some((k) => String(k).startsWith('settings:')));
 
 // Sheet-tab registry defaults (also mirrored in config.js). `enabled:false` hides a tab everywhere.
@@ -294,7 +294,6 @@ const DEFAULT_SETTINGS = {
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],   // v3.87 — TVC → CCH classes (Tag Request class grid)
   // v3.90 — GV agent / TL commission box (Master search + profile): sheet link, tab, columns sab Settings se badal sakte ho.
   // 📞 v3.125.248 — agent mobile kis sheet / tab se (FF + GV) — ID + mobile + naam column system khud header se pehchanta hai
-  delhivery: { token: '' },   // 🚚 Delhivery Tracking API token (sirf admin / server)
   mobileSources: { ff: { sheetLink: '', tab: 'Sheet4' }, gv: { sheetLink: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA', tab: 'agent_Mobile Number' } },
   gvAgentCommission: { enabled: true, sheetLink: '', tab: 'GV Master', agentCol: 'A', tlCol: 'R', tlFallbackCol: 'C', productCol: 'L', commissionCol: 'M', dateCol: 'P', agentNameCol: 'B', tlNameCol: 'D', classCol: 'G', classFallbackCol: 'F', productId: '100000007832', label: 'VC4', suffix: '/tag', currency: '₹' },
   gv: {
@@ -592,7 +591,6 @@ function settingsFor(u) {
   delete s.dispatchEmail; // selected recipients + delivery schedule sirf admin ko
   delete s.__tagSheetBackup; // tag-sheet config ki backup copy (sheet link) sirf admin ko
   delete s.__tagDataBackup;  // tag requests + address ki gzip backup copy sirf admin ko
-  if (s.delhivery) s.delhivery = { configured: !!(s.delhivery.token || process.env.DELHIVERY_TOKEN) };   // 🚚 API token sirf admin ko
   return s;
 }
 /** sw.js ka CACHE_NAME — app version (update-toast ke liye). */
@@ -7289,6 +7287,7 @@ async function restoreStoredIntoDb(data = {}, { usersMode = 'merge', withSetting
   if (withSettings && data.settings && typeof data.settings === 'object') {
     const previousSettings = db.settings;
     db.settings = deepMerge(DEFAULT_SETTINGS, data.settings);
+    if (db.settings && db.settings.delhivery) delete db.settings.delhivery;   // 🧹 v3.125.286 — Delhivery Tracking hata diya: purana saved token bhi saaf
     out.settingsRestored = true;
     if (liveFeedSettingsDiffer(previousSettings, db.settings)) invalidateLiveFeedCaches();
   }
@@ -10297,7 +10296,7 @@ async function handleApi(req, res, url) {
     }
   }
   // 🛰️ v3.125.284 — NPCI Status (Cross Channel): Tag ID / VRN / Chassis → ApnaPayment verifyNpciStatus API (server se, bina token).
-  const npciPerm = (u) => u && (u.role === 'admin' || (Array.isArray(u.permissions) && (u.permissions.includes('npci') || u.permissions.includes('delhivery'))));
+  const npciPerm = (u) => u && (u.role === 'admin' || (Array.isArray(u.permissions) && u.permissions.includes('npci')));
   const NPCI_URL = process.env.NPCI_API_URL || 'https://www.apnapayment.com/api/agent/idfc/verifyNpciStatus';
   const npciKind = (v) => (/^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
   async function npciOne(raw) {
@@ -12162,13 +12161,6 @@ async function handleApi(req, res, url) {
       };
       Object.keys(cfg).forEach((k) => delete cfg[k]);
       Object.assign(cfg, out);
-    }
-    if (patch.delhivery !== undefined) {
-      const d = patch.delhivery || {};
-      const prev = (db.settings && db.settings.delhivery) || {};
-      const tok = d.token === undefined ? (prev.token || '') : String(d.token || '').trim().replace(/^Token\s+/i, '').slice(0, 200);
-      if (tok && !/^[A-Za-z0-9_-]{16,200}$/.test(tok)) throw new HttpError(400, 'Delhivery token sahi format me nahi hai.');
-      patch.delhivery = { token: tok };
     }
     if (patch.mobileSources !== undefined) {
       const m = patch.mobileSources;
