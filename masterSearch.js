@@ -1834,9 +1834,9 @@ FF.pages = FF.pages || {};
       const chart = (days.length && FF.charts) ? FF.charts.bars({
         labels: days.map((d) => String(d.day)), height: 220, showValues: true, legendAlways: true,
         series: [
-          { name: 'VC4', values: days.map((d) => d.vc4), color: '#6366f1' },
-          { name: 'VC20', values: days.map((d) => d.vc20), color: '#f59e0b' },
-          { name: 'VC5+', values: days.map((d) => d.vc5p), color: '#10b981' }
+          { name: 'VC4', values: days.map((d) => d.vc4), color: '#2563eb' },
+          { name: 'VC20', values: days.map((d) => d.vc20), color: '#fb923c' },
+          { name: 'VC5+', values: days.map((d) => d.vc5p), color: '#c2410c' }
         ]
       }) : '';
       const pct = (n) => (tot('total') ? ` <small class="dim">${Math.round((n / tot('total')) * 100)}%</small>` : '');
@@ -2986,8 +2986,10 @@ FF.pages = FF.pages || {};
     const lab = (i) => `${String(i + 1).padStart(2, '0')} ${mName(ym)}`;
     const tips = days.map((d, i) => `<b>${esc(lab(i))}</b><br>VC4: <b>${U.fmt(d.vc4)}</b><br>VC20: <b>${U.fmt(d.vc20)}</b><br>VC5+: <b>${U.fmt(d.vc5p)}</b><br>🔁 Replacement: <b>${U.fmt(d.rep)}</b><br>🔧 Chassis: <b>${U.fmt(d.chs)}</b><br>Total: <b>${U.fmt(d.total)}</b>`);
     const chart = FF.charts ? FF.charts.bars({
-      labels: days.map((_, i) => String(i + 1)), tipLabels: days.map((_, i) => lab(i)), tips, height: 190, showValues: true, labelEvery: n > 20 ? 3 : 1,
-      series: [{ name: sc.ch === 'gv' ? 'GV Partner · GV' : 'First Forward · FF', values: days.map((d) => d.total), color: sc.ch === 'gv' ? '#0d9488' : '#6366f1' }]
+      labels: days.map((_, i) => String(i + 1)), tipLabels: days.map((_, i) => lab(i)), tips, height: 190, showValues: true,
+      // 🌈 v3.125.271 — roz ka bar class ke rang me: VC4 neela · VC20 halka orange · VC5+ gehra orange
+      series: [{ name: 'VC4', values: days.map((d) => d.vc4) }, { name: 'VC20', values: days.map((d) => d.vc20) }, { name: 'VC5+', values: days.map((d) => d.vc5p) }],
+      legendAlways: true
     }) : '';
     const active = days.filter((d) => d.total > 0).length;
     // v3.125.115 — Run-rate table: per day (calendar din) + month-end expected; pichhle mahine ke per-day se tulna

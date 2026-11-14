@@ -337,7 +337,7 @@ FF.pages = FF.pages || {};
     const shareDonut = C.donut({ size: 150, title: U.fmtShort(totalAll), subtitle: 'Total tags', items: [
       { label: 'First Forward', value: ff.total, color: FF_COLOR }, { label: 'GV Partner', value: gv.total, color: GV_COLOR }] });
     const mixDonut = C.donut({ size: 150, title: U.fmtShort(totalAll), subtitle: 'Class mix', items: [
-      { label: 'VC4', value: ff.vc4 + gv.vc4, color: '#10b981' }, { label: 'VC20', value: ff.vc20 + gv.vc20, color: '#f59e0b' }, { label: 'VC5+', value: ff.vc5p + gv.vc5p, color: '#ec4899' }] });
+      { label: 'VC4', value: ff.vc4 + gv.vc4, color: '#2563eb' }, { label: 'VC20', value: ff.vc20 + gv.vc20, color: '#fb923c' }, { label: 'VC5+', value: ff.vc5p + gv.vc5p, color: '#c2410c' }] });
     const [tf, tt] = trendWindow(m);
     const labels = [], ffV = [], gvV = [], totV = [], tipLabels = [];
     for (let k = tf; k <= tt; k = shiftKey(k, 1)) {

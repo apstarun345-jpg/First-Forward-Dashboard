@@ -6,7 +6,7 @@ window.FF = window.FF || {};
   const esc = U.esc;
   const PALETTE = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#0ea5e9', '#8b5cf6', '#f97316', '#14b8a6', '#ef4444', '#84cc16', '#06b6d4', '#d946ef', '#64748b'];
   const COLORS = {
-    VC4: '#2563eb', VC20: '#f59e0b', 'VC5+': '#ea580c', NVC4: '#f97316', Commercial: '#f97316',
+    VC4: '#2563eb', VC20: '#fb923c', 'VC5+': '#c2410c', NVC4: '#f97316', Commercial: '#f97316',
     ISSUANCE: '#10b981', REPLACEMENT: '#f97316',
     'First Forward': '#8b5cf6', 'GV Partner': '#0ea5e9',
     current: '#6366f1', last: '#ec4899',
@@ -120,8 +120,9 @@ window.FF = window.FF || {};
   const specs = new Map();
 
   // 🚗v226 — har class ka ek pakka rang, poori site par: VC4 = neela, VC20 / VC5+ / commercial = orange.
-  const CLS = { VC4: '#2563eb', VC20: '#f59e0b', 'VC5+': '#ea580c', NVC4: '#f97316', COMMERCIAL: '#f97316', 'ALL COMM': '#f97316', COMM: '#f97316',
-    VC5: '#fb923c', VC6: '#f97316', VC7: '#ea580c', VC12: '#d9480f', VC16: '#c2410c' };
+  // v3.125.271 — VC4 = neela · VC20 = halka orange · VC5+ = gehra orange (har chart / chip / donut me yehi)
+  const CLS = { VC4: '#2563eb', VC20: '#fb923c', 'VC5+': '#c2410c', NVC4: '#f97316', COMMERCIAL: '#f97316', 'ALL COMM': '#f97316', COMM: '#f97316',
+    VC5: '#c2410c', VC6: '#f97316', VC7: '#ea580c', VC12: '#d9480f', VC16: '#c2410c' };
   const cc = (n) => CLS[String(n == null ? '' : n).trim().toUpperCase().replace(/\s+/g, ' ')] || null;
   function color(name, i) { return cc(name) || COLORS[name] || PALETTE[i % PALETTE.length]; }
   function fmtVal(v, f) { return f ? f(v) : U.fmt(v); }
@@ -144,7 +145,8 @@ window.FF = window.FF || {};
     const max = niceMax(Math.max(...totals, 0));
     const height = opts.height || 220;
     const n = labels.length;
-    const every = opts.labelEvery || (n > 40 ? 5 : n > 20 ? 2 : 1);
+    // 📅 v3.125.271 — 31 din tak har bar ke neeche uski date / label; usse zyada ho to hi beech-beech me
+    const every = n <= 31 ? 1 : (opts.labelEvery || (n > 40 ? 5 : n > 20 ? 2 : 1));
     const showValues = opts.showValues !== undefined ? opts.showValues : n <= 45;
     // 🌈 v224 — ek hi series wale class charts (VC4 · VC5 · …) har bar alag rang me; har bar par halka gradient
     const classy = series.length === 1 && opts.multicolor !== false && n > 1 && n <= 12 && labels.every((l) => /^(N?VC\s?\d+\+?|all|comm)/i.test(String(l)));
@@ -164,10 +166,12 @@ window.FF = window.FF || {};
     }).join('');
     const grid = [1, 0.75, 0.5, 0.25, 0].map((f) => `<div class="vgrid-line"><span>${U.fmtShort(max * f)}</span></div>`).join('');
     const cid = `ch${++seq}`;
-    const minPlotWidth = Math.max(0, Number(opts.minPlotWidth) || 0);
-    const plotStyle = minPlotWidth ? ` style="min-width:${minPlotWidth}px"` : '';
+    // 📏 v3.125.271 — bar ki chaudai har jagah ek-si (data kam ho ya zyada): ≤8 bars = 52px, usse zyada = 30px; jagah kam ho to scroll
+    const colW = n <= 8 ? 52 : 30;
+    const minPlotWidth = Math.max(40 + 8 + n * (colW + 3), Number(opts.minPlotWidth) || 0);
+    const plotStyle = ` style="min-width:${minPlotWidth}px"`;
     specs.set(cid, { kind: 'bars', opts: { ...opts, series } });
-    return `<div class="chart-shot" data-cid="${cid}"><div class="vbars${minPlotWidth ? ' scroll-x' : ''}${n > 24 ? ' dense' : ''}" style="--h:${height}px"><div class="vbars-plot"${plotStyle}><div class="vgrid">${grid}</div><div class="vbars-cols">${cols}</div></div>${series.length > 1 || opts.legendAlways ? legend(series) : ''}</div></div>`;
+    return `<div class="chart-shot" data-cid="${cid}"><div class="vbars scroll-x${n > 24 ? ' dense' : ''}" style="--h:${height}px;--cw:${colW}px"><div class="vbars-plot"${plotStyle}><div class="vgrid">${grid}</div><div class="vbars-cols">${cols}</div></div>${series.length > 1 || opts.legendAlways ? legend(series) : ''}</div></div>`;
   }
 
   /** Horizontal bars. opts: { items:[{label, sub, value, compare, color, tip, attr}], max, format, compareLabel } */
