@@ -213,7 +213,7 @@ window.FF = window.FF || {};
       <div class="ps-quick"><button type="button" class="btn sm" data-ps-all>Select all</button><button type="button" class="btn sm" data-ps-none>Clear</button><button type="button" class="btn sm" data-ps-last3>Last 3 months</button></div>
       <div class="ps-mode"><b class="small">File</b><label><input type="radio" name="psfmt" value="pdf" checked> 📄 PDF payslip</label><label><input type="radio" name="psfmt" value="xlsx"> 📊 Excel (APN sheet format, rangeen)</label><label><input type="radio" name="psfmt" value="both"> Dono — PDF + Excel</label></div>
       <div class="ps-mode"><b class="small">Months</b><label><input type="radio" name="psmode" value="combined" checked> Ek file — saare chune hue mahine (summary ke saath)</label><label><input type="radio" name="psmode" value="separate"> Har mahine ki alag file</label></div>
-      <div class="ops-tw-f"><button type="button" class="btn primary" data-ps-go>⬇ Download</button></div>
+      <div class="ops-tw-f"><button type="button" class="btn" data-ps-view>👁 View (bina download)</button> <button type="button" class="btn primary" data-ps-go>⬇ Download</button></div>
       <small>PAN & bank account masked (Excel me account details nahi). Figures exactly as in the APN payout sheet and FNF payment sheet.</small></div>`;
     ov.hidden = false;
     const boxes = () => [...ov.querySelectorAll('.ps-m input')];
@@ -222,6 +222,18 @@ window.FF = window.FF || {};
       if (e.target.closest('[data-ps-all]')) boxes().forEach((x) => { x.checked = true; });
       if (e.target.closest('[data-ps-none]')) boxes().forEach((x) => { x.checked = false; });
       if (e.target.closest('[data-ps-last3]')) boxes().forEach((x, i) => { x.checked = i < 3; });
+      const vw = e.target.closest('[data-ps-view]');
+      if (vw) {
+        const pick = new Set(boxes().filter((x) => x.checked).map((x) => x.value));
+        const sel = months.filter((m) => pick.has(m.tab));
+        if (!sel.length) { vw.textContent = 'Select at least one month'; setTimeout(() => { vw.textContent = '👁 View (bina download)'; }, 1800); return; }
+        const fmt = (ov.querySelector('input[name=psfmt]:checked') || {}).value || 'pdf';
+        vw.disabled = true; vw.textContent = '⏳ Bana raha hoon…';
+        try { await view(spec, sel, fmt, d.company, all); }
+        catch (err) { vw.textContent = `⚠️ ${(err && err.message) || err}`; }
+        setTimeout(() => { vw.disabled = false; vw.textContent = '👁 View (bina download)'; }, 1200);
+        return;
+      }
       const go = e.target.closest('[data-ps-go]');
       if (go) {
         const pick = new Set(boxes().filter((x) => x.checked).map((x) => x.value));
@@ -318,7 +330,7 @@ window.FF = window.FF || {};
       });
       return FF.pdf.build(pages.map((p) => p.canvas));
     };
-    return { newPage, need, text, rect, pill, section, table, kv, finish, get y() { return y; }, set y(v) { y = v; } };
+    return { newPage, need, text, rect, pill, section, table, kv, finish, canvases: () => pages.map((p) => p.canvas), get y() { return y; }, set y(v) { y = v; } };
   }
 
   const nowIst = () => new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -625,6 +637,74 @@ window.FF = window.FF || {};
     }
     const ord = sel.slice().sort((a, b) => b.ym.localeCompare(a.ym));
     saveAs(FF.xlsx.build([xlSummary(ord, spec, all), ...ord.map(xlMonthSheet)]), xname(sel));
+  }
+  // ---------------------------------------------------------------- 👁 View (bina download) — v3.125.280
+  const XL_CSS = {
+    hRed: 'background:#dc2626;color:#fff', hGreen: 'background:#16a34a;color:#fff', hBlue: 'background:#2563eb;color:#fff', hTeal: 'background:#0d9488;color:#fff',
+    hSlate: 'background:#475569;color:#fff', hAmber: 'background:#d97706;color:#fff', hPurple: 'background:#7c3aed;color:#fff',
+    zeb: 'background:#f8fafc', zebNum: 'background:#f8fafc', zebAmt: 'background:#f8fafc', rowTotal: 'background:#e5e7eb;font-weight:800', totAmt: 'background:#e5e7eb;font-weight:800',
+    inact: 'background:#fef2f2;color:#b91c1c', inactNum: 'background:#fef2f2;color:#b91c1c', inactAmt: 'background:#fef2f2;color:#b91c1c',
+    newSt: 'color:#2563eb;font-weight:800', zebNew: 'background:#f8fafc;color:#2563eb;font-weight:800',
+    pUp: 'background:#ecfdf5;color:#15803d;font-weight:700', pDown: 'background:#fef2f2;color:#b91c1c;font-weight:700', pFlat: 'color:#64748b',
+    gAmt: 'background:#ecfdf5;color:#15803d', rAmt: 'background:#fef2f2;color:#b91c1c', pAmt: 'background:#ede9fe;color:#5b21b6;font-weight:800',
+    label: 'background:#f5f3ff;font-weight:700', section: 'background:#e0e7ff;font-weight:800', curNum: 'background:#e0e7ff;font-weight:800', flat: 'color:#64748b',
+    up: 'background:#ecfdf5;color:#15803d', down: 'background:#fef2f2;color:#b91c1c', total: 'background:#fff7ed;color:#c2410c'
+  };
+  const MONEY_ST = /amt$|Amt$/i, PCT_ST = /^p(Up|Down|Flat)$/;
+  function sheetHtml(sh) {
+    const head = (sh.header || []).map((h, c) => `<th style="${XL_CSS[(sh.headStyleOf && sh.headStyleOf(c)) || 'hSlate'] || XL_CSS.hSlate}">${esc(h)}</th>`).join('');
+    const body = (sh.rows || []).map((row, ri) => `<tr>${row.map((v, c) => {
+      const st = (sh.styleOf && sh.styleOf(ri, c, v)) || '';
+      let t = v == null ? '' : v;
+      if (typeof v === 'number') t = PCT_ST.test(st) ? `${(v * 100).toFixed(1)}%` : MONEY_ST.test(st) ? `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : v.toLocaleString('en-IN');
+      return `<td style="${XL_CSS[st] || ''}${typeof v === 'number' ? ';text-align:right' : ''}">${esc(String(t))}</td>`;
+    }).join('')}</tr>`).join('');
+    return `<div class="ps-xv-wrap"><table class="ps-xv"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+  function viewer(title, html, onDl) {
+    let ov = document.getElementById('ps-view');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'ps-view'; document.body.appendChild(ov); }
+    if (!document.getElementById('ps-view-css')) {
+      const st = document.createElement('style'); st.id = 'ps-view-css';
+      st.textContent = `#ps-view{position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,.62);display:flex;align-items:stretch;justify-content:center;padding:18px}
+        #ps-view[hidden]{display:none}#ps-view .psv-box{background:var(--card,#fff);border-radius:16px;width:min(1200px,100%);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 60px -20px rgba(0,0,0,.5)}
+        #ps-view .psv-h{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line,#e5e7eb)}#ps-view .psv-h b{flex:1}
+        #ps-view .psv-b{overflow:auto;padding:14px;background:#e2e8f0}#ps-view .psv-b canvas{display:block;width:min(820px,100%);height:auto;margin:0 auto 14px;background:#fff;box-shadow:0 6px 18px -8px rgba(0,0,0,.4);border-radius:4px}
+        #ps-view .psv-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}#ps-view .psv-tabs button{border:0;border-radius:999px;padding:6px 12px;font-weight:700;cursor:pointer;background:#fff}#ps-view .psv-tabs button.on{background:#4f46e5;color:#fff}
+        .ps-xv-wrap{overflow:auto;background:#fff;border-radius:8px;max-height:70vh}.ps-xv{border-collapse:collapse;font-size:12px;white-space:nowrap}.ps-xv th,.ps-xv td{border:1px solid #e2e8f0;padding:5px 8px}.ps-xv thead th{position:sticky;top:0;z-index:1}`;
+      document.head.appendChild(st);
+    }
+    ov.innerHTML = `<div class="psv-box"><div class="psv-h"><b>${esc(title)}</b><button type="button" class="btn small primary" data-psv-dl>⬇ Download</button><button type="button" class="btn small" data-psv-x>✕ Band karo</button></div><div class="psv-b"></div></div>`;
+    const b = ov.querySelector('.psv-b');
+    if (typeof html === 'string') b.innerHTML = html; else b.appendChild(html);
+    ov.hidden = false;
+    ov.onclick = (e) => {
+      if (e.target === ov || e.target.closest('[data-psv-x]')) { ov.hidden = true; ov.innerHTML = ''; return; }
+      if (e.target.closest('[data-psv-dl]') && onDl) onDl();
+      const tb = e.target.closest('[data-psv-tab]');
+      if (tb) { ov.querySelectorAll('[data-psv-tab]').forEach((x) => x.classList.toggle('on', x === tb)); ov.querySelectorAll('[data-psv-sheet]').forEach((x) => { x.hidden = x.dataset.psvSheet !== tb.dataset.psvTab; }); }
+    };
+    return ov;
+  }
+  async function view(spec, sel, fmt, company, all) {
+    const ord = sel.slice().sort((a, b) => b.ym.localeCompare(a.ym));
+    if (fmt === 'xlsx') {
+      const sheets = [xlSummary(ord, spec, all), ...ord.map(xlMonthSheet)];
+      const tabs = `<div class="psv-tabs">${sheets.map((sh, i) => `<button type="button" data-psv-tab="${i}" class="${i ? '' : 'on'}">${esc(sh.name)}</button>`).join('')}</div>`;
+      const html = tabs + sheets.map((sh, i) => `<div data-psv-sheet="${i}"${i ? ' hidden' : ''}>${sheetHtml(sh)}</div>`).join('');
+      viewer(`📊 Excel view — ${fileName(sel, spec).replace(/\.pdf$/, '.xlsx')}`, html, () => downloadExcel(spec, sel, 'combined', all));
+      return;
+    }
+    if (!FF.pdf && FF.lazy && FF.lazy.need) await FF.lazy.need('pdf').catch(() => {});
+    if (!FF.pdf || !FF.pdf.page) throw new Error('PDF module load nahi hua — page refresh karo');
+    const prevOf = (m) => { const [y, mo] = m.ym.split('-').map(Number); const pd = new Date(Date.UTC(y, mo - 2, 1)); const pym = `${pd.getUTCFullYear()}-${String(pd.getUTCMonth() + 1).padStart(2, '0')}`; return (all || sel).find((x) => x.ym === pym && x.data) || null; };
+    const P = pager(company || COMPANY);
+    if (sel.length > 1) drawSummary(P, sel, spec);
+    sel.forEach((m) => drawMonth(P, m, spec, prevOf(m)));
+    const blob = P.finish(`${company || COMPANY} · Confidential — for the named payee only`);
+    const frag = document.createDocumentFragment();
+    P.canvases().forEach((c) => frag.appendChild(c));
+    viewer(`📄 PDF view — ${fileName(sel, spec)}`, frag, () => saveAs(blob, fileName(sel, spec)));
   }
   async function download(spec, sel, mode, company, all) {
     const prevOf = (m) => { const [y, mo] = m.ym.split('-').map(Number); const pd = new Date(Date.UTC(y, mo - 2, 1)); const pym = `${pd.getUTCFullYear()}-${String(pd.getUTCMonth() + 1).padStart(2, '0')}`; return (all || sel).find((x) => x.ym === pym && x.data) || null; };
