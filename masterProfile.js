@@ -1125,7 +1125,8 @@ window.FF = window.FF || {};
     const snapshotRows = teamReports.map((r) => snapshotStockParts(r, ch)).sort((a, b) => b.total - a.total);
     const snapshot = snapshotRows[0] || { vc4: 0, comm: 0, total: 0 };
     const snapshotTotal = snapshot.total || (snapshot.vc4 + snapshot.comm);
-    const rollupOwnRow = !!reportOwn && teamFloor.total > 0 && reportOwnParts.total >= teamFloor.total - 1;
+    // TL ki apni row kisi AUR TL / Direct ke neeche (sirf ID se mili) ho to wo is team ka rollup nahi ho sakti — wo asli own stock hai.
+    const rollupOwnRow = !!reportOwn && belongsToTl(reportOwn, name, id) && teamFloor.total > 0 && reportOwnParts.total >= teamFloor.total - 1;
     let ownTotal = detailOwnTotal || 0;
     let ownFrom = ownTotal > 0 ? 'detail' : '';
     let ownMap = ownTotal > 0 ? new Map(detailOwnMap) : new Map();

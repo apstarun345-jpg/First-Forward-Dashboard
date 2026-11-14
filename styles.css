@@ -8255,3 +8255,4 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 /* 🔽 v3.125.273 — card ke andar ka search dropdown (Agent/TL Summary, Master Search, Tag Issued…) card me kat-ta nahi:
    .card ka content-visibility:auto paint-clip karta tha. Jab card me typing / focus ho to poora dikhe aur neeche ke cards ke upar rahe. */
 .card:focus-within, .panel:focus-within, .report-card:focus-within { content-visibility: visible; contain: none; position: relative; z-index: 40; }
+.vbars.lbl-sm .vcol-label { font-size: 8.5px; letter-spacing: -.03em; }

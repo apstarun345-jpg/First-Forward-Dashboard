@@ -87,10 +87,12 @@ window.FF = window.FF || {};
         const maxW = Math.max(...shown.map((l) => l.scrollWidth));
         let k = Math.ceil((maxW + 6) / w);
         const vb = row.closest('.vbars');
-        if (vb) vb.classList.remove('lbl-2');
+        if (vb) { vb.classList.remove('lbl-2'); vb.classList.remove('lbl-sm'); }
         if (k <= base) return;
         // kam categories (VC4 · VC20 · All Comm …) → chhupao mat, 2 line me likho
         if (cols.length <= 8 && base === 1) { if (vb) vb.classList.add('lbl-2'); return; }
+        // 🗓 v3.125.274 — 31 bars tak (din wale charts) koi date chhupani nahi: chhota font, sab dikhen
+        if (cols.length <= 31 && base === 1) { if (vb) vb.classList.add('lbl-sm'); return; }
         k = Math.ceil(k / base) * base;
         labs.forEach((l, i) => { if (l && i % k !== 0) l.classList.add('lbl-hide'); });
       });
@@ -179,7 +181,7 @@ window.FF = window.FF || {};
     const grid = [1, 0.75, 0.5, 0.25, 0].map((f) => `<div class="vgrid-line"><span>${U.fmtShort(max * f)}</span></div>`).join('');
     const cid = `ch${++seq}`;
     // 📏 v3.125.271 — bar ki chaudai har jagah ek-si (data kam ho ya zyada): ≤8 bars = 52px, usse zyada = 30px; jagah kam ho to scroll
-    const colW = n <= 8 ? 64 : 44;
+    const colW = n <= 8 ? 64 : 46;
     const minPlotWidth = Math.max(40 + 8 + n * (colW + 3), Number(opts.minPlotWidth) || 0);
     const plotStyle = ` style="min-width:${minPlotWidth}px"`;
     specs.set(cid, { kind: 'bars', opts: { ...opts, series } });
