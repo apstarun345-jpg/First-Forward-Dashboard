@@ -10415,7 +10415,7 @@ async function handleApi(req, res, url) {
   // 🛰️ v3.125.284 — NPCI Status (Cross Channel): Tag ID / VRN / Chassis → ApnaPayment verifyNpciStatus API (server se, bina token).
   const npciPerm = (u) => u && (u.role === 'admin' || (Array.isArray(u.permissions) && u.permissions.includes('npci')));
   const NPCI_URL = process.env.NPCI_API_URL || 'https://www.apnapayment.com/api/agent/idfc/verifyNpciStatus';
-  const npciKind = (v) => (/^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
+  const npciKind = (v) => (/^\d{8,}$/.test(v) ? 'Barcode' : /^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
   // ⏱ v3.125.287 — ApnaPayment API rate-limit (HTTP 429) deti hai: poore server par ek hi "gate" —
   //    calls ke beech kam se kam npciGap ms; 429 aaye to sab calls ruk ke (Retry-After / 4s→ badhta) phir wahi item dobara.
   const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 70, chain: Promise.resolve(), cut: 0, ok: 0, n429: 0, calls: 0 });
@@ -10510,13 +10510,29 @@ async function handleApi(req, res, url) {
     NPCI_JOBS.set(id, job);
     let next = 0;
     // 8 ek saath; jo item fail hua wo queue ke AAKHIR me dobara (tab tak API ka rate settle ho jaata hai) — user ko error tab dikhta hai jab 2 baar fail ho.
+    // 🔢 Barcode (sirf digits, 8+) → StockDataa / Tag Assignment se Tag ID nikaal ke NPCI check; input barcode hi dikhta hai.
+    const bcTag = new Map();
+    const bcs = items.filter((x) => /^\d{8,}$/.test(x));
+    if (bcs.length) {
+      try {
+        const out = await mappingStock.lookup(bcs.map((b) => ({ type: 'barcode', barcode: b })), {});
+        bcs.forEach((b, i) => { const hit = ((out.results[i] || {}).rows || []).find((x) => /^[0-9A-Fa-f]{19,24}$/.test(String(x.tagId || ''))); if (hit) bcTag.set(b, String(hit.tagId).toUpperCase()); });
+      } catch (err) { console.log('NPCI barcode lookup fail:', String((err && err.message) || err).slice(0, 160)); }
+    }
+    const doOne = async (it) => {
+      if (!/^\d{8,}$/.test(it)) return npciOne(it);
+      const tag = bcTag.get(it);
+      if (!tag) return { input: it, kind: 'Barcode', ok: false, msg: 'Barcode StockDataa / Tag Assignment me nahi mila (Tag ID nahi nikla)', records: [] };
+      const r = await npciOne(tag);
+      return { ...r, input: it, kind: 'Barcode', tagFromBarcode: tag };
+    };
     const queue = items.slice(), requeued = new Set(); let inflight = 0;
     const worker = async () => {
       while (!job.stop) {
         if (next >= queue.length) { if (inflight > 0) { await new Promise((r) => setTimeout(r, 150)); continue; } break; }
         const it = queue[next++]; inflight++;
         try {
-          const r = await npciOne(it);
+          const r = await doOne(it);
           if (r.retry && !requeued.has(it) && !job.stop) { requeued.add(it); queue.push(it); } else job.rows.push(r);
         } finally { inflight--; }
       }

@@ -24,7 +24,7 @@ FF.pages = FF.pages || {};
     });
     return out;
   }
-  const kindOf = (v) => (/^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
+  const kindOf = (v) => (/^\d{8,}$/.test(v) ? 'Barcode' : /^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
   /** VRN par kai records (purane Replaced/Closed bhi) — "primary" = Active, warna jo closed/replaced nahi, warna pehla. */
   function primaryOf(recs) {
     if (!recs || !recs.length) return null;
@@ -48,7 +48,7 @@ FF.pages = FF.pages || {};
     return out;
   }
   function summary() {
-    const s = { total: Math.max(st.total, st.rows.length), checked: st.rows.length, kind: { 'Tag ID': 0, VRN: 0, Chassis: 0 }, found: 0, failed: 0, notFound: 0, retry: 0, upd: 0, notUpd: 0, updBase: 0, status: {}, multi: 0, active: 0 };
+    const s = { total: Math.max(st.total, st.rows.length), checked: st.rows.length, kind: { 'Tag ID': 0, Barcode: 0, VRN: 0, Chassis: 0 }, found: 0, failed: 0, notFound: 0, retry: 0, upd: 0, notUpd: 0, updBase: 0, status: {}, multi: 0, active: 0 };
     st.rows.forEach((r) => {
       s.kind[r.kind] = (s.kind[r.kind] || 0) + 1;
       const prim = primaryOf(r.records);
@@ -92,7 +92,7 @@ FF.pages = FF.pages || {};
     const k = (cls, key, lab, val, sub) => `<button type="button" class="np-k ${cls}${st.filter === key ? ' on' : ''}" data-np-f="${esc(key)}">${esc(lab)}<b>${U.fmt(val)}</b>${sub ? `<small>${sub}</small>` : ''}</button>`;
     const pctOf = (a, b) => (b ? `${Math.round((a / b) * 1000) / 10}%` : '—');
     const cards = `<div class="np-sum">
-      ${k('c1', '', 'Total input', s.total, `${st.busy ? `⏳ ${U.fmt(s.checked)} check hue · ${U.fmt(s.total - s.checked)} baaki · ` : ''}Tag ID ${s.kind['Tag ID']} · VRN ${s.kind.VRN} · Chassis ${s.kind.Chassis}`)}
+      ${k('c1', '', 'Total input', s.total, `${st.busy ? `⏳ ${U.fmt(s.checked)} check hue · ${U.fmt(s.total - s.checked)} baaki · ` : ''}Tag ID ${s.kind['Tag ID']}${s.kind.Barcode ? ` · Barcode ${s.kind.Barcode}` : ''} · VRN ${s.kind.VRN} · Chassis ${s.kind.Chassis}`)}
       ${k('c2', 'found', 'NPCI me mile', s.found, `Active ${U.fmt(s.active)}${s.multi ? ` · ${s.multi} VRN par kai tags` : ''}`)}
       ${k('c4', 'upd', 'VRN updated', s.upd, `Tag ID / Chassis me se · ${pctOf(s.upd, s.updBase)}`)}
       ${k('c3', 'notupd', 'VRN not updated', s.notUpd, `REGNUMBER 10 akshar se lamba (chassis hi) · ${pctOf(s.notUpd, s.updBase)}`)}
@@ -132,7 +132,7 @@ FF.pages = FF.pages || {};
     const pct = (a, b) => (b ? `${Math.round((a / b) * 1000) / 10}%` : '');
     const out = [
       ['Input', 'Total input', s.total, ''], ['Input', 'Check ho gaye', s.checked, pct(s.checked, s.total)], ...(s.total > s.checked ? [['Input', 'Baaki (check nahi hue)', s.total - s.checked, pct(s.total - s.checked, s.total)]] : []),
-      ['Input', 'Tag ID input', s.kind['Tag ID'], ''], ['Input', 'VRN input', s.kind.VRN, ''], ['Input', 'Chassis input', s.kind.Chassis, ''],
+      ['Input', 'Tag ID input', s.kind['Tag ID'], ''], ['Input', 'Barcode input', s.kind.Barcode || 0, ''], ['Input', 'VRN input', s.kind.VRN, ''], ['Input', 'Chassis input', s.kind.Chassis, ''],
       ['Result', 'NPCI me mile', s.found, pct(s.found, s.checked)], ['Result', 'NPCI me nahi mile', s.notFound, pct(s.notFound, s.checked)], ...(s.retry ? [['Result', 'Check fail (dobara karo)', s.retry, pct(s.retry, s.checked)]] : []),
       ['VRN update (Tag ID / Chassis input)', 'VRN updated (REGNUMBER 1-10 akshar)', s.upd, pct(s.upd, s.updBase)], ['VRN update (Tag ID / Chassis input)', 'VRN not updated', s.notUpd, pct(s.notUpd, s.updBase)],
       ['NPCI status', 'Active', s.active, pct(s.active, s.checked)]
@@ -156,7 +156,7 @@ FF.pages = FF.pages || {};
       if (!FF.pdf || !FF.pdf.doc) throw new Error('PDF module load nahi hua');
       const s = summary();
       const doc = FF.pdf.doc({ title: 'NPCI Status', subtitle: `${U.fmt(s.total)} input · ${new Date().toLocaleString('en-IN')}`, right: 'ApnaPayment' });
-      doc.kpis([{ label: 'Total input', value: U.fmt(s.total), sub: `Tag ${s.kind['Tag ID']} · VRN ${s.kind.VRN} · Chassis ${s.kind.Chassis}` }, { label: 'NPCI me mile', value: U.fmt(s.found) },
+      doc.kpis([{ label: 'Total input', value: U.fmt(s.total), sub: `Tag ${s.kind['Tag ID']}${s.kind.Barcode ? ` · Barcode ${s.kind.Barcode}` : ''} · VRN ${s.kind.VRN} · Chassis ${s.kind.Chassis}` }, { label: 'NPCI me mile', value: U.fmt(s.found) },
         { label: 'VRN updated', value: U.fmt(s.upd), sub: 'Tag ID / Chassis input' }, { label: 'VRN not updated', value: U.fmt(s.notUpd) }, { label: 'Not found / fail', value: U.fmt(s.failed) }], 5);
       doc.section('NPCI status summary', '');
       doc.table([{ h: 'NPCI status', w: 3 }, { h: 'Count', w: 1, align: 'right' }], Object.entries(s.status).sort((a, b) => b[1] - a[1]).map(([k2, n]) => [k2, U.fmt(n)]), { headColor: '#4338ca' });
@@ -241,14 +241,14 @@ FF.pages = FF.pages || {};
       <div class="np-hero"><div class="np-ico">🛰️</div><div><h2>NPCI Status</h2><p>Tag ID · VRN · Chassis — ek ya bahut saare ek saath. NPCI ka live status, VRN update check aur summary · CSV / Excel / PDF.</p></div></div>
       <section class="card"><div class="card-body">
         <div class="np-in">
-          <div><label class="small"><b>Tag ID / VRN / Chassis</b> — har line me ek (comma / space bhi chalega)</label>
+          <div><label class="small"><b>Tag ID / Barcode / VRN / Chassis</b> — har line me ek (comma / space bhi chalega)</label>
             <textarea class="input" data-np-ta placeholder="34161FA820328EE84D7F6D40&#10;MH14EY3466&#10;MA1RV2TUKT6H20555"></textarea>
             <div class="np-acts"><button type="button" class="btn primary" data-np-go>🔍 Check</button><button type="button" class="btn" data-np-stop hidden>⏹ Ruko</button><button type="button" class="btn" data-np-clear>🧹 Clear</button><span class="dim small" data-np-count></span></div></div>
           <div class="np-up"><b>📄 CSV upload</b><span class="dim small">CSV / TXT — kisi bhi column me Tag ID / VRN / Chassis (header apne aap chhoot jaata hai)</span>
             <label class="btn">⬆ File chuno<input type="file" accept=".csv,.txt,text/csv,text/plain" data-np-file hidden></label><span class="dim small" data-np-fname></span></div>
         </div>
         <div class="np-prog" data-np-prog hidden><i style="width:0"></i></div><small class="dim" data-np-plab></small>
-        <p class="dim small" style="margin:8px 0 0">Tag ID = 19-24 akshar (34161F…) · VRN = 10 akshar tak · baaki = Chassis. <b>VRN update</b>: Tag ID / Chassis diya ho aur NPCI ka REGNUMBER 1-10 akshar ka ho = <b>Updated</b>, warna <b>Not updated</b>.</p>
+        <p class="dim small" style="margin:8px 0 0">Tag ID = 19-24 akshar (34161F…) · Barcode = sirf digits (Tag ID apne aap StockDataa se) · VRN = 10 akshar tak · baaki = Chassis. <b>VRN update</b>: Tag ID / Chassis diya ho aur NPCI ka REGNUMBER 1-10 akshar ka ho = <b>Updated</b>, warna <b>Not updated</b>.</p>
       </div></section>
       <section class="card"><div class="card-body" data-np-out>${resultHtml()}</div></section><div data-np-hist>${histHtml()}</div></div>`;
     const ta = root.querySelector('[data-np-ta]'), cnt = root.querySelector('[data-np-count]');
