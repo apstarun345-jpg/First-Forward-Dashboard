@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Stable feed snapshots (/api/today),
 // /api/auth/me and /api/settings are network-first with a cached fallback; raw /api/gviz stays live-only.
-const CACHE_NAME = 'apnapayment-v312795';
+const CACHE_NAME = 'apnapayment-v312796';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // A same-origin browser tab and an installed PWA are both WindowClients. Remember the display
@@ -338,12 +338,27 @@ self.addEventListener('fetch', e => {
       }
     }
     try {
-      const response = await fetch(e.request);
-      if (response.ok) {
-        await cache.put(e.request, response.clone());
-        if (e.request.mode === 'navigate') await cache.put('./index.html', response.clone());
+      // ⚡ v3.125.296 — app / site kholte waqt Render ka jawab dheere ho (phone network, server abhi jaaga) to
+      //    Android ka splash "atka" rehta tha. Navigate par: network ko 1.2s do; tab tak na aaye aur cached shell ho
+      //    to shell turant (opening effect seedha), network ka jawab peeche cache update karta rahe (agli baar taaza).
+      const netP = fetch(e.request).then(async (response) => {
+        if (response.ok) {
+          const c1 = response.clone();
+          await cache.put(e.request, response.clone());
+          if (e.request.mode === 'navigate') await cache.put('./index.html', c1);
+        }
+        return response;
+      });
+      if (e.request.mode === 'navigate') {
+        const shell = await cache.match('./index.html');
+        if (shell) {
+          const first = await Promise.race([netP.catch(() => null), new Promise((r) => setTimeout(() => r('slow'), 1200))]);
+          if (first && first !== 'slow') return first;
+          e.waitUntil(netP.catch(() => {}));
+          return shell;
+        }
       }
-      return response;
+      return await netP;
     } catch (err) {
       const cached = await cache.match(e.request);
       if (cached) return cached;
