@@ -107,3 +107,14 @@ html body #app-boot.app-boot .ap3d-b {
 }
 @keyframes ap3dGlow { 0%, 100% { opacity: .65; } 50% { opacity: 1; } }
 @media (max-width: 520px) { .ap3d-tag { letter-spacing: .16em; font-size: 10.5px; white-space: nowrap; } }
+
+/* ⚡ v3.125.297 — phone / installed app: opening screen halka (app JS load ke saath bhi smooth, frame na tootein).
+   Bhaari blur(60px) + ghoomta layer + animated floor + shine hataye; text ka 3D look wahi. */
+@media (max-width: 820px), (hover: none) and (pointer: coarse) {
+  html body #app-boot.app-boot::before { filter: none !important; animation: none !important; inset: 0 !important;
+    background: radial-gradient(60% 45% at 50% 42%, rgba(250,204,21,.16), transparent 70%), radial-gradient(70% 50% at 25% 75%, rgba(168,85,247,.16), transparent 70%), radial-gradient(60% 50% at 80% 25%, rgba(56,189,248,.14), transparent 70%) !important; }
+  html body #app-boot.app-boot::after { animation: none !important; }
+  html body #app-boot.app-boot .ap3d-word::after, html body #app-boot.app-boot .ap3d-word::before { animation: none !important; }
+  html body #app-boot.app-boot .ap3d { will-change: transform; animation: ap3dIn .7s cubic-bezier(.2,.9,.2,1) both !important; }
+  html body #app-boot.app-boot .ap3d-play { filter: drop-shadow(0 6px 8px rgba(0,0,0,.5)) !important; }
+}

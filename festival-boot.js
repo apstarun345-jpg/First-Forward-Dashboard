@@ -21,14 +21,15 @@
 
     var ctx = cv.getContext('2d');
     if (!ctx) return;
-    var W = 0, Ht = 0, dpr = Math.min(2, window.devicePixelRatio || 1);
+    var lite = Math.min(window.innerWidth || 9999, window.innerHeight || 9999) < 820 || document.documentElement.classList.contains('mobile-ui');
+    var W = 0, Ht = 0, dpr = lite ? 1 : Math.min(2, window.devicePixelRatio || 1);   // v3.125.297 — phone par DPR 1: 4x kam pixel, app load ke saath bhi smooth
     function size() { W = boot.clientWidth || window.innerWidth; Ht = boot.clientHeight || window.innerHeight; cv.width = Math.round(W * dpr); cv.height = Math.round(Ht * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
     size();
     window.addEventListener('resize', size);
 
     var COLORS = ['#facc15', '#fb923c', '#f472b6', '#60a5fa', '#34d399', '#a78bfa', '#f87171', '#22d3ee', '#fde047', '#ffffff'];
     var small = W < 640;
-    var MAXP = small ? 650 : 1200;
+    var MAXP = small ? 260 : 1000;
     var rockets = [], parts = [];
     function rnd(a, b) { return a + Math.random() * (b - a); }
 
@@ -38,7 +39,7 @@
     }
     function burst(r) {
       var big = Math.min(W, Ht) * (small ? 0.5 : 0.38);   // bada dhamaka — screen ka ~1/3
-      var n = small ? 70 : 110, two = Math.random() < 0.45, c2 = COLORS[(Math.random() * COLORS.length) | 0];
+      var n = small ? 36 : 100, two = Math.random() < 0.45, c2 = COLORS[(Math.random() * COLORS.length) | 0];
       var ring = Math.random() < 0.3;
       for (var i = 0; i < n && parts.length < MAXP; i++) {
         var a = (i / n) * Math.PI * 2 + rnd(-0.05, 0.05);
@@ -53,6 +54,7 @@
     function frame(now) {
       if (!alive) return;
       if (!boot.isConnected || boot.hidden || boot.style.display === 'none' || boot.classList.contains('hide') || boot.classList.contains('done')) { stop(); return; }
+      if (lite && now - last < 30) { requestAnimationFrame(frame); return; }   // phone par ~33fps (app JS load ke saath frame na tootein)
       var dt = Math.min(0.05, (now - last) / 1000); last = now;
       // halka fade = smooth trails
       ctx.globalCompositeOperation = 'destination-out';
