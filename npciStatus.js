@@ -195,7 +195,7 @@ FF.pages = FF.pages || {};
       st.job = j.id;
       let fails = 0;
       for (;;) {
-        await new Promise((r) => setTimeout(r, got ? 1500 : 800));
+        await new Promise((r) => setTimeout(r, got ? 800 : 500));
         let d;
         try { d = await FF.auth.api(`/api/npci/job/${j.id}?from=${got}`); fails = 0; } catch (e) { if (e && e.status === 404) throw e; if (++fails > 6) throw e; continue; }
         (d.rows || []).forEach(put); got += (d.rows || []).length;
