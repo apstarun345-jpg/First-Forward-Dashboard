@@ -237,7 +237,7 @@ FF.pages = FF.pages || {};
         try { d = await FF.auth.api(`/api/npci/job/${jobId}?from=${got}`); fails = 0; }
         catch (e) { if (e && e.status === 404) { lost = true; break; } if (++fails > 12) throw e; continue; }
         (d.rows || []).forEach(put); got += (d.rows || []).length;
-        paintLabel(got, total, false, t0, d.rate ? `API ${d.rate}/s` : ''); paintBusy(); liveHist();
+        paintLabel(got, total, false, t0, d.rate ? `API ${d.rate}/s · jawab ~${d.lat >= 1000 ? `${(d.lat / 1000).toFixed(1)}s` : `${d.lat || 0}ms`} · ek saath ${d.conc}${d.jobN429 ? ` · rate-limit ${d.jobN429}× (khud sambhala)` : ''}` : ''); paintBusy(); liveHist();
         if ($q('[data-np-out]')) repaintOut();
         if (d.done) break;
       }

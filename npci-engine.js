@@ -57,48 +57,101 @@ export function parseNpci(txt) {
 }
 
 // ------------------------------------------------------------------ rate gate
+// v3.125.304 — teen sudhaar (simulation: per-minute limit wali API par 44% → ~100%, baaki cases barabar ya thoda behtar):
+//   a) 429 "episode" = ek hi kat: jo calls kat se PEHLE nikal chuki thi unke 429 dobara rate nahi kaatte; lagataar 429 me
+//      sirf ruk lamba hota hai (1s → 2s → … 15s), rate pehle kat ke baad nahi girta. Pehli kaamyaab call par episode khatam.
+//   b) Concurrency ki chhat bhi seekhta hai (429 ke waqt kitni calls chal rahi thi) — "ek saath max N" wali API ke liye.
+//   c) API rate-limit headers (RateLimit-* / X-RateLimit-* / Retry-After) bheje to unhi se pace: remaining 0 = reset tak ruko,
+//      policy (limit / window) = pakki chhat. Pehli baar dikhe headers stats me (diagnosis ke liye).
+const num = (v) => { const t = String(v == null ? '' : v).trim().split(/[;,\s]/)[0]; if (!t) return NaN; const n = Number(t); return Number.isFinite(n) ? n : NaN; };
+export function readRateHeaders(get) {
+  if (typeof get !== 'function') return null;
+  const h = (k) => get(k) ?? get(`x-${k}`) ?? null;
+  const out = {};
+  const lim = num(h('ratelimit-limit')), rem = num(h('ratelimit-remaining')), rst = num(h('ratelimit-reset'));
+  const pol = String(get('ratelimit-policy') || get('x-ratelimit-policy') || '');
+  const ra = get('retry-after');
+  if (Number.isFinite(lim)) out.limit = lim;
+  if (Number.isFinite(rem)) out.remaining = rem;
+  if (Number.isFinite(rst)) out.resetSec = rst > 1e9 ? Math.max(0, rst - Date.now() / 1000) : rst;   // epoch ya delta
+  const pm = /^\s*(\d+)\s*;\s*w=(\d+)/.exec(pol); if (pm) { out.limit = Number(pm[1]); out.windowSec = Number(pm[2]); }
+  if (ra != null && ra !== '') { const n = Number(ra); out.retryAfterSec = Number.isFinite(n) ? n : Math.max(0, (Date.parse(ra) - Date.now()) / 1000) || 0; }
+  return Object.keys(out).length ? out : null;
+}
 export function createRateGate(init = {}) {
   const g = {
     rate: Number(init.rate) > 0 ? Number(init.rate) : 4, ceil: Number(init.ceil) > 0 ? Number(init.ceil) : 0,
     minRate: 0.4, maxRate: Number(init.maxRate) > 0 ? Number(init.maxRate) : 40, maxConcCap: Number(init.maxConc) > 0 ? Number(init.maxConc) : 40,
-    next: 0, pauseUntil: 0, inflight: 0, waitQ: [], lat: Number(init.lat) > 0 ? Number(init.lat) : 0,
-    n429: 0, calls: 0, errs: 0, okRun: 0, streak429: 0, cut: 0, fixed: false, fixedConc: 0
+    concCap: Number(init.concCap) > 0 ? Number(init.concCap) : 0, hardCeil: 0, probeAt: -1,
+    next: 0, pauseUntil: 0, inflight: 0, active: 0, waitQ: [], lat: Number(init.lat) > 0 ? Number(init.lat) : 0,
+    n429: 0, calls: 0, errs: 0, okRun: 0, streak429: 0, cut: 0, inEpisode: false, fixed: false, fixedConc: 0, hdr: null, hdrSeen: null
   };
-  // ek saath kitni: rate × latency (+25% + 1), latency badhe to concurrency apne aap badhti hai.
-  g.maxConc = () => (g.fixed && g.fixedConc ? g.fixedConc : Math.max(2, Math.min(g.maxConcCap, Math.ceil(g.rate * Math.max(0.25, (g.lat || 1500) / 1000) * 1.25) + 1)));
+  // ek saath kitni: rate × latency (+25% + 1), seekhi hui concurrency chhat se upar nahi.
+  g.maxConc = () => {
+    if (g.fixed && g.fixedConc) return g.fixedConc;
+    const want = Math.max(2, Math.min(g.maxConcCap, Math.ceil(g.rate * Math.max(0.25, (g.lat || 1500) / 1000) * 1.25) + 1));
+    return g.concCap ? Math.max(1, Math.min(want, g.concCap)) : want;
+  };
   const drain = () => { while (g.waitQ.length && g.inflight < g.maxConc()) { g.inflight++; g.waitQ.shift()(); } };
+  /** @returns start time (ms) — on429 ko do taaki purani (kat se pehle nikli) calls dobara na kaatein. */
   g.acquire = async () => {
     await new Promise((res) => { if (g.inflight < g.maxConc()) { g.inflight++; res(); } else g.waitQ.push(res); });
-    for (;;) {   // start times ko 1/rate ke gap par baanto; beech me 429 ruk aaye to naya slot lo (ruk ke baad burst nahi)
+    for (;;) {   // start times ko 1/rate ke gap par baanto; beech me ruk aaye to naya slot lo (ruk ke baad burst nahi)
       const now = Date.now();
       const start = Math.max(now, g.next, g.pauseUntil);
       g.next = start + 1000 / g.rate;
       if (start > now) await sleep(start - now);
-      if (g.pauseUntil <= Date.now()) return;
+      if (g.pauseUntil <= Date.now()) { g.active++; return Date.now(); }
     }
   };
-  g.release = () => { g.inflight = Math.max(0, g.inflight - 1); drain(); };
+  g.release = () => { g.inflight = Math.max(0, g.inflight - 1); g.active = Math.max(0, g.active - 1); drain(); };
+  /** Har response ke headers (agar API bheje). */
+  g.onHeaders = (h) => {
+    if (!h) return;
+    g.hdr = h; if (!g.hdrSeen) g.hdrSeen = { ...h, at: Date.now() };
+    if (h.limit > 0 && h.windowSec > 0 && !g.fixed) g.hardCeil = h.limit / h.windowSec;
+    if (h.remaining === 0 && h.resetSec > 0) { const until = Date.now() + Math.min(120e3, h.resetSec * 1000 + 150); g.pauseUntil = Math.max(g.pauseUntil, until); g.next = Math.max(g.next, g.pauseUntil); }
+    else if (h.remaining > 0 && h.resetSec > 0 && !g.fixed) {   // bacha budget barabar baanto
+      const fair = h.remaining / Math.max(0.5, h.resetSec);
+      if (fair < g.rate) g.rate = Math.max(g.minRate, fair);
+    }
+  };
+  const capNow = () => { let c = g.ceil ? g.ceil * 0.9 : g.maxRate; if (g.hardCeil) c = Math.min(c, g.hardCeil * 0.97); return c; };
   g.onOk = (ms) => {
     g.lat = g.lat ? Math.round(g.lat * 0.9 + ms * 0.1) : ms;
-    g.calls++; g.streak429 = 0; g.okRun++;
+    g.calls++; g.streak429 = 0; g.okRun++; g.inEpisode = false;
     if (g.fixed) return;
-    if (g.ceil && g.okRun % 80 === 0) g.ceil = Math.min(g.maxRate, g.ceil * 1.06);   // chhat dheere upar khisakti hai (API ki limit badal sakti hai)
-    const cap = g.ceil ? g.ceil * 0.9 : g.maxRate;
-    if (g.rate < cap) g.rate = Math.min(cap, g.ceil ? g.rate + 0.04 : g.rate + Math.max(0.12, g.rate * 0.03));   // chhat pata nahi = tez "slow start"
+    if (g.ceil && g.okRun % 80 === 0) g.ceil = Math.min(g.maxRate, g.ceil * 1.06);   // chhat dheere upar (API ki limit badal sakti hai)
+    if (g.concCap && g.okRun % 100 === 0 && g.concCap < g.maxConcCap && g.active >= g.concCap - 1) { g.concCap++; g.probeAt = g.calls; }   // concurrency chhat bhi dheere upar (tabhi jab poori use ho rahi ho)
+    const cap = capNow();
+    if (g.rate < cap) g.rate = Math.min(cap, g.ceil ? g.rate + 0.05 : g.rate + Math.max(0.12, g.rate * 0.03));   // chhat pata nahi = tez "slow start"
+    else if (g.rate > cap) g.rate = cap;
     drain();
   };
-  g.on429 = (retryAfterSec) => {
+  g.on429 = (retryAfterSec, startedAt) => {
     g.n429++;
     const now = Date.now();
-    if (now - g.cut < 2000) return;   // ek burst = ek hi baar
-    g.cut = now; g.streak429++; g.okRun = 0;
-    if (!g.fixed) { g.ceil = Math.max(g.minRate, g.rate); g.rate = Math.max(g.minRate, g.rate * 0.6); }
-    const pause = retryAfterSec > 0 ? Math.min(30e3, retryAfterSec * 1000) : Math.min(8000, 700 * 2 ** (g.streak429 - 1));
-    g.pauseUntil = Math.max(g.pauseUntil, now + pause);
-    g.next = Math.max(g.next, g.pauseUntil);
+    const stale = startedAt && startedAt < g.cut;   // kat se pehle nikli call — uska 429 purani speed ka hai
+    if (!stale) {
+      let concOnly = false;
+      if (!g.inEpisode) {   // naya episode → ek hi baar kaato
+        g.inEpisode = true; g.okRun = 0;
+        if (!g.fixed) {
+          // abhi-abhi concurrency +1 probe kiya tha aur wo poori bhari thi → limit concurrency ki hai: sirf wahi wapas, speed mat kaato
+          concOnly = g.probeAt >= 0 && g.active >= g.concCap;
+          if (concOnly) g.concCap = Math.max(1, g.concCap - 1);
+          else { const cc = g.maxConc(); g.ceil = Math.max(g.minRate, g.rate); g.rate = Math.max(g.minRate, g.rate * 0.6); g.concCap = Math.max(1, cc - 1); }
+          g.probeAt = -1;
+        }
+      }
+      g.cut = now; if (!concOnly) g.streak429++;
+      if (concOnly && !(retryAfterSec > 0)) return;   // ruk ki zaroorat nahi — bas ek kam chalegi
+    }
+    const pause = retryAfterSec > 0 ? Math.min(60e3, retryAfterSec * 1000) : (stale ? 0 : Math.min(15e3, 1000 * 2 ** Math.max(0, g.streak429 - 1)));
+    if (pause) { g.pauseUntil = Math.max(g.pauseUntil, now + pause); g.next = Math.max(g.next, g.pauseUntil); }
   };
-  g.onErr = () => { g.errs++; if (!g.fixed) g.rate = Math.max(g.minRate, g.rate * 0.85); };
-  g.stats = () => ({ rate: Math.round(g.rate * 100) / 100, ceil: Math.round(g.ceil * 100) / 100, conc: g.maxConc(), inflight: g.inflight, lat: g.lat, n429: g.n429, calls: g.calls, gap: Math.round(1000 / g.rate) });
+  g.onErr = (startedAt) => { g.errs++; if (!g.fixed && !(startedAt && startedAt < g.cut)) { g.rate = Math.max(g.minRate, g.rate * 0.9); g.cut = Date.now(); } };
+  g.stats = () => ({ rate: Math.round(g.rate * 100) / 100, ceil: Math.round(g.ceil * 100) / 100, conc: g.maxConc(), concCap: g.concCap, inflight: g.inflight, lat: g.lat, n429: g.n429, calls: g.calls, gap: Math.round(1000 / g.rate), hdr: g.hdrSeen });
   return g;
 }
 
@@ -116,8 +169,8 @@ export function createNpciEngine(opts = {}) {
   const gateFile = path.join(dataDir, 'npci-gate.json');
 
   let saved = {}; try { if (existsSync(gateFile)) saved = JSON.parse(readFileSync(gateFile, 'utf8')) || {}; } catch { saved = {}; }
-  const gate = createRateGate({ rate: saved.ceil ? saved.ceil * 0.8 : saved.rate, ceil: saved.ceil, lat: saved.lat, ...(opts.gate || {}) });
-  const saveGate = () => { try { mkdirSync(dataDir, { recursive: true }); writeFileSync(gateFile, JSON.stringify({ rate: gate.rate, ceil: gate.ceil, lat: gate.lat, at: Date.now() })); } catch { /* optional */ } };
+  const gate = createRateGate({ rate: saved.ceil ? saved.ceil * 0.8 : saved.rate, ceil: saved.ceil, lat: saved.lat, concCap: saved.concCap ? saved.concCap + 1 : 0, ...(opts.gate || {}) });
+  const saveGate = () => { try { mkdirSync(dataDir, { recursive: true }); writeFileSync(gateFile, JSON.stringify({ rate: gate.rate, ceil: gate.ceil, lat: gate.lat, concCap: gate.concCap, at: Date.now() })); } catch { /* optional */ } };
 
   const jobs = new Map();
   const mem = new Map();        // owner → { runs, touched, diskOk, stale, staleAt }
@@ -137,17 +190,20 @@ export function createNpciEngine(opts = {}) {
     let lastErr = '', tries = 0, rl = 0;
     while (tries < 4 && rl < 25) {   // 429 = sirf "ruko" (attempt nahi ginta)
       if (tries) await sleep(500 * tries);
-      await gate.acquire();
-      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), CALL_TIMEOUT); const t0 = Date.now();
+      const t0 = await gate.acquire();
+      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), CALL_TIMEOUT);
       try {
         const r = await fetchImpl(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body), signal: ac.signal });
         const txt = await r.text();
-        if (r.status === 429) { rl++; gate.on429(Number(r.headers && r.headers.get && r.headers.get('retry-after')) || 0); lastErr = 'HTTP 429 — API ne "bahut zyada requests" kaha (rate limit)'; continue; }
-        if (r.status >= 500 || /^\s*</.test(txt)) { tries++; gate.onErr(); lastErr = `HTTP ${r.status} — ${/^\s*</.test(txt) ? 'HTML aaya (server ne JSON nahi diya)' : 'API server error'}`; continue; }
+        const hget = r.headers && typeof r.headers.get === 'function' ? (k) => r.headers.get(k) : null;
+        const rh = hget ? readRateHeaders(hget) : null;
+        gate.onHeaders(rh);
+        if (r.status === 429) { rl++; gate.on429((rh && rh.retryAfterSec) || 0, t0); lastErr = 'HTTP 429 — API ne "bahut zyada requests" kaha (rate limit)'; continue; }
+        if (r.status >= 500 || /^\s*</.test(txt)) { tries++; gate.onErr(t0); lastErr = `HTTP ${r.status} — ${/^\s*</.test(txt) ? 'HTML aaya (server ne JSON nahi diya)' : 'API server error'}`; continue; }
         gate.onOk(Date.now() - t0);
         let parsed; try { parsed = parseNpci(txt); } catch { tries++; lastErr = 'Response samajh nahi aaya'; continue; }
         return { input: v, kind, ...parsed };
-      } catch (err) { tries++; gate.onErr(); lastErr = err && err.name === 'AbortError' ? `Time out (${Math.round(CALL_TIMEOUT / 1000)}s) — API ne jawab nahi diya` : String((err && err.message) || err); }
+      } catch (err) { tries++; gate.onErr(t0); lastErr = err && err.name === 'AbortError' ? `Time out (${Math.round(CALL_TIMEOUT / 1000)}s) — API ne jawab nahi diya` : String((err && err.message) || err); }
       finally { clearTimeout(t); gate.release(); }
     }
     return { input: v, kind, ok: false, retry: !!lastErr && !/samajh nahi/i.test(lastErr), msg: lastErr || 'Fail', records: [] };
@@ -290,12 +346,13 @@ export function createNpciEngine(opts = {}) {
   // ---------- jobs
   async function startJob({ owner, items = [], mergeInto = '', resume = '', tune = null }) {
     gcMem();
-    const ent = await ensure(owner);
+    const baseId0 = resume || mergeInto;
+    const ent = baseId0 ? await ensure(owner) : null;   // naya check: history load (sheet) ka intezaar nahi — turant shuru
     for (const j0 of jobs.values()) if (j0.owner === owner && !j0.done) j0.stop = true;   // ek user = ek job (do job ek saath 429 dilate the)
     const id = crypto.randomBytes(8).toString('hex');
     let runId = id, list = [...new Set(items.map(cleanItem).filter((x) => x.length >= 4 && x.length <= 30))].slice(0, 5000), baseMs = 0;
     const baseId = resume || mergeInto;
-    const base = baseId ? ent.runs.find((r) => r.id === baseId) : null;
+    const base = baseId && ent ? ent.runs.find((r) => r.id === baseId) : null;
     if (resume) {
       if (!base) { const e = new Error('Ye run ab save nahi hai.'); e.status = 404; throw e; }
       const have = new Set((base.rows || []).map((r) => r.input));
@@ -308,13 +365,14 @@ export function createNpciEngine(opts = {}) {
     const job = { id, runId, owner, items: list, rows: [], done: false, stop: false, started: Date.now(), touched: Date.now(), baseMs, mergeInto: base ? base.id : '', resumed: !!resume, lastSheet: 0 };
     jobs.set(id, job);
     if (tune && (Number(tune.rate) > 0 || Number(tune.gap) > 0)) { gate.fixed = true; gate.rate = Math.max(0.2, Math.min(50, Number(tune.rate) || 1000 / Number(tune.gap))); gate.fixedConc = Math.max(1, Math.min(40, Number(tune.conc) || 0)); } else gate.fixed = false;
-    await upsert(job, false);   // history me turant "⏳ chal raha"
+    const first = upsert(job, false).catch((err) => log.warn('NPCI run save:', String((err && err.message) || err).slice(0, 160)));   // history me "⏳ chal raha"
+    if (base) await first;
     runJob(job, tune).catch((err) => log.warn('NPCI job:', String((err && err.message) || err).slice(0, 160)));
     return { id, total: list.length, runId };
   }
 
   async function runJob(job, tune) {
-    const g0 = { n429: gate.n429, calls: gate.calls };
+    const g0 = { n429: gate.n429, calls: gate.calls }; job.g0 = g0;
     let bcTag = new Map();
     const bcs = job.items.filter((x) => /^\d{8,}$/.test(x));
     if (bcs.length) { try { bcTag = (await barcodeToTag(bcs)) || new Map(); } catch (err) { log.log('NPCI barcode lookup fail:', String((err && err.message) || err).slice(0, 160)); } }
@@ -344,7 +402,7 @@ export function createNpciEngine(opts = {}) {
       }
     };
     let ckBusy = false;
-    const ck = setInterval(() => { if (ckBusy || job.done) return; ckBusy = true; upsert(job, false).catch(() => {}).finally(() => { ckBusy = false; }); }, CKPT_MS);
+    const ck = setInterval(() => { if (ckBusy || job.done || job.rows.length === job.ckRows) return; ckBusy = true; job.ckRows = job.rows.length; upsert(job, false).catch(() => {}).finally(() => { ckBusy = false; }); }, CKPT_MS);
     if (ck.unref) ck.unref();
     const nWorkers = tune && Number(tune.workers) > 0 ? Math.min(60, Number(tune.workers)) : 48;   // asli limit gate karta hai
     try { await Promise.all(Array.from({ length: nWorkers }, worker)); }
@@ -355,7 +413,7 @@ export function createNpciEngine(opts = {}) {
       job.done = true; job.touched = Date.now();
       saveGate();
       const sec = (job.ended - job.started) / 1000; const st = gate.stats();
-      log.log(`🛰️ NPCI job: ${job.rows.length}/${job.items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${gate.n429 - g0.n429} · rate ${st.rate}/s (chhat ${st.ceil}) · conc ${st.conc} · avg call ${st.lat}ms · fail ${job.rows.filter((r) => r.retry).length}`);
+      log.log(`🛰️ NPCI job: ${job.rows.length}/${job.items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${gate.n429 - g0.n429} · rate ${st.rate}/s (chhat ${st.ceil}) · conc ${st.conc} · avg call ${st.lat}ms · fail ${job.rows.filter((r) => r.retry).length}${st.hdr ? ` · API headers ${JSON.stringify(st.hdr)}` : ' · API rate-limit headers: nahi'}`);
     }
   }
 
@@ -364,7 +422,7 @@ export function createNpciEngine(opts = {}) {
     if (!job || (job.owner !== owner && !isAdmin)) return null;
     job.touched = Date.now();
     const st = gate.stats();
-    return { ok: true, runId: job.runId, total: job.items.length, checked: job.rows.length, done: job.done, stopped: job.stop, n429: st.n429, gap: st.gap, conc: st.conc, rate: st.rate, lat: st.lat, rows: job.rows.slice(Math.max(0, from)), ms: (job.ended || Date.now()) - job.started };
+    return { ok: true, runId: job.runId, total: job.items.length, checked: job.rows.length, done: job.done, stopped: job.stop, n429: st.n429, jobN429: job.g0 ? st.n429 - job.g0.n429 : 0, concCap: st.concCap, gap: st.gap, conc: st.conc, rate: st.rate, lat: st.lat, rows: job.rows.slice(Math.max(0, from)), ms: (job.ended || Date.now()) - job.started };
   }
   function stopJob(id, owner, isAdmin) { const job = jobs.get(id); if (!job || (job.owner !== owner && !isAdmin)) return false; job.stop = true; job.touched = Date.now(); return true; }
 
