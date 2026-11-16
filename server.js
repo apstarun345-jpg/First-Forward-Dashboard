@@ -10418,21 +10418,27 @@ async function handleApi(req, res, url) {
   const npciKind = (v) => (/^\d{8,}$/.test(v) ? 'Barcode' : /^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
   // ⏱ v3.125.287 — ApnaPayment API rate-limit (HTTP 429) deti hai: poore server par ek hi "gate" —
   //    calls ke beech kam se kam npciGap ms; 429 aaye to sab calls ruk ke (Retry-After / 4s→ badhta) phir wahi item dobara.
-  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 40, chain: Promise.resolve(), cut: 0, ok: 0, n429: 0, calls: 0, lat: 0 });
+  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 100, chain: Promise.resolve(), cut: 0, ok: 0, n429: 0, calls: 0, lat: 0, conc: 3, inflight: 0, waitQ: [], run: 0, streak429: 0 });
   function npciSlot() {
     const g = npciGate;
     const p2 = g.chain.then(async () => { const w = g.next - Date.now(); if (w > 0) await new Promise((r) => setTimeout(r, w)); g.next = Date.now() + g.gap; });
     g.chain = p2.catch(() => {});
     return p2;
   }
+  // 🚦 v3.125.301 — LIVE test se mila: API ki limit sakht hai. 20 ek saath bhejne par 429 ki baadh aati hai aur har retry block ko
+  //    lamba kar deta tha (0.15/s). Ab: ek saath chalti calls ki limit (conc) — 429 par aadhi + lamba (exponential) global ruk;
+  //    lagataar kaamyaab calls par dheere +1. Resume par pehle sirf 1 call (probe).
+  const npciAcq = () => new Promise((res) => { const g = npciGate; if (g.inflight < g.conc) { g.inflight++; res(); } else g.waitQ.push(res); });
+  const npciRel = () => { const g = npciGate; g.inflight = Math.max(0, g.inflight - 1); while (g.waitQ.length && g.inflight < g.conc) { g.inflight++; g.waitQ.shift()(); } };
   async function npciOne(raw) {
     const v = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     const kind = npciKind(v);
     const body = kind === 'Tag ID' ? { tagId: v } : { vrn: v };
     let lastErr = '', tries = 0, rl = 0;
     // 429 = sirf "thoda ruko" — attempt me nahi ginte (15 baar tak, ya ~90s), baaki errors 5 attempt.
-    while (tries < 5 && rl < 15) {
+    while (tries < 5 && rl < 12) {
       if (tries) await new Promise((r) => setTimeout(r, 800 * tries));
+      await npciAcq();
       await npciSlot();
       const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20e3);
       try {
@@ -10444,15 +10450,18 @@ async function handleApi(req, res, url) {
           rl++;
           const ra = Number(r.headers.get('retry-after')) || 0;
           npciGate.n429++;
-          const pause = Math.min(10e3, Math.max(ra * 1000, 800 * Math.min(rl, 6)));
-          npciGate.next = Math.max(npciGate.next, Date.now() + pause);   // sab calls thodi der ruko
-          if (!npciGate.fixed && Date.now() - npciGate.cut > 3000) { npciGate.cut = Date.now(); npciGate.gap = Math.min(1500, Math.round(npciGate.gap * 1.5) + 20); npciGate.ok = 0; }   // ek burst me ek hi baar dheere
+          if (Date.now() - npciGate.cut > 2500) {   // ek burst = ek hi baar gino
+            npciGate.cut = Date.now(); npciGate.streak429++; npciGate.run = 0;
+            if (!npciGate.fixed) npciGate.conc = Math.max(1, Math.floor(npciGate.conc / 2));
+            const pause = Math.min(25e3, Math.max(ra * 1000, 1500 * 2 ** Math.min(npciGate.streak429, 4)));
+            npciGate.next = Math.max(npciGate.next, Date.now() + pause);
+          }
           lastErr = 'HTTP 429 — API ne "bahut zyada requests" kaha (rate limit)';
           continue;
         }
         if (/^\s*</.test(txt)) { tries++; lastErr = `HTTP ${r.status} — HTML aaya (server ne JSON nahi diya)`; continue; }
-        npciGate.calls++;
-        if (!npciGate.fixed && ++npciGate.ok >= 5 && npciGate.gap > 30) { npciGate.ok = 0; npciGate.gap = Math.max(30, Math.round(npciGate.gap * 0.75)); }   // theek chala to dheere dheere tez
+        npciGate.calls++; npciGate.streak429 = 0;
+        if (!npciGate.fixed && ++npciGate.run >= 20 && npciGate.conc < 8) { npciGate.run = 0; npciGate.conc++; }   // 20 lagataar theek → ek aur ek saath
         let j; try { j = JSON.parse(txt); } catch { tries++; lastErr = 'Response samajh nahi aaya'; continue; }
         const m = Array.isArray(j) ? (j[0] || {}) : (j || {});
         const td = (m.res && Array.isArray(m.res.tagDetails)) ? m.res.tagDetails : [];
@@ -10464,7 +10473,7 @@ async function handleApi(req, res, url) {
         if (!recs.length && td.length) recs = td.map((x) => ({ TAGID: x.tagId || '', BANKID: x.npci_BankId || '', REGNUMBER: x.regNumber || '', custId: x.custId || '', cch: x.cch || '', commVeh: x.commVeh || '', activationDt: x.activationDt || '', closeDt: x.closeDt || '', ENTITYID: x.entityId || '', tagDetails_cardStage: x.cardStage || '', tagDetails_npci_ExcCode: x.npci_ExcCode || '', npci_ExcCode: x.npci_ExcCode || '', TAGSTATUS: x.npci_TagStatus || '' }));
         return { input: v, kind, ok: m.STATUS === 'Success' && recs.length > 0, msg: m.APIRESPMSG || m.STATUS || '', records: recs };
       } catch (err) { tries++; lastErr = err && err.name === 'AbortError' ? 'Time out (20s) — API ne jawab nahi diya' : String((err && err.message) || err); }
-      finally { clearTimeout(t); }
+      finally { clearTimeout(t); npciRel(); }
     }
     return { input: v, kind, ok: false, retry: !!lastErr && !/samajh nahi/i.test(lastErr), msg: lastErr || 'Fail', records: [] };
   }
@@ -10548,10 +10557,10 @@ async function handleApi(req, res, url) {
     };
     // 🔧 Admin test knob: {tune:{workers,gap}} → fixed gap (adaptive band) + workers — real API ki sustainable speed napne ke liye.
     const tune = user.role === 'admin' && body.tune && typeof body.tune === 'object' ? body.tune : null;
-    if (tune && Number(tune.gap) > 0) { npciGate.fixed = true; npciGate.gap = Math.max(10, Math.min(3000, Number(tune.gap))); } else if (tune) { npciGate.fixed = false; }
+    if (tune && Number(tune.gap) > 0) { npciGate.fixed = true; npciGate.gap = Math.max(10, Math.min(3000, Number(tune.gap))); npciGate.conc = Math.max(1, Math.min(40, Number(tune.conc) || npciGate.conc)); } else { npciGate.fixed = false; }
     const nWorkers = tune && Number(tune.workers) > 0 ? Math.min(40, Number(tune.workers)) : 20;
     const g0 = { n429: npciGate.n429, calls: npciGate.calls };
-    Promise.all(Array.from({ length: nWorkers }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); const sec = (job.ended - job.started) / 1000; console.log(`🛰️ NPCI job: ${job.rows.length}/${items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${npciGate.n429 - g0.n429} · gap ${npciGate.gap}ms · avg call ${npciGate.lat}ms · fail ${job.rows.filter((r) => r.retry).length}`); });
+    Promise.all(Array.from({ length: nWorkers }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); const sec = (job.ended - job.started) / 1000; console.log(`🛰️ NPCI job: ${job.rows.length}/${items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${npciGate.n429 - g0.n429} · gap ${npciGate.gap}ms · conc ${npciGate.conc} · avg call ${npciGate.lat}ms · fail ${job.rows.filter((r) => r.retry).length}`); });
     return sendJson(res, 200, { ok: true, id, total: items.length });
   }
   {
@@ -10563,7 +10572,7 @@ async function handleApi(req, res, url) {
       job.touched = Date.now();
       if (mj[2]) { job.stop = true; return sendJson(res, 200, { ok: true }); }
       const from = Math.max(0, Number(url.searchParams.get('from')) || 0);
-      return sendJson(res, 200, { ok: true, total: job.items.length, checked: job.rows.length, done: job.done, stopped: job.stop, n429: npciGate.n429, gap: npciGate.gap, lat: npciGate.lat, rows: job.rows.slice(from), ms: (job.ended || Date.now()) - job.started });
+      return sendJson(res, 200, { ok: true, total: job.items.length, checked: job.rows.length, done: job.done, stopped: job.stop, n429: npciGate.n429, gap: npciGate.gap, conc: npciGate.conc, lat: npciGate.lat, rows: job.rows.slice(from), ms: (job.ended || Date.now()) - job.started });
     }
   }
   // 💰 v3.125.234 — Payout SNAPSHOT: mahine me ek baar Home se "Payout refresh" → browser poori APN/FNF tabs padhta hai
