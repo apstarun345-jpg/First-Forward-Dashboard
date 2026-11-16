@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createNpciEngine, createRateGate, mergeRows } from '../npci-engine.js';
+import { createNpciEngine, createRateGate, mergeRows, readRateHeaders } from '../npci-engine.js';
 
 const quiet = { log() {}, warn() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -45,6 +45,45 @@ test('rate gate: 429 par chhat seekhta hai, rate kam karta hai, dobara upar jaat
   for (let i = 0; i < 200; i++) g.onOk(1000);
   assert.ok(g.rate <= g.ceil * 0.9 + 1e-9 && g.rate > 6, `rate ${g.rate} chhat ${g.ceil}`);
   assert.ok(g.maxConc() >= Math.floor(g.rate), 'latency 1s par concurrency ≈ rate');
+});
+
+test('v304 gate: kat se pehle nikli calls ke 429 dobara rate nahi kaatte; lagataar 429 me rate ek hi baar katta hai', () => {
+  const g = createRateGate({ rate: 10 });
+  const oldStart = Date.now() - 500;
+  g.on429(0, Date.now());
+  assert.equal(g.rate, 6);
+  g.on429(0, oldStart);                      // kat se pehle bheji thi
+  assert.equal(g.rate, 6, 'stale 429 = koi kat nahi');
+  g.on429(0, Date.now() + 1);                // nayi, par episode chal raha (beech me koi OK nahi)
+  assert.equal(g.rate, 6, 'ek episode = ek kat');
+  assert.ok(g.pauseUntil - Date.now() > 1500, 'lagataar 429 = ruk lamba');
+  g.onOk(500);
+  g.on429(0, Date.now() + 2);                // OK ke baad naya episode
+  assert.ok(g.rate < 6);
+});
+
+test('v304 gate: concurrency probe ke baad 429 = sirf concurrency −1, speed same', () => {
+  const g = createRateGate({ rate: 3, concCap: 3 });
+  g.active = 3; g.calls = 500;
+  for (let i = 0; i < 100; i++) g.onOk(1000);
+  assert.equal(g.concCap, 4, 'poori bhari thi → +1 probe');
+  const r0 = g.rate; g.active = 4;
+  g.on429(0, Date.now());
+  assert.equal(g.concCap, 3); assert.equal(g.rate, r0, 'speed nahi kati'); assert.ok(g.pauseUntil <= Date.now(), 'ruk nahi');
+});
+
+test('v304: API rate-limit headers padhta hai (remaining 0 = reset tak ruk, policy = pakki chhat)', () => {
+  const H = (o) => (k) => (k in o ? o[k] : null);
+  assert.deepEqual(readRateHeaders(H({ 'ratelimit-limit': '100', 'ratelimit-remaining': '0', 'ratelimit-reset': '7', 'ratelimit-policy': '100;w=60' })), { limit: 100, remaining: 0, resetSec: 7, windowSec: 60 });
+  assert.equal(readRateHeaders(H({ 'x-ratelimit-remaining': '5' })).remaining, 5);
+  assert.equal(readRateHeaders(H({})), null);
+  const g = createRateGate({ rate: 10 });
+  g.onHeaders(readRateHeaders(H({ 'ratelimit-remaining': '0', 'ratelimit-reset': '3', 'ratelimit-policy': '120;w=60' })));
+  assert.ok(g.pauseUntil - Date.now() > 2500, 'reset tak ruk');
+  assert.equal(g.hardCeil, 2);
+  for (let i = 0; i < 50; i++) g.onOk(300);
+  assert.ok(g.rate <= 2 * 0.97 + 1e-9, `policy se upar nahi: ${g.rate}`);
+  assert.ok(g.stats().hdr, 'diagnosis ke liye headers stats me');
 });
 
 test('bulk: 300 items, API limit 40/s — sab check, koi fail nahi, history me save', async () => {
