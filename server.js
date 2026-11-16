@@ -27,6 +27,7 @@ import { createMappingStock, sheetIdFrom, identifierText, expandIdentifierNumber
 import { createDuplicateBarcodeCollector } from './duplicate-barcode.js';
 import { personalActivityCalendar } from './personal-calendar.js';
 import { createMappingJobs } from './mapping-job.js';
+import { createNpciEngine, cleanItem as npciCleanItem } from './npci-engine.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS, LAYOUTS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
@@ -132,7 +133,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const robotPushState = new Map(); // 🤖 robot push dedupe / rate (per admin)
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
@@ -7514,6 +7515,23 @@ function recoveryDiskDirs() {
 }
 const RECOVERY_FILES = { users: 'users.json', sessions: 'sessions.json', settings: 'settings.json', resets: 'resets.json' };
 
+// 🛰️ v3.125.303 — NPCI engine: ek hi (module-level) instance — jobs / rate gate / runs restart tak memory me, disk + sheet par save.
+function npciEngine() {
+  if (globalThis.__ffNpciEngine) return globalThis.__ffNpciEngine;
+  globalThis.__ffNpciEngine = createNpciEngine({
+    dataDir: DATA_DIR,
+    url: process.env.NPCI_API_URL || undefined,
+    store: () => sheetsStore,
+    barcodeToTag: async (bcs) => {
+      const m = new Map();
+      const out = await mappingStock.lookup(bcs.map((b) => ({ type: 'barcode', barcode: b })), {});
+      bcs.forEach((b, i) => { const hit = (((out.results || [])[i] || {}).rows || []).find((x) => /^[0-9A-Fa-f]{19,24}$/.test(String(x.tagId || ''))); if (hit) m.set(b, String(hit.tagId).toUpperCase()); });
+      return m;
+    }
+  });
+  return globalThis.__ffNpciEngine;
+}
+
 async function handleApi(req, res, url) {
   const p = url.pathname;
   const method = req.method;
@@ -10412,162 +10430,45 @@ async function handleApi(req, res, url) {
       throw new HttpError(502, `Sheet history read nahi ho payi: ${err.message}`);
     }
   }
-  // 🛰️ v3.125.284 — NPCI Status (Cross Channel): Tag ID / VRN / Chassis → ApnaPayment verifyNpciStatus API (server se, bina token).
+  // 🛰️ v3.125.303 — NPCI Status (Cross Channel): saara engine ./npci-engine.js me (rate gate, jobs, pichhli 5 + chalta run save, auto-resume).
   const npciPerm = (u) => u && (u.role === 'admin' || (Array.isArray(u.permissions) && u.permissions.includes('npci')));
-  const NPCI_URL = process.env.NPCI_API_URL || 'https://www.apnapayment.com/api/agent/idfc/verifyNpciStatus';
-  const npciKind = (v) => (/^\d{8,}$/.test(v) ? 'Barcode' : /^[0-9A-F]{19,24}$/.test(v) ? 'Tag ID' : (/^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/.test(v) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(v) || v.length <= 10) ? 'VRN' : 'Chassis');
-  // ⏱ v3.125.287 — ApnaPayment API rate-limit (HTTP 429) deti hai: poore server par ek hi "gate" —
-  //    calls ke beech kam se kam npciGap ms; 429 aaye to sab calls ruk ke (Retry-After / 4s→ badhta) phir wahi item dobara.
-  const npciGate = globalThis.__ffNpciGate || (globalThis.__ffNpciGate = { next: 0, gap: 100, chain: Promise.resolve(), cut: 0, ok: 0, n429: 0, calls: 0, lat: 0, conc: 3, inflight: 0, waitQ: [], run: 0, streak429: 0 });
-  function npciSlot() {
-    const g = npciGate;
-    const p2 = g.chain.then(async () => { const w = g.next - Date.now(); if (w > 0) await new Promise((r) => setTimeout(r, w)); g.next = Date.now() + g.gap; });
-    g.chain = p2.catch(() => {});
-    return p2;
-  }
-  // 🗂️ v3.125.302 — NPCI "pichhli 5 runs" (har user ke) — server par save: browser band / reload / dusra device — kuch nahi udta.
-  //    Durable copy: Google Sheet "CACHE_SNAPSHOT" tab ke apne column me (gz + base64 chunks); tez copy DATA_DIR/npci-runs me.
-  const NPCI_RUN_KEEP = 5, NPCI_RUN_TAB = 'CACHE_SNAPSHOT', NPCI_RUN_CHUNK = 45000;
-  const NPCI_RUNS_MEM = globalThis.__ffNpciRuns || (globalThis.__ffNpciRuns = new Map());
-  const npciSafeOwner = (o) => String(o || 'user').toLowerCase().replace(/[^a-z0-9._-]/g, '_').slice(0, 60) || 'user';
-  const npciPrimary = (recs) => (!recs || !recs.length ? null : (recs.find((d) => d.TAGSTATUS === 'A' || /^active$/i.test(d.npci_ExcCode)) || recs.find((d) => !/closed|replaced|blacklist/i.test(d.npci_ExcCode)) || recs[0]));
-  const npciIsRetry = (r) => !r.ok && (r.retry || /busy|429|HTML|time out|fetch|fail$/i.test(r.msg || ''));
-  function npciSummary(rows, total) {
-    const s = { total: Math.max(total || 0, rows.length), checked: rows.length, kind: { 'Tag ID': 0, Barcode: 0, VRN: 0, Chassis: 0 }, found: 0, notFound: 0, retry: 0, upd: 0, notUpd: 0, updBase: 0, status: {}, active: 0 };
-    for (const r of rows) {
-      s.kind[r.kind] = (s.kind[r.kind] || 0) + 1;
-      const prim = npciPrimary(r.records);
-      if (prim) s.found++; else if (npciIsRetry(r)) s.retry++; else s.notFound++;
-      const key = prim ? (prim.npci_ExcCode || prim.tagDetails_npci_ExcCode || 'Blank (NPCI ne status nahi diya)') : (npciIsRetry(r) ? 'Check fail — dobara karo' : 'Not found (NPCI me nahi)');
-      if (prim && /^active$/i.test(key)) s.active++;
-      if (r.kind !== 'VRN' && prim) { s.updBase++; const reg = String(prim.REGNUMBER || '').replace(/[^A-Z0-9]/gi, ''); if (reg.length >= 1 && reg.length <= 10) s.upd++; else s.notUpd++; }
-      s.status[key] = (s.status[key] || 0) + 1;
-    }
-    return s;
-  }
-  async function npciOwnerCol(owner) {
-    // B1 = {owner: column letter} — D se aage har user ka apna column.
-    let map = {};
-    try { const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: NPCI_RUN_TAB, startRow: 1, columns: ['B'] }, { timeoutMs: 30e3, attempts: 2 }); map = JSON.parse(((out.rows || [])[0] || [])[0] || '{}') || {}; } catch { map = {}; }
-    if (map[owner]) return map[owner];
-    const used = new Set(Object.values(map)); let n = 4; while (used.has(String.fromCharCode(64 + n)) && n < 26) n++;
-    map[owner] = String.fromCharCode(64 + n);
-    await sheetsStore.call('writecells', { spreadsheetId: '', tab: NPCI_RUN_TAB, column: 'B', writes: [{ row: 1, value: JSON.stringify(map) }] });
-    return map[owner];
-  }
-  async function npciRunsLoad(owner) {
-    if (NPCI_RUNS_MEM.has(owner)) return NPCI_RUNS_MEM.get(owner);
-    const f = path.join(DATA_DIR, 'npci-runs', `${npciSafeOwner(owner)}.json.gz`);
-    let runs = null;
-    try { if (existsSync(f)) runs = JSON.parse(zlib.gunzipSync(readFileSync(f)).toString('utf8')).runs; } catch { runs = null; }
-    if (!runs && sheetsStore && typeof sheetsStore.call === 'function') {
-      try {
-        const col = await npciOwnerCol(owner);
-        const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: NPCI_RUN_TAB, startRow: 1, columns: [col] }, { timeoutMs: 60e3, attempts: 3 });
-        const rows = (out && out.rows) || []; const head = JSON.parse((rows[0] && rows[0][0]) || 'null');
-        if (head && head.kind === 'npciRuns' && head.n) { const body = rows.slice(1, 1 + head.n).map((r) => r[0] || '').join(''); runs = JSON.parse(zlib.gunzipSync(Buffer.from(body, 'base64')).toString('utf8')).runs; }
-      } catch (err) { console.warn('NPCI runs load:', String((err && err.message) || err).slice(0, 160)); }
-    }
-    runs = Array.isArray(runs) ? runs : [];
-    NPCI_RUNS_MEM.set(owner, runs);
-    return runs;
-  }
-  async function npciRunsSave(owner, runs) {
-    NPCI_RUNS_MEM.set(owner, runs);
-    const gz = zlib.gzipSync(Buffer.from(JSON.stringify({ v: 1, owner, runs })));
-    try { const dir = path.join(DATA_DIR, 'npci-runs'); mkdirSync(dir, { recursive: true }); writeFileSync(path.join(dir, `${npciSafeOwner(owner)}.json.gz`), gz); } catch { /* disk optional */ }
-    if (!sheetsStore || typeof sheetsStore.call !== 'function') return;
-    try {
-      const body = gz.toString('base64'); const parts = []; for (let i = 0; i < body.length; i += NPCI_RUN_CHUNK) parts.push(body.slice(i, i + NPCI_RUN_CHUNK));
-      if (parts.length > 600) { console.warn('NPCI runs: bahut bada, sheet save skip'); return; }
-      const col = await npciOwnerCol(owner);
-      const writes = [{ row: 1, value: JSON.stringify({ v: 1, kind: 'npciRuns', owner, at: Date.now(), n: parts.length }) }, ...parts.map((v, i) => ({ row: i + 2, value: v })), ...Array.from({ length: 40 }, (_, j) => ({ row: parts.length + 2 + j, value: '' }))];
-      await sheetsStore.call('writecells', { spreadsheetId: '', tab: NPCI_RUN_TAB, column: col, writes });
-      console.log(`🗂️ NPCI runs saved (${owner}): ${runs.length} run · ${parts.length} chunk · ${Math.round(body.length / 1024)} KB`);
-    } catch (err) { console.warn('NPCI runs sheet save:', String((err && err.message) || err).slice(0, 200)); }
-  }
-  async function npciRunFinish(job, mergeInto) {
-    if (!job.rows.length) return;
-    const runs = (await npciRunsLoad(job.owner)).slice();
-    if (mergeInto) {
-      const at = runs.findIndex((r) => r.id === mergeInto);
-      if (at >= 0) {
-        const base = runs[at]; const idx = new Map(base.rows.map((r, i) => [r.input, i]));
-        const rows = base.rows.slice(); for (const r of job.rows) { const i = idx.get(r.input); if (i >= 0 || i === 0) rows[i] = r; else rows.push(r); }
-        runs[at] = { ...base, rows, checked: rows.length, ms: (base.ms || 0) + ((job.ended || Date.now()) - job.started), sum: npciSummary(rows, base.total) };
-        await npciRunsSave(job.owner, runs); return;
-      }
-    }
-    const rows = job.rows.slice();
-    runs.unshift({ id: job.id, at: job.started, total: job.items.length, checked: rows.length, ms: (job.ended || Date.now()) - job.started, stopped: !!job.stop, sum: npciSummary(rows, job.items.length), rows });
-    await npciRunsSave(job.owner, runs.slice(0, NPCI_RUN_KEEP));
-  }
-  // 🚦 v3.125.301 — LIVE test se mila: API ki limit sakht hai. 20 ek saath bhejne par 429 ki baadh aati hai aur har retry block ko
-  //    lamba kar deta tha (0.15/s). Ab: ek saath chalti calls ki limit (conc) — 429 par aadhi + lamba (exponential) global ruk;
-  //    lagataar kaamyaab calls par dheere +1. Resume par pehle sirf 1 call (probe).
-  const npciAcq = () => new Promise((res) => { const g = npciGate; if (g.inflight < g.conc) { g.inflight++; res(); } else g.waitQ.push(res); });
-  const npciRel = () => { const g = npciGate; g.inflight = Math.max(0, g.inflight - 1); while (g.waitQ.length && g.inflight < g.conc) { g.inflight++; g.waitQ.shift()(); } };
-  async function npciOne(raw) {
-    const v = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const kind = npciKind(v);
-    const body = kind === 'Tag ID' ? { tagId: v } : { vrn: v };
-    let lastErr = '', tries = 0, rl = 0;
-    // 429 = sirf "thoda ruko" — attempt me nahi ginte (15 baar tak, ya ~90s), baaki errors 5 attempt.
-    while (tries < 5 && rl < 12) {
-      if (tries) await new Promise((r) => setTimeout(r, 800 * tries));
-      await npciAcq();
-      await npciSlot();
-      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20e3);
-      try {
-        const tl0 = Date.now();
-        const r = await fetch(NPCI_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body), signal: ac.signal });
-        const txt = await r.text();
-        npciGate.lat = npciGate.lat ? Math.round(npciGate.lat * 0.9 + (Date.now() - tl0) * 0.1) : (Date.now() - tl0);
-        if (r.status === 429) {
-          rl++;
-          const ra = Number(r.headers.get('retry-after')) || 0;
-          npciGate.n429++;
-          if (Date.now() - npciGate.cut > 2500) {   // ek burst = ek hi baar gino
-            npciGate.cut = Date.now(); npciGate.streak429++; npciGate.run = 0;
-            if (!npciGate.fixed) npciGate.conc = Math.max(1, Math.floor(npciGate.conc / 2));
-            const pause = Math.min(25e3, Math.max(ra * 1000, 1500 * 2 ** Math.min(npciGate.streak429, 4)));
-            npciGate.next = Math.max(npciGate.next, Date.now() + pause);
-          }
-          lastErr = 'HTTP 429 — API ne "bahut zyada requests" kaha (rate limit)';
-          continue;
-        }
-        if (/^\s*</.test(txt)) { tries++; lastErr = `HTTP ${r.status} — HTML aaya (server ne JSON nahi diya)`; continue; }
-        npciGate.calls++; npciGate.streak429 = 0;
-        if (!npciGate.fixed && ++npciGate.run >= 20 && npciGate.conc < 8) { npciGate.run = 0; npciGate.conc++; }   // 20 lagataar theek → ek aur ek saath
-        let j; try { j = JSON.parse(txt); } catch { tries++; lastErr = 'Response samajh nahi aaya'; continue; }
-        const m = Array.isArray(j) ? (j[0] || {}) : (j || {});
-        const td = (m.res && Array.isArray(m.res.tagDetails)) ? m.res.tagDetails : [];
-        const tdBy = new Map(td.map((x) => [String(x.tagId || '').toUpperCase(), x]));
-        let recs = (Array.isArray(m.NPCIVehicleDetails) ? m.NPCIVehicleDetails : []).map((d) => {
-          const tg = tdBy.get(String(d.TAGID || '').toUpperCase()) || {};
-          return { TAGID: d.TAGID || '', BANKID: d.BANKID || '', REGNUMBER: d.REGNUMBER || '', custId: d.custId || '', cch: d.cch || d.VEHICLECLASS || '', commVeh: d.commVeh || d.COMVEHICLE || '', activationDt: d.activationDt || '', closeDt: d.closeDt || '', ENTITYID: d.ENTITYID || '', tagDetails_cardStage: tg.cardStage || '', tagDetails_npci_ExcCode: tg.npci_ExcCode || '', npci_ExcCode: d.npci_ExcCode || '', TAGSTATUS: d.TAGSTATUS || '' };
-        });
-        if (!recs.length && td.length) recs = td.map((x) => ({ TAGID: x.tagId || '', BANKID: x.npci_BankId || '', REGNUMBER: x.regNumber || '', custId: x.custId || '', cch: x.cch || '', commVeh: x.commVeh || '', activationDt: x.activationDt || '', closeDt: x.closeDt || '', ENTITYID: x.entityId || '', tagDetails_cardStage: x.cardStage || '', tagDetails_npci_ExcCode: x.npci_ExcCode || '', npci_ExcCode: x.npci_ExcCode || '', TAGSTATUS: x.npci_TagStatus || '' }));
-        return { input: v, kind, ok: m.STATUS === 'Success' && recs.length > 0, msg: m.APIRESPMSG || m.STATUS || '', records: recs };
-      } catch (err) { tries++; lastErr = err && err.name === 'AbortError' ? 'Time out (20s) — API ne jawab nahi diya' : String((err && err.message) || err); }
-      finally { clearTimeout(t); npciRel(); }
-    }
-    return { input: v, kind, ok: false, retry: !!lastErr && !/samajh nahi/i.test(lastErr), msg: lastErr || 'Fail', records: [] };
-  }
-  if (p === '/api/npci/check' && method === 'POST') {
+  const npci = npciEngine();
+  if (p.startsWith('/api/npci/')) {
     if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
-    const body = await readBody(req);
-    const items = [...new Set((Array.isArray(body.items) ? body.items : String(body.items || '').split(/[\s,;]+/)).map((x) => String(x || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')).filter((x) => x.length >= 4 && x.length <= 30))].slice(0, 25);
-    if (!items.length) throw new HttpError(400, 'Tag ID / VRN / Chassis daalo.');
-    const out = new Array(items.length); let next = 0;
-    const worker = async () => { while (next < items.length) { const i = next++; out[i] = await npciOne(items[i]); } };
-    await Promise.all([worker(), worker()]);
-    return sendJson(res, 200, { ok: true, rows: out, at: new Date().toISOString() });
+    const isAdmin = user.role === 'admin';
+    if (p === '/api/npci/check' && method === 'POST') {
+      const body = await readBody(req);
+      const items = [...new Set((Array.isArray(body.items) ? body.items : String(body.items || '').split(/[\s,;]+/)).map(npciCleanItem).filter((x) => x.length >= 4 && x.length <= 30))].slice(0, 25);
+      if (!items.length) throw new HttpError(400, 'Tag ID / VRN / Chassis daalo.');
+      const rows = await Promise.all(items.map((it) => npci.checkOne(it)));
+      return sendJson(res, 200, { ok: true, rows, at: new Date().toISOString() });
+    }
+    if (p === '/api/npci/runs' && method === 'GET') {
+      return sendJson(res, 200, await npci.listRuns(user.username));
+    }
+    const mr = /^\/api\/npci\/runs\/([a-f0-9]{16})$/.exec(p);
+    if (mr && method === 'GET') {
+      const run = await npci.getRun(user.username, mr[1]);
+      if (!run) throw new HttpError(404, 'Ye run ab save nahi hai (sirf pichhle 5 rehte hain).');
+      return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, run }), { 'Cache-Control': 'no-store' });
+    }
+    if (p === '/api/npci/job' && method === 'POST') {
+      const body = await readBody(req);
+      const items = Array.isArray(body.items) ? body.items : String(body.items || '').split(/[\s,;]+/);
+      const resume = /^[a-f0-9]{16}$/.test(String(body.resume || '')) ? String(body.resume) : '';
+      const mergeInto = /^[a-f0-9]{16}$/.test(String(body.mergeInto || '')) ? String(body.mergeInto) : '';
+      const tune = isAdmin && body.tune && typeof body.tune === 'object' ? body.tune : null;   // 🔧 admin test knob {rate|gap, conc, workers}
+      try { return sendJson(res, 200, { ok: true, ...(await npci.startJob({ owner: user.username, items, resume, mergeInto, tune })) }); }
+      catch (err) { if (err && err.status) throw new HttpError(err.status, err.message); throw err; }
+    }
+    const mj = /^\/api\/npci\/job\/([a-f0-9]{16})(\/stop)?$/.exec(p);
+    if (mj) {
+      if (mj[2]) { if (!npci.stopJob(mj[1], user.username, isAdmin)) throw new HttpError(404, 'Job nahi mila.'); return sendJson(res, 200, { ok: true }); }
+      const st = npci.jobStatus(mj[1], user.username, isAdmin, Number(url.searchParams.get('from')) || 0);
+      if (!st) throw new HttpError(404, 'Job nahi mila (server restart hua hoga) — page bache hue apne aap resume karega.');
+      return sendJson(res, 200, st);
+    }
   }
-  // 🛰️ v3.125.291 — NPCI background JOB: browser 60s timeout / "signal is aborted" khatam. Server khud chalata hai,
-  //    browser har ~1.5s me progress + naye rows le jaata hai, "Ruko" turant job band karta hai.
-  const NPCI_JOBS = globalThis.__ffNpciJobs || (globalThis.__ffNpciJobs = new Map());
-  const npciJobGc = () => { const now = Date.now(); for (const [k, j] of NPCI_JOBS) if (now - j.touched > 60 * 60e3) NPCI_JOBS.delete(k); };
   if (p === '/api/eir-raw/status' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login karo.');
     const cfg = eirRawCfg(), today = istTodayKey(); const saved = [];
@@ -10584,87 +10485,6 @@ async function handleApi(req, res, url) {
     const r = await eirRawRows(from, to);
     if (r.errors.length && !r.rows.length) throw new HttpError(502, `Google Sheet se rows nahi aayi: ${r.errors[0]}`);
     return sendJson(res, 200, { ok: true, rows: r.rows, cachedDays: r.cachedDays, fetchedDays: r.fetchedDays, errors: r.errors, ms: Date.now() - t0 });
-  }
-  if (p === '/api/npci/runs' && method === 'GET') {
-    if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
-    const runs = await npciRunsLoad(user.username);
-    let active = null; for (const j of NPCI_JOBS.values()) if (j.owner === user.username && !j.done && !j.stop) active = { id: j.id, total: j.items.length, checked: j.rows.length, mergeInto: j.mergeInto || '' };
-    return sendJson(res, 200, { ok: true, active, runs: runs.map((r) => ({ id: r.id, at: r.at, total: r.total, checked: r.checked, ms: r.ms, stopped: !!r.stopped, sum: r.sum })) });
-  }
-  { const mr = /^\/api\/npci\/runs\/([a-f0-9]{16})$/.exec(p);
-    if (mr && method === 'GET') {
-      if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
-      const run = (await npciRunsLoad(user.username)).find((r) => r.id === mr[1]);
-      if (!run) throw new HttpError(404, 'Ye run ab save nahi hai (sirf pichhle 5 rehte hain).');
-      return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, run }), { 'Cache-Control': 'no-store' });
-    } }
-  if (p === '/api/npci/job' && method === 'POST') {
-    if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
-    npciJobGc();
-    const body = await readBody(req);
-    const items = [...new Set((Array.isArray(body.items) ? body.items : String(body.items || '').split(/[\s,;]+/)).map((x) => String(x || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')).filter((x) => x.length >= 4 && x.length <= 30))].slice(0, 5000);
-    if (!items.length) throw new HttpError(400, 'Tag ID / VRN / Chassis daalo.');
-    // ek user ka purana chalta job band (do job ek saath API ko 429 dilate the)
-    for (const j0 of NPCI_JOBS.values()) if (j0.owner === user.username && !j0.done) j0.stop = true;
-    const id = crypto.randomBytes(8).toString('hex');
-    const mergeInto = /^[a-f0-9]{16}$/.test(String(body.mergeInto || '')) ? String(body.mergeInto) : '';
-    const job = { id, owner: user.username, items, rows: [], done: false, stop: false, started: Date.now(), touched: Date.now(), mergeInto };
-    NPCI_JOBS.set(id, job);
-    let next = 0;
-    // 8 ek saath; jo item fail hua wo queue ke AAKHIR me dobara (tab tak API ka rate settle ho jaata hai) — user ko error tab dikhta hai jab 2 baar fail ho.
-    // 🔢 Barcode (sirf digits, 8+) → StockDataa / Tag Assignment se Tag ID nikaal ke NPCI check; input barcode hi dikhta hai.
-    const bcTag = new Map();
-    const bcs = items.filter((x) => /^\d{8,}$/.test(x));
-    if (bcs.length) {
-      try {
-        const out = await mappingStock.lookup(bcs.map((b) => ({ type: 'barcode', barcode: b })), {});
-        bcs.forEach((b, i) => { const hit = ((out.results[i] || {}).rows || []).find((x) => /^[0-9A-Fa-f]{19,24}$/.test(String(x.tagId || ''))); if (hit) bcTag.set(b, String(hit.tagId).toUpperCase()); });
-      } catch (err) { console.log('NPCI barcode lookup fail:', String((err && err.message) || err).slice(0, 160)); }
-    }
-    const NC = globalThis.__ffNpciCache || (globalThis.__ffNpciCache = new Map());   // 3 min — wahi tag dobara check ho to turant
-    const doOne = async (it) => {
-      const hit = NC.get(it); if (hit && Date.now() - hit.at < 3 * 60e3) return hit.r;
-      const r = await doOne0(it);
-      if (r && r.ok && !r.retry) { NC.set(it, { at: Date.now(), r }); if (NC.size > 8000) NC.delete(NC.keys().next().value); }
-      return r;
-    };
-    const doOne0 = async (it) => {
-      if (!/^\d{8,}$/.test(it)) return npciOne(it);
-      const tag = bcTag.get(it);
-      if (!tag) return { input: it, kind: 'Barcode', ok: false, msg: 'Barcode StockDataa / Tag Assignment me nahi mila (Tag ID nahi nikla)', records: [] };
-      const r = await npciOne(tag);
-      return { ...r, input: it, kind: 'Barcode', tagFromBarcode: tag };
-    };
-    const queue = items.slice(), requeued = new Set(); let inflight = 0;
-    const worker = async () => {
-      while (!job.stop) {
-        if (next >= queue.length) { if (inflight > 0) { await new Promise((r) => setTimeout(r, 150)); continue; } break; }
-        const it = queue[next++]; inflight++;
-        try {
-          const r = await doOne(it);
-          if (r.retry && !requeued.has(it) && !job.stop) { requeued.add(it); queue.push(it); } else job.rows.push(r);
-        } finally { inflight--; }
-      }
-    };
-    // 🔧 Admin test knob: {tune:{workers,gap}} → fixed gap (adaptive band) + workers — real API ki sustainable speed napne ke liye.
-    const tune = user.role === 'admin' && body.tune && typeof body.tune === 'object' ? body.tune : null;
-    if (tune && Number(tune.gap) > 0) { npciGate.fixed = true; npciGate.gap = Math.max(10, Math.min(3000, Number(tune.gap))); npciGate.conc = Math.max(1, Math.min(40, Number(tune.conc) || npciGate.conc)); } else { npciGate.fixed = false; }
-    const nWorkers = tune && Number(tune.workers) > 0 ? Math.min(40, Number(tune.workers)) : 20;
-    const g0 = { n429: npciGate.n429, calls: npciGate.calls };
-    Promise.all(Array.from({ length: nWorkers }, worker)).catch(() => {}).finally(() => { job.ended = Date.now(); npciRunFinish(job, job.mergeInto).catch((e) => console.warn('NPCI run save:', String((e && e.message) || e).slice(0, 160))).finally(() => { job.done = true; }); const sec = (job.ended - job.started) / 1000; console.log(`🛰️ NPCI job: ${job.rows.length}/${items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${npciGate.n429 - g0.n429} · gap ${npciGate.gap}ms · conc ${npciGate.conc} · avg call ${npciGate.lat}ms · fail ${job.rows.filter((r) => r.retry).length}`); });
-    return sendJson(res, 200, { ok: true, id, total: items.length });
-  }
-  {
-    const mj = /^\/api\/npci\/job\/([a-f0-9]{16})(\/stop)?$/.exec(p);
-    if (mj) {
-      if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
-      const job = NPCI_JOBS.get(mj[1]);
-      if (!job || (job.owner !== user.username && user.role !== 'admin')) throw new HttpError(404, 'Job nahi mila (server restart hua hoga) — bache hue dobara check karo.');
-      job.touched = Date.now();
-      if (mj[2]) { job.stop = true; return sendJson(res, 200, { ok: true }); }
-      const from = Math.max(0, Number(url.searchParams.get('from')) || 0);
-      return sendJson(res, 200, { ok: true, total: job.items.length, checked: job.rows.length, done: job.done, stopped: job.stop, n429: npciGate.n429, gap: npciGate.gap, conc: npciGate.conc, lat: npciGate.lat, rows: job.rows.slice(from), ms: (job.ended || Date.now()) - job.started });
-    }
   }
   // 💰 v3.125.234 — Payout SNAPSHOT: mahine me ek baar Home se "Payout refresh" → browser poori APN/FNF tabs padhta hai
   // (server sirf raw stream aage bhejta hai, parse nahi karta = memory safe), compact + masked snapshot banakar yahan PUT karta hai.
