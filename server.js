@@ -10425,6 +10425,83 @@ async function handleApi(req, res, url) {
     g.chain = p2.catch(() => {});
     return p2;
   }
+  // 🗂️ v3.125.302 — NPCI "pichhli 5 runs" (har user ke) — server par save: browser band / reload / dusra device — kuch nahi udta.
+  //    Durable copy: Google Sheet "CACHE_SNAPSHOT" tab ke apne column me (gz + base64 chunks); tez copy DATA_DIR/npci-runs me.
+  const NPCI_RUN_KEEP = 5, NPCI_RUN_TAB = 'CACHE_SNAPSHOT', NPCI_RUN_CHUNK = 45000;
+  const NPCI_RUNS_MEM = globalThis.__ffNpciRuns || (globalThis.__ffNpciRuns = new Map());
+  const npciSafeOwner = (o) => String(o || 'user').toLowerCase().replace(/[^a-z0-9._-]/g, '_').slice(0, 60) || 'user';
+  const npciPrimary = (recs) => (!recs || !recs.length ? null : (recs.find((d) => d.TAGSTATUS === 'A' || /^active$/i.test(d.npci_ExcCode)) || recs.find((d) => !/closed|replaced|blacklist/i.test(d.npci_ExcCode)) || recs[0]));
+  const npciIsRetry = (r) => !r.ok && (r.retry || /busy|429|HTML|time out|fetch|fail$/i.test(r.msg || ''));
+  function npciSummary(rows, total) {
+    const s = { total: Math.max(total || 0, rows.length), checked: rows.length, kind: { 'Tag ID': 0, Barcode: 0, VRN: 0, Chassis: 0 }, found: 0, notFound: 0, retry: 0, upd: 0, notUpd: 0, updBase: 0, status: {}, active: 0 };
+    for (const r of rows) {
+      s.kind[r.kind] = (s.kind[r.kind] || 0) + 1;
+      const prim = npciPrimary(r.records);
+      if (prim) s.found++; else if (npciIsRetry(r)) s.retry++; else s.notFound++;
+      const key = prim ? (prim.npci_ExcCode || prim.tagDetails_npci_ExcCode || 'Blank (NPCI ne status nahi diya)') : (npciIsRetry(r) ? 'Check fail — dobara karo' : 'Not found (NPCI me nahi)');
+      if (prim && /^active$/i.test(key)) s.active++;
+      if (r.kind !== 'VRN' && prim) { s.updBase++; const reg = String(prim.REGNUMBER || '').replace(/[^A-Z0-9]/gi, ''); if (reg.length >= 1 && reg.length <= 10) s.upd++; else s.notUpd++; }
+      s.status[key] = (s.status[key] || 0) + 1;
+    }
+    return s;
+  }
+  async function npciOwnerCol(owner) {
+    // B1 = {owner: column letter} — D se aage har user ka apna column.
+    let map = {};
+    try { const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: NPCI_RUN_TAB, startRow: 1, columns: ['B'] }, { timeoutMs: 30e3, attempts: 2 }); map = JSON.parse(((out.rows || [])[0] || [])[0] || '{}') || {}; } catch { map = {}; }
+    if (map[owner]) return map[owner];
+    const used = new Set(Object.values(map)); let n = 4; while (used.has(String.fromCharCode(64 + n)) && n < 26) n++;
+    map[owner] = String.fromCharCode(64 + n);
+    await sheetsStore.call('writecells', { spreadsheetId: '', tab: NPCI_RUN_TAB, column: 'B', writes: [{ row: 1, value: JSON.stringify(map) }] });
+    return map[owner];
+  }
+  async function npciRunsLoad(owner) {
+    if (NPCI_RUNS_MEM.has(owner)) return NPCI_RUNS_MEM.get(owner);
+    const f = path.join(DATA_DIR, 'npci-runs', `${npciSafeOwner(owner)}.json.gz`);
+    let runs = null;
+    try { if (existsSync(f)) runs = JSON.parse(zlib.gunzipSync(readFileSync(f)).toString('utf8')).runs; } catch { runs = null; }
+    if (!runs && sheetsStore && typeof sheetsStore.call === 'function') {
+      try {
+        const col = await npciOwnerCol(owner);
+        const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: NPCI_RUN_TAB, startRow: 1, columns: [col] }, { timeoutMs: 60e3, attempts: 3 });
+        const rows = (out && out.rows) || []; const head = JSON.parse((rows[0] && rows[0][0]) || 'null');
+        if (head && head.kind === 'npciRuns' && head.n) { const body = rows.slice(1, 1 + head.n).map((r) => r[0] || '').join(''); runs = JSON.parse(zlib.gunzipSync(Buffer.from(body, 'base64')).toString('utf8')).runs; }
+      } catch (err) { console.warn('NPCI runs load:', String((err && err.message) || err).slice(0, 160)); }
+    }
+    runs = Array.isArray(runs) ? runs : [];
+    NPCI_RUNS_MEM.set(owner, runs);
+    return runs;
+  }
+  async function npciRunsSave(owner, runs) {
+    NPCI_RUNS_MEM.set(owner, runs);
+    const gz = zlib.gzipSync(Buffer.from(JSON.stringify({ v: 1, owner, runs })));
+    try { const dir = path.join(DATA_DIR, 'npci-runs'); mkdirSync(dir, { recursive: true }); writeFileSync(path.join(dir, `${npciSafeOwner(owner)}.json.gz`), gz); } catch { /* disk optional */ }
+    if (!sheetsStore || typeof sheetsStore.call !== 'function') return;
+    try {
+      const body = gz.toString('base64'); const parts = []; for (let i = 0; i < body.length; i += NPCI_RUN_CHUNK) parts.push(body.slice(i, i + NPCI_RUN_CHUNK));
+      if (parts.length > 600) { console.warn('NPCI runs: bahut bada, sheet save skip'); return; }
+      const col = await npciOwnerCol(owner);
+      const writes = [{ row: 1, value: JSON.stringify({ v: 1, kind: 'npciRuns', owner, at: Date.now(), n: parts.length }) }, ...parts.map((v, i) => ({ row: i + 2, value: v })), ...Array.from({ length: 40 }, (_, j) => ({ row: parts.length + 2 + j, value: '' }))];
+      await sheetsStore.call('writecells', { spreadsheetId: '', tab: NPCI_RUN_TAB, column: col, writes });
+      console.log(`🗂️ NPCI runs saved (${owner}): ${runs.length} run · ${parts.length} chunk · ${Math.round(body.length / 1024)} KB`);
+    } catch (err) { console.warn('NPCI runs sheet save:', String((err && err.message) || err).slice(0, 200)); }
+  }
+  async function npciRunFinish(job, mergeInto) {
+    if (!job.rows.length) return;
+    const runs = (await npciRunsLoad(job.owner)).slice();
+    if (mergeInto) {
+      const at = runs.findIndex((r) => r.id === mergeInto);
+      if (at >= 0) {
+        const base = runs[at]; const idx = new Map(base.rows.map((r, i) => [r.input, i]));
+        const rows = base.rows.slice(); for (const r of job.rows) { const i = idx.get(r.input); if (i >= 0 || i === 0) rows[i] = r; else rows.push(r); }
+        runs[at] = { ...base, rows, checked: rows.length, ms: (base.ms || 0) + ((job.ended || Date.now()) - job.started), sum: npciSummary(rows, base.total) };
+        await npciRunsSave(job.owner, runs); return;
+      }
+    }
+    const rows = job.rows.slice();
+    runs.unshift({ id: job.id, at: job.started, total: job.items.length, checked: rows.length, ms: (job.ended || Date.now()) - job.started, stopped: !!job.stop, sum: npciSummary(rows, job.items.length), rows });
+    await npciRunsSave(job.owner, runs.slice(0, NPCI_RUN_KEEP));
+  }
   // 🚦 v3.125.301 — LIVE test se mila: API ki limit sakht hai. 20 ek saath bhejne par 429 ki baadh aati hai aur har retry block ko
   //    lamba kar deta tha (0.15/s). Ab: ek saath chalti calls ki limit (conc) — 429 par aadhi + lamba (exponential) global ruk;
   //    lagataar kaamyaab calls par dheere +1. Resume par pehle sirf 1 call (probe).
@@ -10508,6 +10585,19 @@ async function handleApi(req, res, url) {
     if (r.errors.length && !r.rows.length) throw new HttpError(502, `Google Sheet se rows nahi aayi: ${r.errors[0]}`);
     return sendJson(res, 200, { ok: true, rows: r.rows, cachedDays: r.cachedDays, fetchedDays: r.fetchedDays, errors: r.errors, ms: Date.now() - t0 });
   }
+  if (p === '/api/npci/runs' && method === 'GET') {
+    if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
+    const runs = await npciRunsLoad(user.username);
+    let active = null; for (const j of NPCI_JOBS.values()) if (j.owner === user.username && !j.done && !j.stop) active = { id: j.id, total: j.items.length, checked: j.rows.length, mergeInto: j.mergeInto || '' };
+    return sendJson(res, 200, { ok: true, active, runs: runs.map((r) => ({ id: r.id, at: r.at, total: r.total, checked: r.checked, ms: r.ms, stopped: !!r.stopped, sum: r.sum })) });
+  }
+  { const mr = /^\/api\/npci\/runs\/([a-f0-9]{16})$/.exec(p);
+    if (mr && method === 'GET') {
+      if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
+      const run = (await npciRunsLoad(user.username)).find((r) => r.id === mr[1]);
+      if (!run) throw new HttpError(404, 'Ye run ab save nahi hai (sirf pichhle 5 rehte hain).');
+      return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, run }), { 'Cache-Control': 'no-store' });
+    } }
   if (p === '/api/npci/job' && method === 'POST') {
     if (!npciPerm(user)) throw new HttpError(user ? 403 : 401, 'NPCI Status ki permission nahi hai.');
     npciJobGc();
@@ -10517,7 +10607,8 @@ async function handleApi(req, res, url) {
     // ek user ka purana chalta job band (do job ek saath API ko 429 dilate the)
     for (const j0 of NPCI_JOBS.values()) if (j0.owner === user.username && !j0.done) j0.stop = true;
     const id = crypto.randomBytes(8).toString('hex');
-    const job = { id, owner: user.username, items, rows: [], done: false, stop: false, started: Date.now(), touched: Date.now() };
+    const mergeInto = /^[a-f0-9]{16}$/.test(String(body.mergeInto || '')) ? String(body.mergeInto) : '';
+    const job = { id, owner: user.username, items, rows: [], done: false, stop: false, started: Date.now(), touched: Date.now(), mergeInto };
     NPCI_JOBS.set(id, job);
     let next = 0;
     // 8 ek saath; jo item fail hua wo queue ke AAKHIR me dobara (tab tak API ka rate settle ho jaata hai) — user ko error tab dikhta hai jab 2 baar fail ho.
@@ -10560,7 +10651,7 @@ async function handleApi(req, res, url) {
     if (tune && Number(tune.gap) > 0) { npciGate.fixed = true; npciGate.gap = Math.max(10, Math.min(3000, Number(tune.gap))); npciGate.conc = Math.max(1, Math.min(40, Number(tune.conc) || npciGate.conc)); } else { npciGate.fixed = false; }
     const nWorkers = tune && Number(tune.workers) > 0 ? Math.min(40, Number(tune.workers)) : 20;
     const g0 = { n429: npciGate.n429, calls: npciGate.calls };
-    Promise.all(Array.from({ length: nWorkers }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); const sec = (job.ended - job.started) / 1000; console.log(`🛰️ NPCI job: ${job.rows.length}/${items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${npciGate.n429 - g0.n429} · gap ${npciGate.gap}ms · conc ${npciGate.conc} · avg call ${npciGate.lat}ms · fail ${job.rows.filter((r) => r.retry).length}`); });
+    Promise.all(Array.from({ length: nWorkers }, worker)).catch(() => {}).finally(() => { job.ended = Date.now(); npciRunFinish(job, job.mergeInto).catch((e) => console.warn('NPCI run save:', String((e && e.message) || e).slice(0, 160))).finally(() => { job.done = true; }); const sec = (job.ended - job.started) / 1000; console.log(`🛰️ NPCI job: ${job.rows.length}/${items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${npciGate.n429 - g0.n429} · gap ${npciGate.gap}ms · conc ${npciGate.conc} · avg call ${npciGate.lat}ms · fail ${job.rows.filter((r) => r.retry).length}`); });
     return sendJson(res, 200, { ok: true, id, total: items.length });
   }
   {

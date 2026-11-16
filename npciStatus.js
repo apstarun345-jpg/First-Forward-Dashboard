@@ -8,7 +8,7 @@ FF.pages = FF.pages || {};
   const U = FF.util, esc = U.esc;
   const COLS = ['BANKID', 'REGNUMBER', 'custId', 'cch', 'commVeh', 'activationDt', 'closeDt', 'ENTITYID', 'tagDetails_cardStage', 'tagDetails_npci_ExcCode', 'npci_ExcCode'];
   const MAX = 5000;   // server job chalata hai, browser 1.5s me naye rows leta hai
-  const st = { rows: [], busy: false, stop: false, allTags: false, filter: '', total: 0, job: null };
+  const st = { rows: [], busy: false, stop: false, allTags: false, filter: '', total: 0, job: null, runs: [], runId: '', label: '' };
   const isRetry = (r) => !r.ok && (r.retry || /busy|429|HTML|time out|fetch|fail$/i.test(r.msg || ''));
   const FAIL_LAB = (r) => (isRetry(r) ? 'Check fail — dobara karo' : 'Not found (NPCI me nahi)');
 
@@ -169,71 +169,95 @@ FF.pages = FF.pages || {};
   }
 
   // ---------------------------------------------------------------- run
-  async function run(root, items, opts = {}) {
-    const out = root.querySelector('[data-np-out]'), prog = root.querySelector('[data-np-prog]'), lab = root.querySelector('[data-np-plab]');
-    if (!items.length) { out.innerHTML = '<p class="np-err">Tag ID / VRN / Chassis daalo.</p>'; return; }
-    if (items.length > MAX) { items = items.slice(0, MAX); U.toast && U.toast(`Pehle ${MAX} hi check honge`, 'warn'); }
-    const again = !!opts.retry;
-    st.busy = true; st.stop = false; st.filter = ''; st.job = null;
-    if (!again) { st.rows = []; st.total = items.length; }
-    const go = root.querySelector('[data-np-go]'); if (go) go.disabled = true;
-    const stopB = root.querySelector('[data-np-stop]'); if (stopB) { stopB.hidden = false; stopB.disabled = false; stopB.textContent = '⏹ Ruko'; }
-    prog.hidden = false;
-    if (out && !again) out.innerHTML = resultHtml();
-    const put = (r) => { const row = { ...r, records: r.records || [] }; const at = again ? st.rows.findIndex((x) => x.input === row.input) : -1; if (at >= 0) st.rows[at] = row; else st.rows.push(row); };
-    const t0 = Date.now();
-    const label = (n, done) => {
-      const s0 = summary(); const sec = (Date.now() - t0) / 1000; const rate = n && sec ? n / sec : 0;
-      const eta = !done && rate ? Math.round((items.length - n) / rate) : 0;
-      lab.textContent = `${done ? (st.stop ? '⏹ Ruk gaya' : '✅ Ho gaya') : '⏳'} ${U.fmt(n)} / ${U.fmt(items.length)} check hue · ✅ ${U.fmt(s0.found)} mile · ❌ ${U.fmt(s0.notFound)} nahi mile${s0.retry ? ` · ⚠ ${U.fmt(s0.retry)} fail` : ''}${eta ? ` · ~${eta >= 60 ? `${Math.round(eta / 60)} min` : `${eta}s`} baaki` : ''}${done ? '' : ' — beech me bhi download kar sakte ho'}`;
-      prog.querySelector('i').style.width = `${Math.round((n / items.length) * 100)}%`;
-    };
-    label(0, false);
+  // 🛰️ v3.125.302 — job SERVER par chalta hai; yahan sirf follow hota hai. Dusre page par jao to bhi chalta rahta hai
+  //    (loop DOM ko har baar naye sire se dhoondhta hai), reload / band karke wapas aao to "active job" se dobara jud jaata hai.
+  const $q = (sel) => document.querySelector(`.np-page ${sel}`);
+  function paintBusy() {
+    const go = $q('[data-np-go]'), stopB = $q('[data-np-stop]'), prog = $q('[data-np-prog]');
+    if (go) go.disabled = st.busy;
+    if (stopB) { stopB.hidden = !st.busy; if (st.busy && !st.stop) { stopB.disabled = false; stopB.textContent = '⏹ Ruko'; } }
+    if (prog) prog.hidden = !st.busy && !st.label;
+  }
+  function paintLabel(n, total, done, t0) {
+    const lab = $q('[data-np-plab]'), prog = $q('[data-np-prog]'); if (!lab) return;
+    const s0 = summary(); const sec = (Date.now() - t0) / 1000; const rate = n && sec ? n / sec : 0;
+    const eta = !done && rate ? Math.round((total - n) / rate) : 0;
+    st.label = `${done ? (st.stop ? '⏹ Ruk gaya' : '✅ Ho gaya') : '⏳'} ${U.fmt(n)} / ${U.fmt(total)} check hue · ✅ ${U.fmt(s0.found)} mile · ❌ ${U.fmt(s0.notFound)} nahi mile${s0.retry ? ` · ⚠ ${U.fmt(s0.retry)} fail` : ''}${eta ? ` · ~${eta >= 60 ? `${Math.round(eta / 60)} min` : `${eta}s`} baaki` : ''}${done ? '' : ' — dusre page par jao to bhi chalta rahega'}`;
+    lab.textContent = st.label;
+    const bar = prog && prog.querySelector('i'); if (bar) bar.style.width = `${Math.round((n / Math.max(1, total)) * 100)}%`;
+  }
+  const repaintOut = () => { const out = $q('[data-np-out]'); if (out) out.innerHTML = resultHtml(); };
+  const repaintHist = () => { const h = $q('[data-np-hist]'); if (h) h.innerHTML = histHtml(); };
+  async function refreshRuns() { try { const j = await FF.auth.api('/api/npci/runs'); st.runs = j.runs || []; repaintHist(); return j; } catch { return null; } }
+
+  async function follow(jobId, total, o = {}) {
+    const again = !!o.retry; const t0 = Date.now();
+    st.busy = true; st.stop = !!o.stopped; st.job = jobId; st.runId = o.mergeInto || jobId; st.total = again ? st.total : total;
+    const put = (r) => { const row = { ...r, records: r.records || [] }; const at = st.rows.findIndex((x) => x.input === row.input); if (at >= 0) st.rows[at] = row; else st.rows.push(row); };
+    paintBusy(); paintLabel(0, total, false, t0);
     let got = 0, err = '';
     try {
-      const j = await FF.auth.api('/api/npci/job', 'POST', { items });
-      st.job = j.id;
       let fails = 0;
       for (;;) {
         await new Promise((r) => setTimeout(r, got ? 800 : 500));
         let d;
-        try { d = await FF.auth.api(`/api/npci/job/${j.id}?from=${got}`); fails = 0; } catch (e) { if (e && e.status === 404) throw e; if (++fails > 6) throw e; continue; }
+        try { d = await FF.auth.api(`/api/npci/job/${jobId}?from=${got}`); fails = 0; } catch (e) { if (e && e.status === 404) throw e; if (++fails > 8) throw e; continue; }
         (d.rows || []).forEach(put); got += (d.rows || []).length;
-        label(got, false);
-        if (root.isConnected) out.innerHTML = resultHtml();
+        paintLabel(got, total, false, t0); paintBusy();
+        if ($q('[data-np-out]')) repaintOut();
         if (d.done) break;
       }
     } catch (e) { err = (e && e.message) || 'Fail'; }
-    // jo check nahi hue (stop / error) — "dobara" ke liye fail rows
     if (err) {
       const seen = new Set(st.rows.filter((r) => !isRetry(r)).map((r) => r.input));
-      items.filter((x) => !seen.has(x)).forEach((x) => put({ input: x, kind: kindOf(x), ok: false, retry: true, msg: err, records: [] }));
+      (o.items || []).filter((x) => !seen.has(x)).forEach((x) => put({ input: x, kind: kindOf(x), ok: false, retry: true, msg: err, records: [] }));
       U.toast && U.toast(`NPCI: ${err}`, 'warn');
     }
-    st.busy = false; st.job = null; if (go) go.disabled = false; if (stopB) stopB.hidden = true;
-    label(got, true);
-    hSave((Date.now() - t0) / 1000, again);
-    if (root.isConnected) { out.innerHTML = resultHtml(); const hh = root.querySelector('[data-np-hist]'); if (hh) hh.innerHTML = histHtml(); }
+    st.busy = false; st.job = null;
+    paintLabel(got, total, true, t0); paintBusy(); repaintOut();
+    await refreshRuns();
+    if (!err && U.toast) U.toast(`NPCI check ho gaya — ${U.fmt(got)} / ${U.fmt(total)}`, 'ok');
+  }
+  async function run(root, items, opts = {}) {
+    const out = root.querySelector('[data-np-out]');
+    if (st.busy) { U.toast && U.toast('Ek check abhi chal raha hai', 'warn'); return; }
+    if (!items.length) { out.innerHTML = '<p class="np-err">Tag ID / VRN / Chassis daalo.</p>'; return; }
+    if (items.length > MAX) { items = items.slice(0, MAX); U.toast && U.toast(`Pehle ${MAX} hi check honge`, 'warn'); }
+    const again = !!opts.retry;
+    st.filter = ''; st.stop = false;
+    if (!again) { st.rows = []; st.total = items.length; st.runId = ''; out.innerHTML = resultHtml(); }
+    st.busy = true; paintBusy();
+    let j;
+    try { j = await FF.auth.api('/api/npci/job', 'POST', { items, mergeInto: again ? st.runId : undefined }); }
+    catch (e) { st.busy = false; paintBusy(); out.innerHTML = `<p class="np-err">${U.esc((e && e.message) || 'Job shuru nahi hua')}</p>`; return; }
+    await follow(j.id, j.total || items.length, { retry: again, items, mergeInto: again ? st.runId : '' });
+  }
+  /** Page khulne par: server par chalta hua job ho to usse jud jao, aur pichhli 5 runs laao. */
+  async function attach() {
+    const j = await refreshRuns();
+    if (j && j.active && !st.busy) {
+      st.rows = []; st.filter = '';
+      follow(j.active.id, j.active.total, { retry: !!j.active.mergeInto, mergeInto: j.active.mergeInto || '' });
+    }
+  }
+  async function openRun(id, then) {
+    try {
+      const j = await FF.auth.api(`/api/npci/runs/${id}`);
+      const r = j.run; if (!r) return;
+      st.rows = (r.rows || []).map((x) => ({ ...x, records: x.records || [] })); st.total = r.total; st.runId = r.id; st.filter = ''; st.label = '';
+      repaintOut(); const o = $q('[data-np-out]'); if (o && !then) o.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (then) await download(then);
+    } catch (e) { U.toast && U.toast((e && e.message) || 'Run nahi khula', 'err'); }
   }
 
-  // 🕘 v3.125.295 — pichhli 3 checks ki history (is browser me): kitne input the, kya status nikla, kitna time laga.
-  const HKEY = 'ff.npci.hist.v1';
-  const hLoad = () => { try { const a = JSON.parse(localStorage.getItem(HKEY) || '[]'); return Array.isArray(a) ? a.slice(0, 3) : []; } catch { return []; } };
-  function hSave(sec, replace) {
-    try {
-      const s = summary(); if (!s.checked) return;
-      const e = { at: Date.now(), total: s.total, checked: s.checked, sec: Math.round(sec), found: s.found, notFound: s.notFound, retry: s.retry, upd: s.upd, notUpd: s.notUpd, updBase: s.updBase, active: s.active, kind: s.kind, status: s.status };
-      let a = hLoad(); if (replace && a.length) a[0] = { ...e, sec: a[0].sec + e.sec }; else a.unshift(e);
-      localStorage.setItem(HKEY, JSON.stringify(a.slice(0, 3)));
-    } catch { /* storage band ho sakta hai */ }
-  }
+  // 🕘 Pichhli 5 checks (server par save — browser band ho, reload ho, dusre device se bhi dikhti hain)
   function histHtml() {
-    const a = hLoad(); if (!a.length) return '';
+    const a = st.runs || []; if (!a.length) return '';
     const when = (t) => new Date(t).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-    const dur = (x) => (x >= 60 ? `${Math.floor(x / 60)}m ${x % 60}s` : `${x}s`);
+    const dur = (ms) => { const x = Math.round((ms || 0) / 1000); return x >= 60 ? `${Math.floor(x / 60)}m ${x % 60}s` : `${x}s`; };
     const top = (o) => Object.entries(o || {}).sort((x, y) => y[1] - x[1]).map(([k, n]) => `<span class="np-pill gray" style="margin:1px 3px 1px 0">${U.esc(k)} <b>${U.fmt(n)}</b></span>`).join('');
-    return `<section class="card"><div class="card-body"><b>🕘 Pichhli ${a.length} checks</b> <span class="dim small">(is browser me save)</span>
-      <div class="np-scroll" style="margin-top:8px;max-height:none"><table class="np-tbl"><thead><tr><th>Kab</th><th>Input</th><th>Check hue</th><th>Time</th><th>NPCI me mile</th><th>Nahi mile</th><th>VRN updated</th><th>Not updated</th><th>Status</th></tr></thead><tbody>${a.map((h) => `<tr><td>${when(h.at)}</td><td><b>${U.fmt(h.total)}</b><br><span class="dim small">Tag ${U.fmt(h.kind['Tag ID'] || 0)} · VRN ${U.fmt(h.kind.VRN || 0)} · Chassis ${U.fmt(h.kind.Chassis || 0)}</span></td><td>${U.fmt(h.checked)}</td><td>${dur(h.sec)}</td><td>${U.fmt(h.found)}</td><td>${U.fmt(h.notFound)}${h.retry ? ` · ⚠ ${U.fmt(h.retry)} fail` : ''}</td><td class="np-upd">${U.fmt(h.upd)}</td><td class="np-nupd">${U.fmt(h.notUpd)}</td><td style="white-space:normal;min-width:260px">${top(h.status)}</td></tr>`).join('')}</tbody></table></div></div></section>`;
+    return `<section class="card"><div class="card-body"><b>🕘 Pichhli ${a.length} checks</b> <span class="dim small">(server par save — reload / dusra device par bhi rahenge)</span>
+      <div class="np-scroll" style="margin-top:8px;max-height:none"><table class="np-tbl"><thead><tr><th>Kab</th><th>Input</th><th>Check hue</th><th>Time</th><th>NPCI me mile</th><th>Nahi mile</th><th>VRN updated</th><th>Not updated</th><th>Status</th><th>Download</th></tr></thead><tbody>${a.map((h) => { const m = h.sum || {}; const k = m.kind || {}; return `<tr><td>${when(h.at)}${h.stopped ? '<br><span class="dim small">⏹ beech me roka</span>' : ''}</td><td><b>${U.fmt(h.total)}</b><br><span class="dim small">Tag ${U.fmt(k['Tag ID'] || 0)}${k.Barcode ? ` · Barcode ${U.fmt(k.Barcode)}` : ''} · VRN ${U.fmt(k.VRN || 0)} · Chassis ${U.fmt(k.Chassis || 0)}</span></td><td>${U.fmt(h.checked)}</td><td>${dur(h.ms)}</td><td>${U.fmt(m.found || 0)}</td><td>${U.fmt(m.notFound || 0)}${m.retry ? ` · ⚠ ${U.fmt(m.retry)} fail` : ''}</td><td class="np-upd">${U.fmt(m.upd || 0)}</td><td class="np-nupd">${U.fmt(m.notUpd || 0)}</td><td style="white-space:normal;min-width:260px">${top(m.status)}</td><td style="white-space:nowrap"><button type="button" class="btn small" data-np-open="${h.id}">👁 Kholo</button> <button type="button" class="btn small" data-np-hdl="csv:${h.id}">⬇ CSV</button> <button type="button" class="btn small" data-np-hdl="xlsx:${h.id}">📊 Excel</button></td></tr>`; }).join('')}</tbody></table></div></div></section>`;
   }
   function render(root) {
     css();
@@ -247,11 +271,12 @@ FF.pages = FF.pages || {};
           <div class="np-up"><b>📄 CSV upload</b><span class="dim small">CSV / TXT — kisi bhi column me Tag ID / VRN / Chassis (header apne aap chhoot jaata hai)</span>
             <label class="btn">⬆ File chuno<input type="file" accept=".csv,.txt,text/csv,text/plain" data-np-file hidden></label><span class="dim small" data-np-fname></span></div>
         </div>
-        <div class="np-prog" data-np-prog hidden><i style="width:0"></i></div><small class="dim" data-np-plab></small>
+        <div class="np-prog" data-np-prog ${st.busy || st.label ? '' : 'hidden'}><i style="width:0"></i></div><small class="dim" data-np-plab>${U.esc(st.label || '')}</small>
         <p class="dim small" style="margin:8px 0 0">Tag ID = 19-24 akshar (34161F…) · Barcode = sirf digits (Tag ID apne aap StockDataa se) · VRN = 10 akshar tak · baaki = Chassis. <b>VRN update</b>: Tag ID / Chassis diya ho aur NPCI ka REGNUMBER 1-10 akshar ka ho = <b>Updated</b>, warna <b>Not updated</b>.</p>
       </div></section>
       <section class="card"><div class="card-body" data-np-out>${resultHtml()}</div></section><div data-np-hist>${histHtml()}</div></div>`;
     const ta = root.querySelector('[data-np-ta]'), cnt = root.querySelector('[data-np-count]');
+    paintBusy(); if (!st.busy) attach();
     const recount = () => { const n = splitInputs(ta.value).length; cnt.textContent = n ? `${U.fmt(n)} unique` : ''; };
     ta.addEventListener('input', recount);
     ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(root, splitInputs(ta.value)); } });
@@ -267,6 +292,8 @@ FF.pages = FF.pages || {};
     root.addEventListener('click', (e) => {
       if (e.target.closest('[data-np-go]')) { run(root, splitInputs(ta.value)); return; }
       if (e.target.closest('[data-np-stop]')) { st.stop = true; const b = e.target.closest('[data-np-stop]'); b.disabled = true; b.textContent = '⏹ Ruk raha…'; if (st.job) FF.auth.api(`/api/npci/job/${st.job}/stop`, 'POST', {}).catch(() => {}); return; }
+      const op = e.target.closest('[data-np-open]'); if (op) { openRun(op.dataset.npOpen); return; }
+      const hd = e.target.closest('[data-np-hdl]'); if (hd) { const [k, id] = hd.dataset.npHdl.split(':'); openRun(id, k); return; }
       if (e.target.closest('[data-np-retry]')) { if (!st.busy) run(root, st.rows.filter(isRetry).map((r) => r.input), { retry: true }); return; }
       if (e.target.closest('[data-np-clear]')) { ta.value = ''; st.rows = []; st.filter = ''; recount(); root.querySelector('[data-np-out]').innerHTML = resultHtml(); return; }
       const f = e.target.closest('[data-np-f]');
