@@ -10446,13 +10446,13 @@ async function handleApi(req, res, url) {
           npciGate.n429++;
           const pause = Math.min(10e3, Math.max(ra * 1000, 800 * Math.min(rl, 6)));
           npciGate.next = Math.max(npciGate.next, Date.now() + pause);   // sab calls thodi der ruko
-          if (Date.now() - npciGate.cut > 3000) { npciGate.cut = Date.now(); npciGate.gap = Math.min(1500, Math.round(npciGate.gap * 1.5) + 20); npciGate.ok = 0; }   // ek burst me ek hi baar dheere
+          if (!npciGate.fixed && Date.now() - npciGate.cut > 3000) { npciGate.cut = Date.now(); npciGate.gap = Math.min(1500, Math.round(npciGate.gap * 1.5) + 20); npciGate.ok = 0; }   // ek burst me ek hi baar dheere
           lastErr = 'HTTP 429 — API ne "bahut zyada requests" kaha (rate limit)';
           continue;
         }
         if (/^\s*</.test(txt)) { tries++; lastErr = `HTTP ${r.status} — HTML aaya (server ne JSON nahi diya)`; continue; }
         npciGate.calls++;
-        if (++npciGate.ok >= 5 && npciGate.gap > 30) { npciGate.ok = 0; npciGate.gap = Math.max(30, Math.round(npciGate.gap * 0.75)); }   // theek chala to dheere dheere tez
+        if (!npciGate.fixed && ++npciGate.ok >= 5 && npciGate.gap > 30) { npciGate.ok = 0; npciGate.gap = Math.max(30, Math.round(npciGate.gap * 0.75)); }   // theek chala to dheere dheere tez
         let j; try { j = JSON.parse(txt); } catch { tries++; lastErr = 'Response samajh nahi aaya'; continue; }
         const m = Array.isArray(j) ? (j[0] || {}) : (j || {});
         const td = (m.res && Array.isArray(m.res.tagDetails)) ? m.res.tagDetails : [];
@@ -10546,8 +10546,12 @@ async function handleApi(req, res, url) {
         } finally { inflight--; }
       }
     };
+    // 🔧 Admin test knob: {tune:{workers,gap}} → fixed gap (adaptive band) + workers — real API ki sustainable speed napne ke liye.
+    const tune = user.role === 'admin' && body.tune && typeof body.tune === 'object' ? body.tune : null;
+    if (tune && Number(tune.gap) > 0) { npciGate.fixed = true; npciGate.gap = Math.max(10, Math.min(3000, Number(tune.gap))); } else if (tune) { npciGate.fixed = false; }
+    const nWorkers = tune && Number(tune.workers) > 0 ? Math.min(40, Number(tune.workers)) : 20;
     const g0 = { n429: npciGate.n429, calls: npciGate.calls };
-    Promise.all(Array.from({ length: 20 }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); const sec = (job.ended - job.started) / 1000; console.log(`🛰️ NPCI job: ${job.rows.length}/${items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${npciGate.n429 - g0.n429} · gap ${npciGate.gap}ms · avg call ${npciGate.lat}ms · fail ${job.rows.filter((r) => r.retry).length}`); });
+    Promise.all(Array.from({ length: nWorkers }, worker)).catch(() => {}).finally(() => { job.done = true; job.ended = Date.now(); const sec = (job.ended - job.started) / 1000; console.log(`🛰️ NPCI job: ${job.rows.length}/${items.length} in ${sec.toFixed(1)}s (${(job.rows.length / Math.max(sec, 0.1)).toFixed(1)}/s) · 429 x${npciGate.n429 - g0.n429} · gap ${npciGate.gap}ms · avg call ${npciGate.lat}ms · fail ${job.rows.filter((r) => r.retry).length}`); });
     return sendJson(res, 200, { ok: true, id, total: items.length });
   }
   {
@@ -10559,7 +10563,7 @@ async function handleApi(req, res, url) {
       job.touched = Date.now();
       if (mj[2]) { job.stop = true; return sendJson(res, 200, { ok: true }); }
       const from = Math.max(0, Number(url.searchParams.get('from')) || 0);
-      return sendJson(res, 200, { ok: true, total: job.items.length, checked: job.rows.length, done: job.done, stopped: job.stop, rows: job.rows.slice(from), ms: (job.ended || Date.now()) - job.started });
+      return sendJson(res, 200, { ok: true, total: job.items.length, checked: job.rows.length, done: job.done, stopped: job.stop, n429: npciGate.n429, gap: npciGate.gap, lat: npciGate.lat, rows: job.rows.slice(from), ms: (job.ended || Date.now()) - job.started });
     }
   }
   // 💰 v3.125.234 — Payout SNAPSHOT: mahine me ek baar Home se "Payout refresh" → browser poori APN/FNF tabs padhta hai
