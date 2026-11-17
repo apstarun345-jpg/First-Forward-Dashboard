@@ -6244,48 +6244,72 @@ function dispatchBasisOptions(agents) {
   if (!b) return {};
   return { elapsed: { ff: b.ff && b.ff.days, gv: b.gv && b.gv.days }, months: { ff: b.ff && b.ff.curYm, gv: b.gv && b.gv.curYm } };
 }
+/** ⏰ v3.125.305 — dispatch email ka "slot" (daily = din, weekly = us hafte ka Monday, monthly = mahina) + sent-key me exact HH:MM. */
+function dispatchEmailSlot(schedule, ist, dateKey) {
+  if (schedule.kind === 'weekly') { const monday = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate())); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7)); return monday.toISOString().slice(0, 10); }
+  return schedule.kind === 'monthly' ? dateKey.slice(0, 7) : dateKey;
+}
+const dispatchEmailHHMM = (s) => `${String(s.hour).padStart(2, '0')}:${String(s.minute || 0).padStart(2, '0')}`;
+/** Abhi bhejna hai? (force nahi) — sasta check, data load se pehle. */
+function dispatchEmailDue(schedule, ist, dateKey) {
+  const nowMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  const atMin = schedule.hour * 60 + (schedule.minute || 0);
+  if (nowMin < atMin) return null;
+  if (schedule.kind === 'weekly' && ist.getUTCDay() !== schedule.weekday) return null;
+  if (schedule.kind === 'monthly' && Number(ist.getUTCDate()) !== schedule.day) return null;
+  // Aaj ka time nikal jaane ke BAAD schedule save kiya → aaj nahi (turant surprise mail nahi), agle slot se. Abhi chahiye to "Send now".
+  const savedAt = Number(schedule.savedAt) || 0;
+  if (savedAt) {
+    const sv = new Date(savedAt + 5.5 * 3600e3);
+    if (sv.toISOString().slice(0, 10) === dateKey && sv.getUTCHours() * 60 + sv.getUTCMinutes() > atMin) return null;
+  }
+  const slot = dispatchEmailSlot(schedule, ist, dateKey);
+  const sent = Array.isArray(db.notify.watch.dispatchEmailFired) ? db.notify.watch.dispatchEmailFired : [];
+  const key = `${slot}@${dispatchEmailHHMM(schedule)}`;
+  if (sent.includes(key)) return null;
+  // purane format (hash|slot, sirf ghanta) me aaj bhej chuke aur time wahi ghanta hai → dobara nahi
+  if ((schedule.minute || 0) === 0 && sent.some((x) => /^[0-9a-f]{16}\|/.test(x) && x.endsWith(`|${slot}`))) return null;
+  return key;
+}
+let dispatchEmailBusy = false, dispatchEmailFailAt = 0;
 async function sendDispatchPlanEmail(force = false, input = null) {
   const saved = db.settings.dispatchEmail || DEFAULT_DISPATCH_EMAIL;
   let schedule;
   try { schedule = normalizeDispatchEmail(input || saved, saved); }
   catch (err) { if (force) throw err; console.warn('dispatch email schedule:', err.message); return null; }
   if (!force && schedule.enabled !== true) return null;
+  const ist = istNow(), dateKey = dateKeyNow();
+  let sentKey = null;
+  if (!force) {
+    if (!db.notify || typeof db.notify !== 'object') db.notify = { items: [], watch: {} };
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    sentKey = dispatchEmailDue(schedule, ist, dateKey);
+    if (!sentKey || dispatchEmailBusy) return null;
+    if (Date.now() - dispatchEmailFailAt < 10 * 60e3) return null;   // fail hua tha → 10 min baad dobara (har minute sheet load nahi)
+  }
   const recipients = splitRecipients(schedule.recipients);
   if (!recipients.length) { if (force) throw new Error('Dispatch email recipients add karo.'); return null; }
   const emailCfg = db.settings.email || {};
   const mailCfg = { ...emailCfg, to: recipients.join(',') };
   if (!resolveProviders(mailCfg).length) { if (force) throw new Error('Email provider configure nahi — Settings → Features → Email me provider set karo.'); return null; }
-  const ist = istNow(), dateKey = dateKeyNow();
-  if (!force) {
-    if (ist.getUTCHours() < schedule.hour) return null;
-    if (schedule.kind === 'weekly' && ist.getUTCDay() !== schedule.weekday) return null;
-    if (schedule.kind === 'monthly' && Number(ist.getUTCDate()) !== schedule.day) return null;
-    const sent = Array.isArray(db.notify.watch.dispatchEmailFired) ? db.notify.watch.dispatchEmailFired : [];
-    const slot = schedule.kind === 'weekly'
-      ? (() => { const monday = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate())); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7)); return monday.toISOString().slice(0, 10); })()
-      : schedule.kind === 'monthly' ? dateKey.slice(0, 7) : dateKey;
-    const scheduleId = crypto.createHash('sha256').update(JSON.stringify(schedule)).digest('hex').slice(0, 16);
-    const sentKey = `${scheduleId}|${slot}`;
-    if (sent.includes(sentKey)) return null;
-  }
-  const sourceAgents = await loadDispatchAgents(schedule.channel);
-  if (!sourceAgents.length) throw new Error('Selected channel ke REPORT sheet me koi dispatch row nahi mili.');
-  const plan = buildDispatchPlan(sourceAgents, schedule, { settings: db.settings, days: Number(feats().suggestDays) || 15, now: ist, ...dispatchBasisOptions(sourceAgents) });
-  if (!plan.summary.agents && !plan.summary.tls) throw new Error('Selected filters ke liye dispatch data nahi mila.');
-  const email = dispatchEmailContent(plan, schedule, db.settings.brand || 'Dashboard', dateKey);
-  const result = await sendMail(mailCfg, email.subject, email.text, { html: email.html, attachments: email.attachments });
-  if (!force) {
-    const sent = Array.isArray(db.notify.watch.dispatchEmailFired) ? db.notify.watch.dispatchEmailFired : [];
-    const slot = schedule.kind === 'weekly'
-      ? (() => { const monday = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate())); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7)); return monday.toISOString().slice(0, 10); })()
-      : schedule.kind === 'monthly' ? dateKey.slice(0, 7) : dateKey;
-    const scheduleId = crypto.createHash('sha256').update(JSON.stringify(schedule)).digest('hex').slice(0, 16);
-    db.notify.watch.dispatchEmailFired = [...sent, `${scheduleId}|${slot}`].slice(-240);
-    persist('notify').catch(() => {});
-  }
-  logAudit(null, 'dispatch_email_sent', { actor: force ? 'admin:test' : 'scheduler', target: recipients.join(','), note: `${plan.summary.agents} agents · ${schedule.sections.join('+')} · ${result.provider}` });
-  console.log(`dispatch email ${force ? 'test ' : ''}sent (${dateKey} · ${plan.summary.agents} agents · ${schedule.kind})`);
-  return { date: dateKey, recipients: recipients.length, agents: plan.summary.agents, tls: plan.summary.tls, provider: result.provider, attached: email.attachments.map((a) => a.name) };
+  if (!force) dispatchEmailBusy = true;
+  try {
+    const sourceAgents = await loadDispatchAgents(schedule.channel);
+    if (!sourceAgents.length) throw new Error('Selected channel ke REPORT sheet me koi dispatch row nahi mili.');
+    const plan = buildDispatchPlan(sourceAgents, schedule, { settings: db.settings, days: Number(feats().suggestDays) || 15, now: ist, ...dispatchBasisOptions(sourceAgents) });
+    if (!plan.summary.agents && !plan.summary.tls) throw new Error('Selected filters ke liye dispatch data nahi mila.');
+    const email = dispatchEmailContent(plan, schedule, db.settings.brand || 'Dashboard', dateKey);
+    const result = await sendMail(mailCfg, email.subject, email.text, { html: email.html, attachments: email.attachments });
+    if (!force) {
+      const sent = Array.isArray(db.notify.watch.dispatchEmailFired) ? db.notify.watch.dispatchEmailFired : [];
+      db.notify.watch.dispatchEmailFired = [...sent, sentKey].slice(-240);
+      persist('notify').catch(() => {});
+    }
+    logAudit(null, 'dispatch_email_sent', { actor: force ? 'admin:test' : 'scheduler', target: recipients.join(','), note: `${plan.summary.agents} agents · ${schedule.agentType || 'all'} · ${schedule.sections.join('+')} · ${result.provider}` });
+    console.log(`dispatch email ${force ? 'test ' : ''}sent (${dateKey} ${force ? '' : dispatchEmailHHMM(schedule)} · ${plan.summary.agents} agents · ${schedule.kind} · ${schedule.agentType || 'all'})`);
+    return { date: dateKey, recipients: recipients.length, agents: plan.summary.agents, tls: plan.summary.tls, provider: result.provider, attached: email.attachments.map((a) => a.name) };
+  } catch (err) { if (!force) dispatchEmailFailAt = Date.now(); throw err; }
+  finally { if (!force) dispatchEmailBusy = false; }
 }
 
 // ---- 🧠 Smart Action Center notification ------------------------------------------------------
@@ -12508,7 +12532,7 @@ async function handleApi(req, res, url) {
       if (patch.email.host !== undefined) patch.email.host = String(patch.email.host || '').trim().slice(0, 200);
     }
     if (patch.dispatchEmail !== undefined) {
-      try { patch.dispatchEmail = normalizeDispatchEmail(patch.dispatchEmail, db.settings.dispatchEmail || DEFAULT_DISPATCH_EMAIL); }
+      try { patch.dispatchEmail = { ...normalizeDispatchEmail(patch.dispatchEmail, db.settings.dispatchEmail || DEFAULT_DISPATCH_EMAIL), savedAt: Date.now() }; }
       catch (err) { throw new HttpError(400, err.message); }
     }
     if (patch.stockMovement !== undefined) {
@@ -15840,6 +15864,8 @@ async function start() {
     //    weekly inactive users + 🔴 cover alert / 📉 stock history — boot par aur har 30 min.
     setTimeout(() => runScheduledChecks(), 15000);
     setInterval(() => runScheduledChecks(), 30 * 60e3).unref();
+    // ⏰ v3.125.305 — Dispatch plan email exact HH:MM par: har minute sasta check (data tabhi load hota hai jab time ho)
+    setInterval(() => { sendDispatchPlanEmail(false).catch((err) => console.warn('dispatch email:', String((err && err.message) || err).slice(0, 160))); }, 60e3).unref();
     // ⏪ v3.48: sheet history me purani saves hain to admin ko batao (khud kuch restore nahi karta).
     if (CLOUD_BACKEND) setTimeout(() => recoveryHint().catch(() => {}), 20000).unref?.();
     // 🧓 Stock ageing index pehle se bana lo (pehla user 1-2 min intezaar na kare). Render par default ON; STOCK_AGE_WARM=0 se band.

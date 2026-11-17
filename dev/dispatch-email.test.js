@@ -147,3 +147,34 @@ test('email subject/labels read well for a multi-selection', () => {
   assert.match(oneEmail.subject, /· GV Partner$/);
   assert.match(oneEmail.text, /GV Partner · All tags · High priority/);
 });
+
+test('v3.125.305: exact HH:MM time — "time" field se hour+minute, purane hour-only schedule bhi chalte hain', () => {
+  const a = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, time: '18:45' });
+  assert.equal(a.hour, 18); assert.equal(a.minute, 45); assert.equal('time' in a, false);
+  const old = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, hour: 7, minute: undefined });
+  assert.equal(old.hour, 7); assert.equal(old.minute, 0);
+  const keep = normalizeDispatchEmail({ time: '06:05' }, { ...DEFAULT_DISPATCH_EMAIL, hour: 9, minute: 30 });
+  assert.equal(keep.hour, 6); assert.equal(keep.minute, 5);
+  assert.throws(() => normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, minute: 60 }), /Minute/);
+  assert.throws(() => normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, time: '25:00' }), /Hour/);
+});
+
+test('v3.125.305: agent type filter — sirf Direct agents / sirf TL-managed', () => {
+  assert.equal(normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL }).agentType, 'all');
+  assert.throws(() => normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, agentType: 'boss' }), /Agent type/);
+  const base = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, sections: ['summary', 'agents', 'tls'] });
+  const direct = buildDispatchPlan(sources, { ...base, agentType: 'direct' }, { settings, days: 15, now });
+  assert.deepEqual(direct.agents.map((r) => r.id).sort(), ['D1', 'G2']);
+  assert.ok(direct.agents.every((r) => r.direct));
+  assert.ok(direct.tls.every((r) => r.direct), 'TL-wise CSV me sirf Direct group');
+  assert.equal(direct.summary.agents, 2);
+  const tl = buildDispatchPlan(sources, { ...base, agentType: 'tl' }, { settings, days: 15, now });
+  assert.deepEqual(tl.agents.map((r) => r.id).sort(), ['G1', 'R1', 'R2']);
+  assert.ok(tl.tls.every((r) => !r.direct));
+  const all = buildDispatchPlan(sources, base, { settings, days: 15, now });
+  assert.equal(all.summary.agents, 5);
+  const mail = dispatchEmailContent(direct, { ...base, agentType: 'direct' }, 'FF', '2026-09-29');
+  assert.match(mail.subject, /Direct agents \(no TL\)/);
+  assert.match(mail.text, /Direct agents \(no TL\)/);
+  assert.doesNotMatch(dispatchEmailContent(all, base, 'FF', '2026-09-29').subject, /Direct agents/);
+});
