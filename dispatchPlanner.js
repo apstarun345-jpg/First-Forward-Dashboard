@@ -669,6 +669,8 @@ FF.pages = FF.pages || {};
     const savedMail = authSettings.dispatchEmail || {};
     const mailSections = Array.isArray(savedMail.sections) ? savedMail.sections : ['summary', 'agents'];
     const mailHour = Number.isInteger(Number(savedMail.hour)) ? Number(savedMail.hour) : 9;
+    const mailMinute = Number.isInteger(Number(savedMail.minute)) ? Number(savedMail.minute) : 0;
+    const mailTime = `${String(mailHour).padStart(2, '0')}:${String(mailMinute).padStart(2, '0')}`;
     const mailWeekday = Number.isInteger(Number(savedMail.weekday)) ? Number(savedMail.weekday) : 1;
     const mailDay = Number.isInteger(Number(savedMail.day)) ? Number(savedMail.day) : 1;
     const opt = (value, label, selected) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`;
@@ -678,10 +680,11 @@ FF.pages = FF.pages || {};
         <div class="dp-mail-grid">
           <label class="fld dp-mail-recipients"><span>Recipients <small>(comma / semicolon separated)</small></span><input class="input" id="dp2-email-to" type="text" value="${esc(savedMail.recipients || authSettings.email?.to || '')}" maxlength="1200" placeholder="manager@example.com, ops@example.com"></label>
           <label class="fld"><span>Delivery</span><select class="select" id="dp2-email-kind">${opt('daily', 'Every day', savedMail.kind || 'daily')}${opt('weekly', 'Weekly', savedMail.kind || 'daily')}${opt('monthly', 'Monthly', savedMail.kind || 'daily')}</select></label>
-          <label class="fld"><span>Hour (IST)</span><input class="input" id="dp2-email-hour" type="number" min="0" max="23" value="${mailHour}"></label>
+          <label class="fld"><span>Time (IST)</span><input class="input" id="dp2-email-time" type="time" step="60" value="${mailTime}" required></label>
           <label class="fld dp-mail-weekday" data-dp-mail-weekday ${savedMail.kind === 'weekly' ? '' : 'hidden'}><span>Weekday</span><select class="select" id="dp2-email-weekday">${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => opt(String(i), d, String(mailWeekday))).join('')}</select></label>
           <label class="fld dp-mail-monthday" data-dp-mail-monthday ${savedMail.kind === 'monthly' ? '' : 'hidden'}><span>Day of month</span><select class="select" id="dp2-email-day">${Array.from({ length: 28 }, (_, i) => opt(String(i + 1), `${i + 1}`, String(mailDay))).join('')}</select></label>
           <label class="fld"><span>Channel <small>(multiple select)</small></span><button type="button" class="btn small" id="dp2-email-channel">🌐 Both channels</button></label>
+          <label class="fld"><span>Agent type</span><select class="select" id="dp2-email-type">${opt('all', '👥 All agents', savedMail.agentType || 'all')}${opt('direct', '🧑 Direct agents (no TL)', savedMail.agentType || 'all')}${opt('tl', '🧑‍💼 TL-managed', savedMail.agentType || 'all')}</select></label>
           <label class="fld"><span>Tag basis</span><select class="select" id="dp2-email-basis">${opt('total', 'All tags', savedMail.basis || 'total')}${opt('vc4', 'VC4', savedMail.basis || 'total')}${opt('comm', 'Commercial', savedMail.basis || 'total')}</select></label>
           <label class="fld"><span>Priority filter <small>(multiple select)</small></span><button type="button" class="btn small" id="dp2-email-priority">🎚️ All priorities</button></label>
           <label class="fld"><span>Maximum rows per CSV</span><select class="select" id="dp2-email-rows">${[50, 100, 250, 500].map((n) => opt(String(n), `${n} rows`, String(savedMail.maxRows || 250))).join('')}</select></label>
@@ -724,7 +727,8 @@ FF.pages = FF.pages || {};
         priority: mailPriority.length ? mailPriority.join(',') : 'all',
         maxRows: Number(U.$('#dp2-email-rows', root).value),
         kind: kindEl.value,
-        hour: Number(U.$('#dp2-email-hour', root).value),
+        time: U.$('#dp2-email-time', root).value || '09:00',
+        agentType: U.$('#dp2-email-type', root).value,
         weekday: Number(U.$('#dp2-email-weekday', root).value),
         day: Number(U.$('#dp2-email-day', root).value)
       });
@@ -743,16 +747,35 @@ FF.pages = FF.pages || {};
         selected: () => mailPriority, onChange: (v) => { mailPriority = v; }
       });
       const statusEl = U.$('#dp2-email-status', root);
+      /** ⏰ Agla mail kab (IST) — save ke baad confirm. Aaj ka time nikal chuka ho to agle din/slot se (server bhi yahi karta hai). */
+      const nextSendText = (f) => {
+        const [hh, mm] = String(f.time || '09:00').split(':').map(Number);
+        const ist = new Date(Date.now() + 5.5 * 3600e3);
+        const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        for (let add = 0; add < 62; add++) {
+          const d = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + add, hh, mm));
+          if (add === 0 && hh * 60 + mm < ist.getUTCHours() * 60 + ist.getUTCMinutes()) continue;
+          if (f.kind === 'weekly' && d.getUTCDay() !== f.weekday) continue;
+          if (f.kind === 'monthly' && d.getUTCDate() !== f.day) continue;
+          const day = add === 0 ? 'aaj' : add === 1 ? 'kal' : `${WD[d.getUTCDay()]} ${d.getUTCDate()} ${d.toLocaleString('en-IN', { month: 'short', timeZone: 'UTC' })}`;
+          return `${day} ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} IST`;
+        }
+        return '';
+      };
+      const typeText = (t) => (t === 'direct' ? 'Direct agents' : t === 'tl' ? 'TL-managed' : 'All agents');
+      if (savedMail.enabled === true && statusEl) { const f0 = readMailForm(); statusEl.textContent = `Schedule ON · ${typeText(f0.agentType)} · ${f0.time} IST · agla mail: ${nextSendText(f0) || '—'}`; }
       const saveBtn = U.$('#dp2-email-save', root);
       saveBtn.addEventListener('click', async () => {
         U.setButtonBusy(saveBtn, true, 'Saving…');
         try {
-          const out = await FF.auth.api('/api/settings', 'PUT', { settings: { dispatchEmail: readMailForm() } });
+          const form = readMailForm();
+          const out = await FF.auth.api('/api/settings', 'PUT', { settings: { dispatchEmail: form } });
           if (out.settings) FF.auth.applySettings(out.settings);
           const enabled = U.$('#dp2-email-enabled', root).checked;
           const badgeEl = U.$('.card-head .badge', U.$('#dp2-mail-card', root));
           if (badgeEl) { badgeEl.className = `badge ${enabled ? 'green' : 'gray'}`; badgeEl.textContent = enabled ? 'SCHEDULE ON' : 'SCHEDULE OFF'; }
-          if (statusEl) statusEl.textContent = enabled ? 'Schedule saved · recurring delivery is ON.' : 'Schedule saved · recurring delivery is OFF.';
+          const nxt = nextSendText(form);
+          if (statusEl) statusEl.textContent = enabled ? `Schedule saved · ON · ${typeText(form.agentType)} · agla mail: ${nxt || '—'}` : 'Schedule saved · recurring delivery is OFF.';
           U.toast('📧 Dispatch email schedule saved ✓', 'ok');
         } catch (err) { if (statusEl) statusEl.textContent = err.message; U.toast(err.message, 'err'); }
         finally { U.setButtonBusy(saveBtn, false); }
