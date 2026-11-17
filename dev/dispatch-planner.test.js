@@ -194,3 +194,29 @@ test('v3.125.257 — VC5+ ka cover 0 (stock 0) priority nahi banata', () => {
   assert.equal(c.coverB, 0);
   assert.notEqual(c.priority, 'High');
 });
+
+test('v3.125.306: FF + GV agents ka mobile — table column + CSV (sirf admin / contacts permission)', () => {
+  const gv = gvRows[0], ff = ffAgents[0];
+  const prevAuth = FF.auth;
+  gv.mobile = '9876543210'; ff.mobile = '9123456780';
+  try {
+    FF.auth = undefined;
+    const noPerm = DP.collectAgents().map((r) => DP.withCalc(r, 'total'));
+    assert.doesNotMatch(DP.tableHtml(noPerm, 'agents'), /9876543210|<span>Mobile/, 'permission nahi → mobile nahi');
+    assert.equal(DP.csvRow(noPerm.find((r) => r.name === 'GV Ramesh'), 'agents')[DP.csvHead('agents').indexOf('Mobile')], '');
+    FF.auth = { isAdmin: () => true, can: () => true };
+    const list = DP.collectAgents().map((r) => DP.withCalc(r, 'total'));
+    const html = DP.tableHtml(list, 'agents');
+    assert.match(html, /<span>Mobile/);
+    assert.match(html, /tel:9876543210/); assert.match(html, /tel:9123456780/);
+    const head = DP.csvHead('agents');
+    assert.equal(DP.csvRow(list.find((r) => r.name === 'GV Ramesh'), 'agents')[head.indexOf('Mobile')], '9876543210');
+    assert.equal(DP.csvRow(list.find((r) => r.name === 'Ravi Kumar'), 'agents')[head.indexOf('Mobile')], '9123456780');
+    // har row me utne hi cells jitne header (Mobile column se columns khiske nahi)
+    const cols = (html.match(/<thead>[\s\S]*?<\/thead>/)[0].match(/<th\b/g) || []).length;
+    const firstRow = html.match(/<tr class="dp2-row[\s\S]*?<\/tr>/)[0];
+    assert.equal((firstRow.match(/<td\b/g) || []).length, cols);
+    assert.equal((html.match(/<tfoot>[\s\S]*?<\/tfoot>/)[0].replace(/colspan="1"/g, '').match(/<td\b/g) || []).length, cols);
+    assert.ok(DP.passes(list.find((r) => r.name === 'GV Ramesh')) !== undefined);
+  } finally { FF.auth = prevAuth; delete gv.mobile; delete ff.mobile; }
+});

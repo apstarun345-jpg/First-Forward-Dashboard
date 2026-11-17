@@ -56,58 +56,84 @@ test('source priority wording normalizes only known labels and preserves unknown
   assert.equal(sourcePriority(''), '');
 });
 
-test('scheduled plan uses the shared run-rate formula and source priority (FF + GV)', () => {
+test('scheduled plan uses the page run-rate formula and stock-cover priority (FF + GV)', () => {
   const config = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, sections: ['summary', 'agents', 'tls'], maxRows: 500 });
   const plan = buildDispatchPlan(sources, config, { settings, days: 25, now });
   const ravi = plan.agents.find((r) => r.name === 'Ravi Kumar');
   assert.equal(ravi.rate, 10); // 280 ÷ 28
   assert.equal(ravi.required, 250);
   assert.equal(ravi.gross, 250); // stock is not subtracted
-  assert.equal(ravi.net, 150); // stock-subtracted quantity
+  assert.equal(ravi.net, 150); // stock-subtracted quantity (VC4/VC20 150 + VC5+ 0)
+  assert.equal(ravi.netA, 150); assert.equal(ravi.netB, 0);
   assert.equal(ravi.cover, 10);
-  assert.equal(plan.agents.find((r) => r.name === 'Source Review').priority, 'Review soon');
-  assert.equal(plan.agents.find((r) => r.name === 'Source Review').tagged, undefined, 'unknown priority is preserved, never promoted to High/Medium');
+  assert.equal(ravi.priority, 'Medium', 'cover 10 din → Medium (page jaisa), sheet "High" nahi');
+  assert.equal(ravi.sheetPriority, 'High');
+  assert.equal(plan.agents.find((r) => r.name === 'Sita Devi').priority, 'Low');      // cover 250 din
+  assert.equal(plan.agents.find((r) => r.name === 'Source Review').priority, 'High'); // issuance hai, stock 0
+  assert.equal(plan.agents.find((r) => r.name === 'GV Free').priority, 'High', 'GV sheet "Low" ho tab bhi cover 5 din → High');
   assert.equal(plan.summary.agents, 5);
-  assert.equal(plan.summary.high, 2);
-  assert.equal(plan.summary.medium, 0);
-  assert.equal(plan.summary.low, 2);
-  assert.equal(plan.summary.source, 1);
+  assert.equal(plan.summary.ff, 3); assert.equal(plan.summary.gv, 2);
+  assert.equal(plan.summary.high, 3);
+  assert.equal(plan.summary.medium, 1);
+  assert.equal(plan.summary.low, 1);
+  assert.equal(plan.summary.source, 0);
   const tl = plan.tls.find((r) => r.name === 'TL One');
   assert.equal(tl.agents, 2);
   assert.equal(tl.curV, 336);
   assert.equal(tl.stockV, 320, 'TL stock in the source report wins over the sum of member stock');
-  assert.equal(tl.priority, 'Medium');
+  assert.equal(tl.priority, 'Low', 'TL cover (VC4 300 ÷ 12/din = 25 din) → Low');
+  assert.equal(tl.sheetPriority, 'Medium');
   const gvTl = plan.tls.find((r) => r.ch === 'gv' && !r.direct);
-  assert.equal(gvTl.priority, '', 'do not invent a GV TL priority');
+  assert.equal(gvTl.priority, 'High');
 });
 
-test('channel / tag basis / source-priority filters apply to the emailed rows', () => {
+test('channel / tag basis / priority filters apply to the emailed rows', () => {
   const vc4 = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: 'gv', basis: 'vc4', priority: 'High', sections: ['agents'] });
   const plan = buildDispatchPlan(sources, vc4, { settings, days: 25, now });
-  assert.deepEqual(plan.agents.map((r) => r.name), ['GV Ramesh']);
+  assert.deepEqual(plan.agents.map((r) => r.name), ['GV Ramesh', 'GV Free']);
   assert.equal(plan.agents[0].rate, 5);
   assert.equal(plan.agents[0].required, 125);
-  const other = buildDispatchPlan(sources, { ...vc4, channel: 'all', basis: 'total', priority: 'other' }, { settings, days: 25, now });
-  assert.deepEqual(other.agents.map((r) => r.name), ['Source Review']);
-  const mixedTl = sources.slice(0, 2);
-  mixedTl[1] = { ...mixedTl[1], tlPriority: 'High' };
-  const group = buildDispatchPlan(mixedTl, { ...vc4, channel: 'ff', priority: 'other' }, { settings, days: 25, now });
-  assert.equal(group.tls[0].priority, 'Medium / High');
+  // issuance 0 + sheet ka unknown text → "other" (page jaisa, badla nahi jaata)
+  const idle = [...sources, { ...sources[2], name: 'Idle Review', agentId: 'D9', id: 'D9', cur: { vc4: 0, comm: 0, total: 0 } }];
+  const other = buildDispatchPlan(idle, { ...vc4, channel: 'all', basis: 'total', priority: 'other' }, { settings, days: 25, now });
+  assert.deepEqual(other.agents.map((r) => r.name), ['Idle Review']);
+  assert.equal(other.agents[0].priority, 'Review soon');
+  const lowIdle = buildDispatchPlan([{ ...sources[1], priority: 'High', cur: { vc4: 0, comm: 0, total: 0 } }], { ...vc4, channel: 'ff', priority: 'Low' }, { settings, days: 25, now });
+  assert.equal(lowIdle.agents.length, 1, 'issuance 0 → Low (sheet High ho tab bhi), page jaisa');
 });
 
-test('email builder includes selected CSV attachments and leaves unknown priority text intact', () => {
+test('email builder includes selected CSV attachments with mobile + page priority', () => {
   const schedule = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, sections: ['summary', 'agents', 'tls'], maxRows: 100 });
-  const plan = buildDispatchPlan(sources, schedule, { settings, days: 25, now });
+  const withMobile = sources.map((r) => ({ ...r }));
+  Object.defineProperty(withMobile[3], 'mobile', { value: '9876543210', enumerable: false });
+  withMobile[0].mobile = '9123456780';
+  const plan = buildDispatchPlan(withMobile, schedule, { settings, days: 25, now });
   const mail = dispatchEmailContent(plan, schedule, 'FF + GV', '2026-09-29');
   assert.match(mail.subject, /Dispatch Planner/);
   assert.match(mail.text, /without subtracting stock/);
-  assert.match(mail.text, /Other \/ unchanged source value 1/);
+  assert.match(mail.text, /First Forward 3 · GV Partner 2/);
+  assert.match(mail.text, /High 3 · Medium 1 · Low 1\./);
   assert.equal(mail.attachments.length, 2);
-  assert.match(mail.attachments[0].content, /Review soon/);
-  assert.match(mail.attachments[0].content, /Dispatch W\/O stock/);
+  const csv = mail.attachments[0].content.split('\r\n');
+  assert.match(csv[0], /^"Name","ID","Mobile","Channel"/);
+  assert.match(csv[0], /Dispatch W\/O stock/);
+  assert.ok(csv.some((l) => l.startsWith('"GV Ramesh","G1","9876543210","GV Partner"')), 'GV agent ka mobile');
+  assert.ok(csv.some((l) => l.startsWith('"Ravi Kumar","R1","9123456780","First Forward"')), 'FF agent ka mobile');
   assert.match(mail.attachments[1].name, /tl-summary/);
   const summaryOnly = dispatchEmailContent(plan, { ...schedule, sections: ['summary'] }, 'FF + GV', '2026-09-29');
   assert.equal(summaryOnly.attachments.length, 0);
+});
+
+test('v3.125.306: FF + GV + High/Medium — GV REPORT ki sheet priority "Low" ho tab bhi GV agents mail me (bug fix)', () => {
+  const gvLow = sources.map((r) => (r.ch === 'gv' ? { ...r, priority: 'Low' } : { ...r }));
+  const cfg = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: ['ff', 'gv'], priority: 'High,Medium', sections: ['summary', 'agents'], maxRows: 500 });
+  const plan = buildDispatchPlan(gvLow, cfg, { settings, days: 30, now });
+  assert.ok(plan.summary.gv > 0, 'GV agents aane chahiye');
+  assert.deepEqual(plan.agents.filter((r) => r.ch === 'gv').map((r) => r.name).sort(), ['GV Free', 'GV Ramesh']);
+  assert.ok(plan.agents.some((r) => r.ch === 'ff'));
+  // thresholds settings se (FF.config.thresholds jaisa)
+  const strict = buildDispatchPlan(gvLow, cfg, { settings: { ...settings, thresholds: { coverRed: 3, coverOrange: 4 } }, days: 30, now });
+  assert.ok(!strict.agents.some((r) => r.name === 'GV Free'), 'cover 5 din > 4 → Low');
 });
 
 /* 🔠 v3.18 — multiple selection in the scheduled dispatch email. */
@@ -125,14 +151,15 @@ test('channel + priority accept multiple values (array, comma or plus separated)
 test('multiple channels + priorities widen the emailed rows, single values behave as before', () => {
   const multi = normalizeDispatchEmail({ ...DEFAULT_DISPATCH_EMAIL, channel: 'ff,gv', priority: 'High', sections: ['agents'] });
   const plan = buildDispatchPlan(sources, multi, { settings, days: 25, now });
-  assert.deepEqual(plan.agents.map((r) => r.name).sort(), ['GV Ramesh', 'Ravi Kumar']);
+  assert.deepEqual(plan.agents.map((r) => r.name).sort(), ['GV Free', 'GV Ramesh', 'Source Review']);
 
   const two = buildDispatchPlan(sources, { ...multi, priority: 'High,Low' }, { settings, days: 25, now });
-  assert.deepEqual(two.agents.map((r) => r.name).sort(), ['GV Free', 'GV Ramesh', 'Ravi Kumar', 'Sita Devi']);
+  assert.deepEqual(two.agents.map((r) => r.name).sort(), ['GV Free', 'GV Ramesh', 'Sita Devi', 'Source Review']);
 
-  // single value = purana behaviour (regression lock)
   const single = buildDispatchPlan(sources, { ...multi, channel: 'gv', priority: 'High' }, { settings, days: 25, now });
-  assert.deepEqual(single.agents.map((r) => r.name), ['GV Ramesh']);
+  assert.deepEqual(single.agents.map((r) => r.name), ['GV Ramesh', 'GV Free']);
+  const ffOnly = buildDispatchPlan(sources, { ...multi, channel: 'ff', priority: 'Medium' }, { settings, days: 25, now });
+  assert.deepEqual(ffOnly.agents.map((r) => r.name), ['Ravi Kumar']);
 });
 
 test('email subject/labels read well for a multi-selection', () => {
