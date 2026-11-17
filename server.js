@@ -32,6 +32,7 @@ import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, L
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
+import { parseAnyFile } from './address-import.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
 // Ye classic script hai (koi export nahi): import se sirf execute hota hai aur global set karta hai.
@@ -134,7 +135,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip'
 };
-const BLOCKED_FILES = new Set(['server.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'address-import.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const robotPushState = new Map(); // 🤖 robot push dedupe / rate (per admin)
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
@@ -175,6 +176,10 @@ export const PAGE_PERMISSIONS = [
   { key: 'directAgents', label: 'Cross-channel · Direct Agents & TLs (FF APS + GV no-TL rule)', group: 'Cross Channel' },
   { key: 'multiCustomer', label: 'Cross-channel · Multiple Customer ID (EIR customer × month · issuing agent)', group: 'Cross Channel' },
   { key: 'aiAnalyst', label: 'Management · AI Business Analyst (GV + FF review)', group: 'Management' },
+  { key: 'addressBook', label: 'Management · Agents Address (page access)', group: 'Management' },
+  { key: 'addressFF', label: 'Management · Agents Address — First Forward addresses dekh sakta hai', group: 'Management' },
+  { key: 'addressGV', label: 'Management · Agents Address — GV Partner addresses dekh sakta hai', group: 'Management' },
+  { key: 'addressUpload', label: 'Management · Agents Address — file upload / import', group: 'Management' },
   { key: 'unusual', label: 'Cross-channel · Unusual Agent Activity (wrong VRN / replacement / chassis)', group: 'Cross Channel' },
   { key: 'npci', label: 'Cross-channel · NPCI Status (Tag ID / VRN / Chassis)', group: 'Cross Channel' },
   { key: 'ffAgentSummary', label: 'First Forward · Agent / TL Summary (share / PDF)', group: 'First Forward' },
@@ -776,7 +781,7 @@ function permissionDiff(before, after) {
 }
 const activityLast = new Map();
 // Client routes (app.js PAGES) — notification tap par seedha usi page par le jao.
-const CLIENT_PAGES = new Set(['gvPayout', 'gvApiReport', 'home', 'tagIssued', 'tagRequest', 'targets', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'charts', 'dispatchPlan', 'tlScorecard']);
+const CLIENT_PAGES = new Set(['addressBook', 'gvPayout', 'gvApiReport', 'home', 'tagIssued', 'tagRequest', 'targets', 'dashboard', 'trend', 'performance', 'stock', 'stockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock', 'gvStockReport', 'charts', 'dispatchPlan', 'tlScorecard']);
 /** Search/click ki "option" se client route banao (deep link — mobile push tap → seedha page). */
 function pageLinkFor(option, query) {
   const t = String(option || '').trim();
@@ -9659,11 +9664,12 @@ async function handleApi(req, res, url) {
     if (!force && agentMobileRt.data && Date.now() - agentMobileRt.at < 3 * 3600e3) return agentMobileRt.data;
     if (agentMobileRt.promise) return agentMobileRt.promise;
     agentMobileRt.promise = (async () => {
-      const ids = {}, names = {}, nameClash = new Set();
+      const ids = {}, names = {}, nameClash = new Set(), byMobile = {};
       let sources = { sheet: 0, address: 0, requests: 0 }, sheetError = '';
-      const put = (idList, name, mob, src, override) => {
+      const put = (idList, name, mob, src, override, chn) => {
         const d = tagDigits(mob).slice(-10);
         if (d.length !== 10 || /^0/.test(d)) return false;
+        { const first = (idList || []).map((x) => String(x || '').trim()).find(Boolean) || ''; const o = byMobile[d]; if (!o) byMobile[d] = { id: first, name: String(name || '').trim(), ch: chn || '' }; else { if (!o.id && first) o.id = first; if (!o.ch && chn) o.ch = chn; if (!o.name && name) o.name = String(name).trim(); } }
         idList.flatMap(mobIdKeys).forEach((k) => { if (override || !ids[k]) ids[k] = d; });
         const nk = mobNameKey(name);
         if (nk.length >= 4) { if (names[nk] && names[nk] !== d && !override) nameClash.add(nk); else names[nk] = d; }
@@ -9682,7 +9688,7 @@ async function handleApi(req, res, url) {
           try {
             const r = await readMobileSheet(store, sid, c.tab);
             let n = 0;
-            r.rows.forEach((row) => { if (put(row.ids, row.name, row.mobile, 'sheet', false)) n++; });
+            r.rows.forEach((row) => { if (put(row.ids, row.name, row.mobile, 'sheet', false, ch)) n++; });
             sources[`sheet_${ch}`] = n;
             detail[ch] = { tab: c.tab, rows: r.rows.length, used: n, cols: r.cols };
           } catch (err) { const m = String(err && err.message || err).slice(0, 160); detail[ch] = { tab: c.tab, error: m }; sheetError = sheetError ? `${sheetError} · ${ch}: ${m}` : `${ch}: ${m}`; }
@@ -9698,7 +9704,7 @@ async function handleApi(req, res, url) {
       // 3) Tag requests (sabse nayi wali last me → override)
       for (const r of (workspaceStore().tagRequests || [])) if (r && r.agent) put([r.agent.agentId, r.agent.id], r.agent.name, r.agent.mobile, 'requests', true);
       nameClash.forEach((k) => { delete names[k]; });   // ek naam ke do alag number → naam se mat batao
-      return { ok: true, at: new Date().toISOString(), ids, names, count: Object.keys(ids).length, sources, sheetError };
+      return { ok: true, at: new Date().toISOString(), ids, names, byMobile, count: Object.keys(ids).length, sources, sheetError };
     })().then((d) => { agentMobileRt.data = d; agentMobileRt.at = Date.now(); return d; }).finally(() => { agentMobileRt.promise = null; });
     return agentMobileRt.promise;
   }
@@ -9970,6 +9976,153 @@ async function handleApi(req, res, url) {
     return asContact({ mobile: pickF('mobile').replace(/[^\d+]/g, ''), address: pickF('address'), pincode: pickF('pincode'), dispatchName: pickF('dispatchName'), tl: pickF('tl'), lastRequestAt: pickF('lastRequestAt') });
   }
 
+  // 📍 v3.125.312 — AGENTS ADDRESS: Management → Agents Address. Address tab + tag-request addresses ek jagah; kisi bhi file se import.
+  //    Priority: pehle tag requests (agent ne jo address diya), phir Address tab. Import kabhi koi maujooda value nahi mitata (blank hi bharta hai).
+  const ADDR_LOG_TAB = 'Address Import Log';
+  const addrSync = (globalThis.__ffAddrSync ||= { running: false, total: 0, done: 0, failed: 0, error: '', at: '', log: '' });
+  const addrPreviews = (globalThis.__ffAddrPrev ||= new Map());
+  const addrPerm = (u, ch) => !!u && (u.role === 'admin' || (Array.isArray(u.permissions) && u.permissions.includes(ch === 'gv' ? 'addressGV' : 'addressFF')));
+  const addrChannels = (u) => ['ff', 'gv'].filter((c) => addrPerm(u, c));
+  const addrCanUpload = (u) => !!u && (u.role === 'admin' || (Array.isArray(u.permissions) && u.permissions.includes('addressUpload')));
+  const last10 = (v) => { const d = tagDigits(v); return d.length >= 10 ? d.slice(-10) : ''; };
+  const pickTxt = (...vals) => { for (const v of vals) { const t = String(v ?? '').trim(); if (t && t !== '+') return t; } return ''; };
+  /** Address tab (+memory) ∪ tag requests — tag request ke non-empty fields upar. Mobile se dedupe (sabse poori entry rehti hai). */
+  async function addressBookView() {
+    const map = await addressBookMap();
+    const rows = new Map();
+    const layer = (k, e, src) => { const old = rows.get(k) || {}; const m = { ...old, key: k, src: old.src && src === 'Address' ? old.src : src }; ['agentId', 'agent', 'channel', 'mobile', 'address', 'pincode', 'tl', 'updatedAt'].forEach((f) => { m[f] = pickTxt(e[f], old[f]); }); if (e.src) m.src = e.src; rows.set(k, m); };
+    for (const [k, e] of map) if (e) layer(k, e, 'Address');
+    for (const [k, e] of Object.entries(addressBookMemoryEntries())) if (e) layer(k, e, 'Address');
+    for (const r of (workspaceStore().tagRequests || [])) { const e = addressEntryFromRequest(r); if (e) { const old = rows.get(e.key) || {}; const m = { ...old, key: e.key, src: 'Tag request' }; ['agentId', 'agent', 'channel', 'mobile', 'address', 'pincode', 'tl', 'updatedAt'].forEach((f) => { m[f] = pickTxt(e[f], old[f]); }); rows.set(e.key, m); } }
+    const byMob = new Map(), out = [];
+    const score = (x) => (x.agentId ? 4 : 0) + (x.tl ? 2 : 0) + (x.src === 'Tag request' ? 1 : 0) + (x.address ? 1 : 0);
+    for (const x of rows.values()) {
+      const m = last10(x.mobile);
+      if (!m) { out.push(x); continue; }
+      const k = `${x.channel === 'gv' ? 'gv' : 'ff'}|${m}`;
+      const o = byMob.get(k);
+      if (!o) byMob.set(k, x);
+      else { const [hi, lo] = score(x) >= score(o) ? [x, o] : [o, x]; ['agentId', 'agent', 'address', 'pincode', 'tl'].forEach((f) => { hi[f] = pickTxt(hi[f], lo[f]); }); byMob.set(k, hi); }
+    }
+    return [...out, ...byMob.values()].map((x) => ({ key: x.key, id: x.agentId || '', name: x.agent || '', mobile: last10(x.mobile) || x.mobile || '', tl: x.tl || '', address: x.address || '', pincode: tagDigits(x.pincode).slice(0, 6), channel: x.channel === 'gv' ? 'gv' : 'ff', src: x.src, updatedAt: x.updatedAt || '' }));
+  }
+  /** Mobile se agent pehchano: (1) tag requests (2) Address book (3) mobile directory (4) REPORT sheets (TL / channel / naam). */
+  async function enrichAddressEntries(entries) {
+    const byMob = new Map();
+    const note = (m, o, src) => { if (m && !byMob.has(m)) byMob.set(m, { ...o, src }); else if (m) { const x = byMob.get(m); ['id', 'name', 'channel', 'tl'].forEach((f) => { if (!x[f] && o[f]) x[f] = o[f]; }); } };
+    for (const r of (workspaceStore().tagRequests || []).slice().reverse()) { const a = r && r.agent; if (a) note(last10(a.mobile), { id: String(a.agentId || '').trim(), name: a.name, channel: a.channel === 'gv' ? 'gv' : 'ff', tl: a.tl || a.tlName || '' }, 'Tag request'); }
+    let book = []; try { book = await addressBookView(); } catch { book = []; }
+    book.forEach((x) => note(last10(x.mobile), { id: x.id, name: x.name, channel: x.channel, tl: x.tl }, 'Address'));
+    let dir = null; try { dir = await agentMobileData(false); } catch { dir = null; }
+    const bm = (dir && dir.byMobile) || {};
+    const rep = { byId: new Map(), byMob: new Map() };
+    const idKey = (c, id) => `${c}|${String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, '')}`;
+    try {
+      const [ff, gv] = await Promise.all([dispatchReportTable('ff').then((t) => loadFfDispatchRows(t, db.settings)).catch(() => []), dispatchReportTable('gv').then((t) => loadGvDispatchRows(t, db.settings)).catch(() => [])]);
+      [...ff, ...gv].forEach((r) => { if (!r || !r.agentId) return; const o = { id: r.agentId, name: r.name || r.agentName, channel: r.ch === 'gv' ? 'gv' : 'ff', tl: r.tlName || r.tl || '' }; rep.byId.set(idKey(o.channel, o.id), o); const m = last10(r.mobile); if (m) rep.byMob.set(m, o); });
+    } catch { /* report optional */ }
+    const placeholder = /^(direct|direct agent|aps|no tl|n\/?a|-+|none|null|not assigned)$/i;
+    return entries.map((e) => {
+      const m = last10(e.mobile);
+      const out = { ...e, mobile: m || e.mobile || '', resolved: '' };
+      if (!m) return out;
+      const hit = byMob.get(m);
+      if (hit) { out.id = out.id || hit.id || ''; out.channel = out.channel || hit.channel || ''; out.tl = out.tl || hit.tl || ''; out.resolved = hit.src; }
+      const d = bm[m];
+      if (d) { if (!out.id && d.id) out.id = d.id; if (!out.channel && d.ch) out.channel = d.ch; if (!out.resolved) out.resolved = 'Mobile sheet'; }
+      const rr = rep.byMob.get(m);
+      if (rr && !out.id) { out.id = rr.id; out.channel = out.channel || rr.channel; if (!out.resolved) out.resolved = 'Report'; }
+      if (out.id) {
+        const r = rep.byId.get(idKey(out.channel || 'ff', out.id)) || rep.byId.get(idKey(out.channel === 'gv' ? 'ff' : 'gv', out.id));
+        if (r) { if (!out.channel) out.channel = r.channel; if (!out.tl && r.tl && !placeholder.test(String(r.tl).trim())) out.tl = r.tl; if (!out.resolved) out.resolved = 'Report'; }
+      }
+      return out;
+    });
+  }
+  /** Parsed entries → memory (durable + gzip backup) + Address tab (background chunks). Kabhi purani value nahi mitati (overwrite sirf admin ke kehne par, non-empty se). */
+  async function commitAddressImport(entries, meta) {
+    const mem = addressBookMemoryEntries();
+    const view = await addressBookView();
+    const byMob = new Map();
+    view.forEach((x) => { const m = last10(x.mobile); if (m && !byMob.has(`${m}`)) byMob.set(m, x); });
+    const stats = { added: 0, filled: 0, replaced: 0, unchanged: 0, noMobile: 0, unknownChannel: 0 };
+    const now = new Date().toISOString();
+    const fresh = [];
+    for (const e of entries) {
+      const m = last10(e.mobile);
+      const ex = m ? byMob.get(m) : null;
+      const channel = e.channel || (ex && ex.channel) || 'ff';
+      if (!e.channel && !(ex && ex.channel) && !e.id) stats.unknownChannel++;
+      const agentId = pickTxt(ex && ex.id, e.id);
+      const key = ex ? ex.key : addressBookKey({ channel, agentId, agentName: e.name });
+      const old = { ...(mem[key] || {}) };
+      const exv = ex || {};
+      const prior = { agentId: pickTxt(old.agentId, exv.id), agent: pickTxt(old.agent, exv.name), mobile: pickTxt(old.mobile, exv.mobile), address: pickTxt(old.address, exv.address), pincode: pickTxt(old.pincode, exv.pincode), tl: pickTxt(old.tl, exv.tl) };
+      const inc = { agentId, agent: e.name, mobile: m, address: shortText(String(e.address || '').replace(/\s+/g, ' '), 400), pincode: tagDigits(e.pincode).slice(0, 6), tl: shortText(e.tl, 120) };
+      const next = {}; let changed = false, filledAny = false, replacedAny = false;
+      for (const f of Object.keys(prior)) {
+        if (meta.overwrite && inc[f]) { next[f] = inc[f]; if (prior[f] && prior[f] !== inc[f]) replacedAny = true; }
+        else next[f] = pickTxt(prior[f], inc[f]);
+        if (next[f] !== prior[f]) { changed = true; if (!prior[f]) filledAny = true; }
+      }
+      if (!m) stats.noMobile++;
+      if (!ex && !mem[key]) stats.added++; else if (replacedAny) stats.replaced++; else if (filledAny) stats.filled++; else stats.unchanged++;
+      if (!changed && (ex || mem[key])) continue;
+      fresh.push({ ...old, key, ...next, channel: pickTxt(old.channel, exv.channel, channel), updatedAt: now, pendingSync: true, importedFrom: shortText(meta.file, 80) });
+    }
+    rememberAddressBook(fresh);
+    fresh.forEach((f) => { const t = mem[f.key]; if (t) { t.pendingSync = true; t.importedFrom = f.importedFrom; } });
+    addressBookRuntime.map = null; addressBookRuntime.at = 0;
+    try { await persist('notify'); } catch (err) { console.warn('address persist:', err && err.message); }
+    tagBackupSchedule(2000);
+    startAddressSheetSync(meta, entries).catch(() => {});
+    return { ...stats, saved: fresh.length };
+  }
+  /** Memory me pendingSync wali entries ko Address tab me chunk-wise likho (background; fail ho to pending rehti hain, dobara chalao). */
+  async function startAddressSheetSync(meta, logEntries) {
+    if (addrSync.running) return { running: true };
+    const store = sheetSyncStore();
+    const mem = addressBookMemoryEntries();
+    const pending = Object.values(mem).filter((e) => e && e.pendingSync && e.key);
+    Object.assign(addrSync, { running: true, total: pending.length, done: 0, failed: 0, error: '', at: new Date().toISOString(), log: '' });
+    if (!store) { addrSync.running = false; addrSync.error = 'Google Sheet (Apps Script) connected nahi — data site me safe hai, sheet jodte hi sync hoga.'; return addrSync; }
+    try {
+      for (let i = 0; i < pending.length; i += 50) {
+        const chunk = pending.slice(i, i + 50);
+        try {
+          await store.call('upsertaddresses', { tab: ADDRESS_BOOK_TAB, rows: chunk.map((e) => ({ key: e.key, agentId: e.agentId || '', agent: e.agent || '', channel: e.channel === 'gv' ? 'gv' : 'ff', mobile: e.mobile || '', address: e.address || '', pincode: e.pincode || '', tl: e.tl || '', updatedAt: e.updatedAt || new Date().toISOString() })) }, { timeoutMs: 120e3, attempts: 2 });
+          chunk.forEach((e) => { const t = mem[e.key]; if (t) { delete t.pendingSync; t.syncedAt = new Date().toISOString(); } });
+          addrSync.done += chunk.length;
+        } catch (err) { addrSync.failed += chunk.length; addrSync.error = String(err && err.message || err).slice(0, 160); }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      // 🧾 Import log (append-only) — har import ki poori row Sheet me alag tab me, taki file ka original data kabhi na jaaye
+      if (logEntries && logEntries.length && !addrSync.failed) {
+        try {
+          const header = ['Imported At', 'By', 'File', 'Name', 'Mobile', 'Agent ID', 'TL', 'Channel', 'Address', 'Pincode', 'Matched from'];
+          for (let i = 0; i < logEntries.length; i += 400) {
+            const rows = logEntries.slice(i, i + 400).map((e) => [new Date().toISOString(), meta.by || '', meta.file || '', e.name || '', e.mobile || '', e.id || '', e.tl || '', e.channel || '', e.address || '', e.pincode || '', e.resolved || '']);
+            await store.call('appendrows', { tab: ADDR_LOG_TAB, header, rows }, { timeoutMs: 120e3, attempts: 2 });
+          }
+          addrSync.log = `${logEntries.length} rows → "${ADDR_LOG_TAB}" tab`;
+        } catch (err) { addrSync.log = `log skip: ${String(err && err.message || err).slice(0, 100)}`; }
+      }
+    } finally {
+      addrSync.running = false; addrSync.at = new Date().toISOString();
+      addressBookRuntime.map = null; addressBookRuntime.at = 0;
+      try { await persist('notify'); } catch { /* retry next time */ }
+      tagBackupSchedule(2000);
+    }
+    return addrSync;
+  }
+  const addrMatch = (row, terms, fields) => {
+    if (!terms.length) return true;
+    return terms.some((t) => fields.some((f) => {
+      if (f === 'mobile' || f === 'pincode') { const d = tagDigits(t); return d.length >= 3 && tagDigits(row[f]).includes(d); }
+      if (f === 'id') return String(row.id || '').toLowerCase().includes(t);
+      return String(row[f] || '').toLowerCase().includes(t);
+    }));
+  };
   /** Apps Script store — storage backend se independent (files backend par bhi sheet sync chale). */
   let tagSheetStore = null;
   function sheetSyncStore() {
@@ -10639,10 +10792,65 @@ async function handleApi(req, res, url) {
     res.setHeader('Cache-Control', 'private, no-store');
     return sendJson(res, 200, { ok: true, company: 'APNAPAYMENT SERVICES PRIVATE LIMITED', months, readtab: PO.readtab, at: new Date().toISOString() });
   }
+  // 📍 Agents Address (v3.125.312) — search / preview / commit / sync. Channel-wise access admin deta hai (addressFF / addressGV), upload: admin ya addressUpload.
+  if (p.startsWith('/api/address-book')) {
+    if (!user) throw new HttpError(401, 'Login required.');
+    const chans = addrChannels(user);
+    const syncInfo = () => ({ running: addrSync.running, total: addrSync.total, done: addrSync.done, failed: addrSync.failed, error: addrSync.error, at: addrSync.at, log: addrSync.log, pending: Object.values(addressBookMemoryEntries()).filter((e) => e && e.pendingSync).length });
+    if (p === '/api/address-book' && method === 'GET') {
+      if (!chans.length) throw new HttpError(403, 'Agents Address dekhne ki permission nahi hai.');
+      const want = String(url.searchParams.get('channel') || 'all').toLowerCase();
+      const allowed = want === 'ff' || want === 'gv' ? chans.filter((c) => c === want) : chans;
+      const terms = String(url.searchParams.get('q') || '').split(/[\n,;\t]+/).map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 300);
+      const fields = String(url.searchParams.get('fields') || 'name,mobile,pincode,id').split(',').map((f) => f.trim()).filter((f) => ['name', 'mobile', 'pincode', 'id', 'address', 'tl'].includes(f));
+      const limit = Math.min(5000, Math.max(1, Number(url.searchParams.get('limit')) || 300));
+      const view = (await addressBookView()).filter((x) => allowed.includes(x.channel));
+      const counts = { ff: 0, gv: 0 }; view.forEach((x) => { counts[x.channel]++; });
+      const hit = view.filter((x) => addrMatch(x, terms, fields.length ? fields : ['name', 'mobile', 'pincode', 'id'])).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      res.setHeader('Cache-Control', 'private, no-store');
+      return sendJson(res, 200, { ok: true, total: hit.length, all: view.length, counts, channels: chans, canUpload: addrCanUpload(user), rows: hit.slice(0, limit), sync: syncInfo() });
+    }
+    if (p === '/api/address-book/status' && method === 'GET') {
+      if (!chans.length) throw new HttpError(403, 'Permission nahi hai.');
+      return sendJson(res, 200, { ok: true, sync: syncInfo() });
+    }
+    if (!addrCanUpload(user)) throw new HttpError(403, 'Address upload karne ki permission nahi hai (admin se "Address upload" access mango).');
+    if (p === '/api/address-book/preview' && method === 'POST') {
+      const MAXB = 40 * 1024 * 1024;
+      const raw = await new Promise((resolve, reject) => { const chunks = []; let size = 0; req.on('data', (c) => { size += c.length; if (size > MAXB) { reject(new HttpError(413, 'File bahut badi hai (max 40 MB).')); req.destroy(); return; } chunks.push(c); }); req.on('end', () => resolve(Buffer.concat(chunks))); req.on('error', reject); });
+      if (!raw.length) throw new HttpError(400, 'File khaali hai.');
+      let fname = 'upload'; try { fname = decodeURIComponent(String(req.headers['x-file-name'] || 'upload')).slice(0, 120); } catch { fname = 'upload'; }
+      let parsed;
+      try { parsed = parseAnyFile(fname, raw); } catch (err) { throw new HttpError(422, `File padh nahi paya: ${String(err && err.message || err).slice(0, 160)}`); }
+      if (!parsed.entries.length) throw new HttpError(422, 'Is file me koi Name / Mobile / Address nahi mila.');
+      const entries = await enrichAddressEntries(parsed.entries.slice(0, 20000));
+      const id = crypto.randomBytes(8).toString('hex');
+      addrPreviews.set(id, { at: Date.now(), entries, file: fname, by: user.name || user.username || '' });
+      [...addrPreviews.keys()].slice(0, Math.max(0, addrPreviews.size - 4)).forEach((k) => addrPreviews.delete(k));
+      const c = (f) => entries.filter(f).length;
+      const stats = { total: entries.length, kind: parsed.kind, withId: c((e) => e.id), ff: c((e) => e.channel === 'ff'), gv: c((e) => e.channel === 'gv'), unknownChannel: c((e) => !e.channel), withTl: c((e) => e.tl), noMobile: c((e) => !e.mobile), noAddress: c((e) => !e.address), noPincode: c((e) => !e.pincode), review: c((e) => (e.flags || []).includes('check')) };
+      return sendJson(res, 200, { ok: true, previewId: id, file: fname, stats, rows: entries.slice(0, 200) });
+    }
+    if (p === '/api/address-book/commit' && method === 'POST') {
+      const body = await readBody(req);
+      const pv = addrPreviews.get(String(body.previewId || ''));
+      if (!pv) throw new HttpError(410, 'Preview purana ho gaya — file dobara upload karo.');
+      if (addrSync.running) throw new HttpError(409, 'Pichla sync abhi chal raha hai — thodi der baad try karo.');
+      const out = await commitAddressImport(pv.entries, { file: pv.file, by: pv.by, overwrite: body.overwrite === true });
+      addrPreviews.delete(String(body.previewId));
+      return sendJson(res, 200, { ok: true, ...out, sync: syncInfo() });
+    }
+    if (p === '/api/address-book/sync' && method === 'POST') {
+      if (addrSync.running) return sendJson(res, 200, { ok: true, sync: syncInfo() });
+      startAddressSheetSync({ file: 'manual sync', by: user.name || '' }, []).catch(() => {});
+      return sendJson(res, 200, { ok: true, sync: syncInfo() });
+    }
+    throw new HttpError(404, 'Not found');
+  }
   if (p === '/api/agent-mobiles' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required.');
     if (user.role !== 'admin' && !(Array.isArray(user.permissions) && user.permissions.includes('contacts'))) throw new HttpError(403, 'Mobile numbers dekhne ki permission nahi hai.');
-    const d = await agentMobileData(url.searchParams.get('fresh') === '1' && user.role === 'admin');
+    const { byMobile: _bm, ...d } = await agentMobileData(url.searchParams.get('fresh') === '1' && user.role === 'admin');
     res.setHeader('Cache-Control', 'private, max-age=600');
     return sendJson(res, 200, d);
   }

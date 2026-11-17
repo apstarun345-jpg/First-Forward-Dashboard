@@ -653,7 +653,7 @@ function doPost(e) {
           tl: String(r[7] || '').trim(), updatedAt: r[8] instanceof Date ? r[8].toISOString() : String(r[8] || '')
         };
       }).filter(function (x) { return !!x.key; });
-      return json_({ ok: true, tab: aTab, rows: aOut.slice(-5000), spreadsheet: aSs.getName(), spreadsheetId: aSs.getId(), url: aSs.getUrl() });
+      return json_({ ok: true, tab: aTab, rows: aOut.slice(-20000), spreadsheet: aSs.getName(), spreadsheetId: aSs.getId(), url: aSs.getUrl() });
     }
 
     if (body.action === 'upsertaddresses') {

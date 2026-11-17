@@ -90,6 +90,7 @@ window.FF = window.FF || {};
     aiAnalyst: [...INSIGHT_DEPS, 'aiAnalyst'],
     unusual: ['pdf', 'unusual-scan', 'unusual'],
     npciStatus: ['npciStatus'],
+    addressBook: ['addressBook'],
     ffAgentSummary: [...SUMMARY_DEPS, 'agentSummary', 'gvTruth', 'summaryUI'],
     gvAgentSummary: [...SUMMARY_DEPS, 'gvpages', 'agentSummary', 'gvTruth', 'agentBoard', 'masterSearch', 'summaryUI'],
     settings: [...PROFILE_DEPS, 'agentSummary', 'unusual-scan', 'unusual', 'settings']
