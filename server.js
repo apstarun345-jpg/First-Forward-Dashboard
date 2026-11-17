@@ -6221,10 +6221,15 @@ async function overlayDispatchEirIssuance(agents) {
     if (map) add(map, r.ch, r.id, r.name, r.cls, r.n);
   }
   void previousYm;
-  const find = (map, agent) => map.get(key(agent.ch, 'id', agent.agentId || agent.id)) || map.get(key(agent.ch, 'name', agent.name || agent.agentName)) || { vc4: 0, comm: 0, total: 0 };
+  const hit = (map, agent) => map.get(key(agent.ch, 'id', agent.agentId || agent.id)) || map.get(key(agent.ch, 'name', agent.name || agent.agentName)) || null;
+  const find = (map, agent) => hit(map, agent) || { vc4: 0, comm: 0, total: 0 };
   // REPORT remains the operational source for stock, priority, status, and TL metadata. Only
   // these current/last issuance fields are replaced, so scheduled email matches the browser EIR path.
   agents.forEach((agent) => {
+    // 🟩 v3.125.307 — GV ki asli issuance GV Master sheet me hai (page FF.gv.issuanceRows padhta hai), EIR sheet me nahi —
+    // EIR se GV agent ka match na mile to REPORT ki apni this/last-month issuance rakho (page ke numbers se same).
+    // Pehle yahan 0 ho jaata tha → run-rate 0 → GV agents High/Medium filter me mail se gayab.
+    if (agent.ch === 'gv' && !hit(maps.cur, agent) && !hit(maps.last, agent)) return;
     const cur = find(maps.cur, agent), last = find(maps.last, agent);
     agent.cur = { vc4: cur.vc4, comm: cur.comm, total: cur.total };
     agent.last = { vc4: last.vc4, comm: last.comm, total: last.total };
