@@ -3030,6 +3030,9 @@ html[data-theme="dark"] .dp2-class-chip b { color: #5eead4; }
 .dp2-row.is-direct td:first-child { box-shadow: inset 3px 0 0 #0d9488; }
 .dp2-name b { display: block; font-size: 13.5px; }
 .dp2-name small { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.dp2-mobcell { white-space: nowrap; }
+.dp2-mob { color: var(--brand); text-decoration: none; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.dp2-mob:hover { text-decoration: underline; }
 .dp2-ch.ff { background: #dbeafe; color: #1d4ed8; }
 .dp2-ch.gv { background: #ccfbf1; color: #0f766e; }
 .dp2-tl { color: var(--brand); font-weight: 700; cursor: pointer; text-decoration: underline dotted; }

@@ -249,7 +249,7 @@ FF.pages = FF.pages || {};
         kind: 'agent', ch: 'ff', name: clean(a.name || a.agentId), id: clean(a.agentId || a.id),
         tl: direct ? '' : clean(a.tlName), tlId: clean(a.tlId), direct,
         directLabel: direct ? FF.config.directLabel(a, 'ff') : '', priority: prioOf(a.agentPriority || a.priority),
-        status: clean(a.agentStatus),
+        status: clean(a.agentStatus), mobile: clean(a.mobile),
         cur: trio(a.curVc4, a.curNvc4, a.curTotal), last: trio(a.lastVc4, a.lastNvc4, a.lastTotal), stock: trio(a.stockVc4, a.stockNvc4, a.stockTotal),
         stockClasses: stockMix.classes, stockClassAvailable: stockMix.available,
         tlStock: a.tlStockTotal != null || a.tlStockVc4 != null ? trio(a.tlStockVc4, a.tlStockNvc4, a.tlStockTotal) : null,
@@ -271,7 +271,7 @@ FF.pages = FF.pages || {};
         out.push({
           kind: 'agent', ch: 'gv', name: clean(r.agentName || r.agentId), id: clean(r.agentId),
           tl: direct ? '' : clean(r.tlName), tlId: clean(r.tlId), direct,
-          directLabel: direct ? FF.config.directLabel(r, 'gv') : '', priority: prioOf(r.priority), status: clean(r.agentStatus),
+          directLabel: direct ? FF.config.directLabel(r, 'gv') : '', priority: prioOf(r.priority), status: clean(r.agentStatus), mobile: clean(r.mobile),
           cur, last, stock: trio(r.stockVc4, r.stockComm, r.stockTotal),
           stockClasses: stockMix.classes, stockClassAvailable: stockMix.available,
           tlStock: r.tlStockTotal != null ? trio(r.tlStockVc4, r.tlStockComm, r.tlStockTotal) : null, tlPriority: ''
@@ -353,7 +353,7 @@ FF.pages = FF.pages || {};
     prio: (r, v) => v === 'all' || (v === 'other' ? !KNOWN_PRIORITIES.has(r.priority) : r.priority === v),
     need: (r, v) => v === 'all' || (v === 'need' ? !r.direct && r.net > 0 : v === 'low' ? r.cover != null && r.cover < 7 : v === 'zero' ? r.stockV <= 0 : true),
     tl: (r, v) => !v || (r.kind === 'tl' ? norm(r.name) === norm(v) : norm(r.tl) === norm(v)),
-    q: (r, v) => { const q = clean(v).toLowerCase(); return !q || [r.name, r.id, r.tl, r.directLabel, r.ch === 'gv' ? 'gv' : 'ff first forward', r.priority].join(' ').toLowerCase().includes(q); }
+    q: (r, v) => { const q = clean(v).toLowerCase(); return !q || [r.name, r.id, r.tl, r.directLabel, r.ch === 'gv' ? 'gv' : 'ff first forward', r.priority, canMob() ? mobileOf(r) : ''].join(' ').toLowerCase().includes(q); }
   };
   /** Multi-select aware filter test. `skip` = ek dim mat lagao (chip counters ke liye). */
   const passes = (r, skip) => Object.keys(DIMS).every((k) => {
@@ -397,7 +397,7 @@ FF.pages = FF.pages || {};
   const prioBadge = (p) => {
     const value = clean(p) || '—';
     const tone = value === 'High' ? 'red' : value === 'Medium' ? 'amber' : value === 'Low' ? 'green' : 'gray';
-    return `<span class="badge ${tone}" title="Priority from source sheet">${esc(value)}</span>`;
+    return `<span class="badge ${tone}" title="Priority = stock cover (stock ÷ run-rate) · 7 din se kam High, 15 se kam Medium">${esc(value)}</span>`;
   };
   const chBadge = (ch) => `<span class="dp2-ch ${ch}">${CH[ch].icon} ${CH[ch].short}</span>`;
   const coverCell = (c) => {
@@ -406,6 +406,20 @@ FF.pages = FF.pages || {};
     return `<span class="dp2-cover ${tone}">${fmt(c, true)} <small>din</small></span>`;
   };
   const growthChip = (g) => (g == null ? '' : `<small class="dp2-gr ${g >= 0 ? 'up' : 'down'}">${g >= 0 ? '▲' : '▼'} ${Math.abs(g).toFixed(0)}%</small>`);
+  // 📞 v3.125.306 — agent ka mobile (FF + GV): Sheet4 agent master / REPORT ka apna / 10-digit ID / GV REPORT
+  // (masterProfile.mobileFor) → server mobile directory (Agent Details sheet + Address book + requests). Sirf admin / "contacts".
+  const canMob = () => { try { return !!(FF.auth && (FF.auth.isAdmin() || FF.auth.can('contacts'))); } catch { return false; } };
+  const okMob = (m) => { const v = clean(m); return v && !/^na$/i.test(v) ? v : ''; };
+  function mobileOf(r) {
+    if (!r || r.kind === 'tl' || !canMob()) return '';
+    const own = okMob(r.mobile);
+    let m = '';
+    try { if (FF.masterProfile && FF.masterProfile.mobileFor) m = okMob(FF.masterProfile.mobileFor(r.name, r.id, own)); } catch { /* optional */ }
+    if (!m) m = own;
+    if (!m) try { m = okMob(FF.agentMobiles && FF.agentMobiles.of && FF.agentMobiles.of({ id: r.id, name: r.name })); } catch { /* optional */ }
+    return m;
+  }
+  const mobileCell = (r) => { const m = mobileOf(r); return m ? `<a class="dp2-mob" href="tel:${esc(m)}" title="Call ${esc(r.name)}">📞 ${esc(m)}</a>` : '<span class="dim">—</span>'; };
   const typeLabel = (r) => (r.direct ? `<span class="direct-chip">🚫 ${esc(r.directLabel || 'Direct')}</span>` : esc(r.tl || '—'));
 
   // ---- table --------------------------------------------------------------------------------------------
@@ -413,7 +427,7 @@ FF.pages = FF.pages || {};
     const days = U.suggestDays(), el = elText(lastList);
     const c = [
       { k: 'name', t: view === 'tls' ? 'TL' : 'Agent' },
-      ...(view === 'tls' ? [{ k: 'agents', t: 'Agents', num: 1 }] : [{ k: 'tl', t: 'TL' }]),
+      ...(view === 'tls' ? [{ k: 'agents', t: 'Agents', num: 1 }] : [{ k: 'tl', t: 'TL' }, ...(canMob() ? [{ k: '', t: 'Mobile' }] : [])]),
       { k: 'prio', t: 'Priority' },
       { k: 'last', t: 'Last month', num: 1, sub: 'issuance' },
       { k: 'cur', t: 'This month', num: 1, sub: 'issuance' },
@@ -442,7 +456,7 @@ FF.pages = FF.pages || {};
     const nameCell = `<div class="dp2-name"><b>${esc(r.name)}</b><small>${chBadge(r.ch)}${r.id ? ` <span>${esc(r.id)}</span>` : ''}${r.direct && view === 'tls' ? ` <span class="direct-chip">🚫 direct</span>` : ''}</small></div>`;
     const on = picked.has(r.uid);
     return `<tr class="dp2-row ${r.direct ? 'is-direct' : ''} ${r.cover != null && r.cover < 7 && !r.direct ? 'is-low' : ''} ${on ? 'is-picked' : ''}" data-dp-open="${r.uid}">
-      <td class="dp2-pick"><input type="checkbox" data-dp-pick="${r.uid}" ${on ? 'checked' : ''} aria-label="Select ${esc(r.name)}"></td><td class="dp2-idx">${i + 1}</td><td>${nameCell}</td>${view === 'tls' ? `<td class="num">${fmt(r.agents)}</td>` : `<td>${tlCell}</td>`}<td>${prioBadge(r.priority)}</td>
+      <td class="dp2-pick"><input type="checkbox" data-dp-pick="${r.uid}" ${on ? 'checked' : ''} aria-label="Select ${esc(r.name)}"></td><td class="dp2-idx">${i + 1}</td><td>${nameCell}</td>${view === 'tls' ? `<td class="num">${fmt(r.agents)}</td>` : `<td>${tlCell}</td>${canMob() ? `<td class="dp2-mobcell">${mobileCell(r)}</td>` : ''}`}<td>${prioBadge(r.priority)}</td>
       <td class="num">${fmt(r.lastV)}</td><td class="num"><b>${fmt(r.curV)}</b>${growthChip(r.c.growth)}</td><td class="num">${fmt(r.rate, true)}</td><td class="num">${fmt(r.required)}</td><td class="num">${fmt(r.stockV)}</td><td>${stockClassCell(r)}</td>
       <td class="num dp2-hot1"><b>${fmt(r.net)}</b></td><td class="num dp2-hot2"><b>${fmt(r.netA)}</b></td><td class="num dp2-hot2"><b>${fmt(r.netB)}</b></td><td class="num">${coverCell(r.coverA)}</td><td class="num">${coverCell(r.coverB)}</td>
       <td><span class="dp2-act ${r.action.cls}">${r.action.t}</span></td></tr>`;
@@ -451,8 +465,8 @@ FF.pages = FF.pages || {};
     const shown = list.slice(0, state.limit);
     const t = agg(list);
     const label = view === 'tls' ? 'TLs' : 'agents';
-    const foot = list.length ? `<tfoot><tr class="row-total"><td></td><td></td><td colspan="${view === 'tls' ? 1 : 1}">Total · ${fmt(list.length)} ${label}</td><td class="num">${view === 'tls' ? fmt(U.sum(list, (r) => r.agents)) : ''}</td><td></td><td class="num">${fmt(t.last)}</td><td class="num">${fmt(t.cur)}</td><td class="num">${fmt(t.rate, true)}</td><td class="num">${fmt(t.required)}</td><td class="num">${fmt(t.stock)}</td><td></td><td class="num dp2-hot1">${fmt(t.net)}</td><td class="num dp2-hot2">${fmt(t.netA)}</td><td class="num dp2-hot2">${fmt(t.netB)}</td><td class="num">${coverCell(t.coverA)}</td><td class="num">${coverCell(t.coverB)}</td><td></td></tr></tfoot>` : '';
-    const body = shown.map((r, i) => rowHtml(r, i, view)).join('') || `<tr><td colspan="17"><div class="empty-state">Is filter par koi ${label === 'TLs' ? 'TL' : 'agent'} nahi mila<br><span class="dim small">Filters clear karke dekho</span></div></td></tr>`;
+    const foot = list.length ? `<tfoot><tr class="row-total"><td></td><td></td><td colspan="${view === 'tls' ? 1 : 1}">Total · ${fmt(list.length)} ${label}</td><td class="num">${view === 'tls' ? fmt(U.sum(list, (r) => r.agents)) : ''}</td>${view !== 'tls' && canMob() ? '<td></td>' : ''}<td></td><td class="num">${fmt(t.last)}</td><td class="num">${fmt(t.cur)}</td><td class="num">${fmt(t.rate, true)}</td><td class="num">${fmt(t.required)}</td><td class="num">${fmt(t.stock)}</td><td></td><td class="num dp2-hot1">${fmt(t.net)}</td><td class="num dp2-hot2">${fmt(t.netA)}</td><td class="num dp2-hot2">${fmt(t.netB)}</td><td class="num">${coverCell(t.coverA)}</td><td class="num">${coverCell(t.coverB)}</td><td></td></tr></tfoot>` : '';
+    const body = shown.map((r, i) => rowHtml(r, i, view)).join('') || `<tr><td colspan="${view !== 'tls' && canMob() ? 18 : 17}"><div class="empty-state">Is filter par koi ${label === 'TLs' ? 'TL' : 'agent'} nahi mila<br><span class="dim small">Filters clear karke dekho</span></div></td></tr>`;
     return `<div class="table-wrap dp2-wrap"><table class="dp2-table">${head(view)}<tbody>${body}</tbody>${foot}</table></div>
       ${list.length > shown.length ? `<div class="dp2-more"><button class="btn small" data-dp-more="1">⬇ Aur dikhao (${fmt(list.length - shown.length)} baaki)</button><span class="dim small">Showing ${fmt(shown.length)} / ${fmt(list.length)} · sort karne par poori list sort hoti hai</span></div>` : ''}`;
   }
@@ -508,8 +522,8 @@ FF.pages = FF.pages || {};
   }
 
   // ---- export / share -----------------------------------------------------------------------------------
-  const CSV_HEAD = (view) => [view === 'tls' ? 'TL' : 'Agent', 'ID', 'Channel', 'Type', view === 'tls' ? 'Agents' : 'TL', 'Priority', 'Last month', 'This month', 'Run-rate / day', `Required (× ${U.suggestDays()} din)`, 'Stock', view === 'tls' ? 'Agents stock · class-wise sum' : 'All stock · class-wise mix', 'Dispatch WITH stock (total)', 'Dispatch VC4/VC20', 'Dispatch VC5+', 'Cover VC4/VC20 (din)', 'Cover VC5+ (din)', 'Status'];
-  const csvRow = (r, view) => [r.name, r.id, CH[r.ch].label, r.direct ? 'Direct' : 'TL-managed', view === 'tls' ? r.agents : (r.direct ? r.directLabel : r.tl), r.priority, r.lastV, r.curV, Number(r.rate.toFixed(2)), r.required, r.stockV, stockClassText(r), r.net, r.netA, r.netB, r.coverA == null ? '' : Number(r.coverA.toFixed(1)), r.coverB == null ? '' : Number(r.coverB.toFixed(1)), r.action.t.replace(/^\S+\s/, '')];
+  const CSV_HEAD = (view) => [view === 'tls' ? 'TL' : 'Agent', 'ID', 'Mobile', 'Channel', 'Type', view === 'tls' ? 'Agents' : 'TL', 'Priority', 'Last month', 'This month', 'Run-rate / day', `Required (× ${U.suggestDays()} din)`, 'Stock', view === 'tls' ? 'Agents stock · class-wise sum' : 'All stock · class-wise mix', 'Dispatch WITH stock (total)', 'Dispatch VC4/VC20', 'Dispatch VC5+', 'Cover VC4/VC20 (din)', 'Cover VC5+ (din)', 'Status'];
+  const csvRow = (r, view) => [r.name, r.id, view === 'tls' ? '' : mobileOf(r), CH[r.ch].label, r.direct ? 'Direct' : 'TL-managed', view === 'tls' ? r.agents : (r.direct ? r.directLabel : r.tl), r.priority, r.lastV, r.curV, Number(r.rate.toFixed(2)), r.required, r.stockV, stockClassText(r), r.net, r.netA, r.netB, r.coverA == null ? '' : Number(r.coverA.toFixed(1)), r.coverB == null ? '' : Number(r.coverB.toFixed(1)), r.action.t.replace(/^\S+\s/, '')];
   /** Channel filter ka readable label — multi-select ke saath "First Forward + GV Partner". */
   function channelLabel() {
     const set = U.asValueSet(state.ch);
@@ -691,7 +705,7 @@ FF.pages = FF.pages || {};
         </div>
         <div class="dp-mail-sections"><b>Data to send</b><label class="check"><input type="checkbox" data-dp-mail-section="summary" ${mailSections.includes('summary') ? 'checked' : ''}> Summary</label><label class="check"><input type="checkbox" data-dp-mail-section="agents" ${mailSections.includes('agents') ? 'checked' : ''}> Agent-wise CSV</label><label class="check"><input type="checkbox" data-dp-mail-section="tls" ${mailSections.includes('tls') ? 'checked' : ''}> TL-wise CSV</label></div>
         <div class="dp-mail-actions"><label class="check dp-mail-enable"><input type="checkbox" id="dp2-email-enabled" ${savedMail.enabled === true ? 'checked' : ''}> Enable recurring email</label><button class="btn primary" id="dp2-email-save">💾 Save schedule</button><button class="btn" id="dp2-email-send">📨 Send this selection now</button><a class="btn" href="#/settings?tab=features">⚙️ Email provider settings</a></div>
-        <p class="dp-mail-note">Uses the existing dashboard email provider (SMTP / Apps Script / Resend / Brevo). Schedule runs on the server, even if this page is closed. Source-sheet priorities are preserved.</p><div class="dim small" id="dp2-email-status" aria-live="polite"></div>
+        <p class="dp-mail-note">Uses the existing dashboard email provider (SMTP / Apps Script / Resend / Brevo). Schedule runs on the server, even if this page is closed. Priority = stock cover (is page jaisa) · CSV me agents ke mobile number bhi.</p><div class="dim small" id="dp2-email-status" aria-live="polite"></div>
       </div>
     </section>` : `<section class="card dp-mail-card" id="dp2-mail-card"><div class="card-head"><div><h3>📧 Dispatch plan email</h3><small class="dim">Admin can select report data, recipients and a recurring IST schedule.</small></div></div><p class="dp-mail-note">Email scheduling is managed by an administrator · existing provider settings are in Settings → Features.</p></section>`;
 
@@ -808,7 +822,7 @@ FF.pages = FF.pages || {};
       <section class="dp2-panel">
         <div class="dp2-tabs" id="dp2-tabs"></div>
         <div id="dp2-chips" class="dp2-chips"></div>
-        <div class="dp2-search"><span>🔎</span><input class="input" id="dp2-q" placeholder="Agent / TL / ID search…" value="${esc(state.q)}">
+        <div class="dp2-search"><span>🔎</span><input class="input" id="dp2-q" placeholder="Agent / TL / ID / mobile search…" value="${esc(state.q)}">
           <button type="button" class="btn small" id="dp2-tl" title="Ek se zyada TL chuno">👥 TL</button>
           <button type="button" class="btn small" id="dp2-prio" title="Ek se zyada priority chuno">🎚️ Priority</button>
           <button type="button" class="btn small" id="dp2-need" title="Ek se zyada condition chuno">Need</button>
@@ -925,6 +939,8 @@ FF.pages = FF.pages || {};
     const refreshMulti = () => Object.values(multiCtrls).forEach((c) => { try { c.refresh(); } catch { /* detached */ } });
     const redraw = () => { drawTabs(); refreshMulti(); drawResults(); saveState(); };
     redraw();
+    // 📞 mobile directory (server) aate hi table dobara — jinke mobile REPORT / Sheet4 me nahi the unke bhi dikh jaayein
+    if (canMob() && FF.agentMobiles && FF.agentMobiles.load) FF.agentMobiles.load().then(() => { if (root.isConnected && U.$('#dp2-table', root)) drawResults(); }).catch(() => {});
 
     // --- events (root par ek hi listener)
     root.addEventListener('click', (e) => {

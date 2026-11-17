@@ -113,6 +113,7 @@ const CLOUD_BACKEND = STORAGE_BACKEND === 'sheets' || STORAGE_BACKEND === 'appss
 const REQUIRE_DURABLE_CLOUD = process.env.REQUIRE_DURABLE_CLOUD === '1' || !!process.env.RENDER;
 let sheetsStore = null;
 let resetAgentMobiles = null;   // 📞 settings save par mobile directory cache saaf
+let agentMobileLoader = null;   // 📞 v3.125.306 — mobile directory loader (handleApi me set) — scheduled dispatch email bhi mobile bhare
 if (REQUIRE_DURABLE_CLOUD && STORAGE_BACKEND !== 'appsscript') {
   throw new Error('Production storage guard: Render par APPS_SCRIPT_URL + APPS_SCRIPT_SECRET wala Google Sheet storage required hai. Temporary file/default storage intentionally disabled.');
 }
@@ -6271,6 +6272,25 @@ function dispatchEmailDue(schedule, ist, dateKey) {
   if ((schedule.minute || 0) === 0 && sent.some((x) => /^[0-9a-f]{16}\|/.test(x) && x.endsWith(`|${slot}`))) return null;
   return key;
 }
+/** 📞 v3.125.306 — dispatch email CSV me agent ka mobile: REPORT ka apna (GV col A / FF profile ID) → mobile directory
+ *  (Agent Details sheet + Address book + tag requests — /api/agent-mobiles jaisa). Directory na mile to bina mobile ke hi mail. */
+async function fillDispatchMobiles(agents) {
+  let d = (globalThis.__ffMobRt && globalThis.__ffMobRt.data) || null;
+  if (!d && typeof agentMobileLoader === 'function') {
+    try { d = await Promise.race([agentMobileLoader(false), new Promise((ok) => setTimeout(() => ok(null), 60e3))]); } catch { d = null; }
+  }
+  if (!d) try { const f = path.join(DATA_DIR, 'agent-mobiles.json'); if (existsSync(f)) d = JSON.parse(readFileSync(f, 'utf8')); } catch { d = null; }
+  const idKeys = (id) => { const raw = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!raw) return []; const dg = raw.replace(/\D/g, '').replace(/^0+/, ''); return [raw, dg && dg.length >= 3 ? `#${dg}` : ''].filter(Boolean); };
+  let filled = 0;
+  for (const a of agents || []) {
+    if (a.mobile) continue;
+    let m = '';
+    if (d && d.ids) { for (const k of idKeys(a.agentId || a.id)) if (d.ids[k]) { m = d.ids[k]; break; } }
+    if (!m && d && d.names) { const nk = String(a.name || '').toLowerCase().replace(/[^a-z]/g, ''); if (nk.length >= 4 && d.names[nk]) m = d.names[nk]; }
+    if (m) { Object.defineProperty(a, 'mobile', { value: m, enumerable: false, configurable: true, writable: true }); filled++; }
+  }
+  return filled;
+}
 let dispatchEmailBusy = false, dispatchEmailFailAt = 0;
 async function sendDispatchPlanEmail(force = false, input = null) {
   const saved = db.settings.dispatchEmail || DEFAULT_DISPATCH_EMAIL;
@@ -6296,6 +6316,7 @@ async function sendDispatchPlanEmail(force = false, input = null) {
   try {
     const sourceAgents = await loadDispatchAgents(schedule.channel);
     if (!sourceAgents.length) throw new Error('Selected channel ke REPORT sheet me koi dispatch row nahi mili.');
+    await fillDispatchMobiles(sourceAgents);
     const plan = buildDispatchPlan(sourceAgents, schedule, { settings: db.settings, days: Number(feats().suggestDays) || 15, now: ist, ...dispatchBasisOptions(sourceAgents) });
     if (!plan.summary.agents && !plan.summary.tls) throw new Error('Selected filters ke liye dispatch data nahi mila.');
     const email = dispatchEmailContent(plan, schedule, db.settings.brand || 'Dashboard', dateKey);
@@ -9549,6 +9570,7 @@ async function handleApi(req, res, url) {
   const mobIdKeys = (id) => { const raw = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!raw) return []; const dg = raw.replace(/\D/g, '').replace(/^0+/, ''); return [...new Set([raw, dg && dg.length >= 3 ? `#${dg}` : ''].filter(Boolean))]; };
   const mobNameKey = (n) => String(n || '').toLowerCase().replace(/[^a-z]/g, '');
   resetAgentMobiles = () => { agentMobileRt.data = null; agentMobileRt.at = 0; };
+  agentMobileLoader = agentMobileData;
   /** Mobile sheet: header (pehli 5 rows me) se ID / naam / mobile column pehchano, phir sirf wahi columns padho. */
   async function readMobileSheet(store, spreadsheetId, tab) {
     const head = await store.call('readtab', { spreadsheetId, tab, maxRows: 5, maxCols: 60 }, { timeoutMs: 60e3, attempts: 2 });

@@ -98,7 +98,7 @@ export function loadFfDispatchRows(table, settings = {}) {
       tlStock: { vc4: numeric(c.tlStock), comm: numeric(c.tlStock + 1), total: numeric(c.tlStock + 2) }
     };
     // 📞 mobile (non-enumerable so existing row-shape comparisons stay unchanged): only a real 10-digit mobile (starts 6-9) in the profile "ID" column / agent ID. Long agent IDs (18 digits) are NOT mobiles — never slice them.
-    { const idc = text(c.agentId + 1).replace(/\D/g, ''), aid = agentId.replace(/\D/g, ''); const okMob = (v) => /^[6-9]\d{9}$/.test(v); Object.defineProperty(row, 'mobile', { value: okMob(idc) ? idc : (okMob(aid) && aid === agentId ? aid : ''), enumerable: false }); }
+    { const idc = text(c.agentId + 1).replace(/\D/g, ''), aid = agentId.replace(/\D/g, ''); const okMob = (v) => /^[6-9]\d{9}$/.test(v); Object.defineProperty(row, 'mobile', { value: okMob(idc) ? idc : (okMob(aid) && aid === agentId ? aid : ''), enumerable: false, configurable: true, writable: true }); }
     row.direct = isDirect(row, 'ff', settings);
     row.directLabel = row.direct ? directLabel('ff', settings) : '';
     rows.push(row);
@@ -125,7 +125,7 @@ export function loadGvDispatchRows(table, settings = {}) {
       stock: { vc4: numeric(7), comm: numeric(12), total: numeric(11) },
       tlStock: { vc4: numeric(16), comm: numeric(17), total: numeric(18) }
     };
-    { const m = text(0).replace(/\D/g, '').slice(-10); Object.defineProperty(row, 'mobile', { value: m.length === 10 ? m : '', enumerable: false }); }
+    { const m = text(0).replace(/\D/g, '').slice(-10); Object.defineProperty(row, 'mobile', { value: m.length === 10 ? m : '', enumerable: false, configurable: true, writable: true }); }
     row.direct = isDirect(row, 'gv', settings);
     row.directLabel = row.direct ? directLabel('gv', settings) : '';
     rows.push(row);

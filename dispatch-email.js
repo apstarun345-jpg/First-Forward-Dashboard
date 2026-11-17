@@ -96,24 +96,50 @@ const directTitle = (channel, settings = {}) => {
   return String((channel === 'gv' ? rules.labelGv : rules.labelFf) || fallback);
 };
 
-function calculate(row, basis, days, elapsed) {
-  const cur = num(trio(row, 'cur')[basis]);
-  const last = num(trio(row, 'last')[basis]);
-  const stock = num(trio(row, 'stock')[basis]);
+const KNOWN_PRIORITIES = new Set(['High', 'Medium', 'Low']);
+/** VC4/VC20 (core) ya VC5+ (comm) hissa — Dispatch Planner page (withCalc) jaisa. */
+const part = (o, k) => { const tot = Math.max(0, num(o && o.total)), cm = Math.max(0, num(o && o.comm)); return k === 'comm' ? Math.min(cm, tot || cm) : Math.max(0, tot - cm); };
+function rateCalc(cur, last, stock, days, elapsed) {
   const rate = cur / elapsed;
   const required = Math.max(0, Math.ceil(rate * days));
+  return { cur, last, stock, rate, required, net: Math.max(0, Math.ceil(rate * days - stock)), cover: rate > 0 ? stock / rate : null };
+}
+/**
+ * 🧮 v3.125.306 — page (dispatchPlanner.js withCalc) jaisa hi hisaab, taaki mail aur screen ke numbers same hon:
+ *  • Priority stock cover se: cover < coverRed (7) din = High, < coverOrange (15) = Medium, warna Low.
+ *    Sheet ka "Priority Level" column (GV REPORT me lagbhag hamesha "Low") sirf `sheetPriority` me rehta hai —
+ *    pehle mail usi se filter karta tha, isliye High + Medium chunne par GV ke agents mail se gayab ho jaate the.
+ *  • All tags basis par dispatch = VC4/VC20 + VC5+ alag-alag (page ka "Dispatch total").
+ */
+function calculate(row, basis, days, elapsed, thresholds = {}) {
+  const c = rateCalc(num(trio(row, 'cur')[basis]), num(trio(row, 'last')[basis]), num(trio(row, 'stock')[basis]), days, elapsed);
+  const gA = rateCalc(part(row.cur, 'core'), part(row.last, 'core'), part(row.stock, 'core'), days, elapsed);
+  const gB = rateCalc(part(row.cur, 'comm'), part(row.last, 'comm'), part(row.stock, 'comm'), days, elapsed);
+  const redD = num(thresholds.coverRed) || 7, orgD = num(thresholds.coverOrange) || 15;
+  const covers = [gA, gB].filter((g) => g.rate > 0 && g.cover !== null && (g !== gB || g.stock > 0)).map((g) => g.cover);
+  const coverMin = covers.length ? Math.min(...covers) : c.cover;
+  const sheetPriority = row.kind === 'tl' ? String(row.priority || '').trim() : sourcePriority(row.priority);
+  let priority = sheetPriority;
+  if (c.rate > 0) priority = coverMin === null ? 'Low' : coverMin < redD ? 'High' : coverMin < orgD ? 'Medium' : 'Low';
+  else if (!sheetPriority || KNOWN_PRIORITIES.has(sheetPriority)) priority = 'Low';
+  const split = basis === 'total';
+  const netA = split ? gA.net : (basis === 'vc4' ? c.net : 0), netB = split ? gB.net : (basis === 'comm' ? c.net : 0);
   return {
     ...row,
-    priority: sourcePriority(row.priority),
-    curV: cur,
-    lastV: last,
-    stockV: stock,
-    rate,
-    required,
-    gross: required,
-    net: Math.max(0, Math.ceil(rate * days - stock)),
-    cover: rate > 0 ? stock / rate : null,
-    growth: last > 0 ? ((cur - last) / last) * 100 : null
+    mobile: row.mobile || '',
+    priority,
+    sheetPriority,
+    curV: c.cur,
+    lastV: c.last,
+    stockV: c.stock,
+    rate: c.rate,
+    required: c.required,
+    gross: c.required,
+    net: split ? netA + netB : c.net,
+    netA,
+    netB,
+    cover: coverMin,
+    growth: c.last > 0 ? ((c.cur - c.last) / c.last) * 100 : null
   };
 }
 
@@ -123,8 +149,8 @@ function priorityMatches(row, selected) {
   // rehta hai, isliye use 'other' hi maana jaata hai (High ya Medium nahi).
   const chosen = multiValues(selected);
   if (!chosen.size) return true;                                   // 'all' / khaali = koi filter nahi
-  const value = row.kind === 'tl' ? String(row.priority || '').trim() : sourcePriority(row.priority);
-  return [...chosen].some((c) => (c === 'other' ? !['High', 'Medium', 'Low'].includes(value) : value === c));
+  const value = String(row.priority || '').trim();   // calculate() ke baad: cover-based (page jaisa)
+  return [...chosen].some((c) => (c === 'other' ? !KNOWN_PRIORITIES.has(value) : value === c));
 }
 
 /** Calculate the same run-rate / required / stock-subtraction figures used by Dispatch Planner. */
@@ -154,7 +180,7 @@ export function buildDispatchPlan(sourceAgents, schedule, options = {}) {
   const channelOk = (r) => (!channels.size || channels.has(r.ch)) && typeOk(r);
   const basis = cfg.basis || 'total';
   const agents = (sourceAgents || []).filter(channelOk)
-    .map((r) => calculate(r, basis, days, elapsedOf(r.ch)))
+    .map((r) => calculate(r, basis, days, elapsedOf(r.ch), settings.thresholds || {}))
     .filter((r) => priorityMatches(r, cfg.priority || 'all'));
 
   const groups = new Map();
@@ -195,8 +221,7 @@ export function buildDispatchPlan(sourceAgents, schedule, options = {}) {
     tlRow.last = components('last');
     if (sourceStock) tlRow.stock = sourceStock.tlStock;
     else tlRow.stock = components('stock');
-    const calc = calculate(tlRow, basis, days, elapsedOf(group.ch));
-    calc.priority = priority; // TL priority is the sheet TL value; keep a combined "High / Medium" unchanged.
+    const calc = calculate(tlRow, basis, days, elapsedOf(group.ch), settings.thresholds || {});
     if (priorityMatches(calc, cfg.priority || 'all')) tls.push(calc);
   }
 
@@ -214,7 +239,9 @@ export function buildDispatchPlan(sourceAgents, schedule, options = {}) {
     high: agents.filter((r) => r.priority === 'High').length,
     medium: agents.filter((r) => r.priority === 'Medium').length,
     low: agents.filter((r) => r.priority === 'Low').length,
-    source: agents.filter((r) => !['High', 'Medium', 'Low'].includes(r.priority)).length
+    source: agents.filter((r) => !['High', 'Medium', 'Low'].includes(r.priority)).length,
+    ff: agents.filter((r) => r.ch === 'ff').length,
+    gv: agents.filter((r) => r.ch === 'gv').length
   };
   const sort = (a, b) => b.net - a.net || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
   agents.sort(sort); tls.sort(sort);
@@ -224,11 +251,11 @@ export function buildDispatchPlan(sourceAgents, schedule, options = {}) {
 
 const csvCell = (value) => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`;
 function csvFor(rows) {
-  const header = ['Name', 'ID', 'Channel', 'Type', 'Team leader', 'Priority (source sheet)', 'Last month', 'This month', 'Run-rate / day', 'Required', 'Stock', 'Dispatch WITH stock', 'Dispatch W/O stock', 'Cover days', 'Status'];
+  const header = ['Name', 'ID', 'Mobile', 'Channel', 'Type', 'Team leader', 'Priority (stock cover)', 'Sheet priority', 'Last month', 'This month', 'Run-rate / day', 'Required', 'Stock', 'Dispatch WITH stock', 'Dispatch VC4/VC20', 'Dispatch VC5+', 'Dispatch W/O stock', 'Cover days', 'Status'];
   const body = rows.map((r) => [
-    r.name, r.id, r.ch === 'gv' ? 'GV Partner' : 'First Forward', r.direct ? 'Direct' : 'TL-managed',
+    r.name, r.id, r.kind === 'tl' ? '' : (r.mobile || ''), r.ch === 'gv' ? 'GV Partner' : 'First Forward', r.direct ? 'Direct' : 'TL-managed',
     r.kind === 'tl' ? (r.direct ? r.directLabel : r.name) : (r.direct ? r.directLabel : r.tl),
-    r.priority, r.lastV, r.curV, Number(r.rate.toFixed(2)), r.required, r.stockV, r.net, r.gross,
+    r.priority, r.sheetPriority === r.priority ? '' : (r.sheetPriority || ''), r.lastV, r.curV, Number(r.rate.toFixed(2)), r.required, r.stockV, r.net, r.netA, r.netB, r.gross,
     r.cover === null ? '' : Number(r.cover.toFixed(1)), r.status
   ]);
   return [header, ...body].map((row) => row.map(csvCell).join(',')).join('\r\n');
@@ -264,19 +291,19 @@ export function dispatchEmailContent(plan, schedule, brand = 'Dashboard', date =
     `${brand} · Dispatch Planner · ${date}`,
     `${channel} · ${basis} · ${priority}${typeLabel ? ` · ${typeLabel}` : ''}`,
     `Run-rate uses ${elapsedText(plan)} elapsed day(s) — issuance ÷ (today − 1); required horizon ${plan.days} day(s).`,
-    chosen.has('summary') ? `Summary: ${s.agents} agents · current ${s.current} · last month ${s.last} · run-rate ${s.rate.toFixed(2)}/day · required ${s.required} · stock ${s.stock} · dispatch with stock ${s.net} · without subtracting stock ${s.gross}.` : '',
-    chosen.has('summary') ? `Source priority rows: High ${s.high} · Medium ${s.medium} · Low ${s.low} · Other / unchanged source value ${s.source}.` : '',
+    chosen.has('summary') ? `Summary: ${s.agents} agents (First Forward ${s.ff} · GV Partner ${s.gv}) · current ${s.current} · last month ${s.last} · run-rate ${s.rate.toFixed(2)}/day · required ${s.required} · stock ${s.stock} · dispatch with stock ${s.net} · without subtracting stock ${s.gross}.` : '',
+    chosen.has('summary') ? `Priority (stock cover, same as Dispatch Planner page): High ${s.high} · Medium ${s.medium} · Low ${s.low}${s.source ? ` · Other ${s.source}` : ''}.` : '',
     chosen.has('agents') ? `Agent-wise CSV: ${plan.agents.length} row(s) attached (maximum ${schedule.maxRows}).` : '',
     chosen.has('tls') ? `TL-wise CSV: ${plan.tls.length} row(s) attached (maximum ${schedule.maxRows}).` : '',
     '',
-    'Priority values are taken from the source reports. Unknown / blank source values are not reclassified.'
+    'Priority = stock cover (stock ÷ run-rate): under 7 days High, under 15 days Medium, otherwise Low — same as the Dispatch Planner page. CSV includes agent mobile numbers.'
   ].filter(Boolean).join('\n');
   const attachments = [];
   if (chosen.has('agents')) attachments.push({ name: `dispatch-agents-${date}.csv`, content: csvFor(plan.agents), type: 'text/csv' });
   if (chosen.has('tls')) attachments.push({ name: `dispatch-tl-summary-${date}.csv`, content: csvFor(plan.tls), type: 'text/csv' });
   const summaryHtml = chosen.has('summary') ? `<table cellpadding="7" cellspacing="0" border="1" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px"><tbody>${[
-    ['Agents', s.agents], ['Current', s.current], ['Last month', s.last], ['Run-rate / day', s.rate.toFixed(2)], ['Required', s.required], ['Stock', s.stock], ['Dispatch with stock', s.net], ['Dispatch without subtracting stock', s.gross], ['High priority (source)', s.high], ['Medium priority (source)', s.medium], ['Low priority (source)', s.low], ['Other / source value', s.source]
+    ['Agents', s.agents], ['First Forward agents', s.ff], ['GV Partner agents', s.gv], ['Current', s.current], ['Last month', s.last], ['Run-rate / day', s.rate.toFixed(2)], ['Required', s.required], ['Stock', s.stock], ['Dispatch with stock', s.net], ['Dispatch without subtracting stock', s.gross], ['High priority (cover)', s.high], ['Medium priority (cover)', s.medium], ['Low priority (cover)', s.low], ['Other', s.source]
   ].map(([k, v]) => `<tr><th align="left">${htmlEscape(k)}</th><td>${htmlEscape(v)}</td></tr>`).join('')}</tbody></table>` : '<p>See attached dispatch data.</p>';
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a"><h2>${htmlEscape(brand)} · Dispatch Planner · ${htmlEscape(date)}</h2><p>${htmlEscape(channel)} · ${htmlEscape(basis)} · ${htmlEscape(priority)}${typeLabel ? ` · ${htmlEscape(typeLabel)}` : ''}</p><p>Run-rate = issuance ÷ ${htmlEscape(elapsedText(plan))} elapsed day(s) (today − 1) · Required horizon = ${plan.days} day(s).</p>${summaryHtml}<p style="color:#64748b;font-size:12px">Priority values are from the source reports. Unknown / blank values were left unchanged.</p></div>`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a"><h2>${htmlEscape(brand)} · Dispatch Planner · ${htmlEscape(date)}</h2><p>${htmlEscape(channel)} · ${htmlEscape(basis)} · ${htmlEscape(priority)}${typeLabel ? ` · ${htmlEscape(typeLabel)}` : ''}</p><p>Run-rate = issuance ÷ ${htmlEscape(elapsedText(plan))} elapsed day(s) (today − 1) · Required horizon = ${plan.days} day(s).</p>${summaryHtml}<p style="color:#64748b;font-size:12px">Priority = stock cover (stock ÷ run-rate) — same as the Dispatch Planner page. Agent mobile numbers are in the CSV.</p></div>`;
   return { subject, text, html, attachments };
 }
