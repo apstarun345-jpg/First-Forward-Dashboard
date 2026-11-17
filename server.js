@@ -6155,6 +6155,37 @@ async function dispatchReportTable(channel) {
   if (out.status < 200 || out.status >= 300) throw new Error(`${isGv ? 'GV REPORT' : 'FF REPORT'} sheet responded ${out.status}`);
   return parseGvizServer(out.body);
 }
+/** 🟩 v3.125.308 — GV agents ki this/last-month issuance GV MASTER se (page FF.gv.issuanceRows jaisa). EIR / REPORT me GV ki
+ *  issuance nahi hoti (REPORT ke cur columns 0 aate hain) — isliye mail me GV agents run-rate 0 → Low → filter se gayab the. */
+async function dispatchGvMasterMonths(curYm, lastYm) {
+  const settings = db.settings;
+  const cfg = (settings.gv && settings.gv.master) || {};
+  const L = (v, d) => String(v || d).toUpperCase().replace(/[^A-Z]/g, '') || d;
+  const idCol = L(cfg.uniqueId, 'A'), clsCol = L(cfg.cch, 'G'), vcCol = L(cfg.vClass, 'F'), dateCol = L(cfg.date, 'P'), tagCol = L(cfg.tagId, 'I');
+  const tab = cfg.tab || 'GV Master';
+  const id = String(settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const nextMonth = (ym) => { const [y, m] = ym.split('-').map(Number); return `${new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7)}-01`; };
+  const one = async (ym) => {
+    const map = new Map();
+    const tq = `select ${idCol}, ${clsCol}, ${vcCol}, count(${tagCol}) where ${dateCol} >= date '${ym}-01' and ${dateCol} < date '${nextMonth(ym)}' and ${tagCol} is not null group by ${idCol}, ${clsCol}, ${vcCol}`;
+    const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id, sheet: tab, tq })), { maxAgeMs: 10 * 60e3 });
+    if (out.status < 200 || out.status >= 300) throw new Error(`GV Master issuance query responded ${out.status}`);
+    const table = parseGvizServer(out.body);
+    for (const row of table.rows || []) {
+      const agent = String(serverCell(row, 0)).trim();
+      if (!agent) continue;
+      const n = serverNumber(serverCell(row, 3)) || 0;
+      const cls = classBucket(serverCell(row, 1), serverCell(row, 2), settings.gvClassCch);
+      const k = agent.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+      const r = map.get(k) || { vc4: 0, comm: 0, total: 0 };
+      r.total += n; if (cls === 'VC4') r.vc4 += n; else r.comm += n;
+      map.set(k, r);
+    }
+    return map;
+  };
+  const [cur, last] = await Promise.all([one(curYm), one(lastYm)]);
+  return { cur, last };
+}
 async function overlayDispatchEirIssuance(agents) {
   const e = db.settings.eir || {};
   const sheet = db.settings.eirSheet || e.sheet || 'EIR';
@@ -6225,11 +6256,22 @@ async function overlayDispatchEirIssuance(agents) {
   const find = (map, agent) => hit(map, agent) || { vc4: 0, comm: 0, total: 0 };
   // REPORT remains the operational source for stock, priority, status, and TL metadata. Only
   // these current/last issuance fields are replaced, so scheduled email matches the browser EIR path.
+  // 🟩 v3.125.308 — GV agents: issuance GV Master se (EIR me GV rows nahi). Query fail ho to REPORT ki apni issuance rakho.
+  let gvMonths = null;
+  if (agents.some((a) => a.ch === 'gv')) {
+    try { gvMonths = await dispatchGvMasterMonths(basis.gv.curYm, basis.gv.lastYm); }
+    catch (err) { console.warn('dispatch GV Master issuance:', err.message); }
+  }
+  const cleanId = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   agents.forEach((agent) => {
-    // 🟩 v3.125.307 — GV ki asli issuance GV Master sheet me hai (page FF.gv.issuanceRows padhta hai), EIR sheet me nahi —
-    // EIR se GV agent ka match na mile to REPORT ki apni this/last-month issuance rakho (page ke numbers se same).
-    // Pehle yahan 0 ho jaata tha → run-rate 0 → GV agents High/Medium filter me mail se gayab.
-    if (agent.ch === 'gv' && !hit(maps.cur, agent) && !hit(maps.last, agent)) return;
+    if (agent.ch === 'gv') {
+      if (!gvMonths) return;                       // fallback: REPORT values
+      const z = { vc4: 0, comm: 0, total: 0 };
+      const c = gvMonths.cur.get(cleanId(agent.agentId || agent.id)) || z, l = gvMonths.last.get(cleanId(agent.agentId || agent.id)) || z;
+      agent.cur = { vc4: c.vc4, comm: c.comm, total: c.total };
+      agent.last = { vc4: l.vc4, comm: l.comm, total: l.total };
+      return;
+    }
     const cur = find(maps.cur, agent), last = find(maps.last, agent);
     agent.cur = { vc4: cur.vc4, comm: cur.comm, total: cur.total };
     agent.last = { vc4: last.vc4, comm: last.comm, total: last.total };
