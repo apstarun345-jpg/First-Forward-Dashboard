@@ -173,7 +173,7 @@ test('late server hit is not discarded after prompt fallback has started', async
   FF.masterSearch._limits.liveFallbackMs = 5;
   FF.masterSearch.search(BAR);
   await new Promise((r) => setTimeout(r, 15));
-  assert.equal(calls.length, 2, 'FF + GV fallback, no EIR for barcode');
+  assert.equal(calls.length, 3, 'FF + GV + GV Master (issued check) fallback, no EIR for barcode');
   response.resolve({ ok: true, rows: [hit()] }); await tick();
   assert.equal(FF.masterSearch.search(BAR).tags[0].ff[0].agentName, 'Ravi Kumar');
   assert.equal(FF.masterSearch.search(BAR).livePending, false, 'do not wait for slower sheets');

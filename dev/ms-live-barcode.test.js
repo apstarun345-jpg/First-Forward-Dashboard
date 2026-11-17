@@ -77,6 +77,7 @@ test('barcode + tag ID of the same tag collapse into ONE result row (barcode key
   FF.data.query = async (sheet, sql) => {
     sqls.push({ sheet, sql });
     const cols = colsOf(sql);
+    if (sheet === 'GV Master') return { rows: [], cols: [] };   // v3.125.308: stock miss → issued check (is test me kuch issued nahi)
     const map = sheet === 'Tag Assignment'
       ? { [a.serial]: '608116-039-0550696', [a.tagId]: '34161FA820328EE84F0CE500', [a.agentName]: 'SOMANANDA DASH', [a.tlName]: 'SOMANANDA DASH' }
       : { [s.barcode]: '608116-039-0550696', [s.tagId]: '34161FA820328EE84F0CE500', [s.agentName]: 'Ravi', [s.tlName]: 'TL One' };
@@ -84,7 +85,8 @@ test('barcode + tag ID of the same tag collapse into ONE result row (barcode key
   };
   FF.masterSearch.search('608116-039-0550696');
   // dashed barcode → only barcode/serial column, no EIR scan
-  assert.ok(sqls.every((q) => [...q.sql.split(' where ')[1].matchAll(/lower\((\w+)\)/g)].every((m) => m[1] === s.barcode || m[1] === a.serial)), 'only barcode/serial column scanned');
+  const gmc = FF.config.gv.master;
+  assert.ok(sqls.every((q) => [...q.sql.split(' where ')[1].matchAll(/lower\((\w+)\)/g)].every((m) => m[1] === s.barcode || m[1] === a.serial || (q.sheet === 'GV Master' && m[1] === gmc.serial))), 'only barcode/serial column scanned');
   assert.ok(!sqls.some((q) => q.sheet === (FF.config.eir.sheet || 'EIR')), 'EIR skipped for barcode input');
   await new Promise((r) => setTimeout(r, 30));
   const res = FF.masterSearch.search('608116-039-0550696');
@@ -122,4 +124,25 @@ test('v3.125.35: instant server lookup answers without any sheet query', async (
   assert.equal(res.livePending, false);
   assert.ok(res.tags.some((t) => t.key === '6081160390119734' && t.gv[0].agentName === 'SOMANANDA DASH'));
   delete FF.auth;
+});
+
+test('v3.125.308: barcode not in stock but issued → GV Master hit shown as Issued with VRN', async () => {
+  const gm = FF.config.gv.master;
+  FF.data.query = async (sheet, sql) => {
+    const cols = sql.replace(/^select\s+/i, '').split(/\s+where\s+/i)[0].split(',').map((x) => x.trim());
+    if (sheet !== 'GV Master') return { rows: [], cols: cols.map((id) => ({ id })) };
+    const map = { [gm.serial]: '608116-039-0417299', [gm.tagId]: '34161FA820328EE84ECBC260', [gm.agentName]: 'RAKESH YADAV', [gm.uniqueId]: 'APS020683', [gm.vrn]: 'UP44AT1923', [gm.customer]: 'Arun Yadav', [gm.status]: 'Completed', [gm.date]: '6-November-2026', [gm.time]: '6:21:29' };
+    return { rows: [cols.map((c) => ({ v: map[c] || '' }))], cols: cols.map((id) => ({ id })) };
+  };
+  FF.masterSearch.search('608116-039-0417299');
+  await new Promise((r) => setTimeout(r, 40));
+  const res = FF.masterSearch.search('608116-039-0417299');
+  assert.equal(res.tags.length, 1);
+  const g = res.tags[0].gv[0];
+  assert.equal(g.issued, true);
+  assert.equal(g.vrn, 'UP44AT1923');
+  assert.equal(g.agentName, 'RAKESH YADAV');
+  const dd = FF.masterSearch.suggestItems('608116-039-0417299').find((i) => i.barcode);
+  assert.match(dd.sub, /Issued/);
+  assert.match(dd.sub, /UP44AT1923/);
 });

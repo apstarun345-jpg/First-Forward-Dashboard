@@ -686,6 +686,23 @@ FF.pages = FF.pages || {};
       rec.pending = false; rec.instantHit = true; rec.local = true; rec.at = Date.now();
       return rec;
     }
+    // ⚡ v3.125.308 — GV Master memory me load ho to turant (koi network nahi): issued tag ka agent / VRN / date foran dikhe.
+    //   Network wali search neeche bhi chalti hai (poori history ke liye); duplicate row mergeTagEntries hata deta hai.
+    try {
+      const mr = FF.gv && FF.gv.masterRows ? FF.gv.masterRows() : null;
+      if (mr && mr.length && key.length >= 8) {
+        const stamp2 = (d, tm) => `${d instanceof Date ? d.toISOString().slice(0, 10) : clean(d)}${tm ? ' ' + tm : ''}`;
+        let n = 0;
+        for (let i = mr.length - 1; i >= 0 && n < 5; i--) {
+          const x = mr[i];
+          if (normBar(x.serial) !== key && normBar(x.tagId) !== key) continue;
+          n++;
+          const k = normBar(x.serial) || normBar(x.tagId);
+          let en = rec.entries.get(k); if (!en) { en = { key: k, ff: [], gv: [] }; rec.entries.set(k, en); }
+          en.gv.push({ issued: true, barcode: k, tagId: clean(x.tagId), agentId: clean(x.agentId), agentName: clean(x.agentName) || clean(x.agentId), tlName: clean(x.tlName), cls: clean(x.cls), vrn: clean(x.vrn), customer: clean(x.customer), status: clean(x.status), gvId: clean(x.gvUniqueId), gvName: clean(x.gvUniqueName), allocated: stamp2(x.date, x.time), source: 'GV Master' });
+        }
+      }
+    } catch { /* optional */ }
     // Sheet me barcode dash ke saath bhi hota hai (608116-011-0558357) — raw aur bina-dash dono roop dhoondo.
     const raw = String(query || '').trim().toLowerCase().replace(/[^a-z0-9\-\/ ]/g, '');
     const needles = [...new Set([key.toLowerCase(), liveSafe(query), raw].filter((x) => x && x.length >= 4))];
@@ -716,8 +733,14 @@ FF.pages = FF.pages || {};
         .finally(() => { if (gen === state.generation) emit(); });
     };
     const cls = (v) => (FF.gv && FF.gv.normClass ? FF.gv.normClass(v) : v);
-    const eirOnly = () => (kindOf === 'barcode' ? Promise.resolve() : find(e.sheet || 'EIR', [e.tagId, e.agentId, e.agentName, e.tlName, e.cls, e.date], [e.tagId], (row, val, txt) => {
-      add(val(row, e.tagId), (en, k) => en.ff.push({ barcode: k, tagId: val(row, e.tagId), agentId: val(row, e.agentId), agentName: txt(row, e.agentName) || val(row, e.agentId), tlName: txt(row, e.tlName), cls: txt(row, e.cls), allocated: txt(row, e.date), source: 'EIR' }));
+    const eirOnly = () => (kindOf === 'barcode' ? Promise.resolve() : find(e.sheet || 'EIR', [e.tagId, e.agentId, e.agentName, e.tlName, e.cls, e.date, e.vrn], [e.tagId], (row, val, txt) => {
+      add(val(row, e.tagId), (en, k) => en.ff.push({ issued: true, vrn: val(row, e.vrn), barcode: k, tagId: val(row, e.tagId), agentId: val(row, e.agentId), agentName: txt(row, e.agentName) || val(row, e.agentId), tlName: txt(row, e.tlName), cls: txt(row, e.cls), allocated: txt(row, e.date), source: 'EIR' }));
+    }));
+    // 🟩 v3.125.308 — stock me nahi mila = issue ho chuka ho sakta hai. GV Master me sno (barcode) / tag ID se dhoondo —
+    //   mile to "✅ Issued" + VRN / customer / date ke saath. (EIR me barcode column nahi hota; hex tag ID par EIR bhi chalta hai.)
+    const gm = (c.gv && c.gv.master) || {};
+    const gvMasterOnly = () => (!gm.serial && !gm.tagId ? Promise.resolve() : find(gm.tab || 'GV Master', [gm.serial, gm.tagId, gm.vrn, gm.uniqueId, gm.agentName, gm.tlName, gm.cch, gm.vClass, gm.customer, gm.status, gm.date, gm.time, gm.gvUniqueId, gm.gvUniqueName], pick(gm.serial, gm.tagId), (row, val, txt) => {
+      add(val(row, gm.serial) || val(row, gm.tagId), (en, k) => en.gv.push({ issued: true, barcode: k, tagId: val(row, gm.tagId), agentId: val(row, gm.uniqueId), agentName: txt(row, gm.agentName) || val(row, gm.uniqueId), tlName: txt(row, gm.tlName), cls: cls(txt(row, gm.cch) || txt(row, gm.vClass)), vrn: txt(row, gm.vrn), customer: txt(row, gm.customer), status: txt(row, gm.status), gvId: txt(row, gm.gvUniqueId), gvName: txt(row, gm.gvUniqueName), allocated: [txt(row, gm.date), txt(row, gm.time)].filter(Boolean).join(' '), source: 'GV Master' }));
     }));
     let apiPending = hasApi, sheetFinished = false;
     const done = () => { rec.pending = apiPending && !rec.instantHit; if (!rec.pending) rec.at = Date.now(); if (gen === state.generation) emit(); };
@@ -745,7 +768,7 @@ FF.pages = FF.pages || {};
         }
         if (d && d.ok && !d.pending) {
           // A stock miss can still be an issued tag. Never make a barcode wait for EIR.
-          if (!sheetStarted) { rec.instantMiss = true; eirOnly().finally(done); }
+          if (!sheetStarted) { rec.instantMiss = true; Promise.all([eirOnly(), gvMasterOnly()]).finally(done); }
           else if (sheetFinished) done();
           return;
         }
@@ -764,7 +787,8 @@ FF.pages = FF.pages || {};
         find('Tag Assignment', [a.serial, a.tagId, a.agentId, a.agentName, a.tlName, a.cls, a.gvUniqueId, a.gvUniqueName, a.allocatedAt], pick(a.serial, a.tagId), (row, val, txt) => {
           [val(row, a.serial) || val(row, a.tagId)].forEach((b) => add(b, (en, k) => en.gv.push({ barcode: k, tagId: val(row, a.tagId), agentId: val(row, a.agentId), agentName: txt(row, a.agentName) || val(row, a.agentId), tlName: txt(row, a.tlName), cls: cls(txt(row, a.cls)), gvId: txt(row, a.gvUniqueId), gvName: txt(row, a.gvUniqueName), allocated: txt(row, a.allocatedAt), source: 'Tag Assignment' })));
         }),
-        eirOnly()
+        eirOnly(),
+        gvMasterOnly()
       ]).finally(() => { sheetFinished = true; done(); });
     }
   }
@@ -1067,8 +1091,8 @@ FF.pages = FF.pages || {};
         kind: 'cls', kindLabel: 'Barcode',
         label: U.barcode(t.key),
         sub: [((f && f.tagId) || (g && g.tagId)) && normBar((f && f.tagId) || (g && g.tagId)) !== t.key ? `Tag ${(f && f.tagId) || (g && g.tagId)}` : '',
-          f ? (clean(f.agentName) ? `FF ${f.agentName}${f.tlName ? ' (TL ' + f.tlName + ')' : ''}` : 'FF stock · agent assign nahi') : 'FF not mapped',
-          g ? (clean(g.agentName) ? `GV ${g.agentName}${g.tlName ? ' (TL ' + g.tlName + ')' : ''}` : 'GV stock · agent assign nahi') : 'GV not mapped',
+          f ? (f.issued ? `✅ Issued · FF ${f.agentName || f.agentId}${f.vrn ? ' · ' + f.vrn : ''}${f.allocated ? ' · ' + f.allocated : ''}` : clean(f.agentName) ? `FF ${f.agentName}${f.tlName ? ' (TL ' + f.tlName + ')' : ''}` : 'FF stock · agent assign nahi') : 'FF not mapped',
+          g ? (g.issued ? `✅ Issued · GV ${g.agentName || g.agentId}${g.vrn ? ' · ' + g.vrn : ''}${g.allocated ? ' · ' + g.allocated : ''}` : clean(g.agentName) ? `GV ${g.agentName}${g.tlName ? ' (TL ' + g.tlName + ')' : ''}` : 'GV stock · agent assign nahi') : 'GV not mapped',
           (f && f.cls) || (g && g.cls) || ''].filter(Boolean).join(' · '),
         keywords: `${t.key} ${query}`,
         value: t.key, barcode: t.key
@@ -1083,15 +1107,22 @@ FF.pages = FF.pages || {};
   const classPills = (map) => [...(map || new Map()).entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
     .map(([c, n]) => `<span class="ms-pill">${esc(c)} <b>${U.fmt(n)}</b></span>`).join('') || '<span class="dim small">class data nahi</span>';
 
+  /** Issued tag ki detail — VRN · customer · status (GV Master / EIR se). */
+  function issuedDetail(f, g) {
+    const r = [f, g].find((x) => x && x.issued);
+    if (!r) return '<span class="dim">—</span>';
+    const parts = [r.vrn ? `🚗 <b>${esc(r.vrn)}</b>` : '', r.customer ? esc(r.customer) : '', r.status ? `<small>${esc(r.status)}</small>` : '', `<small>${esc(r.source || '')}</small>`].filter(Boolean);
+    return parts.join('<br>');
+  }
   function tagStatus(t) {
     const f = t.ff[0], g = t.gv[0];
     // Holder = agent / GV naam jiske paas tag assign hai. Dono me koi holder nahi → 🏢 OFFICE STOCK.
     const held = (r) => !!(r && (clean(r.agentName) || clean(r.agentId) || clean(r.gvName) || clean(r.gvId)));
     const office = !held(f) && !held(g);
-    const one = (r) => (!r ? { text: 'Not mapped', tone: 'red' } : held(r) ? { text: 'Mapped', tone: 'green' } : { text: 'Stock · assign nahi', tone: 'amber' });
+    const one = (r) => (!r ? { text: 'Not mapped', tone: 'red' } : r.issued ? { text: '✅ Issued', tone: 'green' } : held(r) ? { text: 'Mapped', tone: 'green' } : { text: 'Stock · assign nahi', tone: 'amber' });
     const st = { ff: one(f), gv: one(g), office };
     if (office) { st.ff = f ? { text: '🏢 OFFICE STOCK', tone: 'office' } : st.ff; st.gv = g ? { text: '🏢 OFFICE STOCK', tone: 'office' } : st.gv; }
-    st.t = office ? (f || g ? 'Office stock' : 'Not mapped') : (held(f) && held(g) ? 'FF + GV' : held(f) ? 'FF' : 'GV');
+    st.t = (f && f.issued) || (g && g.issued) ? 'Issued' : office ? (f || g ? 'Office stock' : 'Not mapped') : (held(f) && held(g) ? 'FF + GV' : held(f) ? 'FF' : 'GV');
     return st;
   }
   /** Kundli card ke andar quick stats — mobile · TL · stock · TL stock · priority · suggested (data load hone par). */
@@ -1332,7 +1363,7 @@ FF.pages = FF.pages || {};
     }
     if (res.tags.length) {
       parts.push(`<section class="ms-section"><h3>🏷️ Tags / barcodes <span class="dim small">${U.fmt(res.tags.length)} match</span></h3>
-        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / serial</th><th>Tag ID</th><th>FF holder</th><th>FF TL</th><th>FF mapping</th><th>GV holder</th><th>GV TL</th><th>GV unique</th><th>GV mapping</th><th>Class</th><th>Allocated</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody>
+        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / serial</th><th>Tag ID</th><th>FF holder</th><th>FF TL</th><th>FF mapping</th><th>GV holder</th><th>GV TL</th><th>GV unique</th><th>GV mapping</th><th>Class</th><th>Allocated / Issued</th><th>Issued details</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody>
         ${res.tags.slice(0, 60).map((t) => {
         const f = t.ff[0] || {}, g = t.gv[0] || {};
         const st = tagStatus(t);
@@ -1341,7 +1372,7 @@ FF.pages = FF.pages || {};
             <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
             <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(tlText(g.tlName, 'gv') || '—')}</td>
             <td>${esc(g.gvName || '—')}${g.gvId ? `<small>${esc(g.gvId)}</small>` : ''}</td><td><span class="badge ${st.gv.tone}">${esc(st.gv.text)}</span></td>
-            <td>${esc(f.cls || g.cls || '—')}</td><td>${esc(f.allocated || g.allocated || '—')}</td>${dispCellsHtml(t.key)}</tr>`;
+            <td>${esc(f.cls || g.cls || '—')}</td><td>${esc(f.allocated || g.allocated || '—')}</td><td>${issuedDetail(f, g)}</td>${dispCellsHtml(t.key)}</tr>`;
       }).join('')}
         </tbody></table></div>${res.tags.length > 60 ? `<p class="dim small">Pehle 60 rows dikhe — CSV me poori list.</p>` : ''}</section>`);
     }
