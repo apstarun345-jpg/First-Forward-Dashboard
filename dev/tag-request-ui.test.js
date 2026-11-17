@@ -409,3 +409,11 @@ test('v203 repeat request: confirm checkbox + wajah zaroori, force button tab ta
   assert.match(html, /data-tr-dup-reason/);
   assert.match(html, /data-tr-act="dup-force" disabled/, 'confirm + wajah ke bina force button band');
 });
+
+test('📍 Agents Address label — addressOnly: TO/FROM hi, item / FASTags qty line nahi', () => {
+  const r = { id: 'ADDR-ff|id:1', at: '2026-11-17T05:00:00.000Z', status: 'approved', addressOnly: true, rows: [], agent: { name: 'Ravi Kumar', dispatchName: 'Ravi Kumar', mobile: '9876543210', address: 'House 4, Delhi 110045', pincode: '110045' } };
+  const html = TR.labelsHtml([r], {});
+  assert.equal(count(html, /class="lbl"/g), 1);
+  assert.match(html, /Ravi Kumar/); assert.match(html, /110045/);
+  assert.doesNotMatch(html, /class="cls"/); assert.doesNotMatch(html, /class="to-item-name"/);
+});

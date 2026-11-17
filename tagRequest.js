@@ -757,7 +757,8 @@ FF.pages = FF.pages || {};
       agentName, agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
       agents: agents.length, forTl: !!(r.agent && r.agent.kind === 'tl'), tl: (r.agent && r.agent.tl) || (rows[0] && rows[0].tl !== '—' ? rows[0].tl : '') || '',
       courier: clean(r.courier || ''),         // 🚚 label par courier ka naam
-      itemName: itemLabel(r.itemName)  // 📦 printed item(s)
+      itemName: r.addressOnly ? '' : itemLabel(r.itemName),  // 📦 printed item(s)
+      addressOnly: !!r.addressOnly   // 📍 Agents Address labels: sirf TO/FROM — item/qty line nahi
     };
   }
   /** Label par agent / TL ka reference line (dispatch name alag ho ya purani employee request ho tab). */
@@ -805,8 +806,8 @@ FF.pages = FF.pages || {};
       const cls = it.classes.length ? it.classes.map((c) => `${esc(c.cls)} × ${fmt(c.qty)}`).join(' · ') : '—';
       const agentLine = agentRef(it) ? `<div class="to-agent">${esc(agentRef(it))}</div>` : '';
       const courierChip = it.courier ? `<div class="to-courier">🚚 Courier: <b>${esc(it.courier)}</b></div>` : '';
-      const itemNameChip = `<div class="to-item-name">📦 Items: <b>${esc(it.itemName || 'FASTag')}</b></div>`;
-      const showCls = it.classes.length || !it.itemName || /FASTag/.test(it.itemName);
+      const itemNameChip = it.addressOnly ? '' : `<div class="to-item-name">📦 Items: <b>${esc(it.itemName || 'FASTag')}</b></div>`;
+      const showCls = !it.addressOnly && (it.classes.length || !it.itemName || /FASTag/.test(it.itemName));
       return `<div class="lbl"><div class="lbl-top-bar"><span class="to-hdr-title">DELIVER TO</span></div><div class="to"><div class="to-row"><span class="lbl-k">Name - </span><b class="to-name">${esc(t.name || '')}</b>${t.mobile ? `<div class="to-mob">☏ ${esc(t.mobile)}</div>` : ''}</div>${t.address ? `<div class="to-addr"><span class="lbl-k">Address - </span>${esc(t.address)}</div>` : ''}${t.pincode ? `<div class="to-pin"><span class="lbl-k">PIN Code - </span>PIN: ${esc(t.pincode)}</div>` : ''}${itemNameChip}${courierChip}${agentLine}</div>${showCls ? `<div class="cls">🏷️ ${cls} = <b>${fmt(it.total)} tags</b></div>` : ''}${fromLine}</div>`;
     }).join('');
     const totalTags = list.reduce((s, it) => s + num(it.total), 0);
@@ -951,7 +952,7 @@ body.colorful .from-hdr { color: #166534; }
         const fromStr1 = `FROM: Name - ${f.name}`; // sirf naam — mobile/address label par nahi
 
         fnt(0.76, 700);
-        const clsLines = it.classes.length || !it.itemName || /FASTag/.test(it.itemName) ? FF.pdf.wrap(ctx, `FASTags: ${cls} = ${fmt(it.total)} tags`, px(iw)).slice(0, 2) : [];
+        const clsLines = !it.addressOnly && (it.classes.length || !it.itemName || /FASTag/.test(it.itemName)) ? FF.pdf.wrap(ctx, `FASTags: ${cls} = ${fmt(it.total)} tags`, px(iw)).slice(0, 2) : [];
         fnt(0.64, 700);
         const fromLines1 = FF.pdf.wrap(ctx, fromStr1, px(iw)).slice(0, 2);
 
@@ -4132,7 +4133,7 @@ body.colorful .from-hdr { color: #166534; }
     preview,
     shareLink,
     // 🖨️ Dispatch labels — pure HTML generators (smoke/tests): 1 request = 1 label, multi = har ek EK baar.
-    dispatchLabelHtml, labelsPdf, downloadPdf, tlRecord, labelsHtml: (requests, opts) => labelsHtml(uniqueRequests(requests).map(labelItem), opts), labelText, dispatchFrom,
+    dispatchLabelHtml, labelsPdf, downloadPdf, openPrint, tlRecord, labelsHtml: (requests, opts) => labelsHtml(uniqueRequests(requests).map(labelItem), opts), labelText, dispatchFrom,
     // 🔁 Diagnostics (smoke): duplicate warning card ka wahi HTML jo employee dekhta hai.
     dupWarning: (list, name) => {
       const saved = { dup: state.dup, emp: state.employee };

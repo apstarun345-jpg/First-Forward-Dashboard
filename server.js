@@ -2973,7 +2973,9 @@ async function tagBackupSave() {
     let list = [...byId.values()].sort((a, b) => (Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0));
     if (list.length > TAG_BACKUP_CAP) list = list.slice(-TAG_BACKUP_CAP);
     const addressBook = { ...(old.addressBook && typeof old.addressBook === 'object' ? old.addressBook : {}), ...(w.addressBook && typeof w.addressBook === 'object' ? w.addressBook : {}) };
-    const payload = JSON.stringify({ v: 1, tagRequests: list, addressBook, deleted: [...tagBackupDeletedIds].slice(-500) });
+    const addrDead = { ...(old.addrDeleted && typeof old.addrDeleted === 'object' ? old.addrDeleted : {}), ...(w.addressDeleted && typeof w.addressDeleted === 'object' ? w.addressDeleted : {}) };
+    Object.keys(addrDead).forEach((k) => { delete addressBook[k]; });   // delete hua address backup se wapas nahi aata
+    const payload = JSON.stringify({ v: 1, tagRequests: list, addressBook, addrDeleted: addrDead, deleted: [...tagBackupDeletedIds].slice(-500) });
     const cur = db.settings.__tagDataBackup;
     const sig = crypto.createHash('sha1').update(payload).digest('hex');
     if (cur && cur.sig === sig) return;
@@ -2994,6 +2996,7 @@ function tagBackupRestore() {
   (bk.deleted || []).forEach((id) => tagBackupDeletedIds.add(String(id)));
   const missing = tagReqMissing(workspaceStore().tagRequests, bk.tagRequests).filter((r) => !tagBackupDeletedIds.has(tagReqKeyOf(r)) && !tagReqSuppressed(r));
   const w = workspaceStore();
+  if (bk.addrDeleted && typeof bk.addrDeleted === 'object') { w.addressDeleted = { ...bk.addrDeleted, ...(w.addressDeleted || {}) }; Object.keys(w.addressDeleted).forEach((k) => { if (bk.addressBook) delete bk.addressBook[k]; if (w.addressBook) delete w.addressBook[k]; }); }
   const addrMissing = bk.addressBook && typeof bk.addressBook === 'object' ? Object.keys(bk.addressBook).filter((k) => !(w.addressBook && w.addressBook[k])).length : 0;
   if (!missing.length && !addrMissing) return { added: [], addresses: 0 };
   const merged = mergeMissingTagRequests(missing, { addressBook: bk.addressBook });
@@ -9986,6 +9989,17 @@ async function handleApi(req, res, url) {
   const addrCanUpload = (u) => !!u && (u.role === 'admin' || (Array.isArray(u.permissions) && u.permissions.includes('addressUpload')));
   const last10 = (v) => { const d = tagDigits(v); return d.length >= 10 ? d.slice(-10) : ''; };
   const pickTxt = (...vals) => { for (const v of vals) { const t = String(v ?? '').trim(); if (t && t !== '+') return t; } return ''; };
+  const addressDeletedMap = () => { const w = workspaceStore(); if (!w.addressDeleted || typeof w.addressDeleted !== 'object') w.addressDeleted = {}; return w.addressDeleted; };
+  const addressDismissMap = () => { const w = workspaceStore(); if (!w.addressDismiss || typeof w.addressDismiss !== 'object') w.addressDismiss = {}; return w.addressDismiss; };
+  const addrNorm = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  /** Do address "ek hi" maane jaayein? (khaali / ek doosre me samaya hua / 80%+ same shabd) */
+  const addrCompatible = (a, b) => {
+    const x = addrNorm(a), y = addrNorm(b);
+    if (!x || !y || x === y || x.includes(y) || y.includes(x)) return true;
+    const tk = (v) => new Set(String(v || '').toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 1));
+    const A = tk(a), B = tk(b); let n = 0; A.forEach((t) => { if (B.has(t)) n++; });
+    return n / Math.max(1, Math.min(A.size, B.size)) >= 0.8;
+  };
   /** Address tab (+memory) ∪ tag requests — tag request ke non-empty fields upar. Mobile se dedupe (sabse poori entry rehti hai). */
   async function addressBookView() {
     const map = await addressBookMap();
@@ -9994,17 +10008,28 @@ async function handleApi(req, res, url) {
     for (const [k, e] of map) if (e) layer(k, e, 'Address');
     for (const [k, e] of Object.entries(addressBookMemoryEntries())) if (e) layer(k, e, 'Address');
     for (const r of (workspaceStore().tagRequests || [])) { const e = addressEntryFromRequest(r); if (e) { const old = rows.get(e.key) || {}; const m = { ...old, key: e.key, src: 'Tag request' }; ['agentId', 'agent', 'channel', 'mobile', 'address', 'pincode', 'tl', 'updatedAt'].forEach((f) => { m[f] = pickTxt(e[f], old[f]); }); rows.set(e.key, m); } }
-    const byMob = new Map(), out = [];
+    const dead = addressDeletedMap();
+    for (const k of [...rows.keys()]) if (dead[k]) rows.delete(k);
+    const out = [], groups = new Map();
     const score = (x) => (x.agentId ? 4 : 0) + (x.tl ? 2 : 0) + (x.src === 'Tag request' ? 1 : 0) + (x.address ? 1 : 0);
     for (const x of rows.values()) {
       const m = last10(x.mobile);
       if (!m) { out.push(x); continue; }
-      const k = `${x.channel === 'gv' ? 'gv' : 'ff'}|${m}`;
-      const o = byMob.get(k);
-      if (!o) byMob.set(k, x);
-      else { const [hi, lo] = score(x) >= score(o) ? [x, o] : [o, x]; ['agentId', 'agent', 'address', 'pincode', 'tl'].forEach((f) => { hi[f] = pickTxt(hi[f], lo[f]); }); byMob.set(k, hi); }
+      const gk = `${x.channel === 'gv' ? 'gv' : 'ff'}|${m}`;
+      if (!groups.has(gk)) groups.set(gk, []);
+      groups.get(gk).push(x);
     }
-    return [...out, ...byMob.values()].map((x) => ({ key: x.key, id: x.agentId || '', name: x.agent || '', mobile: last10(x.mobile) || x.mobile || '', tl: x.tl || '', address: x.address || '', pincode: tagDigits(x.pincode).slice(0, 6), channel: x.channel === 'gv' ? 'gv' : 'ff', src: x.src, updatedAt: x.updatedAt || '' }));
+    const dismissed = addressDismissMap();
+    for (const [gk, list] of groups) {
+      const clusters = [];
+      list.sort((p, q) => score(q) - score(p) || String(q.updatedAt).localeCompare(String(p.updatedAt)));
+      for (const x of list) {
+        const c = clusters.find((cl) => addrCompatible(cl[0].address, x.address));
+        if (c) { const hi = c[0]; ['agentId', 'agent', 'address', 'pincode', 'tl'].forEach((f) => { hi[f] = pickTxt(hi[f], x[f]); }); c.push(x); } else clusters.push([x]);
+      }
+      clusters.forEach((cl) => { const x = cl[0]; x.gkey = gk; x.gsize = clusters.length; x.conflict = clusters.length > 1 && !dismissed[gk]; x.altKeys = cl.slice(1).map((y) => y.key); out.push(x); });
+    }
+    return out.map((x) => ({ key: x.key, id: x.agentId || '', name: x.agent || '', mobile: last10(x.mobile) || x.mobile || '', tl: x.tl || '', address: x.address || '', pincode: tagDigits(x.pincode).slice(0, 6), channel: x.channel === 'gv' ? 'gv' : 'ff', src: x.src, updatedAt: x.updatedAt || '', gkey: x.gkey || '', gsize: x.gsize || 1, conflict: !!x.conflict, altKeys: x.altKeys || [] }));
   }
   /** Mobile se agent pehchano: (1) tag requests (2) Address book (3) mobile directory (4) REPORT sheets (TL / channel / naam). */
   async function enrichAddressEntries(entries) {
@@ -10044,19 +10069,23 @@ async function handleApi(req, res, url) {
     const mem = addressBookMemoryEntries();
     const view = await addressBookView();
     const byMob = new Map();
-    view.forEach((x) => { const m = last10(x.mobile); if (m && !byMob.has(`${m}`)) byMob.set(m, x); });
-    const stats = { added: 0, filled: 0, replaced: 0, unchanged: 0, noMobile: 0, unknownChannel: 0 };
+    view.forEach((x) => { const m = last10(x.mobile); if (!m) return; if (!byMob.has(m)) byMob.set(m, []); byMob.get(m).push(x); });
+    const stats = { added: 0, filled: 0, replaced: 0, unchanged: 0, noMobile: 0, unknownChannel: 0, versions: 0 };
     const now = new Date().toISOString();
     const fresh = [];
     for (const e of entries) {
       const m = last10(e.mobile);
-      const ex = m ? byMob.get(m) : null;
+      const exList = m ? (byMob.get(m) || []) : [];
+      let ex = exList.find((x) => addrCompatible(x.address, e.address)) || null;
+      let asVersion = false;
+      if (!ex && exList.length && !meta.overwrite) { ex = exList[0]; asVersion = true; }   // alag address → naya version (search me popup se chuno)
       const channel = e.channel || (ex && ex.channel) || 'ff';
       if (!e.channel && !(ex && ex.channel) && !e.id) stats.unknownChannel++;
       const agentId = pickTxt(ex && ex.id, e.id);
-      const key = ex ? ex.key : addressBookKey({ channel, agentId, agentName: e.name });
-      const old = { ...(mem[key] || {}) };
-      const exv = ex || {};
+      let key = ex ? ex.key : addressBookKey({ channel, agentId, agentName: e.name });
+      if (asVersion) key = `${ex.key}|v${Date.now().toString(36)}${stats.versions}`;
+      const old = asVersion ? {} : { ...(mem[key] || {}) };
+      const exv = asVersion ? { id: ex.id, name: ex.name, mobile: ex.mobile, tl: ex.tl, channel: ex.channel } : (ex || {});
       const prior = { agentId: pickTxt(old.agentId, exv.id), agent: pickTxt(old.agent, exv.name), mobile: pickTxt(old.mobile, exv.mobile), address: pickTxt(old.address, exv.address), pincode: pickTxt(old.pincode, exv.pincode), tl: pickTxt(old.tl, exv.tl) };
       const inc = { agentId, agent: e.name, mobile: m, address: shortText(String(e.address || '').replace(/\s+/g, ' '), 400), pincode: tagDigits(e.pincode).slice(0, 6), tl: shortText(e.tl, 120) };
       const next = {}; let changed = false, filledAny = false, replacedAny = false;
@@ -10066,8 +10095,8 @@ async function handleApi(req, res, url) {
         if (next[f] !== prior[f]) { changed = true; if (!prior[f]) filledAny = true; }
       }
       if (!m) stats.noMobile++;
-      if (!ex && !mem[key]) stats.added++; else if (replacedAny) stats.replaced++; else if (filledAny) stats.filled++; else stats.unchanged++;
-      if (!changed && (ex || mem[key])) continue;
+      if (asVersion) stats.versions++; else if (!ex && !mem[key]) stats.added++; else if (replacedAny) stats.replaced++; else if (filledAny) stats.filled++; else stats.unchanged++;
+      if (!changed && !asVersion && (ex || mem[key])) continue;
       fresh.push({ ...old, key, ...next, channel: pickTxt(old.channel, exv.channel, channel), updatedAt: now, pendingSync: true, importedFrom: shortText(meta.file, 80) });
     }
     rememberAddressBook(fresh);
@@ -10114,6 +10143,44 @@ async function handleApi(req, res, url) {
       tagBackupSchedule(2000);
     }
     return addrSync;
+  }
+  /** 🗑️ Address delete — pehle "Address Deleted" log tab me poori row (append-only), phir site + backup + Sheet se hatao. */
+  async function deleteAddressKeys(keys, by) {
+    const view = await addressBookView();
+    const all = new Map(view.map((x) => [x.key, x]));
+    // altKeys (merge ho chuke duplicate rows) bhi saath jaate hain
+    const want = new Set();
+    for (const k of keys) { want.add(k); const x = all.get(k); if (x) (x.altKeys || []).forEach((a) => want.add(a)); }
+    const list = [...want];
+    if (!list.length) return { deleted: 0 };
+    const store = sheetSyncStore();
+    const snap = list.map((k) => ({ ...(addressBookMemoryEntries()[k] || {}), ...(all.get(k) || {}), key: k }));
+    if (store) {
+      const header = ['Deleted At', 'By', 'Key', 'Agent ID', 'Name', 'Channel', 'Mobile', 'TL', 'Address', 'Pincode'];
+      await store.call('appendrows', { tab: 'Address Deleted', header, rows: snap.map((e) => [new Date().toISOString(), by || '', e.key, e.agentId || e.id || '', e.agent || e.name || '', e.channel || '', e.mobile || '', e.tl || '', e.address || '', e.pincode || '']) }, { timeoutMs: 90e3, attempts: 2 });   // log fail → delete nahi hoga (data kabhi lost nahi)
+    }
+    const mem = addressBookMemoryEntries(), dead = addressDeletedMap();
+    list.forEach((k) => { delete mem[k]; dead[k] = new Date().toISOString(); });
+    addressBookRuntime.map = null; addressBookRuntime.at = 0;
+    let sheetDeleted = false, sheetNote = '';
+    if (store) {
+      try { await store.call('deleteaddresses', { tab: ADDRESS_BOOK_TAB, keys: list }, { timeoutMs: 90e3, attempts: 2 }); sheetDeleted = true; }
+      catch (err) {
+        if (!/unknown action/i.test(String(err && err.message || err))) sheetNote = String(err && err.message || err).slice(0, 120);
+        else {   // purana Code.gs — key wale cell khaali kar do (readaddresses / upsert aise rows ignore karte hain)
+          try {
+            const colA = await store.call('readtab', { tab: ADDRESS_BOOK_TAB, maxRows: 20000, maxCols: 1 }, { timeoutMs: 90e3, attempts: 2 });
+            const vals = colA.values || [];
+            const rows = []; vals.forEach((r, i) => { if (list.includes(String((r && r[0]) || '').trim())) rows.push(i + 1); });
+            for (const col of ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']) await store.call('writecells', { tab: ADDRESS_BOOK_TAB, column: col, writes: rows.map((row) => ({ row, value: '' })) }, { timeoutMs: 90e3, attempts: 2 });
+            sheetDeleted = true; sheetNote = 'purana Code.gs: rows khaali ki gayi (naya Code.gs deploy karo to poori row delete hogi)';
+          } catch (e2) { sheetNote = `Sheet row hata nahi payi: ${String(e2 && e2.message || e2).slice(0, 100)} (site se hat gayi, log me save hai)`; }
+        }
+      }
+    }
+    try { await persist('notify'); } catch (err) { console.warn('address delete persist:', err && err.message); }
+    tagBackupSchedule(2000);
+    return { deleted: list.length, sheetDeleted, note: sheetNote };
   }
   const addrMatch = (row, terms, fields) => {
     if (!terms.length) return true;
@@ -10839,6 +10906,22 @@ async function handleApi(req, res, url) {
       const out = await commitAddressImport(pv.entries, { file: pv.file, by: pv.by, overwrite: body.overwrite === true });
       addrPreviews.delete(String(body.previewId));
       return sendJson(res, 200, { ok: true, ...out, sync: syncInfo() });
+    }
+    if (p === '/api/address-book/delete' && method === 'POST') {
+      const body = await readBody(req);
+      const keys = (Array.isArray(body.keys) ? body.keys : []).map((k) => String(k || '').slice(0, 200)).filter(Boolean).slice(0, 300);
+      if (!keys.length) throw new HttpError(400, 'Kuch select nahi kiya.');
+      const out = await deleteAddressKeys(keys, user.name || user.username || '');
+      return sendJson(res, 200, { ok: true, ...out });
+    }
+    if (p === '/api/address-book/resolve' && method === 'POST') {
+      const body = await readBody(req);
+      const gkey = String(body.gkey || '').slice(0, 60);
+      if (body.mode === 'both') { addressDismissMap()[gkey] = new Date().toISOString(); try { await persist('notify'); } catch { /* retry */ } return sendJson(res, 200, { ok: true }); }
+      const drop = (Array.isArray(body.drop) ? body.drop : []).map((k) => String(k || '').slice(0, 200)).filter(Boolean).slice(0, 50);
+      if (!drop.length) throw new HttpError(400, 'Kuch delete karne ko nahi diya.');
+      const out = await deleteAddressKeys(drop, user.name || user.username || '');
+      return sendJson(res, 200, { ok: true, ...out });
     }
     if (p === '/api/address-book/sync' && method === 'POST') {
       if (addrSync.running) return sendJson(res, 200, { ok: true, sync: syncInfo() });

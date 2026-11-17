@@ -656,6 +656,18 @@ function doPost(e) {
       return json_({ ok: true, tab: aTab, rows: aOut.slice(-20000), spreadsheet: aSs.getName(), spreadsheetId: aSs.getId(), url: aSs.getUrl() });
     }
 
+    if (body.action === 'deleteaddresses') {
+      var dTab = String(body.tab || 'Address').slice(0, 80);
+      var dKeys = {}; (Array.isArray(body.keys) ? body.keys : []).forEach(function (k) { dKeys[String(k || '').trim()] = true; });
+      var dSh = target_(body.spreadsheetId).getSheetByName(dTab);
+      var dGone = 0;
+      if (dSh && dSh.getLastRow() >= 2) {
+        var dVals = dSh.getRange(2, 1, dSh.getLastRow() - 1, 1).getValues();
+        for (var di2 = dVals.length - 1; di2 >= 0; di2--) { if (dKeys[String(dVals[di2][0] || '').trim()]) { dSh.deleteRow(di2 + 2); dGone++; } }
+        SpreadsheetApp.flush();
+      }
+      return json_({ ok: true, deleted: dGone });
+    }
     if (body.action === 'upsertaddresses') {
       var uTab = String(body.tab || 'Address').slice(0, 80);
       var uRows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];

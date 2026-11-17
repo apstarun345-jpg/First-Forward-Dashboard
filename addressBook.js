@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, esc = U.esc;
   const FIELDS = [['name', 'Name'], ['mobile', 'Mobile number'], ['pincode', 'Pincode'], ['id', 'Agent ID'], ['address', 'Address'], ['tl', 'TL name']];
-  const st = { channel: 'all', fields: ['name', 'mobile', 'pincode', 'id'], q: '', data: null, busy: false, preview: null, overwrite: false, timer: 0, poll: 0 };
+  const st = { sel: new Set(), later: new Set(), channel: 'all', fields: ['name', 'mobile', 'pincode', 'id'], q: '', data: null, busy: false, preview: null, overwrite: false, timer: 0, poll: 0 };
   const chLabel = (c) => (c === 'gv' ? '🟩 GV' : '🟦 FF');
   const apiJson = (path) => FF.auth.api(path);
 
@@ -35,7 +35,27 @@ FF.pages = FF.pages || {};
     const sync = d.sync || {};
     const syncLine = sync.running ? `<span class="pill warn">⏳ Sheet sync: ${sync.done}/${sync.total}</span>` : sync.pending ? `<span class="pill warn">⚠ ${sync.pending} entries sheet me sync baaki (site me safe hain)</span>${d.canUpload ? ' <button class="btn small" id="ab-sync">Sheet me sync karo</button>' : ''}` : '<span class="pill ok">✅ Sheet + backup synced</span>';
     box.innerHTML = `<div class="ab-bar"><b>${U.fmt(d.total)}</b> mile${d.total > rows.length ? ` · pehle ${U.fmt(rows.length)} dikha rahe` : ''} · ${syncLine}${d.total ? ' <button class="btn small" id="ab-csv">⬇ CSV</button>' : ''}</div>
-      <div class="table-wrap tall"><table class="tbl compact ab-tbl"><thead><tr><th>Ch</th><th>Name</th><th>ID</th><th>Mobile</th><th>TL</th><th>Address</th><th>Pincode</th><th>Source</th><th></th></tr></thead><tbody>${rows.length ? rows.map((r, i) => `<tr><td>${chLabel(r.channel)}</td><td><b>${esc(r.name)}</b></td><td>${esc(r.id)}</td><td class="nowrap">${esc(r.mobile)}</td><td>${esc(r.tl)}</td><td class="ab-addr">${esc(r.address)}</td><td>${esc(r.pincode)}</td><td><small class="dim">${esc(r.src)}</small></td><td><button class="btn small" data-copy="${i}" title="Address copy">📋</button></td></tr>`).join('') : '<tr><td colspan="9" class="dim" style="text-align:center;padding:18px">Kuch nahi mila.</td></tr>'}</tbody></table></div>`;
+      <div class="ab-act"${rows.length ? '' : ' hidden'}><span id="ab-selc" class="dim small"></span> <button class="btn small" id="ab-print" disabled>🖨️ Labels print</button> <button class="btn small" id="ab-pdf" disabled>📄 Labels PDF</button>${d.canUpload ? ' <button class="btn small danger" id="ab-del" disabled>🗑 Delete</button>' : ''}</div>
+      <div class="table-wrap tall"><table class="tbl compact ab-tbl"><thead><tr><th><input type="checkbox" id="ab-all" title="Sab select"></th><th>Ch</th><th>Name</th><th>ID</th><th>Mobile</th><th>TL</th><th>Address</th><th>Pincode</th><th>Source</th><th></th></tr></thead><tbody>${rows.length ? rows.map((r, i) => `<tr class="${r.conflict ? 'ab-conf' : ''}"><td><input type="checkbox" data-sel="${esc(r.key)}"${st.sel.has(r.key) ? ' checked' : ''}></td><td>${chLabel(r.channel)}</td><td><b>${esc(r.name)}</b>${r.conflict ? ` <button class="btn small warn" data-conf="${esc(r.gkey)}" title="Is agent ke ${r.gsize} alag address hain — chuno">⚠ ${r.gsize} address</button>` : ''}</td><td>${esc(r.id)}</td><td class="nowrap">${esc(r.mobile)}</td><td>${esc(r.tl)}</td><td class="ab-addr">${esc(r.address)}</td><td>${esc(r.pincode)}</td><td><small class="dim">${esc(r.src)}</small></td><td><button class="btn small" data-copy="${i}" title="Address copy">📋</button></td></tr>`).join('') : '<tr><td colspan="10" class="dim" style="text-align:center;padding:18px">Kuch nahi mila.</td></tr>'}</tbody></table></div>`;
+    const selRows = () => rows.filter((r) => st.sel.has(r.key));
+    const refreshSel = () => { const n = selRows().length; ['ab-print', 'ab-pdf', 'ab-del'].forEach((id) => { const el = U.$('#' + id, box); if (el) el.disabled = !n; }); const c = U.$('#ab-selc', box); if (c) c.textContent = n ? `${n} select` : 'Select karke label / delete'; const all = U.$('#ab-all', box); if (all) all.checked = n > 0 && n === rows.length; };
+    box.querySelectorAll('[data-sel]').forEach((cb) => { cb.onchange = () => { if (cb.checked) st.sel.add(cb.dataset.sel); else st.sel.delete(cb.dataset.sel); refreshSel(); }; });
+    const allCb = U.$('#ab-all', box);
+    if (allCb) allCb.onchange = () => { rows.forEach((r) => { if (allCb.checked) st.sel.add(r.key); else st.sel.delete(r.key); }); box.querySelectorAll('[data-sel]').forEach((cb) => { cb.checked = allCb.checked; }); refreshSel(); };
+    refreshSel();
+    const asReq = (r) => ({ id: `ADDR-${r.key}`, at: new Date().toISOString(), status: 'approved', addressOnly: true, rows: [], agent: { name: r.name, dispatchName: r.name, mobile: r.mobile, address: r.address, pincode: r.pincode, agentId: r.id, tl: r.tl, channel: r.channel } });
+    const needTR = async () => { try { if (FF.lazy && FF.lazy.need) await FF.lazy.need('tagRequest'); } catch { /* ignore */ } if (!FF.pages.tagRequest || !FF.pages.tagRequest.openPrint) { U.toast('Label module load nahi hua — page refresh karo', 'err'); return null; } return FF.pages.tagRequest; };
+    const pr = U.$('#ab-print', box), pf = U.$('#ab-pdf', box), dl = U.$('#ab-del', box);
+    if (pr) pr.onclick = async () => { const T = await needTR(); if (T) T.openPrint(selRows().map(asReq)); };
+    if (pf) pf.onclick = async () => { const T = await needTR(); if (T) T.downloadPdf(selRows().map(asReq)); };
+    if (dl) dl.onclick = async () => {
+      const list = selRows();
+      if (!confirm(`${list.length} address delete karein?\n\n${list.slice(0, 6).map((r) => `• ${r.name} (${r.mobile})`).join('\n')}${list.length > 6 ? '\n…' : ''}\n\nSite + Google Sheet dono se hatega (copy "Address Deleted" tab me save rahegi).`)) return;
+      dl.disabled = true;
+      try { const out = await FF.auth.api('/api/address-book/delete', 'POST', { keys: list.map((r) => r.key) }); list.forEach((r) => st.sel.delete(r.key)); U.toast(`🗑 ${out.deleted} delete${out.sheetDeleted === false ? ' (Sheet row nahi hati)' : ''}${out.note ? ' — ' + out.note : ''}`, out.sheetDeleted === false ? 'warn' : 'ok'); load(root); } catch (err) { dl.disabled = false; alert(err.message); }
+    };
+    box.querySelectorAll('[data-conf]').forEach((b) => { b.onclick = () => conflictModal(root, b.dataset.conf); });
+    if (st.q.trim() && d.canUpload) { const g = rows.find((r) => r.conflict && !st.later.has(r.gkey)); if (g) setTimeout(() => conflictModal(root, g.gkey), 150); }
     const csv = U.$('#ab-csv', box);
     if (csv) csv.addEventListener('click', async () => {
       csv.disabled = true;
@@ -54,6 +74,29 @@ FF.pages = FF.pages || {};
     if (sb) sb.addEventListener('click', async () => { sb.disabled = true; try { await FF.auth.api('/api/address-book/sync', 'POST', {}); watchSync(root); } catch (err) { alert(err.message); } });
     tabs.querySelectorAll('[data-ch]').forEach((b) => { b.onclick = () => { st.channel = b.dataset.ch; load(root); }; });
     if (sync.running) watchSync(root);
+  }
+  /** ⚠ Ek agent ke kai alag address — chuno kaunsa sahi hai (baaki delete) ya dono rakho. */
+  async function conflictModal(root, gkey) {
+    if (document.getElementById('ab-modal')) return;
+    const m = gkey.split('|')[1] || '';
+    let list = [];
+    try { const j = await apiJson(`/api/address-book?channel=all&fields=mobile&q=${encodeURIComponent(m)}&limit=20`); list = (j.rows || []).filter((r) => r.gkey === gkey); } catch (err) { alert(err.message); return; }
+    if (list.length < 2) { return; }
+    const ov = document.createElement('div');
+    ov.id = 'ab-modal'; ov.className = 'ab-ov';
+    ov.innerHTML = `<div class="ab-md"><h3>⚠ ${esc(list[0].name)} — ${list.length} alag address mile</h3><p class="dim small">Mobile <b>${esc(m)}</b>. Kaunsa sahi hai? "Yeh sahi" dabane par baaki delete ho jayenge (Sheet se bhi; copy log me rahegi).</p>
+      <div class="ab-cards">${list.map((r, i) => `<div class="ab-card"><div><b>${esc(r.name)}</b> ${chLabel(r.channel)} <small class="dim">${esc(r.src)}${r.updatedAt ? ' · ' + esc(String(r.updatedAt).slice(0, 10)) : ''}</small></div><div class="ab-addr">${esc(r.address)}</div><div>PIN <b>${esc(r.pincode)}</b>${r.id ? ` · ID ${esc(r.id)}` : ''}${r.tl ? ` · TL ${esc(r.tl)}` : ''}</div><button class="btn primary small" data-keep="${i}">✅ Yeh sahi</button></div>`).join('')}</div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="ab-both">Dono rakho (dobara na poochho)</button><button class="btn" id="ab-later">Baad me</button></div></div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.querySelector('#ab-later').onclick = () => { st.later.add(gkey); close(); };
+    ov.querySelector('#ab-both').onclick = async () => { try { await FF.auth.api('/api/address-book/resolve', 'POST', { mode: 'both', gkey }); close(); load(root); } catch (err) { alert(err.message); } };
+    ov.querySelectorAll('[data-keep]').forEach((b) => { b.onclick = async () => {
+      const keep = list[Number(b.dataset.keep)];
+      const drop = list.filter((r) => r !== keep).flatMap((r) => [r.key, ...(r.altKeys || [])]);
+      b.disabled = true;
+      try { await FF.auth.api('/api/address-book/resolve', 'POST', { mode: 'one', gkey, drop }); close(); U.toast('✅ Sahi address rakh liya, baaki delete', 'ok'); load(root); } catch (err) { b.disabled = false; alert(err.message); }
+    }; });
   }
   function watchSync(root) {
     clearInterval(st.poll);
@@ -118,7 +161,7 @@ FF.pages = FF.pages || {};
         <div id="ab-paste" hidden style="margin-top:8px"><textarea id="ab-pt" class="input" rows="6" placeholder="Yahan address text paste karo…"></textarea><button class="btn" id="ab-pgo">Preview</button></div>
         <div id="ab-preview"></div>
       </div></section>
-      <style>.ab-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.ab-search{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px}.ab-search textarea{flex:1;min-width:240px}.ab-fields{position:relative}.ab-fields summary{cursor:pointer;list-style:none}.ab-fbox{position:absolute;z-index:20;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:10px;padding:8px 12px;display:grid;gap:6px;box-shadow:0 6px 20px rgba(0,0,0,.15);min-width:170px}.ab-bar{margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.ab-addr{min-width:260px;max-width:480px;white-space:normal}.nowrap{white-space:nowrap}.ab-pv{border:1px dashed var(--line,#ccc);border-radius:12px;padding:12px;margin-top:12px}.ab-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.ab-flag td{background:rgba(255,193,7,.12)}</style>`;
+      <style>.ab-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.ab-search{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px}.ab-search textarea{flex:1;min-width:240px}.ab-fields{position:relative}.ab-fields summary{cursor:pointer;list-style:none}.ab-fbox{position:absolute;z-index:20;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:10px;padding:8px 12px;display:grid;gap:6px;box-shadow:0 6px 20px rgba(0,0,0,.15);min-width:170px}.ab-bar{margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.ab-addr{min-width:260px;max-width:480px;white-space:normal}.nowrap{white-space:nowrap}.ab-pv{border:1px dashed var(--line,#ccc);border-radius:12px;padding:12px;margin-top:12px}.ab-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.ab-flag td{background:rgba(255,193,7,.12)}.ab-conf td{background:rgba(255,152,0,.10)}.ab-act{margin:6px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.btn.danger{color:#b91c1c;border-color:#fca5a5}.ab-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px}.ab-md{background:var(--card,#fff);color:inherit;border-radius:14px;padding:16px;max-width:760px;width:100%;max-height:88vh;overflow:auto}.ab-cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}.ab-card{border:1px solid var(--line,#ddd);border-radius:10px;padding:10px;display:grid;gap:6px}</style>`;
     const flLabel = () => { U.$('#ab-fl', root).textContent = st.fields.map((k) => (FIELDS.find((f) => f[0] === k) || [k, k])[1]).join(' · ') || 'kuch nahi'; };
     flLabel();
     root.querySelectorAll('[data-f]').forEach((cb) => { cb.onchange = () => { st.fields = [...root.querySelectorAll('[data-f]')].filter((x) => x.checked).map((x) => x.dataset.f); if (!st.fields.length) { cb.checked = true; st.fields = [cb.dataset.f]; } flLabel(); if (st.q.trim()) load(root); }; });
