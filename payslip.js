@@ -433,7 +433,10 @@ window.FF = window.FF || {};
         ['Rest class (VC5+)', int(t.iss_rest), int(t.rep_rest), int(t.wv_rest), int(t.kb_rest), int(t.ch_rest), int(t.pay_rest), one ? rate('rate_rest') : inr(t.po_rest)],
         ['Total', int(t.iss_total || (num(t.iss_vc4) + num(t.iss_vc20) + num(t.iss_rest))), int(num(t.rep_vc4) + num(t.rep_vc20) + num(t.rep_rest)), int(num(t.wv_vc4) + num(t.wv_vc20) + num(t.wv_rest)), int(num(t.kb_vc4) + num(t.kb_vc20) + num(t.kb_rest)), int(num(t.ch_vc4) + num(t.ch_vc20) + num(t.ch_rest)), int(t.pay_total), one ? '' : inr(num(t.po_vc4) + num(t.po_vc20) + num(t.po_rest))]],
       { foot: true, title });
-    P.kv([['KYC with 500 product', int(t.kyc500_n), C.kyc], ['KYC without 500 product', int(t.kycw500_n), C.kyc], ['MAX count', int(t.max_n), C.kyc], ['MAX payout', inr(t.po_max), C.kyc]], 2);
+    // 💠 VC4 rate with MAX issuance (payout sheet column) — ek agent ka rate, team me jitne alag rate hain wo sab
+    const maxRates = [...new Set((d.agents || []).map((a) => num(a.rate_vc4max)).filter((v) => v > 0))];
+    const maxRateTxt = one && num(one.rate_vc4max) > 0 ? inr(one.rate_vc4max) : maxRates.length ? maxRates.map((v) => inr(v, 0)).join(' / ') : '—';
+    P.kv([['KYC with 500 product', int(t.kyc500_n), C.kyc], ['KYC without 500 product', int(t.kycw500_n), C.kyc], ['MAX count', int(t.max_n), C.kyc], ['MAX payout', inr(t.po_max), C.kyc], ['VC4 rate with MAX issuance', maxRateTxt, C.kyc], ['', '']], 3);
     // ---- earnings / deductions side by side
     const earn = [['VC4 payout', t.po_vc4], ['VC20 payout', t.po_vc20], ['Rest class payout', t.po_rest], ['MAX FASTag payout', t.po_max], ['Replacement payout (VC20/VC5)', t.po_rep_a], ['Replacement payout (VC6–VC16)', t.po_rep_b], ['Salary', t.salary], ['Bonus / offer / incentive', t.bonus]].filter(([, v]) => num(v));
     const ded = [['TDS @ 2%', t.tds], ['Wrong VRN penalty', t.pen_wrongvrn], ['Tag closure penalty', t.pen_closure], ['Bank complaint', t.bank_complaint], ['Penalty (scanned tags)', t.pen_scanned], ['Secugen device charges', t.secugen], ['Unaffixed tag penalty', t.pen_unaffixed]].filter(([, v]) => num(v));
@@ -497,9 +500,9 @@ window.FF = window.FF || {};
       if (P.y + 12 + Math.min(act.length + 2, 8) * 5.6 > H - 18) P.newPage(title);
       P.section(`Active agents — payout breakdown (${act.length} agents)`, C.agents);
       const L = act.slice().sort((a, b) => num(b.final) - num(a.final));
-      P.table([{ t: '#', w: 8, a: 'r' }, { t: 'Agent name', w: 34 }, { t: 'Agent ID', w: 18 }, { t: 'Status', w: 12 }, { t: 'Issued', w: 14, a: 'r' }, { t: 'Payable', w: 15, a: 'r' }, { t: 'KYV BL', w: 13, a: 'r', c: C.ded }, { t: 'MAX', w: 11, a: 'r', c: C.kyc }, { t: 'VC4 rate', w: 16, a: 'r', c: C.kyc }, { t: 'Payout', w: 22, a: 'r', c: C.earn }, { t: 'Final', w: 23, a: 'r', c: C.net }],
-        [...L.map((a, i) => [i + 1, a.name, a.agentId, a.status || '', int(a.iss_total), int(a.pay_total), int(num(a.kb_vc4) + num(a.kb_vc20) + num(a.kb_rest)), int(a.max_n), inr(a.rate_vc4, 0), inr(a.po_total, 0), inr(a.final, 0)]),
-          (() => { const sm = (k) => L.reduce((x, a) => x + num(a[k]), 0); return ['', 'Total (active)', '', '', int(sm('iss_total')), int(sm('pay_total')), int(sm('kb_vc4') + sm('kb_vc20') + sm('kb_rest')), int(sm('max_n')), '', inr(sm('po_total'), 0), inr(sm('final'), 0)]; })()],
+      P.table([{ t: '#', w: 8, a: 'r' }, { t: 'Agent name', w: 24 }, { t: 'Agent ID', w: 18 }, { t: 'Status', w: 11 }, { t: 'Issued', w: 13, a: 'r' }, { t: 'Payable', w: 14, a: 'r' }, { t: 'KYV BL', w: 12, a: 'r', c: C.ded }, { t: 'MAX', w: 11, a: 'r', c: C.kyc }, { t: 'VC4 rate', w: 16, a: 'r', c: C.kyc }, { t: 'VC4 rate (MAX)', w: 17, a: 'r', c: C.kyc }, { t: 'Payout', w: 21, a: 'r', c: C.earn }, { t: 'Final', w: 21, a: 'r', c: C.net }],
+        [...L.map((a, i) => [i + 1, a.name, a.agentId, a.status || '', int(a.iss_total), int(a.pay_total), int(num(a.kb_vc4) + num(a.kb_vc20) + num(a.kb_rest)), int(a.max_n), inr(a.rate_vc4, 0), num(a.rate_vc4max) > 0 ? inr(a.rate_vc4max, 0) : '—', inr(a.po_total, 0), inr(a.final, 0)]),
+          (() => { const sm = (k) => L.reduce((x, a) => x + num(a[k]), 0); return ['', 'Total (active)', '', '', int(sm('iss_total')), int(sm('pay_total')), int(sm('kb_vc4') + sm('kb_vc20') + sm('kb_rest')), int(sm('max_n')), '', '', inr(sm('po_total'), 0), inr(sm('final'), 0)]; })()],
         { foot: true, title, rh: 5.6, cell: (ri, ci, v) => (ci === 3 && /^new$/i.test(String(v).trim()) ? '#1d4ed8' : null) });
       // 🔴 Inactive agents — alag table, laal (payout sirf active ka calculate hota hai)
       if (ina.length) {
