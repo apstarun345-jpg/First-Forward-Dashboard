@@ -66,3 +66,12 @@ test('cleanAddressText: doosre agent ka hissa hatao, pincode nikalo', () => {
   assert.equal(cleanAddressText('Toll plaza Seoni', '480886').pincode, '480886');
   assert.equal(cleanAddressText('House 4 Delhi 110045').pincode, '110045');
 });
+
+import fs from 'node:fs';
+test('pin-geo.json: pincode → lat/lng/district/state (Agents Address map)', () => {
+  const g = JSON.parse(fs.readFileSync(new URL('../pin-geo.json', import.meta.url), 'utf8'));
+  assert.ok(Object.keys(g.p).length > 19000);
+  const v = g.p['307043'];
+  assert.equal(g.d[v[2]], 'Sirohi'); assert.equal(g.s[v[3]], 'Rajasthan');
+  assert.ok(v[0] > 8 && v[0] < 37 && v[1] > 68 && v[1] < 98);
+});

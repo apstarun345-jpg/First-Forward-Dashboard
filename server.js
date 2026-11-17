@@ -135,7 +135,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip'
 };
-const BLOCKED_FILES = new Set(['server.js', 'address-import.js', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'address-import.js', 'pin-geo.json', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const robotPushState = new Map(); // 🤖 robot push dedupe / rate (per admin)
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
@@ -10217,6 +10217,12 @@ async function handleApi(req, res, url) {
     }
     return out;
   }
+  const pinGeoRt = (globalThis.__ffPinGeo ||= { data: null });
+  const pinGeoOf = (pin) => {
+    if (!pinGeoRt.data) { try { pinGeoRt.data = JSON.parse(readFileSync(path.join(__dirname, 'pin-geo.json'), 'utf8')); } catch { pinGeoRt.data = { d: [], s: [], p: {} }; } }
+    const v = pinGeoRt.data.p[String(pin)];
+    return v ? [v[0], v[1], pinGeoRt.data.d[v[2]] || '', pinGeoRt.data.s[v[3]] || ''] : null;
+  };
   const addrMatch = (row, terms, fields) => {
     if (!terms.length) return true;
     return terms.some((t) => fields.some((f) => {
@@ -10908,9 +10914,18 @@ async function handleApi(req, res, url) {
       const limit = Math.min(5000, Math.max(1, Number(url.searchParams.get('limit')) || 300));
       const view = (await addressBookView()).filter((x) => allowed.includes(x.channel));
       const counts = { ff: 0, gv: 0 }; view.forEach((x) => { counts[x.channel]++; });
-      const hit = view.filter((x) => addrMatch(x, terms, fields.length ? fields : ['name', 'mobile', 'pincode', 'id'])).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      const multi = url.searchParams.get('multi') === '1';
+      let hit = view.filter((x) => addrMatch(x, terms, fields.length ? fields : ['name', 'mobile', 'pincode', 'id']));
+      if (multi) {   // 2+ address wale agents — sab versions ek saath (mobile ke hisaab se paas-paas)
+        const many = new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey));
+        const hitG = new Set(hit.map((x) => x.gkey).filter((g) => many.has(g)));
+        hit = view.filter((x) => hitG.has(x.gkey)).sort((a, b) => String(a.gkey).localeCompare(String(b.gkey)) || String(a.src).localeCompare(String(b.src)));
+      } else hit.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      const rows = hit.slice(0, limit);
+      let pins;
+      if (url.searchParams.get('geo') === '1') { pins = {}; rows.forEach((r) => { if (r.pincode && !pins[r.pincode]) { const g = pinGeoOf(r.pincode); if (g) pins[r.pincode] = g; } }); }
       res.setHeader('Cache-Control', 'private, no-store');
-      return sendJson(res, 200, { ok: true, total: hit.length, all: view.length, counts, channels: chans, canUpload: addrCanUpload(user), rows: hit.slice(0, limit), sync: syncInfo() });
+      return sendJson(res, 200, { ok: true, total: hit.length, all: view.length, multiCount: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, counts, channels: chans, canUpload: addrCanUpload(user), rows, pins, sync: syncInfo() });
     }
     if (p === '/api/address-book/status' && method === 'GET') {
       if (!chans.length) throw new HttpError(403, 'Permission nahi hai.');

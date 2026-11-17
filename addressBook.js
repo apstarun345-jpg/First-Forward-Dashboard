@@ -6,7 +6,7 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, esc = U.esc;
   const FIELDS = [['name', 'Name'], ['mobile', 'Mobile number'], ['pincode', 'Pincode'], ['id', 'Agent ID'], ['address', 'Address'], ['tl', 'TL name']];
-  const st = { sel: new Set(), later: new Set(), channel: 'all', fields: ['name', 'mobile', 'pincode', 'id'], q: '', data: null, busy: false, preview: null, overwrite: false, timer: 0, poll: 0 };
+  const st = { view: 'list', multi: false, status: 'all', act: null, sel: new Set(), later: new Set(), channel: 'all', fields: ['name', 'mobile', 'pincode', 'id'], q: '', data: null, busy: false, preview: null, overwrite: false, timer: 0, poll: 0 };
   const chLabel = (c) => (c === 'gv' ? '🟩 GV' : '🟦 FF');
   const apiJson = (path) => FF.auth.api(path);
 
@@ -16,7 +16,7 @@ FF.pages = FF.pages || {};
     st.busy = true;
     box.innerHTML = U.spinner('Address dhundh rahe hain…');
     try {
-      const qs = `channel=${st.channel}&fields=${st.fields.join(',')}&q=${encodeURIComponent(st.q)}&limit=300`;
+      const qs = `channel=${st.channel}&fields=${st.fields.join(',')}&q=${encodeURIComponent(st.q)}&limit=${st.view === 'map' ? 5000 : 300}${st.multi ? '&multi=1' : ''}${st.view === 'map' ? '&geo=1' : ''}`;
       st.data = await apiJson(`/api/address-book?${qs}`);
     } catch (err) { st.busy = false; box.innerHTML = U.errorBox(err); return; }
     st.busy = false;
@@ -31,10 +31,10 @@ FF.pages = FF.pages || {};
       .filter(([c]) => c !== 'all' || allowed.length > 1)
       .map(([c, l]) => `<button type="button" class="btn small${st.channel === c ? ' primary' : ''}" data-ch="${c}">${l}</button>`).join(' ');
     const box = U.$('#ab-results', root);
-    const rows = d.rows || [];
+    const rows = st.view === 'map' ? (d.rows || []).slice(0, 300) : (d.rows || []);   // map me poori list pin banti hai, table sirf pehli 300
     const sync = d.sync || {};
     const syncLine = sync.running ? `<span class="pill warn">⏳ Sheet sync: ${sync.done}/${sync.total}</span>` : sync.pending ? `<span class="pill warn">⚠ ${sync.pending} entries sheet me sync baaki (site me safe hain)</span>${d.canUpload ? ' <button class="btn small" id="ab-sync">Sheet me sync karo</button>' : ''}` : '<span class="pill ok">✅ Sheet + backup synced</span>';
-    box.innerHTML = `<div class="ab-bar"><b>${U.fmt(d.total)}</b> mile${d.total > rows.length ? ` · pehle ${U.fmt(rows.length)} dikha rahe` : ''} · ${syncLine}${d.total ? ' <button class="btn small" id="ab-csv">⬇ CSV</button>' : ''}</div>
+    box.innerHTML = `<div class="ab-tools"><span class="grp"><button type="button" class="btn small${st.view === 'list' ? ' primary' : ''}" data-view="list">📋 List</button><button type="button" class="btn small${st.view === 'map' ? ' primary' : ''}" data-view="map">🗺 Map (pincode)</button></span> <label class="small"><input type="checkbox" id="ab-multi"${st.multi ? ' checked' : ''}> ⚠ Sirf 2+ address wale${d.multiCount ? ` (${d.multiCount})` : ''}</label></div>${st.view === 'map' ? '<div id="ab-mapbox"></div>' : ''}<div class="ab-bar"><b>${U.fmt(d.total)}</b> mile${d.total > rows.length ? ` · pehle ${U.fmt(rows.length)} dikha rahe` : ''} · ${syncLine}${d.total ? ' <button class="btn small" id="ab-csv">⬇ CSV</button>' : ''}</div>
       <div class="ab-act"${rows.length ? '' : ' hidden'}><span id="ab-selc" class="dim small"></span> ${d.canUpload ? '<button class="btn small" id="ab-clean">🧹 Duplicate + pincode fix</button> ' : ''}<button class="btn small" id="ab-print" disabled>🖨️ Labels print</button> <button class="btn small" id="ab-pdf" disabled>📄 Labels PDF</button>${d.canUpload ? ' <button class="btn small danger" id="ab-del" disabled>🗑 Delete</button>' : ''}</div>
       <div class="table-wrap tall"><table class="tbl compact ab-tbl"><thead><tr><th><input type="checkbox" id="ab-all" title="Sab select"></th><th>Ch</th><th>Name</th><th>ID</th><th>Mobile</th><th>TL</th><th>Address</th><th>Pincode</th><th>Source</th><th></th></tr></thead><tbody>${rows.length ? rows.map((r, i) => `<tr class="${r.conflict ? 'ab-conf' : ''}"><td><input type="checkbox" data-sel="${esc(r.key)}"${st.sel.has(r.key) ? ' checked' : ''}></td><td>${chLabel(r.channel)}</td><td><b>${esc(r.name)}</b>${r.conflict ? ` <button class="btn small warn" data-conf="${esc(r.gkey)}" title="Is agent ke ${r.gsize} alag address hain — chuno">⚠ ${r.gsize} address</button>` : ''}</td><td>${esc(r.id)}</td><td class="nowrap">${esc(r.mobile)}</td><td>${esc(r.tl)}</td><td class="ab-addr">${esc(r.address)}</td><td>${esc(r.pincode)}</td><td><small class="dim">${esc(r.src)}</small></td><td><button class="btn small" data-copy="${i}" title="Address copy">📋</button></td></tr>`).join('') : '<tr><td colspan="10" class="dim" style="text-align:center;padding:18px">Kuch nahi mila.</td></tr>'}</tbody></table></div>`;
     const selRows = () => rows.filter((r) => st.sel.has(r.key));
@@ -67,6 +67,9 @@ FF.pages = FF.pages || {};
     };
     box.querySelectorAll('[data-conf]').forEach((b) => { b.onclick = () => conflictModal(root, b.dataset.conf); });
     if (st.q.trim() && d.canUpload) { const g = rows.find((r) => r.conflict && !st.later.has(r.gkey)); if (g) setTimeout(() => conflictModal(root, g.gkey), 150); }
+    box.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { st.view = b.dataset.view; load(root); }; });
+    const mc = U.$('#ab-multi', box); if (mc) mc.onchange = () => { st.multi = mc.checked; load(root); };
+    if (st.view === 'map') mapView(root, box, d);
     const csv = U.$('#ab-csv', box);
     if (csv) csv.addEventListener('click', async () => {
       csv.disabled = true;
@@ -85,6 +88,66 @@ FF.pages = FF.pages || {};
     if (sb) sb.addEventListener('click', async () => { sb.disabled = true; try { await FF.auth.api('/api/address-book/sync', 'POST', {}); watchSync(root); } catch (err) { alert(err.message); } });
     tabs.querySelectorAll('[data-ch]').forEach((b) => { b.onclick = () => { st.channel = b.dataset.ch; load(root); }; });
     if (sync.running) watchSync(root);
+  }
+  // ---- 🗺 Map: pincode se agents kahan hain + active / inactive ------------------------------------
+  const TILE = 256;
+  const proj = (lat, lng, z) => { const n = TILE * (2 ** z), s = Math.sin(lat * Math.PI / 180); return { x: (lng + 180) / 360 * n, y: (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n }; };
+  const unproj = (x, y, z) => { const n = TILE * (2 ** z); return { lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI, lng: x / n * 360 - 180 }; };
+  const keyOf = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const STAT = { active: ['🟢 Active', 'green'], in1: ['🟠 Inactive · is mahine', 'amber'], in2: ['🔴 Inactive · 2 mahine', 'red'], none: ['⚪ Status nahi (stock/report me nahi)', ''] };
+  async function loadActivity() {
+    if (st.act) return st.act;
+    const m = new Map();
+    try {
+      if (FF.lazy && FF.lazy.need) await FF.lazy.need('agentsOverview');
+      const rows = await FF.agentsOverview.load();
+      (rows || []).forEach((r) => { const v = { status: r.status, lastActive: r.lastActive || '', cur: r.cur, last: r.last }; if (r.id) m.set(`${r.ch}|${keyOf(r.id)}`, v); if (r.name) m.set(`${r.ch}|N${keyOf(r.name)}`, v); });
+    } catch { /* status optional */ }
+    st.act = m; return m;
+  }
+  const actOf = (act, r) => act.get(`${r.channel}|${keyOf(r.id)}`) || act.get(`${r.channel}|N${keyOf(r.name)}`) || null;
+  async function mapView(root, box, d) {
+    const host = U.$('#ab-mapbox', box);
+    host.innerHTML = U.spinner('Map + active status aa raha hai…');
+    const act = await loadActivity();
+    const pins = d.pins || {};
+    const rows = (d.rows || []).map((r) => ({ ...r, a: actOf(act, r), g: pins[r.pincode] || null }));
+    const stOf = (r) => (r.a && r.a.status) || 'none';
+    const want = st.status;
+    const shown = rows.filter((r) => want === 'all' || (want === 'active' ? stOf(r) === 'active' : want === 'inactive' ? (stOf(r) === 'in1' || stOf(r) === 'in2') : stOf(r) === 'none'));
+    const placed = shown.filter((r) => r.g);
+    const groups = new Map();
+    placed.forEach((r) => { if (!groups.has(r.pincode)) groups.set(r.pincode, { pin: r.pincode, lat: r.g[0], lng: r.g[1], district: r.g[2], state: r.g[3], list: [] }); groups.get(r.pincode).list.push(r); });
+    const toneOf = (g) => { const s = g.list.map(stOf); return s.includes('active') ? 'green' : s.includes('in1') ? 'amber' : s.includes('in2') ? 'red' : ''; };
+    const cnt = { active: shown.filter((r) => stOf(r) === 'active').length, inactive: shown.filter((r) => ['in1', 'in2'].includes(stOf(r))).length, none: shown.filter((r) => stOf(r) === 'none').length };
+    host.innerHTML = `<div class="ab-mapbar"><span class="grp">${[['all', 'Sab'], ['active', '🟢 Active'], ['inactive', '🔴 Inactive'], ['none', '⚪ Status nahi']].map(([k, l]) => `<button type="button" class="btn small${want === k ? ' primary' : ''}" data-st="${k}">${l}</button>`).join('')}</span> <span class="dim small">${U.fmt(placed.length)} agents map par · ${U.fmt(groups.size)} pincode · 🟢 ${cnt.active} · 🔴 ${cnt.inactive} · ⚪ ${cnt.none}${shown.length - placed.length ? ` · ${shown.length - placed.length} ka pincode map me nahi mila` : ''}</span></div>
+      <div class="osm-map" id="ab-osm"><div class="osm-controls"><button type="button" data-mz="in">＋</button><button type="button" data-mz="out">−</button><button type="button" data-mfit="1">⌖</button></div><div class="osm-tiles"></div><div class="osm-pins"></div><div class="osm-attrib">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · pincode location approx</div></div>
+      <div id="ab-pick" class="ab-pick dim small">Pin par click karo — us pincode ke agents, active status aur last active yahan aayega.</div>`;
+    host.querySelectorAll('[data-st]').forEach((b) => { b.onclick = () => { st.status = b.dataset.st; mapView(root, box, d); }; });
+    const map = U.$('#ab-osm', host), tiles = U.$('.osm-tiles', map), pinsEl = U.$('.osm-pins', map);
+    const pts = [...groups.values()];
+    if (!pts.length) { map.outerHTML = '<div class="empty-state">Map par dikhane ke liye pincode wale agents nahi.</div>'; return; }
+    let zoom = 5, center = { lat: 22.5, lng: 80 };
+    const dim = () => ({ w: Math.max(300, map.clientWidth || 720), h: Math.max(300, map.clientHeight || 430) });
+    const fit = () => { const { w, h } = dim(); for (let z = 14; z >= 3; z--) { const ps = pts.map((p) => proj(p.lat, p.lng, z)); const x0 = Math.min(...ps.map((p) => p.x)), x1 = Math.max(...ps.map((p) => p.x)), y0 = Math.min(...ps.map((p) => p.y)), y1 = Math.max(...ps.map((p) => p.y)); if (x1 - x0 <= w - 90 && y1 - y0 <= h - 90) { zoom = z; center = unproj((x0 + x1) / 2, (y0 + y1) / 2, z); break; } } if (pts.length === 1) zoom = Math.min(zoom, 11); draw(); };
+    const draw = () => {
+      const { w, h } = dim(); const cp = proj(center.lat, center.lng, zoom); const ox = cp.x - w / 2, oy = cp.y - h / 2, n = 2 ** zoom;
+      let t = '';
+      for (let ty = Math.floor(oy / TILE); ty <= Math.floor((oy + h) / TILE); ty++) { if (ty < 0 || ty >= n) continue; for (let tx = Math.floor(ox / TILE); tx <= Math.floor((ox + w) / TILE); tx++) t += `<img src="https://tile.openstreetmap.org/${zoom}/${((tx % n) + n) % n}/${ty}.png" alt="" draggable="false" style="left:${Math.round(tx * TILE - ox)}px;top:${Math.round(ty * TILE - oy)}px">`; }
+      tiles.innerHTML = t;
+      pinsEl.innerHTML = pts.map((g, i) => { const p = proj(g.lat, g.lng, zoom); return `<a href="#" class="osm-pin ${toneOf(g)}" data-pin="${i}" style="left:${(p.x - ox).toFixed(1)}px;top:${(p.y - oy).toFixed(1)}px" title="${esc(g.pin)} · ${esc(g.district)} · ${g.list.length} agent"><span></span>${g.list.length > 1 ? `<b class="ab-cnt">${g.list.length}</b>` : ''}</a>`; }).join('');
+    };
+    map.addEventListener('click', (e) => {
+      const z = e.target.closest('[data-mz]'); if (z) { e.preventDefault(); zoom = Math.max(3, Math.min(17, zoom + (z.dataset.mz === 'in' ? 1 : -1))); draw(); return; }
+      if (e.target.closest('[data-mfit]')) { e.preventDefault(); fit(); return; }
+      const pn = e.target.closest('[data-pin]'); if (pn) { e.preventDefault(); const g = pts[Number(pn.dataset.pin)]; U.$('#ab-pick', host).classList.remove('dim'); U.$('#ab-pick', host).innerHTML = `<h4>📍 ${esc(g.pin)} — ${esc(g.district)}, ${esc(g.state)} <small class="dim">(${g.list.length} agent)</small></h4><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Ch</th><th>Name</th><th>ID</th><th>Mobile</th><th>Status</th><th>Last active</th><th>Address</th></tr></thead><tbody>${g.list.map((r) => { const s = STAT[stOf(r)]; return `<tr><td>${chLabel(r.channel)}</td><td><b>${esc(r.name)}</b></td><td>${esc(r.id)}</td><td class="nowrap">${esc(r.mobile)}</td><td>${s[0]}</td><td>${esc((r.a && r.a.lastActive) || '—')}</td><td class="ab-addr">${esc(r.address)}</td></tr>`; }).join('')}</tbody></table></div>`; }
+    });
+    let drag = null;
+    map.addEventListener('pointerdown', (e) => { if (e.target.closest('button,a')) return; drag = { x: e.clientX, y: e.clientY, c: proj(center.lat, center.lng, zoom) }; map.setPointerCapture(e.pointerId); });
+    map.addEventListener('pointermove', (e) => { if (!drag) return; center = unproj(drag.c.x - (e.clientX - drag.x), drag.c.y - (e.clientY - drag.y), zoom); draw(); });
+    const end = () => { drag = null; }; map.addEventListener('pointerup', end); map.addEventListener('pointercancel', end);
+    map.addEventListener('wheel', (e) => { e.preventDefault(); zoom = Math.max(3, Math.min(17, zoom + (e.deltaY < 0 ? 1 : -1))); draw(); }, { passive: false });
+    fit();
   }
   /** ⚠ Ek agent ke kai alag address — chuno kaunsa sahi hai (baaki delete) ya dono rakho. */
   async function conflictModal(root, gkey) {
@@ -172,7 +235,7 @@ FF.pages = FF.pages || {};
         <div id="ab-paste" hidden style="margin-top:8px"><textarea id="ab-pt" class="input" rows="6" placeholder="Yahan address text paste karo…"></textarea><button class="btn" id="ab-pgo">Preview</button></div>
         <div id="ab-preview"></div>
       </div></section>
-      <style>.ab-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.ab-search{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px}.ab-search textarea{flex:1;min-width:240px}.ab-fields{position:relative}.ab-fields summary{cursor:pointer;list-style:none}.ab-fbox{position:absolute;z-index:20;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:10px;padding:8px 12px;display:grid;gap:6px;box-shadow:0 6px 20px rgba(0,0,0,.15);min-width:170px}.ab-bar{margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.ab-addr{min-width:260px;max-width:480px;white-space:normal}.nowrap{white-space:nowrap}.ab-pv{border:1px dashed var(--line,#ccc);border-radius:12px;padding:12px;margin-top:12px}.ab-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.ab-flag td{background:rgba(255,193,7,.12)}.ab-conf td{background:rgba(255,152,0,.10)}.ab-act{margin:6px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.btn.danger{color:#b91c1c;border-color:#fca5a5}.ab-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px}.ab-md{background:var(--card,#fff);color:inherit;border-radius:14px;padding:16px;max-width:760px;width:100%;max-height:88vh;overflow:auto}.ab-cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}.ab-card{border:1px solid var(--line,#ddd);border-radius:10px;padding:10px;display:grid;gap:6px}</style>`;
+      <style>.ab-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.ab-search{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px}.ab-search textarea{flex:1;min-width:240px}.ab-fields{position:relative}.ab-fields summary{cursor:pointer;list-style:none}.ab-fbox{position:absolute;z-index:20;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:10px;padding:8px 12px;display:grid;gap:6px;box-shadow:0 6px 20px rgba(0,0,0,.15);min-width:170px}.ab-bar{margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.ab-addr{min-width:260px;max-width:480px;white-space:normal}.nowrap{white-space:nowrap}.ab-pv{border:1px dashed var(--line,#ccc);border-radius:12px;padding:12px;margin-top:12px}.ab-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.ab-flag td{background:rgba(255,193,7,.12)}.ab-conf td{background:rgba(255,152,0,.10)}.ab-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:6px 0}.ab-mapbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}.ab-pick{margin:8px 0;padding:8px}.ab-cnt{position:absolute;top:-10px;left:6px;background:#111;color:#fff;border-radius:9px;font-size:10px;padding:0 5px;line-height:15px}.osm-pin.ab-x{}.ab-act{margin:6px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.btn.danger{color:#b91c1c;border-color:#fca5a5}.ab-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px}.ab-md{background:var(--card,#fff);color:inherit;border-radius:14px;padding:16px;max-width:760px;width:100%;max-height:88vh;overflow:auto}.ab-cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}.ab-card{border:1px solid var(--line,#ddd);border-radius:10px;padding:10px;display:grid;gap:6px}</style>`;
     const flLabel = () => { U.$('#ab-fl', root).textContent = st.fields.map((k) => (FIELDS.find((f) => f[0] === k) || [k, k])[1]).join(' · ') || 'kuch nahi'; };
     flLabel();
     root.querySelectorAll('[data-f]').forEach((cb) => { cb.onchange = () => { st.fields = [...root.querySelectorAll('[data-f]')].filter((x) => x.checked).map((x) => x.dataset.f); if (!st.fields.length) { cb.checked = true; st.fields = [cb.dataset.f]; } flLabel(); if (st.q.trim()) load(root); }; });
