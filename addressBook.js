@@ -35,7 +35,7 @@ FF.pages = FF.pages || {};
     const sync = d.sync || {};
     const syncLine = sync.running ? `<span class="pill warn">⏳ Sheet sync: ${sync.done}/${sync.total}</span>` : sync.pending ? `<span class="pill warn">⚠ ${sync.pending} entries sheet me sync baaki (site me safe hain)</span>${d.canUpload ? ' <button class="btn small" id="ab-sync">Sheet me sync karo</button>' : ''}` : '<span class="pill ok">✅ Sheet + backup synced</span>';
     box.innerHTML = `<div class="ab-bar"><b>${U.fmt(d.total)}</b> mile${d.total > rows.length ? ` · pehle ${U.fmt(rows.length)} dikha rahe` : ''} · ${syncLine}${d.total ? ' <button class="btn small" id="ab-csv">⬇ CSV</button>' : ''}</div>
-      <div class="ab-act"${rows.length ? '' : ' hidden'}><span id="ab-selc" class="dim small"></span> <button class="btn small" id="ab-print" disabled>🖨️ Labels print</button> <button class="btn small" id="ab-pdf" disabled>📄 Labels PDF</button>${d.canUpload ? ' <button class="btn small danger" id="ab-del" disabled>🗑 Delete</button>' : ''}</div>
+      <div class="ab-act"${rows.length ? '' : ' hidden'}><span id="ab-selc" class="dim small"></span> ${d.canUpload ? '<button class="btn small" id="ab-clean">🧹 Duplicate + pincode fix</button> ' : ''}<button class="btn small" id="ab-print" disabled>🖨️ Labels print</button> <button class="btn small" id="ab-pdf" disabled>📄 Labels PDF</button>${d.canUpload ? ' <button class="btn small danger" id="ab-del" disabled>🗑 Delete</button>' : ''}</div>
       <div class="table-wrap tall"><table class="tbl compact ab-tbl"><thead><tr><th><input type="checkbox" id="ab-all" title="Sab select"></th><th>Ch</th><th>Name</th><th>ID</th><th>Mobile</th><th>TL</th><th>Address</th><th>Pincode</th><th>Source</th><th></th></tr></thead><tbody>${rows.length ? rows.map((r, i) => `<tr class="${r.conflict ? 'ab-conf' : ''}"><td><input type="checkbox" data-sel="${esc(r.key)}"${st.sel.has(r.key) ? ' checked' : ''}></td><td>${chLabel(r.channel)}</td><td><b>${esc(r.name)}</b>${r.conflict ? ` <button class="btn small warn" data-conf="${esc(r.gkey)}" title="Is agent ke ${r.gsize} alag address hain — chuno">⚠ ${r.gsize} address</button>` : ''}</td><td>${esc(r.id)}</td><td class="nowrap">${esc(r.mobile)}</td><td>${esc(r.tl)}</td><td class="ab-addr">${esc(r.address)}</td><td>${esc(r.pincode)}</td><td><small class="dim">${esc(r.src)}</small></td><td><button class="btn small" data-copy="${i}" title="Address copy">📋</button></td></tr>`).join('') : '<tr><td colspan="10" class="dim" style="text-align:center;padding:18px">Kuch nahi mila.</td></tr>'}</tbody></table></div>`;
     const selRows = () => rows.filter((r) => st.sel.has(r.key));
     const refreshSel = () => { const n = selRows().length; ['ab-print', 'ab-pdf', 'ab-del'].forEach((id) => { const el = U.$('#' + id, box); if (el) el.disabled = !n; }); const c = U.$('#ab-selc', box); if (c) c.textContent = n ? `${n} select` : 'Select karke label / delete'; const all = U.$('#ab-all', box); if (all) all.checked = n > 0 && n === rows.length; };
@@ -45,6 +45,17 @@ FF.pages = FF.pages || {};
     refreshSel();
     const asReq = (r) => ({ id: `ADDR-${r.key}`, at: new Date().toISOString(), status: 'approved', addressOnly: true, rows: [], agent: { name: r.name, dispatchName: r.name, mobile: r.mobile, address: r.address, pincode: r.pincode, agentId: r.id, tl: r.tl, channel: r.channel } });
     const needTR = async () => { try { if (FF.lazy && FF.lazy.need) await FF.lazy.need('tagRequest'); } catch { /* ignore */ } if (!FF.pages.tagRequest || !FF.pages.tagRequest.openPrint) { U.toast('Label module load nahi hua — page refresh karo', 'err'); return null; } return FF.pages.tagRequest; };
+    const cl = U.$('#ab-clean', box);
+    if (cl) cl.onclick = async () => {
+      cl.disabled = true;
+      try {
+        const pv = await FF.auth.api('/api/address-book/cleanup', 'POST', { apply: false });
+        if (!pv.duplicatesRemoved && !pv.addressesFixed && !pv.pincodesFilled) { U.toast('Sab theek hai — kuch fix karne ko nahi', 'ok'); cl.disabled = false; return; }
+        if (!confirm(`Cleanup:\n• ${pv.duplicatesRemoved} duplicate address hatenge (jin mobile par tag-request address hai, unke baaki Address-tab rows)\n• ${pv.addressesFixed} address saaf honge (doosre ka hissa hatega)\n• ${pv.pincodesFilled} khaali pincode bharenge\n\nHatayi hui rows "Address Deleted" log me rahengi. Karein?`)) { cl.disabled = false; return; }
+        const out = await FF.auth.api('/api/address-book/cleanup', 'POST', { apply: true });
+        U.toast(`🧹 ${out.duplicatesRemoved} duplicate hata, ${out.addressesFixed} address saaf, ${out.pincodesFilled} pincode bhare`, 'ok'); load(root);
+      } catch (err) { alert(err.message); cl.disabled = false; }
+    };
     const pr = U.$('#ab-print', box), pf = U.$('#ab-pdf', box), dl = U.$('#ab-del', box);
     if (pr) pr.onclick = async () => { const T = await needTR(); if (T) T.openPrint(selRows().map(asReq)); };
     if (pf) pf.onclick = async () => { const T = await needTR(); if (T) T.downloadPdf(selRows().map(asReq)); };

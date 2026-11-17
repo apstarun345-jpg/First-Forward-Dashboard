@@ -332,6 +332,22 @@ const cleanAddr = (a) => String(a || '').replace(/\s+/g, ' ').replace(/\s+([,.;]
 export const normMobile = (v) => { const m = String(v || '').match(MOBILE_RX); return m ? digits(m[1]) : ''; };
 const normChannel = (v) => { const t = String(v || '').toLowerCase(); if (/\bgv\b|gv\s*partner|gvpartner/.test(t)) return 'gv'; if (/\bff\b|first\s*forward|idfc/.test(t)) return 'ff'; return ''; };
 
+/** Address saaf: doosre agent ka hissa (2nd pincode ke baad / "Name -" / mobile) hatao, pincode nikalo. */
+export function cleanAddressText(addr, pin) {
+  let a = String(addr || '').replace(/\s+/g, ' ').trim();
+  let cut = false;
+  a = a.replace(/\s*\b(?:name|nmae|naam)\s*[-–—:]\s*\S[\s\S]*$/i, () => { cut = true; return ''; });
+  a = a.replace(/(?<!\d)(?:\+?91[\s-]?)?0?[6-9](?:[\s-]?\d){9}(?!\d)/g, ' ');
+  a = a.replace(/\b(?:mob(?:ile)?|mo|phone|contact|cell)\s*(?:no\.?|number)?\s*[:\-–—.]*\s*(?=$|,)/gi, ' ').replace(/\s+/g, ' ').trim();
+  const pins = [...a.matchAll(/(?<!\d)([1-9]\d{2}\s?\d{3})(?!\d)/g)];
+  const distinct = [...new Set(pins.map((m) => m[1].replace(/\s/g, '')))];
+  if (distinct.length >= 2) { const first = pins[0]; a = a.slice(0, first.index + first[0].length); cut = true; }
+  const have = pins.length ? pins[0][1].replace(/\s/g, '') : '';
+  let pincode = distinct.length >= 2 || !digits(pin).slice(0, 6) ? have : digits(pin).slice(0, 6);
+  if (!/^[1-9]\d{5}$/.test(pincode)) pincode = have || '';
+  a = a.replace(/^[\s:\-–—.,]+|[\s,;:\-–—]+$/g, '').replace(/\s+([,.;])/g, '$1').trim();
+  return { address: a, pincode, cut };
+}
 function entryFromLines(name, lines) {
   const e = { name: cleanName(name), mobile: '', address: '', pincode: '', id: '', tl: '', channel: '' };
   const rest = [];
@@ -359,6 +375,8 @@ function entryFromLines(name, lines) {
   text = text.split('\n').map((l) => l.replace(ADDR_LABEL_RX, '')).join(' ');
   if (!e.pincode) { const all = [...text.matchAll(/(?<!\d)([1-9]\d{2}\s?\d{3})(?!\d)/g)]; if (all.length) e.pincode = digits(all[all.length - 1][1]); }
   e.address = cleanAddr(text);
+  const cl = cleanAddressText(e.address, e.pincode);
+  e.address = cl.address; e.pincode = cl.pincode || e.pincode;
   if (e.pincode && !e.address.replace(/\s/g, '').includes(e.pincode)) e.address = cleanAddr(`${e.address} ${e.pincode}`);
   return e;
 }

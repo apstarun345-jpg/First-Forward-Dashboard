@@ -32,7 +32,7 @@ import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, L
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
 import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
-import { parseAnyFile } from './address-import.js';
+import { parseAnyFile, cleanAddressText } from './address-import.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
 // Ye classic script hai (koi export nahi): import se sirf execute hota hai aur global set karta hai.
@@ -10027,9 +10027,9 @@ async function handleApi(req, res, url) {
         const c = clusters.find((cl) => addrCompatible(cl[0].address, x.address));
         if (c) { const hi = c[0]; ['agentId', 'agent', 'address', 'pincode', 'tl'].forEach((f) => { hi[f] = pickTxt(hi[f], x[f]); }); c.push(x); } else clusters.push([x]);
       }
-      clusters.forEach((cl) => { const x = cl[0]; x.gkey = gk; x.gsize = clusters.length; x.conflict = clusters.length > 1 && !dismissed[gk]; x.altKeys = cl.slice(1).map((y) => y.key); out.push(x); });
+      clusters.forEach((cl) => { const x = cl[0]; x.gkey = gk; x.gsize = clusters.length; x.conflict = clusters.length > 1 && !dismissed[gk]; x.altKeys = cl.slice(1).map((y) => y.key); x.members = cl.map((y) => ({ key: y.key, src: y.src })); out.push(x); });
     }
-    return out.map((x) => ({ key: x.key, id: x.agentId || '', name: x.agent || '', mobile: last10(x.mobile) || x.mobile || '', tl: x.tl || '', address: x.address || '', pincode: tagDigits(x.pincode).slice(0, 6), channel: x.channel === 'gv' ? 'gv' : 'ff', src: x.src, updatedAt: x.updatedAt || '', gkey: x.gkey || '', gsize: x.gsize || 1, conflict: !!x.conflict, altKeys: x.altKeys || [] }));
+    return out.map((x) => ({ key: x.key, id: x.agentId || '', name: x.agent || '', mobile: last10(x.mobile) || x.mobile || '', tl: x.tl || '', address: x.address || '', pincode: tagDigits(x.pincode).slice(0, 6), channel: x.channel === 'gv' ? 'gv' : 'ff', src: x.src, updatedAt: x.updatedAt || '', gkey: x.gkey || '', gsize: x.gsize || 1, conflict: !!x.conflict, altKeys: x.altKeys || [], members: x.members || [{ key: x.key, src: x.src }] }));
   }
   /** Mobile se agent pehchano: (1) tag requests (2) Address book (3) mobile directory (4) REPORT sheets (TL / channel / naam). */
   async function enrichAddressEntries(entries) {
@@ -10154,11 +10154,14 @@ async function handleApi(req, res, url) {
     const list = [...want];
     if (!list.length) return { deleted: 0 };
     const store = sheetSyncStore();
+    let logFailed = '';
     const snap = list.map((k) => ({ ...(addressBookMemoryEntries()[k] || {}), ...(all.get(k) || {}), key: k }));
     if (store) {
       const header = ['Deleted At', 'By', 'Key', 'Agent ID', 'Name', 'Channel', 'Mobile', 'TL', 'Address', 'Pincode'];
-      await store.call('appendrows', { tab: 'Address Deleted', header, rows: snap.map((e) => [new Date().toISOString(), by || '', e.key, e.agentId || e.id || '', e.agent || e.name || '', e.channel || '', e.mobile || '', e.tl || '', e.address || '', e.pincode || '']) }, { timeoutMs: 90e3, attempts: 2 });   // log fail → delete nahi hoga (data kabhi lost nahi)
+      try { await store.call('appendrows', { tab: 'Address Deleted', header, rows: snap.map((e) => [new Date().toISOString(), by || '', e.key, e.agentId || e.id || '', e.agent || e.name || '', e.channel || '', e.mobile || '', e.tl || '', e.address || '', e.pincode || '']) }, { timeoutMs: 90e3, attempts: 2 }); }
+      catch (err) { logFailed = String(err && err.message || err).slice(0, 100); }
     }
+    if (logFailed || !store) { const w = workspaceStore(); w.addressDeletedLog = [...(Array.isArray(w.addressDeletedLog) ? w.addressDeletedLog : []), ...snap.map((e) => ({ at: new Date().toISOString(), by: by || '', ...e }))].slice(-3000); }   // Sheet log na ho paye to site ke backup me copy rahegi
     const mem = addressBookMemoryEntries(), dead = addressDeletedMap();
     list.forEach((k) => { delete mem[k]; dead[k] = new Date().toISOString(); });
     addressBookRuntime.map = null; addressBookRuntime.at = 0;
@@ -10181,6 +10184,38 @@ async function handleApi(req, res, url) {
     try { await persist('notify'); } catch (err) { console.warn('address delete persist:', err && err.message); }
     tagBackupSchedule(2000);
     return { deleted: list.length, sheetDeleted, note: sheetNote };
+  }
+  /** 🧹 Cleanup: (1) jis mobile par tag-request address hai uske baaki Address-tab duplicates hatao, (2) address saaf (doosre ka hissa) + khaali pincode nikalo. */
+  async function cleanupAddresses(by, apply) {
+    const view = await addressBookView();
+    const dropKeys = new Set();
+    const seenG = new Set();
+    for (const x of view) {
+      if (!x.gkey || seenG.has(x.gkey)) continue;
+      const group = view.filter((y) => y.gkey === x.gkey);
+      const members = group.flatMap((y) => y.members || []);
+      if (members.some((m) => m.src === 'Tag request')) members.filter((m) => m.src !== 'Tag request').forEach((m) => dropKeys.add(m.key));
+      seenG.add(x.gkey);
+    }
+    // tag-request wale keys kabhi delete nahi hote
+    const fixes = [];
+    for (const x of view) {
+      if (x.src === 'Tag request' || dropKeys.has(x.key)) continue;
+      const c = cleanAddressText(x.address, x.pincode);
+      if (c.address !== x.address || (c.pincode && c.pincode !== x.pincode)) fixes.push({ key: x.key, address: c.address, pincode: c.pincode, was: x.address, wasPin: x.pincode });
+    }
+    const out = { duplicatesRemoved: dropKeys.size, addressesFixed: fixes.filter((f) => f.address !== f.was).length, pincodesFilled: fixes.filter((f) => f.pincode && !f.wasPin).length };
+    if (!apply) return out;
+    if (dropKeys.size) await deleteAddressKeys([...dropKeys], by);
+    if (fixes.length) {
+      const mem = addressBookMemoryEntries(), map = await addressBookMap();
+      const now = new Date().toISOString();
+      fixes.forEach((f) => { if (dropKeys.has(f.key)) return; const base = { ...(map.get(f.key) || {}), ...(mem[f.key] || {}) }; if (!base.key) return; mem[f.key] = { ...base, key: f.key, address: f.address, pincode: f.pincode || base.pincode || '', updatedAt: now, pendingSync: true }; });
+      addressBookRuntime.map = null; addressBookRuntime.at = 0;
+      try { await persist('notify'); } catch { /* retry */ }
+      startAddressSheetSync({ file: 'cleanup', by }, []).catch(() => {});
+    }
+    return out;
   }
   const addrMatch = (row, terms, fields) => {
     if (!terms.length) return true;
@@ -10913,6 +10948,11 @@ async function handleApi(req, res, url) {
       if (!keys.length) throw new HttpError(400, 'Kuch select nahi kiya.');
       const out = await deleteAddressKeys(keys, user.name || user.username || '');
       return sendJson(res, 200, { ok: true, ...out });
+    }
+    if (p === '/api/address-book/cleanup' && method === 'POST') {
+      const body = await readBody(req);
+      const out = await cleanupAddresses(user.name || user.username || '', body.apply === true);
+      return sendJson(res, 200, { ok: true, applied: body.apply === true, ...out, sync: syncInfo() });
     }
     if (p === '/api/address-book/resolve' && method === 'POST') {
       const body = await readBody(req);

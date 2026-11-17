@@ -56,3 +56,13 @@ test('any file: txt and csv routes', () => {
   assert.equal(parseAnyFile('a.txt', Buffer.from('Name: X Y\nMo: 9555555555\nAdd: Z 100001')).entries[0].mobile, '9555555555');
   assert.equal(parseAnyFile('a.csv', Buffer.from('name,mobile,address\nQ,9666666666,Road 5 200002')).entries[0].pincode, '200002');
 });
+
+import { cleanAddressText } from '../address-import.js';
+test('cleanAddressText: doosre agent ka hissa hatao, pincode nikalo', () => {
+  const a = cleanAddressText('Shevganj Teh Sirohi 307027 Raj Raghunath Amutha 1/1 Karaikal 609607 Cell');
+  assert.equal(a.pincode, '307027'); assert.equal(a.address.endsWith('307027'), true);
+  const b = cleanAddressText('Village Milak Rampur Mo 9876543210 Name - Other Person Lane 2 226001');
+  assert.equal(b.address, 'Village Milak Rampur'); 
+  assert.equal(cleanAddressText('Toll plaza Seoni', '480886').pincode, '480886');
+  assert.equal(cleanAddressText('House 4 Delhi 110045').pincode, '110045');
+});
