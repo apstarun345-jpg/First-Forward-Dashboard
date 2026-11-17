@@ -1111,13 +1111,16 @@ FF.pages = FF.pages || {};
   function issuedDetail(f, g) {
     const r = [f, g].find((x) => x && x.issued);
     if (!r) return '<span class="dim">—</span>';
-    const parts = [r.vrn ? `🚗 <b>${esc(r.vrn)}</b>` : '', r.customer ? esc(r.customer) : '', r.status ? `<small>${esc(r.status)}</small>` : '', `<small>${esc(r.source || '')}</small>`].filter(Boolean);
-    return parts.join('<br>');
+    const parts = [r.vrn ? `<span class="tg-vrn">🚗 ${esc(r.vrn)}</span>` : '', realName(r.customer) ? `<span>👤 ${esc(r.customer)}</span>` : '', r.status ? `<span class="tg-stat">${esc(r.status)}</span>` : '', r.source ? `<span class="tg-src">${esc(r.source)}</span>` : ''].filter(Boolean);
+    return `<div class="tg-issued">${parts.join('')}</div>`;
   }
+  /** Sheet ke placeholder ("Not Assigned", "-", "NA"…) ko khaali maano — holder / mapping dono me. */
+  const PLACEHOLDER_RX = /^(not\s*assigned|not\s*mapped|unassigned|none|null|n\/?a|-+|—|0)$/i;
+  function realName(v) { const x = clean(v); return x && !PLACEHOLDER_RX.test(x) ? x : ''; }
   function tagStatus(t) {
     const f = t.ff[0], g = t.gv[0];
     // Holder = agent / GV naam jiske paas tag assign hai. Dono me koi holder nahi → 🏢 OFFICE STOCK.
-    const held = (r) => !!(r && (clean(r.agentName) || clean(r.agentId) || clean(r.gvName) || clean(r.gvId)));
+    const held = (r) => !!(r && (realName(r.agentName) || realName(r.agentId) || realName(r.gvName) || realName(r.gvId)));
     const office = !held(f) && !held(g);
     const one = (r) => (!r ? { text: 'Not mapped', tone: 'red' } : r.issued ? { text: '✅ Issued', tone: 'green' } : held(r) ? { text: 'Mapped', tone: 'green' } : { text: 'Stock · assign nahi', tone: 'amber' });
     const st = { ff: one(f), gv: one(g), office };
@@ -1363,16 +1366,18 @@ FF.pages = FF.pages || {};
     }
     if (res.tags.length) {
       parts.push(`<section class="ms-section"><h3>🏷️ Tags / barcodes <span class="dim small">${U.fmt(res.tags.length)} match</span></h3>
-        <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Barcode / serial</th><th>Tag ID</th><th>FF holder</th><th>FF TL</th><th>FF mapping</th><th>GV holder</th><th>GV TL</th><th>GV unique</th><th>GV mapping</th><th>Class</th><th>Allocated / Issued</th><th>Issued details</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody>
+        <div class="table-wrap tg-wrap"><table class="tbl compact tg-tbl"><thead><tr><th>Barcode / serial</th><th>Tag ID</th><th>FF holder</th><th>FF TL</th><th>FF mapping</th><th>GV holder</th><th>GV TL</th><th>GV unique</th><th>GV mapping</th><th>Class</th><th>Allocated / Issued</th><th>Issued details</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody>
         ${res.tags.slice(0, 60).map((t) => {
         const f = t.ff[0] || {}, g = t.gv[0] || {};
         const st = tagStatus(t);
-        return `<tr${st.office && (f.tagId || g.tagId) ? ' class="ms-office-row"' : ''}><td class="ms-barcode-cell" style="white-space:nowrap"><b>${esc(U.barcode(t.key))}</b></td><td>${esc((f.tagId || g.tagId) || '—')}</td>
-            <td>${esc(f.agentName || '—')}${f.agentId ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${esc(tlText(f.tlName, 'ff') || '—')}</td>
+        const dash = (v) => { const x = realName(v); return x ? esc(x) : '<span class="dim">—</span>'; };
+        const rowCls = st.office ? 'tg-office' : (st.ff.tone === 'green' || st.gv.tone === 'green') ? 'tg-mapped' : 'tg-stock';
+        return `<tr class="${rowCls}"><td class="tg-bar"><b>${esc(U.barcode(t.key))}</b></td><td class="tg-tid">${esc((f.tagId || g.tagId) || '—')}</td>
+            <td>${dash(f.agentName)}${realName(f.agentId) ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${dash(tlText(f.tlName, 'ff'))}</td>
             <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
-            <td>${esc(g.agentName || '—')}${g.agentId ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${esc(tlText(g.tlName, 'gv') || '—')}</td>
-            <td>${esc(g.gvName || '—')}${g.gvId ? `<small>${esc(g.gvId)}</small>` : ''}</td><td><span class="badge ${st.gv.tone}">${esc(st.gv.text)}</span></td>
-            <td>${esc(f.cls || g.cls || '—')}</td><td>${esc(f.allocated || g.allocated || '—')}</td><td>${issuedDetail(f, g)}</td>${dispCellsHtml(t.key)}</tr>`;
+            <td>${dash(g.agentName)}${realName(g.agentId) ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${dash(tlText(g.tlName, 'gv'))}</td>
+            <td>${dash(g.gvName)}${realName(g.gvId) ? `<small>${esc(g.gvId)}</small>` : ''}</td><td><span class="badge ${st.gv.tone}">${esc(st.gv.text)}</span></td>
+            <td><span class="tg-cls">${esc(f.cls || g.cls || '—')}</span></td><td class="tg-nowrap">${esc(f.allocated || g.allocated || '—')}</td><td class="tg-nowrap">${issuedDetail(f, g)}</td>${dispCellsHtml(t.key)}</tr>`;
       }).join('')}
         </tbody></table></div>${res.tags.length > 60 ? `<p class="dim small">Pehle 60 rows dikhe — CSV me poori list.</p>` : ''}</section>`);
     }

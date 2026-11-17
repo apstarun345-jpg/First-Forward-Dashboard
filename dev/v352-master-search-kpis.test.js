@@ -186,7 +186,7 @@ test('🏷️ Master Search barcode table keeps FF and GV mapping status in sepa
   assert.match(ms, /<th>GV mapping<\/th>/);
   assert.match(ms, /st\.ff\.tone[\s\S]{0,100}st\.ff\.text/);
   assert.match(ms, /st\.gv\.tone[\s\S]{0,100}st\.gv\.text/);
-  assert.match(ms, /class="ms-barcode-cell" style="white-space:nowrap"/, 'formatted barcode and hyphen groups stay on one line');
+  assert.match(ms, /class="tg-bar"/, 'formatted barcode cell stays on one line (tg-bar nowrap)');
   assert.doesNotMatch(ms, /GV only \(StockDataa me nahi\)|st\.detail/, 'combined misleading status detail removed');
 });
 
