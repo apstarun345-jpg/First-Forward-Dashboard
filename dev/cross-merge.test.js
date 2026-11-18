@@ -13,12 +13,14 @@ const SR = FF.searchReport;
 const ffTl = { kind: 'ff-tl', name: 'UMESH SHARMA', sub: 'APN1' };
 const gvTl = { kind: 'gv-tl', name: 'Umesh Sharma', sub: '41110975' };
 const gvAg = { kind: 'gv-agent', name: 'UMESH SHARMA', sub: '555' };
-test('auto same-name same-role merge', () => {
+test('same naam bina pair ke merge NAHI (auto band); pair ho to merge', () => {
+  assert.equal(SR.mergeOk(ffTl, gvTl), false);
+  assert.equal(SR.groupPeople([ffTl, gvTl]).length, 2);
+  FF.config.crossMerge.pairs = [{ ff: 'APN1', gv: '41110975' }];
   assert.equal(SR.mergeOk(ffTl, gvTl), true);
-  assert.equal(SR.mergeOk(ffTl, gvAg), false);
-  const g = SR.groupPeople([ffTl, gvTl]);
-  assert.equal(g.length, 1); assert.ok(g[0].ff && g[0].gv);
+  assert.equal(SR.groupPeople([ffTl, gvTl]).length, 1);
   assert.equal(SR.partnerOf(ffTl, [gvAg, gvTl]), gvTl);
+  FF.config.crossMerge.pairs = [];
 });
 test('block + pairs + off', () => {
   FF.config.crossMerge.block = ['UMESH SHARMA'];

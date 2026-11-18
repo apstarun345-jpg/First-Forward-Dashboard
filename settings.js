@@ -1321,7 +1321,7 @@ FF.pages = FF.pages || {};
         return section('🔗 FF + GV merge <span class="dim">(same insaan dono platform par)</span>', `
         <p class="dim small">Jo TL / agent <b>First Forward aur GV dono</b> me kaam karte hain, Master Search me unka ek <b>🔗 FF + GV</b> option aata hai — dono platform ka issuance, stock aur class-wise ek table me. Alag-alag FF / GV option bhi rehte hain.</p>
         <label class="chk"><input type="checkbox" id="cm-enabled" ${cm.enabled !== false ? 'checked' : ''}> FF + GV merge chalu</label><br>
-        <label class="chk"><input type="checkbox" id="cm-auto" ${cm.autoName !== false ? 'checked' : ''}> Same naam + same role (TL↔TL, Agent↔Agent) ho to apne aap merge</label>
+        <span class="dim small">Auto merge band hai — sirf neeche jode hue (pakke) pairs hi merge hote hain.</span>
         <div class="form-grid" style="margin-top:10px">
           <div class="fld" style="grid-column:1/-1"><span>Pakke jode (naam alag ho tab bhi) — <b>FF</b> aur <b>GV</b> dropdown se chuno → ➕ Jodo</span>
             <div class="cm-pick">
@@ -3028,7 +3028,7 @@ FF.pages = FF.pages || {};
       if (cmBtn) cmBtn.addEventListener('click', () => {
         const lines = (id) => String((U.$(id, body) || {}).value || '').split(/\n/).map((x) => x.trim()).filter(Boolean);
         const pairs = cmState.pairs.filter((x) => x.ff && x.gv);
-        const crossMerge = { enabled: !!U.$('#cm-enabled', body).checked, autoName: !!U.$('#cm-auto', body).checked, pairs, block: lines('#cm-block') };
+        const crossMerge = { enabled: !!U.$('#cm-enabled', body).checked, autoName: false, pairs, block: lines('#cm-block') };
         U.withButtonBusy(cmBtn, async () => { await save({ crossMerge }, U.$('#save-msg-crossMerge', body)); FF.config.crossMerge = { ...FF.config.crossMerge, ...crossMerge }; }, 'Saving…');
       });
       const cmScan = U.$('#cm-scan', body);

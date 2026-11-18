@@ -80,6 +80,7 @@ const html = (s) => String(s).replace(/&amp;/g, '&');
 
 test('groupPeople: same naam FF + GV = ek group, TL kind agent kind par jeetta hai, alag naam alag group', () => {
   const { SR } = mount({ ff: ffFixture(), gv: gvFixture() });
+  FF.config.crossMerge = { enabled: true, autoName: false, block: [], pairs: [{ ff: 'T100', gv: 'T100' }] };   // v3.125.318: sirf Settings ke pairs merge hote hain
   const groups = SR.groupPeople([
     person('ff-agent', 'TL One', 'R100'), person('ff-tl', 'TL One', 'T100'), person('gv-tl', 'tl one', 'T100'),
     person('ff-agent', 'Ravi Kumar', 'R101'), person('gv-id', 'zzz')

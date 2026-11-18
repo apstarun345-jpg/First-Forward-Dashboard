@@ -49,9 +49,8 @@ window.FF = window.FF || {};
     if (!c.enabled || !a || !b || chOf(a.kind) === chOf(b.kind)) return false;
     const ff = chOf(a.kind) === 'ff' ? a : b, gv = ff === a ? b : a;
     if (c.pairs.some((x) => x && matchesSpec(ff, x.ff) && matchesSpec(gv, x.gv))) return true;
-    if (blocked(a) || blocked(b)) return false;
-    if (identitiesLinked(a, b)) return true;
-    return c.autoName && normName(a.name) === normName(b.name) && isTlKind(a.kind) === isTlKind(b.kind);
+    // 🔗 v3.125.318 — sirf Settings me jode hue pairs merge hote hain (auto naam / ID-link merge band).
+    return false;
   }
   /** p ka doosre channel wala partner (list = saare people). TL ko agent se pehle. */
   // ⚡ v3.125.88 — har keystroke par 3,700 logon ka scan (90 ms+) nahi: list ka ek baar index (naam / ID → people).
@@ -101,7 +100,7 @@ window.FF = window.FF || {};
         if (isTlKind(p.kind) && !isTlKind(sameChannel[ch].kind)) sameChannel[ch] = p;
         return;
       }
-      const linked = groups.find((g) => !g[ch] && g[other] && ((normName(g.name) === name && identitiesLinked(p, g[other])) || mergeOk(p, g[other])));
+      const linked = groups.find((g) => !g[ch] && g[other] && mergeOk(p, g[other]));
       if (linked) { linked[ch] = p; return; }
       groups.push({ key: `${name}|${ch}|${identityIds(p)[0] || name}`, name: p.name, ff: ch === 'ff' ? p : null, gv: ch === 'gv' ? p : null });
     });

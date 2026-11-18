@@ -134,7 +134,7 @@ FF.config = {
   gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
   gvAgentCommission: { enabled: true, label: 'VC4', suffix: '/tag', currency: '₹' },
   // 🔗 v3.125.75 — FF + GV merge: same insaan dono platform par (Settings → FF + GV merge).
-  crossMerge: { enabled: true, autoName: true, pairs: [], block: [] },
+  crossMerge: { enabled: true, autoName: false, pairs: [], block: [] },
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],
   gv: {
     master: {
