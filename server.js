@@ -11007,11 +11007,18 @@ async function handleApi(req, res, url) {
       // 🔎 v3.125.320 — har search term ka alag hisaab: kaun mila (kitne), kaun nahi mila → "➕ Add address"
       const fl = fields.length ? fields : ['name', 'mobile', 'pincode', 'id'];
       const termStats = rawTerms.length ? rawTerms.map((t) => ({ t, n: view.filter((x) => addrMatch(x, [t.toLowerCase()], fl)).length })) : [];
+      // 📊 v3.125.326 — KPI (poore allowed data par) + click-filter (kf)
+      const kpi = { total: view.length, ff: counts.ff, gv: counts.gv, noMobile: 0, noPin: 0, noAddr: 0, complete: 0, tagReq: 0, multi: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size };
+      const okM = (x) => last10(x.mobile).length === 10, okP = (x) => /^\d{6}$/.test(String(x.pincode || '').trim()), okA = (x) => String(x.address || '').trim().length >= 8;
+      view.forEach((x) => { if (!okM(x)) kpi.noMobile++; if (!okP(x)) kpi.noPin++; if (!okA(x)) kpi.noAddr++; if (okM(x) && okP(x) && okA(x)) kpi.complete++; if (x.src === 'Tag request') kpi.tagReq++; });
+      const kf = String(url.searchParams.get('kf') || '');
+      const KF = { nomobile: (x) => !okM(x), nopin: (x) => !okP(x), noaddr: (x) => !okA(x), complete: (x) => okM(x) && okP(x) && okA(x), tagreq: (x) => x.src === 'Tag request', multi: (x) => x.gsize > 1 };
+      if (KF[kf]) hit = hit.filter(KF[kf]);
       const rows = hit.slice(0, limit);
       let pins;
       if (url.searchParams.get('geo') === '1') { pins = {}; rows.forEach((r) => { if (r.pincode && !pins[r.pincode]) { const g = pinGeoOf(r.pincode); if (g) pins[r.pincode] = g; } }); }
       res.setHeader('Cache-Control', 'private, no-store');
-      return sendJson(res, 200, { ok: true, termStats, total: hit.length, all: view.length, multiCount: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, counts, channels: chans, canUpload: addrCanUpload(user), rows, pins, sync: syncInfo(), cache: { at: addressBookRuntime.at ? new Date(addressBookRuntime.at).toISOString() : '', everyHours: 8 } });
+      return sendJson(res, 200, { ok: true, kpi, kf, termStats, total: hit.length, all: view.length, multiCount: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, counts, channels: chans, canUpload: addrCanUpload(user), rows, pins, sync: syncInfo(), cache: { at: addressBookRuntime.at ? new Date(addressBookRuntime.at).toISOString() : '', everyHours: 8 } });
     }
     if (p === '/api/address-book/status' && method === 'GET') {
       if (!chans.length) throw new HttpError(403, 'Permission nahi hai.');
