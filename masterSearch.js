@@ -845,7 +845,13 @@ FF.pages = FF.pages || {};
       const tlBoost = (p) => (/-tl$/.test(p.kind || '') ? 0 : 1);
       if (roleWant) out.people = out.people.filter((p) => (roleWant === 'tl' ? /-tl$/.test(p.kind || '') : /-agent$/.test(p.kind || '')));
       out.people.sort((a, b) => (nameRank(a) - nameRank(b)) || (tlBoost(a) - tlBoost(b)) || (b.bars.size - a.bars.size) || (b.n - a.n));
-      if (out.people.length > 60) out.people.length = 60;
+      // 🔀 v3.125.319 — cap channel-wise: pehle top-60 me zyada tags wale GV agents aa jaate the aur kam tags wala FF agent
+      //    (jaise "IRFAN AHMED LRFAN") kat jaata tha. Ab FF aur GV dono ke apne 40-40.
+      if (out.people.length > 60) {
+        const cnt = { ff: 0, gv: 0 }, keep = [];
+        for (const p of out.people) { const ch = /^gv/.test(String(p.kind || '')) ? 'gv' : 'ff'; if (cnt[ch] < 40) { cnt[ch]++; keep.push(p); } }
+        out.people = keep;
+      }
     }
     // exact / prefix ID hits — only inspect IDs sharing the first 4 normalized characters.
     if (idx && ni.length >= 4) {
@@ -1037,6 +1043,14 @@ FF.pages = FF.pages || {};
       .map((p, i) => ({ p, i }))
       .sort((a, b) => (nameHit(b.p) - nameHit(a.p)) || (isTlRank(b.p) - isTlRank(a.p)) || (a.i - b.i))
       .map((x) => x.p);
+    // 🔀 v3.125.319 — dropdown me FF aur GV dono ko barabar jagah: dono channel ki sorted list se baari-baari (round-robin),
+    //    taaki ek channel ke 14+ naam doosre ko dropdown se bahar na dhakel dein.
+    {
+      const isGvP = (p) => /^gv/.test(String(p.kind || ''));
+      const a = filteredPeople.filter((p) => !isGvP(p)), b = filteredPeople.filter(isGvP), mixed = [];
+      for (let i = 0; i < Math.max(a.length, b.length); i++) { if (a[i]) mixed.push(a[i]); if (b[i]) mixed.push(b[i]); }
+      filteredPeople.length = 0; filteredPeople.push(...mixed);
+    }
     const items = [];
     filteredPeople.slice(0, 14).forEach((rawP) => {
       const p = canonicalPerson(rawP, state.full || state.light);
