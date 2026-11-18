@@ -9480,7 +9480,7 @@ async function handleApi(req, res, url) {
     const addressEntries = created.map(addressEntryFromRequest).filter(Boolean);
     if (addressEntries.length) {
       rememberAddressBook(addressEntries);
-      addressBookRuntime.map = null; addressBookRuntime.at = 0;
+      /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
     }
     persistBackground('notify');
     if (addressEntries.length) {
@@ -9621,9 +9621,15 @@ async function handleApi(req, res, url) {
     }
     return map;
   }
-  async function addressBookMap() {
+  const ADDR_TTL_MS = 8 * 3600e3;
+  async function addressBookRefresh() { return addressBookMap(true); }
+  async function addressBookMap(force) {
     const now = Date.now();
-    if (addressBookRuntime.map && now - addressBookRuntime.at < 10 * 60e3) return addressBookRuntime.map;
+    // ⚡ v3.125.325: Sheet se har 8 ghante me ek baar (ya manual force refresh). Beech me turant memory se; purana ho to background me refresh.
+    if (addressBookRuntime.map && !force) {
+      if (now - addressBookRuntime.at >= ADDR_TTL_MS && !addressBookRuntime.promise) addressBookRefresh().catch(() => {});
+      return addressBookRuntime.map;
+    }
     if (addressBookRuntime.promise) return addressBookRuntime.promise;
     const fallback = fallbackAddressMap();
     const store = sheetSyncStore();
@@ -9638,6 +9644,7 @@ async function handleApi(req, res, url) {
       })
       .catch((err) => {
         console.warn('address book read:', err.message);
+        if (addressBookRuntime.map && force) { addressBookRuntime.at = Date.now() - ADDR_TTL_MS + 5 * 60e3; return addressBookRuntime.map; }   // refresh fail: purana rakho, 5 min baad dobara try
         addressBookRuntime.map = fallback; addressBookRuntime.at = Date.now(); return fallback;
       })
       .finally(() => { addressBookRuntime.promise = null; });
@@ -9943,14 +9950,14 @@ async function handleApi(req, res, url) {
       if (mem[e.key]) Object.assign(mem[e.key], { mobile: out.mobile, address: out.address, pincode: out.pincode });
       return out;
     });
-    addressBookRuntime.map = null; addressBookRuntime.at = 0;
+    /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
     const store = sheetSyncStore();
     if (!store || !entries.length) return { ok: true, local: true, synced: false, count: entries.length };
     const cfg = tagSheetConfig();
     const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
     try {
       const out = await store.call('upsertaddresses', { tab: ADDRESS_BOOK_TAB, rows: entries });
-      addressBookRuntime.map = null; addressBookRuntime.at = 0;
+      /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
       return { ok: true, local: true, synced: true, count: entries.length, sheet: out };
     } catch (err) {
       console.warn('address book sync:', err.message);
@@ -10172,7 +10179,7 @@ async function handleApi(req, res, url) {
     }
     rememberAddressBook(fresh);
     fresh.forEach((f) => { const t = mem[f.key]; if (t) { t.pendingSync = true; t.importedFrom = f.importedFrom; } });
-    addressBookRuntime.map = null; addressBookRuntime.at = 0;
+    /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
     try { await persist('notify'); } catch (err) { console.warn('address persist:', err && err.message); }
     tagBackupSchedule(2000);
     startAddressSheetSync(meta, entries).catch(() => {});
@@ -10209,7 +10216,7 @@ async function handleApi(req, res, url) {
       }
     } finally {
       addrSync.running = false; addrSync.at = new Date().toISOString();
-      addressBookRuntime.map = null; addressBookRuntime.at = 0;
+      /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
       try { await persist('notify'); } catch { /* retry next time */ }
       tagBackupSchedule(2000);
     }
@@ -10235,7 +10242,7 @@ async function handleApi(req, res, url) {
     if (logFailed || !store) { const w = workspaceStore(); w.addressDeletedLog = [...(Array.isArray(w.addressDeletedLog) ? w.addressDeletedLog : []), ...snap.map((e) => ({ at: new Date().toISOString(), by: by || '', ...e }))].slice(-3000); }   // Sheet log na ho paye to site ke backup me copy rahegi
     const mem = addressBookMemoryEntries(), dead = addressDeletedMap();
     list.forEach((k) => { delete mem[k]; dead[k] = new Date().toISOString(); });
-    addressBookRuntime.map = null; addressBookRuntime.at = 0;
+    /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
     let sheetDeleted = false, sheetNote = '';
     if (store) {
       try { await store.call('deleteaddresses', { tab: ADDRESS_BOOK_TAB, keys: list }, { timeoutMs: 90e3, attempts: 2 }); sheetDeleted = true; }
@@ -10285,7 +10292,7 @@ async function handleApi(req, res, url) {
       const mem = addressBookMemoryEntries(), map = await addressBookMap();
       const now = new Date().toISOString();
       fixes.forEach((f) => { if (dropKeys.has(f.key)) return; const base = { ...(map.get(f.key) || {}), ...(mem[f.key] || {}) }; if (!base.key) return; mem[f.key] = { ...base, key: f.key, address: f.address, pincode: f.pincode || base.pincode || '', updatedAt: now, pendingSync: true }; });
-      addressBookRuntime.map = null; addressBookRuntime.at = 0;
+      /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
       try { await persist('notify'); } catch { /* retry */ }
       try { await startAddressSheetSync({ file: 'cleanup', by }, []); } catch { /* pending rehti hain */ }   // v3.125.321 — sheet sync poora hone tak ruko
     }
@@ -11004,7 +11011,7 @@ async function handleApi(req, res, url) {
       let pins;
       if (url.searchParams.get('geo') === '1') { pins = {}; rows.forEach((r) => { if (r.pincode && !pins[r.pincode]) { const g = pinGeoOf(r.pincode); if (g) pins[r.pincode] = g; } }); }
       res.setHeader('Cache-Control', 'private, no-store');
-      return sendJson(res, 200, { ok: true, termStats, total: hit.length, all: view.length, multiCount: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, counts, channels: chans, canUpload: addrCanUpload(user), rows, pins, sync: syncInfo() });
+      return sendJson(res, 200, { ok: true, termStats, total: hit.length, all: view.length, multiCount: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, counts, channels: chans, canUpload: addrCanUpload(user), rows, pins, sync: syncInfo(), cache: { at: addressBookRuntime.at ? new Date(addressBookRuntime.at).toISOString() : '', everyHours: 8 } });
     }
     if (p === '/api/address-book/status' && method === 'GET') {
       if (!chans.length) throw new HttpError(403, 'Permission nahi hai.');
@@ -11052,7 +11059,7 @@ async function handleApi(req, res, url) {
         if (ex.src === 'Tag request') throw new HttpError(400, 'Tag request ka address yahan edit nahi hota (Tag Request page se badlo).');
         if (!chans.includes(ex.channel)) throw new HttpError(403, 'Is channel ki permission nahi hai.');
         rememberAddressBook([{ key, agentId: agentId || ex.id, agent: name, channel: channel || ex.channel, mobile, address, pincode, tl: tl || ex.tl, updatedAt: new Date().toISOString(), pendingSync: true, importedFrom: 'Manual edit' }]);
-        addressBookRuntime.map = null; addressBookRuntime.at = 0;
+        /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
         try { await persist('notify'); } catch (err) { console.warn('address persist:', err && err.message); }
         tagBackupSchedule(2000);
         startAddressSheetSync({ file: 'Manual edit', by }, []).catch(() => {});
@@ -11110,6 +11117,11 @@ async function handleApi(req, res, url) {
       deleteAddressKeys(drop, user.name || user.username || '').catch((err) => console.warn('address resolve delete:', err && err.message));
       return sendJson(res, 200, { ok: true, deleted: drop.length, background: true });
     }
+    if (p === '/api/address-book/refresh' && method === 'POST') {
+      const t0 = Date.now();
+      const m = await addressBookRefresh();
+      return sendJson(res, 200, { ok: true, rows: m ? m.size : 0, ms: Date.now() - t0, cache: { at: new Date(addressBookRuntime.at).toISOString(), nextAt: new Date(addressBookRuntime.at + ADDR_TTL_MS).toISOString() } });
+    }
     if (p === '/api/address-book/sync' && method === 'POST') {
       if (addrSync.running) return sendJson(res, 200, { ok: true, sync: syncInfo() });
       startAddressSheetSync({ file: 'manual sync', by: user.name || '' }, []).catch(() => {});
@@ -11127,7 +11139,7 @@ async function handleApi(req, res, url) {
   // 📇 Purani/imported requests me agent ka mobile+address+pincode Address book se bharo (admin). Dispatch label isi se bharta hai.
   if (p === '/api/tag-requests/recovery/fill-addresses' && method === 'POST') {
     requireAdmin(user);
-    addressBookRuntime.map = null; addressBookRuntime.at = 0; // Address tab abhi-abhi badla ho sakta hai — taaza padho
+    /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */ // Address tab abhi-abhi badla ho sakta hai — taaza padho
     const filled = await fillRequestAddresses();
     for (const r of (workspaceStore().tagRequests || [])) if (r && r.by === 'sheet-import' && (!r.byName || r.byName === 'Sheet import')) r.byName = (r.agent && r.agent.name) || r.byName;
     if (filled) await persist('notify');
@@ -11173,7 +11185,7 @@ async function handleApi(req, res, url) {
     }
     const merged = mergeMissingTagRequests(made);
     let filled = 0; try { filled = await fillRequestAddresses(); } catch (err) { console.warn('fill addresses:', err && err.message); }
-    try { const ae = made.map(addressEntryFromRequest).filter(Boolean); if (ae.length) { rememberAddressBook(ae); addressBookRuntime.map = null; addressBookRuntime.at = 0; } } catch { /* optional */ }
+    try { const ae = made.map(addressEntryFromRequest).filter(Boolean); if (ae.length) { rememberAddressBook(ae); /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */ } } catch { /* optional */ }
     await persist('notify');
     logAudit(user, 'tag_request_recovered', { target: 'sheet', note: `${merged.added.length} requests · source Tag Requests sheet tab`, ip: clientIp(req) });
     return sendJson(res, 200, { ok: true, received: list.length, added: merged.added.length, total: merged.total, addressFilled: filled });
