@@ -31,7 +31,7 @@ import { createNpciEngine, cleanItem as npciCleanItem } from './npci-engine.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS, LAYOUTS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
-import { loadFfDispatchRows, loadGvDispatchRows } from './dispatch-report.js';
+import { loadFfDispatchRows, loadGvDispatchRows, isDirect as dispatchIsDirect, directLabel as dispatchDirectLabel } from './dispatch-report.js';
 import { parseAnyFile, cleanAddressText } from './address-import.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
 // file use karte hain, isliye dono ke duplicate/wrong/malformed counts hamesha same rehte hain.
@@ -6287,10 +6287,63 @@ async function overlayDispatchEirIssuance(agents) {
   Object.defineProperty(agents, 'basis', { value: basis, enumerable: false });
   return agents;
 }
+/** 🔁 v3.125.317 — GV agents page jaisa LIVE (Tag Assignment se TL + stock), stale "GV REPORT" tab se nahi.
+ *  Pehle mail GV REPORT sheet padhta tha: wahan kai agents ka TL/stock khaali tha → wo "Direct, stock 0, High" ban
+ *  jaate the (page par TL-managed / stock wala). Ab TL + in-stock Tag Assignment se; REPORT sirf naam/mobile/status fallback. */
+async function liveGvDispatchRows(sheetRows) {
+  const s = db.settings, a = (s.gv && s.gv.assignment) || {};
+  const L = (v, d) => String(v || d).toUpperCase().replace(/[^A-Z]/g, '') || d;
+  const c = { cls: L(a.cls, 'A'), tag: L(a.tagId, 'B'), st: L(a.status, 'D'), id: L(a.agentId, 'E'), name: L(a.agentName, 'F'), tlId: L(a.tlId, 'G'), tlName: L(a.tlName, 'H') };
+  const id = String(s.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const sel = [c.id, c.name, c.tlId, c.tlName, c.cls, c.st];
+  const tq = `select ${sel.join(', ')}, count(${c.tag}) group by ${sel.join(', ')}`;
+  const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id, sheet: a.tab || 'Tag Assignment', tq })), { maxAgeMs: 10 * 60e3 });
+  if (out.status < 200 || out.status >= 300) throw new Error(`Tag Assignment query responded ${out.status}`);
+  const table = parseGvizServer(out.body);
+  const NA = /^(NOT\s*ASSIGNED|NULL|NA|N\/A|-)$/i;
+  const OUT = ['ISSUE', 'ISSUED', 'SOLD', 'DISPATCH', 'DELIVER', 'RETURN', 'CANCEL', 'DEAD', 'BLOCK', 'LOST', 'DAMAGE', 'REPLAC', 'VOID', 'EXPIRE', 'CLOSED', 'INACTIVE'];
+  const key = (v) => String(v || '').trim().toUpperCase();
+  const live = new Map();
+  for (const row of table.rows || []) {
+    const aid = String(serverCell(row, 0)).trim();
+    if (!aid || NA.test(aid) || /^(AGENT[ _]?ID|ID)$/i.test(aid)) continue;
+    let o = live.get(key(aid));
+    if (!o) { o = { id: aid, name: '', tlId: '', tlName: '', vc4: 0, total: 0 }; live.set(key(aid), o); }
+    const nm = String(serverCell(row, 1)).trim(), tid = String(serverCell(row, 2)).trim(), tn = String(serverCell(row, 3)).trim();
+    if (!o.name && nm) o.name = nm;
+    if (!o.tlId && tid && !NA.test(tid)) o.tlId = tid;
+    if (!o.tlName && tn && !NA.test(tn) && !/^(DIRECT|TL\s)/i.test(tn)) o.tlName = tn;
+    const status = String(serverCell(row, 5)).toUpperCase();
+    const n = serverNumber(serverCell(row, 6)) || 0;
+    if (OUT.some((w) => status.includes(w))) continue;
+    o.total += n;
+    if (/VC\s*0*4\b/i.test(String(serverCell(row, 4)))) o.vc4 += n;
+  }
+  const byId = new Map((sheetRows || []).map((r) => [key(r.agentId), r]));
+  const ids = new Set([...live.keys(), ...byId.keys()]);
+  const rows = [];
+  for (const k of ids) {
+    const l = live.get(k), r = byId.get(k);
+    if (!l) continue;                                  // Tag Assignment me kabhi nahi aaya → page me bhi nahi
+    const tlName = l.tlName || '', tlId = l.tlId || '';
+    const row = { ch: 'gv', kind: 'agent', agentId: l.id, id: l.id, name: l.name || (r && r.name) || l.id, agentName: l.name || (r && r.name) || l.id,
+      tlId, tl: tlName || (tlId ? `TL ${tlId}` : ''), tlName: tlName || (tlId ? `TL ${tlId}` : ''), priority: '', tlPriority: '', status: (r && r.status) || '',
+      cur: { vc4: 0, comm: 0, total: 0 }, last: { vc4: 0, comm: 0, total: 0 },
+      stock: { vc4: l.vc4, comm: Math.max(0, l.total - l.vc4), total: l.total }, tlStock: { vc4: 0, comm: 0, total: 0 } };
+    Object.defineProperty(row, 'mobile', { value: (r && r.mobile) || '', enumerable: false, configurable: true, writable: true });
+    row.direct = dispatchIsDirect(row, 'gv', s);
+    row.directLabel = row.direct ? dispatchDirectLabel('gv', s) : '';
+    rows.push(row);
+  }
+  const tls = new Map();
+  rows.forEach((r) => { if (r.direct) return; const k = key(r.tlId || r.tlName); const t = tls.get(k) || { vc4: 0, comm: 0, total: 0 }; t.vc4 += r.stock.vc4; t.comm += r.stock.comm; t.total += r.stock.total; tls.set(k, t); });
+  rows.forEach((r) => { if (!r.direct) r.tlStock = { ...tls.get(key(r.tlId || r.tlName)) }; });
+  return rows;
+}
 async function loadDispatchAgents(channel) {
   const jobs = [];
   if (channel !== 'gv') jobs.push(dispatchReportTable('ff').then((table) => loadFfDispatchRows(table, db.settings)));
-  if (channel !== 'ff') jobs.push(dispatchReportTable('gv').then((table) => loadGvDispatchRows(table, db.settings)));
+  if (channel !== 'ff') jobs.push(dispatchReportTable('gv').then((table) => loadGvDispatchRows(table, db.settings)).then(async (rows) => { try { const live = await liveGvDispatchRows(rows); return live.length ? live : rows; } catch (err) { console.warn('dispatch GV live rows:', err.message); return rows; } }));
   const sources = await Promise.all(jobs);
   return overlayDispatchEirIssuance(sources.flat());
 }

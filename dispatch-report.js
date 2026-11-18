@@ -16,7 +16,7 @@ function numberCell(row, index) {
   const match = String(raw === undefined || raw === null ? '' : raw).replace(/,/g, '').match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
   return match ? Number(match[0]) || 0 : 0;
 }
-function isDirect(agent, channel, settings = {}) {
+export function isDirect(agent, channel, settings = {}) {
   if (agent.directAgent === true || agent.tlExcluded === true || agent.isDirect === true) return true;
   const rules = settings.direct || {};
   if (rules.enabled === false) return false;
@@ -38,7 +38,7 @@ function isDirect(agent, channel, settings = {}) {
   }
   return (tl && excludedTl(tl)) || (!tl && !tlId) || !!selfSupervised;
 }
-function directLabel(channel, settings = {}) {
+export function directLabel(channel, settings = {}) {
   const rules = settings.direct || {};
   return String((channel === 'gv' ? rules.labelGv : rules.labelFf) || (channel === 'gv' ? 'Direct Agent (no TL)' : 'Direct Agent (APS)'));
 }
