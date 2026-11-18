@@ -10308,7 +10308,7 @@ async function handleApi(req, res, url) {
   const addrMatch = (row, terms, fields) => {
     if (!terms.length) return true;
     return terms.some((t) => fields.some((f) => {
-      if (f === 'mobile' || f === 'pincode') { const d = tagDigits(t); return d.length >= 3 && tagDigits(row[f]).includes(d); }
+      if (f === 'mobile' || f === 'pincode') { let d = tagDigits(t); if (f === 'mobile' && d.length >= 11) d = d.slice(-10); return d.length >= 3 && tagDigits(row[f]).includes(d); }
       if (f === 'id') return String(row.id || '').toLowerCase().includes(t);
       return String(row[f] || '').toLowerCase().includes(t);
     }));
@@ -10991,9 +10991,12 @@ async function handleApi(req, res, url) {
       if (!chans.length) throw new HttpError(403, 'Agents Address dekhne ki permission nahi hai.');
       const want = String(url.searchParams.get('channel') || 'all').toLowerCase();
       const allowed = want === 'ff' || want === 'gv' ? chans.filter((c) => c === want) : chans;
-      const terms = String(url.searchParams.get('q') || '').split(/[\n,;\t]+/).map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 300);
+      // 🔁 v3.125.327 — same term (naam / mobile / ID) kitni bhi baar likho, ek hi ginega (91xxxxxxxxxx = xxxxxxxxxx)
+      const termKey = (t) => { const d = String(t).replace(/\D/g, ''); if (d.length >= 10 && d.length === String(t).replace(/[\s+-]/g, '').length) return 'm' + d.slice(-10); return String(t).toLowerCase().replace(/[^a-z0-9]/g, ''); };
+      const dedupeTerms = (arr) => { const seen = new Set(); return arr.filter((t) => { const k = termKey(t); if (!k || seen.has(k)) return false; seen.add(k); return true; }); };
+      const terms = dedupeTerms(String(url.searchParams.get('q') || '').split(/[\n,;\t]+/).map((t) => t.trim()).filter(Boolean)).map((t) => t.toLowerCase()).slice(0, 300);
       const fields = String(url.searchParams.get('fields') || 'name,mobile,pincode,id').split(',').map((f) => f.trim()).filter((f) => ['name', 'mobile', 'pincode', 'id', 'address', 'tl'].includes(f));
-      const rawTerms = String(url.searchParams.get('q') || '').split(/[\n,;\t]+/).map((t) => t.trim()).filter(Boolean).slice(0, 300);
+      const rawTerms = dedupeTerms(String(url.searchParams.get('q') || '').split(/[\n,;\t]+/).map((t) => t.trim()).filter(Boolean)).slice(0, 300);
       const limit = Math.min(5000, Math.max(1, Number(url.searchParams.get('limit')) || 300));
       const view = (await addressBookView()).filter((x) => allowed.includes(x.channel));
       const counts = { ff: 0, gv: 0 }; view.forEach((x) => { counts[x.channel]++; });
