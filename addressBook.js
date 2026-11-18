@@ -210,12 +210,28 @@ FF.pages = FF.pages || {};
     document.body.appendChild(ov);
     const close = () => ov.remove();
     ov.querySelector('#ab-later').onclick = () => { st.later.add(gkey); close(); };
-    ov.querySelector('#ab-both').onclick = async () => { try { await FF.auth.api('/api/address-book/resolve', 'POST', { mode: 'both', gkey }); close(); load(root); } catch (err) { alert(err.message); } };
-    ov.querySelectorAll('[data-keep]').forEach((b) => { b.onclick = async () => {
+    // ⚡ Instant: popup turant band + list se local update; server delete/sync background me (fail ho to wapas load).
+    const dropLocal = (keys) => {
+      if (!st.data || !Array.isArray(st.data.rows)) return;
+      const ks = new Set(keys);
+      st.data.rows = st.data.rows.filter((r) => !(ks.has(r.key) || (r.altKeys || []).some((k) => ks.has(k))));
+      if (st.data.counts) { /* count server se agle load par theek ho jayega */ }
+      try { paint(root); } catch { /* list repaint optional */ }
+    };
+    ov.querySelector('#ab-both').onclick = () => {
+      close(); st.later.add(gkey);
+      if (st.data && Array.isArray(st.data.rows)) st.data.rows.forEach((r) => { if (r.gkey === gkey) r.conflict = false; });
+      try { paint(root); } catch { /* optional */ }
+      U.toast('✅ Dono rakhe', 'ok');
+      FF.auth.api('/api/address-book/resolve', 'POST', { mode: 'both', gkey }).catch((err) => { alert('Save nahi hua: ' + err.message); load(root); });
+    };
+    ov.querySelectorAll('[data-keep]').forEach((b) => { b.onclick = () => {
       const keep = list[Number(b.dataset.keep)];
       const drop = list.filter((r) => r !== keep).flatMap((r) => [r.key, ...(r.altKeys || [])]);
-      b.disabled = true;
-      try { await FF.auth.api('/api/address-book/resolve', 'POST', { mode: 'one', gkey, drop }); close(); U.toast('✅ Sahi address rakh liya, baaki delete', 'ok'); load(root); } catch (err) { b.disabled = false; alert(err.message); }
+      close();
+      U.toast('✅ Sahi address rakh liya — baaki hat rahe hain', 'ok');
+      dropLocal(drop);
+      FF.auth.api('/api/address-book/resolve', 'POST', { mode: 'one', gkey, drop }).catch((err) => { alert('Delete nahi hua: ' + err.message); load(root); });
     }; });
   }
 

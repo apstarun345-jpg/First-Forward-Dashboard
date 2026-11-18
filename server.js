@@ -9958,7 +9958,25 @@ async function handleApi(req, res, url) {
     }
   }
   async function lookupAgentAddress(q) {
-    const r = await lookupAgentAddressRaw(q);
+    let r = await lookupAgentAddressRaw(q);
+    // 📍 v3.125.322 — exact key na mile (ID APS… vs digits / naam thoda alag) to Agents Address list me ID / naam / mobile se dhundo.
+    if (!r || !r.address) {
+      try {
+        const dm0 = directoryMobile(q && q.agentId, q && q.agentName);
+        const idD = tagDigits(q && q.agentId), nk = tagNameKey((q && q.agentName) || ''), m10 = last10(dm0 || '');
+        const ch = String((q && q.channel) || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+        const view = await addressBookView();
+        const cand = view.filter((x) => x && (x.address || x.pincode)).filter((x) => {
+          const xch = String(x.channel || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+          const byId = idD.length >= 3 && tagDigits(x.agentId) === idD && xch === ch;
+          const byName = nk && tagNameKey(x.agent || '') === nk && xch === ch;
+          const byMob = m10 && last10(x.mobile) === m10;
+          return byId || byName || byMob;
+        });
+        const hit = cand.find((x) => x.address && x.pincode) || cand.find((x) => x.address) || cand[0];
+        if (hit) r = { mobile: (r && r.mobile) || hit.mobile || '', address: hit.address || '', pincode: hit.pincode || '', dispatchName: (r && r.dispatchName) || '', tl: (r && r.tl) || hit.tl || '', source: 'Address', lastRequestAt: (r && r.lastRequestAt) || '' };
+      } catch (err) { console.warn('lookupAgentAddress fallback:', err && err.message); }
+    }
     if (r && r.mobile) return r;
     const dm = directoryMobile(q && q.agentId, q && q.agentName);
     if (!dm) return r;
@@ -11088,8 +11106,9 @@ async function handleApi(req, res, url) {
       if (body.mode === 'both') { addressDismissMap()[gkey] = new Date().toISOString(); try { await persist('notify'); } catch { /* retry */ } return sendJson(res, 200, { ok: true }); }
       const drop = (Array.isArray(body.drop) ? body.drop : []).map((k) => String(k || '').slice(0, 200)).filter(Boolean).slice(0, 50);
       if (!drop.length) throw new HttpError(400, 'Kuch delete karne ko nahi diya.');
-      const out = await deleteAddressKeys(drop, user.name || user.username || '');
-      return sendJson(res, 200, { ok: true, ...out });
+      // ⚡ v3.125.322: turant jawab — site se abhi hide, Sheet delete/log background me.
+      deleteAddressKeys(drop, user.name || user.username || '').catch((err) => console.warn('address resolve delete:', err && err.message));
+      return sendJson(res, 200, { ok: true, deleted: drop.length, background: true });
     }
     if (p === '/api/address-book/sync' && method === 'POST') {
       if (addrSync.running) return sendJson(res, 200, { ok: true, sync: syncInfo() });

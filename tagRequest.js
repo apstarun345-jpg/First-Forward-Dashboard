@@ -148,7 +148,9 @@ FF.pages = FF.pages || {};
   if (!state.rows.length) state.rows = [newRow()];
 
   const norm = (v) => String(v == null ? '' : v).trim().toUpperCase().replace(/\s+/g, ' ');
-  const digits = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+  const digits = (v) => String(v == null ? '' : v).replace(/\D/g, '')
+  /** Agent ID jaisa hai waisa (GV: APS011190) — digits() prefix hata deta tha. */
+  const keepId = (v) => String(v == null ? '' : v).trim().replace(/\s+/g, '');
   const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
   const round1 = (v) => Math.round(num(v) * 10) / 10;
   const ymNow = () => U.reportYm();
@@ -277,10 +279,11 @@ FF.pages = FF.pages || {};
   function addEir(map, channel, name, id, tl, row) {
     const key = `${channel}|${norm(name) || digits(id)}`;
     const rec = map.get(key) || {
-      channel, name: name || id || key, agentId: digits(id), tlName: tl || '',
+      channel, name: name || id || key, agentId: digits(id), rawId: keepId(id), tlName: tl || '',
       stock: {}, cur: {}, last: {}, eirCur: {}, eirLast: {}, growth: null, priority: '', grp: emptyGroups()
     };
     if (id && !rec.agentId) rec.agentId = digits(id);
+    if (id && !rec.rawId) rec.rawId = keepId(id);
     if (name && (!rec.name || rec.name === key)) rec.name = name;
     if (tl && !rec.tlName) rec.tlName = tl;
     const ym = row.ym, cls = String(row.cls || '').toUpperCase();
@@ -352,11 +355,12 @@ FF.pages = FF.pages || {};
         if (DATEISH.test(String(tlName || '').trim())) tlName = '';
         // 🆔 v3.125.248 — ek hi naam ke do agent (jaise 2× "SURAJ KUMAR", alag ID) pehle ek me mil jaate the → doosra
         // list se gayab. Ab naam same par ID alag ho to alag record (key = naam#ID).
-        const nk = `${channel}|${norm(name) || digits(id)}`, did = digits(id);
+        const nk = `${channel}|${norm(name) || digits(id)}`, did = digits(id), rawId = keepId(id);
         let key = nk, found = byKey.get(nk);
         if (found && did && found.agentId && found.agentId !== did) { key = `${nk}#${did}`; found = byKey.get(key); }
-        const rec = found || { key, channel, name: name || id, agentId: did, tlName: tlName || '', stock: {}, cur: {}, last: {}, eirCur: {}, eirLast: {}, priority: '', growth: null, grp: emptyGroups() };
-        if (id && !rec.agentId) rec.agentId = digits(id);
+        const rec = found || { key, channel, name: name || id, agentId: did, rawId, tlName: tlName || '', stock: {}, cur: {}, last: {}, eirCur: {}, eirLast: {}, priority: '', growth: null, grp: emptyGroups() };
+        if (id && !rec.agentId) rec.agentId = did;
+        if (id && !rec.rawId) rec.rawId = rawId;
         if (name && (!rec.name || rec.name === key)) rec.name = name;
         if (tlName && !rec.tlName) rec.tlName = tlName;
         Object.assign(rec, patch || {});
@@ -429,7 +433,7 @@ FF.pages = FF.pages || {};
       const list = [...byKey.values()].map((r) => {
         const t = recTotals(r);
         return {
-          key: r.key || `${r.channel}|${norm(r.name)}`, channel: r.channel, name: r.name, agentId: r.agentId, tlName: r.tlName, priority: r.priority,
+          key: r.key || `${r.channel}|${norm(r.name)}`, channel: r.channel, name: r.name, agentId: r.agentId, rawId: r.rawId || r.agentId, tlName: r.tlName, priority: r.priority,
           stock: t.stock, last: t.last, cur: t.cur, core: t.core, comm: t.comm
         };
       });
@@ -1299,7 +1303,7 @@ body.colorful .from-hdr { color: #166534; }
       if (!q) return true;
       return norm(a.name).includes(q) || (dq && digits(a.agentId).includes(dq)) || (fam.length > 1 && fam.includes(digits(a.agentId))) || norm(a.tlName).includes(q);
     }).slice(0, 24).map((a) => ({
-      kind: 'agent', name: a.name, agentId: a.agentId, tlName: a.tlName, channel: a.channel,
+      kind: 'agent', name: a.name, agentId: a.agentId, rawId: a.rawId, tlName: a.tlName, channel: a.channel,
       stock: num(a.stock), last: num(a.last), cur: num(a.cur)
     }));
     const tls = row.tlFilter ? [] : [...idx.tls.values()].filter((t) => !q || norm(t.name).includes(q))
@@ -1313,14 +1317,14 @@ body.colorful .from-hdr { color: #166534; }
     if (!items.length) return `<div class="tr-suggest-empty">${state.index ? 'Koi match nahi mila — naya agent hai to naam likh kar aage badho' : 'Agent list load ho rahi hai…'}</div>`;
     return items.map((it, i) => it.kind === 'tl'
       ? `<button type="button" class="tr-suggest-item tl ${i === 0 ? 'hot' : ''}" data-tr-pick="tl:${esc(norm(it.channel) + '|' + norm(it.name))}"><span class="tr-suggest-name">🧑‍💼 ${esc(it.name)}</span><small class="dim">TL · ${esc(it.agents)} agents · ${it.channel === 'gv' ? 'GV' : 'FF'} — TL select karo → poora data dikhega</small>${stockLine(it)}</button><button type="button" class="tr-suggest-item tl" data-tr-pick="tlmap:${esc(norm(it.channel) + '|' + norm(it.name))}"><span class="tr-suggest-name">🔗 FASTag Mapping Name/ID — ${esc(it.name)}</span><small class="dim">TL ka naam alag hai / FASTag kisi aur naam-ID par map hain → mapping naam ya ID likho, sheet me wahi jayegi</small></button>`
-      : `<button type="button" class="tr-suggest-item ${i === 0 ? 'hot' : ''}" data-tr-pick="agent:${esc(it.channel)}:${esc(it.agentId || '')}:${esc(norm(it.name))}"><span class="tr-suggest-name">${esc(it.name)}${it.agentId ? ` <small class="dim">#${esc(it.agentId)}</small>` : ''}</span><small class="dim">${it.tlName ? `TL ${esc(it.tlName)} · ` : ''}${it.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</small>${stockLine(it)}</button>`).join('');
+      : `<button type="button" class="tr-suggest-item ${i === 0 ? 'hot' : ''}" data-tr-pick="agent:${esc(it.channel)}:${esc(it.agentId || '')}:${esc(norm(it.name))}"><span class="tr-suggest-name">${esc(it.name)}${it.agentId ? ` <small class="dim">#${esc(it.rawId || it.agentId)}</small>` : ''}</span><small class="dim">${it.tlName ? `TL ${esc(it.tlName)} · ` : ''}${it.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</small>${stockLine(it)}</button>`).join('');
   }
   /** Agent ke neeche ka status line — pakka match / "kya ye hai?" / naya agent. */
   function agentMetaHtml(row) {
     const rec = exactAgent(row);
     const filter = row.tlFilter ? ` <button type="button" class="chip on tr-filter-clear" title="TL filter hatao">TL: ${esc(row.tlFilter)} ✕</button>` : '';
     if (rec && rec.isTl) return `<span class="badge purple">👥 TL</span> <span class="badge green">${rec.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span> <b>${esc(rec.name)}</b> · ${fmt(rec.agents ? rec.agents.size : 0)} agents <small class="dim">— TL ke naam par request · dispatch name neeche bharo</small>`;
-    if (rec) return `<span class="badge green">${rec.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span> <b>${esc(rec.name)}</b>${rec.agentId ? ` · ID <b>${esc(rec.agentId)}</b>` : ''}${rec.tlName ? ` · TL <b>${tlLink(rec.tlName)}</b>` : ''}${filter}`;
+    if (rec) return `<span class="badge green">${rec.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span> <b>${esc(rec.name)}</b>${rec.agentId ? ` · ID <b>${esc(rec.rawId || rec.agentId)}</b>` : ''}${rec.tlName ? ` · TL <b>${tlLink(rec.tlName)}</b>` : ''}${filter}`;
     const q = String(row.name || row.agentId || '').trim();
     if (!q) return (state.index ? '<span class="dim small">Naam / ID likhna shuru karo — agents + TL dropdown me aayenge; chunte hi ID + TL bhar jayega</span>' : '<span class="dim small">⏳ agent list load ho rahi hai…</span>') + filter;
     if (!state.index) return '<span class="dim small">⏳ agent list load ho rahi hai…</span>' + filter;
@@ -1452,7 +1456,7 @@ body.colorful .from-hdr { color: #166534; }
     if (!all.length) return `<div class="tr-sb-empty dim small">Is search / filter me koi agent nahi mila.</div>`;
     const tot = (list, key) => list.reduce((s, a) => s + num(key.split('.').reduce((o, k) => (o == null ? o : o[k]), a)), 0);
     const body = shown.map((a) => `<tr class="tr-sb-row" data-tr-sb-pick="agent:${esc(a.channel)}:${esc(a.agentId || '')}:${esc(norm(a.name))}" title="${esc(a.name)} ko form me jodo">
-        <td class="tr-sb-name"><b>${esc(a.name)}</b>${a.agentId ? ` <small class="dim">#${esc(a.agentId)}</small>` : ''}<small class="dim">${a.tlName ? `TL ${tlLink(a.tlName)}` : 'Direct'}</small></td>
+        <td class="tr-sb-name"><b>${esc(a.name)}</b>${a.agentId ? ` <small class="dim">#${esc(a.rawId || a.agentId)}</small>` : ''}<small class="dim">${a.tlName ? `TL ${tlLink(a.tlName)}` : 'Direct'}</small></td>
         <td class="tr-sb-ch"><span class="badge ${a.channel === 'gv' ? 'green' : 'blue'}">${a.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span></td>
         <td class="num"><b>${fmt(num(a.core && a.core.stock))}</b></td>
         <td class="num"><b>${fmt(num(a.comm && a.comm.stock))}</b></td>
@@ -1735,12 +1739,6 @@ body.colorful .from-hdr { color: #166534; }
       const saved = agentBook()[`${rec.channel}|${norm(rec.name)}`];
       if (saved && (saved.mobile || saved.dispatchName || saved.address || saved.pincode)) {
         row.suggest = { mobile: clean(saved.mobile), dispatchName: clean(saved.dispatchName), address: clean(saved.address), pincode: clean(saved.pincode), source: 'Request', lastRequestAt: clean(saved.lastRequestAt) };
-        let filled = false;
-        if (!clean(row.mobile) && clean(saved.mobile)) { row.mobile = saved.mobile; filled = true; }
-        if (!clean(row.dispatchName) && clean(saved.dispatchName)) { row.dispatchName = saved.dispatchName; filled = true; }
-        if (!clean(row.address) && clean(saved.address)) { row.address = saved.address; filled = true; }
-        if (!clean(row.pincode) && clean(saved.pincode)) { row.pincode = saved.pincode; filled = true; }
-        if (filled) row.fromBook = true;
       } else row.suggest = null;
     }
     if (state.errs[row.id]) delete state.errs[row.id].agent;
@@ -1762,6 +1760,45 @@ body.colorful .from-hdr { color: #166534; }
       renderForm();
     } catch { /* optional */ }
   }
+  /** Pehle se saved address mila — popup me dikhao, "Haan, bhar do" par hi form me fill. */
+  function confirmContactModal(row, sg, rec) {
+    if (!sg || document.getElementById('tr-ca-modal')) return;
+    const ov = document.createElement('div');
+    ov.id = 'tr-ca-modal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px';
+    const line = (k, v) => `<div style="display:grid;grid-template-columns:96px 1fr;gap:8px;padding:5px 0;border-bottom:1px solid rgba(128,128,128,.2)"><span class="dim small">${k}</span><b style="word-break:break-word">${esc(v || '—')}</b></div>`;
+    ov.innerHTML = `<div role="dialog" aria-modal="true" style="background:var(--card,#fff);color:inherit;border-radius:14px;padding:16px;max-width:460px;width:100%;max-height:88vh;overflow:auto">
+      <h3 style="margin:0 0 4px">📍 Address pehle se saved hai</h3>
+      <p class="dim small" style="margin:0 0 8px">Details check karo — sahi ho to confirm karo, form me tabhi bharega.</p>
+      ${line('Name', (rec && rec.name) || row.name)}${line('Mobile', sg.mobile)}${line('Pincode', sg.pincode)}${line('Address', sg.address)}
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
+        <button type="button" class="btn" data-ca="no">Nahi, khud bharunga</button>
+        <button type="button" class="btn primary" data-ca="yes">✅ Haan, sahi hai — bhar do</button></div></div>`;
+    const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) return close();
+      const b = e.target.closest ? e.target.closest('[data-ca]') : null;
+      if (!b) return;
+      close();
+      if (b.dataset.ca !== 'yes' || !state.rows.includes(row)) return;
+      if (!clean(row.mobile) && clean(sg.mobile)) row.mobile = String(sg.mobile);
+      if (!clean(row.dispatchName) && clean(sg.dispatchName)) row.dispatchName = String(sg.dispatchName);
+      if (!clean(row.address) && clean(sg.address)) row.address = String(sg.address);
+      if (!clean(row.pincode) && clean(sg.pincode)) row.pincode = String(sg.pincode);
+      row.fromBook = true; row.contactManual = true; row.addressSource = 'Address';
+      ['mobile', 'address', 'pincode'].forEach((f) => { if (state.errs[row.id]) delete state.errs[row.id][f]; });
+      const card = rootEl && rootEl.querySelector ? rootEl.querySelector('[data-tr-row="' + row.id + '"]') : null;
+      if (card) {
+        const wrap = document.createElement('div'); wrap.innerHTML = agentCardHtml(row, state.rows.indexOf(row));
+        const fresh = wrap.firstElementChild;
+        if (fresh) { card.replaceWith(fresh); bindAgentCard(fresh); updateTotals(fresh, row); }
+      }
+      U.toast('📍 Address bhar diya', 'ok');
+    });
+    document.body.appendChild(ov);
+  }
   async function suggestHistoricalContact(row) {
      checkRepeatOnPick(row);
      const rec = exactAgent(row); if (!rec) return;
@@ -1781,21 +1818,11 @@ body.colorful .from-hdr { color: #166534; }
          source: contact.source || 'Address',
          lastRequestAt: clean(contact.lastRequestAt)
        };
-       let changed = false;
-       if (!row.contactManual) {
-         if (!clean(row.mobile) && clean(contact.mobile)) { row.mobile = contact.mobile; changed = true; }
-         if (!clean(row.dispatchName) && clean(contact.dispatchName)) { row.dispatchName = contact.dispatchName; changed = true; }
-         if (!clean(row.address) && clean(contact.address)) { row.address = contact.address; changed = true; }
-         if (!clean(row.pincode) && clean(contact.pincode)) { row.pincode = contact.pincode; changed = true; }
-       }
-       if (!changed) { refreshContactSuggest(row); return; }
-       row.fromBook = true; row.addressSource = 'Address';
-       const card = rootEl && rootEl.querySelector ? rootEl.querySelector('[data-tr-row="' + row.id + '"]') : null;
-       if (card) {
-         const wrap = document.createElement('div'); wrap.innerHTML = agentCardHtml(row, state.rows.indexOf(row));
-         const fresh = wrap.firstElementChild;
-         if (fresh) { card.replaceWith(fresh); bindAgentCard(fresh); updateTotals(fresh, row); }
-       }
+       refreshContactSuggest(row);
+       // 📍 Seedha fill nahi — address/mobile mila to confirm popup (naam · mobile · pincode · address), confirm par hi fill.
+       const sg = row.suggest;
+       const needs = (!clean(row.address) && sg.address) || (!clean(row.mobile) && sg.mobile) || (!clean(row.pincode) && sg.pincode);
+       if (!row.contactManual && needs && (sg.address || sg.pincode)) confirmContactModal(row, sg, rec);
      } catch { /* optional suggestion */ }
    }
   /** Ek agent-card ki bindings (search dropdown + contact + qty). Partial re-render par sirf naya card
