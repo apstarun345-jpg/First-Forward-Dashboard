@@ -2088,6 +2088,57 @@ window.FF = window.FF || {};
   // ------------------------------------------------------------------ html
   const prioChip = (p) => (p ? `<span class="badge ${/high/i.test(p) ? 'red' : /medium/i.test(p) ? 'amber' : 'green'}">${esc(p)}</span>` : '<span class="dim">—</span>');
   const tagChip = (n) => `<b class="sug-chip direct">🏷️ ${fmt(n)} tags</b>`;
+
+  // 📍 v3.125.323 — Agent + TL ka address (Agents Address / tag request) profile me: Name · Mobile · Address with Pincode + copy.
+  const ADDR_MEM = new Map();
+  const aN = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  async function addrFetch(ch, id, name, mobile) {
+    const mob = String(mobile || '').replace(/\D/g, '').slice(-10);
+    const tries = [];
+    if (id) tries.push(['id', id]);
+    if (mob.length === 10) tries.push(['mobile', mob]);
+    if (name) tries.push(['name', name]);
+    let rows = [];
+    try {
+      for (const [fld, val] of tries) {
+        const j = await FF.auth.api(`/api/address-book?channel=${ch}&fields=${fld}&q=${encodeURIComponent(val)}&limit=20`);
+        let r = j.rows || [];
+        if (fld === 'id') r = r.filter((x) => aN(x.id) === aN(val));
+        else if (fld === 'mobile') r = r.filter((x) => String(x.mobile || '').replace(/\D/g, '').slice(-10) === val);
+        else { r = r.filter((x) => aN(x.name) === aN(val)); if (r.length !== 1) r = []; }
+        if (r.length) { rows = r; break; }
+      }
+    } catch { rows = []; }
+    if (!rows.length) {
+      try {
+        const qs = new URLSearchParams({ agentId: String(id || '').replace(/\D/g, ''), agentName: name || '', channel: ch });
+        const j = await FF.auth.api('/api/tag-request/contact?' + qs.toString());
+        const c = j && j.contact;
+        if (c && (c.address || c.pincode)) rows = [{ name, mobile: c.mobile || mob, address: c.address || '', pincode: c.pincode || '', src: 'Address' }];
+      } catch { /* optional */ }
+    }
+    const row = rows.find((x) => x.src === 'Tag request') || rows[0];
+    return row ? { name: row.name || name, mobile: row.mobile || mob, address: row.address || '', pincode: row.pincode || '', more: rows.length - 1 } : null;
+  }
+  const addrHolder = (label, ch, id, name, mobile) => (name || id)
+    ? `<div class="mp-addr" data-ach="${esc(ch)}" data-aid="${esc(id || '')}" data-aname="${esc(name || '')}" data-amob="${canContacts() ? esc(mobile || '') : ''}" data-alabel="${esc(label)}"><small class="dim">📍 ${esc(label)} address dhundh rahe…</small></div>` : '';
+  function hydrateAddr() {
+    document.querySelectorAll('.mp-addr:not([data-done])').forEach((el) => {
+      el.dataset.done = '1';
+      const { ach, aid, aname, amob, alabel } = el.dataset;
+      const key = `${ach}|${aN(aid)}|${aN(aname)}`;
+      const paint = (r) => {
+        if (!r) { el.innerHTML = `<small class="dim">📍 ${esc(alabel)} — address nahi mila</small>`; return; }
+        const withPin = `${r.address || ''}${r.pincode && !String(r.address || '').includes(r.pincode) ? `${r.address ? ', ' : ''}${r.pincode}` : ''}`.trim();
+        const txt = `Name - ${r.name}\nMobile Number - ${r.mobile}\nAddress with Pincode - ${withPin}`;
+        el.innerHTML = `<div class="mp-addr-h"><b>📍 ${esc(alabel)} address</b>${r.more > 0 ? ` <small class="dim">(+${r.more} aur — Agents Address me)</small>` : ''} <button type="button" class="btn small" data-acopy>📋 Copy</button></div>
+          <div><small>Name - </small><b>${esc(r.name)}</b></div><div><small>Mobile Number - </small><b>${esc(r.mobile || '—')}</b></div><div><small>Address with Pincode - </small><b>${esc(withPin || '—')}</b></div>`;
+        el.querySelector('[data-acopy]').onclick = (e) => { const b = e.currentTarget; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => { b.textContent = '✅ Copied'; setTimeout(() => { b.textContent = '📋 Copy'; }, 1200); }).catch(() => { try { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); b.textContent = '✅ Copied'; } catch { /* ignore */ } }); };
+      };
+      if (ADDR_MEM.has(key)) { paint(ADDR_MEM.get(key)); return; }
+      addrFetch(ach, aid, aname, amob).then((r) => { ADDR_MEM.set(key, r); paint(r); }).catch(() => paint(null));
+    });
+  }
   const mobileCell = (m) => (!canContacts() ? '<span class="dim">🔒</span>' : m ? `<a href="tel:${esc(m)}">📞 ${esc(m)}</a>` : '<span class="dim">—</span>');
   const kpi = (label, value, foot, tone, kpiSpec) => `<div class="mp-kpi ${tone || ''}${kpiSpec ? ' kpi-clickable' : ''}"${kpiSpec ? ` data-kpi="${esc(kpiSpec)}" role="button" tabindex="0"` : ''}><small>${esc(label)}</small><b>${value}</b>${foot ? `<em>${foot}</em>` : ''}</div>`;
 
@@ -2566,7 +2617,9 @@ window.FF = window.FF || {};
     };
     const stockPane = `${stockInsights}<section class="mp-sec" data-mp-sec="stock">${stockNotes}</section>
       ${asDetails(calcHtml(pr))}${asDetails(tlIdStockTable)}${stockInsights ? '' : (stockCharts ? `<section class="mp-sec">${stockCharts}</section>` : '')}`;
-    return `<div class="mp${embedded ? ' mp-embedded' : ''}">${partial}${noData}${head}${embedded ? '' : `<div class="mp-kpi-top" data-mp-kpis>${kpis}</div>`}${tabBar}
+    const addrSec = (embedded || drawer) ? '' : `<div class="mp-addrs">${addrHolder(isTl ? 'TL' : 'Agent', pr.ch, pr.id, pr.name, pr.mobile)}${!isTl && pr.tl && pr.tl.name ? addrHolder('TL', pr.ch, pr.tl.id, pr.tl.name, pr.tl.mobile) : ''}</div>`;
+    setTimeout(hydrateAddr, 0);
+    return `<div class="mp${embedded ? ' mp-embedded' : ''}">${partial}${noData}${head}${addrSec}${embedded ? '' : `<div class="mp-kpi-top" data-mp-kpis>${kpis}</div>`}${tabBar}
       ${pane('overview', overviewPane)}${pane('issuance', issuancePane)}${pane('stock', stockPane)}${isTl && agentsTable ? pane('agents', agentsTable) : ''}</div>`;
   }
 

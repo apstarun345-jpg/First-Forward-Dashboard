@@ -2503,8 +2503,17 @@ FF.pages = FF.pages || {};
               else { r = r.filter((x) => aNorm(x.name) === aNorm(val)); if (r.length !== 1) r = []; }   // sirf naam se: tabhi jab ek hi insaan ho
               if (r.length) { rows = r; break; }
             }
-            ADDR_CACHE.set(key, rows);
-          } catch { ADDR_CACHE.set(key, 'none'); }   // permission nahi / error → block chhupa do
+          } catch { rows = []; }
+          // v3.125.322 — Agents Address se na mile (ya permission/error) to tag-request wale lookup se (ID/naam/mobile) dhundo
+          if (!rows.length) {
+            try {
+              const qs = new URLSearchParams({ agentId: String(id).replace(/\D/g, ''), agentName: pp.name || '', channel: ch });
+              const j = await FF.auth.api('/api/tag-request/contact?' + qs.toString());
+              const c = j && j.contact;
+              if (c && (c.address || c.pincode)) rows = [{ name: pp.name, mobile: c.mobile || (mob.length === 10 ? mob : ''), address: c.address || '', pincode: c.pincode || '', src: 'Address' }];
+            } catch { /* optional */ }
+          }
+          ADDR_CACHE.set(key, rows.length ? rows : (rows.failed ? 'none' : rows));
           if (current === g) paintDet();
         })();
         return 'loading';
