@@ -1057,6 +1057,7 @@ window.FF = window.FF || {};
 
   async function renderCurrent(ctx) {
     if (!FF.auth.user) return;
+    if (softPending) { softPending = false; softChip(false); }   // naya render = chip ki zarurat nahi
     viewAsBanner();
     const { page, params } = parseHash();
     // Legacy route: Stock Report ka koi standalone module nahi hai; same stock/report
@@ -2116,11 +2117,37 @@ window.FF = window.FF || {};
     setInterval(updateInstallBtn, 60000);
   }
 
+  // 🧘 v3.125.328 — background data aane par page ko BEECH ME refresh nahi karte (user ka filter / search / scroll / typing ud jaata tha).
+  //    User kuch kar raha ho (60s me click/type/scroll, input focus, modal khula) to sirf "🔄 Naya data aaya" chip dikhta hai;
+  //    user idle hote hi ya chip dabane par refresh. Manual ↻ hamesha turant.
+  let lastTouch = 0, softPending = false;   // 0 = boot par user ne kuch nahi chhua → pehla render turant
+  ['pointerdown', 'keydown', 'input', 'wheel', 'touchstart', 'scroll'].forEach((ev) => document.addEventListener(ev, () => { lastTouch = Date.now(); }, { passive: true, capture: true }));
+  function userBusy() {
+    if (document.hidden) return false;
+    if (Date.now() - lastTouch < 60e3) return true;
+    const a = document.activeElement;
+    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true;
+    if (a && a.isContentEditable) return true;
+    if (document.querySelector('.ab-ov, .tr-dup-backdrop, dialog[open], #drawer.open, .modal-backdrop, [role="dialog"][aria-modal="true"]')) return true;
+    try { const sel = window.getSelection && window.getSelection(); if (sel && String(sel).length > 2) return true; } catch { /* ignore */ }
+    return false;
+  }
+  function softChip(show) {
+    let el = document.getElementById('bg-fresh');
+    if (!show) { if (el) el.remove(); return; }
+    if (el) return;
+    el = U.h('<button type="button" id="bg-fresh" class="btn primary" style="position:fixed;left:16px;bottom:16px;z-index:9000;border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.3)">🔄 Naya data aaya — refresh</button>');
+    el.addEventListener('click', () => { softPending = false; softChip(false); renderCurrent({ bgUpdated: true }); });
+    document.body.appendChild(el);
+  }
+  function softRender() {
+    if (!userBusy()) { softPending = false; softChip(false); return renderCurrent({ bgUpdated: true }); }
+    softPending = true; softChip(true);
+    if (!softTimer) softTimer = setInterval(() => { if (!softPending) { clearInterval(softTimer); softTimer = null; return; } if (!userBusy()) softRender(); }, 15000);
+  }
+  let softTimer = null;   // pending hone par hi chalta hai (module load par koi timer nahi)
   function onBackgroundDataUpdated() {
-    // If user is on a data page, smoothly re-render so new stock and stats appear automatically
-    if (['stock', 'stockReport', 'home', 'dataQuality', 'dualChannel', 'masterStock', 'fastagChampions', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvStockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'sheet'].includes(current.page)) {
-      renderCurrent({ bgUpdated: true });
-    }
+    if (['stock', 'stockReport', 'home', 'dataQuality', 'dualChannel', 'masterStock', 'fastagChampions', 'tagIssued', 'dashboard', 'trend', 'performance', 'gvStock', 'gvStockReport', 'gvDashboard', 'gvTrend', 'gvPerformance', 'compare', 'sheet'].includes(current.page)) softRender();
   }
 
   // ---- 📊🔄 Instant data sync + "data update" notification/voice ---------------------------------
@@ -2282,7 +2309,7 @@ window.FF = window.FF || {};
           announceDataUpdate(before, after);
         }
       }
-      if (FF.auth.user && !['settings', 'sheet'].includes(current.page)) onBackgroundDataUpdated();
+      if (FF.auth.user && !['settings', 'sheet'].includes(current.page) && after && feedChanged(before, after)) onBackgroundDataUpdated();   // data badla ho tabhi (pehle har sync par re-render)
       return after;
     })().finally(() => { syncingNow = null; });
     return syncingNow;
@@ -2510,7 +2537,7 @@ window.FF = window.FF || {};
     setLang(next);
   }
 
-  FF.app = { openNotifications, openDataFreshness, storageBanner, pushBanner, liveShareChip, applySavedTweaks, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, firstAllowedPage, firstAllowedRoute, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
+  FF.app = { softRender, openNotifications, openDataFreshness, storageBanner, pushBanner, liveShareChip, applySavedTweaks, navigate, updateParams, clearGlobalFilters, refresh, syncNow, checkFeedChange, announceDataUpdate, parseHash, resolvePage, pageKnown, firstAllowedPage, firstAllowedRoute, openDrawer, closeDrawer, currentDrawerSnapshot, restoreDrawerSnapshot, exportDrawerCsv, exportDrawerPdf, renderSidebar, renderCurrent, renderTopUser, updateStatus, onLogin, onBackgroundDataUpdated, promptInstall, enhanceCharts, enhanceTables, themeMode, toggleThemeMode, lang, setLang, toggleLangMenu, renderGlobalFilters, renderMobileNav, focusMode: updateFocusMode, openAccessibility: renderA11yPanel, tableDensity, setTableDensity, PAGES, refreshPendingBadge, setPendingSignups, shareWhatsApp, checkVersion, exportCSV: () => exportCurrentCsv('csv'), exportXLSX: () => exportCurrentCsv('xlsx'), toggleTheme: toggleThemeMode, toggleLang: toggleLangQuick, get pendingSignups() { return pendingSignups; }, get current() { return current; }, currentFilters: () => (FF.filters ? FF.filters.current() : currentFilterValues()) };
   // 📶 PWA reliability: reflect connectivity immediately and refresh read-only dashboard data
   // after reconnect. Never auto-resubmit a Tag Request or any other mutation.
   if (!window.__ffConnectivityHandlers) {

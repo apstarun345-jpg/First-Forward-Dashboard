@@ -115,7 +115,7 @@ window.FF = window.FF || {};
       if (!left) {
         state.retrying = false;
         emit('refresh', { healed: list });
-        try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); if (FF.util && FF.util.toast) FF.util.toast('✅ Fail hui sheets auto-retry se load ho gayi', 'ok'); } catch { /* ignore */ }
+        try { if (FF.app && (FF.app.softRender || FF.app.renderCurrent)) (FF.app.softRender || FF.app.renderCurrent)(); if (FF.util && FF.util.toast) FF.util.toast('✅ Fail hui sheets auto-retry se load ho gayi', 'ok'); } catch { /* ignore */ }
         emit('done');
       } else scheduleRetry(version, round + 1);
     }, wait);
@@ -135,7 +135,7 @@ window.FF = window.FF || {};
       if (version !== generation) return;
       state.loadedAt = Date.now();
       emit('refresh', { fresh: true });
-      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+      try { if (FF.app && (FF.app.softRender || FF.app.renderCurrent)) (FF.app.softRender || FF.app.renderCurrent)(); } catch { /* ignore */ }
     });
   } catch { /* ignore */ }
   /** Settings (column letters) aane ke baad: purane config wale (bane hue ya chal rahe) datasets turant naye config se. */
@@ -151,7 +151,7 @@ window.FF = window.FF || {};
     configReload = Promise.allSettled([...keys].map((k) => loadKey(k, false))).then(() => {
       if (version !== generation) return;
       emit('refresh', { config: true });
-      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+      try { if (FF.app && (FF.app.softRender || FF.app.renderCurrent)) (FF.app.softRender || FF.app.renderCurrent)(); } catch { /* ignore */ }
     }).finally(() => { configReload = null; });
   }
   let configReload = null;

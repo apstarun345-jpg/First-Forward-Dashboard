@@ -323,7 +323,7 @@ window.FF = window.FF || {};
       state.loadedAt = Date.now();
       if (!Object.keys(state.errors).length) {
         state.retrying = false;
-        try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); if (FF.app && FF.app.updateStatus) FF.app.updateStatus(); } catch { /* ignore */ }
+        try { if (FF.app && (FF.app.softRender || FF.app.renderCurrent)) (FF.app.softRender || FF.app.renderCurrent)(); if (FF.app && FF.app.updateStatus) FF.app.updateStatus(); } catch { /* ignore */ }
       } else scheduleRetry(version, round + 1);
     }, wait);
     if (retryTimer && typeof retryTimer.unref === 'function') retryTimer.unref();   // never keep a Node (test) process alive
@@ -340,7 +340,7 @@ window.FF = window.FF || {};
       for (const k of keys) { try { await (jobs.has(k) ? jobs.get(k) : loadKey(k, false)); } catch { /* ignore */ } }   // master pehle (report usi par banta hai)
       if (version !== generation) return;
       state.loadedAt = Date.now();
-      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+      try { if (FF.app && (FF.app.softRender || FF.app.renderCurrent)) (FF.app.softRender || FF.app.renderCurrent)(); } catch { /* ignore */ }
     });
   } catch { /* ignore */ }
   function onConfig() {
@@ -355,7 +355,7 @@ window.FF = window.FF || {};
       state.mapping = {};
       for (const k of redo) { try { await loadKey(k, false); } catch { /* ignore */ } }
       if (version !== generation) return;
-      try { if (FF.app && FF.app.renderCurrent) FF.app.renderCurrent(); } catch { /* ignore */ }
+      try { if (FF.app && (FF.app.softRender || FF.app.renderCurrent)) (FF.app.softRender || FF.app.renderCurrent)(); } catch { /* ignore */ }
     })();
   }
   function get(key) { return state.data[key]; }
