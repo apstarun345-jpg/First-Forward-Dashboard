@@ -1803,7 +1803,7 @@ body.colorful .from-hdr { color: #166534; }
      checkRepeatOnPick(row);
      const rec = exactAgent(row); if (!rec) return;
      try {
-       const qs = new URLSearchParams({ agentId: rec.agentId || '', agentName: rec.name || '', channel: rec.channel || 'ff' });
+       const qs = new URLSearchParams({ agentId: rec.rawId || rec.agentId || '', agentName: rec.name || '', channel: rec.channel || 'ff' });
        const path = isPublic() ? '/api/public/tag-request/contact?' + qs.toString() : '/api/tag-request/contact?' + qs.toString();
        const out = isPublic() ? await publicApi(path) : await FF.auth.api(path);
        const contact = out && out.contact;

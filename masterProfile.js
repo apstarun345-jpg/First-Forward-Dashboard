@@ -2111,7 +2111,7 @@ window.FF = window.FF || {};
     } catch { rows = []; }
     if (!rows.length) {
       try {
-        const qs = new URLSearchParams({ agentId: String(id || '').replace(/\D/g, ''), agentName: name || '', channel: ch });
+        const qs = new URLSearchParams({ agentId: String(id || '').trim(), agentName: name || '', channel: ch });
         const j = await FF.auth.api('/api/tag-request/contact?' + qs.toString());
         const c = j && j.contact;
         if (c && (c.address || c.pincode)) rows = [{ name, mobile: c.mobile || mob, address: c.address || '', pincode: c.pincode || '', src: 'Address' }];

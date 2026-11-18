@@ -9675,7 +9675,7 @@ async function handleApi(req, res, url) {
   const AGENT_DETAILS_SHEET = String(process.env.AGENT_DETAILS_SHEET_ID || '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk').trim();
   const AGENT_DETAILS_TAB = String(process.env.AGENT_DETAILS_TAB || 'Sheet4').trim();
   const agentMobileRt = (globalThis.__ffMobRt ||= { at: 0, data: null, promise: null });
-  const mobIdKeys = (id) => { const raw = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!raw) return []; const dg = raw.replace(/\D/g, '').replace(/^0+/, ''); return [...new Set([raw, dg && dg.length >= 3 ? `#${dg}` : ''].filter(Boolean))]; };
+  const mobIdKeys = (id) => { const raw = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!raw) return []; const dg = raw.replace(/\D/g, '').replace(/^0+/, ''); /* v3.125.323: APS… (GV) ID ka digits-only key nahi — warna FF ke 11190 se mixup hota tha */ return [...new Set([raw, dg && dg.length >= 3 && /^\d+$/.test(raw) ? `#${dg}` : ''].filter(Boolean))]; };
   const mobNameKey = (n) => String(n || '').toLowerCase().replace(/[^a-z]/g, '');
   resetAgentMobiles = () => { agentMobileRt.data = null; agentMobileRt.at = 0; };
   agentMobileLoader = agentMobileData;
@@ -9997,7 +9997,7 @@ async function handleApi(req, res, url) {
       if (rch !== ch) return;
       const rid = String(r.agent.agentId || '').trim();
       const rname = tagNameKey(r.agent.name || '');
-      const sameId = id && rid && rid === id;
+      const sameId = id && rid && (rid === id || (tagDigits(rid) && tagDigits(rid) === tagDigits(id)));
       const sameName = name && rname && rname === name;
       if (!sameId && !sameName) return;
       const at = Date.parse(r.at || '');
@@ -10007,7 +10007,7 @@ async function handleApi(req, res, url) {
 
     const memory = addressBookMemoryEntries();
     const keys = [];
-    if (id) keys.push(ch + '|id:' + id);
+    if (id) { keys.push(ch + '|id:' + id); if (tagDigits(id) && tagDigits(id) !== id) keys.push(ch + '|id:' + tagDigits(id)); }
     if (name) keys.push(ch + '|n:' + name);
     const asContact = (e) => e && (e.address || e.pincode || e.mobile || e.dispatchName)
       ? {
