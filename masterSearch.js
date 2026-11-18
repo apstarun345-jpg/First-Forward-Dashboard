@@ -811,6 +811,7 @@ FF.pages = FF.pages || {};
     return order.map((g) => ({ key: g.key, ff: g.ff, gv: g.gv }));
   }
 
+  const ADDR_CACHE = new Map();   // v3.125.321 — agent address (Master Search card)
   function search(q) {
     const idx = state.full || state.light;
     // v3.125.283 — "varsha kanwar TL" / "TL varsha" / "ramesh agent" → role shabd hata ke naam se dhoondo, sirf wahi role
@@ -2479,6 +2480,49 @@ FF.pages = FF.pages || {};
         <div id="msp-rank"></div>
         ${gvStripHtml(viewGroup.gv)}${ffStripHtml(viewGroup.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
+      // 📍 v3.125.321 — agent / TL ka address (Agents Address book se): Name · Mobile Number · Address with Pincode + copy.
+      const copyBuf = [];
+      const aNorm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const addrLoad = (pp, ch, q) => {
+        const id = (q && q.id) || pp.sub || '', mob = String((q && q.mobile) || '').replace(/\D/g, '').slice(-10);
+        const key = `${ch}|${aNorm(id)}|${mob}|${aNorm(pp.name)}`;
+        if (ADDR_CACHE.has(key)) return ADDR_CACHE.get(key);
+        ADDR_CACHE.set(key, 'loading');
+        (async () => {
+          let rows = [];
+          const tries = [];
+          if (id) tries.push(['id', id]);
+          if (mob.length === 10) tries.push(['mobile', mob]);
+          tries.push(['name', pp.name]);
+          try {
+            for (const [fld, val] of tries) {
+              const j = await FF.auth.api(`/api/address-book?channel=${ch}&fields=${fld}&q=${encodeURIComponent(val)}&limit=20`);
+              let r = j.rows || [];
+              if (fld === 'id') r = r.filter((x) => aNorm(x.id) === aNorm(val));
+              else if (fld === 'mobile') r = r.filter((x) => String(x.mobile || '').replace(/\D/g, '').slice(-10) === val);
+              else { r = r.filter((x) => aNorm(x.name) === aNorm(val)); if (r.length !== 1) r = []; }   // sirf naam se: tabhi jab ek hi insaan ho
+              if (r.length) { rows = r; break; }
+            }
+            ADDR_CACHE.set(key, rows);
+          } catch { ADDR_CACHE.set(key, 'none'); }   // permission nahi / error → block chhupa do
+          if (current === g) paintDet();
+        })();
+        return 'loading';
+      };
+      const addrBlock = (pp, ch, q) => {
+        const r = addrLoad(pp, ch, q);
+        if (r === 'loading') return '<div class="msp-det-addr"><small class="dim">📍 Address dhundh rahe…</small></div>';
+        if (r === 'none') return '';
+        if (!r.length) return '<div class="msp-det-addr"><small class="dim">📍 Address nahi mila</small></div>';
+        const row = r.find((x) => x.src === 'Tag request') || r[0];
+        const withPin = `${row.address || ''}${row.pincode && !String(row.address || '').includes(row.pincode) ? `${row.address ? ', ' : ''}${row.pincode}` : ''}`.trim();
+        copyBuf.push(`Name - ${row.name}\nMobile Number - ${row.mobile}\nAddress with Pincode - ${withPin}`);
+        const i = copyBuf.length - 1;
+        return `<div class="msp-det-addr"><div class="msp-det-ah"><b>📍 Address</b>${r.length > 1 ? ` <small class="dim">(+${r.length - 1} aur address — Agents Address me dekho)</small>` : ''} <button type="button" class="btn small" data-addr-copy="${i}" title="Name · Mobile · Address copy">📋 Copy</button></div>
+          <div class="msp-det-al"><small>Name - </small><b>${esc(row.name)}</b></div>
+          <div class="msp-det-al"><small>Mobile Number - </small><b>${esc(row.mobile)}</b></div>
+          <div class="msp-det-al"><small>Address with Pincode - </small><b>${esc(withPin)}</b></div></div>`;
+      };
       const paintDet = () => {
         const host = out.querySelector('#msp-det');
         if (!host || current !== g) return;
@@ -2502,9 +2546,11 @@ FF.pages = FF.pages || {};
             ${tlKind ? '' : `<div class="msp-det-f"><small>TL mobile</small><b>${mob(pp.direct ? '' : tlMob)}</b></div>`}
             ${q && q.status ? f('Status', q.status) : ''}${q && q.lastActive ? f('Last active', q.lastActive) : ''}
             ${pp.last ? f('Last allocation', pp.last) : ''}
-          </div></div>`;
+          </div>${addrBlock(pp, ch, q)}</div>`;
         };
+        copyBuf.length = 0;
         host.innerHTML = [card(viewGroup.ff, 'ff'), card(viewGroup.gv, 'gv')].join('');
+        host.querySelectorAll('[data-addr-copy]').forEach((b) => { b.onclick = () => { const t = copyBuf[Number(b.dataset.addrCopy)] || ''; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { b.textContent = '✅ Copied'; setTimeout(() => { b.textContent = '📋 Copy'; }, 1200); }).catch(() => { try { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); b.textContent = '✅ Copied'; } catch { /* ignore */ } }); }; });
       };
       paintDet();
       try { if (MP() && MP().loadFor) [viewGroup.ff, viewGroup.gv].filter(Boolean).forEach((pp) => { if (MP().supports(pp)) MP().loadFor(pp).then(paintDet).catch(() => {}); }); } catch { /* optional */ }

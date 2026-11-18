@@ -86,6 +86,10 @@
 .msp-det-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px 12px; }
 .msp-det-f small { display: block; color: var(--muted, #64748b); font-size: 11px; }
 .msp-det-f b { font-size: 13px; word-break: break-word; }
+.msp-det-addr { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border, #e2e8f0); }
+.msp-det-ah { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; font-size: 13px; }
+.msp-det-al { font-size: 13px; word-break: break-word; }
+.msp-det-al small { color: var(--muted, #64748b); font-size: 12px; }
 
 
 /* TL Summary · quick agent health snapshot inside the Agents KPI. */

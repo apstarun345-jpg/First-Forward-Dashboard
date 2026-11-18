@@ -49,11 +49,12 @@ FF.pages = FF.pages || {};
     if (cl) cl.onclick = async () => {
       cl.disabled = true;
       try {
-        const pv = await FF.auth.api('/api/address-book/cleanup', 'POST', { apply: false });
-        if (!pv.duplicatesRemoved && !pv.addressesFixed && !pv.pincodesFilled) { U.toast('Sab theek hai — kuch fix karne ko nahi', 'ok'); cl.disabled = false; return; }
-        if (!confirm(`Cleanup:\n• ${pv.duplicatesRemoved} duplicate address hatenge (jin mobile par tag-request address hai, unke baaki Address-tab rows)\n• ${pv.addressesFixed} address saaf honge (doosre ka hissa hatega)\n• ${pv.pincodesFilled} khaali pincode bharenge\n\nHatayi hui rows "Address Deleted" log me rahengi. Karein?`)) { cl.disabled = false; return; }
-        const out = await FF.auth.api('/api/address-book/cleanup', 'POST', { apply: true });
-        U.toast(`🧹 ${out.duplicatesRemoved} duplicate hata, ${out.addressesFixed} address saaf, ${out.pincodesFilled} pincode bhare`, 'ok'); load(root);
+        cl.textContent = '⏳ Clean ho raha hai…';
+        const out = await FF.auth.api('/api/address-book/cleanup', 'POST', { apply: true });   // v3.125.321 — seedha apply; tag-request address kabhi nahi hatta
+        const s = out.sync || {};
+        if (!out.duplicatesRemoved && !out.addressesFixed && !out.pincodesFilled) U.toast('Sab theek hai — kuch fix karne ko nahi', 'ok');
+        else U.toast(`🧹 ${out.duplicatesRemoved} duplicate hata, ${out.addressesFixed} address saaf, ${out.pincodesFilled} pincode bhare · tag-request address safe · Sheet ${s.failed || s.error ? '⚠ sync baaki' : '✅ synced'}`, 'ok');
+        cl.textContent = '🧹 Duplicate + pincode fix'; cl.disabled = false; load(root);
       } catch (err) { alert(err.message); cl.disabled = false; }
     };
     const pr = U.$('#ab-print', box), pf = U.$('#ab-pdf', box), dl = U.$('#ab-del', box);

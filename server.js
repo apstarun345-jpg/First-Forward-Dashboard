@@ -10250,7 +10250,10 @@ async function handleApi(req, res, url) {
       if (members.some((m) => m.src === 'Tag request')) members.filter((m) => m.src !== 'Tag request').forEach((m) => dropKeys.add(m.key));
       seenG.add(x.gkey);
     }
-    // tag-request wale keys kabhi delete nahi hote
+    // tag-request wale keys kabhi delete nahi hote (same key par Address-tab row ho tab bhi) — v3.125.321
+    const tagKeys = new Set((workspaceStore().tagRequests || []).map((r) => { const e = addressEntryFromRequest(r); return e && e.key; }).filter(Boolean));
+    view.forEach((x) => { if (x.src === 'Tag request') tagKeys.add(x.key); });
+    tagKeys.forEach((k) => dropKeys.delete(k));
     const fixes = [];
     for (const x of view) {
       if (x.src === 'Tag request' || dropKeys.has(x.key)) continue;
@@ -10266,8 +10269,9 @@ async function handleApi(req, res, url) {
       fixes.forEach((f) => { if (dropKeys.has(f.key)) return; const base = { ...(map.get(f.key) || {}), ...(mem[f.key] || {}) }; if (!base.key) return; mem[f.key] = { ...base, key: f.key, address: f.address, pincode: f.pincode || base.pincode || '', updatedAt: now, pendingSync: true }; });
       addressBookRuntime.map = null; addressBookRuntime.at = 0;
       try { await persist('notify'); } catch { /* retry */ }
-      startAddressSheetSync({ file: 'cleanup', by }, []).catch(() => {});
+      try { await startAddressSheetSync({ file: 'cleanup', by }, []); } catch { /* pending rehti hain */ }   // v3.125.321 — sheet sync poora hone tak ruko
     }
+    out.tagKept = tagKeys.size;
     return out;
   }
   const pinGeoRt = (globalThis.__ffPinGeo ||= { data: null });

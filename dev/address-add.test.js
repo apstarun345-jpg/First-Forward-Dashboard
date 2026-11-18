@@ -16,3 +16,10 @@ test('address add/edit: popup + not-found panel client', () => {
   assert.match(cli, /nahi mile/);
   assert.match(cli, /address-book\/save/);
 });
+test('master search card: address block + cleanup tag-request safe', () => {
+  const ms = fs.readFileSync(new URL('../masterSearch.js', import.meta.url), 'utf8');
+  assert.match(ms, /Address with Pincode - /);
+  assert.match(ms, /Mobile Number - /);
+  assert.match(srv, /tag-request wale keys kabhi delete nahi hote/);
+  assert.match(srv, /tagKeys\.forEach\(\(k\) => dropKeys\.delete\(k\)\)/);
+});
