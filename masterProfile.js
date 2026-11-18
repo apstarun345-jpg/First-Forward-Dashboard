@@ -2128,7 +2128,17 @@ window.FF = window.FF || {};
       const { ach, aid, aname, amob, alabel } = el.dataset;
       const key = `${ach}|${aN(aid)}|${aN(aname)}`;
       const paint = (r) => {
-        if (!r) { el.innerHTML = `<small class="dim">📍 ${esc(alabel)} — address nahi mila</small>`; return; }
+        if (!r) {
+          const canAdd = FF.auth && FF.auth.can && FF.auth.can('addressUpload');
+          el.innerHTML = `<small class="dim">📍 ${esc(alabel)} — address nahi mila</small>${canAdd ? ' <button type="button" class="btn small ab-addbtn" data-aadd>➕ Address</button>' : ''}`;
+          const ab = el.querySelector('[data-aadd]');
+          if (ab) ab.onclick = async () => {
+            try { if (!FF.addressBook && FF.lazy) await FF.lazy.inject('addressBook'); } catch { /* ignore */ }
+            if (!FF.addressBook) { U.toast('Address form load nahi hua — Agents Address page se add karo', 'warn'); return; }
+            FF.addressBook.add({ name: aname, mobile: String(amob || '').replace(/\D/g, '').slice(-10), id: aid, channel: ach, onSaved: () => { ADDR_MEM.delete(key); el.innerHTML = '<small class="dim">📍 address save ho gaya — dobara dhundh rahe…</small>'; addrFetch(ach, aid, aname, amob).then((rr) => { ADDR_MEM.set(key, rr); paint(rr); }).catch(() => {}); } });
+          };
+          return;
+        }
         const withPin = `${r.address || ''}${r.pincode && !String(r.address || '').includes(r.pincode) ? `${r.address ? ', ' : ''}${r.pincode}` : ''}`.trim();
         const txt = `Name - ${r.name}\nMobile Number - ${r.mobile}\nAddress with Pincode - ${withPin}`;
         el.innerHTML = `<div class="mp-addr-h"><b>📍 ${esc(alabel)} address</b>${r.more > 0 ? ` <small class="dim">(+${r.more} aur — Agents Address me)</small>` : ''} <button type="button" class="btn small" data-acopy>📋 Copy</button></div>

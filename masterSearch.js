@@ -2481,7 +2481,7 @@ FF.pages = FF.pages || {};
         ${gvStripHtml(viewGroup.gv)}${ffStripHtml(viewGroup.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
       // 📍 v3.125.321 — agent / TL ka address (Agents Address book se): Name · Mobile Number · Address with Pincode + copy.
-      const copyBuf = [];
+      const copyBuf = [], addBuf = [];
       const aNorm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       const addrLoad = (pp, ch, q) => {
         const id = (q && q.id) || pp.sub || '', mob = String((q && q.mobile) || '').replace(/\D/g, '').slice(-10);
@@ -2522,7 +2522,11 @@ FF.pages = FF.pages || {};
         const r = addrLoad(pp, ch, q);
         if (r === 'loading') return '<div class="msp-det-addr"><small class="dim">📍 Address dhundh rahe…</small></div>';
         if (r === 'none') return '';
-        if (!r.length) return '<div class="msp-det-addr"><small class="dim">📍 Address nahi mila</small></div>';
+        if (!r.length) {
+          const canAdd = FF.auth && FF.auth.can && FF.auth.can('addressUpload');
+          addBuf.push({ pp, ch, q, key: `${ch}|${aNorm((q && q.id) || pp.sub || '')}|${String((q && q.mobile) || '').replace(/\D/g, '').slice(-10)}|${aNorm(pp.name)}` });
+          return `<div class="msp-det-addr"><small class="dim">📍 Address nahi mila</small>${canAdd ? ` <button type="button" class="btn small ab-addbtn" data-addr-add="${addBuf.length - 1}">➕ Address</button>` : ''}</div>`;
+        }
         const row = r.find((x) => x.src === 'Tag request') || r[0];
         const withPin = `${row.address || ''}${row.pincode && !String(row.address || '').includes(row.pincode) ? `${row.address ? ', ' : ''}${row.pincode}` : ''}`.trim();
         copyBuf.push(`Name - ${row.name}\nMobile Number - ${row.mobile}\nAddress with Pincode - ${withPin}`);
@@ -2557,8 +2561,15 @@ FF.pages = FF.pages || {};
             ${pp.last ? f('Last allocation', pp.last) : ''}
           </div>${addrBlock(pp, ch, q)}</div>`;
         };
-        copyBuf.length = 0;
+        copyBuf.length = 0; addBuf.length = 0;
         host.innerHTML = [card(viewGroup.ff, 'ff'), card(viewGroup.gv, 'gv')].join('');
+        host.querySelectorAll('[data-addr-add]').forEach((b) => { b.onclick = async () => {
+          const it = addBuf[Number(b.dataset.addrAdd)]; if (!it) return;
+          try { if (!FF.addressBook && FF.lazy) await FF.lazy.inject('addressBook'); } catch { /* ignore */ }
+          if (!FF.addressBook) { U.toast('Address form load nahi hua — Agents Address page se add karo', 'warn'); return; }
+          const q0 = it.q || {};
+          FF.addressBook.add({ name: it.pp.name, mobile: String(q0.mobile || '').replace(/\D/g, '').slice(-10), id: q0.id || it.pp.sub || '', channel: it.ch, tl: q0.tlName || '', onSaved: () => { ADDR_CACHE.delete(it.key); paintDet(); } });
+        }; });
         host.querySelectorAll('[data-addr-copy]').forEach((b) => { b.onclick = () => { const t = copyBuf[Number(b.dataset.addrCopy)] || ''; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { b.textContent = '✅ Copied'; setTimeout(() => { b.textContent = '📋 Copy'; }, 1200); }).catch(() => { try { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); b.textContent = '✅ Copied'; } catch { /* ignore */ } }); }; });
       };
       paintDet();

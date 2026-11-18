@@ -336,6 +336,7 @@ FF.pages = FF.pages || {};
         const msg = out.mode === 'edit' ? '✅ Address update ho gaya' : out.versions ? '⚠ Is mobile ka alag address pehle se tha — naya version save hua (search karke sahi chuno)' : out.unchanged ? 'ℹ Ye address pehle se saved tha' : '✅ Address save ho gaya';
         U.toast(`${msg}${out.sync && out.sync.running ? ' · Sheet sync chal raha hai…' : ''}`, 'ok');
         load(root);
+        if (o && typeof o.onSaved === 'function') { try { o.onSaved(out, body); } catch { /* optional */ } }
       } catch (err) { b.disabled = false; b.textContent = '💾 Save'; hint(esc(err.message || err), 'bad-t'); }
     };
   }
@@ -427,5 +428,12 @@ FF.pages = FF.pages || {};
     if (pg) pg.onclick = () => { const t = U.$('#ab-pt', root).value.trim(); if (t) upload(root, null, t); };
     load(root);
   }
+  /** ➕ Dusre pages (Master Search / Master Profile) se "Add address" popup — save → site + Google Sheet. */
+  function ensureModalCss() {
+    if (document.getElementById('ab-modal-css')) return;
+    const css = '.ab-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px}.ab-md{background:var(--card,#fff);color:inherit;border-radius:14px;padding:16px;max-width:760px;width:100%;max-height:88vh;overflow:auto}.ab-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ab-form label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:600}.ab-form .af-wide{grid-column:1/-1}@media(max-width:640px){.ab-form{grid-template-columns:1fr}}.ok-t{color:#15803d}.bad-t{color:#b91c1c}.ab-addbtn{background:linear-gradient(135deg,#f97316,#ec4899)!important;color:#fff!important;border:0!important;font-weight:700;border-radius:999px!important;padding:5px 14px!important;box-shadow:0 3px 10px rgba(236,72,153,.35)}';
+    const el = document.createElement('style'); el.id = 'ab-modal-css'; el.textContent = css; document.head.appendChild(el);
+  }
+  FF.addressBook = { add(o) { ensureModalCss(); addModal(document.body, o || {}); } };
   FF.pages.addressBook = { title: 'Agents Address', render };
 })(window.FF);

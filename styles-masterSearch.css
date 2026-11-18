@@ -103,3 +103,5 @@
   .msp-agent-stat { font-size:9px; padding:2px 5px; }
   .msp-agent-top { font-size:10px; }
 }
+.ab-addbtn{background:linear-gradient(135deg,#f97316,#ec4899)!important;color:#fff!important;border:0!important;font-weight:700;border-radius:999px!important;padding:5px 14px!important;box-shadow:0 3px 10px rgba(236,72,153,.35);cursor:pointer}
+.ab-addbtn:hover{filter:brightness(1.08);transform:translateY(-1px)}
