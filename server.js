@@ -10105,7 +10105,7 @@ async function handleApi(req, res, url) {
       const out = { ...e, mobile: m || e.mobile || '', resolved: '' };
       if (!m) return out;
       const hit = byMob.get(m);
-      if (hit) { out.id = out.id || hit.id || ''; out.channel = out.channel || hit.channel || ''; out.tl = out.tl || hit.tl || ''; out.resolved = hit.src; }
+      if (hit) { out.id = out.id || hit.id || ''; if (!out.name && hit.name) out.name = hit.name; out.channel = out.channel || hit.channel || ''; out.tl = out.tl || hit.tl || ''; out.resolved = hit.src; }
       const d = bm[m];
       if (d) { if (!out.id && d.id) out.id = d.id; if (!out.channel && d.ch) out.channel = d.ch; if (!out.resolved) out.resolved = 'Mobile sheet'; }
       const rr = rep.byMob.get(m);
@@ -10964,6 +10964,7 @@ async function handleApi(req, res, url) {
       const allowed = want === 'ff' || want === 'gv' ? chans.filter((c) => c === want) : chans;
       const terms = String(url.searchParams.get('q') || '').split(/[\n,;\t]+/).map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 300);
       const fields = String(url.searchParams.get('fields') || 'name,mobile,pincode,id').split(',').map((f) => f.trim()).filter((f) => ['name', 'mobile', 'pincode', 'id', 'address', 'tl'].includes(f));
+      const rawTerms = String(url.searchParams.get('q') || '').split(/[\n,;\t]+/).map((t) => t.trim()).filter(Boolean).slice(0, 300);
       const limit = Math.min(5000, Math.max(1, Number(url.searchParams.get('limit')) || 300));
       const view = (await addressBookView()).filter((x) => allowed.includes(x.channel));
       const counts = { ff: 0, gv: 0 }; view.forEach((x) => { counts[x.channel]++; });
@@ -10974,17 +10975,72 @@ async function handleApi(req, res, url) {
         const hitG = new Set(hit.map((x) => x.gkey).filter((g) => many.has(g)));
         hit = view.filter((x) => hitG.has(x.gkey)).sort((a, b) => String(a.gkey).localeCompare(String(b.gkey)) || String(a.src).localeCompare(String(b.src)));
       } else hit.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      // 🔎 v3.125.320 — har search term ka alag hisaab: kaun mila (kitne), kaun nahi mila → "➕ Add address"
+      const fl = fields.length ? fields : ['name', 'mobile', 'pincode', 'id'];
+      const termStats = rawTerms.length ? rawTerms.map((t) => ({ t, n: view.filter((x) => addrMatch(x, [t.toLowerCase()], fl)).length })) : [];
       const rows = hit.slice(0, limit);
       let pins;
       if (url.searchParams.get('geo') === '1') { pins = {}; rows.forEach((r) => { if (r.pincode && !pins[r.pincode]) { const g = pinGeoOf(r.pincode); if (g) pins[r.pincode] = g; } }); }
       res.setHeader('Cache-Control', 'private, no-store');
-      return sendJson(res, 200, { ok: true, total: hit.length, all: view.length, multiCount: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, counts, channels: chans, canUpload: addrCanUpload(user), rows, pins, sync: syncInfo() });
+      return sendJson(res, 200, { ok: true, termStats, total: hit.length, all: view.length, multiCount: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, counts, channels: chans, canUpload: addrCanUpload(user), rows, pins, sync: syncInfo() });
     }
     if (p === '/api/address-book/status' && method === 'GET') {
       if (!chans.length) throw new HttpError(403, 'Permission nahi hai.');
       return sendJson(res, 200, { ok: true, sync: syncInfo() });
     }
     if (!addrCanUpload(user)) throw new HttpError(403, 'Address upload karne ki permission nahi hai (admin se "Address upload" access mango).');
+    // ➕ v3.125.320 — Naya address (search me na mile to) / purana edit: popup se.
+    if (p === '/api/address-book/lookup' && method === 'GET') {
+      const mob = last10(url.searchParams.get('mobile')), aid = String(url.searchParams.get('id') || '').trim(), pin = tagDigits(url.searchParams.get('pincode')).slice(0, 6);
+      const out = { ok: true, found: null, existing: null, geo: null };
+      let m = mob;
+      if (!m && aid) {
+        const want = aid.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        try { const book = await addressBookView(); const b = book.find((x) => String(x.id || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === want && last10(x.mobile)); if (b) m = last10(b.mobile); } catch { /* optional */ }
+        if (!m) { try { const dir = await agentMobileData(false); const raw = want, dg = raw.replace(/\D/g, '').replace(/^0+/, ''); const hit = dir && dir.ids && (dir.ids[raw] || (dg.length >= 3 ? dir.ids[`#${dg}`] : '')); if (hit) m = last10(hit); } catch { /* optional */ } }
+      }
+      if (m) {
+        const [e] = await enrichAddressEntries([{ mobile: m }]);
+        if (e && (e.id || e.channel || e.tl || e.name)) out.found = { mobile: m, id: e.id || '', name: e.name || '', channel: e.channel || '', tl: e.tl || '', via: e.resolved || '' };
+        const ex = (await addressBookView()).filter((x) => last10(x.mobile) === m);
+        if (ex.length) out.existing = ex.slice(0, 3).map((x) => ({ key: x.key, name: x.name, address: x.address, pincode: x.pincode, src: x.src }));
+      }
+      if (pin) { const g = pinGeoOf(pin); if (g) out.geo = { district: g[2], state: g[3] }; }
+      return sendJson(res, 200, out);
+    }
+    if (p === '/api/address-book/save' && method === 'POST') {
+      const body = await readBody(req);
+      const name = shortText(String(body.name || '').replace(/\s+/g, ' ').trim(), 120);
+      const mobile = last10(body.mobile);
+      let address = shortText(String(body.address || '').replace(/\s+/g, ' ').trim(), 400);
+      let pincode = tagDigits(body.pincode).slice(0, 6);
+      const agentId = shortText(String(body.id || '').trim(), 60), tl = shortText(String(body.tl || '').trim(), 120);
+      const channel = body.channel === 'gv' ? 'gv' : body.channel === 'ff' ? 'ff' : '';
+      if (!name) throw new HttpError(400, 'Name likho.');
+      if (!/^[6-9]\d{9}$/.test(mobile)) throw new HttpError(400, 'Mobile number 10 digit ka sahi likho (6-9 se shuru).');
+      if (address.length < 5) throw new HttpError(400, 'Address likho.');
+      if (!pincode) { const pm = address.match(/(?<!\d)[1-9]\d{5}(?!\d)/g); if (pm) pincode = pm[pm.length - 1]; }
+      if (pincode && !/^[1-9]\d{5}$/.test(pincode)) throw new HttpError(400, 'Pincode 6 digit ka hona chahiye.');
+      if (channel && !chans.includes(channel)) throw new HttpError(403, `${channel.toUpperCase()} channel ka address jodne ki permission nahi hai.`);
+      const by = user.name || user.username || '';
+      if (body.key) {
+        const key = String(body.key).slice(0, 200);
+        const ex = (await addressBookView()).find((x) => x.key === key);
+        if (!ex) throw new HttpError(404, 'Ye address ab nahi mila — page refresh karo.');
+        if (ex.src === 'Tag request') throw new HttpError(400, 'Tag request ka address yahan edit nahi hota (Tag Request page se badlo).');
+        if (!chans.includes(ex.channel)) throw new HttpError(403, 'Is channel ki permission nahi hai.');
+        rememberAddressBook([{ key, agentId: agentId || ex.id, agent: name, channel: channel || ex.channel, mobile, address, pincode, tl: tl || ex.tl, updatedAt: new Date().toISOString(), pendingSync: true, importedFrom: 'Manual edit' }]);
+        addressBookRuntime.map = null; addressBookRuntime.at = 0;
+        try { await persist('notify'); } catch (err) { console.warn('address persist:', err && err.message); }
+        tagBackupSchedule(2000);
+        startAddressSheetSync({ file: 'Manual edit', by }, []).catch(() => {});
+        return sendJson(res, 200, { ok: true, mode: 'edit', sync: syncInfo() });
+      }
+      const [entry] = await enrichAddressEntries([{ name, mobile, address, pincode, id: agentId, tl, channel }]);
+      if (entry.channel && !chans.includes(entry.channel)) throw new HttpError(403, `${entry.channel.toUpperCase()} channel ka address jodne ki permission nahi hai.`);
+      const out = await commitAddressImport([entry], { file: 'Manual add', by, overwrite: false });
+      return sendJson(res, 200, { ok: true, mode: 'add', ...out, matched: entry.resolved || '', channel: entry.channel || 'ff', id: entry.id || '', tl: entry.tl || '', sync: syncInfo() });
+    }
     if (p === '/api/address-book/preview' && method === 'POST') {
       const MAXB = 40 * 1024 * 1024;
       const raw = await new Promise((resolve, reject) => { const chunks = []; let size = 0; req.on('data', (c) => { size += c.length; if (size > MAXB) { reject(new HttpError(413, 'File bahut badi hai (max 40 MB).')); req.destroy(); return; } chunks.push(c); }); req.on('end', () => resolve(Buffer.concat(chunks))); req.on('error', reject); });

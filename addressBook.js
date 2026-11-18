@@ -34,9 +34,9 @@ FF.pages = FF.pages || {};
     const rows = st.view === 'map' ? (d.rows || []).slice(0, 300) : (d.rows || []);   // map me poori list pin banti hai, table sirf pehli 300
     const sync = d.sync || {};
     const syncLine = sync.running ? `<span class="pill warn">⏳ Sheet sync: ${sync.done}/${sync.total}</span>` : sync.pending ? `<span class="pill warn">⚠ ${sync.pending} entries sheet me sync baaki (site me safe hain)</span>${d.canUpload ? ' <button class="btn small" id="ab-sync">Sheet me sync karo</button>' : ''}` : '<span class="pill ok">✅ Sheet + backup synced</span>';
-    box.innerHTML = `<div class="ab-tools"><span class="grp"><button type="button" class="btn small${st.view === 'list' ? ' primary' : ''}" data-view="list">📋 List</button><button type="button" class="btn small${st.view === 'map' ? ' primary' : ''}" data-view="map">🗺 Map (pincode)</button></span> <label class="small"><input type="checkbox" id="ab-multi"${st.multi ? ' checked' : ''}> ⚠ Sirf 2+ address wale${d.multiCount ? ` (${d.multiCount})` : ''}</label></div>${st.view === 'map' ? '<div id="ab-mapbox"></div>' : ''}<div class="ab-bar"><b>${U.fmt(d.total)}</b> mile${d.total > rows.length ? ` · pehle ${U.fmt(rows.length)} dikha rahe` : ''} · ${syncLine}${d.total ? ' <button class="btn small" id="ab-csv">⬇ CSV</button>' : ''}</div>
+    box.innerHTML = termPanel(d) + `<div class="ab-tools"><span class="grp"><button type="button" class="btn small${st.view === 'list' ? ' primary' : ''}" data-view="list">📋 List</button><button type="button" class="btn small${st.view === 'map' ? ' primary' : ''}" data-view="map">🗺 Map (pincode)</button></span> <label class="small"><input type="checkbox" id="ab-multi"${st.multi ? ' checked' : ''}> ⚠ Sirf 2+ address wale${d.multiCount ? ` (${d.multiCount})` : ''}</label></div>${st.view === 'map' ? '<div id="ab-mapbox"></div>' : ''}<div class="ab-bar"><b>${U.fmt(d.total)}</b> mile${d.total > rows.length ? ` · pehle ${U.fmt(rows.length)} dikha rahe` : ''} · ${syncLine}${d.total ? ' <button class="btn small" id="ab-csv">⬇ CSV</button>' : ''}${d.canUpload ? ' <button class="btn small primary" id="ab-new">➕ Naya address</button>' : ''}</div>
       <div class="ab-act"${rows.length ? '' : ' hidden'}><span id="ab-selc" class="dim small"></span> ${d.canUpload ? '<button class="btn small" id="ab-clean">🧹 Duplicate + pincode fix</button> ' : ''}<button class="btn small" id="ab-print" disabled>🖨️ Labels print</button> <button class="btn small" id="ab-pdf" disabled>📄 Labels PDF</button>${d.canUpload ? ' <button class="btn small danger" id="ab-del" disabled>🗑 Delete</button>' : ''}</div>
-      <div class="table-wrap tall"><table class="tbl compact ab-tbl"><thead><tr><th><input type="checkbox" id="ab-all" title="Sab select"></th><th>Ch</th><th>Name</th><th>ID</th><th>Mobile</th><th>TL</th><th>Address</th><th>Pincode</th><th>Source</th><th></th></tr></thead><tbody>${rows.length ? rows.map((r, i) => `<tr class="${r.conflict ? 'ab-conf' : ''}"><td><input type="checkbox" data-sel="${esc(r.key)}"${st.sel.has(r.key) ? ' checked' : ''}></td><td>${chLabel(r.channel)}</td><td><b>${esc(r.name)}</b>${r.conflict ? ` <button class="btn small warn" data-conf="${esc(r.gkey)}" title="Is agent ke ${r.gsize} alag address hain — chuno">⚠ ${r.gsize} address</button>` : ''}</td><td>${esc(r.id)}</td><td class="nowrap">${esc(r.mobile)}</td><td>${esc(r.tl)}</td><td class="ab-addr">${esc(r.address)}</td><td>${esc(r.pincode)}</td><td><small class="dim">${esc(r.src)}</small></td><td><button class="btn small" data-copy="${i}" title="Address copy">📋</button></td></tr>`).join('') : '<tr><td colspan="10" class="dim" style="text-align:center;padding:18px">Kuch nahi mila.</td></tr>'}</tbody></table></div>`;
+      <div class="table-wrap tall"><table class="tbl compact ab-tbl"><thead><tr><th><input type="checkbox" id="ab-all" title="Sab select"></th><th>Ch</th><th>Name</th><th>ID</th><th>Mobile</th><th>TL</th><th>Address</th><th>Pincode</th><th>Source</th><th></th></tr></thead><tbody>${rows.length ? rows.map((r, i) => `<tr class="${r.conflict ? 'ab-conf' : ''}"><td><input type="checkbox" data-sel="${esc(r.key)}"${st.sel.has(r.key) ? ' checked' : ''}></td><td>${chLabel(r.channel)}</td><td><b>${esc(r.name)}</b>${r.conflict ? ` <button class="btn small warn" data-conf="${esc(r.gkey)}" title="Is agent ke ${r.gsize} alag address hain — chuno">⚠ ${r.gsize} address</button>` : ''}</td><td>${esc(r.id)}</td><td class="nowrap">${esc(r.mobile)}</td><td>${esc(r.tl)}</td><td class="ab-addr">${esc(r.address)}</td><td>${esc(r.pincode)}</td><td><small class="dim">${esc(r.src)}</small></td><td><button class="btn small" data-copy="${i}" title="Address copy">📋</button>${d.canUpload && r.src !== 'Tag request' ? ` <button class="btn small" data-edit="${i}" title="Address edit">✏️</button>` : ''}</td></tr>`).join('') : '<tr><td colspan="10" class="dim" style="text-align:center;padding:18px">Kuch nahi mila.</td></tr>'}</tbody></table></div>`;
     const selRows = () => rows.filter((r) => st.sel.has(r.key));
     const refreshSel = () => { const n = selRows().length; ['ab-print', 'ab-pdf', 'ab-del'].forEach((id) => { const el = U.$('#' + id, box); if (el) el.disabled = !n; }); const c = U.$('#ab-selc', box); if (c) c.textContent = n ? `${n} select` : 'Select karke label / delete'; const all = U.$('#ab-all', box); if (all) all.checked = n > 0 && n === rows.length; };
     box.querySelectorAll('[data-sel]').forEach((cb) => { cb.onchange = () => { if (cb.checked) st.sel.add(cb.dataset.sel); else st.sel.delete(cb.dataset.sel); refreshSel(); }; });
@@ -84,6 +84,11 @@ FF.pages = FF.pages || {};
       const text = `${r.name}\n${r.mobile}\n${r.address}${r.pincode && !String(r.address).includes(r.pincode) ? ' ' + r.pincode : ''}`;
       (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => { b.textContent = '✅'; setTimeout(() => { b.textContent = '📋'; }, 1200); }).catch(() => {});
     }));
+    const nw = U.$('#ab-new', box); if (nw) nw.onclick = () => addModal(root, {});
+    box.querySelectorAll('[data-addterm]').forEach((b) => { b.onclick = () => addModal(root, prefillOf(b.dataset.addterm)); });
+    box.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => addModal(root, { edit: rows[Number(b.dataset.edit)] }); });
+    const mc2 = U.$('#ab-misscopy', box); if (mc2) mc2.onclick = () => { const t = (d.termStats || []).filter((x) => !x.n).map((x) => x.t).join('\n'); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => U.toast('Nahi mile wali list copy ho gayi', 'ok')).catch(() => {}); };
+    const mc3 = U.$('#ab-missonly', box); if (mc3) mc3.onclick = () => { const miss = (d.termStats || []).filter((x) => !x.n).map((x) => x.t); const q0 = U.$('#ab-q', root); if (q0) q0.value = miss.join('\n'); st.q = miss.join('\n'); load(root); };
     const sb = U.$('#ab-sync', box);
     if (sb) sb.addEventListener('click', async () => { sb.disabled = true; try { await FF.auth.api('/api/address-book/sync', 'POST', {}); watchSync(root); } catch (err) { alert(err.message); } });
     tabs.querySelectorAll('[data-ch]').forEach((b) => { b.onclick = () => { st.channel = b.dataset.ch; load(root); }; });
@@ -212,6 +217,101 @@ FF.pages = FF.pages || {};
       try { await FF.auth.api('/api/address-book/resolve', 'POST', { mode: 'one', gkey, drop }); close(); U.toast('✅ Sahi address rakh liya, baaki delete', 'ok'); load(root); } catch (err) { b.disabled = false; alert(err.message); }
     }; });
   }
+
+  /** Search term → popup ka prefill (mobile / pincode / ID / naam). */
+  function prefillOf(t) {
+    const raw = String(t || '').trim(), dg = raw.replace(/\D/g, '');
+    if (/^(\+?91[\s-]*)?[6-9][\d\s-]{9,13}$/.test(raw) && dg.slice(-10).length === 10) return { mobile: dg.slice(-10) };
+    if (/^[1-9]\d{5}$/.test(raw)) return { pincode: raw };
+    if (/^[A-Za-z]{0,4}\d{4,}$/.test(raw.replace(/\s/g, ''))) return { id: raw.replace(/\s/g, '') };
+    return { name: raw };
+  }
+  /** 🔎 Multi-search ka hisaab: kitne mile, kaun nahi mile (har ek par ➕ Add address). */
+  function termPanel(d) {
+    const ts = d.termStats || [];
+    if (!ts.length || (ts.length < 2 && ts[0].n)) return '';
+    const miss = ts.filter((x) => !x.n), got = ts.filter((x) => x.n);
+    const addB = (x) => (d.canUpload ? ` <button type="button" class="btn small primary" data-addterm="${esc(x.t)}">➕ Add address</button>` : '');
+    return `<div class="ab-terms"><div class="ab-tsum"><b>🔎 ${ts.length} search</b> · <span class="ok-t">✅ ${got.length} mile</span> · <span class="${miss.length ? 'bad-t' : 'ok-t'}">${miss.length ? '❌' : '✅'} ${miss.length} nahi mile</span>${miss.length ? ' <button type="button" class="btn small" id="ab-misscopy">📋 Nahi mile copy</button>' : ''}</div>
+      ${miss.length ? `<div class="ab-miss">${miss.slice(0, 60).map((x) => `<span class="ab-mchip">❌ <b>${esc(x.t)}</b>${addB(x)}</span>`).join('')}${miss.length > 60 ? `<span class="dim small"> +${miss.length - 60} aur</span>` : ''}</div>` : ''}
+      ${got.length ? `<details class="ab-found"><summary class="dim small">✅ ${got.length} mile — dekho</summary><div class="ab-miss">${got.slice(0, 80).map((x) => `<span class="ab-mchip ok">✅ ${esc(x.t)} <small class="dim">(${x.n})</small></span>`).join('')}</div></details>` : ''}</div>`;
+  }
+  /** ➕ Naya address / ✏️ edit popup — name · mobile · pincode · agent ID · channel · TL · address → site + Google Sheet. */
+  function addModal(root, o) {
+    if (document.getElementById('ab-add')) return;
+    const e = o.edit || null, pre = e ? { name: e.name, mobile: e.mobile, pincode: e.pincode, id: e.id, address: e.address, tl: e.tl, channel: e.channel } : (o || {});
+    const allowed = (st.data && st.data.channels) || ['ff', 'gv'];
+    const ov = document.createElement('div');
+    ov.id = 'ab-add'; ov.className = 'ab-ov';
+    ov.innerHTML = `<div class="ab-md"><h3>${e ? '✏️ Address edit' : '➕ Naya address'}</h3>
+      <p class="dim small">${e ? 'Badlav site + Google Sheet dono me save honge.' : 'Save karte hi site me aur Google Sheet ke Address tab me chala jayega. Mobile / ID likhte hi baaki details apne aap bhar jati hain.'}</p>
+      <div class="ab-form">
+        <label>Name *<input class="input" id="af-name" value="${esc(pre.name || '')}" autocomplete="off"></label>
+        <label>Mobile * <input class="input" id="af-mobile" inputmode="numeric" maxlength="14" value="${esc(pre.mobile || '')}" autocomplete="off"></label>
+        <label>Agent ID <input class="input" id="af-id" value="${esc(pre.id || '')}" autocomplete="off"></label>
+        <label>Pincode <input class="input" id="af-pin" inputmode="numeric" maxlength="6" value="${esc(pre.pincode || '')}" autocomplete="off"><small id="af-geo" class="dim"></small></label>
+        <label>Channel <select class="input" id="af-ch"><option value="">Auto (mobile / ID se)</option>${allowed.map((x) => `<option value="${x}"${pre.channel === x ? ' selected' : ''}>${x === 'gv' ? '🟩 GV' : '🟦 FF'}</option>`).join('')}</select></label>
+        <label>TL <input class="input" id="af-tl" value="${esc(pre.tl || '')}" autocomplete="off"></label>
+        <label class="af-wide">Address * <textarea class="input" id="af-addr" rows="3">${esc(pre.address || '')}</textarea></label>
+      </div>
+      <div id="af-hint" class="small" style="margin:6px 0"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="af-cancel" type="button">Cancel</button><button class="btn primary" id="af-save" type="button">💾 Save</button></div></div>`;
+    document.body.appendChild(ov);
+    const g = (id) => ov.querySelector('#' + id), close = () => ov.remove();
+    g('af-cancel').onclick = close;
+    ov.addEventListener('mousedown', (ev) => { if (ev.target === ov) close(); });
+    const hint = (h, cls) => { g('af-hint').innerHTML = h ? `<span class="${cls || 'dim'}">${h}</span>` : ''; };
+    let lastQ = '';
+    const lookup = async (by) => {
+      const mobile = g('af-mobile').value.replace(/\D/g, '').slice(-10), id = g('af-id').value.trim();
+      const key = by === 'id' ? `i:${id}` : `m:${mobile}`;
+      if (key === lastQ) return;
+      if (by === 'mobile' && mobile.length !== 10) return;
+      if (by === 'id' && id.length < 4) return;
+      lastQ = key;
+      try {
+        const j = await apiJson(`/api/address-book/lookup?${by === 'id' ? `id=${encodeURIComponent(id)}` : `mobile=${mobile}`}`);
+        const f = j.found;
+        if (f) {
+          if (!g('af-name').value.trim() && f.name) g('af-name').value = f.name;
+          if (!g('af-id').value.trim() && f.id) g('af-id').value = f.id;
+          if (!g('af-mobile').value.trim() && f.mobile) g('af-mobile').value = f.mobile;
+          if (!g('af-tl').value.trim() && f.tl) g('af-tl').value = f.tl;
+          if (!g('af-ch').value && f.channel) g('af-ch').value = f.channel;
+        }
+        const ex = j.existing || [];
+        hint(f ? `✅ Agent mila${f.via ? ` (${esc(f.via)})` : ''}: <b>${esc(f.name || '')}</b> ${f.id ? '· ID ' + esc(f.id) : ''} ${f.tl ? '· TL ' + esc(f.tl) : ''}${ex.length && !e ? `<br>⚠ Is mobile ka address pehle se hai: <i>${esc(ex[0].address)}</i> — alag likhoge to naya version banega (search me chuno).` : ''}` : (by === 'mobile' ? 'ℹ Is mobile ka agent site data me nahi mila — ID / channel khud bharo.' : ''), f ? 'ok-t' : 'dim');
+      } catch { /* optional */ }
+    };
+    g('af-mobile').addEventListener('input', () => { if (g('af-mobile').value.replace(/\D/g, '').length >= 10) lookup('mobile'); });
+    g('af-mobile').addEventListener('blur', () => lookup('mobile'));
+    g('af-id').addEventListener('blur', () => lookup('id'));
+    const geo = async () => {
+      const pin = g('af-pin').value.replace(/\D/g, '');
+      if (pin.length !== 6) { g('af-geo').textContent = ''; return; }
+      try { const j = await apiJson(`/api/address-book/lookup?pincode=${pin}`); g('af-geo').textContent = j.geo ? `📍 ${j.geo.district}, ${j.geo.state}` : '⚠ Pincode list me nahi mila'; } catch { /* optional */ }
+    };
+    g('af-pin').addEventListener('input', geo);
+    g('af-addr').addEventListener('blur', () => { if (g('af-pin').value.trim()) return; const m = g('af-addr').value.match(/(?<!\d)[1-9]\d{5}(?!\d)/g); if (m) { g('af-pin').value = m[m.length - 1]; geo(); } });
+    if (pre.pincode) geo();
+    if (pre.mobile && !e) lookup('mobile'); else if (pre.id && !e) lookup('id');
+    (g('af-name').value ? (g('af-addr').value ? g('af-save') : g('af-addr')) : g('af-name')).focus();
+    g('af-save').onclick = async () => {
+      const body = { name: g('af-name').value, mobile: g('af-mobile').value, id: g('af-id').value, pincode: g('af-pin').value, channel: g('af-ch').value, tl: g('af-tl').value, address: g('af-addr').value };
+      if (e) body.key = e.key;
+      if (!body.name.trim()) { hint('Name likho.', 'bad-t'); return; }
+      if (body.mobile.replace(/\D/g, '').length < 10) { hint('Mobile 10 digit ka likho.', 'bad-t'); return; }
+      if (body.address.trim().length < 5) { hint('Address likho.', 'bad-t'); return; }
+      const b = g('af-save'); b.disabled = true; b.textContent = 'Save ho raha hai…';
+      try {
+        const out = await FF.auth.api('/api/address-book/save', 'POST', body);
+        close();
+        const msg = out.mode === 'edit' ? '✅ Address update ho gaya' : out.versions ? '⚠ Is mobile ka alag address pehle se tha — naya version save hua (search karke sahi chuno)' : out.unchanged ? 'ℹ Ye address pehle se saved tha' : '✅ Address save ho gaya';
+        U.toast(`${msg}${out.sync && out.sync.running ? ' · Sheet sync chal raha hai…' : ''}`, 'ok');
+        load(root);
+      } catch (err) { b.disabled = false; b.textContent = '💾 Save'; hint(esc(err.message || err), 'bad-t'); }
+    };
+  }
   function watchSync(root) {
     clearInterval(st.poll);
     st.poll = setInterval(async () => {
@@ -275,7 +375,7 @@ FF.pages = FF.pages || {};
         <div id="ab-paste" hidden style="margin-top:8px"><textarea id="ab-pt" class="input" rows="6" placeholder="Yahan address text paste karo…"></textarea><button class="btn" id="ab-pgo">Preview</button></div>
         <div id="ab-preview"></div>
       </div></section>
-      <style>.ab-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.ab-search{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px}.ab-search textarea{flex:1;min-width:240px}.ab-fields{position:relative}.ab-fields summary{cursor:pointer;list-style:none}.ab-fbox{position:absolute;z-index:20;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:10px;padding:8px 12px;display:grid;gap:6px;box-shadow:0 6px 20px rgba(0,0,0,.15);min-width:170px}.ab-bar{margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.ab-addr{min-width:260px;max-width:480px;white-space:normal}.nowrap{white-space:nowrap}.ab-pv{border:1px dashed var(--line,#ccc);border-radius:12px;padding:12px;margin-top:12px}.ab-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.ab-flag td{background:rgba(255,193,7,.12)}.ab-conf td{background:rgba(255,152,0,.10)}.ab-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:4px 0 8px}.ab-dot{position:absolute;transform:translate(-50%,-50%);border-radius:50%;border:2px solid #fff;background:var(--c,#64748b);color:#fff;font:700 11px/1 system-ui;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.4);z-index:3;text-decoration:none!important}.ab-dot.green{--c:#16a34a;box-shadow:0 0 0 4px rgba(22,163,74,.28),0 1px 4px rgba(0,0,0,.4)}.ab-dot.amber{--c:#f59e0b}.ab-dot.red{--c:#ef4444}.ab-dot.gray{--c:#64748b}.ab-dot.static{position:static;display:inline-block;width:12px;height:12px;transform:none;vertical-align:middle}.ab-lbl{position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%);white-space:nowrap;background:rgba(255,255,255,.94);color:#064e3b;padding:1px 5px;border-radius:5px;font:600 10px/1.3 system-ui;font-style:normal;box-shadow:0 1px 3px rgba(0,0,0,.25)}.ab-mapwrap{display:grid;grid-template-columns:1fr 300px;gap:10px}@media(max-width:900px){.ab-mapwrap{grid-template-columns:1fr}}.ab-side{max-height:clamp(340px,55vh,540px);overflow:auto;border:1px solid var(--line,#ddd);border-radius:12px}.ab-sh{padding:8px;position:sticky;top:0;background:var(--card,#fff);border-bottom:1px solid var(--line,#ddd)}.ab-srow{padding:7px 8px;border-bottom:1px solid var(--line,#eee);cursor:pointer}.ab-srow:hover{background:rgba(22,163,74,.10)}.ab-states{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.ab-bad{margin:6px 0}.ab-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:6px 0}.ab-mapbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}.ab-pick{margin:8px 0;padding:8px}.ab-cnt{position:absolute;top:-10px;left:6px;background:#111;color:#fff;border-radius:9px;font-size:10px;padding:0 5px;line-height:15px}.osm-pin.ab-x{}.ab-act{margin:6px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.btn.danger{color:#b91c1c;border-color:#fca5a5}.ab-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px}.ab-md{background:var(--card,#fff);color:inherit;border-radius:14px;padding:16px;max-width:760px;width:100%;max-height:88vh;overflow:auto}.ab-cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}.ab-card{border:1px solid var(--line,#ddd);border-radius:10px;padding:10px;display:grid;gap:6px}</style>`;
+      <style>.ab-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.ab-search{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px}.ab-search textarea{flex:1;min-width:240px}.ab-fields{position:relative}.ab-fields summary{cursor:pointer;list-style:none}.ab-fbox{position:absolute;z-index:20;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:10px;padding:8px 12px;display:grid;gap:6px;box-shadow:0 6px 20px rgba(0,0,0,.15);min-width:170px}.ab-bar{margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.ab-addr{min-width:260px;max-width:480px;white-space:normal}.nowrap{white-space:nowrap}.ab-pv{border:1px dashed var(--line,#ccc);border-radius:12px;padding:12px;margin-top:12px}.ab-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.ab-flag td{background:rgba(255,193,7,.12)}.ab-conf td{background:rgba(255,152,0,.10)}.ab-terms{border:1px solid var(--line,#ddd);border-radius:12px;padding:10px 12px;margin-bottom:10px;background:rgba(0,0,0,.02)}.ab-miss{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.ab-mchip{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;border:1px solid rgba(220,38,38,.35);background:rgba(220,38,38,.06)}.ab-mchip.ok{border-color:rgba(22,163,74,.35);background:rgba(22,163,74,.06)}.ok-t{color:#15803d}.bad-t{color:#b91c1c}.ab-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ab-form label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:600}.ab-form .af-wide{grid-column:1/-1}@media(max-width:640px){.ab-form{grid-template-columns:1fr}}.ab-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:4px 0 8px}.ab-dot{position:absolute;transform:translate(-50%,-50%);border-radius:50%;border:2px solid #fff;background:var(--c,#64748b);color:#fff;font:700 11px/1 system-ui;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.4);z-index:3;text-decoration:none!important}.ab-dot.green{--c:#16a34a;box-shadow:0 0 0 4px rgba(22,163,74,.28),0 1px 4px rgba(0,0,0,.4)}.ab-dot.amber{--c:#f59e0b}.ab-dot.red{--c:#ef4444}.ab-dot.gray{--c:#64748b}.ab-dot.static{position:static;display:inline-block;width:12px;height:12px;transform:none;vertical-align:middle}.ab-lbl{position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%);white-space:nowrap;background:rgba(255,255,255,.94);color:#064e3b;padding:1px 5px;border-radius:5px;font:600 10px/1.3 system-ui;font-style:normal;box-shadow:0 1px 3px rgba(0,0,0,.25)}.ab-mapwrap{display:grid;grid-template-columns:1fr 300px;gap:10px}@media(max-width:900px){.ab-mapwrap{grid-template-columns:1fr}}.ab-side{max-height:clamp(340px,55vh,540px);overflow:auto;border:1px solid var(--line,#ddd);border-radius:12px}.ab-sh{padding:8px;position:sticky;top:0;background:var(--card,#fff);border-bottom:1px solid var(--line,#ddd)}.ab-srow{padding:7px 8px;border-bottom:1px solid var(--line,#eee);cursor:pointer}.ab-srow:hover{background:rgba(22,163,74,.10)}.ab-states{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.ab-bad{margin:6px 0}.ab-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:6px 0}.ab-mapbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}.ab-pick{margin:8px 0;padding:8px}.ab-cnt{position:absolute;top:-10px;left:6px;background:#111;color:#fff;border-radius:9px;font-size:10px;padding:0 5px;line-height:15px}.osm-pin.ab-x{}.ab-act{margin:6px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.btn.danger{color:#b91c1c;border-color:#fca5a5}.ab-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px}.ab-md{background:var(--card,#fff);color:inherit;border-radius:14px;padding:16px;max-width:760px;width:100%;max-height:88vh;overflow:auto}.ab-cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}.ab-card{border:1px solid var(--line,#ddd);border-radius:10px;padding:10px;display:grid;gap:6px}</style>`;
     const flLabel = () => { U.$('#ab-fl', root).textContent = st.fields.map((k) => (FIELDS.find((f) => f[0] === k) || [k, k])[1]).join(' · ') || 'kuch nahi'; };
     flLabel();
     root.querySelectorAll('[data-f]').forEach((cb) => { cb.onchange = () => { st.fields = [...root.querySelectorAll('[data-f]')].filter((x) => x.checked).map((x) => x.dataset.f); if (!st.fields.length) { cb.checked = true; st.fields = [cb.dataset.f]; } flLabel(); if (st.q.trim()) load(root); }; });
