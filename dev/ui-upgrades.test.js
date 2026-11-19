@@ -81,6 +81,17 @@ test('NPCI FASTag class badges and skeleton loaders exist in stylesheets', async
   // Responsive card mode and desktop sticky columns
   assert.match(css, /\.tbl-responsive-cards/);
   assert.match(css, /\.tbl-sticky-first/);
+
+  // Mobile bottom sheet & dark mode drawer contrast
+  assert.match(css, /html\[data-theme="dark"\] \.drawer-head/);
+  assert.match(css, /@media \(max-width: 768px\) \{\s*\.drawer/);
+
+  // Toast mobile nav safe positioning
+  assert.match(css, /@media \(max-width: 768px\) \{\s*\.toast/);
+
+  // Modern empty state
+  assert.match(css, /\.empty-state \.empty-icon/);
+  assert.match(css, /\.empty-state \.empty-title/);
 });
 
 test('Tag Request form has progress stepper, quick quantity shortcuts, and pincode geo auto-fill', async () => {
@@ -126,5 +137,6 @@ test('util.js exports skeleton loaders and class badge helpers', async () => {
   assert.match(util, /function skeletonKpis/);
   assert.match(util, /function skeletonTable/);
   assert.match(util, /function classBadge/);
+  assert.match(util, /function emptyState/);
   assert.match(util, /FASTAG_CLASSES/);
 });
