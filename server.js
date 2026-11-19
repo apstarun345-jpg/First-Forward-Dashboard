@@ -302,7 +302,7 @@ const DEFAULT_SETTINGS = {
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],   // v3.87 — TVC → CCH classes (Tag Request class grid)
   // v3.90 — GV agent / TL commission box (Master search + profile): sheet link, tab, columns sab Settings se badal sakte ho.
   // 📞 v3.125.248 — agent mobile kis sheet / tab se (FF + GV) — ID + mobile + naam column system khud header se pehchanta hai
-  mobileSources: { ff: { sheetLink: '', tab: 'Sheet4' }, gv: { sheetLink: '1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA', tab: 'agent_Mobile Number' } },
+  mobileSources: { ff: { sheetLink: '', tab: 'Sheet4' }, gv: { sheetLink: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', tab: 'agent details' } },
   gvAgentCommission: { enabled: true, sheetLink: '', tab: 'GV Master', agentCol: 'A', tlCol: 'R', tlFallbackCol: 'C', productCol: 'L', commissionCol: 'M', dateCol: 'P', agentNameCol: 'B', tlNameCol: 'D', classCol: 'G', classFallbackCol: 'F', productId: '100000007832', label: 'VC4', suffix: '/tag', currency: '₹' },
   gv: {
     master: { tab: 'GV Master', gid: '', uniqueId: 'A', agentName: 'B', tlId: 'C', tlName: 'D', vrn: 'E', vClass: 'F', cch: 'G', serial: 'H', tagId: 'I', amount: 'J', customer: 'K', productId: 'L', commission: 'M', status: 'N', commissionStatus: 'O', date: 'P', time: 'Q', gvTlId: 'R', masterCch: 'S', monthName: 'T', tagType: 'U', gvUniqueId: 'W', gvUniqueName: 'X' },
@@ -9772,6 +9772,7 @@ async function handleApi(req, res, url) {
       if (store) {
         for (const ch of ['ff', 'gv']) {
           const c = { ...DEFAULT_SETTINGS.mobileSources[ch], ...(msCfg[ch] || {}) };
+          if (ch === 'gv' && /1LkYX746lGZQKhl5ueoKe3kYOo4SNtu47p5-jkVNUiBA/.test(String(c.sheetLink || '')) && /agent_?\s?mobile/i.test(String(c.tab || ''))) { c.sheetLink = DEFAULT_SETTINGS.mobileSources.gv.sheetLink; c.tab = DEFAULT_SETTINGS.mobileSources.gv.tab; }   // v3.125.338: old default was a wallet log (no mobile column)
           const sid = sheetIdFromLink(c.sheetLink) || (ch === 'ff' ? AGENT_DETAILS_SHEET : '');
           if (!sid || !c.tab) continue;
           try {
