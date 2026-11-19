@@ -419,7 +419,7 @@ FF.pages = FF.pages || {};
     if (!m) try { m = okMob(FF.agentMobiles && FF.agentMobiles.of && FF.agentMobiles.of({ id: r.id, name: r.name })); } catch { /* optional */ }
     return m;
   }
-  const mobileCell = (r) => { const m = mobileOf(r); return m ? `<a class="dp2-mob" href="tel:${esc(m)}" title="Call ${esc(r.name)}">📞 ${esc(m)}</a>` : '<span class="dim">—</span>'; };
+  const mobileCell = (r) => { const m = mobileOf(r); return m ? `<a class="dp2-mob" href="tel:${esc(m)}" title="Call ${esc(r.name)}">📞 ${esc(m)}</a>` : '<span class="dim">Not found</span>'; };
   const typeLabel = (r) => (r.direct ? `<span class="direct-chip">🚫 ${esc(r.directLabel || 'Direct')}</span>` : esc(r.tl || '—'));
 
   // ---- table --------------------------------------------------------------------------------------------

@@ -237,7 +237,7 @@ window.FF = window.FF || {};
     const rows = list.map((a, i) => `<tr class="clickable" ${agentAttrs(pr, a)}>
       <td class="dim">${i + 1}</td>
       <td><b>${esc(a.name)}</b>${a.isSelf ? ' <span class="badge">TL own</span>' : ''}<small class="cell-sub">${esc(a.id || '')}${a.priority ? ` · ${esc(a.priority)}` : ''}</small></td>
-      <td>${a.mobile ? `<a href="tel:${esc(a.mobile)}" onclick="event.stopPropagation()">📞 ${esc(a.mobile)}</a>` : '<span class="dim">—</span>'}</td>
+      <td>${a.mobile ? `<a href="tel:${esc(a.mobile)}" onclick="event.stopPropagation()">📞 ${esc(a.mobile)}</a>` : '<span class="dim">Not found</span>'}</td>
       <td class="num"><b>${fmt(a.stock)}</b><small class="cell-sub">VC4 ${fmt(a.stockVc4)} · Comm ${fmt(a.stockComm)}</small></td>
       <td class="num">${fmt(a.cur)}</td>
       <td class="num">${fmt(a.rate, 1)}</td>

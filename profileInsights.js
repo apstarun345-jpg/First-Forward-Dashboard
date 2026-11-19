@@ -175,7 +175,7 @@ window.FF = window.FF || {};
     const rows = list.map((a, i) => `<tr class="clickable" ${agentAttrs(pr, a)}>
       <td class="dim">${i + 1}</td>
       <td><b>${esc(a.name)}</b><small class="cell-sub">${esc(a.id || '')}${a.status ? ` · ${esc(a.status)}` : ''}</small></td>
-      <td>${a.mobile ? `<a href="tel:${esc(a.mobile)}" onclick="event.stopPropagation()">📞 ${esc(a.mobile)}</a>` : '<span class="dim">—</span>'}</td>
+      <td>${a.mobile ? `<a href="tel:${esc(a.mobile)}" onclick="event.stopPropagation()">📞 ${esc(a.mobile)}</a>` : '<span class="dim">Not found</span>'}</td>
       <td class="num">${split(a.cur)}</td>
       <td class="num"><b>${fmt(a.cur.t)}</b></td>
       <td class="num">${fmt(a.last.t)}</td>
