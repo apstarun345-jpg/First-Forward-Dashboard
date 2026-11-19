@@ -7617,6 +7617,37 @@ img.ff-robot { display: block; object-fit: contain; filter: drop-shadow(0 2px 3p
 .mc-glow { position: absolute; left: 22%; bottom: -8%; width: 56%; height: 16%; border-radius: 50%; background: radial-gradient(closest-side, rgba(56, 189, 248, .75), rgba(56, 189, 248, 0)); animation: mcGlow 1.2s ease-in-out infinite alternate; }
 .mc.moving .mc-glow { background: radial-gradient(closest-side, rgba(251, 146, 60, .95), rgba(239, 68, 68, .35) 55%, rgba(239, 68, 68, 0)); height: 26%; bottom: -18%; animation-duration: .12s; }
 .mc.moving .mc-bot { animation: none; transform: rotate(var(--lean, 0deg)); transition: transform .3s; }
+/* 🌈 Mood Glow & Holographic Aura */
+.mc-halo { position: absolute; left: 5%; top: -12%; width: 90%; height: 85%; border-radius: 50%; pointer-events: none; opacity: 0; transition: opacity .4s ease, transform .4s ease; z-index: 1; }
+.mc.rest[data-mood="happy"] .mc-halo, .mc.rest[data-mood="excited"] .mc-halo {
+  opacity: .8;
+  background: radial-gradient(circle, rgba(245, 158, 11, .45) 0%, rgba(16, 185, 129, .25) 50%, transparent 70%);
+  animation: mcHaloPulse 2s ease-in-out infinite alternate;
+}
+.mc.rest[data-mood="alert"] .mc-halo, .mc.rest[data-mood="sad"] .mc-halo {
+  opacity: .85;
+  background: radial-gradient(circle, rgba(239, 68, 68, .5) 0%, rgba(249, 115, 22, .3) 50%, transparent 70%);
+  animation: mcHaloPulse 1.2s ease-in-out infinite alternate;
+}
+.mc[data-astate="listening"] .mc-halo {
+  opacity: .95;
+  background: radial-gradient(circle, rgba(6, 182, 212, .6) 0%, rgba(99, 102, 241, .3) 55%, transparent 70%);
+  animation: mcHaloPulse .8s ease-in-out infinite alternate;
+}
+.mc[data-astate="thinking"] .mc-halo {
+  opacity: .9;
+  background: radial-gradient(circle, rgba(168, 85, 247, .55) 0%, rgba(236, 72, 153, .3) 55%, transparent 70%);
+  animation: mcHaloSpin 2.5s linear infinite;
+}
+@keyframes mcHaloPulse { from { transform: scale(.9); opacity: .55; } to { transform: scale(1.15); opacity: .95; } }
+@keyframes mcHaloSpin { 0% { transform: rotate(0deg) scale(1); } 50% { transform: rotate(180deg) scale(1.1); } 100% { transform: rotate(360deg) scale(1); } }
+
+/* 💭 Robot Glass Thought Bubble */
+.mc-bubble { position: absolute; bottom: 108%; left: 50%; transform: translateX(-50%) scale(.85) translateY(10px); background: rgba(15, 23, 42, .88); color: #f8fafc; border: 1px solid rgba(255, 255, 255, .22); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); padding: 8px 14px; border-radius: 16px; font-size: 12px; font-weight: 600; line-height: 1.35; white-space: nowrap; max-width: 250px; text-overflow: ellipsis; overflow: hidden; pointer-events: auto; cursor: pointer; box-shadow: 0 10px 28px rgba(0, 0, 0, .35), 0 0 0 1px rgba(255, 255, 255, .1); opacity: 0; transition: transform .28s cubic-bezier(.2, 1.4, .4, 1), opacity .22s ease; z-index: 10; }
+.mc-bubble.in { opacity: 1; transform: translateX(-50%) scale(1) translateY(0); }
+.mc-bubble-tail { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 6px solid rgba(15, 23, 42, .88); }
+html[data-theme="light"] .mc-bubble { background: rgba(255, 255, 255, .92); color: #0f172a; border-color: rgba(99, 102, 241, .25); box-shadow: 0 12px 30px rgba(99, 102, 241, .22), 0 2px 8px rgba(15, 23, 42, .08); }
+html[data-theme="light"] .mc-bubble-tail { border-top-color: rgba(255, 255, 255, .92); }
 /* moods */
 .mc.rest[data-mood="happy"] .mc-bot, .mc.rest[data-mood="excited"] .mc-bot { animation: mcDance .8s ease-in-out infinite; }
 .mc.rest[data-mood="happy"] .mc-headwrap, .mc.rest[data-mood="excited"] .mc-headwrap { animation: mcBop .4s ease-in-out infinite alternate; }
@@ -7709,6 +7740,28 @@ html.mc-on #ask-fab { display: none !important; }
 /* history board */
 .mc-board.hist .mc-bh { background: linear-gradient(110deg, #4f46e5, #0ea5e9); }
 .mc-cnt { margin-left: auto; font-size: 10.5px; opacity: .85; background: rgba(255, 255, 255, .2); padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.mc-smart-pills { padding: 6px 10px 8px; border-bottom: 1px dashed var(--line, #e2e8f0); background: color-mix(in srgb, var(--brand, #6366f1) 4%, transparent); }
+.mc-pills-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.mc-chip-pill { border: 1px solid color-mix(in srgb, var(--brand, #6366f1) 35%, var(--line, #e2e8f0)); background: color-mix(in srgb, var(--brand, #6366f1) 8%, var(--card, #fff)); color: color-mix(in srgb, var(--brand, #6366f1) 85%, var(--ink, #0f172a)); border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all .16s ease; text-align: left; }
+.mc-chip-pill:hover { background: color-mix(in srgb, var(--brand, #6366f1) 18%, var(--card, #fff)); transform: translateY(-1px); }
+.mc-sheet-pill { display: none; width: 38px; height: 4px; border-radius: 99px; background: rgba(148, 163, 184, .5); margin: 6px auto 2px; }
+@media (max-width: 760px) {
+  .mc-sheet-pill { display: block; }
+  .mc-board.hist {
+    position: fixed !important;
+    left: 8px !important;
+    right: 8px !important;
+    bottom: 82px !important;
+    top: auto !important;
+    width: auto !important;
+    max-height: 72vh !important;
+    border-radius: 20px !important;
+    box-shadow: 0 16px 45px rgba(0, 0, 0, .45) !important;
+    animation: mcSheetUp .28s cubic-bezier(.2, 1.2, .4, 1) !important;
+    z-index: 100 !important;
+  }
+}
+@keyframes mcSheetUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 .mc-hist { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; max-height: min(380px, 52vh); overflow: auto; overscroll-behavior: contain; }
 .mc-hist li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 9px; background: color-mix(in srgb, var(--line, #e2e8f0) 45%, transparent); border-left: 3px solid #8b5cf6; }
 .mc-hist li[data-q] { cursor: pointer; } .mc-hist li[data-q]:hover { background: color-mix(in srgb, #6366f1 14%, transparent); }
