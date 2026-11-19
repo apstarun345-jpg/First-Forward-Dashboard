@@ -1567,13 +1567,15 @@
   }
   const api = (p) => (FF.auth && FF.auth.api ? FF.auth.api(p) : Promise.reject(new Error('no api')));
   const firstRun = (k) => !cfg[k];
-  async function pollFeeds() {
-    if (!allowed() || !cfg.on || document.hidden || convo) return;
-    const cutoff = Date.now() - 30 * 60e3; // pehli baar: sirf pichle 30 min ka
-    // 🔔 notifications
+  // ⚡ v3.125.352 — notifications (link open / search / tab…) har ~3s me; naya aate hi robot turant bole
+  let notifBusy = false;
+  async function pollNotifs() {
+    if (notifBusy || !allowed() || !cfg.on || document.hidden || convo) return;
+    notifBusy = true;
+    const cutoff = Date.now() - 30 * 60e3;
     try {
-      const r = await api('/api/notifications');
       const last = Date.parse(cfg.lastNotif || '') || 0;
+      const r = await api('/api/notifications' + (last ? `?since=${encodeURIComponent(cfg.lastNotif)}` : ''));
       const fresh = (r && r.items || []).filter((x) => { const t = Date.parse(x.createdAt) || 0; return t > last && (last || t > cutoff); })
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
       const top = (r && r.items || []).reduce((m, x) => Math.max(m, Date.parse(x.createdAt) || 0), last);
@@ -1588,7 +1590,12 @@
         };
       });
       cfg.notifInit = 1;
-    } catch { /* login nahi */ }
+    } catch { /* login nahi */ } finally { notifBusy = false; }
+  }
+  async function pollFeeds() {
+    if (!allowed() || !cfg.on || document.hidden || convo) return;
+    const cutoff = Date.now() - 30 * 60e3; // pehli baar: sirf pichle 30 min ka
+    await pollNotifs();
     // ⚙️ audit (admin)
     try {
       const r = await api('/api/audit');
@@ -2999,7 +3006,7 @@
   window.addEventListener('hashchange', () => { clearTimeout(tipTimer); tipTimer = setTimeout(pageTip, 2000); });
   setTimeout(pageTip, 9000);
 
-  FF.mascot = { addBuilder: (fn) => { if (typeof fn === 'function') BUILDERS.push(fn); }, addPageTips: (m) => Object.assign(extraTips, m || {}), addContext: (fn) => { if (typeof fn === 'function') ctxFns.push(fn); }, push: (it) => it && enqueue({ ...it, id: it.id || `${it.key}:${Date.now()}` }), mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake === true, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { speaksNotifs: () => { try { return !!(allowed() && cfg.on && updatesOn() && el); } catch { return false; } }, addBuilder: (fn) => { if (typeof fn === 'function') BUILDERS.push(fn); }, addPageTips: (m) => Object.assign(extraTips, m || {}), addContext: (fn) => { if (typeof fn === 'function') ctxFns.push(fn); }, push: (it) => it && enqueue({ ...it, id: it.id || `${it.key}:${Date.now()}` }), mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake === true, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho
@@ -3032,6 +3039,7 @@
         } catch { /* ignore */ }
       };
       setTimeout(() => autoBrief(0), 30e3);
+      setInterval(pollNotifs, 3e3);
       setInterval(pollFeeds, 12e3); // pehle 30s — ab 12s (halka call)
       // ⚡ v3.125.181 — push aate hi (service worker se signal) turant robot bataye; tab par wapas aate hi bhi
       let instT = 0; const instant = () => { clearTimeout(instT); instT = setTimeout(() => { try { pollFeeds(); } catch { /* ignore */ } }, 350); };

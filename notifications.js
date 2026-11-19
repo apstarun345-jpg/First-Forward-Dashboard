@@ -249,6 +249,8 @@ window.FF = window.FF || {};
     // Per-type preference check
     if (state.prefs[item.type] === false) return;
     if (document.visibilityState === 'visible') {
+      // 🤖 v3.125.352 — robot khud ye khabar bol raha hai → dobara toast nahi (double message)
+      try { if (FF.mascot && FF.mascot.speaksNotifs && FF.mascot.speaksNotifs()) return; } catch { /* ignore */ }
       if (U && U.toast) {
         U.toast(`${icon(item)} ${item.title}`, 'info');
         beep();
