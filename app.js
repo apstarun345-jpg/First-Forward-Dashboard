@@ -2135,6 +2135,7 @@ window.FF = window.FF || {};
   function softChip(show) {
     let el = document.getElementById('bg-fresh');
     if (!show) { if (el) el.remove(); return; }
+    return;   // v3.125.352 — "Naya data aaya" chip ab nahi dikhta; user idle hote hi page chup-chaap refresh ho jaata hai
     if (el) return;
     el = U.h('<button type="button" id="bg-fresh" class="btn primary" style="position:fixed;left:16px;bottom:16px;z-index:9000;border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.3)">🔄 Naya data aaya — refresh</button>');
     el.addEventListener('click', () => { softPending = false; softChip(false); renderCurrent({ bgUpdated: true }); });

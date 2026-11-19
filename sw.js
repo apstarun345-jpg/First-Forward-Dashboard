@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Stable feed snapshots (/api/today),
 // /api/auth/me and /api/settings are network-first with a cached fallback; raw /api/gviz stays live-only.
-const CACHE_NAME = 'apnapayment-v312851';
+const CACHE_NAME = 'apnapayment-v312852';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // A same-origin browser tab and an installed PWA are both WindowClients. Remember the display
@@ -148,8 +148,16 @@ self.addEventListener('push', e => {
   // "notification not shown" error aata hai aur future push band ho sakte hain.
   e.waitUntil((async () => {
     // Notification PEHLE (Chrome ki requirement + user ko turant dikhe), uske baad voice/badge.
-    try { await self.registration.showNotification(title, options); }
-    catch (err) { console.warn('showNotification:', err && err.message); }
+    // 🤖 v3.125.352 — robot ki khabar: dashboard isi device par khula + focused ho to robot ka board hi dikha raha hai,
+    //    OS notification dobara mat dikhao (double message). Chrome is case me bhi allow karta hai (visible window).
+    let seen = false;
+    if (data.robot) {
+      try { const wl = await self.clients.matchAll({ type: 'window', includeUncontrolled: true }); seen = wl.some((c) => c.visibilityState === 'visible' && c.focused); } catch { seen = false; }
+    }
+    if (!seen) {
+      try { await self.registration.showNotification(title, options); }
+      catch (err) { console.warn('showNotification:', err && err.message); }
+    }
     if (job) { await voiceAdd(job); await tellClients({ type: 'ff-speak-push', item: job }); }
     // 🤖 v3.125.181 — bina awaaz wali push par bhi khule page ko turant batao (robot 30s poll ka intezaar na kare);
     //    awaaz wali push me upar ka 'ff-speak-push' hi signal hai (ek hi message — page do baar na jaage).
