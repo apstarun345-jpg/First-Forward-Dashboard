@@ -13604,12 +13604,12 @@ function plCleanMobile(v) {
   if (d.length === 12 && d.startsWith('91')) d = d.slice(2); else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
   return /^[6-9]\d{9}$/.test(d) ? d : '';
 }
-const plMobileFor = (maps, src, id, name) => {
+const plMobileFor = (maps, src, id, name, idOnly = false) => {
   if (!maps) return '';
   const nk2 = plNormName(name), ik = plIdKey(id), order = src === 'gv' ? ['gv', 'ff'] : ['ff', 'gv'];
   const rm = (ik && maps.reg && maps.reg.id.get(ik)) || (nk2 && maps.reg && maps.reg.name.get(nk2)); if (rm) return rm;   // Sheet4 (agent master) mobile = most reliable
   for (const ch of order) { const m = (ik && maps[ch].id.get(ik)) || maps[ch].name.get(nk2); if (m) return m; }
-  return /^[6-9]\d{9}$/.test(String(id || '').trim()) ? String(id).trim() : '';
+  return !idOnly && /^[6-9]\d{9}$/.test(String(id || '').trim()) ? String(id).trim() : '';
 };
 /** Assigned-work list of a team link (module-level copy of normPlAssigned: src | name | id | tl | bucket). */
 function normPlAssignedGlobal(arr) {
@@ -14806,7 +14806,11 @@ async function servePersonalPage(req, res, rawToken) {
       }
       const memberId = new Map(); (Array.isArray(link.members) ? link.members : []).forEach((m) => { if (m && m.name && m.id) memberId.set(nk(m.name), String(m.id).trim().replace(/\.0+$/, '')); });
       asg.forEach((a) => { if (a.id && !memberId.has(nk(a.name))) memberId.set(nk(a.name), a.id.replace(/\.0+$/, '')); });
-      for (const [k8, p] of peopleMap) { const idv = agentIdBy.get(k8) || memberId.get(k8); if (idv) p.i = idv; }
+      for (const [k8, p] of peopleMap) {
+        const idv = agentIdBy.get(k8) || memberId.get(k8); if (idv) p.i = idv;
+        // APS… IDs are GV agents: when nothing explicit (TL / member / live row) placed the agent, label it by its ID, not by the link default
+        if (p.i && /^APS\d/i.test(String(p.i).trim()) && !agentSrc.has(k8)) p.s = 'gv';
+      }
       const mobMaps = await Promise.race([personalReportMobiles().catch(() => null), new Promise((resolve) => { const t = setTimeout(() => resolve(null), req.__plWarm === PL_WARM_KEY ? 30e3 : 3500); if (t.unref) t.unref(); })]);
       // 📞 make sure the trusted mobile directory is loaded before agents are labelled (otherwise a cold build shows no numbers)
       try { if (typeof agentMobileLoader === 'function') await Promise.race([agentMobileLoader(false).catch(() => null), new Promise((resolve) => { const t = setTimeout(resolve, req.__plWarm === PL_WARM_KEY ? 30e3 : 3500); if (t.unref) t.unref(); })]); } catch { /* optional */ }
@@ -14814,8 +14818,10 @@ async function servePersonalPage(req, res, rawToken) {
       const tgBy = new Map(); tgList.forEach((t) => { if (t && t.ym === ym && t.key) tgBy.set(t.key, t); });
       for (const [k9, p] of peopleMap) {
         // 📞 trusted directory first (agent ID match; name only if unique) — then the REPORT/Sheet4 maps
-        let mo = ''; try { mo = (typeof agentMobileLookup === 'function' && agentMobileLookup(p.i, p.n)) || ''; } catch { mo = ''; }
-        mo = plCleanMobile(mo) || plCleanMobile(plMobileFor(mobMaps, p.s, p.i, p.n)); if (mo) p.mo = mo;
+        // GV (APS…) agents: exact agent-ID match only — a same/similar NAME in another channel must never lend its number
+        const gvId = p.s === 'gv' || /^APS\d/i.test(String(p.i || '').trim());
+        let mo = ''; try { mo = (typeof agentMobileLookup === 'function' && agentMobileLookup(p.i, gvId ? '' : p.n)) || ''; } catch { mo = ''; }
+        mo = plCleanMobile(mo) || plCleanMobile(plMobileFor(mobMaps, p.s, p.i, gvId ? '' : p.n, gvId)); if (mo) p.mo = mo;
         const tt = tgBy.get(plTargetKey(p.s, p.n)); if (tt) { const v = plTargetValue(tt); if (v) p.tg = v; if (tt.via === 'link') p.tl2 = 1; }
       }
       const dailyCls = await dailyClsPromise;
