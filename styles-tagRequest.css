@@ -73,9 +73,9 @@
 .tr-req-tbl col.tr-col-stock-comm { width: 96px; }
 .tr-req-tbl col.tr-col-last { width: 105px; }
 .tr-req-tbl col.tr-col-current { width: 105px; }
-.tr-req-tbl col.tr-col-rate { width: 90px; }
-.tr-req-tbl col.tr-col-expected { width: 100px; }
-.tr-req-tbl col.tr-col-growth { width: 105px; }
+.tr-req-tbl col.tr-col-rate { width: 116px; }
+.tr-req-tbl col.tr-col-expected { width: 116px; }
+.tr-req-tbl col.tr-col-growth { width: 116px; }
 .tr-req-tbl col.tr-col-suggest { width: 200px; }
 .tr-req-tbl col.tr-col-requested { width: 210px; }
 .tr-req-tbl col.tr-col-total { width: 72px; }
@@ -335,8 +335,8 @@ html[data-theme="dark"] .tr-item-chips .tr-item-chip, html[data-theme="dark"] .t
 html[data-theme="dark"] .tr-item-chips .tr-item-chip.on { color: #fff !important; -webkit-text-fill-color: #fff; }
 
 /* v269 — group lines (VC4+VC20 / VC5+ / class-wise growth): emoji nahi, aligned label : value */
-.tr-grp { display: grid; grid-template-columns: auto auto; justify-content: space-between; column-gap: 10px; row-gap: 2px; margin-top: 5px; text-align: left; font-size: 10.5px; line-height: 1.25; white-space: nowrap; }
-.tr-grp .tr-grp-k { font-weight: 800; color: #475569; }
+.tr-grp { display: grid; grid-template-columns: minmax(0, 1fr) auto; justify-content: stretch; column-gap: 10px; row-gap: 2px; margin-top: 5px; text-align: left; font-size: 10.5px; line-height: 1.25; white-space: nowrap; }
+.tr-grp .tr-grp-k { font-weight: 800; color: #475569; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tr-grp .tr-grp-v { justify-self: end; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; }
 .tr-grp .tr-gv.up { color: #15803d; } .tr-grp .tr-gv.down { color: #b91c1c; } .tr-grp .tr-gv.flat { color: #64748b; }
 .tr-m-growth .tr-gr-all { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 5px; padding-top: 4px; border-top: 1px dashed rgba(148,163,184,.5); font-size: 10.5px; white-space: nowrap; }
