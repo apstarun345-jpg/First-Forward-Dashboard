@@ -1140,10 +1140,10 @@ FF.pages = FF.pages || {};
     if (hf && hg) return { text: 'GV+FF', icon: '🟪', cls: 'both' };
     if (hg) return { text: 'GV Partner', icon: '🟩', cls: 'gv' };
     if (hf) return { text: 'First Forward', icon: '🟦', cls: 'ff' };
-    if (f || g) return null;   // v3.125.342 — Office Stock text nahi dikhana
+    if (f || g) return { text: 'Office Stock', icon: '🏢', cls: 'office' };   // table row me nahi dikhta (whereBadge(t, '', true)); header + suggestion me dikhta hai
     return { text: 'Not mapped', icon: '⚪', cls: 'none' };
   }
-  const whereBadge = (t, extra) => { const w = tagWhere(t); return w ? `<span class="tg-where tgw-${w.cls}${extra || ''}">${w.icon} ${esc(w.text)}</span>` : ''; };
+  const whereBadge = (t, extra, hideOffice) => { const w = tagWhere(t); return w && !(hideOffice && w.cls === 'office') ? `<span class="tg-where tgw-${w.cls}${extra || ''}">${w.icon} ${esc(w.text)}</span>` : ''; };
   function tagStatus(t) {
     const f = t.ff[0], g = t.gv[0];
     // Holder = agent / GV naam jiske paas tag assign hai. Dono me koi holder nahi → 🏢 OFFICE STOCK.
@@ -1398,7 +1398,7 @@ FF.pages = FF.pages || {};
         const st = tagStatus(t);
         const dash = (v) => { const x = realName(v); return x ? esc(x) : '<span class="dim">—</span>'; };
         const rowCls = st.office ? 'tg-office' : (st.ff.tone === 'green' || st.gv.tone === 'green') ? 'tg-mapped' : 'tg-stock';
-        return `<tr class="${rowCls}"><td class="tg-bar"><b>${esc(U.barcode(t.key))}</b>${whereBadge(t)}</td><td class="tg-tid">${esc((f.tagId || g.tagId) || '—')}</td>
+        return `<tr class="${rowCls}"><td class="tg-bar"><b>${esc(U.barcode(t.key))}</b>${whereBadge(t, '', true)}</td><td class="tg-tid">${esc((f.tagId || g.tagId) || '—')}</td>
             <td>${dash(f.agentName)}${realName(f.agentId) ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${dash(tlText(f.tlName, 'ff'))}</td>
             <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
             <td>${dash(g.agentName)}${realName(g.agentId) ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${dash(tlText(g.tlName, 'gv'))}</td>
