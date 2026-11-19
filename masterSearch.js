@@ -1140,18 +1140,18 @@ FF.pages = FF.pages || {};
     if (hf && hg) return { text: 'GV+FF', icon: '🟪', cls: 'both' };
     if (hg) return { text: 'GV Partner', icon: '🟩', cls: 'gv' };
     if (hf) return { text: 'First Forward', icon: '🟦', cls: 'ff' };
-    if (f || g) return { text: 'Office Stock', icon: '🏢', cls: 'office' };
+    if (f || g) return null;   // v3.125.342 — Office Stock text nahi dikhana
     return { text: 'Not mapped', icon: '⚪', cls: 'none' };
   }
+  const whereBadge = (t, extra) => { const w = tagWhere(t); return w ? `<span class="tg-where tgw-${w.cls}${extra || ''}">${w.icon} ${esc(w.text)}</span>` : ''; };
   function tagStatus(t) {
     const f = t.ff[0], g = t.gv[0];
     // Holder = agent / GV naam jiske paas tag assign hai. Dono me koi holder nahi → 🏢 OFFICE STOCK.
     const held = (r) => !!(r && (realName(r.agentName) || realName(r.agentId) || realName(r.gvName) || realName(r.gvId)));
     const office = !held(f) && !held(g);
-    const one = (r) => (!r ? { text: 'Not mapped', tone: 'red' } : r.issued ? { text: '✅ Issued', tone: 'green' } : held(r) ? { text: 'Mapped', tone: 'green' } : { text: 'Stock · assign nahi', tone: 'amber' });
+    const one = (r) => (held(r) ? { text: 'Mapped', tone: 'green' } : { text: 'Not mapped', tone: 'red' });   // v3.125.342 — sirf Mapped / Not mapped
     const st = { ff: one(f), gv: one(g), office };
-    if (office) { st.ff = f ? { text: '🏢 OFFICE STOCK', tone: 'office' } : st.ff; st.gv = g ? { text: '🏢 OFFICE STOCK', tone: 'office' } : st.gv; }
-    st.t = (f && f.issued) || (g && g.issued) ? 'Issued' : office ? (f || g ? 'Office stock' : 'Not mapped') : (held(f) && held(g) ? 'FF + GV' : held(f) ? 'FF' : 'GV');
+    st.t = (f && f.issued) || (g && g.issued) ? 'Issued' : office ? 'Not mapped' : (held(f) && held(g) ? 'FF + GV' : held(f) ? 'FF' : 'GV');
     return st;
   }
   /** Kundli card ke andar quick stats — mobile · TL · stock · TL stock · priority · suggested (data load hone par). */
@@ -1398,7 +1398,7 @@ FF.pages = FF.pages || {};
         const st = tagStatus(t);
         const dash = (v) => { const x = realName(v); return x ? esc(x) : '<span class="dim">—</span>'; };
         const rowCls = st.office ? 'tg-office' : (st.ff.tone === 'green' || st.gv.tone === 'green') ? 'tg-mapped' : 'tg-stock';
-        return `<tr class="${rowCls}"><td class="tg-bar"><b>${esc(U.barcode(t.key))}</b> <span class="tg-where tgw-${tagWhere(t).cls}">${tagWhere(t).icon} ${esc(tagWhere(t).text)}</span></td><td class="tg-tid">${esc((f.tagId || g.tagId) || '—')}</td>
+        return `<tr class="${rowCls}"><td class="tg-bar"><b>${esc(U.barcode(t.key))}</b>${whereBadge(t)}</td><td class="tg-tid">${esc((f.tagId || g.tagId) || '—')}</td>
             <td>${dash(f.agentName)}${realName(f.agentId) ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${dash(tlText(f.tlName, 'ff'))}</td>
             <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
             <td>${dash(g.agentName)}${realName(g.agentId) ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${dash(tlText(g.tlName, 'gv'))}</td>
@@ -1424,7 +1424,7 @@ FF.pages = FF.pages || {};
       <div class="ms-panel-backdrop" data-ms-close></div>
       <div class="ms-panel-box">
         <div class="ms-panel-head">
-          <div><span class="ms-panel-kicker">🔎 Master search</span><h2 data-ms-title>${esc(/^\d{12,20}$/.test(clean(res.q)) ? U.barcode(res.q) : (res.q || o.title || 'Results'))}${res.tags && res.tags.length === 1 ? ` <span class="tg-where tgw-${tagWhere(res.tags[0]).cls} tg-where-lg">${tagWhere(res.tags[0]).icon} ${esc(tagWhere(res.tags[0]).text)}</span>` : ''}</h2>
+          <div><span class="ms-panel-kicker">🔎 Master search</span><h2 data-ms-title>${esc(/^\d{12,20}$/.test(clean(res.q)) ? U.barcode(res.q) : (res.q || o.title || 'Results'))}${res.tags && res.tags.length === 1 ? whereBadge(res.tags[0], ' tg-where-lg') : ''}</h2>
             <small class="dim" data-ms-result-state>${U.fmt(res.matched)} match · ${res.heavy ? 'barcode register ready ✓' : (res.livePending ? 'barcode live search…' : 'barcode register loading… (live search on)')}</small></div>
           <div class="btn-row">
             <button class="btn small" data-ms-csv>⬇ CSV</button>
@@ -1441,7 +1441,7 @@ FF.pages = FF.pages || {};
     const paint = () => {
       body.innerHTML = resultsHtml(res);
       try { const ttl = wrap.querySelector('[data-ms-title]');
-      if (ttl) { const old = ttl.querySelector('.tg-where'); if (old) old.remove(); if (res.tags && res.tags.length === 1) { const w = tagWhere(res.tags[0]); ttl.insertAdjacentHTML('beforeend', ` <span class="tg-where tgw-${w.cls} tg-where-lg">${w.icon} ${esc(w.text)}</span>`); } } } catch { /* title badge optional */ }
+      if (ttl) { const old = ttl.querySelector('.tg-where'); if (old) old.remove(); if (res.tags && res.tags.length === 1) ttl.insertAdjacentHTML('beforeend', whereBadge(res.tags[0], ' tg-where-lg')); } } catch { /* title badge optional */ }
       const status = wrap.querySelector('[data-ms-result-state]');
       if (status) status.textContent = `${U.fmt(res.matched)} match · ${res.livePending ? 'barcode live search…' : res.liveFailed ? 'lookup incomplete — retry' : 'search complete ✓'}`;
       if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(wrap);
