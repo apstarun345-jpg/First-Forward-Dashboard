@@ -1040,6 +1040,27 @@ FF.pages = FF.pages || {};
     const nqRank = normName(query);
     const nameHit = (p) => !!nqRank && normName(p.name).includes(nqRank);
     const isTlRank = (p) => /tl$/.test(String(p.kind || ''));
+    // 🧩 v3.125.345 — same kind + same ID + same insaan (naam ek dusre ka hissa) → ek hi suggestion. Pehle ek naam stock me aur
+    //    doosra issuance me hone se (ALHAMZA / ALHAMZA ALHAMZA, dono APS022435) do row aati thi.
+    {
+      const byId = new Map(), outP = [];
+      for (const p of people) {
+        const id = normId(p.sub || [...(p.ids || [])][0] || '');
+        if (!id || id.length < 4 || /tl$/.test(String(p.kind || ''))) { outP.push(p); continue; }
+        const k = `${p.kind}|${id}`, ex = byId.get(k);
+        if (!ex) { byId.set(k, p); outP.push(p); continue; }
+        if (!sameHuman(ex.name, p.name)) { outP.push(p); continue; }
+        // merge p into ex (clone once, original index object untouched)
+        const keep = (ex.__merged ? ex : { ...ex, __merged: true, tlSet: new Set(ex.tlSet || []), tlIds: new Set(ex.tlIds || []), ids: new Set(ex.ids || []), alias: new Set(ex.alias || []), classMap: new Map(ex.classMap || []), bars: new Set(ex.bars || []) });
+        if (keep !== ex) { outP[outP.indexOf(ex)] = keep; byId.set(k, keep); }
+        (p.tlSet || []).forEach((v) => keep.tlSet.add(v)); (p.tlIds || []).forEach((v) => keep.tlIds.add(v)); (p.ids || []).forEach((v) => keep.ids.add(v)); (p.alias || []).forEach((v) => keep.alias.add(v)); (p.bars || []).forEach((v) => keep.bars.add(v));
+        (p.classMap || new Map()).forEach((n, c) => keep.classMap.set(c, (keep.classMap.get(c) || 0) + n));
+        keep.n = (Number(keep.n) || 0) + (Number(p.n) || 0);
+        if (String(p.name || '').length > String(keep.name || '').length && (p.bars ? p.bars.size : 0) >= (ex.bars ? ex.bars.size : 0)) keep.name = p.name;
+        if (String(p.last || '') > String(keep.last || '')) keep.last = p.last;
+      }
+      people = outP;
+    }
     const filteredPeople = people
       .map((p, i) => ({ p, i }))
       .sort((a, b) => (nameHit(b.p) - nameHit(a.p)) || (isTlRank(b.p) - isTlRank(a.p)) || (a.i - b.i))
