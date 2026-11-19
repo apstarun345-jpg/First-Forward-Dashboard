@@ -10073,6 +10073,51 @@ async function handleApi(req, res, url) {
     if (!dm) return r;
     return r ? { ...r, mobile: dm } : { mobile: dm, address: '', pincode: '', dispatchName: '', tl: '', source: 'Mobile sheet', lastRequestAt: '' };
   }
+  /** 📍 v3.125.350 — naam / ID / mobile se SAARE alag-alag address options (Agents Address sheet + pichli requests).
+   *  Same naam ke multiple agents ya alag address/mobile ho to sab dikhte hain; ek ko default (⭐) mark karte hain. */
+  async function lookupAgentAddressOptions({ agentId, agentName, channel }) {
+    const ch = String(channel || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
+    const idD = tagDigits(agentId || ''), nk = tagNameKey(agentName || '');
+    if (!idD && !nk) return [];
+    const dm = directoryMobile(agentId, agentName, ch);
+    const m10 = last10(dm || '');
+    const opts = new Map();
+    const add = (o, rank) => {
+      const address = String(o.address || '').trim(), pincode = tagDigits(o.pincode || '').slice(0, 6), mobile = last10(o.mobile || '') || '';
+      if (!address && !pincode) return;
+      const key = [address.toLowerCase().replace(/[^a-z0-9]/g, ''), pincode, mobile].join('|');
+      const at = Date.parse(o.at || '') || 0;
+      const prev = opts.get(key);
+      const entry = { address, pincode, mobile, dispatchName: String(o.dispatchName || '').trim(), agentId: String(o.agentId || '').trim(), name: String(o.name || '').trim(), tl: String(o.tl || '').trim(), match: o.match, source: o.source, at: at ? new Date(at).toISOString() : '', rank };
+      if (!prev) { opts.set(key, entry); return; }
+      if (at > (Date.parse(prev.at) || 0)) prev.at = entry.at;
+      if (rank < prev.rank) { prev.rank = rank; prev.match = entry.match; }
+      ['dispatchName', 'agentId', 'name', 'tl'].forEach((f) => { if (!prev[f] && entry[f]) prev[f] = entry[f]; });
+      if (!String(prev.source).includes(entry.source)) prev.source = `${prev.source} + ${entry.source}`;
+    };
+    const matchOf = (xid, xname, xmob, xch) => {
+      const sameCh = !xch || (String(xch).toLowerCase() === 'gv' ? 'gv' : 'ff') === ch;
+      if (idD.length >= 3 && tagDigits(xid) === idD && sameCh) return { match: 'ID', rank: 0 };
+      if (m10 && last10(xmob) === m10) return { match: 'Mobile', rank: 1 };
+      if (nk && tagNameKey(xname || '') === nk && sameCh) return { match: 'Naam', rank: 2 };
+      return null;
+    };
+    try {
+      const view = await addressBookView();
+      view.forEach((x) => { const m = x && matchOf(x.id, x.name, x.mobile, x.channel); if (m) add({ address: x.address, pincode: x.pincode, mobile: x.mobile, agentId: x.id, name: x.name, tl: x.tl, match: m.match, source: 'Agents Address sheet' }, m.rank); });
+    } catch (err) { console.warn('address options view:', err && err.message); }
+    (Array.isArray(workspaceStore().tagRequests) ? workspaceStore().tagRequests : []).forEach((r) => {
+      const a = r && r.agent; if (!a) return;
+      const m = matchOf(a.agentId, a.name, a.mobile, a.channel); if (!m) return;
+      add({ address: a.address, pincode: a.pincode, mobile: a.mobile, dispatchName: a.dispatchName, agentId: a.agentId, name: a.name, tl: a.tl, at: r.at, match: m.match, source: 'Pichli request' }, m.rank);
+    });
+    const list = [...opts.values()];
+    // default: sabse naya (request) wala jo exact ID/mobile se match ho; warna rank, phir address+pincode dono wala
+    list.sort((a, b) => a.rank - b.rank || (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0) || ((b.address && b.pincode ? 1 : 0) - (a.address && a.pincode ? 1 : 0)));
+    const best = list.filter((x) => x.rank <= 1)[0] || list[0];
+    list.forEach((x) => { x.isDefault = x === best; x.mobile = x.mobile || (x.rank <= 1 ? last10(dm || '') : ''); delete x.rank; });
+    return list.slice(0, 12);
+  }
   async function lookupAgentAddressRaw({ agentId, agentName, channel }) {
     const ch = String(channel || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
     const id = String(agentId || '').trim();
@@ -11840,7 +11885,8 @@ async function handleApi(req, res, url) {
     const channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
     if (!agentId && !agentName) return sendJson(res, 200, { ok:true, found:false });
     const contact = await lookupAgentAddress({ agentId, agentName, channel });
-    return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null });
+    const options = url.searchParams.get('all') === '1' ? await lookupAgentAddressOptions({ agentId, agentName, channel }).catch(() => []) : undefined;
+    return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null, ...(options ? { options } : {}) });
   }
   if (p === '/api/public/tag-request/contact' && method === 'GET') {
     const ip = clientIp(req);
@@ -11850,7 +11896,8 @@ async function handleApi(req, res, url) {
     const channel = String(url.searchParams.get('channel') || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
     if (!agentId && !agentName) return sendJson(res, 200, { ok:true, found:false });
     const contact = await lookupAgentAddress({ agentId, agentName, channel });
-    return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null });
+    const options = url.searchParams.get('all') === '1' ? await lookupAgentAddressOptions({ agentId, agentName, channel }).catch(() => []) : undefined;
+    return sendJson(res, 200, { ok:true, found:!!contact, contact:contact || null, ...(options ? { options } : {}) });
   }
   if (p === '/api/public/tag-request/status' && method === 'GET') {
     // 📱 v3.30 — agent ke mobile number se saari requests (jo request lagate waqt diya tha). Minimum

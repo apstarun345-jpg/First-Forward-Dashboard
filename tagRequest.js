@@ -1941,15 +1941,76 @@ body.colorful .from-hdr { color: #166534; }
     });
     document.body.appendChild(ov);
   }
+  /** 📍 v3.125.350 — multiple address options (naam / ID / mobile se): radio list, ⭐ default pehle se selected. */
+  function chooseContactModal(row, options, rec) {
+    if (!options || !options.length || document.getElementById('tr-ca-modal')) return;
+    const ov = document.createElement('div');
+    ov.id = 'tr-ca-modal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px';
+    const when = (iso) => { try { return iso ? new Date(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : ''; } catch { return ''; } };
+    const MCOL = { ID: '#16a34a', Mobile: '#2563eb', Naam: '#d97706' };
+    const defIdx = Math.max(0, options.findIndex((o) => o.isDefault));
+    const cards = options.map((o, i) => `<label class="tr-ca-opt" data-i="${i}" style="display:block;cursor:pointer;border:2px solid ${i === defIdx ? '#2563eb' : 'rgba(128,128,128,.28)'};border-radius:12px;padding:10px 12px;margin:0 0 8px;background:${i === defIdx ? 'rgba(37,99,235,.07)' : 'transparent'}">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="radio" name="tr-ca-pick" value="${i}" ${i === defIdx ? 'checked' : ''}>
+          <b>${esc(o.name || (rec && rec.name) || row.name || '')}</b>${o.agentId ? `<span class="dim small">#${esc(o.agentId)}</span>` : ''}
+          ${o.tl ? `<span class="dim small">· TL ${esc(o.tl)}</span>` : ''}
+          <span style="font-size:10.5px;font-weight:800;color:#fff;background:${MCOL[o.match] || '#64748b'};border-radius:999px;padding:1px 8px">${esc(o.match === 'Naam' ? 'Naam match' : o.match === 'Mobile' ? 'Mobile match' : 'ID match')}</span>
+          ${o.isDefault ? '<span style="font-size:10.5px;font-weight:800;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:999px;padding:1px 8px">⭐ Default — apne aap fill</span>' : ''}
+        </div>
+        <div style="margin:6px 0 0 24px;font-size:13px;line-height:1.45;word-break:break-word">
+          ${o.mobile ? `<div>📱 <b>${esc(o.mobile)}</b></div>` : '<div class="dim small">📱 mobile nahi mila</div>'}
+          ${o.address ? `<div>🏠 ${esc(o.address)}</div>` : ''}${o.pincode ? `<div>📮 <b>${esc(o.pincode)}</b></div>` : ''}
+          <div class="dim small">${esc(o.source || '')}${o.at ? ' · ' + esc(when(o.at)) : ''}</div>
+        </div></label>`).join('');
+    ov.innerHTML = `<div role="dialog" aria-modal="true" style="background:var(--card,#fff);color:inherit;border-radius:16px;padding:16px;max-width:560px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 24px 60px rgba(0,0,0,.35)">
+      <h3 style="margin:0 0 2px">📍 ${options.length > 1 ? `${options.length} address mile — konsa bharna hai?` : 'Address mila — sahi hai?'}</h3>
+      <p class="dim small" style="margin:0 0 10px">Google sheet (Agents Address) + pichli requests me naam / ID / mobile se dhunda. ${options.length > 1 ? 'Naam same hai par address ya mobile alag — apna sahi wala chuno.' : ''} ⭐ wala pehle se selected hai.</p>
+      <div data-ca-list>${cards}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+        <button type="button" class="btn" data-ca="no">Nahi, khud bharunga</button>
+        <button type="button" class="btn primary" data-ca="yes">✅ Ye select karke bhar do</button></div></div>`;
+    const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); else if (e.key === 'Enter') ov.querySelector('[data-ca="yes"]').click(); };
+    document.addEventListener('keydown', onKey);
+    const paint = () => ov.querySelectorAll('.tr-ca-opt').forEach((l) => { const on = l.querySelector('input').checked; l.style.borderColor = on ? '#2563eb' : 'rgba(128,128,128,.28)'; l.style.background = on ? 'rgba(37,99,235,.07)' : 'transparent'; });
+    ov.addEventListener('change', paint);
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) return close();
+      const b = e.target.closest ? e.target.closest('[data-ca]') : null;
+      if (!b) return;
+      const pickEl = ov.querySelector('input[name="tr-ca-pick"]:checked');
+      const o = options[pickEl ? Number(pickEl.value) : defIdx];
+      close();
+      if (b.dataset.ca !== 'yes' || !o || !state.rows.includes(row)) return;
+      if (clean(o.mobile)) row.mobile = String(o.mobile);
+      if (clean(o.address)) row.address = String(o.address);
+      if (clean(o.pincode)) row.pincode = String(o.pincode);
+      if (clean(o.dispatchName) && !clean(row.dispatchName)) row.dispatchName = String(o.dispatchName);
+      row.fromBook = true; row.contactManual = true; row.addressSource = 'Address';
+      ['mobile', 'address', 'pincode'].forEach((f) => { if (state.errs[row.id]) delete state.errs[row.id][f]; });
+      const card = rootEl && rootEl.querySelector ? rootEl.querySelector('[data-tr-row="' + row.id + '"]') : null;
+      if (card) {
+        const wrap = document.createElement('div'); wrap.innerHTML = agentCardHtml(row, state.rows.indexOf(row));
+        const fresh = wrap.firstElementChild;
+        if (fresh) { card.replaceWith(fresh); bindAgentCard(fresh); updateTotals(fresh, row); }
+      }
+      U.toast('📍 Address bhar diya', 'ok');
+    });
+    document.body.appendChild(ov);
+    const dflt = ov.querySelector('[data-ca="yes"]'); if (dflt && dflt.focus) dflt.focus();
+  }
   async function suggestHistoricalContact(row) {
      checkRepeatOnPick(row);
      const rec = exactAgent(row); if (!rec) return;
      try {
-       const qs = new URLSearchParams({ agentId: rec.rawId || rec.agentId || '', agentName: rec.name || '', channel: rec.channel || 'ff' });
+       const qs = new URLSearchParams({ agentId: rec.rawId || rec.agentId || '', agentName: rec.name || '', channel: rec.channel || 'ff', all: '1' });
        const path = isPublic() ? '/api/public/tag-request/contact?' + qs.toString() : '/api/tag-request/contact?' + qs.toString();
        const out = isPublic() ? await publicApi(path) : await FF.auth.api(path);
        const contact = out && out.contact;
-       if (!contact) return;
+       const options = Array.isArray(out && out.options) ? out.options : [];
+       if (!contact && !options.length) return;
+       if (!contact) { if (!row.contactManual && options.length && !clean(row.address)) chooseContactModal(row, options, rec); return; }
        // 📇 Purana address chip me hamesha dikhao — employee ne pehle kuch type kiya ho tab bhi, taaki
        // purana address dekh kar ek click me bhar sake. Auto-fill sirf khaali fields me (chup-chaap overwrite nahi).
        row.suggest = {
@@ -1964,7 +2025,8 @@ body.colorful .from-hdr { color: #166534; }
        // 📍 Seedha fill nahi — address/mobile mila to confirm popup (naam · mobile · pincode · address), confirm par hi fill.
        const sg = row.suggest;
        const needs = (!clean(row.address) && sg.address) || (!clean(row.mobile) && sg.mobile) || (!clean(row.pincode) && sg.pincode);
-       if (!row.contactManual && needs && (sg.address || sg.pincode)) confirmContactModal(row, sg, rec);
+       if (!row.contactManual && (needs || options.length > 1) && options.length) chooseContactModal(row, options, rec);
+       else if (!row.contactManual && needs && (sg.address || sg.pincode)) confirmContactModal(row, sg, rec);
      } catch { /* optional suggestion */ }
    }
   /** Ek agent-card ki bindings (search dropdown + contact + qty). Partial re-render par sirf naya card
