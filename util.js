@@ -610,6 +610,19 @@ window.FF = window.FF || {};
     const msg = err && err.message ? err.message : String(err);
     return `<div class="error-box"><div class="error-title">⚠️ Data load nahi hua</div><div class="error-msg">${esc(msg)}</div>${retryAttr ? `<button class="btn" ${retryAttr}>Retry</button>` : ''}</div>`;
   }
+  function emptyState(opts) {
+    const o = opts || {};
+    const icon = o.icon || '🔍';
+    const title = o.title || 'Koi data nahi mila';
+    const desc = o.desc || 'Filter badal kar ya search query clear karke dobara try karein.';
+    const act = o.action ? `<button type="button" class="btn btn-sm primary empty-btn" ${o.action.attr || ''}>${esc(o.action.label || 'Clear Filters')}</button>` : '';
+    return `<div class="empty-state" role="status" data-icon="${esc(icon)}">
+      <span class="empty-icon" aria-hidden="true">${icon}</span>
+      <div class="empty-title">${esc(title)}</div>
+      <div class="empty-desc">${esc(desc)}</div>
+      ${act ? `<div class="empty-act">${act}</div>` : ''}
+    </div>`;
+  }
   /** Promise ka intezaar sirf `ms` tak: value mili to value, deadline/reject par `fallback`. Kabhi latakta ya throw nahi karta —
    *  underlying kaam peeche chalta rehta hai. "Loading" spinner ko hamesha ek hard limit dene ke liye (stock / ageing / drawers). */
   function within(promise, ms, fallback) {
@@ -1742,7 +1755,7 @@ window.FF = window.FF || {};
     weekday, daysInMonth, prevMonthKey, nextMonthKey, weekStart, timeLabel,
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,
-    $, $$, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, niceFileName, withDownloadContext, downloadStart, downloadYield, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    $, $$, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, emptyState, downloadBlob, niceFileName, withDownloadContext, downloadStart, downloadYield, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
     FASTAG_CLASSES, classBadge, skeletonKpis, skeletonTable,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
