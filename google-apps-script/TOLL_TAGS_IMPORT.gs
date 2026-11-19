@@ -21,7 +21,8 @@
 var TOLL_CFG = {
   SHEET_TAB: 'Toll Tags',
   LOG_TAB: 'IMPORT_LOG',
-  MAIL_QUERY: 'from:etoll.newer.teams@idfcfirstbank.com subject:"All Transactions Report" newer_than:7d',
+  MAIL_QUERY: 'from:etoll.newer.teams@idfcfirstbank.com subject:"All Transactions Report" newer_than:3d',
+  BACKFILL_QUERY: 'from:etoll.newer.teams@idfcfirstbank.com subject:"All Transactions Report" newer_than:7d',
   DASH_URL: 'https://first-forward-dashboard.onrender.com',
   CHUNK: 8 * 1024 * 1024,            // UrlFetch max 50 MB; byte[] memory ke liye 8 MB ke tukde
   BUDGET_MS: 5 * 60 * 1000,          // 6 min limit se pehle ruk jao
@@ -37,7 +38,8 @@ function tollImportCheck() {
     var ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SHEET_ID'));
     var runStart = Date.now();
     var done = tollDoneDates_(ss);
-    var threads = GmailApp.search(TOLL_CFG.MAIL_QUERY, 0, 20);
+    var props = PropertiesService.getScriptProperties(), backfill = props.getProperty('BACKFILL_7D') === '1';   // ek baar ka 7 din import
+    var threads = GmailApp.search(backfill ? TOLL_CFG.BACKFILL_QUERY : TOLL_CFG.MAIL_QUERY, 0, 20);
     var jobs = [];
     threads.forEach(function (th) {
       th.getMessages().forEach(function (m) {
@@ -48,12 +50,19 @@ function tollImportCheck() {
     jobs.sort(function (a, b) { return a.reportDate < b.reportDate ? -1 : 1; });   // purani date pehle (ek din chhoot gaya ho to bhi)
     var seen = {};
     jobs = jobs.filter(function (j) { if (seen[j.reportDate]) return false; seen[j.reportDate] = 1; return true; });
+    if (backfill && !jobs.length) { props.deleteProperty('BACKFILL_7D'); console.log('7 din ka backfill poora — ab sirf nayi mail dhundhi jayegi.'); }
     for (var i = 0; i < jobs.length; i++) {
       if (i > 0 && Date.now() - runStart > 150 * 1000) break;   // 6 min limit — baaki din agle trigger (5 min) me
       var r = tollImportOne_(ss, jobs[i], runStart);
       if (!r.ok) break;                       // fail → agla trigger dobara try karega
     }
   } finally { lock.releaseLock(); }
+}
+
+/** EK BAAR chalao: pichhle 7 din ki mails import hongi (trigger har 5 min me baaki din karta rahega); poora hote hi band, phir normal. */
+function tollBackfill7() {
+  PropertiesService.getScriptProperties().setProperty('BACKFILL_7D', '1');
+  tollImportCheck();
 }
 
 /** Mail body → {reportDate:'YYYY-MM-DD', url}. */

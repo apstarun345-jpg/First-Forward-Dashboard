@@ -103,7 +103,7 @@ test('v3.125.356 — class-wise (CCH) toll debit summary + server webhook + page
 test('v3.125.357 — Class column (CCH) tag row me + 7 din ka mail query', async () => {
   const fs = await import('node:fs');
   const gs = fs.readFileSync(new URL('../google-apps-script/TOLL_TAGS_IMPORT.gs', import.meta.url), 'utf8');
-  assert.match(gs, /newer_than:7d/);
+  assert.match(gs, /BACKFILL_QUERY[^\n]*newer_than:7d/); assert.match(gs, /MAIL_QUERY[^\n]*newer_than:3d/);
   const ctx = {}; new Function('ctx', `${gs}; ctx.m = tollMergeRows_; ctx.p = tollParseText_;`)(ctx);
   const st = { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 };
   ctx.p('TAG_ID,TRANSACTION_TYPE,TRANSACTION_AMOUNT,TRANSACTION_SUCCESS_STATUS,VRN,TAG_ISSUING_AGENT_NAME,TAG_ISSUING_AGENT_ID,CCH\nA1,NETC-TOLL-PASS,10,true,V1,X,1,VC20\n', st);
