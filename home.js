@@ -997,7 +997,18 @@ FF.pages = FF.pages || {};
       const g = await gP;
       // v220 — gviz ka andaza pehle nahi dikhate (galat ho sakta hai); pakka server data aate hi dikhate hain
       const s = await sP;
-      return mergeList(s.list || null, g, s.err || '');
+      const list = mergeList(s.list || null, g, s.err || '');
+      // 🛣️ v3.125.355 — Toll Tags (daily mail import) ka asli import time — webhook se (/api/toll-import-info)
+      try {
+        const r = await FF.auth.api('/api/toll-import-info');
+        const t = r && r.info;
+        if (t && t.at) {
+          const lbl = t.reportDate ? new Date(t.reportDate + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+          list.push({ key: 'toll-tags', icon: '🛣️', title: 'Toll Debit · EToll mail', tab: 'Toll Tags', exact: true, lastRow: t.totalTags || 0,
+            note: `${lbl ? lbl + ' report · ' : ''}${U.fmt(t.newTags)} new · ${U.fmt(t.updatedTags)} updated tags`, value: { d: new Date(t.at), hasTime: true, col: 'import log', imported: true } });
+        }
+      } catch { /* optional */ }
+      return list;
     }
     /** Update "nahi aaya" = date-only sheet ka latest data kal se purana, ya time wali sheet 24 ghante se purani. */
     const isStaleVal = (x) => !!(x && x.d && (x.hasTime ? (Date.now() - x.d.getTime()) / 3600000 > 24 : dayDiff(x.d) >= 2));

@@ -615,6 +615,7 @@ function settingsFor(u) {
   if (s.email) s.email = { provider: s.email.provider || 'auto', host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '', resendKey: '', brevoKey: '' };
   delete s.personalLinks; // 🔗 secret tokens sirf admin ko
   delete s.agentMobiles; // manually added agent mobiles — admin only
+  delete s.tollImport; delete s.tollImportLog; // 🛣️ toll import status — /api/toll-import-info se aata hai
   delete s.schedules;     // 🗓 admin ke custom reminders
   delete s.dispatchEmail; // selected recipients + delivery schedule sirf admin ko
   delete s.__tagSheetBackup; // tag-sheet config ki backup copy (sheet link) sirf admin ko
@@ -8992,6 +8993,33 @@ async function handleApi(req, res, url) {
     if (sheet !== expectedTab) return sendJson(res, 200, { ok: true, ignored: true, reason: 'sheet not watched' });
     const result = await checkReports(true, ['gv']);
     return sendJson(res, 200, { ok: true, checked: result.checked || [], changed: result.changed || [], watcher: reportWatcherState.gv });
+  }
+  // 🛣️ v3.125.355 — Toll Tags import (Apps Script TOLL_TAGS_IMPORT.gs) import ke baad yahan khabar deta hai:
+  //    Home "Sheets — last data update" me time + site notification. Sheet share karne ki zarurat nahi (webhook + secret).
+  if (p === '/api/push/toll-import' && method === 'POST') {
+    const body = await readBody(req);
+    const expected = String(process.env.APPS_SCRIPT_SECRET || '').trim();
+    const supplied = String(body.secret || req.headers['x-app-script-secret'] || '').trim();
+    if (!expected || supplied !== expected) throw new HttpError(401, 'Toll import webhook unauthorized.');
+    const n = (v) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? Math.round(x) : 0; };
+    const at = Date.parse(body.at || '');
+    const rd = /^\d{4}-\d{2}-\d{2}$/.test(String(body.reportDate || '')) ? String(body.reportDate) : '';
+    const info = { at: Number.isFinite(at) && Math.abs(at - Date.now()) < 3 * 864e5 ? at : Date.now(), receivedAt: Date.now(), reportDate: rd, newTags: n(body.newTags), updatedTags: n(body.updatedTags), txns: n(body.txns), totalTags: n(body.totalTags), amount: n(body.amount), status: String(body.status || 'OK').slice(0, 20), mailId: String(body.mailId || '').slice(0, 40), spreadsheetId: /^[A-Za-z0-9_-]{20,80}$/.test(String(body.spreadsheetId || '')) ? String(body.spreadsheetId) : '' };
+    db.settings.tollImport = info;
+    db.settings.tollImportLog = [...(Array.isArray(db.settings.tollImportLog) ? db.settings.tollImportLog : []), info].slice(-40);
+    persist('settings').catch(() => {});
+    const fmtN = (v) => Number(v).toLocaleString('en-IN');
+    const dLabel = rd ? new Date(rd + 'T00:00:00+05:30').toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : 'latest';
+    recordNotification({
+      type: 'report', title: '🛣️ Toll Tags import ho gaya',
+      body: `${dLabel} report · ${fmtN(info.txns)} toll txns · ${fmtN(info.newTags)} nayi tags, ${fmtN(info.updatedTags)} purani tags me toll add · sheet me total ${fmtN(info.totalTags)} tags · ₹${fmtN(info.amount)}`,
+      target: 'admin', meta: { link: '#/home', source: 'toll-import' }
+    });
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/toll-import-info' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    return sendJson(res, 200, { ok: true, info: db.settings.tollImport || null, log: (db.settings.tollImportLog || []).slice(-10).reverse() });
   }
   if (p === '/api/push/subscribe' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
