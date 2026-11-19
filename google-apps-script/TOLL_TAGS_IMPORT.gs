@@ -25,7 +25,7 @@ var TOLL_CFG = {
   BACKFILL_QUERY: 'from:etoll.newer.teams@idfcfirstbank.com subject:"All Transactions Report" newer_than:7d',
   DASH_URL: 'https://first-forward-dashboard.onrender.com',
   CHUNK: 8 * 1024 * 1024,            // UrlFetch max 50 MB; byte[] memory ke liye 8 MB ke tukde
-  BUDGET_MS: 5 * 60 * 1000,          // 6 min limit se pehle ruk jao
+  BUDGET_MS: 4 * 60 * 1000,          // 6 min limit se pehle checkpoint save karke ruk jao (download agle run me wahin se aage badhta hai)
   TYPE_PREFIX: 'NETC-TOLL-PASS',
   TZ: 'Asia/Kolkata'
 };
@@ -88,7 +88,7 @@ function tollDoneDates_(ss) {
 function tollImportOne_(ss, job, runStart) {
   var t0 = runStart || Date.now();
   try {
-    var agg = tollDownloadAggregate_(job.url, t0);
+    var agg = tollDownloadAggregate_(job.url, t0, job.reportDate);
     var res = tollMergeIntoSheet_(ss, agg.tags, job.reportDate);
     try { tollDailyUpsert_(ss, job.reportDate, agg); } catch (e3) { console.warn('toll daily fail: ' + e3); }
     var stamp = Utilities.formatDate(new Date(), TOLL_CFG.TZ, 'yyyy-MM-dd HH:mm:ss');
@@ -100,6 +100,7 @@ function tollImportOne_(ss, job, runStart) {
     return { ok: true };
   } catch (e) {
     var msg = String(e && e.message || e).slice(0, 180);
+    if (msg.indexOf('PARTIAL') === 0) { console.log('Download jaari: ' + msg + ' — agla trigger wahin se aage badhayega.'); return { ok: false, partial: true }; }
     try {
       var lg = ss.getSheetByName(TOLL_CFG.LOG_TAB);
       if (lg) lg.appendRow([TOLL_CFG.SHEET_TAB, Utilities.formatDate(new Date(), TOLL_CFG.TZ, 'yyyy-MM-dd HH:mm:ss'), job.reportDate, '', '', '', '', '', 'ERROR: ' + msg, job.id]);
@@ -145,11 +146,15 @@ function tollPushDaily_(sh) {
 function tollPushDailyNow() { tollPushDaily_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TOLL_DAILY_TAB)); }
 
 /** S3 CSV ko Range se tukdon me padho; sirf toll rows tag-wise jodo. */
-function tollDownloadAggregate_(url, t0) {
-  var state = { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 };
-  var pos = 0, total = -1, carry = [];
+function tollDownloadAggregate_(url, t0, key) {
+  var ck = tollLoadCk_(key);                                   // pichhle run ka checkpoint (220 MB ek run me nahi hota)
+  var state = ck ? ck.state : { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 };
+  var pos = ck ? ck.pos : 0, total = ck ? ck.total : -1, carry = ck && ck.carry ? Utilities.base64Decode(ck.carry) : [];
   while (total < 0 || pos < total) {
-    if (Date.now() - t0 > TOLL_CFG.BUDGET_MS) throw new Error('time budget khatam — tollImportCheck dobara chalayein');
+    if (Date.now() - t0 > TOLL_CFG.BUDGET_MS) {
+      tollSaveCk_(key, { pos: pos, total: total, carry: carry.length ? Utilities.base64Encode(carry) : '', state: state });
+      throw new Error('PARTIAL ' + (total > 0 ? Math.round(pos * 100 / total) : 0) + '%');
+    }
     var end = pos + TOLL_CFG.CHUNK - 1;
     var resp = UrlFetchApp.fetch(url, { headers: { Range: 'bytes=' + pos + '-' + end }, muteHttpExceptions: true });
     var code = resp.getResponseCode();
@@ -167,8 +172,22 @@ function tollDownloadAggregate_(url, t0) {
     tollParseText_(text, state);
     bytes = null; buf = null; text = null;
   }
+  tollDelCk_(key);
   return state;
 }
+
+/** Checkpoint = Drive me chhoti JSON file (state + position). */
+function tollCkName_(key) { return 'toll_checkpoint_' + key + '.json'; }
+function tollLoadCk_(key) {
+  var it = DriveApp.getFilesByName(tollCkName_(key));
+  if (!it.hasNext()) return null;
+  try { return JSON.parse(it.next().getBlob().getDataAsString()); } catch (e) { return null; }
+}
+function tollSaveCk_(key, obj) {
+  var it = DriveApp.getFilesByName(tollCkName_(key)), s = JSON.stringify(obj);
+  if (it.hasNext()) it.next().setContent(s); else DriveApp.createFile(tollCkName_(key), s, MimeType.PLAIN_TEXT);
+}
+function tollDelCk_(key) { var it = DriveApp.getFilesByName(tollCkName_(key)); while (it.hasNext()) it.next().setTrashed(true); }
 
 /** Text (poori lines) ko parse karke state.tags me jodo. Pure function — Node test me bhi chalta hai. */
 function tollParseText_(text, state) {
@@ -247,7 +266,8 @@ function tollFillClassNow() {
   GmailApp.search(TOLL_CFG.MAIL_QUERY, 0, 20).forEach(function (th) { th.getMessages().forEach(function (m) {
     var i = tollParseMail_(m.getBody()); if (i && (!best || i.reportDate > best.reportDate)) best = i; }); });
   if (!best) { console.warn('mail nahi mili'); return; }
-  var agg = tollDownloadAggregate_(best.url, t0);
+  var agg;
+  try { agg = tollDownloadAggregate_(best.url, t0, 'fill_' + best.reportDate); } catch (e) { if (String(e.message).indexOf('PARTIAL') === 0) { console.log('Download aadha hua (' + e.message + ') — tollFillClassNow dobara chalao.'); return; } throw e; }
   var sh = ss.getSheetByName(TOLL_CFG.SHEET_TAB); if (!sh || sh.getLastRow() < 2) return;
   if (sh.getMaxColumns() < 9) sh.insertColumnsAfter(sh.getMaxColumns(), 9 - sh.getMaxColumns());
   if (!sh.getRange(1, 9).getValue()) sh.getRange(1, 9).setValue('Class').setFontWeight('bold');
