@@ -391,3 +391,24 @@ html.mobile-ui .tr-req-tbl .tr-c-suggest .tr-grp { font-size: 16px; }
 .tr-qty-list .tr-qty-quick .btn { min-width: 38px; padding: 4px 6px; }
 .tr-qty-list .tr-qty-row .input.tr-qty { width: 64px; }
 .tr-qty-list .tr-qty-batch { border-left: 0; border-right: 0; }
+
+/* ===== v3.125.349 — wide, no-scroll, colourful Tag Request form ===== */
+.page-tagRequest .tr-agent-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (min-width: 1100px) { .page-tagRequest .tr-agent-grid { grid-template-columns: minmax(0, 1.15fr) minmax(380px, .85fr); } }
+@media (max-width: 860px) { .page-tagRequest .tr-agent-grid { grid-template-columns: minmax(0, 1fr); } }
+.page-tagRequest .tr-contact-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 700px) { .page-tagRequest .tr-contact-grid { grid-template-columns: minmax(0, 1fr); } }
+.page-tagRequest .tr-qty-list { border-width: 2px; border-color: color-mix(in srgb, var(--brand) 22%, var(--line)); box-shadow: 0 6px 18px rgba(29, 78, 216, .08); }
+.page-tagRequest .tr-qty-head { background: linear-gradient(90deg, #1d4ed8, #6366f1); color: #fff; }
+.page-tagRequest .tr-qty-foot { background: linear-gradient(90deg, #ecfdf5, #eff6ff); font-weight: 800; }
+.page-tagRequest .tr-qty-row { border-left: 4px solid transparent; transition: background .15s; }
+.page-tagRequest .tr-qty-row:hover { background: color-mix(in srgb, var(--brand) 6%, transparent); }
+.page-tagRequest .tr-qty-row[data-tr-row-cls="vc4"] { border-left-color: #2563eb; }
+.page-tagRequest .tr-qty-row[data-tr-row-cls="vc5"] { border-left-color: #16a34a; }
+.page-tagRequest .tr-qty-row[data-tr-row-cls="vc6"] { border-left-color: #f59e0b; }
+.page-tagRequest .tr-qty-row[data-tr-row-cls="vc7"] { border-left-color: #db2777; }
+.page-tagRequest .tr-qty-row[data-tr-row-cls="vc12"] { border-left-color: #7c3aed; }
+.page-tagRequest .tr-qty-row[data-tr-row-cls="vc16"] { border-left-color: #0891b2; }
+.page-tagRequest .tr-qty-row, .page-tagRequest .tr-qty-head, .page-tagRequest .tr-qty-foot { padding-top: 5px; padding-bottom: 5px; }
+.page-tagRequest .tr-qty-row .input { height: 34px; font-weight: 700; }
+.page-tagRequest .tr-boxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }

@@ -11,7 +11,7 @@ import zlib from 'node:zlib';
 // RSS fragmentation kam (Render 512 MB). Size par asar ~1-3%.
 const BR_LGWIN = Math.min(24, Math.max(10, Number(process.env.BR_LGWIN) || 18));
 import fs from 'node:fs/promises';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, createWriteStream, createReadStream } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, createWriteStream, createReadStream } from 'node:fs';
 import readline from 'node:readline';
 import { once } from 'node:events';
 import path from 'node:path';
@@ -129,6 +129,25 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 // repair the existing matching account once, without creating a duplicate account.
 const ADMIN_FORCE_RESET = process.env.ADMIN_FORCE_RESET === '1';
 const MAX_BODY = 6 * 1024 * 1024; // settings may carry two base64 images
+/** 🏷️ Tag Request — agents (FF + GV) ka daily snapshot: form turant khule, 9 baje ke baad pehla login-user / admin refresh karke save kare. */
+const TAG_AGENTS_FILE = path.join(DATA_DIR, 'tag-agents-snapshot.json');
+let tagAgentsSnap = null;
+try { if (existsSync(TAG_AGENTS_FILE)) { const j = JSON.parse(readFileSync(TAG_AGENTS_FILE, 'utf8')); if (j && Array.isArray(j.recs)) tagAgentsSnap = j; } } catch { tagAgentsSnap = null; }
+function cleanTagAgentRecs(list) {
+  if (!Array.isArray(list) || list.length > 12000) return null;
+  const str = (v, n) => String(v == null ? '' : v).slice(0, n);
+  const nums = (a, k) => (Array.isArray(a) && a.length === k ? a.map((x) => (Number.isFinite(Number(x)) ? Math.round(Number(x) * 100) / 100 : 0)) : null);
+  const out = [];
+  for (const r of list) {
+    if (!Array.isArray(r) || r.length < 13) return null;
+    const stock = nums(r[8], 6), cur = nums(r[9], 6), last = nums(r[10], 6), grp = nums(r[11], 6);
+    if (!stock || !cur || !last || !grp) return null;
+    const channel = r[1] === 'gv' ? 'gv' : 'ff';
+    const growth = r[7] === null || r[7] === undefined || !Number.isFinite(Number(r[7])) ? null : Math.round(Number(r[7]) * 10) / 10;
+    out.push([str(r[0], 200), channel, str(r[2], 160), str(r[3], 40), str(r[4], 40), str(r[5], 160), str(r[6], 40), growth, stock, cur, last, grp, r[12] ? 1 : 0]);
+  }
+  return out;
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -10686,6 +10705,22 @@ async function handleApi(req, res, url) {
       : null;
     return sendJson(res, 200, { ok: true, requests: visibleTagRequests(user), admin: user.role === 'admin', total: all.length, recovery });
   }
+  if (p === '/api/tag-request/agents-snapshot' && method === 'POST') {
+    if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`tagagentssave:${user.username}:${ip}`, 12, 10 * 60e3)) throw new HttpError(429, 'Too many refreshes — wait a few minutes.');
+    const body = await readBody(req);
+    const recs = cleanTagAgentRecs(body.recs);
+    if (!recs || recs.length < 50) throw new HttpError(400, 'Agent list incomplete — snapshot not saved.');
+    const force = body.force === true && user.role === 'admin';
+    const prevN = tagAgentsSnap ? tagAgentsSnap.recs.length : 0;
+    if (!force && prevN && recs.length < prevN * 0.6) return sendJson(res, 200, { ok: false, kept: true, reason: 'smaller', n: prevN, at: tagAgentsSnap.at });
+    const snap = { at: Date.now(), by: user.name || user.username || '', recs };
+    tagAgentsSnap = snap;
+    try { mkdirSync(DATA_DIR, { recursive: true }); const tmp = `${TAG_AGENTS_FILE}.tmp`; writeFileSync(tmp, JSON.stringify(snap)); renameSync(tmp, TAG_AGENTS_FILE); } catch (err) { console.warn('tag agents snapshot save:', err && err.message); }
+    logAudit(user, 'tag_agents_snapshot', { note: `${recs.length} agents${force ? ' (force)' : ''}`, ip });
+    return sendJson(res, 200, { ok: true, at: snap.at, n: recs.length });
+  }
   if (p === '/api/tag-requests' && method === 'POST') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
     const body = await readBody(req);
@@ -11526,6 +11561,11 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/public/tag-request' && method === 'GET') {
     return sendJson(res, 200, { ok: true, config: publicTagView() });
+  }
+  if (p === '/api/public/tag-request/agents' && method === 'GET') {
+    const ip = clientIp(req);
+    if (!publicRateOk(`tagagents:${ip}`, 60, 60e3)) throw new HttpError(429, 'Too many requests — wait a minute.');
+    return sendJson(res, 200, tagAgentsSnap ? { ok: true, at: tagAgentsSnap.at, n: tagAgentsSnap.recs.length, recs: tagAgentsSnap.recs } : { ok: true, at: 0, n: 0, recs: [] });
   }
   if (p === '/api/public/tag-request' && method === 'POST') {
     const cfg = publicTagFormConfig();

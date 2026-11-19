@@ -313,8 +313,65 @@ FF.pages = FF.pages || {};
     const cur = basisYm(ch);
     return { cur, last: U.prevMonthKey(cur) };
   }
-  /** Poora index — REPORT (FF) + GV REPORT (GV) + EIR class-month. Ek baar banta hai, 60s cache. */
-  async function buildIndex(force) {
+  // ---- ⚡ v3.125.349 — agents ka daily snapshot (FF + GV): form turant khule; 9 baje ke baad pehla login user / admin refresh karta hai ----
+  const nineIst = () => { const d = new Date(Date.now() + 19800e3); d.setUTCHours(9, 0, 0, 0); let t = d.getTime() - 19800e3; if (Date.now() < t) t -= 86400e3; return t; };
+  const snapStale = (at) => !at || Number(at) < nineIst();
+  const six = (m) => CLASS_LIST.map((c) => num(m && m[c]));
+  const unsix = (a) => { const o = {}; CLASS_LIST.forEach((c, i) => { o[c] = num(a && a[i]); }); return o; };
+  const packRec = (r) => [r.key, r.channel, r.name, r.agentId || '', r.rawId || '', r.tlName || '', r.priority || '', r.growth === null || r.growth === undefined || !Number.isFinite(Number(r.growth)) ? null : Number(r.growth),
+    six(r.stock), six(r.cur), six(r.last), [r.grp.core.stock, r.grp.core.cur, r.grp.core.last, r.grp.comm.stock, r.grp.comm.cur, r.grp.comm.last].map(num), r.direct ? 1 : 0];
+  const unpackRec = (a) => ({
+    key: a[0], channel: a[1], name: a[2], agentId: a[3], rawId: a[4], tlName: a[5], priority: a[6], growth: a[7],
+    stock: unsix(a[8]), cur: unsix(a[9]), last: unsix(a[10]), eirCur: {}, eirLast: {}, direct: !!a[12],
+    grp: { core: { stock: num(a[11][0]), cur: num(a[11][1]), last: num(a[11][2]) }, comm: { stock: num(a[11][3]), cur: num(a[11][4]), last: num(a[11][5]) } }
+  });
+  /** Snapshot ke recs se wahi index (byKey · tls · list) jo buildIndex banata hai — bina kisi sheet load ke. */
+  function indexFromRecs(recs, at) {
+    idxMonths = null; idxMonths = { ff: monthsFor('ff'), gv: monthsFor('gv') };
+    const byKey = new Map(), tls = new Map();
+    const DATEISH = /^\d{1,2}[ -][A-Za-z]{3}[ -]\d{4}$|^\d{4}-\d{2}-\d{2}|^Date\(|^\d{1,2}:\d{2}|\b1899\b/;
+    const tlOf = (channel, tlName) => {
+      const t = String(tlName || '').trim();
+      if (!t || !FF.config.isRealTl(t) || DATEISH.test(t)) return null;
+      const key = `${channel}|${norm(t)}`;
+      const g = tls.get(key) || { key, name: t, channel, stock: {}, cur: {}, last: {}, agents: new Set(), priority: '', grp: emptyGroups() };
+      tls.set(key, g); return g;
+    };
+    (recs || []).forEach((a) => { const r = unpackRec(a); byKey.set(r.key, r); const g = tlOf(r.channel, r.tlName); if (g) { g.agents.add(r.key); if (!g.priority && r.priority) g.priority = r.priority; } });
+    byKey.forEach((rec) => {
+      const g = tlOf(rec.channel, rec.tlName);
+      if (!g) return;
+      CLASS_LIST.forEach((cls) => { g.stock[cls] = num(g.stock[cls]) + num(rec.stock[cls]); g.cur[cls] = num(g.cur[cls]) + num(rec.cur[cls]); g.last[cls] = num(g.last[cls]) + num(rec.last[cls]); });
+      ['core', 'comm'].forEach((k) => ['stock', 'last', 'cur'].forEach((f) => { g.grp[k][f] += num(rec.grp[k][f]); }));
+    });
+    const list = [...byKey.values()].map((r) => { const t = recTotals(r); return { key: r.key, channel: r.channel, name: r.name, agentId: r.agentId, rawId: r.rawId || r.agentId, tlName: r.tlName, priority: r.priority, stock: t.stock, last: t.last, cur: t.cur, core: t.core, comm: t.comm }; });
+    return { at, byKey, tls, list, cur: idxMonths.ff.cur, last: idxMonths.ff.last, months: idxMonths, fromSnap: true };
+  }
+  async function loadSnapshot() {
+    try {
+      const out = await publicApi('/api/public/tag-request/agents');
+      if (!out || !Array.isArray(out.recs) || out.recs.length < 50) return null;
+      return { at: Number(out.at) || 0, recs: out.recs };
+    } catch { return null; }
+  }
+  async function saveSnapshot(force) {
+    const idx = state.index;
+    if (isPublic() || !idx || idx.error || idx.fromSnap || !idx.byKey || idx.byKey.size < 50) return null;
+    const recs = [...idx.byKey.values()].map(packRec);
+    const body = JSON.stringify({ recs, force: !!force });
+    const res = await fetch('/api/tag-request/agents-snapshot', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body });
+    return res.json().catch(() => null);
+  }
+  /** Form khulte hi: pehle snapshot (turant), phir zarurat ho to (9 baje ke baad ki pehli baar / snapshot nahi) taaza build + save. */
+  async function initIndex() {
+    const snap = await loadSnapshot();
+    if (snap && !state.index) { state.index = indexFromRecs(snap.recs, snap.at); onIndexReady(); }
+    if (isPublic()) { if (!snap) buildIndex().then(() => onIndexReady()).catch(() => {}); return; }
+    if (!snap || snapStale(snap.at)) buildIndex(true, true).then(() => onIndexReady()).catch(() => {});
+  }
+  /** Poora index — REPORT (FF) + GV REPORT (GV) + EIR class-month. Ek baar banta hai, 60s cache. `upload` = banne ke baad server snapshot save (login user). */
+  async function buildIndex(force, upload) {
+    if (!force && state.index && state.index.fromSnap) return state.index;   // snapshot hai → heavy sheet load nahi
     if (!force && state.index && Date.now() - state.index.at < 60e3) return state.index;
     if (state.indexPromise) return state.indexPromise;
     const S = FF.store;
@@ -438,6 +495,7 @@ FF.pages = FF.pages || {};
         };
       });
       state.index = { at: Date.now(), byKey, tls, list, cur: idxMonths.ff.cur, last: idxMonths.ff.last, months: idxMonths };
+      if (upload) saveSnapshot(upload === 'force').catch(() => {});
       return state.index;
     }).catch((err) => {
       console.warn('tagRequest index:', err && err.message);
@@ -1202,7 +1260,7 @@ body.colorful .from-hdr { color: #166534; }
         <div class="head-actions tr-pill-tabs">${tabsHtml()}</div>`;
     }
     return `<div class="page-head"><div><h1>🏷️ Tag Request</h1><p class="sub">IDFC Agents Tag Request — upar employee ka naam, neeche har agent ka block (naam · mobile · address · pincode · class-wise qty). Admin: 📥 Tag Requests me har request ek row me — select karke 🖨️ print / ✅ approve.</p></div>
-      <div class="head-actions">${tabsHtml()}<button class="btn" data-tr-act="share" title="Employees ko bhejne wala form link copy karo (bina login khulta hai)">🔗 Employee link</button><button class="btn" data-tr-act="reload" title="Sheet ka taaza data dobara padho">↻ Data refresh</button></div></div>`;
+      <div class="head-actions">${tabsHtml()}<button class="btn" data-tr-act="share" title="Employees ko bhejne wala form link copy karo (bina login khulta hai)">🔗 Employee link</button>${isAdmin() ? '<button class="btn" data-tr-act="reload" title="Sheet se taaza agents + stock padh kar snapshot dobara save karo (FF + GV)">↻ Force refresh agents</button>' : ''}</div></div>`;
   }
   function bindCommon(root) {
     root.querySelectorAll('[data-tr-view]').forEach((b) => b.addEventListener('click', () => {
@@ -1215,7 +1273,8 @@ body.colorful .from-hdr { color: #166534; }
     const reload = root.querySelector('[data-tr-act="reload"]');
     if (reload) reload.addEventListener('click', () => {
       state.exact = null;
-      Promise.all([buildIndex(true), loadExactStock()]).then(() => { U.toast('Taaza data se index ban gaya', 'ok'); onIndexReady(); });
+      U.toast('Agents refresh ho rahe hain…', 'info');
+      Promise.all([buildIndex(true, 'force'), loadExactStock()]).then(() => { U.toast('Taaza data se agents list ban gayi aur save ho gayi', 'ok'); onIndexReady(); });
     });
     const share = root.querySelector('[data-tr-act="share"]');
     if (share) share.addEventListener('click', () => {
@@ -1366,7 +1425,7 @@ body.colorful .from-hdr { color: #166534; }
   /** Agent ke qty-list ke neeche: boxes + EK class-wise table (VC20 VC4+VC20 group me ginta hai). */
   function agentGroupSummaryHtml(rec) {
     if (!rec || rec.isTl) return '';
-    return personBoxesHtml(rec) + classBreakdownHtml(rec, { title: '📊 Class-wise (VC4 · VC20 · VC5+)', note: 'VC20 ki apni request row nahi — wo VC4 + VC20 group me ginta hai.' });
+    return personBoxesHtml(rec);
   }
   /** 📊 VC4 · VC20 · VC5+ ka stock / last month / current MTD + suggested qty (stock − aur bina stock).
    *  VC20 ki apni class row nahi hoti (wo VC4+VC20 me judta hai) — isliye VC20 = core − VC4. */
@@ -1417,7 +1476,6 @@ body.colorful .from-hdr { color: #166534; }
     return `<div class="tr-tl-panel">
       <div class="tr-tl-head"><b>👥 ${esc(rec.name)}</b> <span class="badge ${rec.channel === 'gv' ? 'green' : 'blue'}">${rec.channel === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} TL</span> <span class="dim small">· TL + ${fmt(agents.length)} agents ka jod${self ? ' (TL ki apni row alag)' : ''}</span></div>
       ${personBoxesHtml(rec, { agents: agents.length, self: !!self })}
-      ${classBreakdownHtml(rec, { title: '📊 Class-wise (VC4 · VC20 · VC5+) · TL total' })}
       <details class="tr-tl-agents"><summary>👥 ${esc(rec.name)} ke agents (${fmt(agents.length)})${self ? ' + TL ka apna stock' : ''} — click karke agent chuno</summary>
         <p class="dim small" style="margin:4px 0">${self ? 'Hisaab: TL ka total = agents ka jod + TL ke paas (apni row alag dikhi hai, do baar nahi judti).' : 'Har agent ka apna stock · last month · MTD — jod upar ke boxes ke barabar.'}</p>
         <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Agent</th><th class="num">Stock</th><th class="num">Last</th><th class="num">MTD</th></tr></thead><tbody>${list.map(agentRow).join('') || '<tr><td colspan="4" class="dim">Agents nahi mile</td></tr>'}</tbody>${foot}</table></div>
@@ -1634,7 +1692,7 @@ body.colorful .from-hdr { color: #166534; }
     const errs = state.errs[row.id] || {};
     const errList = Object.values(errs).filter(Boolean);
     const qtyRows = CLASS_LIST.map((c) => `<label class="tr-qty-row" data-tr-row-cls="${c.toLowerCase()}" title="${esc(CLASS_LABEL[c])} — kitni tags chahiye (0 ya khaali = nahi chahiye)">
-        <span class="tr-qty-cls"><span class="badge-vc ${c.toLowerCase()}">${c}</span><small>${esc(CLASS_DESC(c))}</small><small class="tr-qty-hint tr-check-col" data-tr-hint="${c}">${esc(hintText(rec, c))}</small></span>
+        <span class="tr-qty-cls"><span class="badge-vc ${c.toLowerCase()}">${c}</span><small>${esc(CLASS_DESC(c))}</small></span>
         <div class="tr-qty-right">
           <div class="tr-qty-quick" data-tr-cls="${c}">
             <button type="button" class="btn btn-xs tr-qadd" data-q="10" title="Add 10 to ${c}">+10</button>
@@ -1761,7 +1819,6 @@ body.colorful .from-hdr { color: #166534; }
   }
   function updateHints(card, row) {
     const rec = exactAgent(row);
-    card.querySelectorAll('[data-tr-hint]').forEach((el) => { el.textContent = hintText(rec, el.dataset.trHint); });
   }
   function updateTotals(card, row) {
     if (card && row) {
@@ -4378,7 +4435,7 @@ body.colorful .from-hdr { color: #166534; }
         if (state.view === 'form' && root.isConnected && !typing) renderForm();
       });
     }
-    buildIndex().then(() => onIndexReady()).catch(() => {});
+    initIndex();
   }
 
   /**

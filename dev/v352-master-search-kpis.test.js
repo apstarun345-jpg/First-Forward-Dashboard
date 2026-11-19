@@ -92,16 +92,11 @@ test('👥 employee link TL — ek box-strip + ek class table + footer me total 
   assert.match(panel, /Last month · [A-Z][a-z]+ \d{4}<\/small><b>70<\/b>/, 'last month box');   // month label aaj ki report date se (date-fixture free)
   assert.match(panel, /Current MTD · [A-Z][a-z]+ \d{4}<\/small><b>8<\/b>/, 'MTD box');
   assert.ok(panel.includes('🎯 Suggested qty') && panel.includes('sug-chip wo') && panel.includes('🚦 Priority'), 'suggested (dono) + priority');
-  assert.ok((panel.match(/tr-class-tbl/g) || []).length === 1, 'class table sirf ek');
-  const foot = panel.slice(panel.indexOf('<tfoot>'), panel.indexOf('</tfoot>'));
-  assert.ok(!foot.includes('Agents total'), 'TL ki apni row nahi → "Agents total" alag nahi (wahi TL total hota)');
-  assert.ok((foot.match(/<tr/g) || []).length === 1 && foot.includes('= TL TOTAL (2 agents ka jod)'), 'footer me sirf ek total row');
+  assert.ok(!panel.includes('tr-class-tbl'), 'class-wise table hata di');
   assert.ok(!/undefined|NaN/.test(panel));
 
   TR._test.setIndex(mkIdx(true));
   const p2 = TR._test.tlPanelHtml({ isTl: true, name: 'TL One', channel: 'ff' });
-  const f2 = p2.slice(p2.indexOf('<tfoot>'), p2.indexOf('</tfoot>'));
-  assert.ok(f2.includes('Agents total (2)') && f2.includes('TL own') && f2.includes('= TL TOTAL (own + agents)'), 'TL ki apni row ho to agents + own = total teeno rows');
   assert.ok(p2.includes('👥 2 agents + TL'), 'priority box me agents + TL');
   TR._test.setIndex(null);
 });
@@ -113,8 +108,8 @@ test('🧑‍💼 employee link agent — boxes + ek class table, 🚗/🚚 grou
   });
   assert.ok(!html.includes('tr-qty-group"') && !html.includes('tr-qty-groups'), 'purani group rows nahi');
   assert.match(html, /📦 Stock<\/small><b>31<\/b><em>VC4 12 · VC20 2 · VC5\+ 17/);
-  assert.ok((html.match(/tr-class-tbl/g) || []).length === 1, 'ek class table');
-  assert.ok(html.includes('🟩 GV') && html.includes('VC4 + VC20 group'), 'channel + VC20 note');
+  assert.ok(!html.includes('tr-class-tbl'), 'class table hata di');
+  assert.ok(html.includes('🟩 GV'), 'channel chip');
   assert.ok(!/undefined|NaN/.test(html));
 });
 
