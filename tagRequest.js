@@ -1585,6 +1585,46 @@ body.colorful .from-hdr { color: #166534; }
     else if (name && !id) { const r = list.filter((a) => norm(a.name) === norm(name)); if (r.length === 1) id = r[0].agentId || ''; }
     return { name, id };
   }
+  function barcodeRangeOf(first, last) {
+    const f = String(first || '').trim();
+    const l = String(last || '').trim();
+    if (!f || !l) return null;
+    const fParts = f.split('-');
+    const lParts = l.split('-');
+    if (fParts.length > 1 && lParts.length > 1) {
+      if (fParts.length !== lParts.length) return { ok: false, reason: 'Prefix format mismatch' };
+      const fPre = fParts.slice(0, -1).join('-');
+      const lPre = lParts.slice(0, -1).join('-');
+      if (fPre !== lPre) return { ok: false, reason: 'Barcode series prefix mismatch' };
+      const fNum = Number(fParts[fParts.length - 1]);
+      const lNum = Number(lParts[lParts.length - 1]);
+      if (!Number.isFinite(fNum) || !Number.isFinite(lNum)) return { ok: false, reason: 'Non-numeric barcode serial' };
+      if (lNum < fNum) return { ok: false, reason: 'Last serial is less than First serial' };
+      const count = lNum - fNum + 1;
+      return { ok: true, count, start: fParts[fParts.length - 1], end: lParts[lParts.length - 1], prefix: fPre };
+    }
+    const fd = f.replace(/\D/g, '');
+    const ld = l.replace(/\D/g, '');
+    if (!fd || !ld) return null;
+    if (fd.length !== ld.length) return { ok: false, reason: 'Barcode length mismatch' };
+    let i = 0;
+    while (i < fd.length && fd[i] === ld[i]) i++;
+    const fNum = Number(fd.slice(i));
+    const lNum = Number(ld.slice(i));
+    if (!Number.isFinite(fNum) || !Number.isFinite(lNum)) return { ok: false, reason: 'Invalid barcode serial digits' };
+    if (lNum < fNum) return { ok: false, reason: 'Last serial is less than First serial' };
+    const count = lNum - fNum + 1;
+    return { ok: true, count, start: fd.slice(i), end: ld.slice(i), prefix: fd.slice(0, i) };
+  }
+  function barcodeRangeHtml(row) {
+    if (!row.firstBarcode || !row.lastBarcode) return '';
+    const r = barcodeRangeOf(row.firstBarcode, row.lastBarcode);
+    if (!r) return '';
+    if (!r.ok) return `<span class="tr-bc-chip tr-bc-err">⚠️ ${esc(r.reason)}</span>`;
+    const tot = isFastag() ? rowTotal(row) : 0;
+    const match = tot > 0 && r.count === tot;
+    return `<span class="tr-bc-chip ${match ? 'tr-bc-ok' : 'tr-bc-info'}">${match ? '✅' : 'ℹ️'} Range: <b>${r.count} tags</b> (#${esc(r.start)} → #${esc(r.end)})${tot > 0 ? (match ? ` · Exactly matches requested ${tot} tags` : ` · Requested: ${tot} tags`) : ''}</span>`;
+  }
   function agentCardHtml(row, i) {
     const cfg = formCfg();
     const staff = isAdmin() && !isPublic();   // admin: mobile / address / pincode mandatory nahi + barcode fields
@@ -1635,7 +1675,8 @@ body.colorful .from-hdr { color: #166534; }
           ${staff ? `<div class="tr-contact-grid"><label class="field"><span class="dim small">🔢 First barcode <small class="dim">(optional)</small></span>
               <input class="input mono" data-tr-a="firstBarcode" inputmode="numeric" maxlength="30" placeholder="608116-011-0558283" autocomplete="off" value="${esc(row.firstBarcode || '')}"></label>
             <label class="field"><span class="dim small">🔢 Last barcode <small class="dim">(optional)</small></span>
-              <input class="input mono" data-tr-a="lastBarcode" inputmode="numeric" maxlength="30" placeholder="608116-011-0558331" autocomplete="off" value="${esc(row.lastBarcode || '')}"></label></div>` : ''}
+              <input class="input mono" data-tr-a="lastBarcode" inputmode="numeric" maxlength="30" placeholder="608116-011-0558331" autocomplete="off" value="${esc(row.lastBarcode || '')}"></label>
+            <div class="tr-span-all tr-bc-range-box" data-tr-bc-box="${row.id}">${barcodeRangeHtml(row)}</div></div>` : ''}
           <div class="tr-contact-slot" data-tr-suggest-slot>${contactSuggestHtml(row)}</div>
           ${row.fromBook ? '<p class="dim small tr-book-note">📇 Pichli request / Address book se purana mobile-address auto-fill hua — submit se pehle ek baar check kar lo.</p>' : ''}
           ${errList.length ? `<ul class="tr-err-list">${errList.map((m) => `<li>⚠️ ${esc(m)}</li>`).join('')}</ul>` : ''}
@@ -1726,6 +1767,8 @@ body.colorful .from-hdr { color: #166534; }
     if (card && row) {
       const t = fmt(isFastag() ? rowTotal(row) : 0);
       card.querySelectorAll('[data-tr-agent-total],[data-tr-agent-total2]').forEach((el) => { el.textContent = t; });
+      const bcBox = card.querySelector(`[data-tr-bc-box="${row.id}"]`);
+      if (bcBox) bcBox.innerHTML = barcodeRangeHtml(row);
     }
     const g = fmt(isFastag() ? grandTotal() : 0);
     rootEl.querySelectorAll('[data-tr-total],[data-tr-total2]').forEach((el) => { el.textContent = g; });
@@ -2038,7 +2081,12 @@ body.colorful .from-hdr { color: #166534; }
           row.pinGeo = '';
         }
       }
-      if (key === 'firstBarcode' || key === 'lastBarcode') { const c = v.replace(/[^\d-]/g, ''); if (c !== v) el.value = c; v = c; }
+      if (key === 'firstBarcode' || key === 'lastBarcode') {
+        const c = v.replace(/[^\d-]/g, ''); if (c !== v) el.value = c; v = c;
+        row[key] = v;
+        const box = card.querySelector(`[data-tr-bc-box="${row.id}"]`);
+        if (box) box.innerHTML = barcodeRangeHtml(row);
+      }
       row[key] = v;
        if (key === 'mobile' || key === 'address' || key === 'pincode') { row.contactManual = true; row.fromBook = false; row.addressSource = ''; }
       const ok = key === 'mobile' ? digits(v).length >= 10 : key === 'pincode' ? /^\d{6}$/.test(v) : key === 'dispatchName' ? clean(v).length >= 2 : clean(v).length >= 8;
@@ -2378,9 +2426,88 @@ body.colorful .from-hdr { color: #166534; }
     const extra = [payload.courier ? `Courier: ${esc(payload.courier)}` : '', payload.itemName ? `Items: ${esc(payload.itemName)}` : '', payload.note ? `Note: ${esc(payload.note)}` : ''].filter(Boolean).join(' · ');
     ov.innerHTML = `<div class="trp-box" role="status"><svg class="trp-ok" viewBox="0 0 52 52"><circle cx="26" cy="26" r="25"/><path d="M14 27l8 8 16-17"/></svg>
       <h3>Request sent to admin!</h3><p class="trp-sub">${esc(when)} · ${esc(String(ags.length))} request${ags.length === 1 ? '' : 's'} created${extra ? `<br>${extra}` : ''}</p>${cards}
-      <div class="trp-btns"><button class="btn primary" data-trp="close">Done</button><button class="btn" data-trp="again">➕ New request</button></div></div>`;
+      <div class="trp-btns"><button class="btn primary" data-trp="close">Done</button><button class="btn" data-trp="print">🖨️ Print Slip</button><button class="btn" data-trp="again">➕ New request</button></div></div>`;
     ov.querySelector('[data-trp="close"]').onclick = () => ov.remove();
     ov.querySelector('[data-trp="again"]').onclick = () => { ov.remove(); state.done = null; state.view = 'form'; renderRoot(); };
+    ov.querySelector('[data-trp="print"]').onclick = () => printReceiptSlip(payload, reqs);
+  }
+  function printReceiptSlip(payload, reqs) {
+    reqs = reqs || [];
+    const ags = payload.agents || [];
+    const when = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const emp = payload.employeeName || (state.employee && state.employee.name) || 'Staff';
+    const totalTags = ags.reduce((s, a) => s + (a.rows || []).reduce((x, r) => x + (r.approved || 0), 0), 0);
+    const slipWin = window.open('', '_blank');
+    if (!slipWin) { U.toast('Popup blocked — please allow popups to print slip', 'warn'); return; }
+    const cardsHtml = ags.map((a, i) => {
+      const r = reqs[i] || {};
+      const reqId = r.id ? `#${r.id}` : `REQ-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
+      const tot = (a.rows || []).reduce((s, x) => s + (x.approved || 0), 0);
+      const clsRows = (a.rows || []).filter((x) => x.approved > 0).map((x) => `<tr><td style="padding:4px 8px;border:1px solid #cbd5e1">${esc(x.cls)}</td><td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:right"><b>${esc(fmt(x.approved))}</b></td></tr>`).join('') || '<tr><td colspan="2" style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center">Standard allocation</td></tr>';
+      return `<div style="border:1px solid #94a3b8;border-radius:8px;padding:12px;margin-bottom:16px;page-break-inside:avoid">
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid #e2e8f0;padding-bottom:8px;margin-bottom:8px">
+          <div><span style="font-size:11px;color:#64748b;text-transform:uppercase">Request ID</span><br><b style="font-size:16px;font-family:monospace">${esc(reqId)}</b></div>
+          <div style="text-align:right"><span style="font-size:11px;color:#64748b;text-transform:uppercase">Target Agent</span><br><b style="font-size:15px">${esc(a.agentName || a.agentId || '—')}</b>${a.agentId ? ` <span style="color:#64748b">#${esc(a.agentId)}</span>` : ''}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px;margin-bottom:8px">
+          <div>
+            ${a.dispatchName ? `<div><span style="color:#64748b">Dispatch To:</span> <b>${esc(a.dispatchName)}</b></div>` : ''}
+            ${a.mobile ? `<div><span style="color:#64748b">Mobile:</span> ${esc(a.mobile)}</div>` : ''}
+            ${a.pincode ? `<div><span style="color:#64748b">Pincode:</span> <b>${esc(a.pincode)}</b></div>` : ''}
+            ${a.address ? `<div><span style="color:#64748b">Address:</span> ${esc(a.address)}</div>` : ''}
+            ${a.firstBarcode || a.lastBarcode ? `<div style="margin-top:4px"><span style="color:#64748b">Barcode Range:</span> <span style="font-family:monospace;background:#f1f5f9;padding:1px 4px;border-radius:4px">${esc(a.firstBarcode || '—')} → ${esc(a.lastBarcode || '—')}</span></div>` : ''}
+          </div>
+          <div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead><tr style="background:#f8fafc"><th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:left">Class</th><th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:right">Quantity</th></tr></thead>
+              <tbody>${clsRows}
+              <tr style="background:#f1f5f9;font-weight:bold"><td style="padding:4px 8px;border:1px solid #cbd5e1">Total</td><td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:right">${esc(fmt(tot))}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    slipWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>FASTag Dispatch Voucher - ${esc(when)}</title>
+      <style>
+        body { font-family: system-ui, -apple-system, sans-serif; margin: 20px; color: #0f172a; line-height: 1.4; }
+        .hdr { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
+        .logo { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+        .logo span { color: #4f46e5; }
+        .meta { font-size: 12px; color: #475569; text-align: right; }
+        .summary { display: flex; gap: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; font-size: 13px; }
+        .sig-block { display: flex; justify-content: space-between; margin-top: 40px; padding-top: 10px; font-size: 12px; color: #475569; page-break-inside: avoid; }
+        .sig-line { width: 180px; border-top: 1px dashed #94a3b8; text-align: center; padding-top: 6px; }
+        @media print { .no-print { display: none !important; } body { margin: 10mm; } }
+      </style>
+      </head><body>
+      <div class="no-print" style="margin-bottom:16px;text-align:right"><button onclick="window.print()" style="padding:8px 16px;background:#4f46e5;color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer">🖨️ Print Voucher</button></div>
+      <div class="hdr">
+        <div>
+          <div class="logo">FIRST FORWARD <span>DASHBOARD</span></div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">FASTag Inventory & Dispatch Requisition Voucher</div>
+        </div>
+        <div class="meta">
+          <div><b>Generated:</b> ${esc(when)}</div>
+          <div><b>Requested By:</b> ${esc(emp)}</div>
+          ${payload.courier ? `<div><b>Courier:</b> ${esc(payload.courier)}</div>` : ''}
+        </div>
+      </div>
+      <div class="summary">
+        <div><b>Agents:</b> ${ags.length}</div>
+        <div><b>Total Tags:</b> ${esc(fmt(totalTags))}</div>
+        ${payload.itemName ? `<div><b>Item Type:</b> ${esc(payload.itemName)}</div>` : ''}
+        ${payload.note ? `<div><b>Note:</b> ${esc(payload.note)}</div>` : ''}
+      </div>
+      ${cardsHtml}
+      <div class="sig-block">
+        <div class="sig-line">Prepared By (${esc(emp)})</div>
+        <div class="sig-line">Warehouse / Dispatcher</div>
+        <div class="sig-line">Agent / Receiver Signature</div>
+      </div>
+      <script>setTimeout(() => window.print(), 400);<\/script>
+      </body></html>`);
+    slipWin.document.close();
   }
   function popError(msg, retry) {
     const ov = sendPop(); ov.dataset.busy = '0';
@@ -2513,6 +2640,17 @@ body.colorful .from-hdr { color: #166534; }
     });
   }
   const STEPS = ['pending', 'approved', 'dispatched'];
+  function trackingUrl(courier, awb) {
+    if (!awb) return '';
+    const c = String(courier || '').toLowerCase();
+    const cleanAwb = encodeURIComponent(String(awb).trim());
+    if (c.includes('delhivery')) return `https://www.delhivery.com/track/package/${cleanAwb}`;
+    if (c.includes('dtdc')) return `https://www.dtdc.in/tracking/shipment-tracking.asp?trkType=awb&strCnno=${cleanAwb}`;
+    if (c.includes('blue') || c.includes('dart')) return `https://www.bluedart.com/tracking?trackFor=0&trackNo=${cleanAwb}`;
+    if (c.includes('trackon')) return `http://trackon.in/Tracking/MultipleTracking?awb=${cleanAwb}`;
+    if (c.includes('speed') || c.includes('post') || c.includes('india')) return `https://www.indiapost.gov.in/_layouts/15/dop.portal.tracking/trackconsignment.aspx`;
+    return `https://www.google.com/search?q=${encodeURIComponent(`${courier} tracking ${awb}`)}`;
+  }
   function statusCardHtml(s) {
     const v = STATUS[s.status] || STATUS.pending;
     const at = STEPS.indexOf(s.status);
@@ -2520,12 +2658,14 @@ body.colorful .from-hdr { color: #166534; }
       const changed = num(c.requested) !== num(c.approved) && (s.status !== 'pending' || num(c.requested));
       return `<span class="tr-st-cls"><b>${esc(c.cls)}</b> ${changed ? `<s class="dim">${fmt(c.requested)}</s> → <b>${fmt(c.approved)}</b>` : fmt(c.approved)}${c.agent ? ` <small class="dim">${esc(c.agent)}</small>` : ''}</span>`;
     }).join('');
+    const awbMatch = String(s.adminNote || '').match(/\b(?:awb|docket|tracking|cn|lr|no|#)?[:\s#]*([a-zA-Z0-9]{8,22})\b/i);
+    const awb = awbMatch ? awbMatch[1] : '';
+    const trackBtn = s.courier && awb ? `<a href="${esc(trackingUrl(s.courier, awb))}" target="_blank" rel="noopener" class="btn btn-xs" style="text-decoration:none;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px">🚚 Track ${esc(s.courier)} (#${esc(awb)}) ↗</a>` : '';
     return `<div class="tr-st-card st-${esc(s.status || 'pending')}">
       <div class="tr-st-top"><b class="tr-st-agent">${esc(s.agentName || '—')}</b>${s.agents > 1 ? `<small class="dim"> +${s.agents - 1} agents</small>` : ''} <span class="badge ${v.tone}">${v.label}</span><span class="tr-st-total"><b>${fmt(s.total)}</b> tags</span></div>
       ${cls ? `<div class="tr-st-classes">${cls}</div>` : ''}
-      ${s.courier ? `<div class="small" style="margin-top:4px">🚚 Courier: <b>${esc(s.courier)}</b>${s.status === 'dispatched' ? '' : ' <span class="dim">(dispatch par isi se jayega)</span>'}</div>` : ''}
-      <div class="dim small">📅 ${esc(longDate(s.at))}      <div class="dim small">📦 Items: <b>${esc(itemLabel(s.itemName))}</b></div>
- · ${esc(ago(s.at))}${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : (s.byName ? ` · 👤 entry: ${esc(s.byName)}` : '')} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
+      ${s.courier ? `<div class="small" style="margin-top:4px;display:flex;align-items:center;flex-wrap:wrap;gap:8px"><span>🚚 Courier: <b>${esc(s.courier)}</b>${s.status === 'dispatched' ? '' : ' <span class="dim">(dispatch par isi se jayega)</span>'}</span>${trackBtn}</div>` : ''}
+      <div class="dim small">📅 ${esc(longDate(s.at))} · ${esc(ago(s.at))} · 📦 Items: <b>${esc(itemLabel(s.itemName))}</b>${s.employeeName ? ` · 👤 employee: ${esc(s.employeeName)}` : (s.byName ? ` · 👤 entry: ${esc(s.byName)}` : '')} · <span class="mono">${esc(s.id)}</span>${s.sheetSynced ? ' · 📗 sheet entry' : ''}</div>
       ${s.adminNote ? `<div class="notice green" style="margin-top:8px">💬 Admin note: ${esc(s.adminNote)}</div>` : ''}
       ${isPublic() && (s.classes || []).length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${(s.status || 'pending') === 'pending' ? `<button type="button" class="btn small primary" data-tr-edit="${esc(s.id)}" title="Pending request ki quantity badlo">✏️ Edit</button>` : ''}<button type="button" class="btn small" data-tr-again="${esc(s.id)}" title="Fill the form again with this request's agent and quantities">🔁 Request again</button></div>
       <div class="tr-edit-host" data-tr-edit-host="${esc(s.id)}"></div>` : ''}
