@@ -844,9 +844,28 @@
   function openAssistant() { const f = document.getElementById('ask-fab'); if (f) f.click(); }
 
   // ---------------------------------------------------------------- DOM — assistant ka hi robot (Gems) site par
-  let el = null, bot = null, board = null, stick = null, mode = 'dock', busy = false, timer = 0;
+  let el = null, bot = null, board = null, stick = null, bubble = null, bubbleTimer = null, mode = 'dock', busy = false, timer = 0;
   let current = null, hover = false, skip = null, pos = [0, 0], dragged = false;
   const root = document.documentElement;
+
+  function showBubble(txt, ms) {
+    if (!bubble || !txt) return;
+    const span = bubble.querySelector('.mc-bubble-txt');
+    if (span) span.textContent = txt;
+    bubble.hidden = false;
+    bubble.classList.add('in');
+    clearTimeout(bubbleTimer);
+    bubbleTimer = setTimeout(() => {
+      bubble.classList.remove('in');
+      setTimeout(() => { if (!bubble.classList.contains('in')) bubble.hidden = true; }, 260);
+    }, ms || 4500);
+  }
+  function hideBubble() {
+    if (!bubble) return;
+    bubble.classList.remove('in');
+    bubble.hidden = true;
+  }
+
   function build() {
     if (el) return;
     el = document.createElement('div');
@@ -855,10 +874,12 @@
     el.innerHTML = `
       <div class="mc-stick" aria-hidden="true"></div>
       <div class="mc-board" role="status" aria-live="polite"></div>
+      <div class="mc-bubble" role="status" aria-live="polite" hidden><span class="mc-bubble-txt"></span><i class="mc-bubble-tail"></i></div>
       <div class="mc-chhotu" aria-hidden="true"><img src="${ASSET('robot.png')}" alt="" draggable="false"><span class="mc-cb"></span></div>
       <span class="mc-mb" aria-hidden="true"></span>
       <button type="button" class="mc-bot" aria-label="Gems robot — kya kya bataya (24h history)" title="🤖 Gems — click: maine kya bataya (24h) · drag: jagah badlo">
         <i class="mc-glow" aria-hidden="true"></i>
+        <i class="mc-halo" aria-hidden="true"></i>
         <span class="mc-arm l"><img src="${ASSET('robot-arm-l.png')}" alt="" draggable="false"></span>
         <span class="mc-arm r"><img src="${ASSET('robot-arm-r.png')}" alt="" draggable="false"></span>
         <img class="mc-body" src="${ASSET('robot-torso.png')}" alt="" draggable="false">
@@ -870,6 +891,15 @@
     bot = el.querySelector('.mc-bot');
     board = el.querySelector('.mc-board');
     stick = el.querySelector('.mc-stick');
+    bubble = el.querySelector('.mc-bubble');
+    if (bubble) {
+      bubble.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideBubble();
+        if (mode === 'show' || busy) { histSoon(); return; }
+        if (mode === 'hist') closeHist(); else openHist();
+      });
+    }
     el.addEventListener('mouseenter', () => { hover = true; });
     el.addEventListener('mouseleave', () => { hover = false; });
     board.addEventListener('click', (e) => {
@@ -977,14 +1007,56 @@
         <button type="button" data-mc="close" title="Abhi chhupao">✕</button>
       </div>${menuHtml()}`;
   }
+  function pageSmartQuestions() {
+    const hash = String((typeof location !== 'undefined' && location.hash) || '').toLowerCase();
+    if (hash.includes('tagrequest')) {
+      return [
+        { label: '⏳ Pending requests?', q: 'pending tag requests' },
+        { label: '🚚 Aakhri dispatch?', q: 'last dispatch' },
+        { label: '🏷️ FASTag total stock?', q: 'stock' }
+      ];
+    }
+    if (hash.includes('complaint')) {
+      return [
+        { label: '📨 Pending POS cases?', q: 'pending complaints' },
+        { label: '✅ Solved complaints?', q: 'solved complaints' }
+      ];
+    }
+    if (hash.includes('target')) {
+      return [
+        { label: '🎯 Target achieve kisne kiya?', q: 'target achieved' },
+        { label: '🏆 Top 5 agents?', q: 'top agents' }
+      ];
+    }
+    if (hash.includes('fastagmapping') || hash.includes('mapping')) {
+      return [
+        { label: '📦 StockDataa total tags?', q: 'total stock' },
+        { label: '🧍 Direct agents count?', q: 'direct agents' }
+      ];
+    }
+    if (hash.includes('npci')) {
+      return [
+        { label: '🛰️ NPCI status?', q: 'npci status' },
+        { label: '🚨 Unusual tags?', q: 'unusual activity' }
+      ];
+    }
+    return [
+      { label: '🎯 Aaj ka expected?', q: 'aaj ka expected' },
+      { label: '🚀 Top growth agents?', q: 'growth agents' },
+      { label: '📦 Zero stock agents?', q: 'zero stock' }
+    ];
+  }
   function histHtml() {
     const a = histLoad();
     const list = a.length
       ? `<ol class="mc-hist">${a.map((h) => `<li${h.q ? ` data-q="${esc(h.q)}"` : ''} class="m-${esc(h.mood || 'info')}"><span class="mc-hi">${h.icon || '🤖'}</span>
           <span class="mc-n">${esc(h.title)}<small>${h.big ? `<b>${esc(h.big)}</b> ` : ''}${esc(h.head)}</small></span><b class="mc-v">${ago(h.at)}</b></li>`).join('')}</ol>`
       : '<div class="mc-empty">Pichle 24 ghante me abhi kuch nahi bataya.<br>✨ <b>Naya update</b> dabao — main abhi batata hoon!</div>';
-    return `<div class="mc-bh"><span class="mc-ic">🕘</span><b>Maine kya bataya · 24h</b><small class="mc-cnt">${a.length} unique</small></div>
+    const smartPills = pageSmartQuestions().map((p) => `<button type="button" class="mc-chip-pill" data-q="${esc(p.q)}" title="Poochho: ${esc(p.q)}">💡 ${esc(p.label)}</button>`).join('');
+    return `<div class="mc-sheet-pill" aria-hidden="true"></div>
+      <div class="mc-bh"><span class="mc-ic">🕘</span><b>Maine kya bataya · 24h</b><small class="mc-cnt">${a.length} unique</small></div>
       <form class="mc-askf" data-mcf="ask"><input type="text" name="q" placeholder="Robot se poochho… (jaise: Rahul ka stock / kal 9 baje yaad dilana)" autocomplete="off"><button type="button" data-mc="mic" title="Bolkar poochho">🎙</button><button type="submit" title="Poochho">➤</button></form>
+      <div class="mc-smart-pills"><div class="mc-pills-row">${smartPills}</div></div>
       <div class="mc-quick"><button type="button" data-mc="talk">🎙 Hey Gems — baat karo</button><button type="button" data-mc="wake" title="ON: mic hamesha sunta hai (battery zyada). OFF: sirf 🎙 dabane par.">${cfg.wake === true ? '🟢 "Hey Gems" sunna: ON' : '⚪ "Hey Gems" sunna: OFF'}</button><button type="button" data-mc="todo">📋 Aaj ke kaam</button><button type="button" data-mc="rems">⏰ Reminders</button><button type="button" data-mc="badges">🎖 Badges</button></div>
       <div class="mc-bb">${list}</div>
       <div class="mc-ctl wide">
@@ -1393,6 +1465,7 @@
     if (it.cls) el.classList.add(it.cls);
     if (rs) board.classList.add('instant'); // resume: board turant (animation ke bina)
     board.classList.add('in');
+    if (!rs && (it.head || it.title)) showBubble(`${it.icon || '✨'} ${it.head || it.title}`, 4500);
     if (!rs) {
       try { if (it.onShow) it.onShow(); } catch { /* ignore */ }
       if (/^srv:/.test(it.key || '')) { cfg.srvIdx = (Number(cfg.srvIdx) || 0) + 1; save(); }
@@ -1407,6 +1480,7 @@
       let reasonR = ''; const endedR = new Promise((res) => { skip = (why) => { reasonR = why || 'skip'; res(); }; });
       await Promise.race([wait(Math.max(1500, rs.ms)), endedR]);
       skip = null; stopSpeech();
+      hideBubble();
       board.classList.remove('in'); el.classList.remove('holding', 'rest'); if (it.cls) el.classList.remove(it.cls);
       extEnd(it); el.dataset.mood = 'fly'; await wait(250);
       await fly(path(pos, dockPos(), 'arc'), 1700);
@@ -1431,7 +1505,7 @@
     const minStay = wait(it.stay || Math.max(10000, String(it.say || '').length * 60)); // kam se kam 10 sec board
     const stay = (async () => { await Promise.all([Promise.race([spoken, wait(25000 + String(it.say || '').length * 110)]), minStay]); while ((hover || convo) && !reason) await wait(500); })();
     await Promise.race([stay, ended]);
-    skip = null; stopSpeech(); extEnd(it);
+    skip = null; stopSpeech(); extEnd(it); hideBubble();
     board.classList.remove('in'); el.classList.remove('holding');
     if (it.cls) el.classList.remove(it.cls);
     el.dataset.mood = 'fly';
@@ -2166,6 +2240,15 @@
 #gems-voice[data-s=speak] .gv-orb{animation:gvBeat .5s ease-in-out infinite alternate}
 @keyframes gvPulse{0%{box-shadow:0 0 0 0 rgba(120,140,255,.65)}100%{box-shadow:0 0 0 22px rgba(120,140,255,0)}}
 @keyframes gvSpin{to{transform:rotate(360deg)}}@keyframes gvBeat{from{transform:scale(.88)}to{transform:scale(1.18)}}
+#gems-voice .gv-wave-wrap{display:none;padding:8px 16px 2px;justify-content:center;align-items:center;background:linear-gradient(180deg,rgba(99,102,241,.12),transparent)}
+#gems-voice[data-s=listen] .gv-wave-wrap,#gems-voice[data-s=speak] .gv-wave-wrap{display:flex}
+#gems-voice .gv-wave{display:flex;align-items:center;gap:4px;height:32px}
+#gems-voice .gv-wave i{width:4px;height:12px;border-radius:4px;background:linear-gradient(180deg,#38bdf8,#818cf8,#ec4899);animation:gvWaveBounce 1.1s ease-in-out infinite alternate}
+#gems-voice[data-s=listen] .gv-wave i{background:linear-gradient(180deg,#22c55e,#06b6d4,#6366f1);animation-duration:.75s}
+#gems-voice .gv-wave i.wv-1{animation-delay:0.05s}#gems-voice .gv-wave i.wv-2{animation-delay:0.18s}#gems-voice .gv-wave i.wv-3{animation-delay:0.32s}#gems-voice .gv-wave i.wv-4{animation-delay:0.12s}
+#gems-voice .gv-wave i.wv-5{animation-delay:0.25s}#gems-voice .gv-wave i.wv-6{animation-delay:0.42s}#gems-voice .gv-wave i.wv-7{animation-delay:0.15s}#gems-voice .gv-wave i.wv-8{animation-delay:0.35s}
+#gems-voice .gv-wave i.wv-9{animation-delay:0.22s}#gems-voice .gv-wave i.wv-10{animation-delay:0.48s}#gems-voice .gv-wave i.wv-11{animation-delay:0.28s}#gems-voice .gv-wave i.wv-12{animation-delay:0.1s}
+@keyframes gvWaveBounce{0%{height:6px;opacity:.45}50%{height:28px;opacity:1}100%{height:12px;opacity:.7}}
 #gems-voice .gv-log{flex:1;overflow:auto;padding:14px 14px 6px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth}
 #gems-voice .gv-m{max-width:88%;padding:10px 13px;border-radius:16px;font-size:15px;line-height:1.45;word-wrap:break-word;animation:gvIn .2s ease}
 #gems-voice .gv-m.me{align-self:flex-end;background:#3b4bd8;border-bottom-right-radius:5px}
@@ -2286,7 +2369,10 @@
       gvFab(false);
       const nm = firstName() || 'Tarun';
       gvEl = document.createElement('div'); gvEl.id = 'gems-voice'; gvEl.dataset.s = 'idle';
-      gvEl.innerHTML = `<div class="gv-h"><span class="gv-orb"></span><b>Gems</b><button type="button" class="gv-x" aria-label="Band karo">✕</button></div><div class="gv-log"></div><form class="gv-f"><input type="text" name="q" placeholder="Ya yahan likhkar poochho…" autocomplete="off"><button type="button" class="gv-mic" aria-label="Bolo">🎙</button></form>`;
+      gvEl.innerHTML = `<div class="gv-h"><span class="gv-orb"></span><b>Gems</b><button type="button" class="gv-x" aria-label="Band karo">✕</button></div>
+        <div class="gv-wave-wrap" aria-hidden="true"><div class="gv-wave"><i class="wv-1"></i><i class="wv-2"></i><i class="wv-3"></i><i class="wv-4"></i><i class="wv-5"></i><i class="wv-6"></i><i class="wv-7"></i><i class="wv-8"></i><i class="wv-9"></i><i class="wv-10"></i><i class="wv-11"></i><i class="wv-12"></i></div></div>
+        <div class="gv-log"></div>
+        <form class="gv-f"><input type="text" name="q" placeholder="Ya yahan likhkar poochho…" autocomplete="off"><button type="button" class="gv-mic" aria-label="Bolo">🎙</button></form>`;
       document.body.appendChild(gvEl);
       gvEl.querySelector('.gv-x').addEventListener('click', () => gvClose());
       gvEl.addEventListener('click', async (ev) => { const bq = ev.target.closest && ev.target.closest('[data-gvq]'); if (!bq) return; const q = bq.dataset.gvq; try { if (gvRec) gvRec.abort(); } catch { /* ignore */ } stopSpeech(); gvMsg('me', esc(q)); gvGen += 1; const g2 = gvGen; await gvAnswer(q, g2); if (g2 === gvGen && gvOpen) gvLoop(g2); });
