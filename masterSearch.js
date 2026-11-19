@@ -1105,12 +1105,12 @@ FF.pages = FF.pages || {};
       items.push({
         kind: 'cls', kindLabel: 'Barcode',
         label: U.barcode(t.key),
-        sub: [`${tagWhere(t).icon} ${tagWhere(t).text}`, ((f && f.tagId) || (g && g.tagId)) && normBar((f && f.tagId) || (g && g.tagId)) !== t.key ? `Tag ${(f && f.tagId) || (g && g.tagId)}` : '',
+        sub: [((f && f.tagId) || (g && g.tagId)) && normBar((f && f.tagId) || (g && g.tagId)) !== t.key ? `Tag ${(f && f.tagId) || (g && g.tagId)}` : '',
           f ? (f.issued ? `✅ Issued · FF ${f.agentName || f.agentId}${f.vrn ? ' · ' + f.vrn : ''}${f.allocated ? ' · ' + f.allocated : ''}` : clean(f.agentName) ? `FF ${f.agentName}${f.tlName ? ' (TL ' + f.tlName + ')' : ''}` : 'FF stock · agent assign nahi') : 'FF not mapped',
           g ? (g.issued ? `✅ Issued · GV ${g.agentName || g.agentId}${g.vrn ? ' · ' + g.vrn : ''}${g.allocated ? ' · ' + g.allocated : ''}` : clean(g.agentName) ? `GV ${g.agentName}${g.tlName ? ' (TL ' + g.tlName + ')' : ''}` : 'GV stock · agent assign nahi') : 'GV not mapped',
           (f && f.cls) || (g && g.cls) || ''].filter(Boolean).join(' · '),
         keywords: `${t.key} ${query}`,
-        value: t.key, barcode: t.key
+        value: t.key, barcode: t.key, where: tagWhere(t)
       });
     });
     if (!items.length && !state.light && !r.livePending) items.push({ kind: 'cls', kindLabel: 'Search', label: `“${query}” search ho raha hai…`, sub: 'index ban raha hai (agents + TLs + IDs)', value: query, none: true });
@@ -1424,7 +1424,7 @@ FF.pages = FF.pages || {};
       <div class="ms-panel-backdrop" data-ms-close></div>
       <div class="ms-panel-box">
         <div class="ms-panel-head">
-          <div><span class="ms-panel-kicker">🔎 Master search</span><h2>${esc(/^\d{12,20}$/.test(clean(res.q)) ? U.barcode(res.q) : (res.q || o.title || 'Results'))}</h2>
+          <div><span class="ms-panel-kicker">🔎 Master search</span><h2 data-ms-title>${esc(/^\d{12,20}$/.test(clean(res.q)) ? U.barcode(res.q) : (res.q || o.title || 'Results'))}${res.tags && res.tags.length === 1 ? ` <span class="tg-where tgw-${tagWhere(res.tags[0]).cls} tg-where-lg">${tagWhere(res.tags[0]).icon} ${esc(tagWhere(res.tags[0]).text)}</span>` : ''}</h2>
             <small class="dim" data-ms-result-state>${U.fmt(res.matched)} match · ${res.heavy ? 'barcode register ready ✓' : (res.livePending ? 'barcode live search…' : 'barcode register loading… (live search on)')}</small></div>
           <div class="btn-row">
             <button class="btn small" data-ms-csv>⬇ CSV</button>
@@ -1440,6 +1440,8 @@ FF.pages = FF.pages || {};
     const body = wrap.querySelector('.ms-panel-body');
     const paint = () => {
       body.innerHTML = resultsHtml(res);
+      try { const ttl = wrap.querySelector('[data-ms-title]');
+      if (ttl) { const old = ttl.querySelector('.tg-where'); if (old) old.remove(); if (res.tags && res.tags.length === 1) { const w = tagWhere(res.tags[0]); ttl.insertAdjacentHTML('beforeend', ` <span class="tg-where tgw-${w.cls} tg-where-lg">${w.icon} ${esc(w.text)}</span>`); } } } catch { /* title badge optional */ }
       const status = wrap.querySelector('[data-ms-result-state]');
       if (status) status.textContent = `${U.fmt(res.matched)} match · ${res.livePending ? 'barcode live search…' : res.liveFailed ? 'lookup incomplete — retry' : 'search complete ✓'}`;
       if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(wrap);

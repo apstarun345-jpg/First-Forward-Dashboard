@@ -900,7 +900,7 @@ window.FF = window.FF || {};
         input.removeAttribute('aria-activedescendant');
         show(); return;
       }
-      box.innerHTML = list.map((it, i) => `<div id="${boxId}-option-${i}" class="suggest-item ${i === active ? 'on' : ''}" data-i="${i}" role="option" aria-selected="${i === active ? 'true' : 'false'}"><span class="suggest-kind ${esc(it.kind || '')}">${esc(it.kindLabel || it.kind || '')}</span><span class="suggest-main"><b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span>${it.badge ? `<span class="suggest-badge">${esc(it.badge)}</span>` : ''}</div>`).join('');
+      box.innerHTML = list.map((it, i) => `<div id="${boxId}-option-${i}" class="suggest-item ${i === active ? 'on' : ''}" data-i="${i}" role="option" aria-selected="${i === active ? 'true' : 'false'}"><span class="suggest-kindwrap"><span class="suggest-kind ${esc(it.kind || '')}">${esc(it.kindLabel || it.kind || '')}</span>${it.where ? `<span class="tg-where tgw-${esc(it.where.cls)}">${esc(it.where.icon)} ${esc(it.where.text)}</span>` : ''}</span><span class="suggest-main"><b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span>${it.badge ? `<span class="suggest-badge">${esc(it.badge)}</span>` : ''}</div>`).join('');
       if (active >= 0) input.setAttribute('aria-activedescendant', `${boxId}-option-${active}`);
       else input.removeAttribute('aria-activedescendant');
       show();

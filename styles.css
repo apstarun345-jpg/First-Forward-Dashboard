@@ -8291,3 +8291,6 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .tgw-ff { background: #bfdbfe; color: #1e40af; }
 .tgw-both { background: #e9d5ff; color: #6b21a8; }
 .tgw-none { background: #fecaca; color: #991b1b; }
+.suggest-kindwrap { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; flex: none; }
+.suggest-kindwrap .tg-where { margin-left: 0; font-size: 10.5px; padding: 2px 8px; }
+.tg-where-lg { font-size: 14px; padding: 4px 12px; margin-left: 12px; }
