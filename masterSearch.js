@@ -1144,6 +1144,17 @@ FF.pages = FF.pages || {};
     return { text: 'Not mapped', icon: '⚪', cls: 'none' };
   }
   const whereBadge = (t, extra, hideOffice) => { const w = tagWhere(t); return w && !(hideOffice && w.cls === 'office') ? `<span class="tg-where tgw-${w.cls}${extra || ''}">${w.icon} ${esc(w.text)}</span>` : ''; };
+  /** v3.125.344 — result header: status ke baad jis side (FF / GV) me tag mapped hai uska agent naam + ID (alag alag copy button). */
+  const holdersHtml = (t) => {
+    const f = t.ff[0] || {}, g = t.gv[0] || {};
+    const one = (lbl, cls, name, id) => {
+      const n = realName(name), i = realName(id); if (!n && !i) return '';
+      const cp = (v, what) => `<button type="button" class="cp-btn" data-copy="${esc(v)}" title="Copy ${what}" aria-label="Copy ${what}">📋</button>`;
+      return `<span class="tg-holder"><span class="tg-hl ${cls}">${lbl}</span>${n ? ` <b class="tg-hn">${esc(n)}</b>${cp(n, 'name')}` : ''}${i ? ` <span class="tg-hid">ID <b>${esc(i)}</b></span>${cp(i, 'ID')}` : ''}</span>`;
+    };
+    return one('FF', 'ff', f.agentName, f.agentId) + one('GV', 'gv', g.agentName || g.gvName, g.agentId || g.gvId);
+  };
+  const headExtra = (t) => whereBadge(t, ' tg-where-lg') + holdersHtml(t);
   function tagStatus(t) {
     const f = t.ff[0], g = t.gv[0];
     // Holder = agent / GV naam jiske paas tag assign hai. Dono me koi holder nahi → 🏢 OFFICE STOCK.
@@ -1398,7 +1409,7 @@ FF.pages = FF.pages || {};
         const st = tagStatus(t);
         const dash = (v) => { const x = realName(v); return x ? esc(x) : '<span class="dim">—</span>'; };
         const rowCls = st.office ? 'tg-office' : (st.ff.tone === 'green' || st.gv.tone === 'green') ? 'tg-mapped' : 'tg-stock';
-        return `<tr class="${rowCls}"><td class="tg-bar"><b>${esc(U.barcode(t.key))}</b>${whereBadge(t, '', true)}</td><td class="tg-tid">${esc((f.tagId || g.tagId) || '—')}</td>
+        return `<tr class="${rowCls}"><td class="tg-bar"><b>${esc(U.barcode(t.key))}</b></td><td class="tg-tid">${esc((f.tagId || g.tagId) || '—')}</td>
             <td>${dash(f.agentName)}${realName(f.agentId) ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${dash(tlText(f.tlName, 'ff'))}</td>
             <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
             <td>${dash(g.agentName)}${realName(g.agentId) ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${dash(tlText(g.tlName, 'gv'))}</td>
@@ -1424,7 +1435,7 @@ FF.pages = FF.pages || {};
       <div class="ms-panel-backdrop" data-ms-close></div>
       <div class="ms-panel-box">
         <div class="ms-panel-head">
-          <div><span class="ms-panel-kicker">🔎 Master search</span><h2 data-ms-title>${esc(/^\d{12,20}$/.test(clean(res.q)) ? U.barcode(res.q) : (res.q || o.title || 'Results'))}${res.tags && res.tags.length === 1 ? whereBadge(res.tags[0], ' tg-where-lg') : ''}</h2>
+          <div><span class="ms-panel-kicker">🔎 Master search</span><h2 data-ms-title>${esc(/^\d{12,20}$/.test(clean(res.q)) ? U.barcode(res.q) : (res.q || o.title || 'Results'))}${res.tags && res.tags.length === 1 ? headExtra(res.tags[0]) : ''}</h2>
             <small class="dim" data-ms-result-state>${U.fmt(res.matched)} match · ${res.heavy ? 'barcode register ready ✓' : (res.livePending ? 'barcode live search…' : 'barcode register loading… (live search on)')}</small></div>
           <div class="btn-row">
             <button class="btn small" data-ms-csv>⬇ CSV</button>
@@ -1441,7 +1452,7 @@ FF.pages = FF.pages || {};
     const paint = () => {
       body.innerHTML = resultsHtml(res);
       try { const ttl = wrap.querySelector('[data-ms-title]');
-      if (ttl) { const old = ttl.querySelector('.tg-where'); if (old) old.remove(); if (res.tags && res.tags.length === 1) ttl.insertAdjacentHTML('beforeend', whereBadge(res.tags[0], ' tg-where-lg')); } } catch { /* title badge optional */ }
+      if (ttl) { Array.prototype.slice.call(ttl.querySelectorAll('.tg-where,.tg-holder')).forEach((x) => x.remove()); if (res.tags && res.tags.length === 1) ttl.insertAdjacentHTML('beforeend', headExtra(res.tags[0])); } } catch { /* title badge optional */ }
       const status = wrap.querySelector('[data-ms-result-state]');
       if (status) status.textContent = `${U.fmt(res.matched)} match · ${res.livePending ? 'barcode live search…' : res.liveFailed ? 'lookup incomplete — retry' : 'search complete ✓'}`;
       if (FF.app && FF.app.enhanceTables) FF.app.enhanceTables(wrap);
