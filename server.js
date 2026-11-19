@@ -11783,6 +11783,13 @@ async function handleApi(req, res, url) {
     const ip = clientIp(req); if (!publicRateOk(`tagemp:${ip}`, 60, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada status checks — thodi der baad try karo.');
     return sendJson(res, 200, { ok:true, shared:true, ...employeeStatusSummary(token) });
   }
+  if (p === '/api/public/pincode' && method === 'GET') {
+    const pin = tagDigits(url.searchParams.get('pin') || '').slice(0, 6);
+    if (!pin || pin.length !== 6) return sendJson(res, 200, { ok: false });
+    const g = pinGeoOf(pin);
+    if (!g) return sendJson(res, 200, { ok: false });
+    return sendJson(res, 200, { ok: true, district: g[2] || '', state: g[3] || '', lat: g[0], lng: g[1] });
+  }
   // 📇 Agent contact lookup — central Address tab, exact-agent match only.
   if (p === '/api/tag-request/contact' && method === 'GET') {
     if (!user || (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest'))) throw new HttpError(403, 'Tag Request access disabled.');
@@ -14620,7 +14627,7 @@ async function servePersonalPage(req, res, rawToken) {
     const timer = setTimeout(() => {
       if (res.writableEnded) return;
       if (JSON.stringify(savedLink) !== linkSnapshot || JSON.stringify(db.settings.personalLinkDefaults || {}) !== defaultsSnapshot || !(db.settings.personalLinks || []).includes(savedLink) || savedLink.enabled === false || feats().personalLinks === false || (adminPreview ? !(sessionUser(req) && sessionUser(req).role === 'admin') : !personalLinkSession(req, savedLink))) return fail(403, 'Access changed. Please open the link again.');
-      const shell = `<div id="pl-portal-content"><section class="pb-card" data-pl-bootstrap role="status"><h3>Loading your report…</h3><p class="dim">Live sheet data is loading. The report will open here automatically.</p><button class="pb-btn" type="button" data-pl-bootstrap-retry hidden>Retry</button></section></div>`;
+      const shell = `<div id="pl-portal-content"><section class="pb-card" data-pl-bootstrap role="status"><h3>Loading your report…</h3><p class="dim">Live sheet data is loading. The report will open here automatically.</p><button class="pb-btn" type="button" data-pl-bootstrap-retry hidden>Retry</button></section><div class="pb-sk-kpis"><div class="pb-kpi pb-sk"><div class="pb-sk-line sm"></div><div class="pb-sk-line lg"></div><div class="pb-sk-line xs"></div></div><div class="pb-kpi pb-sk"><div class="pb-sk-line sm"></div><div class="pb-sk-line lg"></div><div class="pb-sk-line xs"></div></div><div class="pb-kpi pb-sk"><div class="pb-sk-line sm"></div><div class="pb-sk-line lg"></div><div class="pb-sk-line xs"></div></div><div class="pb-kpi pb-sk"><div class="pb-sk-line sm"></div><div class="pb-sk-line lg"></div><div class="pb-sk-line xs"></div></div></div><div class="pb-card pb-sk" style="height:120px;margin-bottom:12px"></div></div>`;
       sendHtml(res, 200, personalShell({ title: `${link.name} · Loading`, heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`, sub: 'Preparing your report…', token, requireAuth, authorized: true, personName: link.name, body: shell }), noStore);
     }, 1200);
     if (timer.unref) timer.unref();
@@ -14716,8 +14723,29 @@ async function servePersonalPage(req, res, rawToken) {
     const maxBar = Math.max(1, ...st.monthDays.map((x) => x.n));
     const bars = st.monthDays.map((x) => `<div class="pb-col" title="${escHtml(x.date)}: ${nf(x.n)} tags"><b class="pb-val">${x.n ? nf(x.n) : '0'}</b><div class="pb-bar" style="height:${Math.max(4, Math.round((x.n / maxBar) * 100))}%"></div><span>${escHtml(x.date.slice(8, 10))}</span></div>`).join('');
     const clsRows = Object.entries(st.cls).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="pb-kv"><span>${escHtml(k)}</span><b>${v}</b> <i>${pct(v, st.clsTotal)}%</i></div>`).join('') || '<p class="dim">—</p>';
-    const goalHtml = goal ? `<div class="pb-goal"><div class="pb-goal-top"><span>🎯 TL goal ${escHtml(ym)}</span><b>${st.mtd} / ${Number(goal.target) || 0} (${pct(st.mtd, Number(goal.target))}%)</b></div><div class="pb-track"><div class="pb-fill" style="width:${Math.min(100, pct(st.mtd, Number(goal.target)))}%"></div></div></div>` : '';
-    const targetHtml = target ? `<div class="pb-kv"><span>🎯 Your target ${escHtml(ym)}</span><b>${st.mtd} / ${Number(target.target) || 0} (${pct(st.mtd, Number(target.target))}%)</b></div>` : '';
+    const goalTgt = goal ? Number(goal.target) || 0 : 0;
+    const goalPct = goalTgt ? pct(st.mtd, goalTgt) : 0;
+    const targetTgt = target ? Number(target.target) || 0 : 0;
+    const targetPct = targetTgt ? pct(st.mtd, targetTgt) : 0;
+    const nowDt = new Date();
+    const curDom = Number(dateKeyNow().slice(8, 10));
+    const totalDaysInCurMonth = new Date(Date.UTC(nowDt.getUTCFullYear(), nowDt.getUTCMonth() + 1, 0)).getUTCDate();
+    const daysRemaining = Math.max(1, totalDaysInCurMonth - curDom);
+
+    const calcGamify = (achievedPct, tgtVal, label) => {
+      let badge = '🚀 Rising';
+      let color = '#3b82f6';
+      if (achievedPct >= 100) { badge = '🏆 Target Crushed!'; color = '#8b5cf6'; }
+      else if (achievedPct >= 80) { badge = '🔥 Almost Done!'; color = '#10b981'; }
+      else if (achievedPct >= 50) { badge = '⚡ Halfway There'; color = '#f59e0b'; }
+      const remaining = Math.max(0, tgtVal - st.mtd);
+      const pace = remaining > 0 ? Math.ceil(remaining / daysRemaining) : 0;
+      const waMsg = encodeURIComponent(`🎯 FASTag Performance Update — ${link.name}\n📈 MTD: ${nf(st.mtd)} / ${nf(tgtVal)} (${achievedPct}%)\n🔥 Streak: ${st.streak}d\n⭐ Best Day: ${st.best.n} tags`);
+      return `<div class="pb-gamify"><div class="pb-goal-top"><span class="pb-gtag">${escHtml(label)} <span class="pb-gbadge" style="background:${color}">${badge}</span></span><b>${nf(st.mtd)} / ${nf(tgtVal)} (${achievedPct}%)</b></div><div class="pb-track"><div class="pb-fill" style="width:${Math.min(100, achievedPct)}%;background:${color}"></div></div><div class="pb-gamify-meta"><span>🔥 Streak: <b>${st.streak}d</b></span><span>🗓️ ${daysRemaining}d left</span>${remaining > 0 ? `<span>⚡ Pace: <b>${pace}/day</b></span>` : '<span class="pb-up">🎉 Goal Achieved!</span>'}<a class="pb-btn pb-btn-wa" href="https://api.whatsapp.com/send?text=${waMsg}" target="_blank" rel="noopener">📲 Share</a></div></div>`;
+    };
+
+    const goalHtml = goal ? calcGamify(goalPct, goalTgt, `🎯 TL goal ${escHtml(ym)}`) : '';
+    const targetHtml = target ? calcGamify(targetPct, targetTgt, `🎯 Your target ${escHtml(ym)}`) : '';
     const prevYm = (() => { const dd = new Date(`${dateKeyNow()}T00:00:00Z`); dd.setUTCDate(1); dd.setUTCMonth(dd.getUTCMonth() - 1); return `${dd.getUTCFullYear()}-${pad2(dd.getUTCMonth() + 1)}`; })();
     const lastMonthTotal = rows.reduce((a, r) => a + (String(r.date).startsWith(prevYm) ? r.n : 0), 0);
     const stockInfo = await stockPromise;
@@ -15476,10 +15504,56 @@ body{padding:clamp(10px,1.6vw,26px)}
 @media(max-width:520px){.pl-cal-week,.pl-cal-grid{gap:3px}.pl-cal-day{min-height:50px;border-radius:7px}.pl-cal-day span{font-size:11px}.pl-cal-day b{font-size:13px}.pl-cal-week span{font-size:10px}}
 @media(max-width:1100px){.pb-grid3{grid-template-columns:1fr 1fr}}
 @media(max-width:760px){.pb-grid3{grid-template-columns:1fr}.pb-wrap .pl-side{max-height:none}.pl-layout{grid-template-columns:1fr}}
-</style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
+
+/* Gamified Target & Progress Bar */
+.pb-gamify{background:linear-gradient(135deg,#f8faff 0%,#eef2ff 100%);border:1.5px solid #c7d2fe;border-radius:14px;padding:14px 16px;margin:8px 0 14px}
+.pb-gamify-meta{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;font-size:12.5px;color:#475569}
+.pb-gtag{font-weight:750;color:#1e293b;display:inline-flex;align-items:center;gap:6px}
+.pb-gbadge{display:inline-block;padding:2px 8px;border-radius:999px;color:#fff;font-size:11px;font-weight:800;letter-spacing:.02em}
+.pb-btn-wa{background:linear-gradient(120deg,#15803d,#16a34a);border-color:#15803d;color:#fff!important;text-decoration:none;display:inline-flex;align-items:center;gap:5px;box-shadow:0 2px 8px rgba(22,163,74,.25)}
+.pb-btn-wa:hover{background:#15803d}
+
+/* Shimmer Skeleton Loaders */
+@keyframes pbShimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.pb-sk{background:linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 50%,#f1f5f9 75%);background-size:800px 100%;animation:pbShimmer 1.4s infinite cubic-bezier(.4,0,.2,1);border-radius:8px}
+.pb-sk-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:14px}
+.pb-sk-kpis .pb-kpi{min-height:96px;display:flex;flex-direction:column;justify-content:center;gap:8px}
+.pb-sk-line{height:12px;border-radius:6px;background:linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 50%,#f1f5f9 75%);background-size:800px 100%;animation:pbShimmer 1.4s infinite}
+.pb-sk-line.sm{width:45%;height:10px}
+.pb-sk-line.lg{width:70%;height:22px}
+.pb-sk-line.xs{width:35%;height:10px}
+
+/* NPCI FASTag Class Badges */
+.pb-badge-vc{display:inline-flex;align-items:center;justify-content:center;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:800;padding:2px 7px;border-radius:6px;line-height:1.2;text-transform:uppercase;border:1px solid transparent;margin-right:6px}
+.pb-badge-vc.vc4{background:#ede9fe;color:#5b21b6;border-color:#c4b5fd}
+.pb-badge-vc.vc5{background:#ffedd5;color:#9a3412;border-color:#fed7aa}
+.pb-badge-vc.vc6{background:#fef3c7;color:#92400e;border-color:#fde68a}
+.pb-badge-vc.vc7{background:#dcfce7;color:#166534;border-color:#bbf7d0}
+.pb-badge-vc.vc12{background:#fce7f3;color:#9d174d;border-color:#fbcfe8}
+.pb-badge-vc.vc16{background:#e0f2fe;color:#0369a1;border-color:#bae6fd}
+.pb-badge-vc.vc20{background:#ccfbf1;color:#115e59;border-color:#99f6e4}
+.pb-badge-vc.vc5p{background:#f3e8ff;color:#6b21a8;border-color:#d8b4fe}
+
+/* Dark mode theme layer */
+html[data-theme="dark"]{color-scheme:dark}
+html[data-theme="dark"] body{background:#0b0f19;color:#f1f5f9}
+html[data-theme="dark"] .pb-wrap .pb-card,html[data-theme="dark"] .pb-card,html[data-theme="dark"] .pl-side,html[data-theme="dark"] .pb-kpi,html[data-theme="dark"] .pl-welcome-item{background:#111827;border-color:#1f2937;color:#f1f5f9}
+html[data-theme="dark"] .pb-wrap .pb-card h3,html[data-theme="dark"] .pb-kpi b,html[data-theme="dark"] .pb-val{color:#f8fafc}
+html[data-theme="dark"] .pb-btn{background:#1f2937;border-color:#374151;color:#e2e8f0}
+html[data-theme="dark"] .pb-btn:hover{background:#374151}
+html[data-theme="dark"] .pb-wrap .pb-tbl th{background:#030712;color:#f1f5f9}
+html[data-theme="dark"] .pb-wrap .pb-tbl td{border-bottom-color:#1f2937;color:#e2e8f0}
+html[data-theme="dark"] .pb-wrap .pb-tbl tbody tr:nth-child(even) td{background:#0f172a}
+html[data-theme="dark"] .pb-wrap .pb-tbl tbody tr:hover td{background:#1e293b}
+html[data-theme="dark"] .pb-gamify{background:#111827;border-color:#312e81}
+html[data-theme="dark"] .pb-gtag{color:#e0e7ff}
+html[data-theme="dark"] .pb-track{background:#1f2937}
+html[data-theme="dark"] .pb-sk,html[data-theme="dark"] .pb-sk-line{background:linear-gradient(90deg,#1f2937 25%,#374151 50%,#1f2937 75%);background-size:800px 100%}
+</style><script>(function(){const s=localStorage.getItem('pl_theme');if(s==='dark'||(!s&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.setAttribute('data-theme','dark');}})();</script></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
 <header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(personName || db.settings.brand || 'FF').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
 <div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p id="pl-sub">${sub}</p>` : ''}</div></div>
-${requireAuth ? (authorized && token ? `<a class="pb-btn" id="pl-lock-btn" href="/p/${encodeURIComponent(token)}?logout=1" rel="nofollow" title="Logout from this Personal Link" style="text-decoration:none">🚪 Logout</a>` : `<button type="button" class="pb-btn" id="pl-lock-btn" hidden>🚪 Logout</button>`) : ''}</header>
+<div style="display:flex;align-items:center;gap:8px"><button type="button" class="pb-btn pb-theme-btn" id="pl-theme-toggle" onclick="const d=document.documentElement;const m=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',m);localStorage.setItem('pl_theme',m);this.textContent=m==='dark'?'☀️ Light':'🌙 Dark';">🌙 Dark</button>
+${requireAuth ? (authorized && token ? `<a class="pb-btn" id="pl-lock-btn" href="/p/${encodeURIComponent(token)}?logout=1" rel="nofollow" title="Logout from this Personal Link" style="text-decoration:none">🚪 Logout</a>` : `<button type="button" class="pb-btn" id="pl-lock-btn" hidden>🚪 Logout</button>`) : ''}</div></header>
 ${body || ''}
 </div>
 <script src="/i18n.js"></script><script src="/i18n-en.js"></script>

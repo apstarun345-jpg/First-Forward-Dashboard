@@ -1593,9 +1593,16 @@ body.colorful .from-hdr { color: #166534; }
     const total = isFastag() ? rowTotal(row) : 0;
     const errs = state.errs[row.id] || {};
     const errList = Object.values(errs).filter(Boolean);
-    const qtyRows = CLASS_LIST.map((c) => `<label class="tr-qty-row" title="${esc(CLASS_LABEL[c])} — kitni tags chahiye (0 ya khaali = nahi chahiye)">
-        <span class="tr-qty-cls"><b>${c}</b><small>${esc(CLASS_DESC(c))}</small><small class="tr-qty-hint tr-check-col" data-tr-hint="${c}">${esc(hintText(rec, c))}</small></span>
-        <input class="input tr-qty" data-tr-cls="${c}" inputmode="numeric" placeholder="0" maxlength="5" value="${esc(row.q[c])}" aria-label="${c} qty">
+    const qtyRows = CLASS_LIST.map((c) => `<label class="tr-qty-row" data-tr-row-cls="${c.toLowerCase()}" title="${esc(CLASS_LABEL[c])} — kitni tags chahiye (0 ya khaali = nahi chahiye)">
+        <span class="tr-qty-cls"><span class="badge-vc ${c.toLowerCase()}">${c}</span><b>${c}</b><small>${esc(CLASS_DESC(c))}</small><small class="tr-qty-hint tr-check-col" data-tr-hint="${c}">${esc(hintText(rec, c))}</small></span>
+        <div class="tr-qty-right">
+          <div class="tr-qty-quick" data-tr-cls="${c}">
+            <button type="button" class="btn btn-xs tr-qadd" data-q="10" title="Add 10 to ${c}">+10</button>
+            <button type="button" class="btn btn-xs tr-qadd" data-q="25" title="Add 25 to ${c}">+25</button>
+            <button type="button" class="btn btn-xs tr-qadd" data-q="50" title="Add 50 to ${c}">+50</button>
+          </div>
+          <input class="input tr-qty" data-tr-cls="${c}" inputmode="numeric" placeholder="0" maxlength="5" value="${esc(row.q[c])}" aria-label="${c} qty">
+        </div>
       </label>`).join('');
     return `<div class="tr-agent-card${errList.length ? ' tr-has-err' : ''}" data-tr-row="${row.id}">
       <div class="tr-agent-head">
@@ -1620,7 +1627,8 @@ body.colorful .from-hdr { color: #166534; }
             <label class="field"><span class="dim small">📱 Mobile number${askMobile ? ' *' : ''}</span>
               <input class="input${badCls(row.id, 'mobile')}" data-tr-a="mobile" inputmode="tel" maxlength="16" placeholder="10 digit mobile" autocomplete="off" value="${esc(row.mobile)}"></label>
             <label class="field"><span class="dim small">📮 Pincode${askAddress ? ' *' : ''}</span>
-              <input class="input${badCls(row.id, 'pincode')}" data-tr-a="pincode" inputmode="numeric" maxlength="6" placeholder="6 digit pincode" autocomplete="off" value="${esc(row.pincode)}"></label>
+              <input class="input${badCls(row.id, 'pincode')}" data-tr-a="pincode" inputmode="numeric" maxlength="6" placeholder="6 digit pincode" autocomplete="off" value="${esc(row.pincode)}">
+              <span class="tr-pin-geo" data-tr-pin-geo="${row.id}" ${row.pinGeo ? '' : 'hidden'}>${row.pinGeo ? `📍 <b>${esc(row.pinGeo.split(',')[0])}</b>, ${esc(row.pinGeo.split(',').slice(1).join(','))} <button type="button" class="tr-pin-append" title="Add city and state to address">+ Add to address</button>` : ''}</span></label>
             <label class="field tr-span-all"><span class="dim small">🏠 Full address${askAddress ? ' *' : ''} <small class="dim">(house / street / area / city — tags isi address par jayenge)</small></span>
               <textarea class="input${badCls(row.id, 'address')}" data-tr-a="address" rows="2" maxlength="300" placeholder="e.g. 24, Shanti Nagar, Sodala, Jaipur">${esc(row.address)}</textarea></label>
           </div>
@@ -1635,6 +1643,13 @@ body.colorful .from-hdr { color: #166534; }
         </div>
         <div class="tr-qty-list${badCls(row.id, 'qty')}" role="group" aria-label="Class-wise qty" style="${isFastag() ? '' : 'display:none'}">
           <div class="tr-qty-head"><span>Tag class</span><span>Qty</span></div>
+          <div class="tr-qty-batch">
+            <span class="dim small">⚡ Quick All:</span>
+            <button type="button" class="btn btn-xs tr-qall" data-q="10">+10</button>
+            <button type="button" class="btn btn-xs tr-qall" data-q="25">+25</button>
+            <button type="button" class="btn btn-xs tr-qall" data-q="50">+50</button>
+            <button type="button" class="btn btn-xs tr-qclear">Clear</button>
+          </div>
           ${qtyRows}
           <div class="tr-qty-foot"><span>Requested total</span><b data-tr-agent-total2>${fmt(total)}</b></div>
         </div>
@@ -1649,6 +1664,13 @@ body.colorful .from-hdr { color: #166534; }
     const cfg = formCfg();
     const busy = state.busy === 'send';
     body.innerHTML = `
+      <div class="tr-form-stepper" role="navigation" aria-label="Form progress">
+        <div class="tr-step active" data-step="1"><span class="tr-step-dot">1</span><span class="tr-step-lbl">👤 Employee</span></div>
+        <div class="tr-step-line"></div>
+        <div class="tr-step" data-step="2"><span class="tr-step-dot">2</span><span class="tr-step-lbl">🧑 Agent & Tags</span></div>
+        <div class="tr-step-line"></div>
+        <div class="tr-step" data-step="3"><span class="tr-step-dot">3</span><span class="tr-step-lbl">🚚 Address & Courier</span></div>
+      </div>
       ${employeeCardHtml()}
       ${stockBoardHtml()}
       <section class="card tr-agents-card"><div class="card-head"><h3>🧑‍🤝‍🧑 Agent request <span class="count" data-tr-agents>${fmt(state.rows.length)} agent${state.rows.length === 1 ? '' : 's'}</span></h3>
@@ -1679,6 +1701,7 @@ body.colorful .from-hdr { color: #166534; }
     rootEl.querySelectorAll('.tr-agent-card').forEach(bindAgentCard);
     bindStockBoard(rootEl);
     bindFormGlobal();
+    updateStepper();
   }
   /** Index aane par sirf meta + hints update (typing ke beech focus na toote). */
   function refreshFormMeta() {
@@ -1707,6 +1730,25 @@ body.colorful .from-hdr { color: #166534; }
     const g = fmt(isFastag() ? grandTotal() : 0);
     rootEl.querySelectorAll('[data-tr-total],[data-tr-total2]').forEach((el) => { el.textContent = g; });
     rootEl.querySelectorAll('[data-tr-filled]').forEach((el) => { el.textContent = fmt(filledCount()); });
+    updateStepper();
+  }
+  function updateStepper() {
+    const step1 = rootEl.querySelector('.tr-step[data-step="1"]');
+    const step2 = rootEl.querySelector('.tr-step[data-step="2"]');
+    const step3 = rootEl.querySelector('.tr-step[data-step="3"]');
+    if (!step1 || !step2 || !step3) return;
+    const empDone = !!clean(state.employee && state.employee.name);
+    const agentsDone = state.rows.some((r) => clean(r.name) && (rowTotal(r) > 0 || (state.itemName && state.itemName !== 'fastag')));
+    const addrDone = state.rows.some((r) => clean(r.pincode).length === 6 && clean(r.address).length >= 5);
+
+    step1.classList.toggle('done', empDone);
+    step1.classList.toggle('active', !empDone);
+
+    step2.classList.toggle('done', agentsDone);
+    step2.classList.toggle('active', empDone && !agentsDone);
+
+    step3.classList.toggle('done', addrDone);
+    step3.classList.toggle('active', agentsDone && !addrDone);
   }
   /** Field theek hone par uska error turant hatao (poora re-render nahi). */
   function clearErr(card, rowId, field) {
@@ -1973,13 +2015,91 @@ body.colorful .from-hdr { color: #166534; }
       const key = el.dataset.trA;
       let v = el.value;
       if (key === 'mobile') { const c = v.replace(/[^\d+\s-]/g, ''); if (c !== v) el.value = c; v = c.replace(/[\s-]/g, ''); }
-      if (key === 'pincode') { const c = v.replace(/\D/g, '').slice(0, 6); if (c !== v) el.value = c; v = c; }
+      if (key === 'pincode') {
+        const c = v.replace(/\D/g, '').slice(0, 6);
+        if (c !== v) el.value = c;
+        v = c;
+        const pinBadge = card.querySelector(`[data-tr-pin-geo="${row.id}"]`);
+        if (v.length === 6) {
+          fetch(`/api/public/pincode?pin=${encodeURIComponent(v)}`).then((r) => r.json()).then((res) => {
+            if (res && res.ok && res.district && res.state) {
+              row.pinGeo = `${res.district}, ${res.state}`;
+              if (pinBadge) {
+                pinBadge.innerHTML = `📍 <b>${esc(res.district)}</b>, ${esc(res.state)} <button type="button" class="tr-pin-append" title="Add city and state to address">+ Add to address</button>`;
+                pinBadge.hidden = false;
+              }
+            } else if (pinBadge) {
+              pinBadge.hidden = true;
+              row.pinGeo = '';
+            }
+          }).catch(() => {});
+        } else if (pinBadge) {
+          pinBadge.hidden = true;
+          row.pinGeo = '';
+        }
+      }
       if (key === 'firstBarcode' || key === 'lastBarcode') { const c = v.replace(/[^\d-]/g, ''); if (c !== v) el.value = c; v = c; }
       row[key] = v;
        if (key === 'mobile' || key === 'address' || key === 'pincode') { row.contactManual = true; row.fromBook = false; row.addressSource = ''; }
       const ok = key === 'mobile' ? digits(v).length >= 10 : key === 'pincode' ? /^\d{6}$/.test(v) : key === 'dispatchName' ? clean(v).length >= 2 : clean(v).length >= 8;
       if (ok) clearErr(card, row.id, key);
       updateTotals(null, null);
+    }));
+    // Quick add shortcuts and pincode append handler
+    card.addEventListener('click', (e) => {
+      const pinBtn = e.target.closest('.tr-pin-append');
+      if (pinBtn && row.pinGeo) {
+        const addrEl = card.querySelector('[data-tr-a="address"]');
+        if (addrEl) {
+          const cur = addrEl.value.trim();
+          if (!cur.toLowerCase().includes(row.pinGeo.toLowerCase())) {
+            addrEl.value = cur ? `${cur}, ${row.pinGeo}` : row.pinGeo;
+            row.address = addrEl.value;
+            clearErr(card, row.id, 'address');
+            U.toast(`Added ${row.pinGeo} to address`, 'ok');
+          }
+        }
+      }
+    });
+    card.querySelectorAll('.tr-qadd').forEach((b) => b.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const wrap = b.closest('.tr-qty-quick');
+      const cls = wrap ? wrap.dataset.trCls : null;
+      if (!cls) return;
+      const qinp = card.querySelector(`.tr-qty[data-tr-cls="${cls}"]`);
+      if (qinp) {
+        const add = Number(b.dataset.q) || 0;
+        const cur = Number(qinp.value) || 0;
+        const next = String(Math.min(99999, cur + add));
+        qinp.value = next;
+        row.q[cls] = next;
+        if (rowTotal(row) > 0) clearErr(card, row.id, 'qty');
+        updateTotals(card, row);
+      }
+    }));
+    card.querySelectorAll('.tr-qall').forEach((b) => b.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const add = Number(b.dataset.q) || 0;
+      CLASS_LIST.forEach((cls) => {
+        const qinp = card.querySelector(`.tr-qty[data-tr-cls="${cls}"]`);
+        if (qinp) {
+          const cur = Number(qinp.value) || 0;
+          const next = String(Math.min(99999, cur + add));
+          qinp.value = next;
+          row.q[cls] = next;
+        }
+      });
+      if (rowTotal(row) > 0) clearErr(card, row.id, 'qty');
+      updateTotals(card, row);
+    }));
+    card.querySelectorAll('.tr-qclear').forEach((b) => b.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      CLASS_LIST.forEach((cls) => {
+        const qinp = card.querySelector(`.tr-qty[data-tr-cls="${cls}"]`);
+        if (qinp) qinp.value = '';
+        row.q[cls] = '';
+      });
+      updateTotals(card, row);
     }));
     // ---- class qty inputs (typing par re-render nahi — fast + focus safe) ------------------------
     card.querySelectorAll('.tr-qty').forEach((qinp) => {

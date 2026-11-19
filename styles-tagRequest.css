@@ -347,3 +347,36 @@ html.mobile-ui .tr-req-tbl .tr-c-suggest .tr-grp { font-size: 16px; }
 .tr-cq-item .tr-ed-field { display: flex; gap: 4px; align-items: center; }
 .tr-cq-item .tr-ed-field b { width: 64px; flex: none; }
 .tr-cq-item .tr-ed-field .input, .tr-cq-edit .tr-ed-field .input { width: 150px; text-align: left; font-weight: 600; }
+
+/* Tag Request Stepper, NPCI Badges & Quick Quantity Shortcuts */
+.badge-vc { display: inline-flex; align-items: center; justify-content: center; font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 6px; line-height: 1.2; text-transform: uppercase; border: 1px solid transparent; margin-right: 6px; }
+.badge-vc.vc4 { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
+.badge-vc.vc5 { background: #ffedd5; color: #9a3412; border-color: #fed7aa; }
+.badge-vc.vc6 { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.badge-vc.vc7 { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+.badge-vc.vc12 { background: #fce7f3; color: #9d174d; border-color: #fbcfe8; }
+.badge-vc.vc16 { background: #e0f2fe; color: #0369a1; border-color: #bae6fd; }
+.badge-vc.vc20 { background: #ccfbf1; color: #115e59; border-color: #99f6e4; }
+.badge-vc.vc5p, .badge-vc.vc5plus { background: #f3e8ff; color: #6b21a8; border-color: #d8b4fe; }
+
+.tr-form-stepper { display: flex; align-items: center; justify-content: space-between; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 18px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(15, 23, 42, .04); }
+.tr-step { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; transition: .15s ease; }
+.tr-step-dot { width: 24px; height: 24px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 8%, var(--card)); color: var(--muted); display: grid; place-items: center; font-weight: 800; font-size: 11.5px; }
+.tr-step.active .tr-step-dot { background: var(--brand); color: #fff; box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 20%, transparent); }
+.tr-step.active .tr-step-lbl { color: var(--ink); font-weight: 750; }
+.tr-step.done .tr-step-dot { background: #16a34a; color: #fff; }
+.tr-step.done .tr-step-lbl { color: #16a34a; font-weight: 700; }
+.tr-step-line { flex: 1; height: 2px; background: var(--line); margin: 0 10px; }
+@media (max-width: 600px) { .tr-form-stepper { padding: 10px 12px; } .tr-step-lbl { font-size: 11px; } .tr-step-dot { width: 20px; height: 20px; font-size: 10px; } }
+
+.tr-pin-geo { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #1e40af; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 3px 8px; margin-top: 4px; }
+.tr-pin-append { font-size: 10.5px; padding: 1px 6px; border-radius: 4px; cursor: pointer; background: #2563eb; color: #fff; border: 0; font-weight: 700; }
+.tr-pin-append:hover { background: #1d4ed8; }
+
+.tr-qty-right { display: flex; align-items: center; gap: 8px; }
+.tr-qty-quick { display: flex; gap: 3px; }
+.tr-qty-quick .btn { padding: 2px 7px; font-size: 11px; border-radius: 6px; background: color-mix(in srgb, var(--ink) 4%, var(--card)); border: 1px solid var(--line); color: var(--ink); font-weight: 700; cursor: pointer; }
+.tr-qty-quick .btn:hover { background: color-mix(in srgb, var(--brand) 12%, var(--card)); border-color: var(--brand); color: var(--brand); }
+.tr-qty-batch { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px; background: color-mix(in srgb, var(--brand) 4%, var(--card)); border: 1px dashed var(--line); border-radius: 10px; margin-bottom: 8px; }
+.tr-qty-batch .btn { padding: 3px 9px; font-size: 11.5px; font-weight: 700; }
+
