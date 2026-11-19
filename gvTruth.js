@@ -453,16 +453,24 @@ window.FF = window.FF || {};
   /** GV ke agents + TLs — ledger (issuance) + Tag Assignment (stock) + sheet cross-check ek jagah. */
   function people() {
     const ix = index();
-    const map = new Map();
+    const map = new Map(), byName = new Map();
     const ensure = (kind, name, id, extra = {}) => {
       const nm = clean(name);
       if (!nm) return null;
-      const k = `${kind}|${nameKey(nm)}`;
-      let e = map.get(k);
+      // v3.125.346 — ID pehle: same naam ke do alag agents (Sandeep Kumar APS109 / APS020903) ek me merge nahi hote.
+      const nk = `${kind}|${nameKey(nm)}`, ik = idKey(id), idk = ik ? `${kind}|id:${ik}` : '';
+      let e = idk ? map.get(idk) : null;
+      if (!e) {
+        const sameName = byName.get(nk) || [];
+        e = ik ? (sameName.find((x) => !idKey(x.id)) || null) : (sameName[0] || null);   // bina-ID row: pehle wale same-naam person se jodo
+        if (e && ik) { e.id = clean(id); map.set(idk, e); }
+      }
       if (!e) {
         const placeholder = kind === 'gv-tl' && !!(FF.config && FF.config.isExcludedTl && FF.config.isExcludedTl(nm));
         e = { kind, name: nm, id: clean(id), tlName: '', tlId: '', cur: 0, last: 0, today: 0, stock: 0, sheetCur: null, sheetLast: null, sheetStock: null, isDirect: false, isPlaceholder: placeholder, altIds: new Set(), mobile: '' };
-        map.set(k, e);
+        map.set(idk || `${nk}|noid${byName.get(nk) ? byName.get(nk).length : 0}`, e);
+        if (!byName.has(nk)) byName.set(nk, []);
+        byName.get(nk).push(e);
       }
       if (!e.id && id) e.id = clean(id);
       Object.assign(e, extra);

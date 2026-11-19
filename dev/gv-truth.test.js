@@ -284,6 +284,20 @@ test('Tag Assignment TL/agent totals and drill-down prefer exact IDs when displa
   }
 });
 
+test('gvTruth.people: same naam, alag ID ke do agents alag rehte hain (Sandeep Kumar APS109 / APS020903)', async () => {
+  await boot();
+  const M = FF.gv.get('master');
+  const dup = (id) => ({ ...M[0], agentId: id, agentName: 'Taga Ram', ym: ym });
+  const saved = M.slice();
+  try {
+    M.push(dup('APS109'), dup('APS020903'));
+    FF.gvTruth.invalidateIndex && FF.gvTruth.invalidateIndex();
+    const list = FF.gvTruth.people().filter((p) => p.kind === 'gv-agent' && /^taga ram$/i.test(p.name));
+    const ids = list.map((p) => p.id);
+    assert.ok(ids.includes('APS109') && ids.includes('APS020903') && ids.includes(A1.id), `teeno ID alag: ${ids}`);
+  } finally { M.length = 0; saved.forEach((x) => M.push(x)); FF.gvTruth.invalidateIndex && FF.gvTruth.invalidateIndex(); }
+});
+
 test('gvTruth.people: list me agents + TL dono, ledger aur stock ke saath', async () => {
   await boot();
   const list = FF.gvTruth.people();
