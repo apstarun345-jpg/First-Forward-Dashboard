@@ -64,9 +64,23 @@ export function normCls(value) {
 }
 const isHeaderTag = (tagId, cls) => /^(TAG[_ ]?ID|TAGID)$/i.test(str(tagId)) || /^(TAG[_ ]?CLASS|VEHICLE[_ ]?CLASS|CLASS)$/i.test(str(cls));
 
-function newNode(name, id, tl) { return { n: name || '', id: id || '', tl: tl || '', t: [0, 0], u: [0, 0], c: [[0, 0, 0, 0], [0, 0, 0, 0]], o: [0, 0], s: [0, 0] }; }
-function addAge(node, g, age) {
+function newNode(name, id, tl) { return { n: name || '', id: id || '', tl: tl || '', t: [0, 0], u: [0, 0], c: [[0, 0, 0, 0], [0, 0, 0, 0]], o: [0, 0], s: [0, 0], byCls: {}, clsStock: {} }; }
+const stockBucket = (x) => { const u = String(x || 'VC4').toUpperCase().replace(/\s+/g, ''); if (/^\d+$/.test(u)) return `VC${u}`; return /^VC\d+\+?$/.test(u) ? u : (u.slice(0, 12) || 'VC4'); };
+function addAge(node, g, age, cls) {
   node.t[g]++;
+  if (cls !== undefined) {
+    const bk = stockBucket(cls);
+    node.clsStock = node.clsStock || {};
+    node.clsStock[bk] = (node.clsStock[bk] || 0) + 1;
+    const stdCls = (cls ? normCls(cls) : '') || 'VC4';
+    node.byCls = node.byCls || {};
+    const ce = node.byCls[stdCls] || (node.byCls[stdCls] = { t: 0, c: [0, 0, 0, 0], o: 0 });
+    ce.t++;
+    if (age !== null && age !== undefined && age >= 0) {
+      if (age > ce.o) ce.o = age;
+      for (let i = 0; i < AGE_THRESH.length; i++) if (age >= AGE_THRESH[i]) ce.c[i]++;
+    }
+  }
   if (age === null || age === undefined || age < 0) { node.u[g]++; return; }
   node.s[g] += age;
   if (age > node.o[g]) node.o[g] = age;
@@ -236,7 +250,7 @@ export function mapRows(index, { bucket = 'all', cls = '', q = '' } = {}) {
 /** 🧠 v3.125.32 — RAM bachat (Render 512 MB): ~2.5 lakh tag rows JS arrays (har row ~350 byte heap) ki jagah ek JSON
  *  string me (≈1 byte/char, ~3x kam). `.raw` padhte hi parse hokar 60 sec ke liye rehta hai (drill / CSV / personal links),
  *  phir chhod diya jaata hai. Rows read-only hain, isliye behaviour same. */
-export const RAW_KEEP_MS = 60e3;
+export const RAW_KEEP_MS = 10e3;
 export function compactRaw(c) {
   if (!c || !Array.isArray(c.raw)) return c;
   const rows = c.raw;
@@ -355,14 +369,14 @@ export function createStockAgeBuilder({ compact = false, todayDay, masterId = '5
       if (!an) { an = newNode(agentName || (aKey === '__none__' ? 'Bina agent (BC / master stock)' : str(r.agentId)), agentDigits, str(r.tl)); ff.agents.set(aKey, an); }
       if (!an.tl && r.tl) an.tl = str(r.tl);
       if (!an.n && agentName) an.n = agentName;
-      addAge(an, g, age);
+      addAge(an, g, age, r.cls);
       const tKey = same(normName(r.tl)) || '__none__';
       let tn = ff.tls.get(tKey);
       if (!tn) { tn = newNode(str(r.tl) || '— (TL blank)'); ff.tls.set(tKey, tn); }
-      addAge(tn, g, age);
-      addAge(ff.all, g, age);
+      addAge(tn, g, age, r.cls);
+      addAge(ff.all, g, age, r.cls);
       const parked = (masterDigits && agentDigits === masterDigits) || (parkedTlNorm && normName(r.tl) === parkedTlNorm) || (!agentDigits && !agentName);
-      addAge(parked ? ff.parked : ff.field, g, age);
+      addAge(parked ? ff.parked : ff.field, g, age, r.cls);
       ff.total++;
       // v3.125.106 — FASTag Mapping bhi isi copy se: [11] row id · [12] inventory · [13] tag type · [14] BC date · [15] agent date (asli text)
       ff.raw.push([tagId, str(r.barcode), same(normCls(r.cls)), day, agentName, same(str(r.agentId)), same(str(r.tl)), age, aKey, tKey, src, str(r.id), same(str(r.name)), same(str(r.tagType)), str(r.bcDate), str(r.agentDate)]);
@@ -405,13 +419,13 @@ export function createStockAgeBuilder({ compact = false, todayDay, masterId = '5
       let an = gv.agents.get(aKey);
       if (!an) { an = newNode(agentName || agentId || 'Bina agent', agentId, str(r.tlName)); gv.agents.set(aKey, an); }
       if (!an.tl && r.tlName) an.tl = str(r.tlName);
-      addAge(an, g, age);
+      addAge(an, g, age, r.cls);
       const tlName = same(str(r.tlName)), tlId = str(r.tlId);
       const tKey = tlName ? same(normName(tlName)) : tlId ? `ID:${tlId.toUpperCase()}` : '__direct__';
       let tn = gv.tls.get(tKey);
       if (!tn) { tn = newNode(tlName || (tlId ? `TL ${tlId}` : 'Direct agents (no TL)')); gv.tls.set(tKey, tn); }
-      addAge(tn, g, age);
-      addAge(gv.all, g, age);
+      addAge(tn, g, age, r.cls);
+      addAge(gv.all, g, age, r.cls);
       gv.total++;
       gv.raw.push([tagId, str(r.serial), same(normCls(r.cls)), day, agentName, same(str(r.agentId)), tlName, age, aKey, tKey, src, inStockFlag]);
     }
@@ -441,19 +455,21 @@ export function followupAgeByAgent(index, ch) {
   const src = index && index[ch];
   if (!src) return [];
   const groups = new Map();
-  const rows = ch === 'gv' ? [...(src.raw || []), ...(src.extraInStock || [])] : (src.raw || []);
-  for (const r of rows) {
-    if (ch === 'gv' && r[11] !== 1) continue;
-    if (ch === 'ff' && index.mapGv && !mapBucketOf(r, index.mapGv, index.mapOpts || {}).ffMapped) continue;
+  const handleRow = (r) => {
+    if (ch === 'gv' && r[11] !== 1) return;
+    if (ch === 'ff' && index.mapGv && !mapBucketOf(r, index.mapGv, index.mapOpts || {}).ffMapped) return;
     const id = str(r[5]).toUpperCase().replace(/\.0+$/, ''), name = str(r[4]);
     const key = id ? `I:${id}` : name ? `N:${normName(name)}` : '';
-    if (!key) continue;
+    if (!key) return;
     const group = groups.get(key) || { id, name, age90: 0, known: 0, unknown: 0 };
     const age = r[7];
     if (age === null || age === undefined || age === '' || !Number.isFinite(Number(age))) group.unknown++;
     else { group.known++; if (Number(age) >= 90) group.age90++; }
     groups.set(key, group);
-  }
+  };
+  if (typeof src.each === 'function') src.each(handleRow);
+  else (src.raw || []).forEach(handleRow);
+  if (ch === 'gv' && Array.isArray(src.extraInStock)) src.extraInStock.forEach(handleRow);
   return [...groups.values()];
 }
 
@@ -490,17 +506,30 @@ export function personalStock(index, ch, kind, name) {
     if (!out.personId && n.id) out.personId = n.id;
     for (let g = 0; g < 2; g++) { out.t[g] += n.t[g]; out.o[g] = Math.max(out.o[g], n.o[g]); for (let i = 0; i < 4; i++) out.c[g][i] += n.c[g][i]; }
   });
-  for (const r of c.raw || []) {
-    const matchKey = isTl ? r[9] : r[8];
-    if (!keySet.has(matchKey)) continue;
-    const cls = r[2] || 'VC4';
-    const age = r[7];
-    if (!out.personId && !isTl && r[5]) out.personId = String(r[5]).trim();
-    const ce = out.byCls[cls] || (out.byCls[cls] = { t: 0, c: [0, 0, 0, 0], o: 0 });
-    ce.t++;
-    if (age !== null && age !== undefined && age >= 0) {
-      if (age > ce.o) ce.o = age;
-      for (let i = 0; i < AGE_THRESH.length; i++) if (age >= AGE_THRESH[i]) ce.c[i]++;
+  const hasPrecomputed = nodes.some((n) => n && n.byCls && Object.keys(n.byCls).length > 0);
+  if (hasPrecomputed) {
+    nodes.forEach((n) => {
+      if (n.byCls) {
+        Object.entries(n.byCls).forEach(([cls, v]) => {
+          const ce = out.byCls[cls] || (out.byCls[cls] = { t: 0, c: [0, 0, 0, 0], o: 0 });
+          ce.t += v.t; ce.o = Math.max(ce.o, v.o);
+          for (let i = 0; i < 4; i++) ce.c[i] += v.c[i];
+        });
+      }
+    });
+  } else {
+    for (const r of c.raw || []) {
+      const matchKey = isTl ? r[9] : r[8];
+      if (!keySet.has(matchKey)) continue;
+      const cls = r[2] || 'VC4';
+      const age = r[7];
+      if (!out.personId && !isTl && r[5]) out.personId = String(r[5]).trim();
+      const ce = out.byCls[cls] || (out.byCls[cls] = { t: 0, c: [0, 0, 0, 0], o: 0 });
+      ce.t++;
+      if (age !== null && age !== undefined && age >= 0) {
+        if (age > ce.o) ce.o = age;
+        for (let i = 0; i < AGE_THRESH.length; i++) if (age >= AGE_THRESH[i]) ce.c[i]++;
+      }
     }
   }
   if (isGroup) {
@@ -530,6 +559,16 @@ export function personalClassStockByAgent(index, ch, kind, name) {
     keySet = resolveKeys(c, ch === 'gv' ? 'gv' : 'ff', 'agent', (Array.isArray(name) ? name : [name]).filter((x) => str(x)));
   }
   if (!keySet.size) return out;
+  let hasPrecomputed = false;
+  for (const k of keySet) {
+    const node = c.agents.get(k);
+    if (node && node.clsStock && Object.keys(node.clsStock).length > 0) {
+      hasPrecomputed = true;
+      const nm = normName(node.n);
+      if (nm) out.set(nm, { ...node.clsStock });
+    }
+  }
+  if (hasPrecomputed) return out;
   for (const r of c.raw || []) {
     const k = r[8];
     if (!keySet.has(k)) continue;
@@ -583,17 +622,21 @@ export function tagsFor(index, q = {}) {
   const g = q.group === 'core' ? 0 : q.group === 'comm' ? 1 : -1;
   const onlyUnknown = q.unknown === true || q.unknown === '1';
   const rows = [];
-  for (const r of c.raw) {
-    if (kind === 'agent' && !agentKeys.has(r[8])) continue;
-    if (kind === 'agents' && !(agentKeys.has(r[8]) || (tlKeys && tlKeys.has(r[9])))) continue;
-    if (kind === 'tl' && !tlKeys.has(r[9])) continue;
-    if (kind === 'field' && (ch !== 'ff' || parkedOf(r))) continue;
-    if (kind === 'parked' && (ch !== 'ff' || !parkedOf(r))) continue;
-    if (g >= 0 && groupOf(r[2]) !== g) continue;
-    if (onlyUnknown) { if (r[7] !== null) continue; }
-    else if (minAge && (r[7] === null || r[7] < minAge)) continue;
+  const scan = (fn) => {
+    if (typeof c.each === 'function') c.each(fn);
+    else (c.raw || []).forEach(fn);
+  };
+  scan((r) => {
+    if (kind === 'agent' && !agentKeys.has(r[8])) return;
+    if (kind === 'agents' && !(agentKeys.has(r[8]) || (tlKeys && tlKeys.has(r[9])))) return;
+    if (kind === 'tl' && !tlKeys.has(r[9])) return;
+    if (kind === 'field' && (ch !== 'ff' || parkedOf(r))) return;
+    if (kind === 'parked' && (ch !== 'ff' || !parkedOf(r))) return;
+    if (g >= 0 && groupOf(r[2]) !== g) return;
+    if (onlyUnknown) { if (r[7] !== null) return; }
+    else if (minAge && (r[7] === null || r[7] < minAge)) return;
     rows.push(r);
-  }
+  });
   rows.sort((a, b) => (b[7] ?? -1) - (a[7] ?? -1));
   const limit = Math.max(1, Math.min(150000, Number(q.limit) || 2000));
   const iso = (day) => (day ? new Date(day * DAY_MS).toISOString().slice(0, 10) : '');

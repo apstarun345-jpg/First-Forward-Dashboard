@@ -4626,7 +4626,7 @@ function startStockAgeBuild(key) {
     if (typeof globalThis.gc === 'function') globalThis.gc();   // snapshot load ka kachra pehle saaf, phir naapo
     const rssMb = process.memoryUsage().rss / 1048576;
     // purana index rakhna behtar (scan me kai minute — beech me sab "pending"); sirf sach me tight ho tab chhodo
-    if (stockAgeState.index && rssMb > Number(process.env.STOCK_REBUILD_DROP_MB || 320)) {
+    if (stockAgeState.index && rssMb > Number(process.env.STOCK_REBUILD_DROP_MB || 280)) {
       console.log(`stock index: rebuild se pehle purana index chhoda (rss ${Math.round(rssMb)} MB)`);
       try { stockSerialIndex(stockAgeState.index); } catch { /* optional */ }   // chhodne se pehle chhota count-index bana lo
       stockAgeState.index = null;   // serial index (chhota, ~5 MB) rakho — dispatch Issued / Stock rebuild ke dauran bhi turant
@@ -9583,7 +9583,8 @@ async function handleApi(req, res, url) {
   const ADDRESS_BOOK_TAB = 'Address';
   const addressBookRuntime = (globalThis.__ffAddrRt ||= { at: 0, map: null, promise: null });   // 🧠 v3.125.251 — ye sab handleApi ke andar hai (har request par chalta) → state global, warna cache kabhi nahi bachta
   const addressBookKey = (a) => {
-    const channel = a && a.channel === 'gv' ? 'gv' : 'ff';
+    const isGv = (a && a.channel === 'gv') || (a && /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(a.agentId || a.id));
+    const channel = isGv ? 'gv' : 'ff';
     const id = String((a && (a.agentId || a.id)) || '').trim();
     const name = tagNameKey(a && (a.agentName || a.name));
     return `${channel}|${id ? `id:${id}` : `n:${name}`}`;
@@ -9592,7 +9593,8 @@ async function handleApi(req, res, url) {
     const a = req && req.agent ? req.agent : {};
     const name = shortText(a.name || a.agentName, 120);
     const agentId = shortText(a.agentId, 40);
-    const channel = a.channel === 'gv' ? 'gv' : 'ff';
+    const isGv = a.channel === 'gv' || /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(agentId || a.id);
+    const channel = isGv ? 'gv' : 'ff';
     const mobile = String(a.mobile || a.phone || '').replace(/[^\d+]/g, '').slice(0, 16); // 🐛 v3.125.217 — pehle /[^\\d+]/ tha: saare digits hat jaate the → Address me mobile kabhi save nahi hota tha
     const address = shortText(String(a.address || a.fullAddress || '').replace(/\s+/g, ' '), 300);
     const pincode = tagDigits(a.pincode || a.pin).slice(0, 6);
@@ -9640,7 +9642,17 @@ async function handleApi(req, res, url) {
     addressBookRuntime.promise = store.call('readaddresses', { tab: ADDRESS_BOOK_TAB }) // 📇 Address hamesha storage sheet ke apne tab me (tag-request sheet alag ho tab bhi)
       .then((out) => {
         const map = fallback;
-        (out.rows || []).forEach((e) => { if (e && e.key) map.set(String(e.key), e); });
+        (out.rows || []).forEach((e) => {
+          if (e && e.key) {
+            let idFromKey = '';
+            if (e.key.includes('|id:')) idFromKey = e.key.split('|id:')[1].split('|')[0];
+            if (/^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(e.agentId || idFromKey)) {
+              e.channel = 'gv';
+              if (e.key.startsWith('ff|')) e.key = 'gv|' + e.key.slice(3);
+            }
+            map.set(String(e.key), e);
+          }
+        });
         addressBookRuntime.map = map; addressBookRuntime.at = Date.now(); return map;
       })
       .catch((err) => {
@@ -9662,7 +9674,7 @@ async function handleApi(req, res, url) {
       if (a.address && a.mobile && a.pincode) continue;
       const id = String(a.agentId || a.id || (r.rows && r.rows[0] && r.rows[0].agentId) || '').trim();
       const name = tagNameKey(a.name || (r.rows && r.rows[0] && r.rows[0].agentName) || '');
-      if (!a.mobile) { const dm = directoryMobile(id, a.name || (r.rows && r.rows[0] && r.rows[0].agentName)); if (dm) { a.mobile = dm; filled++; if (a.address && a.pincode) continue; } }
+      if (!a.mobile) { const dm = directoryMobile(id, a.name || (r.rows && r.rows[0] && r.rows[0].agentName), a.channel); if (dm) { a.mobile = dm; filled++; if (a.address && a.pincode) continue; } }
       const keys = [];
       ['ff', 'gv'].forEach((ch) => { if (id) keys.push(`${ch}|id:${id}`); if (name) keys.push(`${ch}|n:${name}`); });
       const cands = keys.flatMap((k) => [mem[k], map.get(k)]).filter((x) => x && (x.address || x.pincode || x.mobile));
@@ -9687,7 +9699,7 @@ async function handleApi(req, res, url) {
   const mobNameKey = (n) => String(n || '').toLowerCase().replace(/[^a-z]/g, '');
   resetAgentMobiles = () => { agentMobileRt.data = null; agentMobileRt.at = 0; };
   agentMobileLoader = agentMobileData;
-  agentMobileLookup = (id, name) => directoryMobile(id, name);
+  agentMobileLookup = (id, name, ch) => directoryMobile(id, name, ch);
   /** Mobile sheet: header (pehli 5 rows me) se ID / naam / mobile column pehchano, phir sirf wahi columns padho. */
   async function readMobileSheet(store, spreadsheetId, tab) {
     const head = await store.call('readtab', { spreadsheetId, tab, maxRows: 5, maxCols: 60 }, { timeoutMs: 60e3, attempts: 2 });
@@ -9734,8 +9746,19 @@ async function handleApi(req, res, url) {
       const put = (idList, name, mob, src, override, chn) => {
         const d = tagDigits(mob).slice(-10);
         if (d.length !== 10 || /^0/.test(d)) return false;
-        { const first = (idList || []).map((x) => String(x || '').trim()).find(Boolean) || ''; const o = byMobile[d]; if (!o) byMobile[d] = { id: first, name: String(name || '').trim(), ch: chn || '' }; else { if (!o.id && first) o.id = first; if (!o.ch && chn) o.ch = chn; if (!o.name && name) o.name = String(name).trim(); } }
-        idList.flatMap(mobIdKeys).forEach((k) => { if (override || !ids[k]) ids[k] = d; });
+        const validIds = (idList || []).map((x) => String(x || '').trim()).filter(Boolean);
+        const autoChn = chn || (validIds.some((id) => /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(id)) ? 'gv' : '');
+        {
+          const first = validIds[0] || '';
+          const o = byMobile[d];
+          if (!o) byMobile[d] = { id: first, name: String(name || '').trim(), ch: autoChn || '' };
+          else {
+            if (!o.id && first) o.id = first;
+            if (!o.ch && autoChn) o.ch = autoChn;
+            if (!o.name && name) o.name = String(name).trim();
+          }
+        }
+        validIds.flatMap(mobIdKeys).forEach((k) => { if (override || !ids[k]) ids[k] = d; });
         const nk = mobNameKey(name);
         if (nk.length >= 4) { if (names[nk] && names[nk] !== d && !override) nameClash.add(nk); else names[nk] = d; }
         sources[src]++; return true;
@@ -9765,9 +9788,22 @@ async function handleApi(req, res, url) {
       const seen = new Map();
       if (map) for (const [k, e] of map) seen.set(k, e);
       for (const [k, e] of Object.entries(addressBookMemoryEntries())) seen.set(k, { ...(seen.get(k) || {}), ...e, mobile: (e && e.mobile) || (seen.get(k) || {}).mobile || '' });
-      for (const e of seen.values()) if (e) put([e.agentId], e.agent || e.agentName, e.mobile, 'address', true);
+      for (const e of seen.values()) {
+        if (!e) continue;
+        let idFromKey = '';
+        if (e.key && e.key.includes('|id:')) idFromKey = e.key.split('|id:')[1].split('|')[0];
+        const isGv = e.channel === 'gv' || (e.key && e.key.startsWith('gv|')) || /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(e.agentId || idFromKey);
+        const chn = isGv ? 'gv' : (e.channel || (e.key && e.key.startsWith('ff|') ? 'ff' : ''));
+        put([e.agentId, idFromKey], e.agent || e.agentName, e.mobile, 'address', true, chn);
+      }
       // 3) Tag requests (sabse nayi wali last me → override)
-      for (const r of (workspaceStore().tagRequests || [])) if (r && r.agent) put([r.agent.agentId, r.agent.id], r.agent.name, r.agent.mobile, 'requests', true);
+      for (const r of (workspaceStore().tagRequests || [])) {
+        if (r && r.agent) {
+          const a = r.agent;
+          const isGv = a.channel === 'gv' || /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(a.agentId || a.id);
+          put([a.agentId, a.id], a.name, a.mobile, 'requests', true, isGv ? 'gv' : 'ff');
+        }
+      }
       nameClash.forEach((k) => { delete names[k]; });   // ek naam ke do alag number → naam se mat batao
       return { ok: true, at: new Date().toISOString(), ids, names, byMobile, count: Object.keys(ids).length, sources, sheetError };
     })().then((d) => { agentMobileRt.data = d; agentMobileRt.at = Date.now(); return d; }).finally(() => { agentMobileRt.promise = null; });
@@ -9778,12 +9814,34 @@ async function handleApi(req, res, url) {
   if (!globalThis.__ffMobBoot) try { if (existsSync(MOB_FILE)) { const j = JSON.parse(readFileSync(MOB_FILE, 'utf8')); const age = Date.now() - Date.parse(j.at || 0); if (j && j.ids && age < 6 * 3600e3) { agentMobileRt.data = j; agentMobileRt.at = Date.now() - age; } } } catch { /* optional */ }
   if (!globalThis.__ffMobBoot) { globalThis.__ffMobBoot = 1; setTimeout(() => { agentMobileData(false).then((d) => { try { if (d && d.ids) writeFileSync(MOB_FILE, JSON.stringify(d)); } catch { /* optional */ } }).catch(() => {}); }, 5 * 60e3); }   // boot ke 5 min baad (boot ke lock-race se door)
   /** Mobile directory se number (ID pehle, phir unique naam). Data load na ho to background me load shuru, abhi '' . */
-  function directoryMobile(id, name) {
+  function directoryMobile(id, name, ch) {
     const d = agentMobileRt.data;
     if (!d) { agentMobileData(false).catch(() => {}); return ''; }
-    for (const k of mobIdKeys(id)) if (d.ids[k]) return d.ids[k];
+    const idStr = String(id || '').trim();
+    const chReq = ch ? String(ch).toLowerCase() : (/^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(idStr) ? 'gv' : '');
+    for (const k of mobIdKeys(idStr)) {
+      if (d.ids[k]) {
+        const cand = d.ids[k];
+        const meta = d.byMobile && d.byMobile[cand];
+        if (chReq && meta && meta.ch && meta.ch !== chReq) continue;
+        return cand;
+      }
+    }
     const nk = mobNameKey(name);
-    return nk.length >= 4 && d.names[nk] ? d.names[nk] : '';
+    if (nk.length >= 4 && d.names[nk]) {
+      const cand = d.names[nk];
+      const meta = d.byMobile && d.byMobile[cand];
+      if (idStr && meta && meta.id) {
+        const normReq = idStr.toUpperCase().replace(/\.0+$/, '');
+        const normMeta = String(meta.id).trim().toUpperCase().replace(/\.0+$/, '');
+        if (normReq !== normMeta) return '';
+      }
+      if (chReq && meta && meta.ch && meta.ch !== chReq) {
+        return '';
+      }
+      return cand;
+    }
+    return '';
   }
   // 💰 v3.125.230 — IDFC payout: APN sheet (agent-wise payable) + FNF sheet (payment release / remark). Sirf admin / "payout" permission.
   const PAYOUT_SHEETS = { apn: String(process.env.APN_PAYOUT_SHEET_ID || '1QyiXewYroY4ppqm2JFKfDmYybh5Un299kEG5mio2z00').trim(), fnf: String(process.env.FNF_PAYOUT_SHEET_ID || '1eZMV79IYrBvTfR5me2IFSbsENp3GzmhWTfB2JNGqjeU').trim() };
@@ -9971,7 +10029,7 @@ async function handleApi(req, res, url) {
     // 📍 v3.125.322 — exact key na mile (ID APS… vs digits / naam thoda alag) to Agents Address list me ID / naam / mobile se dhundo.
     if (!r || !r.address) {
       try {
-        const dm0 = directoryMobile(q && q.agentId, q && q.agentName);
+        const dm0 = directoryMobile(q && q.agentId, q && q.agentName, q && q.channel);
         const idD = tagDigits(q && q.agentId), nk = tagNameKey((q && q.agentName) || ''), m10 = last10(dm0 || '');
         const ch = String((q && q.channel) || '').toLowerCase() === 'gv' ? 'gv' : 'ff';
         const view = await addressBookView();
@@ -9987,7 +10045,7 @@ async function handleApi(req, res, url) {
       } catch (err) { console.warn('lookupAgentAddress fallback:', err && err.message); }
     }
     if (r && r.mobile) return r;
-    const dm = directoryMobile(q && q.agentId, q && q.agentName);
+    const dm = directoryMobile(q && q.agentId, q && q.agentName, q && q.channel);
     if (!dm) return r;
     return r ? { ...r, mobile: dm } : { mobile: dm, address: '', pincode: '', dispatchName: '', tl: '', source: 'Mobile sheet', lastRequestAt: '' };
   }
@@ -13503,16 +13561,50 @@ function mergePersonalStock(list) {
   return out;
 }
 function personalStockFor(sidx, link) {
-  if (!isComboLink(link)) return personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : (link.kind === 'group' ? 'group' : 'agent'), link.kind === 'group' ? personalMemberNames(link) : link.name);
+  if (!isComboLink(link)) {
+    const r = personalStock(sidx, link.source, link.kind === 'tl' ? 'tl' : (link.kind === 'group' ? 'group' : 'agent'), link.kind === 'group' ? personalMemberNames(link) : link.name);
+    if (r && Array.isArray(r.agents)) {
+      const src = link.source === 'gv' ? 'gv' : 'ff';
+      r.agents.forEach((a) => {
+        if (a) {
+          if (!a.src) a.src = (a.id && /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(a.id)) ? 'gv' : src;
+          if (!a.tl && link.kind === 'tl') a.tl = link.name;
+        }
+      });
+    }
+    return r;
+  }
   const res = [];
   const known = { ff: new Set(), gv: new Set() };
   comboTlParts(link).forEach((part) => {
     const r = personalStock(sidx, part.source, 'tl', part.name);
-    if (r) { res.push(r); (r.agents || []).forEach((a) => known[part.source].add(plNormName(a && a.n))); }
+    if (r) {
+      (r.agents || []).forEach((a) => {
+        if (a) {
+          a.src = part.source || ((a.id && /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(a.id)) ? 'gv' : 'ff');
+          if (!a.tl) a.tl = part.name;
+        }
+        known[part.source].add(plNormName(a && a.n));
+      });
+      res.push(r);
+    }
   });
   const bySrc = { ff: [], gv: [] };
-  (Array.isArray(link.members) ? link.members : []).forEach((m) => { const src = plMemberSrc(m, link); if (m && m.name && !known[src].has(plNormName(m.name))) bySrc[src].push(String(m.name)); });
-  ['ff', 'gv'].forEach((src) => { if (bySrc[src].length) { const r = personalStock(sidx, src, 'group', bySrc[src]); if (r) res.push(r); } });
+  (Array.isArray(link.members) ? link.members : []).forEach((m) => {
+    const src = plMemberSrc(m, link);
+    if (m && m.name && !known[src].has(plNormName(m.name))) bySrc[src].push(String(m.name));
+  });
+  ['ff', 'gv'].forEach((src) => {
+    if (bySrc[src].length) {
+      const r = personalStock(sidx, src, 'group', bySrc[src]);
+      if (r) {
+        (r.agents || []).forEach((a) => {
+          if (a) a.src = src || ((a.id && /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(a.id)) ? 'gv' : 'ff');
+        });
+        res.push(r);
+      }
+    }
+  });
   return mergePersonalStock(res);
 }
 /** Class bucket for a stock/issuance class string: VC4 | VC20 | VC5+. */
@@ -13606,9 +13698,19 @@ function plCleanMobile(v) {
 }
 const plMobileFor = (maps, src, id, name) => {
   if (!maps) return '';
-  const nk2 = plNormName(name), ik = plIdKey(id), order = src === 'gv' ? ['gv', 'ff'] : ['ff', 'gv'];
-  const rm = (ik && maps.reg && maps.reg.id.get(ik)) || (nk2 && maps.reg && maps.reg.name.get(nk2)); if (rm) return rm;   // Sheet4 (agent master) mobile = most reliable
-  for (const ch of order) { const m = (ik && maps[ch].id.get(ik)) || maps[ch].name.get(nk2); if (m) return m; }
+  const nk2 = plNormName(name), ik = plIdKey(id);
+  const isGv = src === 'gv' || (id && /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(id));
+  if (isGv) {
+    const gm = (ik && maps.gv && maps.gv.id.get(ik)) || (nk2 && maps.gv && maps.gv.name.get(nk2));
+    if (gm) return gm;
+    const rm = ik && maps.reg && maps.reg.id.get(ik);
+    if (rm) return rm;
+  } else {
+    const rm = (ik && maps.reg && maps.reg.id.get(ik)) || (nk2 && maps.reg && maps.reg.name.get(nk2));
+    if (rm) return rm;
+    const fm = (ik && maps.ff && maps.ff.id.get(ik)) || (nk2 && maps.ff && maps.ff.name.get(nk2));
+    if (fm) return fm;
+  }
   return /^[6-9]\d{9}$/.test(String(id || '').trim()) ? String(id).trim() : '';
 };
 /** Assigned-work list of a team link (module-level copy of normPlAssigned: src | name | id | tl | bucket). */
@@ -14763,12 +14865,41 @@ async function servePersonalPage(req, res, rawToken) {
         names.forEach((n) => agentTl.set(nk(n), link.name));
       }
       if (live) live.agents.forEach((a) => { if (!agentSrc.has(nk(a.name))) agentSrc.set(nk(a.name), a.src); });
+      if (stockInfo && Array.isArray(stockInfo.agents)) {
+        stockInfo.agents.forEach((a) => {
+          if (!a || !a.n) return;
+          const k0 = nk(a.n);
+          if (!k0) return;
+          const src = a.src || (a.id && /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(a.id) ? 'gv' : null);
+          if (src && !agentSrc.has(k0)) agentSrc.set(k0, src);
+          const tlName = a.tl || (link.kind === 'tl' ? link.name : '');
+          if (tlName && !agentTl.has(k0)) agentTl.set(k0, tlName);
+          if (tlName) {
+            const grp = tlGroups.find((g) => g.name === tlName && (!src || g.src === src));
+            if (grp && !grp.agents.some((an) => nk(an) === k0)) grp.agents.push(a.n);
+          }
+        });
+      }
+      for (const [k0, aid] of agentIdBy) {
+        if (/^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(aid) && !agentSrc.has(k0)) agentSrc.set(k0, 'gv');
+      }
       const stockBy = new Map();
       if (stockInfo && stockInfo.agents) stockInfo.agents.forEach((a) => stockBy.set(nk(a.n), (a.t[0] || 0) + (a.t[1] || 0)));
       const liveBy = new Map();
       if (live) live.agents.forEach((a) => liveBy.set(nk(a.name), a.total));
       const peopleMap = new Map();
-      const addPerson = (name) => { const k = nk(name); if (!k) return null; let p = peopleMap.get(k); if (!p) { p = { k: 'a', n: String(name).trim(), s: agentSrc.get(k) || defSrc, tl: agentTl.get(k) || '', m: 0, l: 0, d: 0, st: 0 }; peopleMap.set(k, p); } return p; };
+      const addPerson = (name) => {
+        const k = nk(name);
+        if (!k) return null;
+        let p = peopleMap.get(k);
+        if (!p) {
+          const aid = agentIdBy.get(k);
+          const idSrc = (aid && /^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(aid)) ? 'gv' : null;
+          p = { k: 'a', n: String(name).trim(), s: agentSrc.get(k) || idSrc || defSrc, tl: agentTl.get(k) || '', m: 0, l: 0, d: 0, st: 0 };
+          peopleMap.set(k, p);
+        }
+        return p;
+      };
       for (const [name, dm] of byAgentMap) { const p = addPerson(name); if (!p) continue; for (const [d, n] of dm) { if (String(d).startsWith(ym)) p.m += n; else if (String(d).startsWith(prevYm)) p.l += n; } }
       asg.forEach((a) => { const k0 = nk(a.name); if (k0 && !agentSrc.has(k0)) agentSrc.set(k0, a.src); if (k0 && a.tl && !agentTl.has(k0)) agentTl.set(k0, a.tl); });
       asg.forEach((a) => addPerson(a.name));
@@ -14806,7 +14937,16 @@ async function servePersonalPage(req, res, rawToken) {
       }
       const memberId = new Map(); (Array.isArray(link.members) ? link.members : []).forEach((m) => { if (m && m.name && m.id) memberId.set(nk(m.name), String(m.id).trim().replace(/\.0+$/, '')); });
       asg.forEach((a) => { if (a.id && !memberId.has(nk(a.name))) memberId.set(nk(a.name), a.id.replace(/\.0+$/, '')); });
-      for (const [k8, p] of peopleMap) { const idv = agentIdBy.get(k8) || memberId.get(k8); if (idv) p.i = idv; }
+      for (const [k8, p] of peopleMap) {
+        const idv = agentIdBy.get(k8) || memberId.get(k8);
+        if (idv) {
+          p.i = idv;
+          if (/^(?:APS|WL|[A-Za-z]{2,5})\d/i.test(idv)) {
+            p.s = 'gv';
+            agentSrc.set(k8, 'gv');
+          }
+        }
+      }
       const mobMaps = await Promise.race([personalReportMobiles().catch(() => null), new Promise((resolve) => { const t = setTimeout(() => resolve(null), req.__plWarm === PL_WARM_KEY ? 30e3 : 3500); if (t.unref) t.unref(); })]);
       // 📞 make sure the trusted mobile directory is loaded before agents are labelled (otherwise a cold build shows no numbers)
       try { if (typeof agentMobileLoader === 'function') await Promise.race([agentMobileLoader(false).catch(() => null), new Promise((resolve) => { const t = setTimeout(resolve, req.__plWarm === PL_WARM_KEY ? 30e3 : 3500); if (t.unref) t.unref(); })]); } catch { /* optional */ }
@@ -14814,7 +14954,7 @@ async function servePersonalPage(req, res, rawToken) {
       const tgBy = new Map(); tgList.forEach((t) => { if (t && t.ym === ym && t.key) tgBy.set(t.key, t); });
       for (const [k9, p] of peopleMap) {
         // 📞 trusted directory first (agent ID match; name only if unique) — then the REPORT/Sheet4 maps
-        let mo = ''; try { mo = (typeof agentMobileLookup === 'function' && agentMobileLookup(p.i, p.n)) || ''; } catch { mo = ''; }
+        let mo = ''; try { mo = (typeof agentMobileLookup === 'function' && agentMobileLookup(p.i, p.n, p.s)) || ''; } catch { mo = ''; }
         mo = plCleanMobile(mo) || plCleanMobile(plMobileFor(mobMaps, p.s, p.i, p.n)); if (mo) p.mo = mo;
         const tt = tgBy.get(plTargetKey(p.s, p.n)); if (tt) { const v = plTargetValue(tt); if (v) p.tg = v; if (tt.via === 'link') p.tl2 = 1; }
       }
