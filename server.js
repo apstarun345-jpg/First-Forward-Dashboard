@@ -14304,7 +14304,7 @@ function personalRequestsHtml(link) {
   }).join('');
   return `<section class="pb-card"><h3>🏷️ My Tag Requests</h3><div class="pb-tbl-wrap" style="overflow:auto"><table class="pb-tbl"><thead><tr><th>Date</th>${isTl ? '<th>Agent</th>' : ''}<th>Class-wise qty</th><th>Status</th><th>Courier</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
 }
-const PORTAL_LOGIN_JS = "(function(){var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');\n      function go(extra){e.hidden=true;b.disabled=true;b.textContent='\u23f3 Logging in\u2026';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;\n      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){\n        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}\n        if(x.j.url){location.href=x.j.url;return;}\n        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'\ud83d\udfe9 ':'\ud83d\udfe6 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='\ud83d\udd13 Login';}\n      }).catch(function(err){e.textContent='\u26a0\ufe0f '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='\ud83d\udd13 Login';});}\n      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();";
+const PORTAL_LOGIN_JS = "(function(){try{var th=localStorage.getItem('pl_theme');if(th==='dark'||(!th&&window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.setAttribute('data-theme','dark');var tb=document.getElementById('pl-theme-toggle');if(tb)tb.textContent='\\u2600\\ufe0f Light';}}catch(x){}var tb=document.getElementById('pl-theme-toggle');if(tb){tb.addEventListener('click',function(){var d=document.documentElement;var m=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',m);try{localStorage.setItem('pl_theme',m);}catch(e){}tb.textContent=m==='dark'?'\\u2600\\ufe0f Light':'\\ud83c\\udf19 Dark';});}var f=document.getElementById('pt-form'),b=document.getElementById('pt-btn'),e=document.getElementById('pt-err'),c=document.getElementById('pt-choices');\n      function go(extra){e.hidden=true;b.disabled=true;b.textContent='\u23f3 Logging in\u2026';var body={personId:document.getElementById('pt-id').value,password:document.getElementById('pt-pw').value};if(extra)body.linkId=extra;\n      fetch('/api/public/portal-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});}).then(function(x){\n        if(!x.ok){throw new Error((x.j&&x.j.error)||'Login fail');}\n        if(x.j.url){location.href=x.j.url;return;}\n        if(x.j.choices){c.innerHTML='';x.j.choices.forEach(function(ch){var k=document.createElement('button');k.type='button';k.className='pb-btn';k.textContent=(ch.source==='gv'?'\ud83d\udfe9 ':'\ud83d\udfe6 ')+ch.name+' ('+ch.kind+')';k.onclick=function(){go(ch.id);};c.appendChild(k);});b.disabled=false;b.textContent='\ud83d\udd13 Login';}\n      }).catch(function(err){e.textContent='\u26a0\ufe0f '+(err.message||'Login fail');e.hidden=false;b.disabled=false;b.textContent='\ud83d\udd13 Login';});}\n      f.addEventListener('submit',function(ev){ev.preventDefault();go();});})();";
 
 // ⚡ short-lived rendered-page cache (per link + channel view) so tab/channel switches and reloads are instant
 
@@ -15549,10 +15549,10 @@ html[data-theme="dark"] .pb-gamify{background:#111827;border-color:#312e81}
 html[data-theme="dark"] .pb-gtag{color:#e0e7ff}
 html[data-theme="dark"] .pb-track{background:#1f2937}
 html[data-theme="dark"] .pb-sk,html[data-theme="dark"] .pb-sk-line{background:linear-gradient(90deg,#1f2937 25%,#374151 50%,#1f2937 75%);background-size:800px 100%}
-</style><script>(function(){const s=localStorage.getItem('pl_theme');if(s==='dark'||(!s&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.setAttribute('data-theme','dark');}})();</script></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
+</style></head><body><div class="pb-wrap" id="pl-root" data-token="${escHtml(token)}" data-require-auth="${requireAuth ? '1' : '0'}" data-authorized="${authorized ? '1' : '0'}" data-person="${escHtml(personName)}">
 <header class="pb-head"><div class="pb-head-left"><div class="pb-logo">${escHtml(String(personName || db.settings.brand || 'FF').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
 <div><h1>${heading || escHtml(title || '')}</h1>${sub ? `<p id="pl-sub">${sub}</p>` : ''}</div></div>
-<div style="display:flex;align-items:center;gap:8px"><button type="button" class="pb-btn pb-theme-btn" id="pl-theme-toggle" onclick="const d=document.documentElement;const m=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',m);localStorage.setItem('pl_theme',m);this.textContent=m==='dark'?'☀️ Light':'🌙 Dark';">🌙 Dark</button>
+<div style="display:flex;align-items:center;gap:8px"><button type="button" class="pb-btn pb-theme-btn" id="pl-theme-toggle">🌙 Dark</button>
 ${requireAuth ? (authorized && token ? `<a class="pb-btn" id="pl-lock-btn" href="/p/${encodeURIComponent(token)}?logout=1" rel="nofollow" title="Logout from this Personal Link" style="text-decoration:none">🚪 Logout</a>` : `<button type="button" class="pb-btn" id="pl-lock-btn" hidden>🚪 Logout</button>`) : ''}</div></header>
 ${body || ''}
 </div>
@@ -15642,6 +15642,24 @@ const PERSONAL_PORTAL_JS = `(function () {
   var root = document.getElementById('pl-root');
   if (!root) return;
   var token = root.getAttribute('data-token') || '';
+  try {
+    var th = localStorage.getItem('pl_theme');
+    if (th === 'dark' || (!th && window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches)) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      var tb = document.getElementById('pl-theme-toggle');
+      if (tb) tb.textContent = '☀️ Light';
+    }
+  } catch (e) {}
+  var tb = document.getElementById('pl-theme-toggle');
+  if (tb) {
+    tb.addEventListener('click', function () {
+      var d = document.documentElement;
+      var m = d.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      d.setAttribute('data-theme', m);
+      try { localStorage.setItem('pl_theme', m); } catch (e) {}
+      tb.textContent = m === 'dark' ? '☀️ Light' : '🌙 Dark';
+    });
+  }
   // 🚪 Logout — fetch par depend nahi: server ka ?logout=1 route cookie clear karke login screen par bhejta hai.
   document.addEventListener('click', function (e) {
     var t = e.target && e.target.closest ? e.target.closest('#pl-lock-btn') : null;

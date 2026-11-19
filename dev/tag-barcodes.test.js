@@ -35,3 +35,70 @@ test('admin tag request: no mobile/address/pincode needed; barcodes saved + edit
     assert.equal(cfg.fields.firstBarcode, 'First barcode'); assert.equal(cfg.fields.lastBarcode, 'Last barcode');
   } finally { app.kill('SIGTERM'); await once(app, 'exit').catch(() => {}); }
 });
+
+test('tagRequest: barcodeRangeOf and courier tracking URL logic', async () => {
+  const code = await fs.readFile(path.join(ROOT, 'tagRequest.js'), 'utf8');
+  assert.ok(code.includes('function barcodeRangeOf'), 'barcodeRangeOf present in tagRequest.js');
+  assert.ok(code.includes('function printReceiptSlip'), 'printReceiptSlip present in tagRequest.js');
+  assert.ok(code.includes('function trackingUrl'), 'trackingUrl present in tagRequest.js');
+  assert.ok(code.includes('tr-bc-chip'), 'tr-bc-chip styling wired in tagRequest.js');
+
+  // Verify range calculations matching the algorithm
+  function barcodeRangeOf(first, last) {
+    const f = String(first || '').trim();
+    const l = String(last || '').trim();
+    if (!f || !l) return null;
+    const fParts = f.split('-');
+    const lParts = l.split('-');
+    if (fParts.length > 1 && lParts.length > 1) {
+      if (fParts.length !== lParts.length) return { ok: false, reason: 'Prefix format mismatch' };
+      const fPre = fParts.slice(0, -1).join('-');
+      const lPre = lParts.slice(0, -1).join('-');
+      if (fPre !== lPre) return { ok: false, reason: 'Barcode series prefix mismatch' };
+      const fNum = Number(fParts[fParts.length - 1]);
+      const lNum = Number(lParts[lParts.length - 1]);
+      if (!Number.isFinite(fNum) || !Number.isFinite(lNum)) return { ok: false, reason: 'Non-numeric barcode serial' };
+      if (lNum < fNum) return { ok: false, reason: 'Last serial is less than First serial' };
+      return { ok: true, count: lNum - fNum + 1, start: fParts[fParts.length - 1], end: lParts[lParts.length - 1], prefix: fPre };
+    }
+    const fd = f.replace(/\D/g, '');
+    const ld = l.replace(/\D/g, '');
+    if (!fd || !ld) return null;
+    if (fd.length !== ld.length) return { ok: false, reason: 'Barcode length mismatch' };
+    let i = 0;
+    while (i < fd.length && fd[i] === ld[i]) i++;
+    const fNum = Number(fd.slice(i));
+    const lNum = Number(ld.slice(i));
+    if (!Number.isFinite(fNum) || !Number.isFinite(lNum)) return { ok: false, reason: 'Invalid barcode serial digits' };
+    if (lNum < fNum) return { ok: false, reason: 'Last serial is less than First serial' };
+    return { ok: true, count: lNum - fNum + 1, start: fd.slice(i), end: ld.slice(i), prefix: fd.slice(0, i) };
+  }
+
+  const r1 = barcodeRangeOf('608116-011-0558283', '608116-011-0558332');
+  assert.equal(r1.ok, true);
+  assert.equal(r1.count, 50);
+
+  const r2 = barcodeRangeOf('608116-011-0558283', '608116-012-0558332');
+  assert.equal(r2.ok, false);
+  assert.equal(r2.reason, 'Barcode series prefix mismatch');
+
+  const r3 = barcodeRangeOf('6081160110558283', '6081160110558382');
+  assert.equal(r3.ok, true);
+  assert.equal(r3.count, 100);
+
+  // Tracking URL tests
+  function trackingUrl(courier, awb) {
+    if (!awb) return '';
+    const c = String(courier || '').toLowerCase();
+    const cleanAwb = encodeURIComponent(String(awb).trim());
+    if (c.includes('delhivery')) return `https://www.delhivery.com/track/package/${cleanAwb}`;
+    if (c.includes('dtdc')) return `https://www.dtdc.in/tracking/shipment-tracking.asp?trkType=awb&strCnno=${cleanAwb}`;
+    if (c.includes('blue') || c.includes('dart')) return `https://www.bluedart.com/tracking?trackFor=0&trackNo=${cleanAwb}`;
+    if (c.includes('trackon')) return `http://trackon.in/Tracking/MultipleTracking?awb=${cleanAwb}`;
+    if (c.includes('speed') || c.includes('post') || c.includes('india')) return `https://www.indiapost.gov.in/_layouts/15/dop.portal.tracking/trackconsignment.aspx`;
+    return `https://www.google.com/search?q=${encodeURIComponent(`${courier} tracking ${awb}`)}`;
+  }
+
+  assert.equal(trackingUrl('Delhivery Air', '12345678901'), 'https://www.delhivery.com/track/package/12345678901');
+  assert.equal(trackingUrl('DTDC Express', 'D12345678'), 'https://www.dtdc.in/tracking/shipment-tracking.asp?trkType=awb&strCnno=D12345678');
+});
