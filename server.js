@@ -14122,14 +14122,14 @@ async function warmPersonalLinks() {
         if (link.kind === 'agent') await personalAgentTl(link); else await personalTeamAgents(link);
         if (link.kind !== 'agent') await personalAgentClassRows(link).catch(() => null);
         // 🏗 Pre-build the finished report page(s) too (every channel view), so opening the link is instant.
-        // Memory guard (Render free = 512 MB): pre-build report pages only for links used in the last 5 days, at most 8 links,
+        // Memory guard (Render free = 512 MB): pre-build report pages only for links used in the last 5 days, at most 4 links,
         // and never while RSS is already high — the data warm above stays for everyone.
         const lastUse = (() => { try { return Number(plLinkStats(link.id).lastActivity || 0); } catch { return 0; } })();
-        if (Date.now() - lastUse > 5 * 86400e3 || plPrebuilt >= 8 || process.memoryUsage().rss > 420 * 1048576) continue;
+        if (Date.now() - lastUse > 5 * 86400e3 || plPrebuilt >= 4 || process.memoryUsage().rss > 380 * 1048576) continue;
         plPrebuilt++;
         const baseForWarm = { ...link, source: link.kind === 'group' ? plSrc(link.source) : (link.source === 'gv' ? 'gv' : 'ff') };
         const chs = plLinkChannels(baseForWarm);
-        for (const ch of ['all', ...(chs.length > 1 ? chs : [])]) { await plWarmOne(link, ch).catch(() => {}); if (link.kind !== 'agent') await personalWelcomeCached(ch === 'all' ? baseForWarm : plChannelView(baseForWarm, ch), ch).catch(() => {}); }
+                for (const ch of ['all']) { await plWarmOne(link, ch).catch(() => {}); }
       } catch { /* ek link fail ho to baaki chalte rahein */ }
       await new Promise((r) => setTimeout(r, 2500));
     }
@@ -14153,7 +14153,7 @@ const plBuilding = new Map(), plRecentBuilt = new Map();
 const PL_BUILD_WAIT_MS = 4 * 60e3, PL_RECENT_MS = 90e3;
 function plCachePut(key, val) {
   plPageCache.set(key, { ...val, at: Date.now() });
-  if (plPageCache.size > 150) { const old = [...plPageCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 50); old.forEach(([k]) => plPageCache.delete(k)); }
+  if (plPageCache.size > 40) { const old = [...plPageCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 15); old.forEach(([k]) => plPageCache.delete(k)); }
 }
 /** EIR history within this link's selected scope, not an employment or joining-date registry.
  * Keep channels separate and de-duplicate overlapping TL/member parts by name, as elsewhere in the portal. */
@@ -16442,7 +16442,6 @@ async function start() {
     setTimeout(() => { loadRegistryFull(false).catch(() => {}); complaintsSvc.tick(); }, 20e3).unref();
     setInterval(() => { complaintsSvc.tick(); complaintsMailTick().catch(() => {}); }, 30e3).unref();
     setTimeout(() => warmPersonalLinks().catch(() => {}), 150e3).unref?.();
-    setTimeout(() => warmPersonalLinks().catch(() => {}), 40e3).unref?.();    // first page pre-build right after boot
     setInterval(() => warmPersonalLinks().catch(() => {}), 10 * 60e3).unref();   // 10 min = gviz cache TTL (5 min par har link ke 3-4 queries dobara jaate the)
     setTimeout(() => maybeMonthlyReport(), 8000);
     // ⚡ v3.125.45 — Master Search ka 'Last dispatch' box: ledger aggregate boot par hi + har 25 min (user kabhi intezaar na kare)
