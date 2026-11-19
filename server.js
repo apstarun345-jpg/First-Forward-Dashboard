@@ -595,6 +595,7 @@ function settingsFor(u) {
   const s = { ...db.settings };
   if (s.email) s.email = { provider: s.email.provider || 'auto', host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '', resendKey: '', brevoKey: '' };
   delete s.personalLinks; // 🔗 secret tokens sirf admin ko
+  delete s.agentMobiles; // manually added agent mobiles — admin only
   delete s.schedules;     // 🗓 admin ke custom reminders
   delete s.dispatchEmail; // selected recipients + delivery schedule sirf admin ko
   delete s.__tagSheetBackup; // tag-sheet config ki backup copy (sheet link) sirf admin ko
@@ -11841,6 +11842,27 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true });
   }
   // 🎯 Personal link → set / clear an agent's monthly target (Active goal or a number). Shows on the admin Home "Team link targets" card.
+  if (p === '/api/public/personal-link/agent-mobile' && method === 'POST') {
+    const ip = clientIp(req);
+    if (!publicRateOk(`plmob:${ip}`, 40, 60e3)) throw new HttpError(429, 'Too many tries — wait a minute.');
+    const body = await readBody(req);
+    const token = String(body.token || '').trim();
+    const savedLink = (Array.isArray(db.settings.personalLinks) ? db.settings.personalLinks : []).find((l) => l.token === token);
+    if (!savedLink || savedLink.enabled === false || !personalLinkSession(req, savedLink)) throw new HttpError(401, 'Session expired — open the link again.');
+    if (!isTeamLink(savedLink)) throw new HttpError(403, 'Not allowed for this link.');
+    const scope = await plScopeAgents(savedLink);
+    const who = scope.get(plNormName(body.name));
+    if (!who) throw new HttpError(404, 'This agent is not part of this link.');
+    const mobile = plCleanMobile(body.mobile);
+    if (!mobile) throw new HttpError(400, 'Enter a valid 10-digit mobile number (starts with 6-9).');
+    const id = String(body.id || '').trim().slice(0, 40);
+    if (!db.settings.agentMobiles || typeof db.settings.agentMobiles !== 'object') db.settings.agentMobiles = {};
+    db.settings.agentMobiles[plManualMobileKey(id, who.name)] = { mobile, name: who.name, id, src: who.src, by: `link:${savedLink.name}`, at: new Date().toISOString() };
+    plPageCache.clear();
+    await persist('settings');
+    logAudit(null, 'link_agent_mobile_set', { actor: `link:${savedLink.name}`, target: who.name, ip });
+    return sendJson(res, 200, { ok: true, mobile });
+  }
   if (p === '/api/public/personal-link/target' && method === 'POST') {
     const body = await readBody(req);
     const token = String(body.token || '').trim();
@@ -13598,6 +13620,13 @@ async function personalReportMobiles() {
   })().finally(() => { plMobileCache.promise = null; });
   return plMobileCache.promise;
 }
+/** Mobiles added by hand from personal links: db.settings.agentMobiles { 'id:APS…' | 'n:NAME': { mobile, name, id, src, by, at } }. Exact ID first, then exact name. */
+const plManualMobileKey = (id, name) => { const i = plIdKey(id); return i ? `id:${i}` : `n:${plNormName(name)}`; };
+function plManualMobile(id, name) {
+  const m = db.settings && db.settings.agentMobiles; if (!m || typeof m !== 'object') return '';
+  const i = plIdKey(id), n = plNormName(name);
+  const hit = (i && m[`id:${i}`]) || (n && m[`n:${n}`]); return hit && hit.mobile ? hit.mobile : '';
+}
 /** Keep only a valid Indian 10-digit mobile (strips +91 / 0 / spaces / Excel float tails); anything else → ''. */
 function plCleanMobile(v) {
   let d = String(v == null ? '' : v).replace(/\.0+$/, '').replace(/\D/g, '');
@@ -14820,7 +14849,7 @@ async function servePersonalPage(req, res, rawToken) {
         // 📞 trusted directory first (agent ID match; name only if unique) — then the REPORT/Sheet4 maps
         // GV (APS…) agents: exact agent-ID match only — a same/similar NAME in another channel must never lend its number
         const gvId = p.s === 'gv' || /^APS\d/i.test(String(p.i || '').trim());
-        let mo = ''; try { mo = (typeof agentMobileLookup === 'function' && agentMobileLookup(p.i, gvId ? '' : p.n)) || ''; } catch { mo = ''; }
+        let mo = plCleanMobile(plManualMobile(p.i, p.n)); if (!mo) try { mo = (typeof agentMobileLookup === 'function' && agentMobileLookup(p.i, gvId ? '' : p.n)) || ''; } catch { mo = ''; }
         mo = plCleanMobile(mo) || plCleanMobile(plMobileFor(mobMaps, p.s, p.i, gvId ? '' : p.n, gvId)); if (mo) p.mo = mo;
         const tt = tgBy.get(plTargetKey(p.s, p.n)); if (tt) { const v = plTargetValue(tt); if (v) p.tg = v; if (tt.via === 'link') p.tl2 = 1; }
       }
@@ -15478,6 +15507,22 @@ const PERSONAL_PORTAL_JS = `(function () {
     function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
     items.forEach(function (it) { it._k = norm(it.n); it._s = norm(it.n + ' ' + (it.i || '')); });
     function aid(it) { return it.i ? ' <small class="pb-aid">' + esc(it.i) + '</small>' : ''; }
+    document.addEventListener('click', function (e) {
+      var t = e.target && e.target.closest ? e.target.closest('[data-mob-add],[data-mob-save],[data-mob-cancel]') : null; if (!t) return;
+      var key = t.getAttribute('data-mob-add') || t.getAttribute('data-mob-save') || t.getAttribute('data-mob-cancel'), a = mobReg[key];
+      var cells = Array.prototype.filter.call(document.querySelectorAll('[data-mobcell]'), function (c) { return c.getAttribute('data-mobcell') === key; });
+      if (!a) return;
+      if (t.hasAttribute('data-mob-cancel')) { cells.forEach(function (c) { c.innerHTML = mobInner(a); }); return; }
+      if (t.hasAttribute('data-mob-add')) { cells.forEach(function (c) { c.innerHTML = '<input class="pb-inp pl-mob-inp" type="tel" inputmode="numeric" maxlength="14" placeholder="10-digit mobile" style="width:130px"> <button type="button" class="pb-btn on" data-mob-save="' + esc(key) + '">Save</button> <button type="button" class="pb-btn" data-mob-cancel="' + esc(key) + '">✕</button> <small class="pl-mob-err" style="color:#b91c1c" hidden></small>'; }); var f = cells[0] && cells[0].querySelector('input'); if (f) try { f.focus(); } catch (x) {} return; }
+      var cell = t.closest('[data-mobcell]'), inp = cell && cell.querySelector('input'), er = cell && cell.querySelector('.pl-mob-err'); if (!inp) return;
+      var digits = String(inp.value || '').replace(/\\D/g, ''); if (digits.length === 12 && digits.indexOf('91') === 0) digits = digits.slice(2);
+      if (!/^[6-9]\\d{9}$/.test(digits)) { if (er) { er.textContent = 'Enter a valid 10-digit mobile'; er.hidden = false; } return; }
+      t.disabled = true;
+      fetch('/api/public/personal-link/agent-mobile', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: D.tok, name: a.n, id: a.i || '', src: a.s || '', mobile: digits }) })
+        .then(function (r2) { return r2.json().then(function (j) { return { ok: r2.ok, j: j }; }); })
+        .then(function (o) { if (!o.ok) throw new Error((o.j && o.j.error) || 'Could not save'); a.mo = o.j.mobile || digits; cells.forEach(function (c) { c.innerHTML = mobInner(a); }); })
+        .catch(function (e2) { t.disabled = false; if (er) { er.textContent = e2.message || 'Could not save'; er.hidden = false; } });
+    });
     function chBadge(it) { return D.both ? '<span class="pb-chan ' + it.s + '">' + it.s.toUpperCase() + '</span>' : ''; }
     // ---- numbers: v = [last month, MTD, stock, today] ----
     function sumC(it, names) { var r = [0, 0, 0, 0]; names.forEach(function (n) { var a = (it.c && it.c[n]) || [0, 0, 0, 0]; for (var i = 0; i < 4; i++) r[i] += a[i]; }); return r; }
@@ -15659,9 +15704,15 @@ const PERSONAL_PORTAL_JS = `(function () {
       return out;
     }
     function stkPill(v, k) { return v ? '<span class="pl-cp" style="--c:' + GCOL[k] + '">' + nf(v) + '</span>' : '<span class="pl-cz">0</span>'; }
+    var mobReg = {};
+    function mobInner(a) {
+      mobReg[norm(a.n)] = a;
+      return a.mo ? '<a class="pl-mob" href="tel:' + esc(a.mo) + '">' + esc(a.mo) + '</a>'
+        : '<span class="dim">Not found</span> <button type="button" class="pb-btn pl-mob-add" data-mob-add="' + esc(norm(a.n)) + '">➕ Add</button>';
+    }
     function agentGrid(id, list, opts) {
       opts = opts || {};
-      var hasMob = list.some(function (a) { return a.mo; }), hasId = list.some(function (a) { return a.i; });
+      var hasMob = list.length > 0, hasId = list.some(function (a) { return a.i; });
       var otherIss = list.some(function (a) { var t = sumC(a, B3)[1]; GC.forEach(function (g) { t -= sumC(a, g[1])[1]; }); return t > 0; });
       var showStk = D.stock, showIss = D.issue;
       var th = '<tr><th class="pl-l">#</th><th class="pl-l">Agent ID</th><th class="pl-l">Agent</th>' + (hasMob ? '<th class="pl-l">Mobile</th>' : '') +
@@ -15678,7 +15729,7 @@ const PERSONAL_PORTAL_JS = `(function () {
         var o = opts.priority && a.c ? overall(a) : null;
         return '<tr class="pl-res-row" data-name="' + esc(a.n) + '" data-gap="' + gapDays(a) + '"><td class="pl-l pl-dim">' + (n + 1) + '</td><td class="pl-l">' + (a.i ? '<span class="pb-aid">' + esc(a.i) + '</span>' : '<span class="dim">—</span>') + '</td>' +
           '<td class="pl-l pl-nm"><b>' + esc(a.n) + '</b> ' + chBadge(a) + (opts.tl && a.tl ? '<small class="dim">TL ' + esc(a.tl) + '</small>' : '') + '</td>' +
-          (hasMob ? '<td class="pl-l">' + (a.mo ? '<a class="pl-mob" href="tel:' + esc(a.mo) + '">' + esc(a.mo) + '</a>' : '<span class="dim">—</span>') + '</td>' : '') +
+          (hasMob ? '<td class="pl-l pl-mobcell" data-mobcell="' + esc(norm(a.n)) + '">' + mobInner(a) + '</td>' : '') +
           (showIss ? '<td>' + nf(a.l) + '</td><td><b>' + nf(a.m) + '</b></td><td>' + growthCell(a) + '</td>' : '') + (showStk ? '<td><b>' + nf(a.st) + '</b></td>' : '') +
           '<td class="pl-l pl-lac">' + lastActive(a) + '</td>' + (showTg ? '<td class="pl-l pl-tgc" data-tgcell="' + esc(norm(a.n)) + '">' + tgInner(a) + '</td>' : '') +
           (showStk ? cs.map(function (v, k) { return '<td>' + stkPill(v[2], k) + '</td>'; }).join('') : '') +
