@@ -1,0 +1,17 @@
+name: Keep site warm
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping /api/health
+        run: curl -fsS --max-time 60 --retry 2 https://first-forward-dashboard.onrender.com/api/health > /dev/null || true

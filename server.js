@@ -114,6 +114,7 @@ const CLOUD_BACKEND = STORAGE_BACKEND === 'sheets' || STORAGE_BACKEND === 'appss
 const REQUIRE_DURABLE_CLOUD = process.env.REQUIRE_DURABLE_CLOUD === '1' || !!process.env.RENDER;
 let sheetsStore = null;
 let resetAgentMobiles = null;   // 📞 settings save par mobile directory cache saaf
+let agentMobileLookup = null;   // (id, name) → mobile from the trusted directory (ID first, then unique name)
 let agentMobileLoader = null;   // 📞 v3.125.306 — mobile directory loader (handleApi me set) — scheduled dispatch email bhi mobile bhare
 if (REQUIRE_DURABLE_CLOUD && STORAGE_BACKEND !== 'appsscript') {
   throw new Error('Production storage guard: Render par APPS_SCRIPT_URL + APPS_SCRIPT_SECRET wala Google Sheet storage required hai. Temporary file/default storage intentionally disabled.');
@@ -297,7 +298,7 @@ const DEFAULT_SETTINGS = {
     }
   },
   gvClassCch: { enabled: true, source: 'cch', groups: { VC4: [], VC20: [], VC5: [] } },
-  gvLiveEverySec: 60,   // 🟩 GV live (aaj ka) data GV API se kitni der me aaye: 60 / 120 / 300 / 600 / 900 / 1800 sec (Settings → GV)
+  gvLiveEverySec: 1800,   // 🟩 GV live (aaj ka) data GV API se kitni der me aaye (default 30 min): 60 / 120 / 300 / 600 / 900 / 1800 sec (Settings → GV)
   tvcGroups: [{ tvc: '4', cch: ['VC4', 'VC20'] }, { tvc: '5', cch: ['VC5', 'VC9'] }, { tvc: '6', cch: ['VC8', 'VC11'] }, { tvc: '7', cch: ['VC7', 'VC10'] }, { tvc: '12', cch: ['VC12', 'VC13', 'VC14'] }, { tvc: '16', cch: ['VC16', 'VC17'] }],   // v3.87 — TVC → CCH classes (Tag Request class grid)
   // v3.90 — GV agent / TL commission box (Master search + profile): sheet link, tab, columns sab Settings se badal sakte ho.
   // 📞 v3.125.248 — agent mobile kis sheet / tab se (FF + GV) — ID + mobile + naam column system khud header se pehchanta hai
@@ -1942,7 +1943,7 @@ async function gvTodayVrnCounts(settings, resolved, day, nextDay, cacheMs) {
 const GV_LIVE_ALLOWED = [60, 120, 300, 600, 900, 1800];
 function gvLiveMs() {
   const v = Number(db && db.settings && db.settings.gvLiveEverySec);
-  return (GV_LIVE_ALLOWED.includes(v) ? v : 60) * 1000;
+  return (GV_LIVE_ALLOWED.includes(v) ? v : 1800) * 1000;
 }
 const GV_TODAY_SWR_MS = 10 * 60e3;   // serve a same-day snapshot up to 10 min old instantly, refresh behind it
 function gvTodayLastGood() {
@@ -9686,6 +9687,7 @@ async function handleApi(req, res, url) {
   const mobNameKey = (n) => String(n || '').toLowerCase().replace(/[^a-z]/g, '');
   resetAgentMobiles = () => { agentMobileRt.data = null; agentMobileRt.at = 0; };
   agentMobileLoader = agentMobileData;
+  agentMobileLookup = (id, name) => directoryMobile(id, name);
   /** Mobile sheet: header (pehli 5 rows me) se ID / naam / mobile column pehchano, phir sirf wahi columns padho. */
   async function readMobileSheet(store, spreadsheetId, tab) {
     const head = await store.call('readtab', { spreadsheetId, tab, maxRows: 5, maxCols: 60 }, { timeoutMs: 60e3, attempts: 2 });
@@ -13590,10 +13592,17 @@ async function personalReportMobiles() {
       if (r.status !== 'fulfilled') return;
       r.value.forEach((row) => { const m = row.mobile; if (!m) return; const ik = plIdKey(row.agentId), nk2 = plNormName(row.name); if (ik && !maps[ch].id.has(ik)) maps[ch].id.set(ik, m); if (nk2 && !maps[ch].name.has(nk2)) maps[ch].name.set(nk2, m); });
     });
-    plMobileCache.maps = maps; plMobileCache.at = Date.now();
+    const partial = [ff, gv, reg].some((r) => r.status !== 'fulfilled');
+    plMobileCache.maps = maps; plMobileCache.at = partial ? Date.now() - 14 * 60e3 : Date.now();   // a failed source is retried after ~1 min, not 15
     return maps;
   })().finally(() => { plMobileCache.promise = null; });
   return plMobileCache.promise;
+}
+/** Keep only a valid Indian 10-digit mobile (strips +91 / 0 / spaces / Excel float tails); anything else → ''. */
+function plCleanMobile(v) {
+  let d = String(v == null ? '' : v).replace(/\.0+$/, '').replace(/\D/g, '');
+  if (d.length === 12 && d.startsWith('91')) d = d.slice(2); else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  return /^[6-9]\d{9}$/.test(d) ? d : '';
 }
 const plMobileFor = (maps, src, id, name) => {
   if (!maps) return '';
@@ -14111,6 +14120,9 @@ async function warmPersonalLinks() {
         await personalDailyRows(link);
         if (link.kind === 'agent') await personalAgentTl(link); else await personalTeamAgents(link);
         if (link.kind !== 'agent') await personalAgentClassRows(link).catch(() => null);
+        // 🏗 Pre-build the finished report page(s) too (every channel view), so opening the link is instant.
+        const chs = plLinkChannels({ ...link, source: link.kind === 'group' ? plSrc(link.source) : (link.source === 'gv' ? 'gv' : 'ff') });
+        for (const ch of ['all', ...(chs.length > 1 ? chs : [])]) await plWarmOne(link, ch).catch(() => {});
       } catch { /* ek link fail ho to baaki chalte rahein */ }
       await new Promise((r) => setTimeout(r, 400));
     }
@@ -14118,6 +14130,16 @@ async function warmPersonalLinks() {
 }
 const plPageCache = new Map();
 const PL_CACHE_MS = 45e3;
+const PL_PAGE_STALE_MS = 6 * 3600e3;          // last built report is shown instantly for up to 6 h while a fresh one is rebuilt
+const PL_WARM_KEY = crypto.randomBytes(16).toString('hex');   // in-process secret: only synthetic warm requests carry it
+/** Build (and cache) one personal report view in the background — the same servePersonalPage code, with a fake req/res. */
+async function plWarmOne(link, ch) {
+  if (!link || !link.token) return;
+  const q = `fresh=1${ch && ch !== 'all' ? `&ch=${encodeURIComponent(ch)}` : ''}`;
+  const req = { method: 'GET', url: `/p/${encodeURIComponent(link.token)}?${q}`, headers: { host: 'localhost', 'accept-encoding': '' }, socket: {}, __plWarm: PL_WARM_KEY };
+  const res = { writableEnded: false, headersSent: false, statusCode: 200, req, setHeader() {}, getHeader() {}, write() { return true; }, writeHead() { this.headersSent = true; return this; }, once() { return this; }, on() { return this; }, removeListener() {}, end() { this.writableEnded = true; this.headersSent = true; } };
+  await servePersonalPage(req, res, link.token);
+}
 // One report build per link view at a time: while the cold-open build runs, the page's polls get 202 and then
 // pick up its result (even when stock was still indexing) instead of each starting a second slow build.
 const plBuilding = new Map(), plRecentBuilt = new Map();
@@ -14128,6 +14150,14 @@ function plCachePut(key, val) {
 }
 /** EIR history within this link's selected scope, not an employment or joining-date registry.
  * Keep channels separate and de-duplicate overlapping TL/member parts by name, as elsewhere in the portal. */
+const plWelcomeCache = new Map();
+async function personalWelcomeCached(link, ch) {
+  const key = `${link.token || link.id || link.name}|${ch}`, hit = plWelcomeCache.get(key), age = hit ? Date.now() - hit.at : Infinity;
+  if (hit && age < 30 * 60e3) return hit.data;
+  const run = async () => { const data = await personalWelcomeHistory(link); plWelcomeCache.set(key, { at: Date.now(), data }); if (plWelcomeCache.size > 200) plWelcomeCache.delete(plWelcomeCache.keys().next().value); return data; };
+  if (hit && age < 12 * 3600e3) { run().catch(() => {}); return hit.data; }   // stale copy now, refresh behind it
+  return run();
+}
 async function personalWelcomeHistory(link) {
   let parts;
   if (isComboLink(link)) {
@@ -14202,7 +14232,7 @@ async function servePersonalPage(req, res, rawToken) {
     res.writeHead(302, { Location: `/p/${encodeURIComponent(savedLink.token)}`, 'Set-Cookie': clearPersonalLinkCookie(req, savedLink), 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow' });
     return res.end();
   }
-  const hasSession = adminPreview || personalLinkSession(req, savedLink);
+  const hasSession = adminPreview || req.__plWarm === PL_WARM_KEY || personalLinkSession(req, savedLink);
   if (!hasSession) {
     if (req.method !== 'HEAD') plRecordActivity(savedLink, req, 'link_open', 'Opened the link (login screen)');
     const idLabel = savedLink.kind === 'tl' ? 'TL ID' : (savedLink.kind === 'group' ? 'Team ID' : 'Agent ID');
@@ -14243,7 +14273,7 @@ async function servePersonalPage(req, res, rawToken) {
     if (!hasSec('overview') && !hasSec('issuance')) return sendJson(res, 403, { ok: false, error: 'Section not allowed' }, noStore);
     try {
       const snapshot = JSON.stringify(savedLink);
-      const data = await personalWelcomeHistory(link);
+      const data = await personalWelcomeCached(link, chView);
       if (JSON.stringify(savedLink) !== snapshot || JSON.stringify(db.settings.personalLinkDefaults || {}) !== defaultsSnapshot || savedLink.enabled === false || !(db.settings.personalLinks || []).includes(savedLink) || feats().personalLinks === false || (adminPreview ? !(sessionUser(req) && sessionUser(req).role === 'admin') : !personalLinkSession(req, savedLink))) return sendJson(res, 403, { ok: false, error: 'Access changed' }, noStore);
       return sendJson(res, 200, { ok: true, ...data, team: isTeamLink(link) }, noStore);
     } catch (err) { console.warn('personal welcome:', err.message); return sendJson(res, 503, { ok: false, error: 'EIR history unavailable' }, noStore); }
@@ -14262,7 +14292,19 @@ async function servePersonalPage(req, res, rawToken) {
     if (wantPartial) return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, view: chView, sub: v.sub, body: v.inner, at: v.at || Date.now() }), noStore);
     return sendHtml(res, 200, personalShell({ title: v.title, heading: v.heading, sub: v.sub, token, requireAuth: true, authorized: true, personName: link.name, body: `<div id="pl-portal-content">${v.inner}</div>` }), noStore);
   };
-  if (!wantFresh) { const hit = plPageCache.get(cacheKey); if (hit && Date.now() - hit.at < PL_CACHE_MS) return replyPage(wantPartial ? hit : { ...hit, inner: `<section class="pb-card" data-pl-refresh role="status">Showing a recent cached report; refreshing… <button class="pb-btn" type="button" data-pl-refresh-retry hidden>Retry refresh</button></section>${hit.inner}` }); }
+  if (!wantFresh) {
+    // ⚡ Instant open: a built report up to PL_PAGE_STALE_MS old is served immediately; if it is older than PL_CACHE_MS
+    // a background rebuild (same code path, synthetic request) refreshes it for the next open.
+    const hit = plPageCache.get(cacheKey);
+    if (hit) {
+      const age = Date.now() - hit.at;
+      if (age < PL_PAGE_STALE_MS) {
+        if (age >= PL_CACHE_MS && !plBuilding.has(cacheKey) && req.__plWarm !== PL_WARM_KEY) plWarmOne(savedLink, chView).catch(() => {});
+        const note = `<section class="pb-card" data-pl-refresh role="status">Showing a recent cached report; refreshing… <button class="pb-btn" type="button" data-pl-refresh-retry hidden>Retry refresh</button></section>`;
+        return replyPage(wantPartial ? hit : { ...hit, inner: `${note}${hit.inner}` });
+      }
+    }
+  }
   if (!wantFresh) {
     const rb = plRecentBuilt.get(cacheKey);
     if (rb && Date.now() - rb.at < PL_RECENT_MS && wantPartial) return replyPage(rb);
@@ -14758,11 +14800,13 @@ async function servePersonalPage(req, res, rawToken) {
       const memberId = new Map(); (Array.isArray(link.members) ? link.members : []).forEach((m) => { if (m && m.name && m.id) memberId.set(nk(m.name), String(m.id).trim().replace(/\.0+$/, '')); });
       asg.forEach((a) => { if (a.id && !memberId.has(nk(a.name))) memberId.set(nk(a.name), a.id.replace(/\.0+$/, '')); });
       for (const [k8, p] of peopleMap) { const idv = agentIdBy.get(k8) || memberId.get(k8); if (idv) p.i = idv; }
-      const mobMaps = await Promise.race([personalReportMobiles().catch(() => null), new Promise((resolve) => { const t = setTimeout(() => resolve(null), 3500); if (t.unref) t.unref(); })]);
+      const mobMaps = await Promise.race([personalReportMobiles().catch(() => null), new Promise((resolve) => { const t = setTimeout(() => resolve(null), req.__plWarm === PL_WARM_KEY ? 30e3 : 3500); if (t.unref) t.unref(); })]);
       const tgList = Array.isArray(db.settings.targets) ? db.settings.targets : [];
       const tgBy = new Map(); tgList.forEach((t) => { if (t && t.ym === ym && t.key) tgBy.set(t.key, t); });
       for (const [k9, p] of peopleMap) {
-        const mo = plMobileFor(mobMaps, p.s, p.i, p.n); if (mo) p.mo = mo;
+        // 📞 trusted directory first (agent ID match; name only if unique) — then the REPORT/Sheet4 maps
+        let mo = ''; try { mo = (typeof agentMobileLookup === 'function' && agentMobileLookup(p.i, p.n)) || ''; } catch { mo = ''; }
+        mo = plCleanMobile(mo) || plCleanMobile(plMobileFor(mobMaps, p.s, p.i, p.n)); if (mo) p.mo = mo;
         const tt = tgBy.get(plTargetKey(p.s, p.n)); if (tt) { const v = plTargetValue(tt); if (v) p.tg = v; if (tt.via === 'link') p.tl2 = 1; }
       }
       const dailyCls = await dailyClsPromise;
@@ -16389,6 +16433,7 @@ async function start() {
     setTimeout(() => { loadRegistryFull(false).catch(() => {}); complaintsSvc.tick(); }, 20e3).unref();
     setInterval(() => { complaintsSvc.tick(); complaintsMailTick().catch(() => {}); }, 30e3).unref();
     setTimeout(() => warmPersonalLinks().catch(() => {}), 150e3).unref?.();
+    setTimeout(() => warmPersonalLinks().catch(() => {}), 40e3).unref?.();    // first page pre-build right after boot
     setInterval(() => warmPersonalLinks().catch(() => {}), 10 * 60e3).unref();   // 10 min = gviz cache TTL (5 min par har link ke 3-4 queries dobara jaate the)
     setTimeout(() => maybeMonthlyReport(), 8000);
     // ⚡ v3.125.45 — Master Search ka 'Last dispatch' box: ledger aggregate boot par hi + har 25 min (user kabhi intezaar na kare)
