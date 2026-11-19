@@ -6099,8 +6099,8 @@ html:not(.mobile-ui) .top-more-pop .icon-btn::after { content: attr(data-label);
 /* v3.77 — Tag Request: class quantities in two columns so the agent card is not a tall scroll */
 @media (min-width: 1100px) {
 .tr-agent-grid { grid-template-columns: minmax(0, 1fr) 340px; }
-.tr-qty-list { display: grid; grid-template-columns: 1fr 1fr; }
-.tr-qty-list > .tr-qty-head, .tr-qty-list > .tr-qty-foot, .tr-qty-list > .tr-qty-groups { grid-column: 1 / -1; }
+/* v3.125.348 — 340px column me 2-col grid se VC4/VC6/VC12 rows kat jaati thi → ab ek column, sab 6 class dikhti hain */
+.tr-qty-list { display: flex; flex-direction: column; }
 }
 /* v3.78 — Today's work card + undo toast */
 .todo-card .card-head h3 { margin: 0; }

@@ -1634,7 +1634,7 @@ body.colorful .from-hdr { color: #166534; }
     const errs = state.errs[row.id] || {};
     const errList = Object.values(errs).filter(Boolean);
     const qtyRows = CLASS_LIST.map((c) => `<label class="tr-qty-row" data-tr-row-cls="${c.toLowerCase()}" title="${esc(CLASS_LABEL[c])} — kitni tags chahiye (0 ya khaali = nahi chahiye)">
-        <span class="tr-qty-cls"><span class="badge-vc ${c.toLowerCase()}">${c}</span><b>${c}</b><small>${esc(CLASS_DESC(c))}</small><small class="tr-qty-hint tr-check-col" data-tr-hint="${c}">${esc(hintText(rec, c))}</small></span>
+        <span class="tr-qty-cls"><span class="badge-vc ${c.toLowerCase()}">${c}</span><small>${esc(CLASS_DESC(c))}</small><small class="tr-qty-hint tr-check-col" data-tr-hint="${c}">${esc(hintText(rec, c))}</small></span>
         <div class="tr-qty-right">
           <div class="tr-qty-quick" data-tr-cls="${c}">
             <button type="button" class="btn btn-xs tr-qadd" data-q="10" title="Add 10 to ${c}">+10</button>
