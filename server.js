@@ -14114,6 +14114,7 @@ async function warmPersonalLinks() {
   plWarmRunning = true;
   try {
     const links = (db.settings.personalLinks || []).filter((l) => l && l.enabled !== false && l.kind).slice(0, 40);
+    let plPrebuilt = 0;
     for (const link of links) {
       if (gvizCooldownActive()) break;
       try {
@@ -14121,11 +14122,16 @@ async function warmPersonalLinks() {
         if (link.kind === 'agent') await personalAgentTl(link); else await personalTeamAgents(link);
         if (link.kind !== 'agent') await personalAgentClassRows(link).catch(() => null);
         // 🏗 Pre-build the finished report page(s) too (every channel view), so opening the link is instant.
+        // Memory guard (Render free = 512 MB): pre-build report pages only for links used in the last 5 days, at most 8 links,
+        // and never while RSS is already high — the data warm above stays for everyone.
+        const lastUse = (() => { try { return Number(plLinkStats(link.id).lastActivity || 0); } catch { return 0; } })();
+        if (Date.now() - lastUse > 5 * 86400e3 || plPrebuilt >= 8 || process.memoryUsage().rss > 420 * 1048576) continue;
+        plPrebuilt++;
         const baseForWarm = { ...link, source: link.kind === 'group' ? plSrc(link.source) : (link.source === 'gv' ? 'gv' : 'ff') };
         const chs = plLinkChannels(baseForWarm);
         for (const ch of ['all', ...(chs.length > 1 ? chs : [])]) { await plWarmOne(link, ch).catch(() => {}); if (link.kind !== 'agent') await personalWelcomeCached(ch === 'all' ? baseForWarm : plChannelView(baseForWarm, ch), ch).catch(() => {}); }
       } catch { /* ek link fail ho to baaki chalte rahein */ }
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 2500));
     }
   } finally { plWarmRunning = false; }
 }
@@ -14300,7 +14306,7 @@ async function servePersonalPage(req, res, rawToken) {
     if (hit) {
       const age = Date.now() - hit.at;
       if (age < PL_PAGE_STALE_MS) {
-        if (age >= PL_CACHE_MS && !plBuilding.has(cacheKey) && req.__plWarm !== PL_WARM_KEY) plWarmOne(savedLink, chView).catch(() => {});
+        if (age >= PL_CACHE_MS && !plBuilding.has(cacheKey) && req.__plWarm !== PL_WARM_KEY && process.memoryUsage().rss < 450 * 1048576) plWarmOne(savedLink, chView).catch(() => {});
         const note = `<section class="pb-card" data-pl-refresh role="status">Showing a recent cached report; refreshing… <button class="pb-btn" type="button" data-pl-refresh-retry hidden>Retry refresh</button></section>`;
         return replyPage(wantPartial ? hit : { ...hit, inner: `${note}${hit.inner}` });
       }
