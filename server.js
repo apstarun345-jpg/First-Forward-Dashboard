@@ -615,7 +615,7 @@ function settingsFor(u) {
   if (s.email) s.email = { provider: s.email.provider || 'auto', host: s.email.host || '', port: s.email.port || '', secure: !!s.email.secure, user: '', pass: '', from: s.email.from || '', to: s.email.to || '', resendKey: '', brevoKey: '' };
   delete s.personalLinks; // 🔗 secret tokens sirf admin ko
   delete s.agentMobiles; // manually added agent mobiles — admin only
-  delete s.tollImport; delete s.tollImportLog; // 🛣️ toll import status — /api/toll-import-info se aata hai
+  delete s.tollImport; delete s.tollImportLog; delete s.tollDaily; // 🛣️ toll import status — /api/toll-import-info se aata hai
   delete s.schedules;     // 🗓 admin ke custom reminders
   delete s.dispatchEmail; // selected recipients + delivery schedule sirf admin ko
   delete s.__tagSheetBackup; // tag-sheet config ki backup copy (sheet link) sirf admin ko
@@ -9016,6 +9016,23 @@ async function handleApi(req, res, url) {
       target: 'admin', meta: { link: '#/home', source: 'toll-import' }
     });
     return sendJson(res, 200, { ok: true });
+  }
+  // 🛣️ v3.125.356 — Toll Debit Daily (date-wise + class-wise) ab Toll Tags sheet ke "Toll Debit Daily" tab se; Apps Script poora tab yahan bhejta hai (sheet private rehti hai).
+  if (p === '/api/push/toll-daily' && method === 'POST') {
+    const body = await readBody(req);
+    const expected = String(process.env.APPS_SCRIPT_SECRET || '').trim();
+    const supplied = String(body.secret || req.headers['x-app-script-secret'] || '').trim();
+    if (!expected || supplied !== expected) throw new HttpError(401, 'Toll daily webhook unauthorized.');
+    const header = Array.isArray(body.header) ? body.header.slice(0, 80).map((v) => String(v == null ? '' : v).slice(0, 40)) : [];
+    const rows = Array.isArray(body.rows) ? body.rows.slice(-800).map((r) => (Array.isArray(r) ? r.slice(0, header.length).map((v) => (typeof v === 'number' ? v : String(v == null ? '' : v).slice(0, 40))) : null)).filter(Boolean) : [];
+    if (!header.length || !rows.length) throw new HttpError(400, 'header/rows chahiye.');
+    db.settings.tollDaily = { header, rows, at: Date.now() };
+    persist('settings').catch(() => {});
+    return sendJson(res, 200, { ok: true, rows: rows.length });
+  }
+  if (p === '/api/toll-daily' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    return sendJson(res, 200, { ok: true, data: db.settings.tollDaily || null });
   }
   if (p === '/api/toll-import-info' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');

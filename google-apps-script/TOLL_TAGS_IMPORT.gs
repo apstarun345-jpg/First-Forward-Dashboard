@@ -79,6 +79,7 @@ function tollImportOne_(ss, job) {
   try {
     var agg = tollDownloadAggregate_(job.url, t0);
     var res = tollMergeIntoSheet_(ss, agg.tags, job.reportDate);
+    try { tollDailyUpsert_(ss, job.reportDate, agg); } catch (e3) { console.warn('toll daily fail: ' + e3); }
     var stamp = Utilities.formatDate(new Date(), TOLL_CFG.TZ, 'yyyy-MM-dd HH:mm:ss');
     var log = ss.getSheetByName(TOLL_CFG.LOG_TAB) || ss.insertSheet(TOLL_CFG.LOG_TAB);
     if (log.getLastRow() < 1) log.appendRow(['Tab', 'Time', 'Report Date', 'New Tags', 'Updated Tags', 'Toll Txns', 'Total Tags', 'Amount (₹)', 'Status', 'Mail ID']);
@@ -97,9 +98,44 @@ function tollImportOne_(ss, job) {
   }
 }
 
+/** 🛣️ "Toll Debit Daily" tab — date-wise + class-wise (CCH) toll debit ginti/₹; format purane GV tab jaisa. Roz ek row (upsert). */
+var TOLL_DAILY_TAB = 'Toll Debit Daily';
+var TOLL_DAILY_CLASSES = ['VC4', 'VC20', 'VC5', 'VC7', 'VC8', 'VC9', 'VC10', 'VC11', 'VC12', 'VC13', 'VC14', 'VC15', 'VC16', 'VC17', 'Other'];
+function tollDailyHeader_() {
+  var h = ['Date', 'Din', 'Toll Debit Txn', 'Toll Debit ₹', 'Unique Vehicles'];
+  TOLL_DAILY_CLASSES.forEach(function (k) { h.push(k + ' Txn', k + ' ₹'); });
+  h.push('Status', 'Updated'); return h;
+}
+function tollDailyUpsert_(ss, reportDate, agg) {
+  var sh = ss.getSheetByName(TOLL_DAILY_TAB) || ss.insertSheet(TOLL_DAILY_TAB);
+  var H = tollDailyHeader_();
+  if (sh.getLastRow() < 1) { sh.getRange(1, 1, 1, H.length).setValues([H]).setFontWeight('bold'); sh.setFrozenRows(1); }
+  var d = new Date(reportDate + 'T12:00:00+05:30');
+  var ds = Utilities.formatDate(d, TOLL_CFG.TZ, 'dd-MMM-yyyy'), day = Utilities.formatDate(d, TOLL_CFG.TZ, 'EEE');
+  var row = [ds, day, agg.txns, Math.round(agg.amount), Object.keys(agg.tags).length];
+  TOLL_DAILY_CLASSES.forEach(function (k) { var c = agg.cls[k] || { n: 0, a: 0 }; row.push(c.n, Math.round(c.a)); });
+  row.push('✅', Utilities.formatDate(new Date(), TOLL_CFG.TZ, 'dd-MMM HH:mm'));
+  var n = Math.max(sh.getLastRow() - 1, 0), at = -1;
+  if (n) { var dv = sh.getRange(2, 1, n, 1).getDisplayValues(); for (var i = 0; i < n; i++) { if (dv[i][0] === ds) { at = i + 2; break; } } }
+  if (at < 0) at = sh.getLastRow() + 1;
+  sh.getRange(at, 1, 1, 1).setNumberFormat('@');
+  sh.getRange(at, 1, 1, row.length).setValues([row]);
+  tollPushDaily_(sh);
+}
+/** Poora tab dashboard ko bhejo (sheet private rahe) — manual dobara bhejne ke liye bhi chalao. */
+function tollPushDaily_(sh) {
+  var n = sh.getLastRow() - 1; if (n < 1) return;
+  var vals = sh.getRange(1, 1, n + 1, tollDailyHeader_().length).getDisplayValues();
+  var rows = vals.slice(1).map(function (r) { return r.map(function (v, i) { return i >= 2 && i <= vals[0].length - 3 ? Number(String(v).replace(/[^\d.-]/g, '')) || 0 : v; }); });
+  var secret = PropertiesService.getScriptProperties().getProperty('DASH_SECRET');
+  if (!secret) { console.warn('DASH_SECRET set nahi — toll daily site ko nahi gaya'); return; }
+  UrlFetchApp.fetch(TOLL_CFG.DASH_URL + '/api/push/toll-daily', { method: 'post', contentType: 'application/json', payload: JSON.stringify({ secret: secret, header: vals[0], rows: rows }), muteHttpExceptions: true });
+}
+function tollPushDailyNow() { tollPushDaily_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TOLL_DAILY_TAB)); }
+
 /** S3 CSV ko Range se tukdon me padho; sirf toll rows tag-wise jodo. */
 function tollDownloadAggregate_(url, t0) {
-  var state = { idx: null, tags: {}, txns: 0, amount: 0 };
+  var state = { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 };
   var pos = 0, total = -1, carry = [];
   while (total < 0 || pos < total) {
     if (Date.now() - t0 > TOLL_CFG.BUDGET_MS) throw new Error('time budget khatam — tollImportCheck dobara chalayein');
@@ -143,6 +179,8 @@ function tollParseText_(text, state) {
     var tag = String(f[X.TAG_ID] || '').trim().toUpperCase();
     if (!tag) continue;
     var amt = parseFloat(f[X.TRANSACTION_AMOUNT]); if (!isFinite(amt)) amt = 0;
+    var cc = String(f[X.CCH] || '').trim().toUpperCase(); if (!/^VC\d+$/.test(cc)) cc = 'Other';
+    var dc = state.cls[cc] || (state.cls[cc] = { n: 0, a: 0 }); dc.n += 1; dc.a += amt;   // 🛣️ class-wise (CCH) ginti + ₹
     var t = state.tags[tag];
     if (!t) { t = state.tags[tag] = { vrn: '', an: '', ai: '', amt: 0, n: 0 }; }
     t.amt += amt; t.n += 1; state.txns += 1; state.amount += amt;

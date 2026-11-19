@@ -1,5 +1,5 @@
 /* 🛣 Toll Debit (v3.125.172) — Reports → Toll Debit
-   Data: "Toll Debit Daily" tab (GV workbook). Wo tab Apps Script (TollDebitDaily.gs) roz IDFC ki
+   Data: Toll Tags sheet ka "Toll Debit Daily" tab (TOLL_TAGS_IMPORT.gs, server par /api/toll-daily) + purani tarikhon ke liye GV workbook ka tab (TollDebitDaily.gs) roz IDFC ki
    "EToll 2.0 - All Transactions Report" mail se bharti hai: date-wise + class-wise (TVC) toll debit
    ki ginti aur ₹. Ye page sirf wahi summary padhta hai — poora report site par nahi aata. */
 (function (FF) {
@@ -47,13 +47,29 @@
     if (!fresh && state.days.length && Date.now() - state.at < 10 * 60e3) return state;
     if (state.promise) return state.promise;
     state.promise = (async () => {
-      const p = new URLSearchParams({ tqx: 'out:json', gid: GID, range: 'A1:AK400', headers: '1', prio: '1' });
-      if (FF.config && FF.config.gvSheetId) p.set('id', FF.config.gvSheetId);
-      if (fresh) p.set('fresh', '1');
-      const res = await Promise.race([fetch(`${(FF.config && FF.config.proxyPath) || '/api/gviz'}?${p.toString()}`, { credentials: 'same-origin' }), new Promise((_, rej) => setTimeout(() => rej(new Error('Google Sheet abhi busy hai (rate limit) — 1 minute baad ↻ dabao.')), 45000))]);
-      const text = await res.text();
-      if (!res.ok) { let m = `Toll Debit sheet nahi mili (${res.status})`; try { m = JSON.parse(text).error || m; } catch { /* text */ } throw new Error(m); }
-      const out = parse(FF.data.parseGviz(text));
+      // v3.125.356 — pehli source: Toll Tags sheet ka "Toll Debit Daily" tab (webhook se server par); purani GV tab sirf purani tarikhon ke liye.
+      const fromServer = fetch('/api/toll-daily', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((j) => (j && j.data && j.data.header ? j.data : null)).catch(() => null);
+      const fromGv = (async () => {
+        const p = new URLSearchParams({ tqx: 'out:json', gid: GID, range: 'A1:AK400', headers: '1', prio: '1' });
+        if (FF.config && FF.config.gvSheetId) p.set('id', FF.config.gvSheetId);
+        if (fresh) p.set('fresh', '1');
+        const res = await Promise.race([fetch(`${(FF.config && FF.config.proxyPath) || '/api/gviz'}?${p.toString()}`, { credentials: 'same-origin' }), new Promise((_, rej) => setTimeout(() => rej(new Error('Google Sheet abhi slow hai — thodi der baad dobara try karein.')), 45000))]);
+        const text = await res.text();
+        if (!res.ok) { let m = `Toll Debit sheet nahi mili (${res.status})`; try { m = JSON.parse(text).error || m; } catch { /* text */ } throw new Error(m); }
+        return FF.data.parseGviz(text);
+      })();
+      const [srv, gv] = await Promise.all([fromServer, fromGv.then((t) => ({ t }), (e) => ({ e }))]);
+      let out = null;
+      if (gv.t) out = parse(gv.t);
+      if (srv) {
+        const so = parse({ cols: srv.header.map((l) => ({ label: l })), rows: srv.rows.map((r) => r.map((v, i) => (i === 0 ? { v: null, f: String(v) } : { v }))) });
+        const by = new Map(((out && out.days) || []).map((d) => [d.date, d]));
+        so.days.forEach((d) => by.set(d.date, d));
+        const classes = [...new Set([...(out ? out.classes : []), ...so.classes])];
+        const members = {}; classes.forEach((k) => { const t = tvcOf(k); (members[t] || (members[t] = [])).push(k); });
+        out = { days: [...by.values()].sort((a, b) => (a.date < b.date ? -1 : 1)), classes, basis: 'TVC', members };
+      }
+      if (!out) throw (gv.e || new Error('Toll Debit data nahi mila.'));
       Object.assign(state, out, { at: Date.now(), err: '' });
       return state;
     })();

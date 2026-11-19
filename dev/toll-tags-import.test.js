@@ -21,7 +21,7 @@ test('mail → report date + download link (&amp; decoded)', () => {
 });
 
 test('only successful NETC-TOLL-PASS rows count; recharge/issuance ignored; tag-wise totals; agent id apostrophe stripped', () => {
-  const st = { idx: null, tags: {}, txns: 0, amount: 0 };
+  const st = { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 };
   X.tollParseText_(csv(
     'AA11,NETC-TOLL-PASS,45,True,"toll, plaza ""A""",RJ14AB1234,RAM SINGH,\'1001',
     'AA11,NETC-TOLL-PASS-DEBIT-AUTOPAY,5,True,x,RJ14AB1234,RAM SINGH,\'1001',
@@ -37,14 +37,14 @@ test('only successful NETC-TOLL-PASS rows count; recharge/issuance ignored; tag-
 });
 
 test('chunk boundary: header parsed once, rows split across calls aggregate together', () => {
-  const st = { idx: null, tags: {}, txns: 0, amount: 0 };
+  const st = { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 };
   X.tollParseText_(HDR + '\r\nAA11,NETC-TOLL-PASS,10,True,x,V1,A,\'1\r\n', st);
   X.tollParseText_('AA11,NETC-TOLL-PASS,15,True,x,V1,A,\'1\r\nZZ99,NETC-TOLL-PASS,5,True,x,V2,B,\'2\r\n', st);
   assert.equal(st.tags.AA11.amt, 25); assert.equal(st.tags.AA11.n, 2); assert.equal(st.txns, 3);
 });
 
 test('missing column → clear error', () => {
-  assert.throws(() => X.tollParseText_('A,B\r\n1,2\r\n', { idx: null, tags: {}, txns: 0, amount: 0 }), /column nahi mila/);
+  assert.throws(() => X.tollParseText_('A,B\r\n1,2\r\n', { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 }), /column nahi mila/);
 });
 
 test('day 2: same tag adds to the SAME row (no duplicate), new tag appended, blanks filled, dates move forward only', () => {
@@ -82,4 +82,20 @@ test('dashboard side: secret-guarded webhook + info endpoint + Home row + notifi
   assert.match(srv, /p === '\/api\/toll-import-info'/);
   const home = fs.readFileSync(new URL('../home.js', import.meta.url), 'utf8');
   assert.match(home, /key: 'toll-tags'/);
+});
+
+test('v3.125.356 — class-wise (CCH) toll debit summary + server webhook + page reads it', async () => {
+  const fs = await import('node:fs');
+  const gs = fs.readFileSync(new URL('../google-apps-script/TOLL_TAGS_IMPORT.gs', import.meta.url), 'utf8');
+  const srv = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  const pg = fs.readFileSync(new URL('../tollDebit.js', import.meta.url), 'utf8');
+  assert.match(gs, /tollDailyUpsert_/); assert.match(gs, /Toll Debit Daily/); assert.match(gs, /\/api\/push\/toll-daily/);
+  assert.match(srv, /\/api\/push\/toll-daily/); assert.match(srv, /\/api\/toll-daily/); assert.match(srv, /delete s\.tollDaily/);
+  assert.match(pg, /\/api\/toll-daily/);
+  // script ka parser class-wise ginti banata hai
+  const m = gs.match(/function tollCsvLine_[\s\S]*?\n}\n/); assert.ok(m);
+  const ctx = {}; new Function('ctx', `${gs.replace(/^var TOLL_CFG/m, 'var TOLL_CFG')}; ctx.parse = tollParseText_;`)(ctx);
+  const st = { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 };
+  ctx.parse('TAG_ID,TRANSACTION_TYPE,TRANSACTION_AMOUNT,TRANSACTION_SUCCESS_STATUS,VRN,TAG_ISSUING_AGENT_NAME,TAG_ISSUING_AGENT_ID,CCH\nA1,NETC-TOLL-PASS,100,true,V1,X,1,VC4\nA1,NETC-TOLL-PASS,50,true,V1,X,1,VC4\nB2,NETC-TOLL-PASS,70,true,V2,X,1,VC20\n', st);
+  assert.equal(st.cls.VC4.n, 2); assert.equal(st.cls.VC4.a, 150); assert.equal(st.cls.VC20.n, 1);
 });
