@@ -1515,6 +1515,9 @@ function softTrim(opts) {
   if (opts && opts.cacheAlways || still >= MEM_CACHE_TRIM_MB) {
     try { let drop = Math.ceil(cache.size / 2); for (const k of [...cache.keys()]) { if (drop-- <= 0) break; cache.delete(k); } } catch { /* ignore */ }
     try { if (typeof plPageCache !== 'undefined' && plPageCache.clear) plPageCache.clear(); } catch { /* ignore */ }
+    try { if (typeof plGvMemo !== 'undefined' && plGvMemo.clear) plGvMemo.clear(); } catch { /* ignore */ }
+    try { if (typeof plGvMemoInflight !== 'undefined' && plGvMemoInflight.clear) plGvMemoInflight.clear(); } catch { /* ignore */ }
+    try { if (typeof comboSplitMemo !== 'undefined' && comboSplitMemo.clear) comboSplitMemo.clear(); } catch { /* ignore */ }
     try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ }
     return true;
   }
@@ -13533,37 +13536,65 @@ function plChannelView(link, ch) {
     tls: (Array.isArray(link.tls) ? link.tls : []).filter((t) => t && plMemberSrc(t, link) === ch),
     members: (Array.isArray(link.members) ? link.members : []).filter((m) => m && plMemberSrc(m, link) === ch) };
 }
+const comboSplitMemo = new Map();
+const plGvMemo = new Map();
+const plGvMemoInflight = new Map();
+const PL_GV_MEMO_MS = 60e3;
 async function comboSplit(link) {
   const tlParts = comboTlParts(link);
-  const known = { ff: new Set(), gv: new Set() };
-  const tlMaps = [];
-  for (const part of tlParts) {
-    let m = new Map();
-    try { m = await personalTeamAgents({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] }); } catch { /* ignore */ }
-    m.forEach((_v, n) => known[part.source].add(plNormName(n)));
-    tlMaps.push({ part, map: m });
-  }
-  const memBySrc = { ff: [], gv: [] };
-  (Array.isArray(link.members) ? link.members : []).forEach((m) => {
-    const src = plMemberSrc(m, link);
-    if (m && m.name && !known[src].has(plNormName(m.name))) memBySrc[src].push({ name: String(m.name) });
+  const memArr = Array.isArray(link.members) ? link.members : [];
+  const key = `${link.id || ''}|${link.token || ''}|${link.name || ''}|${link.source || ''}|${tlParts.map((t) => `${t.source}:${t.name}:${t.personId || ''}`).join(',')}|${memArr.map((m) => `${plMemberSrc(m, link)}:${m.name}`).join(',')}`;
+  const hit = comboSplitMemo.get(key);
+  if (hit && Date.now() - hit.at < 60e3 && hit.data) return hit.data;
+  if (hit && hit.promise) return hit.promise;
+
+  const promise = (async () => {
+    const known = { ff: new Set(), gv: new Set() };
+    const tlMaps = await Promise.all(tlParts.map(async (part) => {
+      let m = new Map();
+      try { m = await personalTeamAgents({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] }); } catch { /* ignore */ }
+      return { part, map: m };
+    }));
+    tlMaps.forEach(({ part, map }) => {
+      map.forEach((_v, n) => known[part.source].add(plNormName(n)));
+    });
+    const memBySrc = { ff: [], gv: [] };
+    memArr.forEach((m) => {
+      const src = plMemberSrc(m, link);
+      if (m && m.name && !known[src].has(plNormName(m.name))) memBySrc[src].push({ name: String(m.name) });
+    });
+    const res = { tlParts, tlMaps, memBySrc };
+    comboSplitMemo.set(key, { at: Date.now(), data: res });
+    if (comboSplitMemo.size > 100) comboSplitMemo.delete(comboSplitMemo.keys().next().value);
+    return res;
+  })().finally(() => {
+    const cur = comboSplitMemo.get(key);
+    if (cur && cur.promise) delete cur.promise;
   });
-  return { tlParts, tlMaps, memBySrc };
+
+  comboSplitMemo.set(key, { at: Date.now(), promise });
+  return promise;
 }
 async function comboTeamAgents(link) {
   const out = new Map();
   const merge = (m) => { for (const [n, dm] of m) { if (!out.has(n)) out.set(n, new Map()); const t = out.get(n); for (const [d, v] of dm) t.set(d, Math.max(t.get(d) || 0, v)); } };
   const sp = await comboSplit(link);
   sp.tlMaps.forEach((x) => merge(x.map));
-  for (const src of ['ff', 'gv']) if (sp.memBySrc[src].length) { try { merge(await personalTeamAgents({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] })); } catch { /* ignore */ } }
+  const memParts = ['ff', 'gv'].filter((src) => sp.memBySrc[src].length).map((src) => ({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] }));
+  const memResults = await Promise.all(memParts.map((p) => personalTeamAgents(p).catch(() => new Map())));
+  memResults.forEach(merge);
   return out;
 }
 async function comboDailyRows(link) {
   const sp = await comboSplit(link);
   const agg = new Map();
-  const add = (rows) => rows.forEach((r) => { const k = `${r.date}|${r.cls}`; const o = agg.get(k) || { date: r.date, cls: r.cls, n: 0 }; o.n += r.n; agg.set(k, o); });
-  for (const part of sp.tlParts) add(await personalDailyRows({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] }));
-  for (const src of ['ff', 'gv']) if (sp.memBySrc[src].length) add(await personalDailyRows({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] }));
+  const add = (rows) => (rows || []).forEach((r) => { const k = `${r.date}|${r.cls}`; const o = agg.get(k) || { date: r.date, cls: r.cls, n: 0 }; o.n += r.n; agg.set(k, o); });
+  const allParts = [
+    ...sp.tlParts.map((part) => ({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] })),
+    ...(['ff', 'gv'].filter((src) => sp.memBySrc[src].length).map((src) => ({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] })))
+  ];
+  const allRows = await Promise.all(allParts.map((p) => personalDailyRows(p).catch(() => [])));
+  allRows.forEach(add);
   return [...agg.values()];
 }
 function mergePersonalStock(list) {
@@ -13659,12 +13690,25 @@ async function personalAgentClassRows(link) {
     const sp = await comboSplit(link);
     const parts = [...sp.tlParts.map((p) => ({ kind: 'tl', source: p.source, name: p.name, personId: p.personId, members: [] }))];
     ['ff', 'gv'].forEach((src) => { if (sp.memBySrc[src].length) parts.push({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] }); });
-    for (const part of parts) { try { merge(await personalAgentClassRows(part)); } catch { /* part failed */ } }
+    const results = await Promise.all(parts.map((part) => personalAgentClassRows(part).catch(() => new Map())));
+    for (const rMap of results) merge(rMap);
     return out;
+  }
+  const curStart = `${dateKeyNow().slice(0, 7)}-01`;
+  if (link.source === 'gv' && db.settings.gvSheetId) {
+    try {
+      const gm = await personalGvMasterRows(link);
+      if (gm.length) {
+        for (const r of gm) {
+          const d = String(r.date);
+          add(r.agent || '', r.cls, d.startsWith(curStart.slice(0, 7)) ? 1 : 0, r.n);
+        }
+        return out;
+      }
+    } catch { /* fallback to EIR */ }
   }
   const c = personalConfig(link);
   const { start, today } = personalWindow();
-  const curStart = `${dateKeyNow().slice(0, 7)}-01`;
   const lastEnd = new Date(`${curStart}T00:00:00Z`); lastEnd.setUTCDate(0);
   const lastEndKey = `${lastEnd.getUTCFullYear()}-${pad2(lastEnd.getUTCMonth() + 1)}-${pad2(lastEnd.getUTCDate())}`;
   const run = async (from, to, which) => {
@@ -13781,14 +13825,33 @@ async function personalAgentDailyRows(link) {
     const sp = await comboSplit(link);
     const parts = [...sp.tlParts.map((p) => ({ kind: 'tl', source: p.source, name: p.name, personId: p.personId, members: [] }))];
     ['ff', 'gv'].forEach((src) => { if (sp.memBySrc[src].length) parts.push({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] }); });
-    for (const part of parts) {
-      try { for (const [k, v] of await personalAgentDailyRows(part)) { const o = out.get(k) || { name: v.name, d: {} }; out.set(k, o); for (const [dt, c] of Object.entries(v.d)) { const t = o.d[dt] || (o.d[dt] = { VC4: 0, VC20: 0, 'VC5+': 0 }); for (const b of Object.keys(c)) t[b] = Math.max(t[b], c[b]); } } } catch { /* part failed */ }
+    const results = await Promise.all(parts.map((part) => personalAgentDailyRows(part).catch(() => new Map())));
+    for (const rMap of results) {
+      for (const [k, v] of rMap) {
+        const o = out.get(k) || { name: v.name, d: {} }; out.set(k, o);
+        for (const [dt, c] of Object.entries(v.d)) {
+          const t = o.d[dt] || (o.d[dt] = { VC4: 0, VC20: 0, 'VC5+': 0 });
+          for (const b of Object.keys(c)) t[b] = Math.max(t[b], c[b]);
+        }
+      }
     }
     return out;
   }
-  const c = personalConfig(link);
   const { start, today } = personalWindow();
   const curStart = start;
+  if (link.source === 'gv' && db.settings.gvSheetId) {
+    try {
+      const gm = await personalGvMasterRows(link);
+      if (gm.length) {
+        for (const r of gm) {
+          const d = String(r.date);
+          if (d >= curStart && d <= today) add(r.agent || '', d, r.cls, r.n);
+        }
+        return out;
+      }
+    } catch { /* fallback to EIR */ }
+  }
+  const c = personalConfig(link);
   const tq = `select ${c.agentCol}, ${c.dateCol}, ${c.clsCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${curStart}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.agentCol}, ${c.dateCol}, ${c.clsCol}, ${c.masterCol} limit 40000`;
   const params = new URLSearchParams({ id: String(c.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), sheet: c.sheet, tq });
   const res = await fetchPersonalCached(upstreamUrl(params));
@@ -13809,8 +13872,8 @@ async function personalAgentDailyRows(link) {
 }
 /** GV vs FF split of a combined link (TLs / agents / MTD / last month / stock). */
 async function personalChannelSplit(baseLink, sidx, ym, prevYm) {
-  const out = [];
-  for (const ch of plLinkChannels(baseLink)) {
+  const channels = plLinkChannels(baseLink);
+  return Promise.all(channels.map(async (ch) => {
     const sub = plChannelView(baseLink, ch);
     let rows = [];
     try { rows = await personalDailyRows(sub); } catch { rows = []; }
@@ -13818,9 +13881,8 @@ async function personalChannelSplit(baseLink, sidx, ym, prevYm) {
     rows.forEach((r) => { const d = String(r.date); if (d.startsWith(ym)) mtd += r.n; else if (d.startsWith(prevYm)) last += r.n; });
     let stock = null;
     try { if (sidx) { const sr = personalStockFor(sidx, sub); if (sr) stock = (sr.t[0] || 0) + (sr.t[1] || 0); } } catch { stock = null; }
-    out.push({ ch, tls: (sub.tls || []).length, agents: personalMemberNames(sub).length, mtd, last, stock });
-  }
-  return out;
+    return { ch, tls: (sub.tls || []).length, agents: personalMemberNames(sub).length, mtd, last, stock };
+  }));
 }
 /** 🟢 Today Live — today's issuance per agent (GV: GV Master live rows, FF: EIR rows dated today). */
 async function personalEirTodayRows(link, today) {
@@ -13923,49 +13985,81 @@ function isFfPersonalRow(master) {
   return !isGvPersonalRow(master);
 }
 /** 🟩 GV personal fallback — EIR ke GV columns (AU–AZ) khaali hon to GV Master tab se TL / agent ki issuance padho.
-    Date text ho ya date-typed: 3 koshish (seedha, toDate, bina date filter) aur date JS me filter. */
+    Col A = unique_id, B = agent_name, P = date, G = cch, F = vclass, I = tag_id_number, D = supervisor_name, C = supervisor_agent_id. */
 async function personalGvMasterRows(link, win) {
   const m = (db.settings.gv && db.settings.gv.master) || {};
   const col = { date: m.date || 'P', cch: m.cch || 'G', vcl: m.vClass || 'F', tag: m.tagId || 'I', agent: m.agentName || 'B', uid: m.uniqueId || 'A', tlId: m.tlId || 'C', tlName: m.tlName || 'D' };
   const { start, today } = win || personalWindow();
   const low = (n) => gvizLiteral(String(n).toLowerCase());
   const pid = String(link.personId || '').trim().toUpperCase();
-  let who;
-  if (link.kind === 'tl') who = `(lower(${col.tlName}) = ${low(link.name)}${pid ? ` or upper(${col.tlId}) = ${gvizLiteral(pid)}` : ''})`;
-  else if (link.kind === 'group') { const names = personalMemberNames(link); who = names.length ? `(${names.map((n) => `lower(${col.agent}) = ${low(n)}`).join(' or ')})` : `${col.agent} = ''`; }
-  else who = `(lower(${col.agent}) = ${low(link.name)}${pid ? ` or upper(${col.uid}) = ${gvizLiteral(pid)}` : ''})`;
-  const select = `select ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}, count(${col.tag})`;
-  const group = `group by ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}`;
-  const base = `${col.tag} is not null and ${who}`;
-  const tries = [
-    `${select} where ${base} and ${col.date} >= date '${start}' and ${col.date} <= date '${today}' ${group}`,
-    `${select} where ${base} and toDate(${col.date}) >= date '${start}' and toDate(${col.date}) <= date '${today}' ${group}`,
-    `${select} where ${base} ${group} limit 20000`
-  ];
-  const sheetId = String(db.settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
-  for (const tq of tries) {
-    try {
-      // Live (today-only) window: short cache so "Issued today" matches the site (30s), not the 10-min default.
-      const liveWin = !!win && win.start === win.today;
-      const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: m.tab || 'GV Master', tq })), liveWin ? { maxAgeMs: 30e3 } : { staleMs: PL_STALE_MS });
-      if (out.status < 200 || out.status >= 300) continue;
-      const table = parseGvizServer(out.body);
-      const rows = [];
-      for (const row of table.rows || []) {
-        const dk = serverDate(serverCell(row, 1));
-        if (!dk || dk < start || dk > today) continue;
-        const cch = String(serverCell(row, 2) || '').trim(), vcl = String(serverCell(row, 3) || '').trim().replace(/\.0+$/, '');
-        const cls = classBucket(cch || (vcl ? (/^vc/i.test(vcl) ? vcl : `VC${vcl}`) : ''));
-        rows.push({ agent: serverCell(row, 0).trim(), date: dk, cls, n: serverNumber(serverCell(row, 4)) });
-      }
-      if (!rows.length && tq !== tries[tries.length - 1]) continue;   // empty ≠ no data: try the next date format
-      return rows;
-    } catch { /* next attempt */ }
-  }
-  return [];
+  const memStr = (Array.isArray(link.members) ? link.members : []).map((x) => String((x && x.name) || '')).sort().join(',');
+  const memoKey = `${link.kind}|${link.name}|${pid}|${win ? `${win.start}|${win.today}` : 'def'}|${memStr}`;
+
+  const hit = plGvMemo.get(memoKey);
+  if (hit && Date.now() - hit.at < PL_GV_MEMO_MS && hit.rows) return hit.rows;
+  if (plGvMemoInflight.has(memoKey)) return plGvMemoInflight.get(memoKey);
+
+  const runner = (async () => {
+    let who;
+    if (link.kind === 'tl') who = `(lower(${col.tlName}) = ${low(link.name)}${pid ? ` or upper(${col.tlId}) = ${gvizLiteral(pid)}` : ''})`;
+    else if (link.kind === 'group') { const names = personalMemberNames(link); who = names.length ? `(${names.map((n) => `lower(${col.agent}) = ${low(n)}`).join(' or ')})` : `${col.agent} = ''`; }
+    else who = `(lower(${col.agent}) = ${low(link.name)}${pid ? ` or upper(${col.uid}) = ${gvizLiteral(pid)}` : ''})`;
+    const selectUid = `select ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}, ${col.uid}, count(${col.tag})`;
+    const groupUid = `group by ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}, ${col.uid}`;
+    const selectNoUid = `select ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}, count(${col.tag})`;
+    const groupNoUid = `group by ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}`;
+    const base = `${col.tag} is not null and ${who}`;
+    const tries = [
+      `${selectUid} where ${base} and ${col.date} >= date '${start}' and ${col.date} <= date '${today}' ${groupUid}`,
+      `${selectNoUid} where ${base} and ${col.date} >= date '${start}' and ${col.date} <= date '${today}' ${groupNoUid}`,
+      `${selectNoUid} where ${base} ${groupNoUid} limit 20000`
+    ];
+    const sheetId = String(db.settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+    if (!sheetId) return [];
+    for (const tq of tries) {
+      try {
+        // Live (today-only) window: short cache so "Issued today" matches the site (30s), not the 10-min default.
+        const liveWin = !!win && win.start === win.today;
+        const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: m.tab || 'GV Master', tq })), liveWin ? { maxAgeMs: 30e3 } : { staleMs: PL_STALE_MS });
+        if (out.status < 200 || out.status >= 300) continue;
+        const table = parseGvizServer(out.body);
+        const hasUid = (table.cols || []).length >= 6;
+        const rows = [];
+        for (const row of table.rows || []) {
+          const dk = serverDate(serverCell(row, 1));
+          if (!dk || (win && (dk < start || dk > today))) continue;
+          const cch = String(serverCell(row, 2) || '').trim(), vcl = String(serverCell(row, 3) || '').trim().replace(/\.0+$/, '');
+          const cls = classBucket(cch || (vcl ? (/^vc/i.test(vcl) ? vcl : `VC${vcl}`) : ''));
+          const id = hasUid ? String(serverCell(row, 4) || '').trim().replace(/\.0+$/, '') : '';
+          const countCell = serverCell(row, hasUid ? 5 : 4);
+          rows.push({ agent: serverCell(row, 0).trim(), date: dk, cls, id, n: serverNumber(countCell) });
+        }
+        if (!rows.length && tq !== tries[tries.length - 1]) continue;   // empty ≠ no data: try the next date format
+        plGvMemo.set(memoKey, { at: Date.now(), rows });
+        if (plGvMemo.size > 100) plGvMemo.delete(plGvMemo.keys().next().value);
+        return rows;
+      } catch { /* next attempt */ }
+    }
+    return [];
+  })().finally(() => {
+    plGvMemoInflight.delete(memoKey);
+  });
+
+  plGvMemoInflight.set(memoKey, runner);
+  return runner;
 }
 async function personalDailyRows(link) {
   if (isComboLink(link)) return comboDailyRows(link);
+  if (link.source === 'gv' && db.settings.gvSheetId) {
+    try {
+      const gm = await personalGvMasterRows(link);
+      if (gm.length) {
+        const agg = new Map();
+        gm.forEach((r) => { const k = `${r.date}|${r.cls}`; agg.set(k, { date: r.date, cls: r.cls, n: (agg.get(k) ? agg.get(k).n : 0) + r.n }); });
+        return [...agg.values()];
+      }
+    } catch { /* fallback to EIR */ }
+  }
   const c = personalConfig(link);
   const { start, today } = personalWindow();
   const extra = `, ${c.masterCol}, ${c.tlCol}`;
@@ -14007,6 +14101,21 @@ async function personalDailyRows(link) {
 }
 async function personalTeamAgents(link) {
   if (isComboLink(link)) return comboTeamAgents(link);
+  if (link.source === 'gv' && db.settings.gvSheetId) {
+    try {
+      const gm = await personalGvMasterRows(link);
+      if (gm.length) {
+        const byAgent = new Map();
+        for (const r of gm) {
+          const name = r.agent || '';
+          if (!name) continue;
+          if (!byAgent.has(name)) byAgent.set(name, new Map());
+          byAgent.get(name).set(r.date, (byAgent.get(name).get(r.date) || 0) + r.n);
+        }
+        return byAgent;
+      }
+    } catch { /* fallback to EIR */ }
+  }
   const c = personalConfig(link);
   const { start, today } = personalWindow();
   const extra = `, ${c.masterCol}, ${c.tlCol}`;
@@ -14042,9 +14151,27 @@ async function personalAgentIds(link) {
   const out = new Map();
   if (isComboLink(link)) {
     const sp = await comboSplit(link);
-    for (const part of sp.tlParts) { try { for (const [k, v] of await personalAgentIds({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] })) if (!out.has(k)) out.set(k, v); } catch { /* ignore */ } }
-    for (const src of ['ff', 'gv']) if (sp.memBySrc[src].length) { try { for (const [k, v] of await personalAgentIds({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] })) if (!out.has(k)) out.set(k, v); } catch { /* ignore */ } }
+    const parts = [
+      ...sp.tlParts.map((part) => ({ kind: 'tl', source: part.source, name: part.name, personId: part.personId, members: [] })),
+      ...(['ff', 'gv'].filter((src) => sp.memBySrc[src].length).map((src) => ({ kind: 'group', source: src, name: link.name, members: sp.memBySrc[src] })))
+    ];
+    const results = await Promise.all(parts.map((part) => personalAgentIds(part).catch(() => new Map())));
+    results.forEach((m) => { for (const [k, v] of m) if (!out.has(k)) out.set(k, v); });
     return out;
+  }
+  if (link.source === 'gv' && db.settings.gvSheetId) {
+    try {
+      const gm = await personalGvMasterRows(link);
+      if (gm.length) {
+        for (const r of gm) {
+          if (r.agent && r.id) {
+            const k = plNormName(r.agent);
+            if (!out.has(k)) out.set(k, r.id);
+          }
+        }
+        if (out.size) return out;
+      }
+    } catch { /* fallback */ }
   }
   const c = personalConfig(link);
   const e = db.settings.eir || {};
@@ -14070,6 +14197,23 @@ async function personalAgentIds(link) {
     v3.31 fix: ye function call ho raha tha par define nahi tha → har agent /p/ link 500 deta tha. */
 async function personalAgentTl(link) {
   try {
+    if (link.source === 'gv' && db.settings.gvSheetId) {
+      const m = (db.settings.gv && db.settings.gv.master) || {};
+      const col = { agent: m.agentName || 'B', uid: m.uniqueId || 'A', tl: m.tlName || 'D', tag: m.tagId || 'I' };
+      const low = (n) => gvizLiteral(String(n).toLowerCase());
+      const pid = String(link.personId || '').trim().toUpperCase();
+      const who = `(lower(${col.agent}) = ${low(link.name)}${pid ? ` or upper(${col.uid}) = ${gvizLiteral(pid)}` : ''})`;
+      const tq = `select ${col.tl}, count(${col.tag}) where ${col.tag} is not null and ${who} group by ${col.tl} order by count(${col.tag}) desc limit 1`;
+      const sheetId = String(db.settings.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+      const out = await fetchPersonalCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: m.tab || 'GV Master', tq })));
+      if (out.status >= 200 && out.status < 300) {
+        const table = parseGvizServer(out.body);
+        if (table.rows && table.rows.length) {
+          const tl = serverCell(table.rows[0], 0).trim();
+          if (tl) return tl;
+        }
+      }
+    }
     const c = personalConfig(link);
     const { start, today } = personalWindow();
     const tq = `select ${c.tlCol}, ${c.masterCol}, count(${c.tagCol}) where ${c.tagCol} is not null and ${c.dateCol} >= date '${start}' and ${c.dateCol} <= date '${today}' and ${personalNameFilter(link, c)} group by ${c.tlCol}, ${c.masterCol}`;
@@ -14309,6 +14453,25 @@ async function personalWelcomeHistory(link) {
   const win = personalWindow(), ym = dateKeyNow().slice(0, 7);
   let stale = false;
   const results = await Promise.all(parts.map(async (part) => {
+    if (part.source === 'gv' && db.settings.gvSheetId) {
+      try {
+        const gm = await personalGvMasterRows(part);
+        if (gm.length) {
+          const agents = new Map();
+          for (const r of gm) {
+            const name = r.agent || part.name;
+            const key = plNormName(name);
+            if (!key) continue;
+            if (!agents.has(key)) agents.set(key, { name, source: 'gv', first: '', month: 0 });
+            const a = agents.get(key);
+            const d = String(r.date);
+            if (d && (!a.first || d < a.first)) a.first = d;
+            if (d >= win.currentStart && d <= win.today) a.month += r.n;
+          }
+          return [...agents.values()];
+        }
+      } catch { /* fallback to EIR */ }
+    }
     const c = personalConfig(part), who = personalNameFilter(part, c);
     const run = async (select, extra) => {
       const tq = `select ${c.agentCol}, ${c.masterCol}, ${select} where ${c.tagCol} is not null and ${c.dateCol} is not null and ${who}${extra} group by ${c.agentCol}, ${c.masterCol} limit 20000`;
@@ -14446,7 +14609,7 @@ async function servePersonalPage(req, res, rawToken) {
   }
   if (!wantFresh) {
     const rb = plRecentBuilt.get(cacheKey);
-    if (rb && Date.now() - rb.at < PL_RECENT_MS && wantPartial) return replyPage(rb);
+    if (rb && Date.now() - rb.at < PL_RECENT_MS) return replyPage(rb);
     const b = plBuilding.get(cacheKey);
     if (wantPartial && b && Date.now() - b < PL_BUILD_WAIT_MS) return sendJson(res, 202, { ok: false, loading: true, building: true }, noStore);
   }
@@ -14459,7 +14622,7 @@ async function servePersonalPage(req, res, rawToken) {
       if (JSON.stringify(savedLink) !== linkSnapshot || JSON.stringify(db.settings.personalLinkDefaults || {}) !== defaultsSnapshot || !(db.settings.personalLinks || []).includes(savedLink) || savedLink.enabled === false || feats().personalLinks === false || (adminPreview ? !(sessionUser(req) && sessionUser(req).role === 'admin') : !personalLinkSession(req, savedLink))) return fail(403, 'Access changed. Please open the link again.');
       const shell = `<div id="pl-portal-content"><section class="pb-card" data-pl-bootstrap role="status"><h3>Loading your report…</h3><p class="dim">Live sheet data is loading. The report will open here automatically.</p><button class="pb-btn" type="button" data-pl-bootstrap-retry hidden>Retry</button></section></div>`;
       sendHtml(res, 200, personalShell({ title: `${link.name} · Loading`, heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`, sub: 'Preparing your report…', token, requireAuth, authorized: true, personName: link.name, body: shell }), noStore);
-    }, 600);
+    }, 1200);
     if (timer.unref) timer.unref();
     res.once('finish', () => clearTimeout(timer));
   }
@@ -15096,7 +15259,7 @@ async function servePersonalPage(req, res, rawToken) {
         </div>
       </div>`;
     const pageVals = { title: `${link.name} · Performance`, heading: `👋 Welcome Back, <b>${escHtml(link.name)}</b>`, sub: `${chView === 'all' && (link.source === 'both' || linkChannels.length > 1) ? 'GV Partner + First Forward' : (link.source === 'gv' ? 'GV Partner' : 'First Forward')} · ${link.kind === 'tl' ? 'Team Leader' : (link.kind === 'group' ? `Custom team · ${(link.tls || []).length ? `${link.tls.length} TL${link.tls.length > 1 ? 's' : ''} + ` : ''}${personalMemberNames(link).length} agents` : 'Agent')}${tlName ? ` · ${link.kind === 'tl' ? '' : 'TL '}<b>${escHtml(tlName)}</b>` : ''} · personal view · read-only`, inner: innerHtml };
-    if (stockMeta.state !== 'loading' && JSON.stringify(savedLink) === linkSnapshot && savedLink.enabled !== false && (db.settings.personalLinks || []).includes(savedLink)) plCachePut(cacheKey, pageVals);
+    if (JSON.stringify(savedLink) === linkSnapshot && savedLink.enabled !== false && (db.settings.personalLinks || []).includes(savedLink)) plCachePut(cacheKey, pageVals);
     plRecentBuilt.set(cacheKey, { ...pageVals, at: Date.now() });
     if (plRecentBuilt.size > 80) plRecentBuilt.delete(plRecentBuilt.keys().next().value);
     return replyPage({ ...pageVals, at: Date.now() });
