@@ -14347,7 +14347,7 @@ async function servePersonalPage(req, res, rawToken) {
       const quiet = (pr) => pr.catch(() => null);
       const ready = await Promise.race([
         Promise.all([quiet(rowsPromise), quiet(teamPromise)]).then(() => true),
-        new Promise((resolve) => { const t = setTimeout(() => resolve(false), 3000); if (t.unref) t.unref(); })
+        new Promise((resolve) => { const t = setTimeout(() => resolve(false), req.__plWarm === PL_WARM_KEY ? 150e3 : 3000); if (t.unref) t.unref(); })
       ]);
       // Shell already sent (cold open): keep building in the background so the page's polls receive this result.
       if (!ready && !res.writableEnded) {
@@ -14372,7 +14372,7 @@ async function servePersonalPage(req, res, rawToken) {
         const sidx = await Promise.race([
           stockAgeIndex(false),
           new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('stock timeout')), 1500);   // 400 ms was too short right after a restart — the page then showed no stock
+            timer = setTimeout(() => reject(new Error('stock timeout')), req.__plWarm === PL_WARM_KEY ? 90e3 : 1500);   // 400 ms was too short right after a restart — the page then showed no stock
             if (timer && timer.unref) timer.unref();
           })
         ]);
