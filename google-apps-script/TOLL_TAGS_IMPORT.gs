@@ -214,6 +214,7 @@ function tollCsvLine_(line) {
 function tollMergeIntoSheet_(ss, tags, reportDate) {
   var sh = ss.getSheetByName(TOLL_CFG.SHEET_TAB) || ss.insertSheet(TOLL_CFG.SHEET_TAB);
   if (sh.getLastRow() < 1) sh.appendRow(['Tag ID', 'VRN', 'Agent Name', 'Agent ID', 'Toll Amount (₹ total)', 'Toll Txns', 'First Toll Date', 'Last Toll Date', 'Class']);
+  if (sh.getMaxColumns() < 9) sh.insertColumnsAfter(sh.getMaxColumns(), 9 - sh.getMaxColumns());
   if (sh.getLastRow() >= 1 && !sh.getRange(1, 9).getValue()) { sh.getRange(1, 9).setValue('Class'); sh.getRange(1, 8).copyFormatToRange(sh, 9, 9, 1, 1); sh.getRange(2, 9, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat('@'); }
   var res = tollMergeRows_(sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 9).getValues() : [], tags, reportDate);
   var existing = res.rows.length - res.fresh.length;
@@ -229,6 +230,22 @@ function tollMergeIntoSheet_(ss, tags, reportDate) {
   }
   SpreadsheetApp.flush();
   return { added: res.fresh.length, updated: res.updated, total: res.rows.length };
+}
+
+/** Ek baar chalao: jin purani tags ki Class khaali hai unhe sabse nayi mail se bharo (amount/txns ko haath nahi lagata). */
+function tollFillClassNow() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), t0 = Date.now(), best = null;
+  GmailApp.search(TOLL_CFG.MAIL_QUERY, 0, 20).forEach(function (th) { th.getMessages().forEach(function (m) {
+    var i = tollParseMail_(m.getBody()); if (i && (!best || i.reportDate > best.reportDate)) best = i; }); });
+  if (!best) { console.warn('mail nahi mili'); return; }
+  var agg = tollDownloadAggregate_(best.url, t0);
+  var sh = ss.getSheetByName(TOLL_CFG.SHEET_TAB); if (!sh || sh.getLastRow() < 2) return;
+  if (sh.getMaxColumns() < 9) sh.insertColumnsAfter(sh.getMaxColumns(), 9 - sh.getMaxColumns());
+  if (!sh.getRange(1, 9).getValue()) sh.getRange(1, 9).setValue('Class').setFontWeight('bold');
+  var n = sh.getLastRow() - 1, tags = sh.getRange(2, 1, n, 1).getValues(), cur = sh.getRange(2, 9, n, 1).getValues(), c = 0;
+  for (var i = 0; i < n; i++) { var t = agg.tags[String(tags[i][0]).trim().toUpperCase()]; if (!cur[i][0] && t && t.cc) { cur[i][0] = t.cc; c++; } }
+  sh.getRange(2, 9, n, 1).setNumberFormat('@').setValues(cur);
+  console.log('Class bhari: ' + c + ' tags (report ' + best.reportDate + ')');
 }
 
 /** Sheet kabhi text date ko Date bana de to bhi 'YYYY-MM-DD' wapas. */
