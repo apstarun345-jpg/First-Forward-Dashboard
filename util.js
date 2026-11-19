@@ -579,6 +579,33 @@ window.FF = window.FF || {};
     const sk = (o.size && o.size !== 'lg') || o.skeleton === false ? '' : '<div class="ux-sk" aria-hidden="true"><i></i><i></i><i></i></div>';   // ✨ v213 shimmer skeleton
     return `<div class="loading" role="status" aria-live="polite">${loader(o.style, { size: o.size || 'lg' })}<div class="loading-text">${esc(t)}${ellipsis()}</div>${o.hint ? `<div class="loading-hint">${esc(o.hint)}</div>` : ''}${sk}</div>`;
   }
+  const FASTAG_CLASSES = ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'VC20', 'VC5+'];
+  function classBadge(cls) {
+    const c = String(cls || '').trim().toUpperCase();
+    const sub = c === 'VC5+' ? 'vc5p' : c.toLowerCase();
+    return `<span class="badge-vc ${esc(sub)}" data-vc="${esc(sub)}">${esc(c)}</span>`;
+  }
+  function skeletonKpis(count = 4) {
+    const n = Math.max(1, Math.min(12, Number(count) || 4));
+    let html = '<div class="sk-kpis" role="status" aria-busy="true">';
+    for (let i = 0; i < n; i++) {
+      html += '<div class="sk-kpi"><div class="sk-line sm"></div><div class="sk-line lg"></div><div class="sk-line xs"></div></div>';
+    }
+    return html + '</div>';
+  }
+  function skeletonTable(rows = 5, cols = 4) {
+    const r = Math.max(1, Math.min(25, Number(rows) || 5));
+    const c = Math.max(1, Math.min(10, Number(cols) || 4));
+    let html = '<div class="sk-tbl-wrap" role="status" aria-busy="true"><table class="sk-tbl"><thead><tr>';
+    for (let j = 0; j < c; j++) html += `<th><div class="sk-line ${j === 0 ? 'md' : 'sm'}"></div></th>`;
+    html += '</tr></thead><tbody>';
+    for (let i = 0; i < r; i++) {
+      html += '<tr>';
+      for (let j = 0; j < c; j++) html += `<td><div class="sk-line ${j === 0 ? 'md' : 'sm'}"></div></td>`;
+      html += '</tr>';
+    }
+    return html + '</tbody></table></div>';
+  }
   function errorBox(err, retryAttr) {
     const msg = err && err.message ? err.message : String(err);
     return `<div class="error-box"><div class="error-title">⚠️ Data load nahi hua</div><div class="error-msg">${esc(msg)}</div>${retryAttr ? `<button class="btn" ${retryAttr}>Retry</button>` : ''}</div>`;
@@ -1716,6 +1743,7 @@ window.FF = window.FF || {};
     barcode, barcodeKey,
     sum, groupSum, topEntries, sortBy, uniq,
     $, $$, h, debounce, within, breathe, setButtonBusy, withButtonBusy, toast, spinner, loader, loaderStyle, loaderPref, ellipsis, LOADER_STYLES, LOADER_LABELS, errorBox, downloadBlob, niceFileName, withDownloadContext, downloadStart, downloadYield, downloadFail, downloadCsv, tableToRows, slug, stamp, colLetter, colIndex, initTooltip,
+    FASTAG_CLASSES, classBadge, skeletonKpis, skeletonTable,
     phoneDigits, waLink, mailLink, copyText, suggest,
     parseDateTime, printReport, recentList, recentAdd, voiceInput, voicePrefs, setVoicePrefs,
     multiSelect, asValueSet, valueSetLabel,
