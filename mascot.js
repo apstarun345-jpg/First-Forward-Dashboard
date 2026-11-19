@@ -996,9 +996,40 @@
         <button type="button" data-mc="off">⛔ Robot band karo (purana 🎙 button)</button>
         <small>Wapas chalu: Settings → 🔔 Sound → 🤖 Robot dost (ya Gems panel → 🤖)</small>
       </div>`;
+  // 🔗 v3.125.353 — har khabar ke saath uske related clickable buttons: 🖥️ Live screen · 👤 agent · 🧑‍💼 TL · 🔍 search
+  function actsOf(it) {
+    if (!it) return [];
+    if (Array.isArray(it.acts)) return it.acts;
+    const out = [], seen = new Set();
+    (it.rows || []).slice(0, 8).forEach((r) => {
+      const n = String((r && r.name) || '').trim();
+      if (!n || n.length < 3 || seen.has(n.toLowerCase()) || /^(total|sab|all|ff|gv)$/i.test(n) || /^[\d.,%\s-]+$/.test(n)) return;
+      seen.add(n.toLowerCase());
+      if (out.length < 3) out.push({ t: `👤 ${n.length > 22 ? n.slice(0, 21) + '…' : n}`, k: 'find', v: n, ttl: `${n} — Master search me kholo` });
+    });
+    return out;
+  }
+  function actsHtml(it) {
+    const a = actsOf(it);
+    if (!a.length) return '';
+    return `<div class="ops-acts mc-acts">${a.map((x, i) => `<button type="button" class="ops-btn${x.k === 'live' ? ' live' : ''}" data-mc="go:${i}" title="${esc(x.ttl || x.t)}">${esc(x.t)}</button>`).join('')}</div>`;
+  }
+  async function goAct(a) {
+    if (!a) return;
+    try {
+      if (a.k === 'live') {
+        if (!FF.liveView && FF.lazy && FF.lazy.inject) await FF.lazy.inject('liveView');
+        if (FF.liveView && FF.liveView.watchPublic) FF.liveView.watchPublic(a.v); else location.hash = '#/settings?tab=links';
+      } else if (a.k === 'find') {
+        location.hash = `#/masterSearch?q=${encodeURIComponent(a.v)}${a.ch ? `&ch=${encodeURIComponent(a.ch)}` : ''}`;
+      } else if (a.k === 'hash') {
+        location.hash = a.v;
+      }
+    } catch { /* ignore */ }
+  }
   function boardHtml(it) {
     return `<div class="mc-bh"><span class="mc-ic">${it.icon}</span><b>${esc(it.title)}</b></div>
-      <div class="mc-bb">${rowsHtml(it)}${it.foot ? `<div class="mc-foot">${esc(it.foot)}</div>` : ''}</div>
+      <div class="mc-bb">${rowsHtml(it)}${it.foot ? `<div class="mc-foot">${esc(it.foot)}</div>` : ''}${actsHtml(it)}</div>
       <div class="mc-ctl">
         <span class="mc-go">${it.q ? 'Tap → poori list' : ''}</span>
         <button type="button" data-mc="sound" title="Bol kar sunao (on/off)">${cfg.sound ? '🔊' : '🔇'}</button>
@@ -1084,6 +1115,7 @@
     else if (k === 'hide') { cfg.hideDay = istToday(); save(); if (skip) skip(); closeHist(); applyOn(); }
     else if (k === 'tower') { closeHist(); if (FF.ops) FF.ops.openTower(); }
     else if (k === 'follows') { closeHist(); if (FF.ops) FF.ops.showFollowList(); }
+    else if (k.startsWith('go:')) { hover = true; const src = current || null; const a = actsOf(src)[Number(k.slice(3))]; if (a) goAct(a); if (a && a.k !== 'live' && skip) skip(); }
     else if (k.startsWith('ops:')) { hover = true; const r = k.slice(4), i = r.indexOf(':'); if (FF.ops) FF.ops.act(i < 0 ? r : r.slice(0, i), i < 0 ? '' : r.slice(i + 1), b); }
     else if (k === 'home') { delete cfg.dock; save(); closeHist(); fly([pos, dockPos()], 900); }
     else if (k === 'ask') { closeHist(); openAssistant(); }
@@ -1567,6 +1599,15 @@
   }
   const api = (p) => (FF.auth && FF.auth.api ? FF.auth.api(p) : Promise.reject(new Error('no api')));
   const firstRun = (k) => !cfg[k];
+  /** Activity (personal link / employee link) notification → 🖥️ Live screen + jis agent/TL/search par gaya uska button. */
+  function notifActs(x) {
+    const a = [], meta = (x && x.meta) || {}, body = String((x && x.body) || '');
+    if (meta.publicSessionId) a.push({ t: '🖥️ Live screen', k: 'live', v: meta.publicSessionId, ttl: 'Is visitor ki screen live dekho — wo kya kar raha hai' });
+    if (meta.entityName) a.push({ t: `${meta.entityKind === 'tl' ? '🧑‍💼' : '👤'} ${meta.entityName}`, k: 'find', v: meta.entityName, ch: meta.entityCh, ttl: `${meta.entityName} kholo` });
+    else { const mq = body.match(/"([^"]{2,60})"/); if (mq) a.push({ t: `🔍 ${mq[1]}`, k: 'find', v: mq[1], ttl: `"${mq[1]}" Master search me kholo` }); }
+    if (meta.personalLinkId) a.push({ t: '🔗 Link', k: 'hash', v: '#/settings?tab=links', ttl: 'Personal links settings' });
+    return a.length ? a : undefined;
+  }
   // ⚡ v3.125.352 — notifications (link open / search / tab…) har ~3s me; naya aate hi robot turant bole
   let notifBusy = false;
   async function pollNotifs() {
@@ -1586,7 +1627,8 @@
         return {
           id: `n:${x.id}`, key: `notif:${x.id}`, mood: /delete|fail|error|alert|drop|girawat|⚠|❌|🚨/i.test(x.title + x.type) ? 'alert' : x.type === 'search' ? 'curious' : 'excited',
           icon: ic, title: clip(noEmo(x.title), 46) || 'Naya alert', head: clip(x.body || x.title, 160), view: 'text', foot: `🔔 ${tm(x.createdAt)}`,
-          say: clip(`${noEmo(x.title)}. ${x.body || ''}`, 220), q: link && link[0] === '#' ? link : '@notif', fast: true
+          say: clip(`${noEmo(x.title)}. ${x.body || ''}`, 220), q: link && link[0] === '#' ? link : '@notif', fast: true,
+          acts: notifActs(x)
         };
       });
       cfg.notifInit = 1;
@@ -3006,7 +3048,7 @@
   window.addEventListener('hashchange', () => { clearTimeout(tipTimer); tipTimer = setTimeout(pageTip, 2000); });
   setTimeout(pageTip, 9000);
 
-  FF.mascot = { speaksNotifs: () => { try { return !!(allowed() && cfg.on && updatesOn() && el); } catch { return false; } }, addBuilder: (fn) => { if (typeof fn === 'function') BUILDERS.push(fn); }, addPageTips: (m) => Object.assign(extraTips, m || {}), addContext: (fn) => { if (typeof fn === 'function') ctxFns.push(fn); }, push: (it) => it && enqueue({ ...it, id: it.id || `${it.key}:${Date.now()}` }), mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake === true, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
+  FF.mascot = { speaksNotifs: () => { try { return !!(allowed() && cfg.on && updatesOn()); } catch { return false; } }, addBuilder: (fn) => { if (typeof fn === 'function') BUILDERS.push(fn); }, addPageTips: (m) => Object.assign(extraTips, m || {}), addContext: (fn) => { if (typeof fn === 'function') ctxFns.push(fn); }, push: (it) => it && enqueue({ ...it, id: it.id || `${it.key}:${Date.now()}` }), mountHome, voiceList: () => voiceList().map(({ v, ...x }) => x), voicePlan: () => { const p = voicePlan(); return { name: p.name, nat: p.nat, pitch: p.pitch, rate: p.rate, preset: p.preset }; }, preview: (t) => say(t || 'नमस्ते! मैं जेम्स हूँ। आज फ़र्स्ट फ़ॉरवर्ड ने 688 टैग्स किए, और जी वी पार्टनर ने 751। शाबाश टीम!', { force: true }), _sp: toSpeech, _show: (it) => show(it), _ask: (q) => answerItem(q), wakeOwns: () => !!(cfg.on && allowed()), _voice: (q) => wakeFlow(q || ""), wakeStatus: () => ({ sr: !!SRC(), running: !!wakeR, denied: wakeDenied, err: wakeLastErr, lang: wakeLang, on: cfg.wake === true, convo }), _wake: () => ({ re: WAKE_RE.source }), get _st() { return { busy, mode, cur: current && current.key }; }, now, toggle, setCfg, popOut, popIn, pipOk, get popped() { return !!pipWin; }, getCfg, allowed, clearHistory, history: histLoad, openHistory: () => { build(); histSoon(); }, get on() { return cfg.on; }, get sound() { return cfg.sound; }, setSound(v) { cfg.sound = !!v; save(); }, insights, pollFeeds };
 
   const start = () => {
     // sirf admin ko — login/auth ready hone tak check karte raho

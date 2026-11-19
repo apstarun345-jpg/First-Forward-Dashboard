@@ -1187,7 +1187,7 @@ function plRecordActivity(link, req, kind, label, meta = {}, sid = '') {
           type: 'activity', title: `${PL_KIND_META[kind][0]} ${link.name || 'Personal link'} · ${PL_KIND_META[kind][1]}`,
           body: `${kindName} link · ${ev.label}${ev.ch ? ` · ${ev.ch.toUpperCase()}` : ''}${ip ? ` · ${ip}` : ''}`,
           target: 'admin', routeKey: 'personalLink',
-          meta: { personalLinkId: link.id, ...(sid ? { publicSessionId: sid } : {}), link: '#/settings?tab=links', ip }
+          meta: { personalLinkId: link.id, ...(sid ? { publicSessionId: sid } : {}), ...(meta && meta.name ? { entityName: plCleanText(meta.name, 80), entityKind: meta.kind === 't' ? 'tl' : 'agent', entityCh: ev.ch || '' } : {}), link: '#/settings?tab=links', ip }
         });
       }
     }

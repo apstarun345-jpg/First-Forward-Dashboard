@@ -10184,3 +10184,8 @@ html.mobile-ui .tr-req-tbl .tr-c-suggest .tr-grp { font-size: 16px; }
 .dkpi-hero { grid-column: 1 / -1; border: 1.5px solid color-mix(in srgb, var(--brand, #4f46e5) 35%, transparent); background: color-mix(in srgb, var(--brand, #4f46e5) 6%, transparent); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .ua-kicker { color: #be123c; background: rgba(244, 63, 94, .12); border-color: rgba(244, 63, 94, .4); }
 html[data-theme="dark"] .ua-kicker, .ua-hero .ua-kicker, .ua-head .ua-kicker { color: #fda4af; background: rgba(244, 63, 94, .25); border-color: rgba(244, 63, 94, .45); }
+
+.mc-bb .mc-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ops-btn.live { background: linear-gradient(110deg, #ef4444, #f97316); color: #fff; border-color: transparent; font-weight: 800; animation: mcLivePulse 1.6s ease-in-out infinite; }
+.ops-btn.live:hover { color: #fff; filter: brightness(1.08); }
+@keyframes mcLivePulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, .45); } 50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } }
