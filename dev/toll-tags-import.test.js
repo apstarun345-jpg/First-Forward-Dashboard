@@ -32,7 +32,7 @@ test('only successful NETC-TOLL-PASS rows count; recharge/issuance ignored; tag-
   assert.equal(st.txns, 3);
   assert.equal(st.amount, 50);
   assert.deepEqual(Object.keys(st.tags).sort(), ['AA11', 'BB22']);
-  assert.deepEqual(JSON.parse(JSON.stringify(st.tags.AA11)), { vrn: 'RJ14AB1234', an: 'RAM SINGH', ai: '1001', amt: 50, n: 2 });
+  assert.deepEqual(JSON.parse(JSON.stringify(st.tags.AA11)), { vrn: 'RJ14AB1234', an: 'RAM SINGH', ai: '1001', cc: '', amt: 50, n: 2 });
   assert.equal(st.tags.BB22.an, '');
 });
 
@@ -98,4 +98,15 @@ test('v3.125.356 — class-wise (CCH) toll debit summary + server webhook + page
   const st = { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 };
   ctx.parse('TAG_ID,TRANSACTION_TYPE,TRANSACTION_AMOUNT,TRANSACTION_SUCCESS_STATUS,VRN,TAG_ISSUING_AGENT_NAME,TAG_ISSUING_AGENT_ID,CCH\nA1,NETC-TOLL-PASS,100,true,V1,X,1,VC4\nA1,NETC-TOLL-PASS,50,true,V1,X,1,VC4\nB2,NETC-TOLL-PASS,70,true,V2,X,1,VC20\n', st);
   assert.equal(st.cls.VC4.n, 2); assert.equal(st.cls.VC4.a, 150); assert.equal(st.cls.VC20.n, 1);
+});
+
+test('v3.125.357 — Class column (CCH) tag row me + 7 din ka mail query', async () => {
+  const fs = await import('node:fs');
+  const gs = fs.readFileSync(new URL('../google-apps-script/TOLL_TAGS_IMPORT.gs', import.meta.url), 'utf8');
+  assert.match(gs, /newer_than:7d/);
+  const ctx = {}; new Function('ctx', `${gs}; ctx.m = tollMergeRows_; ctx.p = tollParseText_;`)(ctx);
+  const st = { idx: null, tags: {}, cls: {}, txns: 0, amount: 0 };
+  ctx.p('TAG_ID,TRANSACTION_TYPE,TRANSACTION_AMOUNT,TRANSACTION_SUCCESS_STATUS,VRN,TAG_ISSUING_AGENT_NAME,TAG_ISSUING_AGENT_ID,CCH\nA1,NETC-TOLL-PASS,10,true,V1,X,1,VC20\n', st);
+  const r = ctx.m([['A1', 'V1', 'X', '1', 10, 1, '2026-11-17', '2026-11-17']], Object.assign({}, st.tags, { B2: { vrn: 'V2', an: '', ai: '', cc: 'VC4', amt: 5, n: 1 } }), '2026-11-18');
+  assert.equal(r.rows[0][8], 'VC20'); assert.equal(r.fresh[0][8], 'VC4'); assert.equal(r.fresh[0].length, 9);
 });

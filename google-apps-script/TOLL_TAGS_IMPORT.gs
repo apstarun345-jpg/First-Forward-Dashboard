@@ -1,7 +1,7 @@
 /**
  * 🛣️ TOLL TAGS — EToll 2.0 "All Transactions Report" daily mail → Google Sheet (tag-wise unique)
  *
- * Sheet : "Toll Tags — Daily Import (EToll 2.0)"  (tabs: "Toll Tags" + "IMPORT_LOG")
+ * Sheet : "Toll Tags — Daily Import (EToll 2.0)"  (tabs: "Toll Tags" + "Toll Debit Daily" + "IMPORT_LOG")
  * Mail  : etoll.newer.teams@idfcfirstbank.com · subject "EToll 2.0 - All Transactions Report for ApnaPayment"
  *         (mail me CSV ka download link hota hai — file ~220 MB, isliye Range se tukdon me padhte hain)
  *
@@ -21,7 +21,7 @@
 var TOLL_CFG = {
   SHEET_TAB: 'Toll Tags',
   LOG_TAB: 'IMPORT_LOG',
-  MAIL_QUERY: 'from:etoll.newer.teams@idfcfirstbank.com subject:"All Transactions Report" newer_than:6d',
+  MAIL_QUERY: 'from:etoll.newer.teams@idfcfirstbank.com subject:"All Transactions Report" newer_than:7d',
   DASH_URL: 'https://first-forward-dashboard.onrender.com',
   CHUNK: 8 * 1024 * 1024,            // UrlFetch max 50 MB; byte[] memory ke liye 8 MB ke tukde
   BUDGET_MS: 5 * 60 * 1000,          // 6 min limit se pehle ruk jao
@@ -35,8 +35,9 @@ function tollImportCheck() {
   if (!lock.tryLock(10 * 1000)) return;
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SHEET_ID'));
+    var runStart = Date.now();
     var done = tollDoneDates_(ss);
-    var threads = GmailApp.search(TOLL_CFG.MAIL_QUERY, 0, 10);
+    var threads = GmailApp.search(TOLL_CFG.MAIL_QUERY, 0, 20);
     var jobs = [];
     threads.forEach(function (th) {
       th.getMessages().forEach(function (m) {
@@ -48,7 +49,8 @@ function tollImportCheck() {
     var seen = {};
     jobs = jobs.filter(function (j) { if (seen[j.reportDate]) return false; seen[j.reportDate] = 1; return true; });
     for (var i = 0; i < jobs.length; i++) {
-      var r = tollImportOne_(ss, jobs[i]);
+      if (i > 0 && Date.now() - runStart > 150 * 1000) break;   // 6 min limit — baaki din agle trigger (5 min) me
+      var r = tollImportOne_(ss, jobs[i], runStart);
       if (!r.ok) break;                       // fail → agla trigger dobara try karega
     }
   } finally { lock.releaseLock(); }
@@ -74,8 +76,8 @@ function tollDoneDates_(ss) {
 }
 
 /** Ek report: download → aggregate → sheet merge → log → dashboard ko batao. */
-function tollImportOne_(ss, job) {
-  var t0 = Date.now();
+function tollImportOne_(ss, job, runStart) {
+  var t0 = runStart || Date.now();
   try {
     var agg = tollDownloadAggregate_(job.url, t0);
     var res = tollMergeIntoSheet_(ss, agg.tags, job.reportDate);
@@ -182,8 +184,9 @@ function tollParseText_(text, state) {
     var cc = String(f[X.CCH] || '').trim().toUpperCase(); if (!/^VC\d+$/.test(cc)) cc = 'Other';
     var dc = state.cls[cc] || (state.cls[cc] = { n: 0, a: 0 }); dc.n += 1; dc.a += amt;   // 🛣️ class-wise (CCH) ginti + ₹
     var t = state.tags[tag];
-    if (!t) { t = state.tags[tag] = { vrn: '', an: '', ai: '', amt: 0, n: 0 }; }
+    if (!t) { t = state.tags[tag] = { vrn: '', an: '', ai: '', cc: '', amt: 0, n: 0 }; }
     t.amt += amt; t.n += 1; state.txns += 1; state.amount += amt;
+    if (!t.cc && /^VC\d+$/.test(cc)) t.cc = cc;                  // tag ki class (CCH)
     if (!t.vrn) t.vrn = String(f[X.VRN] || '').trim().toUpperCase();
     if (!t.an) t.an = String(f[X.TAG_ISSUING_AGENT_NAME] || '').trim();
     if (!t.ai) t.ai = String(f[X.TAG_ISSUING_AGENT_ID] || '').trim().replace(/^'+/, '');
@@ -210,18 +213,19 @@ function tollCsvLine_(line) {
  */
 function tollMergeIntoSheet_(ss, tags, reportDate) {
   var sh = ss.getSheetByName(TOLL_CFG.SHEET_TAB) || ss.insertSheet(TOLL_CFG.SHEET_TAB);
-  if (sh.getLastRow() < 1) sh.appendRow(['Tag ID', 'VRN', 'Agent Name', 'Agent ID', 'Toll Amount (₹ total)', 'Toll Txns', 'First Toll Date', 'Last Toll Date']);
-  var res = tollMergeRows_(sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues() : [], tags, reportDate);
+  if (sh.getLastRow() < 1) sh.appendRow(['Tag ID', 'VRN', 'Agent Name', 'Agent ID', 'Toll Amount (₹ total)', 'Toll Txns', 'First Toll Date', 'Last Toll Date', 'Class']);
+  if (sh.getLastRow() >= 1 && !sh.getRange(1, 9).getValue()) { sh.getRange(1, 9).setValue('Class'); sh.getRange(1, 8).copyFormatToRange(sh, 9, 9, 1, 1); sh.getRange(2, 9, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat('@'); }
+  var res = tollMergeRows_(sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 9).getValues() : [], tags, reportDate);
   var existing = res.rows.length - res.fresh.length;
   if (res.touched && existing > 0) {
     sh.getRange(2, 5, existing, 4).setValues(res.rows.slice(0, existing).map(function (r) { return [r[4], r[5], r[6], r[7]]; }));
-    if (res.filled) sh.getRange(2, 2, existing, 3).setValues(res.rows.slice(0, existing).map(function (r) { return [r[1], r[2], r[3]]; }));
+    if (res.filled) { sh.getRange(2, 2, existing, 3).setValues(res.rows.slice(0, existing).map(function (r) { return [r[1], r[2], r[3]]; })); sh.getRange(2, 9, existing, 1).setValues(res.rows.slice(0, existing).map(function (r) { return [r[8] || '']; })); }
   }
   if (res.fresh.length) {
     var start = sh.getLastRow() + 1, need = start + res.fresh.length - 1;
     if (need > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), need - sh.getMaxRows() + 1000);
-    sh.getRange(start, 1, res.fresh.length, 8).setNumberFormats(res.fresh.map(function () { return ['@', '@', '@', '@', '0.00', '0', '@', '@']; }));
-    sh.getRange(start, 1, res.fresh.length, 8).setValues(res.fresh);
+    sh.getRange(start, 1, res.fresh.length, 9).setNumberFormats(res.fresh.map(function () { return ['@', '@', '@', '@', '0.00', '0', '@', '@', '@']; }));
+    sh.getRange(start, 1, res.fresh.length, 9).setValues(res.fresh);
   }
   SpreadsheetApp.flush();
   return { added: res.fresh.length, updated: res.updated, total: res.rows.length };
@@ -253,10 +257,11 @@ function tollMergeRows_(rows, tags, reportDate) {
     if (!r[1] && t.vrn) { r[1] = t.vrn; filled = true; }
     if (!r[2] && t.an) { r[2] = t.an; filled = true; }
     if (!r[3] && t.ai) { r[3] = t.ai; filled = true; }
+    if (!r[8] && t.cc) { r[8] = t.cc; filled = true; }
     updated++; touched = true;
   }
   var fresh = [];
-  for (k in pending) { var n = tags[k]; fresh.push([k, n.vrn, n.an, n.ai, Math.round(n.amt * 100) / 100, n.n, reportDate, reportDate]); }
+  for (k in pending) { var n = tags[k]; fresh.push([k, n.vrn, n.an, n.ai, Math.round(n.amt * 100) / 100, n.n, reportDate, reportDate, n.cc || '']); }
   return { rows: rows.concat(fresh), fresh: fresh, updated: updated, touched: touched, filled: filled };
 }
 
