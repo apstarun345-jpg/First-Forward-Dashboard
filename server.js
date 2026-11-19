@@ -14121,8 +14121,9 @@ async function warmPersonalLinks() {
         if (link.kind === 'agent') await personalAgentTl(link); else await personalTeamAgents(link);
         if (link.kind !== 'agent') await personalAgentClassRows(link).catch(() => null);
         // 🏗 Pre-build the finished report page(s) too (every channel view), so opening the link is instant.
-        const chs = plLinkChannels({ ...link, source: link.kind === 'group' ? plSrc(link.source) : (link.source === 'gv' ? 'gv' : 'ff') });
-        for (const ch of ['all', ...(chs.length > 1 ? chs : [])]) await plWarmOne(link, ch).catch(() => {});
+        const baseForWarm = { ...link, source: link.kind === 'group' ? plSrc(link.source) : (link.source === 'gv' ? 'gv' : 'ff') };
+        const chs = plLinkChannels(baseForWarm);
+        for (const ch of ['all', ...(chs.length > 1 ? chs : [])]) { await plWarmOne(link, ch).catch(() => {}); if (link.kind !== 'agent') await personalWelcomeCached(ch === 'all' ? baseForWarm : plChannelView(baseForWarm, ch), ch).catch(() => {}); }
       } catch { /* ek link fail ho to baaki chalte rahein */ }
       await new Promise((r) => setTimeout(r, 400));
     }
@@ -14801,6 +14802,8 @@ async function servePersonalPage(req, res, rawToken) {
       asg.forEach((a) => { if (a.id && !memberId.has(nk(a.name))) memberId.set(nk(a.name), a.id.replace(/\.0+$/, '')); });
       for (const [k8, p] of peopleMap) { const idv = agentIdBy.get(k8) || memberId.get(k8); if (idv) p.i = idv; }
       const mobMaps = await Promise.race([personalReportMobiles().catch(() => null), new Promise((resolve) => { const t = setTimeout(() => resolve(null), req.__plWarm === PL_WARM_KEY ? 30e3 : 3500); if (t.unref) t.unref(); })]);
+      // 📞 make sure the trusted mobile directory is loaded before agents are labelled (otherwise a cold build shows no numbers)
+      try { if (typeof agentMobileLoader === 'function') await Promise.race([agentMobileLoader(false).catch(() => null), new Promise((resolve) => { const t = setTimeout(resolve, req.__plWarm === PL_WARM_KEY ? 30e3 : 3500); if (t.unref) t.unref(); })]); } catch { /* optional */ }
       const tgList = Array.isArray(db.settings.targets) ? db.settings.targets : [];
       const tgBy = new Map(); tgList.forEach((t) => { if (t && t.ym === ym && t.key) tgBy.set(t.key, t); });
       for (const [k9, p] of peopleMap) {
@@ -15365,7 +15368,7 @@ const PERSONAL_PORTAL_JS = `(function () {
     card.innerHTML = '<h3>✨ Welcome journey</h3><p class="dim" role="status">Loading EIR history…</p>';
     var url = location.pathname + '?welcome=1&ch=' + encodeURIComponent(channel) + (embed ? '&embed=live' : '');
     var controller = new AbortController();
-    var timeout = setTimeout(function () { controller.abort(); }, 15000);
+    var timeout = setTimeout(function () { controller.abort(); }, 60000);
     fetch(url, { credentials: 'same-origin', signal: controller.signal, headers: { Accept: 'application/json' } }).then(function (r) {
       if (!r.ok || (r.headers.get('content-type') || '').indexOf('json') < 0) throw new Error('unavailable');
       return r.json();
