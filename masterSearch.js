@@ -1105,7 +1105,7 @@ FF.pages = FF.pages || {};
       items.push({
         kind: 'cls', kindLabel: 'Barcode',
         label: U.barcode(t.key),
-        sub: [((f && f.tagId) || (g && g.tagId)) && normBar((f && f.tagId) || (g && g.tagId)) !== t.key ? `Tag ${(f && f.tagId) || (g && g.tagId)}` : '',
+        sub: [`${tagWhere(t).icon} ${tagWhere(t).text}`, ((f && f.tagId) || (g && g.tagId)) && normBar((f && f.tagId) || (g && g.tagId)) !== t.key ? `Tag ${(f && f.tagId) || (g && g.tagId)}` : '',
           f ? (f.issued ? `✅ Issued · FF ${f.agentName || f.agentId}${f.vrn ? ' · ' + f.vrn : ''}${f.allocated ? ' · ' + f.allocated : ''}` : clean(f.agentName) ? `FF ${f.agentName}${f.tlName ? ' (TL ' + f.tlName + ')' : ''}` : 'FF stock · agent assign nahi') : 'FF not mapped',
           g ? (g.issued ? `✅ Issued · GV ${g.agentName || g.agentId}${g.vrn ? ' · ' + g.vrn : ''}${g.allocated ? ' · ' + g.allocated : ''}` : clean(g.agentName) ? `GV ${g.agentName}${g.tlName ? ' (TL ' + g.tlName + ')' : ''}` : 'GV stock · agent assign nahi') : 'GV not mapped',
           (f && f.cls) || (g && g.cls) || ''].filter(Boolean).join(' · '),
@@ -1132,6 +1132,17 @@ FF.pages = FF.pages || {};
   /** Sheet ke placeholder ("Not Assigned", "-", "NA"…) ko khaali maano — holder / mapping dono me. */
   const PLACEHOLDER_RX = /^(not\s*assigned|not\s*mapped|unassigned|none|null|n\/?a|-+|—|0)$/i;
   function realName(v) { const x = clean(v); return x && !PLACEHOLDER_RX.test(x) ? x : ''; }
+  /** v3.125.340 — tag kahan hai: Office Stock · GV Partner · First Forward · GV+FF (dono me mapped) · Not mapped. */
+  function tagWhere(t) {
+    const f = t.ff[0], g = t.gv[0];
+    const held = (r) => !!(r && (realName(r.agentName) || realName(r.agentId) || realName(r.gvName) || realName(r.gvId)));
+    const hf = held(f), hg = held(g);
+    if (hf && hg) return { text: 'GV+FF', icon: '🟪', cls: 'both' };
+    if (hg) return { text: 'GV Partner', icon: '🟩', cls: 'gv' };
+    if (hf) return { text: 'First Forward', icon: '🟦', cls: 'ff' };
+    if (f || g) return { text: 'Office Stock', icon: '🏢', cls: 'office' };
+    return { text: 'Not mapped', icon: '⚪', cls: 'none' };
+  }
   function tagStatus(t) {
     const f = t.ff[0], g = t.gv[0];
     // Holder = agent / GV naam jiske paas tag assign hai. Dono me koi holder nahi → 🏢 OFFICE STOCK.
@@ -1387,7 +1398,7 @@ FF.pages = FF.pages || {};
         const st = tagStatus(t);
         const dash = (v) => { const x = realName(v); return x ? esc(x) : '<span class="dim">—</span>'; };
         const rowCls = st.office ? 'tg-office' : (st.ff.tone === 'green' || st.gv.tone === 'green') ? 'tg-mapped' : 'tg-stock';
-        return `<tr class="${rowCls}"><td class="tg-bar"><b>${esc(U.barcode(t.key))}</b></td><td class="tg-tid">${esc((f.tagId || g.tagId) || '—')}</td>
+        return `<tr class="${rowCls}"><td class="tg-bar"><b>${esc(U.barcode(t.key))}</b> <span class="tg-where tgw-${tagWhere(t).cls}">${tagWhere(t).icon} ${esc(tagWhere(t).text)}</span></td><td class="tg-tid">${esc((f.tagId || g.tagId) || '—')}</td>
             <td>${dash(f.agentName)}${realName(f.agentId) ? `<small>${esc(f.agentId)}</small>` : ''}</td><td>${dash(tlText(f.tlName, 'ff'))}</td>
             <td><span class="badge ${st.ff.tone}">${esc(st.ff.text)}</span></td>
             <td>${dash(g.agentName)}${realName(g.agentId) ? `<small>${esc(g.agentId)}</small>` : ''}</td><td>${dash(tlText(g.tlName, 'gv'))}</td>

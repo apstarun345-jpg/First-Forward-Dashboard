@@ -8283,3 +8283,11 @@ html body .msp-lasttag small { display: inline !important; font-size: 11px !impo
 .tg-tbl tr:hover td { background: #eef2ff; }
 .tg-tbl .badge { white-space: nowrap; font-size: 11px; padding: 3px 9px; border-radius: 999px; font-weight: 700; }
 .tg-tbl .badge.office { box-shadow: none; }
+
+/* v3.125.340 — Master search: tag kahan hai (barcode ke aage) */
+.tg-where { display: inline-block; margin-left: 8px; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 800; letter-spacing: .02em; white-space: nowrap; vertical-align: middle; }
+.tgw-office { background: #fed7aa; color: #9a3412; }
+.tgw-gv { background: #bbf7d0; color: #166534; }
+.tgw-ff { background: #bfdbfe; color: #1e40af; }
+.tgw-both { background: #e9d5ff; color: #6b21a8; }
+.tgw-none { background: #fecaca; color: #991b1b; }
