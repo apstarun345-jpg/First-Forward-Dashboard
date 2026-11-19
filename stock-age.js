@@ -1,3 +1,4 @@
+import { deflateRawSync, inflateRawSync } from 'node:zlib';
 /* 🧓 STOCK AGEING — server side (v3.31).
  *
  * Kyun server par: StockDataa (~1 lakh rows) + GV Tag Assignment (~60k rows) ki har row browser me
@@ -255,16 +256,18 @@ export function compactRaw(c) {
   if (!c || !Array.isArray(c.raw)) return c;
   const rows = c.raw;
   // Har row ek JSON line (JSON.stringify '\n' escape karta hai, isliye line todna safe) + line ke shuru ka offset.
-  const lines = rows.map((r) => JSON.stringify(r));
-  const starts = new Int32Array(lines.length + 1);
-  let pos = 0;
-  for (let i = 0; i < lines.length; i++) { starts[i] = pos; pos += lines[i].length + 1; }
-  starts[lines.length] = pos;
-  const text = lines.join('\n');
+  // v3.125.338 — RAM: row text ab 512-row blocks me deflate hota hai (~5x chhota); ek block hi parse hota hai (last block cached).
+  const BLK = 512, count = rows.length;
+  const blocks = [];
+  for (let i = 0; i < count; i += BLK) blocks.push(deflateRawSync(Buffer.from(rows.slice(i, i + BLK).map((r) => JSON.stringify(r)).join('\n'), 'utf8')));
+  let lastBi = -1, lastLines = null;
+  const blockLines = (bi) => { if (bi !== lastBi) { lastLines = inflateRawSync(blocks[bi]).toString('utf8').split('\n'); lastBi = bi; } return lastLines; };
+  const lineAt = (i) => blockLines(i >> 9)[i & 511];
+  const textBytes = blocks.reduce((n, b) => n + b.length, 0);
   // ⚡ v3.125.35 — Instant barcode / tag lookup: har row ki "BARCODE_DIGITS TAG_ID" ek line (indexOf se substring search).
   const keyLines = rows.map((r) => `${normBarcode(r[1])} ${str(r[0]).toUpperCase()}`);
   const kStarts = new Int32Array(keyLines.length + 1);
-  pos = 0;
+  let pos = 0;
   for (let i = 0; i < keyLines.length; i++) { kStarts[i] = pos; pos += keyLines[i].length + 1; }
   kStarts[keyLines.length] = pos;
   const keys = keyLines.join('\n');
@@ -273,15 +276,14 @@ export function compactRaw(c) {
     configurable: true, enumerable: false,
     get() {
       if (!cache) {
-        cache = JSON.parse(`[${text.replace(/\n/g, ',')}]`);
+        cache = new Array(count); for (let i = 0; i < count; i++) cache[i] = JSON.parse(lineAt(i));
         timer = setTimeout(() => { cache = null; timer = null; }, RAW_KEEP_MS);
         if (timer && typeof timer.unref === 'function') timer.unref();
       }
       return cache;
     }
   });
-  const rowAt = (i) => JSON.parse(text.slice(starts[i], starts[i + 1] - 1));
-  const count = starts.length - 1; // do not retain the per-row keyLines array in this closure
+  const rowAt = (i) => JSON.parse(lineAt(i));
   const lineOf = (p) => { let lo = 0, hi = count - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (kStarts[m] <= p) lo = m; else hi = m - 1; } return lo; };
   /** needle (already normalized: digits ya UPPERCASE tag) → matching rows (max `limit`). */
   Object.defineProperty(c, 'find', {
@@ -319,7 +321,7 @@ export function compactRaw(c) {
   Object.defineProperty(c, 'each', { configurable: true, enumerable: false, value(fn, from = 0, to = count) { for (let i = from; i < Math.min(to, count); i++) fn(rowAt(i), i); return count; } });
   Object.defineProperty(c, 'at', { configurable: true, enumerable: false, value: (i) => (i >= 0 && i < count ? rowAt(i) : null) });
   Object.defineProperty(c, 'count', { configurable: true, enumerable: false, value: count });
-  Object.defineProperty(c, 'rawBytes', { value: text.length + keys.length, enumerable: true, configurable: true });
+  Object.defineProperty(c, 'rawBytes', { value: textBytes + keys.length, enumerable: true, configurable: true });
   return c;
 }
 /** ⚡ v3.125.40 — Browser snapshot line (TSV): ch · barcodeKey · barcode · tagId · cls · day · agent · agentId · tl · inStock */
