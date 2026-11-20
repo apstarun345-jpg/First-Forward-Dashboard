@@ -2051,31 +2051,43 @@ FF.pages = FF.pages || {};
     const prioChip = (p) => (p ? `<span class="badge ${/high/i.test(p) ? 'red' : /medium/i.test(p) ? 'amber' : 'green'}">${esc(p)}</span>` : '<span class="dim">—</span>');
     const sugPair = (net, gross) => `<span class="sug-pair sug-pair-tight"><span class="sug-result net" title="Required − stock"><small>After stock</small><b class="sug-chip">${U.fmt(net)}</b></span><span class="sug-result gross" title="Run-rate × din, stock ghata kar nahi"><small>W/o stock</small><b class="sug-chip wo">${U.fmt(gross)}</b></span></span>`;
     const ymLabel = (ym) => { try { return ym ? U.labelYM(ym, true) : ''; } catch { return String(ym || ''); } };
-    /** 🕒 Last active — is agent / TL ka sabse latest issuance (n>0) wala din + kitne din pehle. */
-    function lastActiveHtml(pr, isTl, ch) {
+    /** 🕒 Latest issuance (n>0) — din + us din ka sabse late time + qty + kitne din pehle. {key,time,qty,days} ya null. */
+    function lastActInfo(who, isTl, ch) {
       try {
         let rows = [];
         if (ch === 'gv' && FF.gv && FF.gv.liveDailyRows) { try { rows = FF.gv.liveDailyRows() || []; } catch { rows = []; } }
         if (!rows.length) rows = (FF.store && FF.store.get && FF.store.get('daily')) || [];
-        const nk = normName(pr.name), id = normName(pr.id || '');
+        const nk = normName(who.name), id = normName(who.id || '');
         const isGv = (r) => r.channel === 'GV Partner';
-        let best = '', qty = 0;
+        let best = '', qty = 0, time = '';
         for (const r of rows) {
           if ((ch === 'gv') !== isGv(r)) continue;
           if (!(Number(r.n) > 0)) continue;
           const hit = isTl ? (normName(r.tlName) === nk || normName(r.agentName) === nk) : (normName(r.agentName) === nk || (id && normName(r.agentId) === id));
           if (!hit) continue;
           const k = String(r.key || ''); if (!k) continue;
-          if (k > best) { best = k; qty = 0; }
-          if (k === best) qty += Number(r.n) || 0;
+          if (k > best) { best = k; qty = 0; time = ''; }
+          if (k === best) {
+            qty += Number(r.n) || 0;
+            const tm = String(r.time || '').trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+            if (tm) { const t = `${tm[1].padStart(2, '0')}:${tm[2]}:${tm[3] || '00'}`; if (t > time) time = t; }
+          }
         }
-        if (!best) return ' · <span class="badge amber" title="Is naam ka koi issuance data nahi mila">🕒 Last active: —</span>';
+        if (!best) return null;
         const tk = U.dateKey(new Date());
         const days = Math.max(0, Math.round((new Date(tk + 'T00:00:00') - new Date(best + 'T00:00:00')) / 86400000));
-        const ago = days === 0 ? 'aaj' : days === 1 ? 'kal' : `${days} din pehle`;
-        const cls = days <= 3 ? 'green' : days <= 10 ? 'amber' : 'red';
-        return ` · <span class="badge ${cls}" title="Latest issuance wala din (${esc(U.fmt(qty))} tags)">🕒 Last active: ${esc(U.labelDateKey(best))} · ${ago}</span>`;
-      } catch { return ''; }
+        let t12 = '';
+        if (time) { const [hh, mi, ss] = time.split(':').map(Number); t12 = `${String(((hh + 11) % 12) + 1).padStart(2, '0')}:${String(mi).padStart(2, '0')}:${String(ss || 0).padStart(2, '0')} ${hh >= 12 ? 'PM' : 'AM'}`; }
+        return { key: best, time: t12, qty, days };
+      } catch { return null; }
+    }
+    /** 🕒 Last active — date + time + kitne din pehle (card ke header me). */
+    function lastActiveHtml(pr, isTl, ch) {
+      const li = lastActInfo(pr, isTl, ch);
+      if (!li) return ' · <span class="badge amber" title="Is naam ka koi issuance data nahi mila">🕒 Last active: —</span>';
+      const ago = li.days === 0 ? 'aaj' : li.days === 1 ? 'kal' : `${li.days} din pehle`;
+      const cls = li.days <= 3 ? 'green' : li.days <= 10 ? 'amber' : 'red';
+      return ` · <span class="badge ${cls}" title="Latest issuance wala din (${esc(U.fmt(li.qty))} tags)">🕒 Last active: ${esc(U.labelDateKey(li.key))}${li.time ? ` · ${esc(li.time)}` : ''} · ${ago}</span>`;
     }
     /** Working days = distinct days this month with issuance (n>0) for this agent / TL. */
     function workedDays(pr, isTl, ch, ym) {
@@ -2427,6 +2439,68 @@ FF.pages = FF.pages || {};
     }
     const kpiLoadingHtml = (name, ch) => `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-body">${U.spinner(`${esc(name)} ka ${ch === 'gv' ? '🟩 GV' : '🟦 FF'} stock · issuance · priority · suggested load ho raha hai…`)}</div></section>`;
     /** Group (FF + GV) ke har channel ka KPI card — pehle quick (memory wala data), phir poora profile aate hi upgrade. */
+    // 🧾 v3.125.372 — Profile ke neeche: Tag Requests · Complaints · Notes (+ share). Data /api/master/agent-extras se (har ek apni permission se).
+    const EX_CACHE = new Map();
+    const exFetch = (name, id, mobile, force) => {
+      const key = `${normName(name)}|${normName(id)}|${mobile}`, hit = EX_CACHE.get(key);
+      if (!force && hit && Date.now() - hit.at < 60e3) return Promise.resolve(hit.data);
+      return FF.auth.api(`/api/master/agent-extras?name=${encodeURIComponent(name)}&id=${encodeURIComponent(id || '')}&mobile=${encodeURIComponent(mobile || '')}`)
+        .then((d) => { EX_CACHE.set(key, { at: Date.now(), data: d }); return d; });
+    };
+    const EX_ST = { pending: ['amber', '⏳ Pending'], approved: ['green', '✅ Approved'], dispatched: ['blue', '🚚 Dispatched'], delivered: ['green', '📦 Delivered'], rejected: ['red', '⛔ Rejected'], cancelled: ['red', '⛔ Cancelled'] };
+    const exDate = (v) => { const d = new Date(v); return Number.isFinite(d.getTime()) ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) : ''; };
+    function paintExtras(g, host, force) {
+      if (!host || !FF.auth || !FF.auth.api) return;
+      const pp = g.ff || g.gv; if (!pp) return;
+      let q = null; try { q = MP() && MP().supports(pp) ? MP().quick(pp) : null; } catch { q = null; }
+      const id = (q && q.id) || pp.sub || '', mobile = String((q && q.mobile) || '').replace(/\D/g, '').slice(-10);
+      host.innerHTML = '<section class="card msp-ex-card"><div class="card-body dim small">⏳ Requests · Complaints · Notes load ho rahe…</div></section>';
+      exFetch(g.name, id, mobile, force).then((d) => {
+        if (!host.isConnected) return;
+        const R = d && d.requests, C = d && d.complaints, N = d && d.notes;
+        if (!R && !C && !N) { host.innerHTML = ''; return; }
+        const reqPan = R ? `<div class="msp-ex-pan req"><div class="msp-ex-h"><b>🏷️ Tag Requests</b><span>${U.fmt(R.total)} · ${U.fmt(R.tags)} tags</span></div>
+          <div class="msp-ex-chips">${Object.keys(R.byStatus || {}).map((k) => `<span class="badge ${(EX_ST[k] || ['gray'])[0]}">${esc((EX_ST[k] || [0, k])[1])} ${R.byStatus[k]}</span>`).join('') || '<span class="dim small">Koi request nahi</span>'}</div>
+          <div class="msp-ex-list">${R.rows.map((r) => { const st = EX_ST[r.status] || ['gray', r.status]; return `<div class="msp-ex-row"><div><b>#${esc(r.id)}</b> <span class="dim">${esc(exDate(r.at))}</span> <span class="badge ${st[0]}">${esc(st[1])}</span>${r.sheet ? ' <span class="badge green" title="Google Sheet me entry ho gayi">📗</span>' : r.sheetErr ? ' <span class="badge red" title="Sheet entry fail">📗!</span>' : ''}${r.courier ? ` <span class="badge blue">🚚 ${esc(r.courier)}</span>` : ''}</div>
+            <div class="msp-ex-sub">${r.classes.map((c) => `<span class="vc"><i>${esc(c.cls)}</i><b>${U.fmt(c.qty)}</b></span>`).join('')}<span class="msp-ex-tot">Total ${U.fmt(r.total)}</span></div></div>`; }).join('')}</div>
+          ${R.total > R.rows.length ? `<p class="dim small">Pehli ${R.rows.length} dikhi — baaki Tag Request page me.</p>` : ''}</div>` : '';
+        const cmpPan = C ? `<div class="msp-ex-pan cmp"><div class="msp-ex-h"><b>📣 Complaints</b><span>${U.fmt(C.total)} · <em>${U.fmt(C.open)} open</em></span></div>
+          <div class="msp-ex-list">${C.rows.length ? C.rows.map((r) => `<div class="msp-ex-row"><div><b>${esc(r.caseNo)}</b> <span class="dim">${esc(exDate(r.date))}</span> <span class="badge ${/solved|closed|resolved/i.test(r.status) ? 'green' : 'amber'}">${esc(r.status || 'Open')}</span>${r.deducted ? ` <span class="badge red">₹${U.fmt(r.deducted)} deduct</span>` : ''}</div>
+            <div class="msp-ex-sub"><span class="dim">${esc([r.vrn, r.tagId].filter(Boolean).join(' · '))}</span>${r.description ? ` <span>${esc(r.description)}</span>` : ''}</div></div>`).join('') : `<p class="dim small">${C.error ? 'Complaints abhi load nahi hui — Complaints page ek baar kholo.' : '✅ Is agent ki koi complaint nahi mili.'}</p>`}</div></div>` : '';
+        const canNote = !!N;
+        const notePan = N ? `<div class="msp-ex-pan note"><div class="msp-ex-h"><b>📝 Notes / Follow-up</b><span>${U.fmt(N.total)}</span></div>
+          <div class="msp-ex-list">${N.rows.length ? N.rows.map((n) => `<div class="msp-ex-row"><div>${esc(n.text)}</div><div class="msp-ex-sub"><span class="badge ${n.status === 'done' ? 'green' : n.status === 'waiting' ? 'blue' : 'amber'}">${esc(n.status)}</span>${n.priority === 'high' ? ' <span class="badge red">High</span>' : ''}${n.dueAt ? ` <span class="dim">⏰ ${esc(exDate(n.dueAt))}</span>` : ''} <span class="dim">${esc(n.createdBy)} · ${esc(exDate(n.updatedAt))}</span></div></div>`).join('') : '<p class="dim small">Abhi koi note nahi.</p>'}</div>
+          <div class="msp-ex-add"><input class="input" data-ex-text placeholder="Naya note — jaise: kal call karna hai" maxlength="400"><input class="input" type="date" data-ex-due title="Reminder date (optional)"><button type="button" class="btn small primary" data-ex-save>➕ Save</button></div></div>` : '';
+        host.innerHTML = `<section class="card msp-ex-card"><div class="card-head"><h3>🧾 Requests · Complaints · Notes</h3><div class="card-right"><button type="button" class="btn small" data-ex-share="wa" title="Is profile ka chhota summary WhatsApp par bhejo">🟢 WhatsApp</button> <button type="button" class="btn small" data-ex-share="copy" title="Summary copy karo">📋 Copy</button></div></div>
+          <div class="card-body"><div class="msp-ex-grid">${reqPan}${cmpPan}${notePan}</div></div></section>`;
+        const summary = () => {
+          const L = [`*${g.name}*${id ? ` (${id})` : ''}`];
+          ['ff', 'gv'].forEach((c) => {
+            const pr = REPORT_CTX.prs && REPORT_CTX.prs[c]; if (!pr) return;
+            const li = lastActInfo(pr, /tl$/.test(String(pr.kind || '')), c);
+            L.push(`${c === 'gv' ? '🟩 GV' : '🟦 FF'}: stock ${U.fmt((pr.stock || {}).total || 0)} · is mahine ${U.fmt((pr.totals || {}).curTotal || 0)} · pichhle mahine ${U.fmt((pr.totals || {}).lastTotal || 0)}${li ? ` · last activation ${U.labelDateKey(li.key)}${li.time ? ' ' + li.time : ''}` : ''}`);
+          });
+          if (R) L.push(`🏷️ Tag requests: ${R.total} (${U.fmt(R.tags)} tags)`);
+          if (C) L.push(`📣 Complaints: ${C.total} (${C.open} open)`);
+          return L.join('\n');
+        };
+        host.querySelectorAll('[data-ex-share]').forEach((b) => { b.onclick = () => {
+          const t = summary();
+          if (b.dataset.exShare === 'wa') { window.open(`https://wa.me/?text=${encodeURIComponent(t)}`, '_blank', 'noopener'); return; }
+          (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { b.textContent = '✅ Copied'; setTimeout(() => { b.textContent = '📋 Copy'; }, 1500); }).catch(() => U.toast('Copy nahi hua', 'warn'));
+        }; });
+        const sv = host.querySelector('[data-ex-save]');
+        if (sv && canNote) sv.onclick = async () => {
+          const txt = (host.querySelector('[data-ex-text]') || {}).value || '', due = (host.querySelector('[data-ex-due]') || {}).value || '';
+          if (!txt.trim()) { U.toast('Note likho', 'warn'); return; }
+          sv.disabled = true;
+          try {
+            await FF.auth.api('/api/workspace/notes', 'POST', { entityType: pp.kind && /tl$/.test(String(pp.kind)) ? 'tl' : 'agent', entityName: g.name, entityKey: g.name, channel: g.ff && g.gv ? 'both' : g.gv ? 'gv' : 'ff', text: txt.trim(), dueAt: due ? `${due}T09:00:00+05:30` : undefined });
+            U.toast('📝 Note save ho gaya', 'ok'); EX_CACHE.clear(); paintExtras(g, host, true);
+          } catch (err) { U.toast('Note save nahi hua: ' + ((err && err.message) || ''), 'err'); sv.disabled = false; }
+        };
+      }).catch(() => { if (host.isConnected) host.innerHTML = ''; });
+    }
     async function paintKpis(g, host) {
       if (!host || !MP()) return;
       const chans = ['ff', 'gv'].filter((c) => g[c]);
@@ -2522,6 +2596,7 @@ FF.pages = FF.pages || {};
         </div>
         <div id="msp-det" class="msp-det"></div>
         <div id="msp-kpis" class="msp-kpis-wrap">${['ff', 'gv'].filter((c) => viewGroup[c]).map((c) => kpiLoadingHtml(g.name, c)).join('')}</div>
+        <div id="msp-extras" class="msp-extras"></div>
         <div id="msp-rank"></div>
         ${gvStripHtml(viewGroup.gv)}${ffStripHtml(viewGroup.ff)}
         <div class="msp-report" id="msp-report"></div>${teamCards}`;
@@ -2602,7 +2677,7 @@ FF.pages = FF.pages || {};
             ${tlKind ? '' : (pp.direct || !tlName ? f('TL name', pp.direct ? (pp.directLabel || 'Direct') : tlName) : `<div class="msp-det-f"><small>TL name</small><b><button type="button" class="mp-link-btn" data-ms-open-tl="1" data-ms-tl-name="${esc(tlName)}" data-ms-tl-id="${esc(tlId || '')}" data-ms-tl-ch="${ch}" title="${esc(tlName)} — Master Search me kholo">${esc(tlName)} ↗</button></b></div>`)}
             ${tlKind ? '' : f('TL ID', pp.direct ? '' : tlId, true)}
             ${tlKind ? '' : `<div class="msp-det-f"><small>TL mobile</small><b>${mob(pp.direct ? '' : tlMob)}</b></div>`}
-            ${q && q.status ? f('Status', q.status) : ''}${q && q.lastActive ? f('Last active', q.lastActive) : ''}
+            ${q && q.status ? f('Status', q.status) : ''}${(() => { const li = lastActInfo({ name: pp.name, id: id }, tlKind, ch); if (!li) return q && q.lastActive ? f('Last active', q.lastActive) : ''; const tone = li.days <= 3 ? 'green' : li.days <= 10 ? 'amber' : 'red'; return `<div class="msp-det-f msp-det-act ${tone}"><small>🕒 Last activation</small><b>${esc(U.labelDateKey(li.key))}${li.time ? ` · ${esc(li.time)}` : ''}</b><em>${li.days === 0 ? 'aaj' : li.days === 1 ? 'kal' : `${li.days} din pehle`}${li.days >= 15 ? ' · ⚠️ inactive' : ''} · ${esc(U.fmt(li.qty))} tags</em></div>`; })()}
             ${pp.last ? f('Last allocation', pp.last) : ''}
           </div>${addrBlock(pp, ch, q)}</div>`;
         };
@@ -2620,6 +2695,7 @@ FF.pages = FF.pages || {};
       paintDet();
       try { if (MP() && MP().loadFor) [viewGroup.ff, viewGroup.gv].filter(Boolean).forEach((pp) => { if (MP().supports(pp)) MP().loadFor(pp).then(paintDet).catch(() => {}); }); } catch { /* optional */ }
       paintKpis(viewGroup, U.$('#msp-kpis', out)).catch(() => {});
+      try { paintExtras(viewGroup, U.$('#msp-extras', out)); } catch { /* extras optional */ }
       try { if (FF.newAgentTag) FF.newAgentTag.paint(out); if (FF.aliases) FF.aliases.paint(out); } catch { /* ignore */ }
       const host = U.$('#msp-report', out);
       const sr = SR();

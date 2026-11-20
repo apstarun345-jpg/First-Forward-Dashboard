@@ -105,3 +105,35 @@
 }
 .ab-addbtn{background:linear-gradient(135deg,#f97316,#ec4899)!important;color:#fff!important;border:0!important;font-weight:700;border-radius:999px!important;padding:5px 14px!important;box-shadow:0 3px 10px rgba(236,72,153,.35);cursor:pointer}
 .ab-addbtn:hover{filter:brightness(1.08);transform:translateY(-1px)}
+
+/* 🎨 v3.125.372 — Master Search profile: colourful cards + Requests · Complaints · Notes (same 13px / 11px text sizes) */
+.msp-det-card { background: linear-gradient(135deg, rgba(37,99,235,.09), rgba(37,99,235,.02) 60%), var(--card, #fff); box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+.msp-det-card.gv { background: linear-gradient(135deg, rgba(22,163,74,.11), rgba(22,163,74,.02) 60%), var(--card, #fff); }
+.msp-det-h { display: inline-block; padding: 2px 10px; border-radius: 999px; background: rgba(37,99,235,.14); color: #1d4ed8; }
+.msp-det-card.gv .msp-det-h { background: rgba(22,163,74,.16); color: #15803d; }
+.msp-det-act { border-radius: 10px; padding: 6px 9px; background: rgba(100,116,139,.10); border: 1px solid rgba(100,116,139,.25); }
+.msp-det-act em { display: block; font-style: normal; font-size: 11px; font-weight: 700; margin-top: 1px; }
+.msp-det-act.green { background: rgba(22,163,74,.12); border-color: rgba(22,163,74,.4); } .msp-det-act.green em { color: #15803d; }
+.msp-det-act.amber { background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.45); } .msp-det-act.amber em { color: #b45309; }
+.msp-det-act.red { background: rgba(220,38,38,.12); border-color: rgba(220,38,38,.4); } .msp-det-act.red em { color: #b91c1c; }
+.msp-kpi-card[data-msp-kpi-ch="ff"] > .card-head { background: linear-gradient(90deg, rgba(37,99,235,.14), transparent 70%); border-bottom: 2px solid rgba(37,99,235,.35); }
+.msp-kpi-card[data-msp-kpi-ch="gv"] > .card-head { background: linear-gradient(90deg, rgba(22,163,74,.16), transparent 70%); border-bottom: 2px solid rgba(22,163,74,.4); }
+.msp-ex-card { margin-top: 12px; }
+.msp-ex-card > .card-head { background: linear-gradient(90deg, rgba(124,58,237,.14), transparent 70%); border-bottom: 2px solid rgba(124,58,237,.35); }
+.msp-ex-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.msp-ex-pan { border: 1px solid var(--border, #e2e8f0); border-top: 4px solid #7c3aed; border-radius: 12px; padding: 10px 12px; background: var(--card, #fff); font-size: 13px; min-width: 0; }
+.msp-ex-pan.req { border-top-color: #7c3aed; background: linear-gradient(180deg, rgba(124,58,237,.07), transparent 55px), var(--card, #fff); }
+.msp-ex-pan.cmp { border-top-color: #ea580c; background: linear-gradient(180deg, rgba(234,88,12,.08), transparent 55px), var(--card, #fff); }
+.msp-ex-pan.note { border-top-color: #d97706; background: linear-gradient(180deg, rgba(217,119,6,.09), transparent 55px), var(--card, #fff); }
+.msp-ex-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+.msp-ex-h span { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: rgba(100,116,139,.15); }
+.msp-ex-h em { font-style: normal; color: #c2410c; }
+.msp-ex-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.msp-ex-list { display: grid; gap: 6px; max-height: 320px; overflow: auto; }
+.msp-ex-row { border: 1px solid var(--border, #e2e8f0); border-radius: 10px; padding: 6px 8px; background: rgba(255,255,255,.55); word-break: break-word; }
+.msp-ex-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 3px; font-size: 11px; color: var(--muted, #64748b); }
+.msp-ex-sub .vc { display: inline-flex; gap: 3px; align-items: center; padding: 1px 6px; border-radius: 6px; background: rgba(124,58,237,.12); color: #6d28d9; font-size: 11px; }
+.msp-ex-sub .vc i { font-style: normal; opacity: .8; } .msp-ex-sub .vc b { font-size: 11px; }
+.msp-ex-tot { margin-left: auto; font-weight: 800; color: #6d28d9; }
+.msp-ex-add { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.msp-ex-add .input { flex: 1 1 140px; min-width: 0; font-size: 13px; }

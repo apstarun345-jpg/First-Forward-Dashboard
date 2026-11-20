@@ -11045,6 +11045,56 @@ async function handleApi(req, res, url) {
     const t1 = setTimeout(sweep, 60e3); if (t1.unref) t1.unref();
     const t2 = setInterval(sweep, 5 * 60e3); if (t2.unref) t2.unref();
   }
+  // 🔎 v3.125.372 — Master Search profile ke extra cards: ek agent/TL ki Tag Requests · Complaints · Notes (har ek apni permission se).
+  if (p === '/api/master/agent-extras' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const q = url.searchParams;
+    const name = String(q.get('name') || '').trim(), idRaw = String(q.get('id') || '').trim(), mobRaw = String(q.get('mobile') || '');
+    const nk = tagNameKey(name), idDg = idRaw.replace(/\D/g, ''), mob = mobRaw.replace(/\D/g, '').slice(-10);
+    const idKey = idRaw.toUpperCase();
+    const idOk = idDg.length >= 4 || idKey.length >= 4;
+    const idHit = (v) => { const a = String(v || '').trim(); if (!a || !idOk) return false; return a.toUpperCase() === idKey || (idDg.length >= 4 && a.replace(/\D/g, '') === idDg); };
+    const out = { ok: true, requests: null, complaints: null, notes: null };
+    if (user.role === 'admin' || (user.permissions || []).includes('tagRequest')) {
+      const list = (visibleTagRequests(user) || []).filter((r) => {
+        if (!r) return false;
+        const a = r.agent || {};
+        if (idHit(a.agentId) || idHit(a.mapId)) return true;
+        if (mob.length === 10 && String(a.mobile || '').replace(/\D/g, '').slice(-10) === mob) return true;
+        if (nk && tagNameKey(a.name) === nk) return true;
+        return (r.rows || []).some((x) => idHit(x.agentId) || (nk && tagNameKey(x.agentName) === nk));
+      }).sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
+      out.requests = {
+        total: list.length,
+        rows: list.slice(0, 12).map((r) => ({
+          id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, courier: r.courier || '', byName: r.byName || '',
+          classes: (r.rows || []).filter((x) => !nk || tagNameKey(x.agentName || (r.agent && r.agent.name)) === nk || idHit(x.agentId) || (r.rows || []).length === 1)
+            .map((x) => ({ cls: x.cls, qty: Number(x.approved) || 0, req: x.requested === undefined ? Number(x.approved) || 0 : Number(x.requested) || 0 })),
+          sheet: !!(r.sheetApprovalSync && r.sheetApprovalSync.at) || !!(r.sheetSync && r.sheetSync.at && !r.sheetSync.error),
+          sheetErr: !!(r.sheetSync && r.sheetSync.error)
+        })),
+        byStatus: list.reduce((m, r) => { const k = r.status || 'pending'; m[k] = (m[k] || 0) + 1; return m; }, {}),
+        tags: list.reduce((n, r) => n + (r.status === 'rejected' ? 0 : (Number(r.total) || 0)), 0)
+      };
+    }
+    if (complaintsAllowed(user)) {
+      try {
+        let timer; const wait = new Promise((r) => { timer = setTimeout(() => r('wait'), 6000); });
+        try { await Promise.race([complaintsSvc.ensureRange(''), wait]); } catch { /* ignore */ } finally { clearTimeout(timer); }
+        const rows = complaintsSvc.rows({}).filter((r) => idHit(r.agentId) || (nk && tagNameKey(r.agentName) === nk) || (nk && tagNameKey(r.tlName) === nk));
+        out.complaints = {
+          total: rows.length,
+          open: rows.filter((r) => !/solved|closed|resolved/i.test(String(r.status || ''))).length,
+          rows: rows.slice(0, 10).map((r) => ({ caseNo: r.caseNo, date: r.date, status: r.status || '', vrn: r.vrn || '', tagId: r.tagId || '', description: String(r.description || '').slice(0, 140), deducted: Number(r.deducted) || 0 }))
+        };
+      } catch { out.complaints = { total: 0, open: 0, rows: [], error: true }; }
+    }
+    if (user.role === 'admin' || (user.permissions || []).includes('followups')) {
+      const notes = (workspaceStore().notes || []).filter((n) => n && (tagNameKey(n.entityName) === nk || tagNameKey(n.entityKey) === nk)).sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+      out.notes = { total: notes.length, rows: notes.slice(0, 8).map((n) => ({ id: n.id, text: String(n.text || '').slice(0, 400), status: n.status, priority: n.priority, dueAt: n.dueAt || '', createdBy: n.createdBy || '', updatedAt: n.updatedAt || n.createdAt })) };
+    }
+    return sendJson(res, 200, out);
+  }
   if (p === '/api/tag-requests' && method === 'GET') {
     if (user.role !== 'admin' && !(user.permissions || []).includes('tagRequest')) throw new HttpError(403, 'Tag Request access disabled.');
     // ⏪ v3.50 — boot scan me purani save ke missing requests mile the? UI banner ko batao.
