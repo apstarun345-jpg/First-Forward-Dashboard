@@ -4266,6 +4266,11 @@ body.colorful .from-hdr { color: #166534; }
               <option value="class" ${cfg.rowMode === 'class' ? 'selected' : ''}>Har agent × class ki alag row (no blank spacer)</option>
               <option value="request" ${cfg.rowMode === 'request' ? 'selected' : ''}>Har request ki ek total row</option>
             </select></label>
+          <label class="field"><span class="dim small">Sheet me date ka format</span>
+            <select class="input" data-tr-sheet="dateFormat">
+              <option value="iso" ${(cfg.dateFormat || (isGvTab ? 'dmy' : 'iso')) === 'iso' ? 'selected' : ''}>2026-11-20 (yyyy-mm-dd)</option>
+              <option value="dmy" ${(cfg.dateFormat || (isGvTab ? 'dmy' : 'iso')) === 'dmy' ? 'selected' : ''}>20-11-2026 (dd-mm-yyyy)</option>
+            </select></label>
           <label class="field"><span class="dim small">Kab entry ho</span>
             <span class="tr-check-row">
               <span class="tr-col-opt"><input type="checkbox" checked disabled> Sirf Approved hone par — ek baar</span>
@@ -4439,6 +4444,7 @@ body.colorful .from-hdr { color: #166534; }
         sheetLink: (card.querySelector('[data-tr-sheet="sheetLink"]') || {}).value || '',
         tab: (card.querySelector('[data-tr-sheet="tab"]') || {}).value || (isGv() ? 'Tag Requests GV' : 'Tag Requests'),
         rowMode: (card.querySelector('[data-tr-sheet="rowMode"]') || {}).value || 'agent-class-gap',
+        dateFormat: (card.querySelector('[data-tr-sheet="dateFormat"]') || {}).value || (isGv() ? 'dmy' : 'iso'),
         onSubmit: false,
         onStatus: true,
         ...(isGv() ? { separate: !!(card.querySelector('[data-tr-sheet="separate"]') || {}).checked } : {}),

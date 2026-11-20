@@ -9828,6 +9828,7 @@ async function handleApi(req, res, url) {
     if (!['class', 'agent', 'agent-class-gap', 'request'].includes(g.rowMode)) g.rowMode = 'agent-class-gap';
     if (!Array.isArray(g.columns) || !g.columns.length) g.columns = [...TAG_SHEET_DEFAULT_COLUMNS];
     if (g.spreadsheetId === undefined) g.spreadsheetId = sheetIdFromLink(g.sheetLink) || '';
+    if (!['dmy', 'iso'].includes(g.dateFormat)) g.dateFormat = 'dmy';   // GV sheet me date dd-mm-yyyy
     g.onSubmit = false; g.onStatus = true;
     return g;
   };
@@ -10698,12 +10699,31 @@ async function handleApi(req, res, url) {
     try { tagSheetStore = new AppsScriptStore({ url, secret }); tagSheetStore.timeoutMs = Math.max(tagSheetStore.timeoutMs || 0, Number(process.env.TAG_SHEET_TIMEOUT_MS) || 60000); } catch { tagSheetStore = null; }   // v3.125.61 — sheet append slow ho sakta hai (bada doc)
     return tagSheetStore;
   }
+  // 🧭 v3.125.370 — row banate waqt cfg (date format) + Address book (agent mobile fallback) yahan rehte hain (sync build).
+  let tagSheetCtx = null, tagSheetAddrMap = null;
+  const istParts = (d) => { const t = new Date(d.getTime() + 5.5 * 3600e3); return { y: t.getUTCFullYear(), m: String(t.getUTCMonth() + 1).padStart(2, '0'), d: String(t.getUTCDate()).padStart(2, '0') }; };
+  /** Row ke agent ka mobile/address/pincode: row ka apna → request ka agent (sirf wahi agent ho to) → Address book. */
+  const tagSheetAgentInfo = (x, req) => {
+    const digitsOf = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+    const a = req && req.agent ? req.agent : null;
+    const sameAgent = a && ((digitsOf(a.agentId) && digitsOf(a.agentId) === digitsOf(x && x.agentId)) || (tagNameKey(a.name) && tagNameKey(a.name) === tagNameKey(x && x.agentName)));
+    const out = { mobile: String((x && x.mobile) || (sameAgent ? a.mobile : '') || ''), address: String((x && x.address) || (sameAgent ? a.address : '') || ''), pincode: String((x && x.pincode) || (sameAgent ? a.pincode : '') || '') };
+    if ((!out.mobile || !out.address || !out.pincode) && tagSheetAddrMap && x) {
+      const ch = tagRowChannel(x, req), id = String(x.agentId || '').trim(), dg = digitsOf(id), nm = tagNameKey(x.agentName);
+      const keys = [`${ch}|id:${id}`, dg ? `${ch}|id:APS${dg}` : '', dg ? `${ch}|id:${dg}` : '', nm ? `${ch}|n:${nm}` : ''].filter(Boolean);
+      for (const k of keys) {
+        const e = tagSheetAddrMap.get(k);
+        if (e) { out.mobile = out.mobile || e.mobile || ''; out.address = out.address || e.address || ''; out.pincode = out.pincode || e.pincode || ''; if (out.mobile && out.address && out.pincode) break; }
+      }
+    }
+    return out;
+  };
   const tagSheetFieldValue = (field, x, req, event) => {
     const d = new Date(req.at || Date.now());
     const ch = x.channel === 'gv' ? 'GV Partner' : 'First Forward';
     switch (field) {
       case 'event': return event || '';
-      case 'date': return d.toISOString().slice(0, 10);
+      case 'date': { if (tagSheetCtx && tagSheetCtx.dateFormat === 'dmy') { const p = istParts(d); return `${p.d}-${p.m}-${p.y}`; } return d.toISOString().slice(0, 10); }
       case 'time': return d.toISOString().slice(11, 16);
       case 'requestId': return req.id || '';
       case 'by': return req.byName || req.by || '';
@@ -10711,9 +10731,9 @@ async function handleApi(req, res, url) {
       case 'empMobile': return (req.employee && req.employee.mobile) || '';
       case 'empAddress': return (req.employee && req.employee.address) || '';
       case 'empPincode': return (req.employee && req.employee.pincode) || '';
-      case 'agentMobile': return (req.agent && req.agent.mobile) || '';
-      case 'agentAddress': return (req.agent && req.agent.address) || '';
-      case 'agentPincode': return (req.agent && req.agent.pincode) || '';
+      case 'agentMobile': return tagSheetAgentInfo(x, req).mobile;
+      case 'agentAddress': return tagSheetAgentInfo(x, req).address;
+      case 'agentPincode': return tagSheetAgentInfo(x, req).pincode;
       case 'requested': return x.requested === undefined || x.requested === null ? Number(x.approved) || 0 : Number(x.requested) || 0;
       case 'courier': return req.courier || '';
       case 'firstBarcode': return req.firstBarcode || '';
@@ -10724,7 +10744,7 @@ async function handleApi(req, res, url) {
       case 'materialDescription': return req.materialDescription || '';
       case 'status': return req.status || '';
       // 🔗 FASTag Mapping Name/ID bhari ho to sheet me wahi agent ID / naam jata hai jis par tags map hote hain
-      case 'agentId': return (req.agent && req.agent.mapId) || x.agentId || '';
+      case 'agentId': { const mid = req.agent && req.agent.mapId; if (mid) return mid; const raw = String(x.rawId || x.agentId || '').trim(); return tagRowChannel(x, req) === 'gv' && /^\d+$/.test(raw) ? `APS${raw}` : raw; }   // GV id: APS011961 (digits-only se leading zero + prefix chala jata tha)
       case 'agent': return (req.agent && req.agent.mapName) || x.agentName || '';
       case 'mapName': return (req.agent && req.agent.mapName) || '';
       case 'mapId': return (req.agent && req.agent.mapId) || '';
@@ -10765,6 +10785,7 @@ async function handleApi(req, res, url) {
   }
   /** Request → sheet rows (rowMode ke hisaab se) + header. `event` = new / status / manual. */
   function tagSheetRows(req, cfg, event) {
+    tagSheetCtx = cfg;
     const mapped = tagSheetMapped(cfg);
     const cols = mapped ? mapped.map((m) => m.field) : (cfg.columns || []).filter((c) => TAG_SHEET_FIELDS[c]);
     const header = cols.map((c) => TAG_SHEET_FIELDS[c]);
@@ -10891,6 +10912,7 @@ async function handleApi(req, res, url) {
       if (throwOnFail) throw new HttpError(400, !store ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
       return null;
     }
+    try { tagSheetAddrMap = await addressBookMap(); } catch { tagSheetAddrMap = null; }
     let header = [];
     let positions = null;
     const rows = [];
@@ -12409,6 +12431,7 @@ async function handleApi(req, res, url) {
     cfg.onSubmit = false;
     cfg.onStatus = true;
     if (c.rowMode !== undefined && ['class', 'agent', 'agent-class-gap', 'request'].includes(c.rowMode)) cfg.rowMode = c.rowMode;
+    if (c.dateFormat !== undefined && ['dmy', 'iso'].includes(c.dateFormat)) cfg.dateFormat = c.dateFormat;
     if (c.columnMap && typeof c.columnMap === 'object' && !Array.isArray(c.columnMap)) {
       const clean = {}; const seen = new Map();
       for (const [f, L] of Object.entries(c.columnMap)) {

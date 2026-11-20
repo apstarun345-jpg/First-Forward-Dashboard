@@ -76,7 +76,7 @@ test('tag request sheet — GV ke liye alag sheet/tab/columns', async () => {
     assert.equal(ffTab().rows.length, 2, 'separate OFF: FF + GV dono ek hi (FF) tab me');
 
     // GV separate ON: alag sheet id + tab + columns
-    const put = await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', { gv: { separate: true, enabled: true, sheetLink: 'https://docs.google.com/spreadsheets/d/GVSHEETID1234567890abcdef/edit', tab: 'GV Tab', rowMode: 'class', columnMap: { cls: 'A', agent: 'C', approved: 'E' } } }, admin);
+    const put = await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', { gv: { separate: true, enabled: true, sheetLink: 'https://docs.google.com/spreadsheets/d/GVSHEETID1234567890abcdef/edit', tab: 'GV Tab', rowMode: 'class', columnMap: { date: 'A', agentId: 'B', agent: 'C', agentMobile: 'D', cls: 'E', approved: 'F' } } }, admin);
     assert.equal(put.res.status, 200, JSON.stringify(put.json));
     assert.equal(put.json.gvConfig.separate, true);
     assert.equal(put.json.gvConfig.tab, 'GV Tab');
@@ -90,7 +90,21 @@ test('tag request sheet — GV ke liye alag sheet/tab/columns', async () => {
     assert.ok(gvTab, `GV Tab banna chahiye — got ${JSON.stringify(mock.appends.map((t) => t.tab))}`);
     assert.equal(gvTab.spreadsheetId, 'GVSHEETID1234567890abcdef', 'GV rows GV wali alag sheet me');
     assert.equal(gvTab.rows.length, 1, 'GV tab me sirf GV row');
-    assert.equal(gvTab.rows[0].filter((x) => x !== '' && x != null).includes('Priya Verma'), true);
+    assert.equal(gvTab.rows[0][2], 'Priya Verma');
+    assert.equal(gvTab.rows[0][1], 'APS2002', 'GV agent id APS prefix ke saath');
+    assert.match(String(gvTab.rows[0][0]), /^\d{2}-\d{2}-\d{4}$/, 'GV date dd-mm-yyyy');
+    assert.match(String(ffTab().rows[0][0]) , /./);
+
+    // agents[] flow: agent ka mobile GV sheet me (Agent mobile column), id APS prefix, date dd-mm-yyyy
+    const ag = await jsonCall(server.base, '/api/tag-requests', 'POST', { employee: { name: 'Emp One' }, agents: [{ agentId: '011961', agentName: 'Mukesh Yadav', tl: 'Direct', channel: 'gv', mobile: '7347809270', address: '12, Station Road, Jaunpur', pincode: '222136', rows: [{ cls: 'VC4', requested: 10, approved: 10 }, { cls: 'VC6', requested: 60, approved: 60 }] }] }, admin);
+    assert.equal(ag.res.status, 201, JSON.stringify(ag.json));
+    await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(ag.json.request.id)}`, 'PUT', { status: 'approved' }, admin);
+    await sleep(1800);
+    const mk = gvTab.rows.find((r) => r[2] === 'Mukesh Yadav');
+    assert.ok(mk, JSON.stringify(gvTab.rows));
+    assert.equal(mk[1], 'APS011961', 'GV id APS011961 (leading zero + prefix)');
+    assert.equal(mk[3], '7347809270', 'agent mobile');
+    assert.match(String(mk[0]), /^\d{2}-\d{2}-\d{4}$/);
 
     // FF save GV config ko nahi todta, aur GV OFF karne par GV rows nahi jati
     await jsonCall(server.base, '/api/tag-request-sheet', 'PUT', { gv: { enabled: false } }, admin);
@@ -98,7 +112,7 @@ test('tag request sheet — GV ke liye alag sheet/tab/columns', async () => {
     await jsonCall(server.base, `/api/tag-requests/${encodeURIComponent(c.json.request.id)}`, 'PUT', { status: 'approved' }, admin);
     await sleep(1500);
     assert.equal(ffTab().rows.length, 4, 'GV OFF hone par bhi FF part jata hai');
-    assert.equal(gvTab.rows.length, 1, 'GV sync OFF: GV tab me nayi row nahi');
+    assert.equal(gvTab.rows.filter((r) => r[2] === 'Priya Verma').length, 1, 'GV sync OFF: GV tab me nayi row nahi');
   } finally {
     if (server) await server.stop();
     await mock.close();
