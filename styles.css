@@ -3385,6 +3385,254 @@ html.focus-mode .page-home #today-glance { max-width: 1280px; margin: 16px auto;
 .table-wrap > table, .tbl-wrap > table {
   min-width: 100%;
 }
+
+/* =====================================================================
+ * Shimmer Skeleton Loaders
+ * ===================================================================== */
+@keyframes polishShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.sk-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.sk-kpi {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sk-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--ink) 6%, var(--card)) 25%,
+    color-mix(in srgb, var(--ink) 14%, var(--card)) 37%,
+    color-mix(in srgb, var(--ink) 6%, var(--card)) 63%
+  );
+  background-size: 400% 100%;
+  animation: polishShimmer 1.4s ease infinite;
+}
+.sk-line.sm { width: 35%; height: 10px; }
+.sk-line.lg { width: 65%; height: 26px; }
+.sk-line.xs { width: 45%; height: 9px; }
+.sk-tbl-wrap {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--card);
+}
+.sk-tbl { width: 100%; border-collapse: collapse; }
+.sk-tbl th, .sk-tbl td { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.sk-tbl th { background: color-mix(in srgb, var(--ink) 4%, var(--card)); }
+
+/* =====================================================================
+ * Responsive Card Mode for Tables (<768px) & Sticky Desktop Columns
+ * ===================================================================== */
+.tbl-sticky-first th:first-child,
+.tbl-sticky-first td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--card);
+}
+.tbl-sticky-first thead th:first-child { z-index: 3; }
+
+@media (max-width: 768px) {
+  .tbl-responsive-cards thead { display: none; }
+  .tbl-responsive-cards tbody { display: flex; flex-direction: column; gap: 10px; padding: 2px 0; }
+  .tbl-responsive-cards tbody tr {
+    display: block; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
+  }
+  .tbl-responsive-cards tbody td {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0; border-bottom: 1px dashed var(--line); text-align: right; font-size: 13px;
+  }
+  .tbl-responsive-cards tbody td:last-child { border-bottom: none; padding-bottom: 0; }
+  .tbl-responsive-cards tbody td:first-child {
+    border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 4px;
+    font-weight: 750; color: var(--brand);
+  }
+  .tbl-responsive-cards tbody td::before {
+    content: attr(data-label); font-weight: 700; color: var(--muted); font-size: 11.5px;
+    text-align: left; margin-right: 12px; text-transform: uppercase; letter-spacing: .02em; flex-shrink: 0;
+  }
+  .tbl-responsive-cards tbody td:empty::after { content: '—'; color: var(--muted); }
+}
+
+/* =====================================================================
+ * Tag Request Stepper, Quick Shortcuts & Auto-Fill Badges
+ * ===================================================================== */
+.tr-form-stepper {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px 18px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
+}
+.tr-step { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-weight: 600; transition: .15s ease; }
+.tr-step-dot {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 8%, var(--card)); color: var(--muted);
+  display: grid; place-items: center; font-weight: 800; font-size: 11.5px;
+}
+.tr-step.active .tr-step-dot {
+  background: var(--brand); color: #fff; box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 20%, transparent);
+}
+.tr-step.active .tr-step-lbl { color: var(--ink); font-weight: 750; }
+.tr-step.done .tr-step-dot { background: #16a34a; color: #fff; }
+.tr-step.done .tr-step-lbl { color: #16a34a; font-weight: 700; }
+.tr-step-line { flex: 1; height: 2px; background: var(--line); margin: 0 10px; }
+@media (max-width: 600px) {
+  .tr-form-stepper { padding: 10px 12px; }
+  .tr-step-lbl { font-size: 11px; }
+  .tr-step-dot { width: 20px; height: 20px; font-size: 10px; }
+}
+
+/* Pincode Geo Badge */
+.tr-pin-geo {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  color: #1e40af; background: #eff6ff; border: 1px solid #bfdbfe;
+  border-radius: 8px; padding: 3px 8px; margin-top: 4px;
+}
+html[data-theme="dark"] .tr-pin-geo { background: #1e293b; border-color: #3b82f6; color: #93c5fd; }
+.tr-pin-append {
+  font-size: 10.5px; padding: 1px 6px; border-radius: 4px; cursor: pointer;
+  background: #2563eb; color: #fff; border: 0; font-weight: 700;
+}
+.tr-pin-append:hover { background: #1d4ed8; }
+
+/* Quick Quantity Shortcuts */
+.tr-qty-right { display: flex; align-items: center; gap: 8px; }
+.tr-qty-quick { display: flex; gap: 3px; }
+.tr-qty-quick .btn {
+  padding: 2px 7px; font-size: 11px; border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 4%, var(--card));
+  border: 1px solid var(--line); color: var(--ink); font-weight: 700; cursor: pointer;
+}
+.tr-qty-quick .btn:hover {
+  background: color-mix(in srgb, var(--brand) 12%, var(--card));
+  border-color: var(--brand); color: var(--brand);
+}
+.tr-qty-batch {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px;
+  background: color-mix(in srgb, var(--brand) 4%, var(--card));
+  border: 1px dashed var(--line); border-radius: 10px; margin-bottom: 8px;
+}
+.tr-qty-batch .btn { padding: 3px 9px; font-size: 11.5px; font-weight: 700; }
+
+/* =====================================================================
+ * Drawer Mobile Bottom Sheet & Dark Mode Contrast Repair
+ * ===================================================================== */
+html[data-theme="dark"] .drawer,
+html[data-theme="dark"] .drawer-head,
+html[data-theme="dark"].mobile-ui .drawer-head {
+  background: var(--card, #141d33) !important;
+  color: var(--ink, #f1f5f9) !important;
+  border-color: var(--line, #243250) !important;
+}
+
+html[data-theme="dark"] .drawer-head h2 {
+  color: var(--ink, #f1f5f9) !important;
+}
+
+html[data-theme="dark"] .drawer-sub {
+  color: var(--muted, #94a3b8) !important;
+}
+
+@media (max-width: 768px) {
+  .drawer {
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 88dvh !important;
+    border-radius: 20px 20px 0 0 !important;
+    box-shadow: 0 -12px 36px rgba(0, 0, 0, .28) !important;
+    transform: translateY(100%) !important;
+    transition: transform .28s cubic-bezier(.32, 1, .23, 1) !important;
+  }
+  .drawer.open {
+    transform: translateY(0) !important;
+  }
+  .drawer-head::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 99px;
+    background: var(--line, #cbd5e1);
+    margin: 0 auto 10px;
+    opacity: .8;
+  }
+}
+
+/* =====================================================================
+ * Toast Notification Positioning (Mobile Bottom Nav Safe)
+ * ===================================================================== */
+@media (max-width: 768px) {
+  .toast, html.mobile-ui .toast {
+    bottom: calc(var(--mobile-nav-h, 72px) + env(safe-area-inset-bottom, 0px) + 14px) !important;
+    max-width: calc(100vw - 32px) !important;
+    text-align: center;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .25) !important;
+  }
+}
+
+/* Modern Empty State */
+.empty-state {
+  padding: 42px 20px !important;
+  text-align: center !important;
+  border: 1px dashed var(--line) !important;
+  background: color-mix(in srgb, var(--ink) 2%, var(--card)) !important;
+  border-radius: var(--radius, 16px) !important;
+  box-shadow: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+.empty-state[data-icon]::before {
+  content: attr(data-icon) !important;
+}
+.empty-state:has(.empty-icon)::before {
+  content: none !important;
+}
+.empty-state .empty-icon {
+  font-size: 42px;
+  line-height: 1;
+  margin-bottom: 6px;
+  display: block;
+}
+.empty-state .empty-title {
+  font-size: 16px;
+  font-weight: 750;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.empty-state .empty-desc {
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 440px;
+  margin: 0 auto 12px;
+  line-height: 1.5;
+}
+.empty-state .empty-act {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+html[data-theme="dark"] .empty-state {
+  background: color-mix(in srgb, var(--card) 95%, #fff) !important;
+  border-color: var(--line) !important;
+}
 @media (max-width: 620px) {
 .table-tools { min-width: max-content; }
 .table-tools-note { display: none; }
