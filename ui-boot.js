@@ -64,6 +64,10 @@
   } catch {
     document.documentElement.dataset.theme = 'light';
   }
+  try {
+    const dens = localStorage.getItem('ff_table_density') || 'comfortable';
+    document.documentElement.dataset.tableDensity = dens;
+  } catch {}
   // 🎨 Theme pack + saved branding — PAINT SE PEHLE (login screen aur login ke baad ka flash khatam).
   // Pehle pack wowzone.js se aata tha jo login ke BAAD load hota tha, aur branding rang server settings
   // se login ke baad — isliye pehle default theme dikhta tha, phir badalta tha. Ab dono device par
