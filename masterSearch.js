@@ -2414,7 +2414,7 @@ FF.pages = FF.pages || {};
       const tsOk = !!(ts && ts.has && !pr.direct);
       return `<section class="card msp-kpi-card" data-msp-kpi-ch="${ch}"><div class="card-head"><div>
           <h3>${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${isTl ? 'TL summary' : 'Agent summary'}</h3>
-          <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${lastActiveHtml(pr, isTl, ch)}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
+          <p class="dim small">${isTl ? 'TL + all agents combined' : `This agent only${tlName && !pr.direct ? ` · TL ${esc(tlName)}` : ''}`}${pr.partial ? ' · <span class="badge amber">⏳ loading…</span>' : ''}</p></div>
           <div class="card-right">${ch === 'gv' ? GVC.chip({ kind: isTl ? 'gv_tl' : 'gv_agent', sub: pr.id, id: pr.id, channel: 'gv' }) : ''}${prioChip(worst === 'None' ? prioEff : worst)}</div></div>
         <div class="card-body"><div class="mp-kpis msp-kpis msp-uni">
           ${box('k1', `📦 Stock${isTl ? ' · TL total' : ' · apna'}`, `${U.fmt(s.total)}${c.cover != null ? ` <span class="msp-cover ${c.cover < 7 ? 'bad' : c.cover < 20 ? 'warn' : 'ok'}" title="Run-rate ${U.fmt(c.rate, true)}/day ke hisaab se">⏳ ~${U.fmt(Math.round(c.cover))} din</span>` : ''}`, `${clsOr(clsSums(pr.classes, 'stock', false), TVC6, s.total, stockMix)}${(isTl && ownAgents) || c.cover != null ? `<span class="msp-mini-tail">${isTl && ownAgents ? `${ownAgents}` : ''}${isTl && ownAgents && c.cover != null ? ' · ' : ''}${c.cover != null ? `run-rate ${U.fmt(c.rate, true)}/day` : ''}</span>` : ''}`, spec('stock'))}
@@ -2675,8 +2675,8 @@ FF.pages = FF.pages || {};
           return `<div class="msp-det-card ${ch}"><div class="msp-det-h">${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${tlKind ? 'Team Leader' : 'Agent'}</div><div class="msp-det-grid">
             <div class="msp-det-f"><small>${tlKind ? 'TL mobile' : 'Mobile'}</small><b>${mob(q && q.mobile)}</b></div>
             ${tlKind ? '' : (pp.direct || !tlName ? f('TL name', pp.direct ? (pp.directLabel || 'Direct') : tlName) : `<div class="msp-det-f"><small>TL name</small><b><button type="button" class="mp-link-btn" data-ms-open-tl="1" data-ms-tl-name="${esc(tlName)}" data-ms-tl-id="${esc(tlId || '')}" data-ms-tl-ch="${ch}" title="${esc(tlName)} — Master Search me kholo">${esc(tlName)} ↗</button></b></div>`)}
-            ${tlKind ? '' : f('TL ID', pp.direct ? '' : tlId, true)}
-            ${tlKind ? '' : `<div class="msp-det-f"><small>TL mobile</small><b>${mob(pp.direct ? '' : tlMob)}</b></div>`}
+            ${tlKind ? '' : (pp.direct ? f('Agent ID', id, true) : f('TL ID', tlId, true))}
+            ${tlKind ? '' : `<div class="msp-det-f"><small>${pp.direct ? 'Agent mobile' : 'TL mobile'}</small><b>${mob(pp.direct ? (q && q.mobile) : tlMob)}</b></div>`}
             ${q && q.status ? f('Status', q.status) : ''}${(() => { const li = lastActInfo({ name: pp.name, id: id }, tlKind, ch); if (!li) return q && q.lastActive ? f('Last active', q.lastActive) : ''; const tone = li.days <= 3 ? 'green' : li.days <= 10 ? 'amber' : 'red'; return `<div class="msp-det-f msp-det-act ${tone}"><small>🕒 Last activation</small><b>${esc(U.labelDateKey(li.key))}${li.time ? ` · ${esc(li.time)}` : ''}</b><em>${li.days === 0 ? 'aaj' : li.days === 1 ? 'kal' : `${li.days} din pehle`}${li.days >= 15 ? ' · ⚠️ inactive' : ''} · ${esc(U.fmt(li.qty))} tags</em></div>`; })()}
             ${pp.last ? f('Last allocation', pp.last) : ''}
           </div>${addrBlock(pp, ch, q)}</div>`;
