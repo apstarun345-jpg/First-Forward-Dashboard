@@ -2915,12 +2915,14 @@ FF.pages = FF.pages || {};
       } catch { /* summary optional */ }
       const presenceShare = U.$('#presence-share-toggle', body);
       if (presenceShare) presenceShare.addEventListener('change', () => { localStorage.setItem('ff_presence_pointer', presenceShare.checked ? '1' : '0'); if (FF.app.liveShareChip) FF.app.liveShareChip(); if (!presenceShare.checked && FF.auth.user.role !== 'admin') FF.auth.api('/api/presence', 'POST', { page: 'settings', pointer: null, overlay: '' }).catch(() => {}); });
-      if (presenceShare && FF.presenceIdle && FF.presenceIdle.supported() && FF.auth.user.role !== 'admin') {
+      if (presenceShare && FF.presenceIdle) {
         const lab = presenceShare.closest('label') || presenceShare.parentElement;
         const box = U.h('<div class="dim small" id="presence-idle-box" style="margin-top:8px"></div>');
         lab.insertAdjacentElement('afterend', box);
         const paint = async () => {
           const st = await FF.presenceIdle.permission();
+          if (FF.auth.user.role === 'admin') { box.innerHTML = '🔒 PC lock / idle: <b>admin account ke liye nahi</b> — ye option sirf baaki users ke Settings me dikhta hai (admin ki screen track nahi hoti).'; return; }
+          if (st === 'unsupported') { box.innerHTML = '🔒 PC lock / idle: is browser me <b>support nahi</b> — Chrome ya Edge (desktop / Android) chahiye.'; return; }
           box.innerHTML = st === 'granted' ? '🔒 PC lock / idle: <b>ON</b> (browser permission mili hui hai)' : st === 'denied' ? '🔒 PC lock / idle: browser me <b>Block</b> hai — Chrome site settings → "Device use" se Allow karein.' : '<button class="btn small" id="presence-idle-btn">🔒 PC lock / idle bhi dikhao</button> <span>Sirf itna pata chalta hai ki PC use ho raha hai ya lock / idle hai — kaun si site / app nahi. Browser ek baar permission poochega.</span>';
           const b = U.$('#presence-idle-btn', box);
           if (b) b.addEventListener('click', async () => { const r = await FF.presenceIdle.enable(); U.toast(r === 'granted' ? 'PC lock / idle ON ✓' : 'Permission nahi mili', r === 'granted' ? 'ok' : 'warn'); paint(); });
