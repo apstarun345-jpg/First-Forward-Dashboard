@@ -1812,6 +1812,7 @@ window.FF = window.FF || {};
     const items = root.querySelectorAll('.kpi-value, .mini-value');
     items.forEach((el) => {
       if (el.dataset.odometerRan) return;
+      if (el.children.length) return;   // card me HTML (list / chips / spans) ho to textContent se mat badlo — warna poora structure text ban jaata hai
       const raw = (el.textContent || '').trim();
       if (!raw || raw === '—' || raw === '...' || raw === 'loading…') return;
       const m = raw.match(/^([^\d\-+]*)([-+]?[\d,]+(?:\.\d+)?)(.*)$/);
