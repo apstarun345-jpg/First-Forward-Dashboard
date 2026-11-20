@@ -30,7 +30,19 @@
   const wait = (ms) => new Promise((r) => tw().setTimeout(r, ms));
 
   // ---------------------------------------------------------------- insights (data → board)
-  const sq = (id, n) => { try { return FF.smartQ && FF.smartQ.answer ? FF.smartQ.answer(id, n) : null; } catch { return null; } };
+  // 🎯 TL ke neeche wale agents robot me nahi dikhte — sirf direct agents + TLs (agent row: direct=false aur TL naam 'Direct' nahi)
+  const tlAgentRow = (x) => !!x && x.direct === false && !!String(x.tl || '').trim() && !/direct/i.test(String(x.tl));
+  const sqRaw = (id, n) => { try { return FF.smartQ && FF.smartQ.answer ? FF.smartQ.answer(id, n) : null; } catch { return null; } };
+  const sq = (id, n) => {
+    try {
+      if (!(FF.smartQ && FF.smartQ.answer)) return null;
+      const big = n > 1000 ? n : 100000;
+      const a = FF.smartQ.answer(id, big);
+      if (!a || !Array.isArray(a.rows)) return a;
+      const rows = a.rows.filter((x) => !tlAgentRow(x));
+      return rows.length === a.rows.length && big === n ? a : { ...a, rows: rows.slice(0, n) };
+    } catch { return null; }
+  };
   // 🗣 bolne ke liye naam: 'RAHUL SHARMA' → 'Rahul Sharma' (caps ko voice A-B-C ki tarah padhti thi)
   // ⟪…⟫ = naam (bolte waqt Hinglish→Hindi shabd-badal naam par na lage: 'OLD AGENT' 'एजेंट' na bane)
   const nm = (s) => `⟪${String(s || '').toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase())}⟫`;
@@ -2209,7 +2221,7 @@
       let key = hitC ? hitC[1] : '';
       if (!key && wantList) key = has(/ (stock|maal) /) ? (tl ? 'stocktl' : 'stockhigh') : has(/ inactive /) ? 'inactive' : has(/ (dispatch|bhejna) /) ? (tl ? 'dispatchtl' : 'dispatch') : has(/ (degrowth|girawat) /) ? (tl ? 'degrowthtl' : 'degrowth') : tl ? 'toptl' : 'top';
       if (key) {
-        let a = sq(`${key}|${ch}`, wantList ? 100000 : n) || (ch !== 'all' ? sq(`${key}|all`, wantList ? 100000 : n) : null);
+        let a = sqRaw(`${key}|${ch}`, wantList ? 100000 : n) || (ch !== 'all' ? sqRaw(`${key}|all`, wantList ? 100000 : n) : null);
         if (a && a.rows && a.def) {
           const title = `${a.def.title}${ch !== 'all' ? ` · ${ch.toUpperCase()}` : ''}`;
           if (wantList) { setTimeout(() => { try { FF.smartQ.open(a.def.id, 'all'); } catch { /* ignore */ } }, 600); return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '📥', title, head: `${fmt(a.rows.length)} rows ki poori list khol di — upar "Excel" button dabao to download.`, view: 'text', stay: 7000, closeVoice: true, say: `${fmt(a.rows.length)} की पूरी लिस्ट खोल दी है। एक्सेल बटन दबाइए।` }; }
