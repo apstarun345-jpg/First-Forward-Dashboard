@@ -1019,7 +1019,7 @@
     try {
       if (a.k === 'live') {
         if (!FF.liveView && FF.lazy && FF.lazy.inject) await FF.lazy.inject('liveView');
-        if (FF.liveView && FF.liveView.watchPublic) FF.liveView.watchPublic(a.v); else location.hash = '#/settings?tab=links';
+        if (a.u) { if (FF.liveView && FF.liveView.watch) FF.liveView.watch(a.u); else location.hash = '#/home'; } else if (FF.liveView && FF.liveView.watchPublic) FF.liveView.watchPublic(a.v); else location.hash = '#/settings?tab=links';
       } else if (a.k === 'find') {
         location.hash = `#/masterSearch?q=${encodeURIComponent(a.v)}${a.ch ? `&ch=${encodeURIComponent(a.ch)}` : ''}`;
       } else if (a.k === 'hash') {
@@ -1603,6 +1603,7 @@
   function notifActs(x) {
     const a = [], meta = (x && x.meta) || {}, body = String((x && x.body) || '');
     if (meta.publicSessionId) a.push({ t: '🖥️ Live screen', k: 'live', v: meta.publicSessionId, ttl: 'Is visitor ki screen live dekho — wo kya kar raha hai' });
+    else if (meta.username && !/^public-link$/.test(meta.username) && meta.username !== (FF.auth && FF.auth.user && FF.auth.user.username)) a.push({ t: '🖥️ Live screen', k: 'live', u: meta.username, ttl: `${meta.username} ki screen live dekho — kya kar raha hai` });
     if (meta.entityName) a.push({ t: `${meta.entityKind === 'tl' ? '🧑‍💼' : '👤'} ${meta.entityName}`, k: 'find', v: meta.entityName, ch: meta.entityCh, ttl: `${meta.entityName} kholo` });
     else { const mq = body.match(/"([^"]{2,60})"/); if (mq) a.push({ t: `🔍 ${mq[1]}`, k: 'find', v: mq[1], ttl: `"${mq[1]}" Master search me kholo` }); }
     if (meta.personalLinkId) a.push({ t: '🔗 Link', k: 'hash', v: '#/settings?tab=links', ttl: 'Personal links settings' });

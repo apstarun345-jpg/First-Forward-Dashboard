@@ -244,7 +244,7 @@
           <div class="live-cursor" id="lv-cursor" hidden><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 2l7 19 2.6-7.6L20 11z" fill="#ef4444" stroke="#fff" stroke-width="1.5"/></svg><span id="lv-cursor-name"></span></div>
           <div class="live-blank" id="lv-blank" hidden></div>
         </div></div>
-        <aside class="live-side"><h4>Live actions <span class="live-instant" id="lv-instant">—</span></h4><ol class="live-events" id="lv-events"><li class="dim">Waiting for activity…</li></ol>
+        <aside class="live-side"><div class="live-intent" id="lv-intent"><p class="dim small">Intent load ho raha hai…</p></div><h4>Live actions <span class="live-instant" id="lv-instant">—</span></h4><ol class="live-events" id="lv-events"><li class="dim">Waiting for activity…</li></ol>
           <div class="live-data-clock" id="lv-data-clock"></div>
           <p class="dim small">Mirror aapke (admin) data se render hota hai; cursor, scroll, page aur clicks user ke browser se live aate hain. Typed text / passwords share nahi hote. Speed 0.5s par sabse instant view milta hai.</p></aside>
       </div></div>`);
@@ -271,10 +271,71 @@
       const el = U.$('#lv-fresh', live.modal), txt = U.$('#lv-fresh-text', live.modal);
       if (!el || !txt) return;
       if (!p) { el.className = 'live-fresh dot-off'; txt.textContent = 'offline'; return; }
+      renderIntent(p);   // idle / ago seconds live chalte rahein
       const f = freshness(p.updatedAt || p.lastSeen);
       el.className = `live-fresh ${f.cls}`;
       txt.innerHTML = `exact <span class="live-instant">${esc(exactClock(p.updatedAt || p.lastSeen))}</span> · ${esc(f.label)}`;
     }, 250);
+  }
+
+  // ---- 🧠 Intent — user abhi kya kar raha hai (screen par hi ya kahin aur), sirf share hue page/click/search events se ----------
+  const PAGE_NOTE = { home: 'Home dekh raha hai', dashboard: 'Dashboard dekh raha hai', tagIssued: 'Tag issued report dekh raha hai', stock: 'Stock check kar raha hai', masterSearch: 'Master search me dhundh raha hai', tagRequest: 'Tag request bana / dekh raha hai', performance: 'Performance dekh raha hai', targets: 'Targets dekh raha hai', dispatchPlan: 'Dispatch plan dekh raha hai', settings: 'Settings me hai', reports: 'Reports dekh raha hai', tollDebit: 'Toll debit dekh raha hai' };
+  const agoS = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`; };
+  function pageLabel(page) {
+    const id = String(page || '').replace(/^#?\/?/, '').split(/[?/]/)[0];
+    const hit = ((FF.app && FF.app.PAGES) || []).find((x) => x.id === id);
+    return { id, label: (hit && (hit.label || hit.title)) || id || 'Home' };
+  }
+  /** Pure: person → { head, tone, chips[], trail[], searches[], counts } (Node/test me bhi chalta hai). */
+  function intentOf(p, now) {
+    now = now || Date.now();
+    const ev = Array.isArray(p.events) ? p.events : [];
+    const recent = ev.filter((e) => now - e.at < 10 * 60e3);
+    const last = ev[ev.length - 1] || null;
+    const pg = pageLabel(p.page);
+    const idle = now - Number(p.lastSeen || p.updatedAt || now);          // lastSeen sirf tab badhta hai jab user ne kuch kiya
+    const lastAge = last ? now - last.at : Infinity;
+    const counts = { click: 0, search: 0, page: 0, select: 0, tab: 0, kpi: 0, typing: 0 };
+    recent.forEach((e) => { if (counts[e.kind] != null) counts[e.kind]++; if (/\(typing\)/.test(e.label || '')) counts.typing++; });
+    const searches = [...new Set(recent.filter((e) => e.kind === 'search').map((e) => e.label).filter(Boolean))].slice(-4).reverse();
+    const trail = []; recent.filter((e) => e.kind === 'page').forEach((e) => { const l = pageLabel(e.label || e.page).label; if (trail[trail.length - 1] !== l) trail.push(l); });
+    if (!trail.length || trail[trail.length - 1] !== pg.label) trail.push(pg.label);
+    const pageSince = (() => { for (let i = ev.length - 1; i >= 0; i--) if (ev[i].kind === 'page') return now - ev[i].at; return null; })();
+    let head, tone = 'info';
+    const online = p.online !== false;
+    if (p.kind !== 'personal' && p.visible === false) { head = `🙈 Dashboard tab par nahi hai — dusra tab / app chala raha hai (${agoS(idle)} se)`; tone = 'away'; }
+    else if (!online) { head = `📴 Offline / band — aakhri signal ${agoS(now - Number(p.updatedAt || p.lastSeen || now))} pehle`; tone = 'away'; }
+    else if (p.overlay) { head = `🗂 ${p.overlay} khola hua hai`; tone = 'busy'; }
+    else if (last && lastAge < 12e3) {
+      const l = String(last.label || '');
+      head = last.kind === 'search' ? `🔍 "${l}" search kiya` : /\(typing\)/.test(l) ? `⌨️ ${l.replace(' (typing)', '')} me type kar raha hai` : last.kind === 'page' ? `📄 ${pageLabel(l || last.page).label} par gaya` : last.kind === 'kpi' ? `📊 ${l}` : last.kind === 'select' ? `🔽 Filter / option badla: ${l}` : last.kind === 'tab' ? `🪟 Tab badla: ${l}` : `👆 "${l}" dabaya`;
+      tone = 'busy';
+    } else if (idle > 30e3) { head = `💤 ${agoS(idle)} se kuch nahi kiya — ${pg.label} khula hai`; tone = 'idle'; }
+    else head = `👀 ${PAGE_NOTE[pg.id] || `${pg.label} dekh raha hai`}`;
+    if (p.kind === 'personal') { const st = p.state || {}; head = `🔗 Link visitor · ${(st.ch || 'all').toUpperCase()} · ${st.tab || 'overview'}${st.q ? ` · "${st.q}" search` : ''}`; }
+    const vw = p.viewport && p.viewport.w, sc = p.scroll && p.scroll.h > 0 ? Math.min(100, Math.round((p.scroll.y / Math.max(1, p.scroll.h - ((p.viewport && p.viewport.h) || 800))) * 100)) : null;
+    const chips = [
+      ['📄 Page', pg.label],
+      ...(pageSince != null ? [['⏱ Is page par', agoS(pageSince)]] : []),
+      ['💤 Idle', idle < 5e3 ? 'abhi active' : agoS(idle)],
+      ['🖥 Screen', p.kind === 'personal' ? (p.visible === false ? 'chhupa' : 'dikh raha') : p.visible === false ? 'tab chhupa' : 'dikh raha'],
+      ...(vw ? [[vw < 700 ? '📱 Device' : '💻 Device', `${vw}×${(p.viewport && p.viewport.h) || '?'}`]] : []),
+      ...(sc != null ? [['↕️ Scroll', `${sc}%`]] : [])
+    ];
+    return { head, tone, chips, trail: trail.slice(-6), searches, counts };
+  }
+  function renderIntent(p) {
+    const box = live.modal && U.$('#lv-intent', live.modal);
+    if (!box) return;
+    if (!p) { box.innerHTML = '<div class="li-head away">😴 Abhi koi live signal nahi</div>'; return; }
+    const it = intentOf(p);
+    const c = it.counts;
+    const html = `<div class="li-head ${esc(it.tone)}">${esc(it.head)}</div>
+      <div class="li-chips">${it.chips.map(([k, v]) => `<span class="li-chip"><i>${esc(k)}</i><b>${esc(v)}</b></span>`).join('')}</div>
+      <div class="li-counts" title="Pichhle 10 min">👆 ${c.click} click · 🔍 ${c.search} search · 📄 ${c.page} page · 🔽 ${c.select} filter${c.typing ? ` · ⌨️ ${c.typing} typing` : ''}</div>
+      ${it.searches.length ? `<div class="li-line"><i>Search:</i> ${it.searches.map((q) => `<code>${esc(q)}</code>`).join(' ')}</div>` : ''}
+      ${it.trail.length > 1 ? `<div class="li-line"><i>Raasta:</i> ${it.trail.map(esc).join(' → ')}</div>` : ''}`;
+    if (box.dataset.h !== html) { box.dataset.h = html; box.innerHTML = html; }
   }
 
   function fit(person) {
@@ -327,6 +388,7 @@
     }
     live.lastPerson = p;
     live.lastRenderAt = Date.now();
+    renderIntent(p);
     // A recovered/returning session must make the page mirror visible again.
     frame.hidden = !live.mirror;
     U.$('#lv-name', m).textContent = p.name || p.username;
@@ -432,5 +494,5 @@
     if (e.target.closest('[data-lv-close]')) FF.app.closeDrawer();
   });
 
-  FF.liveView = { openNotification, watch, watchPublic, stop: stopWatch };
+  FF.liveView = { openNotification, watch, watchPublic, stop: stopWatch, intentOf };
 })(window.FF);
