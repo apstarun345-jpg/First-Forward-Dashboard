@@ -31,7 +31,7 @@ import { createNpciEngine, cleanItem as npciCleanItem } from './npci-engine.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS, LAYOUTS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
-import { createIssuedStore, diffLeft, applyResolved, digits as ibDigits } from './issuedBarcodes.js';
+import { createIssuedStore, diffLeft, applyResolved, deriveTagId, digits as ibDigits } from './issuedBarcodes.js';
 import { loadFfDispatchRows, loadGvDispatchRows, isDirect as dispatchIsDirect, directLabel as dispatchDirectLabel } from './dispatch-report.js';
 import { parseAnyFile, cleanAddressText } from './address-import.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
@@ -7423,6 +7423,42 @@ function issuedBarcodesRun(reason, opts = {}) {
   })().finally(() => { issuedRunning = null; });
   return issuedRunning;
 }
+/** Jin barcode ka Tag ID kahin nahi: paas ke stock barcode (StockDataa) se Tag ID nikalo (+32 / barcode) → EIR / GV Master me confirm → register me save. */
+async function issuedDerive(miss) {
+  const num = (r) => BigInt(ibDigits(r.barcode));
+  const groups = new Map();
+  miss.forEach((r) => { const k = r.range || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
+  const cands = new Map();   // tagId → row
+  for (const rows of groups.values()) {
+    const ns = rows.map(num); let lo = ns[0], hi = ns[0]; ns.forEach((n) => { if (n < lo) lo = n; if (n > hi) hi = n; });
+    if (hi - lo > 3000n) continue;
+    const w = ibDigits(rows[0].barcode).length, f = (v) => (v < 0n ? 0n : v).toString().padStart(w, '0');
+    let refs = [];
+    for (const pad of [400n, 4000n]) {
+      try {
+        const out = await mappingStock.lookup([{ type: 'range', first: f(lo - pad), last: f(hi + pad) }], {});
+        refs = ((out.results && out.results[0] && out.results[0].rows) || []).filter((x) => x.tagId && x.barcode).map((x) => ({ bc: ibDigits(x.barcode), tag: String(x.tagId) }));
+      } catch { refs = []; }
+      if (refs.length) break;
+    }
+    if (!refs.length) continue;
+    for (const r of rows) {
+      const n = num(r); let best = null, bd = 0n;
+      for (const x of refs) { const d = BigInt(x.bc) > n ? BigInt(x.bc) - n : n - BigInt(x.bc); if (!best || d < bd) { best = x; bd = d; } }
+      const tag = best ? deriveTagId(best.bc, best.tag, r.barcode) : '';
+      if (tag) { cands.set(tag, r); r.__derived = tag; }
+    }
+  }
+  if (!cands.size) return;
+  const tags = [...cands.keys()], left = new Set(tags);
+  const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+  for (const part of chunk(tags, 60)) {
+    try { (await ibGvmByTags(part)).forEach((g) => { const r = cands.get(g.rec.t); if (r) { issuedStore.setResolved(r.barcode, { ...g.rec, dv: 1 }); left.delete(g.rec.t); } }); } catch { /* next */ }
+  }
+  for (const part of chunk([...left], 60)) {
+    try { (await ibEirByTags(part)).forEach((g) => { const r = cands.get(g.tag); if (r) { issuedStore.setResolved(r.barcode, { ...g.rec, dv: 1 }); left.delete(g.tag); } }); } catch { /* next */ }
+  }
+}
 /** dispatch-status rows (issued, data nahi) ko register + GV Master serial se bharo. */
 async function issuedEnrichRows(rows, ranges) {
   const need = rows.filter((r) => r.status === 'issued' && !r.tagId);
@@ -7441,13 +7477,18 @@ async function issuedEnrichRows(rows, ranges) {
       got.forEach((g) => issuedStore.setResolved(g.bc, g.rec));
     } catch { /* GV Master me nahi / slow — pending note niche */ }
   }
+  // Tag ID barcode se derive (paas ka stock barcode + 32 / barcode) → EIR / GV Master me confirm
+  const still = miss.filter((r) => !issuedStore.get(r.barcode) && !issuedStore.getPending(r.barcode)).slice(0, 400);
+  if (still.length) { try { await Promise.race([issuedDerive(still), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 25e3))]); } catch { /* partial ok */ } }
   for (const r of miss) {
     const rec = issuedStore.get(r.barcode);
-    if (rec) { applyResolved(r, rec); continue; }
+    if (rec) { applyResolved(r, rec); if (rec.dv) r.note = `${r.src === 'gv' ? 'GV Master' : 'EIR'} · issued (Tag ID barcode se match)`; continue; }
+    if (r.__derived) { r.tagId = r.__derived; r.src = 'pending'; r.note = 'Tag ID barcode se nikala · EIR / GV Master me entry nahi mili'; delete r.__derived; continue; }
     const pd = issuedStore.getPending(r.barcode);
     if (pd) { r.tagId = pd.t; r.cls = r.cls || pd.c; r.note = 'Tag ID mila · GV Master / EIR me entry abhi nahi aayi (raat ko dobara check)'; r.src = 'pending'; }
     else r.note = `${String(r.note || '').replace(/ stock list me nahi.*$/, '').trim() || 'FF'} · stock se nikal chuka — Tag ID register me nahi (naya register aaj raat se bharna shuru)`.trim();
   }
+  miss.forEach((r) => { delete r.__derived; });
 }
 async function handleGviz(req, res, params) {
   const fresh = params.get('fresh') === '1';

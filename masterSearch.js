@@ -3093,7 +3093,7 @@ FF.pages = FF.pages || {};
     let today = U.dateKey ? U.dateKey(new Date()) : new Date().toISOString().slice(0, 10);
     // v3.125.103 — din ki jagah stock data ka version: stock sheet badle tabhi naya check, warna saved result
     try { const v = await Promise.race([FF.data.versions(), new Promise((_, no) => setTimeout(() => no(new Error('t')), 2500))]); if (v && v.v && v.v.stock && !/^0\|/.test(v.v.stock)) today = `s${String(v.v.stock).replace(/[|]/g, '_')}`; } catch { /* din wala key */ }
-    const lsKey = `ff_dspst|${today}|v3|${r.ch || ''}|${key}`;
+    const lsKey = `ff_dspst|${today}|v4|${r.ch || ''}|${key}`;
     if (!dspStCache.has(key)) {
       try {
         const hit = localStorage.getItem(lsKey);

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createIssuedStore, diffLeft, applyResolved, digits } from '../issuedBarcodes.js';
+import { createIssuedStore, diffLeft, applyResolved, deriveTagId, digits } from '../issuedBarcodes.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test('diffLeft: sirf wahi jo stock se nikle', () => {
@@ -43,4 +43,14 @@ test('server wiring: GV Master pehle, phir EIR; dispatch-status enrich; nightly'
   assert.equal((src.match(/await issuedEnrichRows\(out, ranges\)/g) || []).length, 2, 'dono branch me enrich');
   assert.match(src, /getUTCHours\(\) >= 3 && issuedStore\.meta\(\)\.lastRunDay !== istTodayKey\(\)/);
   assert.match(src, /curN < prevN \* 0\.5/, 'adhoore stock list par snapshot nahi badalta');
+});
+
+test('deriveTagId: Tag ID barcode ke saath +32 se badhta hai (live EIR se verify)', () => {
+  const ref = ['608116-038-0796455', '34161FA820328EE84D84E4E0'];
+  assert.equal(deriveTagId(...ref, '608116-038-0796419'), '34161FA820328EE84D84E060', 'EIR me KUMAR SUNIL VC4 ka asli tag');
+  assert.equal(deriveTagId(...ref, '608116-038-0796415'), '34161FA820328EE84D84DFE0');
+  assert.equal(deriveTagId(...ref, '608116-038-0796455'), '34161FA820328EE84D84E4E0');
+  assert.equal(deriveTagId(...ref, '608116-039-0796419'), '', 'batch alag → nahi');
+  assert.equal(deriveTagId(...ref, '608116-038-0899999'), '', 'bahut door → nahi');
+  assert.equal(deriveTagId('123', 'ZZ', '125'), '');
 });

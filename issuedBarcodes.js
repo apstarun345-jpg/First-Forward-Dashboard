@@ -87,3 +87,16 @@ export function applyResolved(row, rec) {
   row.note = rec.s === 'gv' ? 'GV Master · issued' : 'EIR · issued';
   return true;
 }
+
+/** Tag ID barcode ke saath seedhi ginti me badhta hai (har barcode par +32 = 0x20).
+ *  Paas ke known (barcode, tagId) se kisi bhi barcode ka Tag ID nikalo. Pehle 9 digit (prefix + batch) same hone chahiye. */
+export function deriveTagId(refBarcode, refTagId, barcode, maxGap = 6000) {
+  const rb = digits(refBarcode), b = digits(barcode), tag = String(refTagId || '').trim().toUpperCase();
+  if (rb.length < 12 || rb.length !== b.length || !/^[0-9A-F]{12,}$/.test(tag)) return '';
+  if (rb.slice(0, -7) !== b.slice(0, -7)) return '';
+  const gap = BigInt(b.slice(-7)) - BigInt(rb.slice(-7));
+  const abs = gap < 0n ? -gap : gap;
+  if (abs > BigInt(maxGap)) return '';
+  const out = BigInt('0x' + tag) + gap * 32n;
+  return out < 0n ? '' : out.toString(16).toUpperCase().padStart(tag.length, '0');
+}
