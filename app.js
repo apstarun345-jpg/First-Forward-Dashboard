@@ -10,6 +10,21 @@ window.FF = window.FF || {};
   const WORKSPACE_BOOT_MAX_MS = 3900;
   const workspaceBootStarted = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   let workspaceBootReleased = false;
+  // Login ke baad splash wapas dikhane ke liye template (showLogin splash hata deta hai → login ke baad blank/atka dikhta tha)
+  let bootTemplate = null;
+  try { const b0 = document.getElementById('app-boot'); if (b0) bootTemplate = b0.cloneNode(true); } catch {}
+  function reshowBoot() {
+    try {
+      if (document.getElementById('app-boot') || !bootTemplate) return;
+      const b = bootTemplate.cloneNode(true);
+      b.classList.remove('boot-exit');
+      document.body.insertBefore(b, document.body.firstChild);
+      workspaceBootReleased = false;
+      document.body.classList.remove('workspace-ready');
+      // safety: kuch bhi atke to 8 s me splash hat jaye
+      setTimeout(() => { try { removeBootOverlay(); } catch {} }, 8000);
+    } catch {}
+  }
   // Hard safety cap: even if preload/render/storage hangs, the splash exits within 3.9s.
   setTimeout(() => {
     if (workspaceBootReleased) return;
@@ -2521,6 +2536,7 @@ window.FF = window.FF || {};
       return;
     }
 
+    reshowBoot();
     renderSidebar();
     FF.auth.applyTheme();
     // Keep the entire shell hidden until critical data + the initial route are populated.
