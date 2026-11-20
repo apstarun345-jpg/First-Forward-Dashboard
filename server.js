@@ -9152,6 +9152,35 @@ async function handleApi(req, res, url) {
     });
     return sendJson(res, 200, { ok: true });
   }
+  // 🛟 v3.125.367 — Backup site (Apps Script web app): Render band ho tab bhi site chale. Apps Script roz yahan se
+  //    config + asset list kheench kar Drive me rakh leta hai (secret = APPS_SCRIPT_SECRET). Koi user/password/token nahi jaata.
+  if (p === '/api/backup/snapshot' && method === 'POST') {
+    const body = await readBody(req);
+    const expected = String(process.env.APPS_SCRIPT_SECRET || '').trim();
+    const supplied = String(body.secret || req.headers['x-app-script-secret'] || '').trim();
+    if (!expected || supplied !== expected) throw new HttpError(401, 'Backup snapshot unauthorized.');
+    const okExt = new Set(['.js', '.css', '.svg', '.png', '.webp', '.jpg', '.jpeg', '.ico', '.webmanifest', '.woff2', '.woff', '.gif']);
+    const assets = [];
+    const walk = async (dir, prefix, depth) => {
+      let names = []; try { names = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+      for (const d of names) {
+        if (d.name.startsWith('.')) continue;
+        if (d.isDirectory()) { if (depth < 2 && d.name === 'logos') await walk(path.join(dir, d.name), `${prefix}${d.name}/`, depth + 1); continue; }
+        if (BLOCKED_FILES.has(d.name) || !okExt.has(path.extname(d.name).toLowerCase())) continue;
+        if (d.name === 'sw.js' || d.name === 'server.js') continue;
+        let size = 0; try { size = (await fs.stat(path.join(dir, d.name))).size; } catch { continue; }
+        assets.push({ path: `${prefix}${d.name}`, size });
+      }
+    };
+    await walk(__dirname, '', 0);
+    const viewer = { username: 'backup', name: 'Backup (read-only)', role: 'user', approved: true, permissions: allPermKeysNow(), notifyAccess: false, createdAt: new Date().toISOString() };
+    return sendJson(res, 200, {
+      ok: true, version: SW_VERSION || '', builtAt: new Date().toISOString(), assets,
+      user: publicUser(viewer), settings: settingsFor({ role: 'user' }), publicSettings: publicSettings(),
+      permissions: permissionsFor(db.settings), tabs: db.settings.tabs || DEFAULT_TABS,
+      sheetId: db.settings.sheetId || DEFAULT_SHEET_ID
+    });
+  }
   // 🛣️ v3.125.356 — Toll Debit Daily (date-wise + class-wise) ab Toll Tags sheet ke "Toll Debit Daily" tab se; Apps Script poora tab yahan bhejta hai (sheet private rehti hai).
   if (p === '/api/push/toll-daily' && method === 'POST') {
     const body = await readBody(req);
