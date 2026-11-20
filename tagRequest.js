@@ -82,7 +82,7 @@ FF.pages = FF.pages || {};
     sel: new Set(), filter: { status: 'all', channel: 'both', q: '', fromDate: '', toDate: '', need: 'all' }, sortNeed: false, edit: null, limit: PAGE_ROWS, dview: [],
     // 📦 "sabhi agents ka stock" board — employee link par bhi (search + channel filter + paging)
     stockBoard: { q: '', channel: 'both', limit: 40 },
-    sheet: { loaded: false, busy: false, config: null, fields: null, connected: false, hint: '', publicForm: null }
+    sheet: { loaded: false, busy: false, ch: 'ff', gvConfig: null, config: null, fields: null, connected: false, hint: '', publicForm: null }
   };
   // ---- Draft auto-save: browser band / refresh / signal chala jaye to bhara hua form wapas milta hai ----
   const DRAFT_TTL = 24 * 60 * 60 * 1000;
@@ -4190,6 +4190,7 @@ body.colorful .from-hdr { color: #166534; }
     return FF.auth.api('/api/tag-request-sheet').then((out) => {
       state.sheet.loaded = true;
       state.sheet.config = out.config || null;
+      state.sheet.gvConfig = out.gvConfig || null;
       state.sheet.fields = out.fields || {};
       state.sheet.connected = !!out.connected;
       state.sheet.hint = out.hint || '';
@@ -4206,7 +4207,8 @@ body.colorful .from-hdr { color: #166534; }
   }
   function sheetCardHtml() {
     const s = state.sheet;
-    const cfg = s.config;
+    const isGvTab = s.ch === 'gv' && !!s.gvConfig;
+    const cfg = isGvTab ? s.gvConfig : s.config;
     if (!cfg) return '<section class="card" id="tr-sheet-card"><div class="card-body dim small">📗 Google Sheet sync load ho raha hai…</div></section>';
     // API response is expected to return fields, but render a complete list even if an
     // older backend/deploy responds without TAG_SHEET_FIELDS.
@@ -4239,9 +4241,17 @@ body.colorful .from-hdr { color: #166534; }
     const mappedCount = orderedCols.filter((k) => letterOf(k)).length;
     const targetId = sheetIdOfLink(cfg.sheetLink) || cfg.spreadsheetId || '';
     const noAgentCols = !['agentMobile', 'agentAddress', 'agentPincode'].some((k) => configuredCols.includes(k));
-    return `<section class="card" id="tr-sheet-card"><div class="card-head"><h3>📗 Google Sheet me direct entry <span class="badge ${cfg.enabled ? 'green' : ''}">${cfg.enabled ? 'ON' : 'OFF'}</span></h3>
+    const chTabs = `<div class="seg" id="tr-sheet-ch" style="margin-bottom:10px"><button class="seg-btn ${isGvTab ? '' : 'on'}" data-tr-sheet-ch="ff">🟦 First Forward</button><button class="seg-btn ${isGvTab ? 'on' : ''}" data-tr-sheet-ch="gv">🟩 GV Partner${s.gvConfig && s.gvConfig.separate ? '' : ' <span class="dim small">(FF wali sheet)</span>'}</button></div>`;
+    const gvOff = isGvTab && !cfg.separate;
+    const gvSwitch = isGvTab ? `<label class="tr-col-opt" style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" data-tr-sheet="separate" ${cfg.separate ? 'checked' : ''}> <b>GV ke liye alag sheet / tab / columns use karo</b></label>${gvOff ? '<div class="notice" style="margin-bottom:10px">ℹ️ Abhi <b>GV ki requests bhi First Forward wali sheet me</b> ja rahi hain. Upar tick karke Save karo, phir GV ki apni sheet-link, tab aur column letters set karo.</div>' : ''}` : '';
+    const label = isGvTab ? 'GV' : 'FF';
+    const badge = isGvTab && !cfg.separate ? '<span class="badge">FF wali sheet</span>' : `<span class="badge ${cfg.enabled ? 'green' : ''}">${cfg.enabled ? 'ON' : 'OFF'}</span>`;
+    return `<section class="card" id="tr-sheet-card"><div class="card-head"><h3>📗 Google Sheet me direct entry · ${label} ${badge}</h3>
       <div class="card-right dim">Admin — tag requests ko seedha apni Google Sheet me likho</div></div>
       <div class="card-body">
+        ${chTabs}${gvSwitch}
+        ${gvOff ? `<div class="btn-row"><button class="btn primary" data-tr-sheet-act="save">💾 Save settings</button></div>` : ''}
+        <div ${gvOff ? 'hidden' : ''} data-tr-sheet-body>
         ${s.connected ? '' : `<div class="notice amber" style="margin-bottom:10px">⚠️ ${esc(s.hint || 'Apps Script connect nahi hai — pehle sheet storage setup karo.')}</div>`}
         ${noAgentCols ? '<div class="notice amber" style="margin-bottom:10px">ℹ️ v3.30: delivery ab <b>agent</b> ke address par hoti hai — neeche <b>Agent mobile / Agent address / Agent pincode</b> columns tick karke save karo (naye columns sheet me aakhir me judte hain).</div>' : ''}
         <div class="tr-sheet-grid">
@@ -4273,6 +4283,7 @@ body.colorful .from-hdr { color: #166534; }
           ${cfg.sheetLink ? `<a class="btn" href="${esc(cfg.sheetLink)}" target="_blank" rel="noopener">↗ Sheet kholo</a>` : ''}
         </div>
         <p class="dim small" style="margin-top:8px">${targetId ? `🎯 Entries <b>is sheet</b> me jaayengi (ID …${esc(String(targetId).slice(-8))} · tab <b>${esc(cfg.tab || '')}</b>). Us sheet par Apps Script wale Google account ka <b>Editor</b> access hona chahiye — Sheet → Share.` : 'Entries is waqt usi sheet me hoti hain jisme Apps Script bana hai (Settings → Backup). Kahin aur bhejna ho to upar <b>alag sheet ka link</b> paste karo.'} Tab na ho to ban jaata hai; pehli entry par header row apne aap likhi jaati hai. Default me <b>ek agent ki saari class rows ek saath</b> jaati hain, phir <b>1 blank row</b> aur phir next agent — isse multiple agents clearly separate rehte hain. Google Sheet me entry <b>sirf admin ke Approved karne par</b> hoti hai — Pending, Dispatched aur Rejected par koi nayi row nahi banti. Approved request ki entry ek hi baar hogi; dobara status badalne ya manual button dabane se duplicate entry roki jayegi. <b>🚚 Courier</b> column me label wala courier naam bhi likha jaata hai.</p>
+        </div>
       </div></section>`;
   }
   /** Employee link (bina login) ka admin control: ON/OFF, fields, title, link copy. */
@@ -4386,6 +4397,21 @@ body.colorful .from-hdr { color: #166534; }
     function attach() {
       const card = rootEl.querySelector('#tr-sheet-card');
       if (!card) return;
+      const isGv = () => state.sheet.ch === 'gv' && !!state.sheet.gvConfig;
+      const curCfg = () => (isGv() ? state.sheet.gvConfig : state.sheet.config) || {};
+      const setCfg = (c) => { if (isGv()) state.sheet.gvConfig = c; else state.sheet.config = c; };
+      const payload = (patch) => (isGv() ? { gv: patch } : { config: patch });
+      card.querySelectorAll('[data-tr-sheet-ch]').forEach((b) => b.addEventListener('click', () => {
+        const to = b.getAttribute('data-tr-sheet-ch') === 'gv' ? 'gv' : 'ff';
+        if (state.sheet.ch === to) return;
+        state.sheet.ch = to;
+        if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach();
+      }));
+      const sepBox = card.querySelector('[data-tr-sheet="separate"]');
+      if (sepBox) sepBox.addEventListener('change', () => {
+        const body = card.querySelector('[data-tr-sheet-body]'); if (body) body.hidden = !sepBox.checked;
+        const note = card.querySelector('.notice:not(.amber)'); if (note && sepBox.checked) note.hidden = true;
+      });
       const mapBox = card.querySelector('[data-tr-colmap]');
       const letterVal = (inp) => String(inp.value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
       const letterNum = (L) => { let n = 0; for (const ch of L) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
@@ -4411,47 +4437,60 @@ body.colorful .from-hdr { color: #166534; }
             const act = (name, fn) => { const b = card.querySelector(`[data-tr-sheet-act="${name}"]`); if (b) b.addEventListener('click', fn); };
       const collect = () => ({
         sheetLink: (card.querySelector('[data-tr-sheet="sheetLink"]') || {}).value || '',
-        tab: (card.querySelector('[data-tr-sheet="tab"]') || {}).value || 'Tag Requests',
+        tab: (card.querySelector('[data-tr-sheet="tab"]') || {}).value || (isGv() ? 'Tag Requests GV' : 'Tag Requests'),
         rowMode: (card.querySelector('[data-tr-sheet="rowMode"]') || {}).value || 'agent-class-gap',
         onSubmit: false,
         onStatus: true,
+        ...(isGv() ? { separate: !!(card.querySelector('[data-tr-sheet="separate"]') || {}).checked } : {}),
         columnMap: (() => { const m = {}; card.querySelectorAll('[data-tr-col-letter]').forEach((inp) => { const L = letterVal(inp); if (L) m[inp.getAttribute('data-tr-col-letter')] = L; }); return m; })()
       });
       act('save', () => {
         const patch = collect();
-        const before = JSON.parse(JSON.stringify(state.sheet.config || {}));
+        const before = JSON.parse(JSON.stringify(curCfg()));
         const letters = Object.values(patch.columnMap || {});
-        if (!letters.length) { U.toast('Pick a column letter for at least one field.', 'warn'); return; }
+        const needCols = !isGv() || patch.separate;
+        if (needCols && !letters.length) { U.toast('Pick a column letter for at least one field.', 'warn'); return; }
         if (new Set(letters).size !== letters.length) { U.toast('A column letter is used twice — give each field its own column.', 'warn'); return; }
-        const optimistic = { ...before, ...patch, columns: Object.entries(patch.columnMap).sort((a, b) => a[1].length - b[1].length || a[1].localeCompare(b[1])).map(([k]) => k) };
-        state.sheet.config = optimistic;
+        if (isGv() && !needCols) { delete patch.columnMap; }
+        const optimistic = { ...before, ...patch, ...(letters.length ? { columns: Object.entries(patch.columnMap).sort((a, b) => a[1].length - b[1].length || a[1].localeCompare(b[1])).map(([k]) => k) } : {}) };
+        setCfg(optimistic);
         if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach();
         U.toast('💾 Sheet settings applied ✓ · saving in background…', 'ok');
-        FF.auth.api('/api/tag-request-sheet', 'PUT', { config: patch })
+        FF.auth.api('/api/tag-request-sheet', 'PUT', payload(patch))
           .then((out) => {
-            state.sheet.config = out.config || optimistic;
+            const wasGv = isGv();
+            if (out.config) state.sheet.config = out.config;
+            if (out.gvConfig) state.sheet.gvConfig = out.gvConfig;
+            if (!wasGv && !out.config) state.sheet.config = optimistic;
             state.sheet.connected = !!out.connected;
             U.toast('☁️ Sheet settings permanently saved ✓', 'ok');
             if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach();
           })
           .catch((err) => {
-            state.sheet.config = before;
+            setCfg(before);
             U.toast('Save fail — previous settings restored: ' + ((err && err.message) || ''), 'err');
             if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach();
           });
       });
       act('toggle', () => {
         const cfg = collect();
-        cfg.enabled = !(state.sheet.config && state.sheet.config.enabled);
-        FF.auth.api('/api/tag-request-sheet', 'PUT', { config: cfg })
-          .then((out) => { state.sheet.config = out.config; state.sheet.connected = !!out.connected; U.toast(out.config.enabled ? '▶️ Google Sheet sync ON — sirf Approved request ek baar entry hogi' : '⏸ Sheet sync OFF', out.config.enabled ? 'ok' : 'info'); if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach(); })
+        cfg.enabled = !curCfg().enabled;
+        FF.auth.api('/api/tag-request-sheet', 'PUT', payload(cfg))
+          .then((out) => {
+            if (out.config) state.sheet.config = out.config;
+            if (out.gvConfig) state.sheet.gvConfig = out.gvConfig;
+            state.sheet.connected = !!out.connected;
+            const on = !!curCfg().enabled;
+            U.toast(on ? '▶️ Google Sheet sync ON — sirf Approved request ek baar entry hogi' : '⏸ Sheet sync OFF', on ? 'ok' : 'warn');
+            if (replaceCard('#tr-sheet-card', sheetCardHtml())) attach();
+          })
           .catch((err) => U.toast('Toggle fail: ' + ((err && err.message) || ''), 'err'));
       });
       act('test', () => {
         const btn = card.querySelector('[data-tr-sheet-act="test"]');
         if (btn) { btn.disabled = true; btn.textContent = '⏳ Check…'; }
         const cfgNow = collect();
-        FF.auth.api('/api/tag-request-sheet/test', 'POST', { sheetLink: cfgNow.sheetLink, tab: cfgNow.tab })
+        FF.auth.api('/api/tag-request-sheet/test', 'POST', { sheetLink: cfgNow.sheetLink, tab: cfgNow.tab, channel: isGv() ? 'gv' : 'ff' })
           .then((out) => {
             const where = out.spreadsheet ? `sheet "${out.spreadsheet}" (tab ${out.tab})` : `tab ${out.tab}`;
             U.toast(`🔌 Connected ✓ — ${where}${out.note ? ' · ' + out.note : ''}`, out.targetExists === false ? 'warn' : 'ok');

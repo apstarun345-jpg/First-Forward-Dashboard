@@ -620,7 +620,7 @@ function settingsFor(u) {
   delete s.tollImport; delete s.tollImportLog; delete s.tollDaily; // 🛣️ toll import status — /api/toll-import-info se aata hai
   delete s.schedules;     // 🗓 admin ke custom reminders
   delete s.dispatchEmail; // selected recipients + delivery schedule sirf admin ko
-  delete s.__tagSheetBackup; // tag-sheet config ki backup copy (sheet link) sirf admin ko
+  delete s.__tagSheetBackup; delete s.__tagSheetBackupGv; // tag-sheet config ki backup copy (sheet link) sirf admin ko
   delete s.__tagDataBackup;  // tag requests + address ki gzip backup copy sirf admin ko
   return s;
 }
@@ -9811,6 +9811,44 @@ async function handleApi(req, res, url) {
     if (cfg.spreadsheetId === undefined) cfg.spreadsheetId = sheetIdFromLink(cfg.sheetLink) || '';
     return cfg;
   };
+  // 🟩 v3.125.369 — GV ke liye ALAG sheet/tab/column-map. `separate` OFF = GV rows bhi FF wali (upar wali) config se jaati hain.
+  const tagSheetConfigGv = () => {
+    const w = workspaceStore();
+    const bk = db.settings && db.settings.__tagSheetBackupGv;
+    if (bk && typeof bk === 'object' && bk.updatedAt) {
+      const cur = w.tagRequestSheetGv && typeof w.tagRequestSheetGv === 'object' ? w.tagRequestSheetGv : null;
+      if (!cur || Date.parse(bk.updatedAt) > Date.parse(cur.updatedAt || 0)) w.tagRequestSheetGv = JSON.parse(JSON.stringify(bk));
+    }
+    if (!w.tagRequestSheetGv || typeof w.tagRequestSheetGv !== 'object') {
+      w.tagRequestSheetGv = { separate: false, enabled: true, tab: 'Tag Requests GV', sheetLink: '', spreadsheetId: '', rowMode: 'agent-class-gap', columns: [...TAG_SHEET_DEFAULT_COLUMNS], v: 1 };
+    }
+    const g = w.tagRequestSheetGv;
+    g.separate = !!g.separate; g.enabled = g.enabled !== false;
+    if (!String(g.tab || '').trim()) g.tab = 'Tag Requests GV';
+    if (!['class', 'agent', 'agent-class-gap', 'request'].includes(g.rowMode)) g.rowMode = 'agent-class-gap';
+    if (!Array.isArray(g.columns) || !g.columns.length) g.columns = [...TAG_SHEET_DEFAULT_COLUMNS];
+    if (g.spreadsheetId === undefined) g.spreadsheetId = sheetIdFromLink(g.sheetLink) || '';
+    g.onSubmit = false; g.onStatus = true;
+    return g;
+  };
+  /** Kis channel ki request/row kis config se jayegi. */
+  const tagSheetCfgFor = (ch) => { if (ch === 'gv') { const g = tagSheetConfigGv(); if (g.separate) return g; } return tagSheetConfig(); };
+  const tagRowChannel = (x, req) => {
+    const c = String((x && x.channel) || (req && req.agent && req.agent.channel) || '').toLowerCase();
+    return c === 'gv' ? 'gv' : 'ff';
+  };
+  /** Request ke rows kin channels ke hain (GV separate ON ho tabhi 'gv' alag; warna sab 'ff' = ek hi sheet). */
+  const tagReqChannels = (req) => {
+    const sep = tagSheetConfigGv().separate;
+    if (!sep) return ['ff'];
+    const rows = Array.isArray(req && req.rows) ? req.rows : [];
+    const set = new Set(rows.map((x) => tagRowChannel(x, req)));
+    if (!set.size) set.add(tagRowChannel(null, req));
+    return [...set];
+  };
+  const tagSheetAnyEnabled = () => !!tagSheetConfig().enabled || (!!tagSheetConfigGv().separate && !!tagSheetConfigGv().enabled);
+  /** Is request ka koi channel-part abhi baaki hai aur uski sheet ON hai? (sweeper / retry sirf tabhi) */
+  const tagReqNeedsSheet = (req) => tagReqChannels(req).some((ch) => !(req.sheetPartsDone && req.sheetPartsDone[ch]) && tagSheetCfgFor(ch).enabled);
   // 📇 Central Agent Address Book — Address tab in the configured request spreadsheet.
   const ADDRESS_BOOK_TAB = 'Address';
   const addressBookRuntime = (globalThis.__ffAddrRt ||= { at: 0, map: null, promise: null });   // 🧠 v3.125.251 — ye sab handleApi ke andar hai (har request par chalta) → state global, warna cache kabhi nahi bachta
@@ -10805,9 +10843,6 @@ async function handleApi(req, res, url) {
 
   async function pushTagRequestsToSheet(list, event, throwOnFail) {
     const reqs = (Array.isArray(list) ? list : [list]).filter(Boolean);
-    const cfg = tagSheetConfig();
-    const store = sheetSyncStore();
-
     // Central guard protects against stale paths/buttons: only an approval or approved manual retry.
     const validEvent = event === 'status:approved' || event === 'manual';
     if (!validEvent) {
@@ -10819,8 +10854,9 @@ async function handleApi(req, res, url) {
       if (throwOnFail) throw new HttpError(400, 'Pehle Tag Request ko Approved karo; Pending/Dispatched request sheet me nahi likhi ja sakti.');
       return null;
     }
-    if (!cfg.enabled || !store) {
-      if (throwOnFail) throw new HttpError(400, !store ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
+    const anyOn = reqs.some((r) => tagReqChannels(r).some((ch) => tagSheetCfgFor(ch).enabled));
+    if (!anyOn || !sheetSyncStore()) {
+      if (throwOnFail) throw new HttpError(400, !sheetSyncStore() ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
       return null;
     }
     const alreadySynced = reqs.find((r) =>
@@ -10831,11 +10867,35 @@ async function handleApi(req, res, url) {
       if (throwOnFail) throw new HttpError(409, 'Ye request pehle hi Google Sheet me sync ho chuki hai. Duplicate entry rok di gayi.');
       return null;
     }
+    const gvSep = !!tagSheetConfigGv().separate;
+    const groups = { ff: [], gv: [] };
+    reqs.forEach((r) => tagReqChannels(r).forEach((ch) => { if (!(r.sheetPartsDone && r.sheetPartsDone[ch])) groups[ch].push(r); }));
+    let last = null, firstErr = null;
+    for (const ch of ['ff', 'gv']) {
+      if (!groups[ch].length) continue;
+      const cfg = ch === 'gv' && gvSep ? tagSheetConfigGv() : tagSheetConfig();
+      if (!cfg.enabled && event !== 'manual') continue;          // is channel ki sheet OFF — chup-chaap chhodo (doosra channel chalta rahe)
+      try {
+        const out = await pushTagRequestsToSheetGroup(groups[ch], event, throwOnFail, cfg, ch, gvSep);
+        if (out) last = out;
+      } catch (err) { if (!firstErr) firstErr = err; }   // ek channel fail ho to doosra phir bhi likha jaye
+    }
+    if (firstErr) throw firstErr;
+    return last;
+  }
+  async function pushTagRequestsToSheetGroup(reqs, event, throwOnFail, cfg, ch, gvSep) {
+    const store = sheetSyncStore();
+    const view = (r) => (gvSep ? { ...r, rows: (Array.isArray(r.rows) ? r.rows : []).filter((x) => tagRowChannel(x, r) === ch) } : r);
+
+    if (!cfg.enabled || !store) {
+      if (throwOnFail) throw new HttpError(400, !store ? 'Apps Script connect nahi hai — pehle Settings → Backup me APPS_SCRIPT_URL/SECRET configure karo (ya sheet storage setup).' : 'Sheet sync OFF hai — pehle Tag Request page par 📗 Google Sheet sync ON karo.');
+      return null;
+    }
     let header = [];
     let positions = null;
     const rows = [];
     const counts = reqs.map((r, ri) => {
-      const out = tagSheetRows(r, cfg, event);
+      const out = tagSheetRows(view(r), cfg, event);
       header = out.header; positions = out.positions;
       rows.push(...out.rows);
       // 🧩 Preferred batch layout: one blank spacer between agents.
@@ -10892,8 +10952,12 @@ async function handleApi(req, res, url) {
     reqs.forEach((r, i) => {
       const syncInfo = {
         at, event, added: reqs.length === 1 ? (Number(out.added) || counts[i]) : counts[i], tab: out.tab || tabName,
-        spreadsheet: out.spreadsheet || '', url: out.url || '', targetId
+        spreadsheet: out.spreadsheet || '', url: out.url || '', targetId, channel: ch
       };
+      r.sheetPartsDone = { ...(r.sheetPartsDone || {}), [ch]: true };
+      // Saare (ON) channel-parts ho gaye to hi request "synced" maani jaye — warna doosra part retry ho (pehla dobara nahi likhta).
+      const pending = tagReqChannels(r).filter((c) => !r.sheetPartsDone[c] && tagSheetCfgFor(c).enabled);
+      if (pending.length) { r.sheetSync = { at, event, error: `${pending.join('+').toUpperCase()} part baaki`, tab: out.tab || tabName }; return; }
       r.sheetSync = syncInfo;
       // Persistent marker prevents future status toggles/manual clicks creating a duplicate.
       r.sheetApprovalSync = { ...syncInfo, event: 'approved' };
@@ -10910,9 +10974,9 @@ async function handleApi(req, res, url) {
   let sheetSyncChain = Promise.resolve();
   function syncApprovedToSheet(rows, event = 'status:approved') {
     const list = (rows || []).filter(Boolean);
-    if (!list.length || !tagSheetConfig().enabled) return Promise.resolve();
+    if (!list.length || !tagSheetAnyEnabled()) return Promise.resolve();
     const run = async (attempt) => {
-      const todo = list.filter((r) => r.status === 'approved' && !isSheetSynced(r));
+      const todo = list.filter((r) => r.status === 'approved' && !isSheetSynced(r) && tagReqNeedsSheet(r));
       if (!todo.length) return;
       const startedAt = new Date().toISOString();
       todo.forEach((r) => { r.sheetSyncStartedAt = startedAt; });
@@ -10938,10 +11002,10 @@ async function handleApi(req, res, url) {
     globalThis.__tagSheetSweepOn = true;
     const sweep = () => {
       try {
-        if (!tagSheetConfig().enabled) return;
+        if (!tagSheetAnyEnabled()) return;
         const now = Date.now(), cutoff = now - 3 * 864e5;
         const ts = (v) => Date.parse(v || '') || 0;
-        const rows = (workspaceStore().tagRequests || []).filter((r) => r && r.status === 'approved' && !isSheetSynced(r)
+        const rows = (workspaceStore().tagRequests || []).filter((r) => r && r.status === 'approved' && !isSheetSynced(r) && tagReqNeedsSheet(r)
           && ts(r.updatedAt || r.at) > cutoff && now - ts(r.updatedAt || r.at) > 90e3
           && !(r.sheetSyncStartedAt && now - ts(r.sheetSyncStartedAt) < 10 * 60e3));
         if (rows.length) { console.log(`tag-request sheet sweep: ${rows.length} approved request(s) bina sheet entry — bhej rahe hain`); syncApprovedToSheet(rows); }
@@ -11057,11 +11121,11 @@ async function handleApi(req, res, url) {
       const prev = row.status;
       row.status = status; row.updatedAt = now; row.updatedBy = user.username;
       updated.push(row);
-      if (status === 'approved' && prev !== 'approved') { delete row.sheetApprovalSync; delete row.sheetSync; toSheet.push(row); }
+      if (status === 'approved' && prev !== 'approved') { delete row.sheetApprovalSync; delete row.sheetSync; delete row.sheetPartsDone; toSheet.push(row); }
     }
     if (updated.length) persistBackground('notify');
     // 📗 Sheet sync sirf pehli baar Approved par (PUT wala rule) — background me ek-ek karke.
-    if (toSheet.length && tagSheetConfig().enabled) syncApprovedToSheet(toSheet);
+    if (toSheet.length && tagSheetAnyEnabled()) syncApprovedToSheet(toSheet);
     // Requester ko ek notification (apni requests ke count ke saath), har request ka alag nahi.
     try {
       const perUser = new Map();
@@ -11148,9 +11212,9 @@ async function handleApi(req, res, url) {
     else await persist('notify');
     // 📗 v5: Sheet sync ONLY on the first transition to Approved.
     // Pending submit, Dispatched, Rejected, and later status changes never append another row.
-    if (body.status === 'approved' && prevStatus !== 'approved' && tagSheetConfig().enabled) {
+    if (body.status === 'approved' && prevStatus !== 'approved' && tagSheetAnyEnabled()) {
       // Re-approval (e.g. Pending → Approved again) = admin ka naya intent: purana sync marker hata do, entry dobara jaye.
-      delete row.sheetApprovalSync; delete row.sheetSync;
+      delete row.sheetApprovalSync; delete row.sheetSync; delete row.sheetPartsDone;
       syncApprovedToSheet([row]);
     }
     // Requester ko status update ka notification (admin ne kuch badla to).
@@ -12321,19 +12385,15 @@ async function handleApi(req, res, url) {
     requireAdmin(user);
     const cfg = tagSheetConfig();
     return sendJson(res, 200, {
-      ok: true, config: cfg, fields: TAG_SHEET_FIELDS,
+      ok: true, config: cfg, gvConfig: tagSheetConfigGv(), fields: TAG_SHEET_FIELDS,
       connected: !!sheetSyncStore(), storageBackend: STORAGE_BACKEND,
       publicForm: publicTagView(), publicPath: '/tag-request', targetId: sheetIdFromLink(cfg.sheetLink) || cfg.spreadsheetId || '',
       hint: sheetSyncStore() ? '' : 'APPS_SCRIPT_URL + APPS_SCRIPT_SECRET (Render → Environment) configure karo — Apps Script se hi sheet me entry hoti hai. Setup: STORAGE_SETUP.md / Settings → Backup.'
     });
   }
-  if (p === '/api/tag-request-sheet' && method === 'PUT') {
-    requireAdmin(user);
-    const body = await readBody(req);
-    const cfg = tagSheetConfig();
-    const c = body.config || body;
+  function applyTagSheetCfg(cfg, c, defTab) {
     if (c.enabled !== undefined) cfg.enabled = !!c.enabled;
-    if (c.tab !== undefined) cfg.tab = String(c.tab || '').trim().slice(0, 80) || 'Tag Requests';
+    if (c.tab !== undefined) cfg.tab = String(c.tab || '').trim().slice(0, 80) || defTab || 'Tag Requests';
     if (c.sheetLink !== undefined) {
       cfg.sheetLink = String(c.sheetLink || '').trim().slice(0, 500);
       if (!cfg.sheetLink) cfg.spreadsheetId = '';
@@ -12368,6 +12428,23 @@ async function handleApi(req, res, url) {
       const cols = c.columns.map((x) => String(x)).filter((x) => TAG_SHEET_FIELDS[x]);
       if (cols.length) { cfg.columns = [...new Set(cols)]; delete cfg.columnMap; }
     }
+  }
+  if (p === '/api/tag-request-sheet' && method === 'PUT') {
+    requireAdmin(user);
+    const body = await readBody(req);
+    const cfg = tagSheetConfig();
+    const c = body.config || body;
+    const mainPatch = body.config || (body.gv ? null : body);
+    if (mainPatch) applyTagSheetCfg(cfg, mainPatch);
+    // 🟩 GV ki alag sheet/tab/columns
+    if (body.gv && typeof body.gv === 'object') {
+      const g = tagSheetConfigGv();
+      if (body.gv.separate !== undefined) g.separate = !!body.gv.separate;
+      applyTagSheetCfg(g, body.gv, 'Tag Requests GV');
+      if (g.separate && body.gv.separate === true && g.enabled === false && body.gv.enabled === undefined) g.enabled = true;
+      g.updatedAt = new Date().toISOString(); g.updatedBy = user.username;
+      db.settings.__tagSheetBackupGv = JSON.parse(JSON.stringify(g));
+    }
     if (c.publicForm && typeof c.publicForm === 'object') {
       const pcfg = publicTagFormConfig();
       const pc = c.publicForm;
@@ -12388,11 +12465,10 @@ async function handleApi(req, res, url) {
       if (pc.intro !== undefined) pcfg.intro = shortText(pc.intro, 400);
       if (pc.maxRows !== undefined) pcfg.maxRows = Math.min(150, Math.max(5, Number(pc.maxRows) || 60));
     }
-    cfg.updatedAt = new Date().toISOString(); cfg.updatedBy = user.username;
-    db.settings.__tagSheetBackup = JSON.parse(JSON.stringify(cfg));
+    if (mainPatch) { cfg.updatedAt = new Date().toISOString(); cfg.updatedBy = user.username; db.settings.__tagSheetBackup = JSON.parse(JSON.stringify(cfg)); }
     await Promise.all([persist('notify'), persist('settings')]);
-    logAudit(user, 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · target ${cfg.spreadsheetId || 'script-sheet'} · ${cfg.columns.length} cols${cfg.columnMap ? ' (by letter)' : ''} · ${cfg.rowMode}`, ip: clientIp(req) });
-    return sendJson(res, 200, { ok: true, config: cfg, connected: !!sheetSyncStore(), publicForm: publicTagView(), targetId: cfg.spreadsheetId || '' });
+    logAudit(user, body.gv ? 'tag_sheet_config_gv' : 'tag_sheet_config', { note: `enabled ${cfg.enabled} · tab ${cfg.tab} · target ${cfg.spreadsheetId || 'script-sheet'} · ${cfg.columns.length} cols${cfg.columnMap ? ' (by letter)' : ''} · ${cfg.rowMode}`, ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, config: cfg, gvConfig: tagSheetConfigGv(), connected: !!sheetSyncStore(), publicForm: publicTagView(), targetId: cfg.spreadsheetId || '' });
   }
   // ⏪ Tag sheet config recovery: purani saves me se sirf "Google Sheet me direct entry" ki setting wapas lao (baaki data nahi chhuta).
   if (p === '/api/tag-request-sheet/history' && method === 'GET') {
@@ -12422,7 +12498,7 @@ async function handleApi(req, res, url) {
     const store = sheetSyncStore();
     if (!store) throw new HttpError(400, 'Apps Script connect nahi hai — Render me APPS_SCRIPT_URL + APPS_SCRIPT_SECRET set karo (Storage setup guide: STORAGE_SETUP.md).');
     const body = await readBody(req);
-    const cfg = tagSheetConfig();
+    const cfg = body.channel === 'gv' ? tagSheetConfigGv() : tagSheetConfig();
     const link = body.sheetLink !== undefined ? String(body.sheetLink || '').trim() : cfg.sheetLink;
     const targetId = sheetIdFromLink(link) || (body.spreadsheetId ? sheetIdFromLink(body.spreadsheetId) : '') || cfg.spreadsheetId || '';
     const tab = String(body.tab || cfg.tab || 'Tag Requests').trim().slice(0, 80) || 'Tag Requests';
@@ -13517,7 +13593,7 @@ async function handleApi(req, res, url) {
       }
       cache.clear();
     }
-    const next = body.reset ? { ...DEFAULT_SETTINGS, ...(db.settings.__tagSheetBackup ? { __tagSheetBackup: db.settings.__tagSheetBackup } : {}), ...(db.settings.__tagDataBackup ? { __tagDataBackup: db.settings.__tagDataBackup } : {}) } : deepMerge(db.settings, patch);
+    const next = body.reset ? { ...DEFAULT_SETTINGS, ...(db.settings.__tagSheetBackup ? { __tagSheetBackup: db.settings.__tagSheetBackup } : {}), ...(db.settings.__tagSheetBackupGv ? { __tagSheetBackupGv: db.settings.__tagSheetBackupGv } : {}), ...(db.settings.__tagDataBackup ? { __tagDataBackup: db.settings.__tagDataBackup } : {}) } : deepMerge(db.settings, patch);
     next.updatedAt = new Date().toISOString(); next.updatedBy = user.username;
     if (next.sheetId !== db.settings.sheetId || next.cacheSeconds !== db.settings.cacheSeconds) cache.clear();
     const previousSettings = db.settings;
