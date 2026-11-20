@@ -31,6 +31,7 @@ import { createNpciEngine, cleanItem as npciCleanItem } from './npci-engine.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS, LAYOUTS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
+import { createIssuedStore, diffLeft, applyResolved, digits as ibDigits } from './issuedBarcodes.js';
 import { loadFfDispatchRows, loadGvDispatchRows, isDirect as dispatchIsDirect, directLabel as dispatchDirectLabel } from './dispatch-report.js';
 import { parseAnyFile, cleanAddressText } from './address-import.js';
 // 🚨 Unusual Activity ka tag-level scan logic — browser (unusual-scan.js script) aur server dono ek hi
@@ -7326,6 +7327,128 @@ function eirRawPrewarm(reason) {
     .catch(() => {}).finally(() => { eirRawPrewarming = null; });
   return eirRawPrewarming;
 }
+// 🏷️ v3.125.374 — Issued barcode register: dispatch ke "Issued" barcode ka Tag ID / VRN / agent / date — pehle GV Master, phir EIR (issuedBarcodes.js).
+const issuedStore = createIssuedStore({ dir: path.join(DATA_DIR, 'issued') });
+issuedStore.load();
+let issuedRunning = null;
+const ibFmt = (d) => (d.length === 16 ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : d);
+const ibQ = (v) => String(v).replace(/\\/g, '').replace(/'/g, '');
+const ibTime12 = (f) => { const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(f || '')); if (!m) return ''; const h = Number(m[1]); return `${String(((h + 11) % 12) + 1).padStart(2, '0')}:${m[2]}:${m[3] || '00'} ${h >= 12 ? 'PM' : 'AM'}`; };
+function ibGvmParams(tq) {
+  const st = db.settings || {}, M = (st.gv && st.gv.master) || {};
+  const qp = new URLSearchParams({ id: String(st.gvSheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq, headers: '1' });
+  if (/^\d+$/.test(String(M.gid || ''))) qp.set('gid', String(M.gid)); else qp.set('sheet', M.tab || 'GV Master');
+  return qp;
+}
+function ibGvmLetters() {
+  const M = ((db.settings || {}).gv || {}).master || {};
+  return { id: colLetter(M.uniqueId, 'A'), name: colLetter(M.agentName, 'B'), tl: colLetter(M.tlName, 'D'), vrn: colLetter(M.vrn, 'E'), cls: colLetter(M.vClass, 'F'), serial: colLetter(M.serial, 'H'), tag: colLetter(M.tagId, 'I'), date: colLetter(M.date, 'P'), time: colLetter(M.time, 'Q') };
+}
+const ibGvmRec = (r) => ({ bc: ibDigits(idCellText(r, 5)), rec: { t: idCellText(r, 6).toUpperCase(), c: idCellText(r, 4), v: idCellText(r, 3), d: gvizCellDayKey(r.c && r.c[7]), tm: ibTime12(r.c && r.c[8] && (r.c[8].f || '')), a: idCellText(r, 1), ai: idCellText(r, 0), tl: idCellText(r, 2), s: 'gv' } });
+async function ibGvmQuery(where) {
+  const L = ibGvmLetters();
+  if (!(db.settings || {}).gvSheetId) return [];
+  const tq = `select ${L.id}, ${L.name}, ${L.tl}, ${L.vrn}, ${L.cls}, ${L.serial}, ${L.tag}, ${L.date}, ${L.time} where ${where(L)} limit 3000`;
+  const t = await gvizPageServerInner(ibGvmParams(tq), 'GV Master');
+  return (t.rows || []).map(ibGvmRec).filter((x) => x.bc);
+}
+const ibGvmByTags = (tags) => ibGvmQuery((L) => tags.map((t) => `${L.tag} = '${ibQ(t)}'`).join(' or '));
+const ibGvmBySerialRange = (a, b) => ibGvmQuery((L) => `${L.serial} >= '${ibQ(a)}' and ${L.serial} <= '${ibQ(b)}'`);
+async function ibEirByTags(tags) {
+  const cfg = eirRawCfg(), [date, tag, vrn, cls, , , , agentName, agentId, tlName] = cfg.cols;
+  const cols = [tag, vrn, cls, agentName, agentId, tlName, date], uniq = [...new Set(cols)], idx = cols.map((c) => uniq.indexOf(c));
+  const tq = `select ${uniq.join(', ')} where ${tags.map((t) => `${tag} = '${ibQ(t)}'`).join(' or ')} limit 3000`;
+  const t = await gvizPageServerInner(new URLSearchParams({ id: cfg.id, sheet: cfg.tab, tq, headers: '1' }), cfg.tab);
+  return (t.rows || []).map((r) => {
+    const g = (i) => idCellText(r, idx[i]);
+    return { tag: g(0).toUpperCase(), rec: { t: g(0).toUpperCase(), v: g(1), c: g(2), a: g(3), ai: g(4), tl: g(5), d: gvizCellDayKey(r.c && r.c[idx[6]]), tm: '', s: 'eir' } };
+  }).filter((x) => x.tag);
+}
+/** Pending list ko resolve: pehle GV Master (Tag ID se), jo na mile unhe EIR me. */
+async function issuedResolvePending(list, stats) {
+  const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+  const byTag = new Map(list.filter((p) => p.t).map((p) => [p.t, p]));
+  const todo = new Set(byTag.keys());
+  for (const part of chunk([...todo], 60)) {
+    try {
+      const got = await ibGvmByTags(part);
+      got.forEach((g) => { const p = byTag.get(g.rec.t); if (p) { issuedStore.setResolved(p.bc, { ...g.rec, c: g.rec.c || p.c }); todo.delete(g.rec.t); stats.resolvedGv++; } });
+    } catch (err) { stats.error = String((err && err.message) || err).slice(0, 160); }
+    await yieldLoop();
+  }
+  for (const part of chunk([...todo], 60)) {
+    try {
+      const got = await ibEirByTags(part);
+      got.forEach((g) => { const p = byTag.get(g.tag); if (p) { issuedStore.setResolved(p.bc, { ...g.rec, c: g.rec.c || p.c }); todo.delete(g.tag); stats.resolvedEir++; } });
+    } catch (err) { stats.error = String((err && err.message) || err).slice(0, 160); }
+    await yieldLoop();
+  }
+}
+/** Raat ki job: stock snapshot diff → jo barcode stock se nikle → GV Master / EIR se data → register me save. */
+function issuedBarcodesRun(reason, opts = {}) {
+  if (issuedRunning) return issuedRunning;
+  issuedRunning = (async () => {
+    const stats = { reason, at: new Date().toISOString(), left: 0, resolvedGv: 0, resolvedEir: 0, stillPending: 0, skipped: '', error: '' };
+    try {
+      const index = await stockAgeIndexWithin(opts.waitMs || 120e3, false);
+      if (!index || !index.ff || index.errors && (index.errors.ff || index.errors.gv)) { stats.skipped = 'stock index poora ready nahi'; }
+      else {
+        const cur = {};
+        for (const [ch, side] of [['ff', index.ff], ['gv', index.gv]]) {
+          if (!side) continue;
+          const add = (r) => { const k = ibDigits(r[1]); if (!k) return; if (ch === 'gv' && !r[11]) return; cur[k] = `${String(r[0] || '').toUpperCase()}|${r[2] || ''}|${ch}`; };
+          if (typeof side.each === 'function') { const total = side.each(() => {}, 0, 0); for (let i = 0; i < total; i += 5000) { side.each(add, i, i + 5000); await yieldLoop(); } }
+          else for (const r of side.raw || []) add(r);
+        }
+        const prev = issuedStore.loadPrev();
+        const curN = Object.keys(cur).length, prevN = prev ? Object.keys(prev).length : 0;
+        if (prev && prevN > 1000 && curN < prevN * 0.5) stats.skipped = `stock list adhoora (${curN} / ${prevN}) — snapshot nahi badla`;
+        else {
+          const left = diffLeft(prev, cur).slice(0, 8000);
+          stats.left = left.length;
+          left.forEach((x) => issuedStore.addPending(x.bc, x.t, x.c, x.ch));
+          issuedStore.savePrev(cur);
+          issuedStore.meta({ snapAt: Date.now() });
+        }
+      }
+      issuedStore.dropOldPending();
+      const list = issuedStore.pendingList().slice(0, 3000);
+      if (list.length) await issuedResolvePending(list, stats);
+      stats.stillPending = issuedStore.pendingList().length;
+    } catch (err) { stats.error = String((err && err.message) || err).slice(0, 200); }
+    issuedStore.meta({ lastRun: Date.now(), lastRunDay: istTodayKey(), lastStats: stats });
+    issuedStore.flush();
+    console.log(`🏷️ issued register (${reason}):`, JSON.stringify(stats));
+    return stats;
+  })().finally(() => { issuedRunning = null; });
+  return issuedRunning;
+}
+/** dispatch-status rows (issued, data nahi) ko register + GV Master serial se bharo. */
+async function issuedEnrichRows(rows, ranges) {
+  const need = rows.filter((r) => r.status === 'issued' && !r.tagId);
+  if (!need.length) return;
+  const miss = [];
+  for (const r of need) { const rec = issuedStore.get(r.barcode); if (rec) applyResolved(r, rec); else miss.push(r); }
+  if (!miss.length) return;
+  // GV Master serial se seedha (barcode hi key hai) — range ke hisaab se, 2 range tak
+  const rgs = new Map(); miss.forEach((r) => { if (!rgs.has(r.range)) rgs.set(r.range, r); });
+  const wanted = ranges.filter((rg) => miss.some((r) => r.range === `${rg.first} → ${rg.last}`)).slice(0, 3);
+  for (const rg of wanted) {
+    const a = String(rg.first || '').replace(/\D/g, ''), b = String(rg.last || '').replace(/\D/g, '');
+    if (a.length < 6 || b.length < 6) continue;
+    try {
+      const got = await Promise.race([ibGvmBySerialRange(ibFmt(a), ibFmt(b)), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 12e3))]);
+      got.forEach((g) => issuedStore.setResolved(g.bc, g.rec));
+    } catch { /* GV Master me nahi / slow — pending note niche */ }
+  }
+  for (const r of miss) {
+    const rec = issuedStore.get(r.barcode);
+    if (rec) { applyResolved(r, rec); continue; }
+    const pd = issuedStore.getPending(r.barcode);
+    if (pd) { r.tagId = pd.t; r.cls = r.cls || pd.c; r.note = 'Tag ID mila · GV Master / EIR me entry abhi nahi aayi (raat ko dobara check)'; r.src = 'pending'; }
+    else r.note = `${String(r.note || '').replace(/ stock list me nahi.*$/, '').trim() || 'FF'} · stock se nikal chuka — Tag ID register me nahi (naya register aaj raat se bharna shuru)`.trim();
+  }
+}
 async function handleGviz(req, res, params) {
   const fresh = params.get('fresh') === '1';
   const url = upstreamUrl(params);
@@ -8376,6 +8499,16 @@ async function handleApi(req, res, url) {
     } catch { /* class inference optional */ }
     return sendJson(res, 200, { ok: true, ch, last: dates[0] || null, recent: dates.slice(0, 8), totalDispatches: dates.length, errors: agg.errors, counts: agg.counts }, { 'Cache-Control': 'no-store' });
   }
+  // 🏷️ v3.125.374 — Issued barcode register: status + "abhi chalao" (admin).
+  if (p === '/api/issued-barcodes/status' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    return sendJson(res, 200, { ok: true, running: !!issuedRunning, ...issuedStore.meta() }, { 'Cache-Control': 'no-store' });
+  }
+  if (p === '/api/issued-barcodes/run' && method === 'POST') {
+    requireAdmin(user);
+    const job = issuedBarcodesRun('manual');
+    return sendJson(res, 202, { ok: true, started: true, running: !!issuedRunning, ...issuedStore.meta() });
+  }
   // 🚚 v3.125.84 — dispatch range → har barcode: Stock (abhi stock list me) ya Issued (stock list se nikal gaya). Stock index se, fast.
   if (p === '/api/dispatch-status' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -8419,6 +8552,7 @@ async function handleApi(req, res, url) {
             note: ch === 'gv' ? `Tag Assignment · ${f.status || ''}` : (f.agent ? 'StockDataa · agent ke paas' : 'StockDataa · office'), range: label });
         }
       }
+      await issuedEnrichRows(out, ranges).catch(() => {});
       return sendJson(res, 200, { ok: true, ch, rows: out, src: 'sheet' }, { 'Cache-Control': 'no-store' });
     }
     for (const rg of ranges) {
@@ -8439,6 +8573,7 @@ async function handleApi(req, res, url) {
         if (out.length > 6000) break;
       }
     }
+    await issuedEnrichRows(out, ranges).catch(() => {});
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, ch, rows: out, at: index.at }), { 'Cache-Control': 'no-store' });
   }
   // 📨 Agents Complaints Summary — cache se (background me Gmail se refresh hota rehta hai)
@@ -17382,6 +17517,11 @@ async function start() {
     setTimeout(() => eirRawPrewarm('boot'), 240e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
     setInterval(() => eirRawPrewarm('30 min'), 30 * 60e3).unref();   // jo din fail / missing hain wahi dobara (baaki disk se)
     setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();
+    // 🏷️ v3.125.374 — roz raat ~3 baje (IST) issued-barcode register update; pehli baar boot ke 5 min baad (snapshot lene ke liye).
+    setTimeout(() => { if (!issuedStore.meta().lastRun) issuedBarcodesRun('first-boot').catch(() => {}); }, 5 * 60e3).unref();
+    setInterval(() => {
+      try { const ist = new Date(Date.now() + 5.5 * 3600e3); if (ist.getUTCHours() >= 3 && issuedStore.meta().lastRunDay !== istTodayKey()) issuedBarcodesRun('nightly').catch(() => {}); } catch { /* ignore */ }
+    }, 10 * 60e3).unref();
     // 🤖 robot brain (server): dashboard band ho tab bhi admins ko push — boot ke 3 min baad, phir har 30 min; push 45 sec me ek
     setTimeout(() => robotBrainRun('boot').catch(() => {}), 180e3).unref?.();
     setInterval(() => robotBrainRun('tick').catch(() => {}), 15 * 60e3).unref();

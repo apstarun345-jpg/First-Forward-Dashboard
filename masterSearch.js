@@ -3093,7 +3093,7 @@ FF.pages = FF.pages || {};
     let today = U.dateKey ? U.dateKey(new Date()) : new Date().toISOString().slice(0, 10);
     // v3.125.103 — din ki jagah stock data ka version: stock sheet badle tabhi naya check, warna saved result
     try { const v = await Promise.race([FF.data.versions(), new Promise((_, no) => setTimeout(() => no(new Error('t')), 2500))]); if (v && v.v && v.v.stock && !/^0\|/.test(v.v.stock)) today = `s${String(v.v.stock).replace(/[|]/g, '_')}`; } catch { /* din wala key */ }
-    const lsKey = `ff_dspst|${today}|v2|${r.ch || ''}|${key}`;
+    const lsKey = `ff_dspst|${today}|v3|${r.ch || ''}|${key}`;
     if (!dspStCache.has(key)) {
       try {
         const hit = localStorage.getItem(lsKey);
@@ -3111,7 +3111,7 @@ FF.pages = FF.pages || {};
         // 💾 din bhar ke liye yaad rakho (roz naya din = naya check). Purane din ki keys hata do.
         try {
           for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.startsWith('ff_dspst|') && !k.startsWith(`ff_dspst|${today}|`)) localStorage.removeItem(k); }
-          localStorage.setItem(lsKey, JSON.stringify(rows.map((x) => ({ barcode: x.barcode, k: x.k, tagId: x.tagId, cls: x.cls, agent: x.agent, agentId: x.agentId, tl: x.tl, date: x.date, vrn: x.vrn, note: x.note, range: x.range }))));
+          localStorage.setItem(lsKey, JSON.stringify(rows.map((x) => ({ barcode: x.barcode, k: x.k, tagId: x.tagId, cls: x.cls, agent: x.agent, agentId: x.agentId, tl: x.tl, date: x.date, time: x.time, vrn: x.vrn, src: x.src, note: x.note, range: x.range }))));
         } catch { /* quota full — sirf memory cache */ }
         return rows;
       })();
@@ -3169,13 +3169,34 @@ FF.pages = FF.pages || {};
     const lab = clsF ? `${lab0} · ${clsF === 'N/A' ? 'Class ?' : clsF}` : lab0;
     const rows = kind === 'all' ? base : base.filter((x) => dspKind(x.k) === kind);
     let sc = {}; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { /* ignore */ }
-    const head = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Date', 'VRN', 'Note', 'Dispatch range'];
+    const head = ['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'Agent ID', 'TL', 'Date', 'Time', 'VRN', 'Source', 'Note', 'Dispatch range'];
     const st = (x) => (dspKind(x.k) === 'issued' ? 'Issued' : 'Stock');
-    const data = rows.map((x) => [x.barcode, st(x), x.tagId || '', x.cls || '', x.agent || '', x.agentId || '', x.tl || '', x.date || '', x.vrn || '', x.note || '', x.range || '']);
+    const data = rows.map((x) => [x.barcode, st(x), x.tagId || '', x.cls || '', x.agent || '', x.agentId || '', x.tl || '', x.date || '', x.time || '', x.vrn || '', ({ gv: 'GV Master', eir: 'EIR', pending: 'Pending' })[x.src] || '', x.note || '', x.range || '']);
     const fname = `${sc.title || 'Agent'} - Dispatch ${dispDateY(pack.r.date)} - ${lab.replace(/^\W+\s*/, '')}.csv`;
     const tabs = ['issued', 'stock', 'nf', 'all'].map((k) => `<button type="button" class="btn small${k === kind ? ' primary' : ''}" data-dsp-tab="${idx}|${k}">${{ issued: '✅ Issued', stock: '📦 Stock', nf: '❔ Not found', all: 'All' }[k]} ${U.fmt(k === 'all' ? pack.rows.length : pack.rows.filter((x) => dspKind(x.k) === k).length)}</button>`).join(' ');
-    const body = `<div class="btn-row" style="margin-bottom:8px">${tabs}<button type="button" class="btn small" data-dsp-csv>⬇ CSV</button></div>
-      <div class="table-wrap"><table class="tbl compact"><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${data.map((r) => `<tr>${r.map((v, j) => `<td${j === 0 || j === 2 ? ' class="mono"' : ''}>${j === 1 ? `<span class="dsp-sb ${v === 'Issued' ? 'iss' : v.startsWith('Stock') ? 'stk' : 'nf'}"><i>${esc(v)}</i></span>` : esc(v)}</td>`).join('')}</tr>`).join('') || '<tr><td colspan="11" class="dim">Koi barcode nahi</td></tr>'}</tbody></table></div>`;
+    // 🎨 v3.125.374 — colourful table: status badge · class pill · agent+ID · date/time · VRN plate · source (GV Master / EIR / Pending)
+    const srcOf = (x) => (x.src === 'gv' ? ['gv', '🟩 GV Master'] : x.src === 'eir' ? ['eir', '🟦 EIR'] : x.src === 'pending' ? ['pend', '⏳ Pending'] : null);
+    const dtxt = (k) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(k || '')); return m ? `${Number(m[3])} ${MON[Number(m[2]) - 1] || ''} ${m[1]}` : esc(k || ''); };
+    const cnt = { gv: 0, eir: 0, pend: 0, none: 0 };
+    rows.forEach((x) => { if (dspKind(x.k) !== 'issued') return; const sv = srcOf(x); if (sv) cnt[sv[0]]++; else cnt.none++; });
+    const issuedN = cnt.gv + cnt.eir + cnt.pend + cnt.none;
+    const summary = issuedN ? `<div class="dsx-sum"><span class="dsx-chip gv">🟩 GV Master <b>${U.fmt(cnt.gv)}</b></span><span class="dsx-chip eir">🟦 EIR <b>${U.fmt(cnt.eir)}</b></span><span class="dsx-chip pend">⏳ Pending <b>${U.fmt(cnt.pend)}</b></span><span class="dsx-chip none">❔ Data nahi <b>${U.fmt(cnt.none)}</b></span></div>` : '';
+    const rowHtml = (x) => {
+      const kind = dspKind(x.k), sv = srcOf(x);
+      const cl = String(x.cls || '').toUpperCase().replace(/\s+/g, '');
+      return `<tr class="dsx-r ${kind}"><td class="mono dsx-bc">${esc(x.barcode)}</td>
+        <td><span class="dsp-sb ${kind === 'issued' ? 'iss' : kind === 'stock' ? 'stk' : 'nf'}"><i>${kind === 'issued' ? 'Issued' : 'Stock'}</i></span></td>
+        <td class="mono dsx-tag">${esc(x.tagId || '')}</td>
+        <td>${cl ? `<span class="dsp-pill cg-${esc(cl.toLowerCase())}"><i>${esc(cl)}</i></span>` : ''}</td>
+        <td>${x.agent ? `<div class="dsx-ag"><b>${esc(x.agent)}</b>${x.agentId ? `<small>${esc(x.agentId)}</small>` : ''}</div>` : ''}</td>
+        <td class="dsx-tl">${esc(x.tl || '')}</td>
+        <td class="dsx-dt">${x.date ? `<b>${dtxt(x.date)}</b>${x.time ? `<small>${esc(x.time)}</small>` : ''}` : ''}</td>
+        <td>${x.vrn ? `<span class="dsx-plate">${esc(x.vrn)}</span>` : ''}</td>
+        <td>${sv ? `<span class="dsx-src ${sv[0]}">${sv[1]}</span>` : ''}</td>
+        <td class="dsx-note">${esc(x.note || '')}</td><td class="dsx-rg">${esc(x.range || '')}</td></tr>`;
+    };
+    const body = `<div class="btn-row" style="margin-bottom:8px">${tabs}<button type="button" class="btn small" data-dsp-csv>⬇ CSV</button></div>${summary}
+      <div class="table-wrap dsx-wrap"><table class="tbl compact dsx-tbl"><thead><tr>${['Barcode', 'Status', 'Tag ID', 'Class', 'Agent', 'TL', 'Date · Time', 'VRN', 'Source', 'Note', 'Dispatch range'].map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(rowHtml).join('') || '<tr><td colspan="11" class="dim">Koi barcode nahi</td></tr>'}</tbody></table></div>`;
     if (!FF.app || !FF.app.openDrawer) return;
     FF.app.openDrawer({ kicker: `${sc.ch === 'gv' ? 'GV' : 'FF'} dispatch · ${dispDateY(pack.r.date)}`, title: `${sc.title || ''} · ${lab}`, sub: `${U.fmt(pack.r.total)} tags dispatch · ${U.fmt(rows.length)} ${lab.replace(/^\W+\s*/, '').toLowerCase()}`, body, wide: true });
     const dr = document.getElementById('drawer-body');
