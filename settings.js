@@ -1512,6 +1512,7 @@ FF.pages = FF.pages || {};
       ['lowStock', '🔴 Low-stock / cover alert', 'VC4 cover band low hone par'],
       ['midMonth', '🎯 Mid-month target miss', 'Target pace se peeche hone par'],
       ['zeroDay', '⚠️ Zero-day / sharp drop', 'Aaj issuance zero ya bahut kam'],
+      ['entityUpdate', '🎯 Direct agents + TLs updates', 'GV/FF direct agent aur TL ka issuance / stock badalne par'],
       ['agentAnomaly', '📉 Agent anomaly', 'Agent ka issuance achanak girne par'],
       ['tlAnomaly', '🏆 TL anomaly', 'Team issuance achanak girne par'],
       ['followup', '⏰ Follow-up list', 'Silent agents ki daily list'],

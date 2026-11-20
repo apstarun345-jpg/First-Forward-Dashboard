@@ -264,6 +264,7 @@ const DEFAULT_NOTIFICATION_ROUTES = Object.freeze({
   champion: 'both', reportUpdate: 'both', inactiveUsers: 'admin', backupReminder: 'admin',
   smartAlert: 'admin', // 🧠 Smart Action Center
   tagRequest: 'admin',  // 🏷️ IDFC Agents Tag Request → admin ke paas
+  entityUpdate: 'admin', // 🎯 v3.125.358 — Direct agents + TLs (GV/FF) ke har update (issuance / stock)
   personalLink: 'admin' // 🔗 Personal link activity (login · search · page open) → admin
 });
 const NOTIFICATION_AUDIENCES = new Set(['admin', 'users', 'both', 'off']);
@@ -1177,8 +1178,9 @@ function plRecordActivity(link, req, kind, label, meta = {}, sid = '') {
       live.lastSeen = now; live.updatedAt = now;
     }
     const alertKey = PL_KIND_ALERT[kind];
-    if (alertKey && plAlertCfg()[alertKey] !== false) {
-      const gap = PL_THROTTLE_MS[kind] || 0;
+    const plScope = link.kind === 'group' ? '' : entityScope(link.name, meta && meta.name);   // 🎯 TL ke agent ki link activity chup; direct agent / TL ki har activity turant
+    if (alertKey && plAlertCfg()[alertKey] !== false && plScope !== 'tlAgent') {
+      const gap = (plScope === 'direct' || plScope === 'tl') && kind !== 'page_open' && kind !== 'link_open' ? 0 : (PL_THROTTLE_MS[kind] || 0);
       const tkey = `${link.id}:${kind}:${sid || ip}`;
       if (!gap || now - (plNotifyLast.get(tkey) || 0) >= gap) {
         plNotifyLast.set(tkey, now);
@@ -5640,6 +5642,7 @@ async function robotBrainRun(reason) {
       const st = await stockSnapshot();
       if (st && st.total) items.push({ key: `srv:stock:${dateKeyNow()}`, title: `🤖 📦 Stock: ${rbFmt(st.total)} tags`, link: '#/stock', body: Object.entries(st.classes || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c, n]) => `${c}: ${rbFmt(n)}`).join(' · ') });
     } catch { /* ignore */ }
+    try { const f = robotScopeFilter(items); items.length = 0; items.push(...f); } catch { /* filter optional */ }
     robotBrain.lastItems = items.map((it) => ({ key: it.key, title: it.title, body: it.body, link: it.link }));
     let added = 0;
     for (const it of items) {
@@ -6371,6 +6374,110 @@ async function loadDispatchAgents(channel) {
   if (channel !== 'ff') jobs.push(dispatchReportTable('gv').then((table) => loadGvDispatchRows(table, db.settings)).then(async (rows) => { try { const live = await liveGvDispatchRows(rows); return live.length ? live : rows; } catch (err) { console.warn('dispatch GV live rows:', err.message); return rows; } }));
   const sources = await Promise.all(jobs);
   return overlayDispatchEirIssuance(sources.flat());
+}
+// ---- 🎯 v3.125.358 — Direct agents + TLs (GV & FF) ke updates; TL ke neeche wale agents ke baare me kuch nahi ------------------
+const entNorm = (v) => String(v == null ? '' : v).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+const entityReg = { at: 0, direct: new Set(), tl: new Set(), tlAgent: new Set() };
+function entityRegBuild(rows) {
+  const direct = new Set(), tl = new Set(), tlAgent = new Set();
+  for (const r of rows || []) {
+    const nm = entNorm(r.agentName || r.name), id = entNorm(r.agentId || r.id);
+    if (r.direct) { if (nm) direct.add(nm); if (id) direct.add(id); continue; }
+    const tn = entNorm(r.tlName || r.tl), ti = entNorm(r.tlId);
+    if (tn) tl.add(tn); if (ti) tl.add(ti);
+    if (nm) tlAgent.add(nm); if (id) tlAgent.add(id);
+  }
+  // naam dono jagah ho (direct bhi, kisi TL ke neeche bhi) to direct/TL jeet'ta hai
+  direct.forEach((k) => tlAgent.delete(k)); tl.forEach((k) => tlAgent.delete(k));
+  entityReg.direct = direct; entityReg.tl = tl; entityReg.tlAgent = tlAgent; entityReg.at = Date.now();
+}
+/** 'direct' | 'tl' | 'tlAgent' | '' (pata nahi). Registry abhi bani nahi ho to '' — kuch chhupta nahi. */
+function entityScope(name, id) {
+  if (!entityReg.at) return '';
+  const k = entNorm(name), i = entNorm(id);
+  const has = (set) => (k && set.has(k)) || (i && set.has(i));
+  return has(entityReg.direct) ? 'direct' : has(entityReg.tl) ? 'tl' : has(entityReg.tlAgent) ? 'tlAgent' : '';
+}
+const scopeHidden = (name, id) => entityScope(name, id) === 'tlAgent';
+/** Tag request notification: sirf TL ke agents ki ho to chup; mixed ho to unke naam body se hata do. */
+function notifyTagReq(names, payload) {
+  try {
+    const list = [...new Set((names || []).map((n) => String(n || '').trim()).filter(Boolean))];
+    const hidden = list.filter((n) => scopeHidden(n));
+    if (list.length && hidden.length === list.length) return null;
+    if (hidden.length) { let b = String(payload.body || ''); hidden.forEach((h) => { b = b.split(h).join('—'); }); payload = { ...payload, body: b }; }
+  } catch { /* filter fail → notification jaisi hai waisi */ }
+  return recordNotification(payload);
+}
+/** Robot / push text se TL-ke-agent wali lines hata do. Title me naam ho to poora item None. */
+function robotScopeFilter(items) {
+  if (!entityReg.at || !entityReg.tlAgent.size) return items;
+  const names = [...entityReg.tlAgent].filter((n) => n.length >= 5 && /[A-Z]/.test(n) && !/^\d+$/.test(n));
+  const hit = (text) => { const t = ` ${entNorm(text)} `; return names.some((n) => t.includes(` ${n} `)); };
+  const out = [];
+  for (const it of items) {
+    if (hit(it.title)) continue;
+    const lines = String(it.body || '').split('\n');
+    const keep = lines.filter((l) => !hit(l));
+    if (keep.length !== lines.length) it.body = keep.join('\n');
+    out.push(it);
+  }
+  return out;
+}
+let entityWatchBusy = false;
+async function entityWatchTick(force = false) {
+  if (entityWatchBusy) return null;
+  entityWatchBusy = true;
+  try {
+    if (feats().entityUpdates === false && !force) return null;
+    const rows = await loadDispatchAgents('all');
+    if (!rows || !rows.length) return null;
+    entityRegBuild(rows);
+    const ents = new Map();
+    for (const r of rows) {
+      const cur = (r.cur && Number(r.cur.total)) || 0, st = (r.stock && Number(r.stock.total)) || 0, v4 = (r.stock && Number(r.stock.vc4)) || 0;
+      if (r.direct) {
+        const k = `${r.ch}:d:${entNorm(r.agentId || r.name)}`;
+        if (k.endsWith(':')) continue;
+        ents.set(k, { ch: r.ch, kind: 'agent', name: r.agentName || r.name, iss: cur, stock: st, vc4: v4 });
+      } else {
+        const tk = entNorm(r.tlId || r.tlName); if (!tk) continue;
+        const k = `${r.ch}:t:${tk}`;
+        let e = ents.get(k);
+        if (!e) { e = { ch: r.ch, kind: 'tl', name: String(r.tlName || r.tl || tk).replace(/^TL\s+/i, ''), iss: 0, stock: Number(r.tlStock && r.tlStock.total) || 0, vc4: Number(r.tlStock && r.tlStock.vc4) || 0, agents: 0 }; ents.set(k, e); }
+        e.iss += cur; e.agents++;
+      }
+    }
+    if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+    const ym = dateKeyNow().slice(0, 7), prev = db.notify.watch.entities;
+    const snap = { ym, at: Date.now(), e: {} };
+    ents.forEach((e, k) => { snap.e[k] = [e.iss, e.stock, e.vc4]; });
+    db.notify.watch.entities = snap;
+    if (!prev || !prev.e || prev.ym !== ym) { persist('notify').catch(() => {}); return { baseline: true, entities: ents.size }; }   // pehli baar / naya mahina: sirf base
+    const fmt = (n) => Number(n).toLocaleString('en-IN');
+    const out = [];
+    ents.forEach((e, k) => {
+      const o = prev.e[k]; if (!o) return;
+      const dIss = e.iss - (o[0] || 0), dSt = e.stock - (o[1] || 0);
+      const parts = [];
+      if (dIss > 0) parts.push(`🏷️ +${fmt(dIss)} tags issue (is mahine ${fmt(e.iss)})`);
+      if (dSt !== 0) parts.push(`📦 stock ${dSt > 0 ? '+' : ''}${fmt(dSt)} → ab ${fmt(e.stock)}${e.vc4 !== (o[2] || 0) ? ` (VC4 ${fmt(e.vc4)})` : ''}`);
+      if (parts.length) out.push({ e, parts });
+    });
+    const MAXN = 30;
+    for (const { e, parts } of out.slice(0, MAXN)) {
+      recordNotification({
+        type: 'activity', routeKey: 'entityUpdate',
+        title: `${e.kind === 'tl' ? '🧑‍💼' : '👤'} ${e.name} · ${e.ch.toUpperCase()} ${e.kind === 'tl' ? 'TL' : 'Direct'} update`,
+        body: `${e.ch.toUpperCase()} ${e.kind === 'tl' ? `TL (${e.agents} agents ka total)` : 'Direct agent'} · ${parts.join(' · ')}`,
+        target: 'admin', meta: { entityName: e.name, entityKind: e.kind, entityCh: e.ch, source: 'entity-update', link: `#/masterSearch?q=${encodeURIComponent(e.name)}` }
+      });
+    }
+    if (out.length > MAXN) recordNotification({ type: 'activity', routeKey: 'entityUpdate', title: `🎯 +${out.length - MAXN} aur direct agent / TL updates`, body: out.slice(MAXN, MAXN + 15).map((x) => `${x.e.name} (${x.e.ch.toUpperCase()})`).join(', '), target: 'admin', meta: { source: 'entity-update', link: '#/dispatchPlan' } });
+    persist('notify').catch(() => {});
+    return { changed: out.length, entities: ents.size };
+  } catch (err) { console.warn('entity watch:', String((err && err.message) || err).slice(0, 160)); return null; }
+  finally { entityWatchBusy = false; }
 }
 /** buildDispatchPlan ke liye per-channel divisor + data month (overlay ka basis). */
 function dispatchBasisOptions(agents) {
@@ -10826,7 +10933,7 @@ async function handleApi(req, res, url) {
       const out = await createTagBatch(drafts, { by: user.username, byName: user.name || user.username, employee, note: shortText(body.note, 300), courier: shortText(body.courier, 40), itemName: normItemName(body.itemName), serialNumber: shortText(body.serialNumber, 100), deviceName: shortText(body.deviceName, 120), materialDescription: shortText(body.materialDescription, 200), updatedBy: user.username, submissionId: body.submissionId });
       const n = out.created.length;
       if (!out.idempotentReplay) try {
-        recordNotification({
+        notifyTagReq(out.created.map((r) => r.agent.name || r.agent.agentId), {
           type: 'request', title: `🏷️ Tag request${out.dupCount ? ' 🔁 duplicate' : ''} · ${employee.name}`,
           body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — ${tagBatchLine(out.created)}${body.note ? ` · ${shortText(body.note, 80)}` : ''}`,
           target: 'admin', routeKey: 'tagRequest',
@@ -10860,7 +10967,7 @@ async function handleApi(req, res, url) {
     // v5: Pending submission sirf dashboard me save hoti hai; Google Sheet entry Approved par hogi.
     // Admin ko notification (routed: Settings → notification routes se off ho sakta hai) + requester ko confirmation.
     try {
-      recordNotification({
+      notifyTagReq(rows.map((r) => r.agentName), {
         type: 'request', title: `🏷️ Tag request · ${row.byName}`,
         body: `${rows.length} rows · ${new Set(rows.map((r) => r.agentName)).size} agents · ${total} tags${row.note ? ` · ${row.note}` : ''}`,
         target: 'admin', routeKey: 'tagRequest',
@@ -11714,7 +11821,7 @@ async function handleApi(req, res, url) {
       const n = out.created.length;
       const dupIds = [...new Set(out.created.flatMap((r) => r.dupOf || []))];
       try {
-        if (!out.idempotentReplay) recordNotification({
+        if (!out.idempotentReplay) notifyTagReq(out.created.map((r) => r.agent.name || r.agent.agentId), {
           type: 'request', title: `🏷️ Tag request (employee link)${out.dupCount ? ' 🔁 duplicate' : ''} · ${employeeName}`,
           body: `${n} agent${n > 1 ? 's' : ''} · ${out.total} tags — ${tagBatchLine(out.created)}${office ? ` · ${office}` : ''}${note ? ` · ${note.slice(0, 80)}` : ''}${out.dupCount ? ` · 🔁 ${out.dupCount} agent ki request pehle se active (${dupIds.slice(0, 3).join(', ')})` : ''}`,
           target: 'admin', routeKey: 'tagRequest',
@@ -11779,7 +11886,7 @@ async function handleApi(req, res, url) {
        syncAddressBookToSheet(body.agents || [row]).then(() => persist('notify').catch(() => {})).catch(() => {});
     // v5: Public Pending request bhi Google Sheet me nahi likhi jaati; approval ka wait karti hai.
     try {
-      recordNotification({
+      notifyTagReq(rows.map((r) => r.agentName), {
         type: 'request', title: `🏷️ Tag request (employee link)${dupes.length ? ' 🔁 duplicate' : ''} · ${employeeName}`,
         body: `${rows.length} rows · ${new Set(rows.map((r) => r.agentName)).size} agents · ${total} tags${office ? ` · ${office}` : ''}${mobile ? ` · 📱 ${mobile}` : ''}${pincode ? ` · 📮 ${pincode}` : ''}${address ? ` · 🏠 ${address.slice(0, 60)}${address.length > 60 ? '…' : ''}` : ''}${dupes.length ? ` · 🔁 pehle se ${dupes.length} active request (${dupes.map((d) => d.id).join(', ')})` : ''}`,
         target: 'admin', routeKey: 'tagRequest',
@@ -11902,7 +12009,7 @@ async function handleApi(req, res, url) {
     row.edits = [...(Array.isArray(row.edits) ? row.edits : []), { at: row.updatedAt, by: row.editedBy, from: before }].slice(-10);
     await persist('notify');
     try {
-      recordNotification({ type: 'request', title: '✏️ Tag request edit hui', body: `${row.editedBy}: ${(ag.name || tpl.agentName || 'Agent')} — ${before} → ${kept.map((x) => `${x.cls}×${x.approved}`).join(', ')}`, target: 'admin', meta: { requestId: row.id, link: '#/tagRequest?view=requests' } });
+      notifyTagReq([ag.name || tpl.agentName], { type: 'request', title: '✏️ Tag request edit hui', body: `${row.editedBy}: ${(ag.name || tpl.agentName || 'Agent')} — ${before} → ${kept.map((x) => `${x.cls}×${x.approved}`).join(', ')}`, target: 'admin', meta: { requestId: row.id, link: '#/tagRequest?view=requests' } });
     } catch { /* optional */ }
     return sendJson(res, 200, { ok: true, request: tagStatusView(row) });
   }
@@ -17068,6 +17175,9 @@ async function start() {
     //    weekly inactive users + 🔴 cover alert / 📉 stock history — boot par aur har 30 min.
     setTimeout(() => runScheduledChecks(), 15000);
     setInterval(() => runScheduledChecks(), 30 * 60e3).unref();
+    // 🎯 v3.125.358 — direct agents + TLs (GV/FF) ke issuance / stock updates (sheet cache ke andar, har 3 min)
+    setTimeout(() => entityWatchTick().catch(() => {}), 25000).unref?.();
+    setInterval(() => entityWatchTick().catch(() => {}), 180e3).unref();
     // ⏰ v3.125.305 — Dispatch plan email exact HH:MM par: har minute sasta check (data tabhi load hota hai jab time ho)
     setInterval(() => { sendDispatchPlanEmail(false).catch((err) => console.warn('dispatch email:', String((err && err.message) || err).slice(0, 160))); }, 60e3).unref();
     // ⏪ v3.48: sheet history me purani saves hain to admin ko batao (khud kuch restore nahi karta).
