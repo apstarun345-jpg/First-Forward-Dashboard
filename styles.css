@@ -1554,7 +1554,7 @@ html[data-theme="dark"] .ff-switch { background: #33415c; }
 }
 /* ---------- PWA & Mobile Viewing — natural-size, app-like layout ---------- */
 @media all and (display-mode: standalone), (max-width: 768px) {
-html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
+html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
 body { font-size: 14px; -webkit-text-size-adjust: 100%; }
 .topbar {
     padding-top: max(10px, env(safe-area-inset-top));
@@ -3764,7 +3764,7 @@ body.print-a360 .a360-tabs, body.print-a360 .a360-nav { display: none; }
 .lf-banner .lf-chip { background: rgba(99,102,241,.18); }
 .home-ff-pending { font-style: italic; opacity: .85; }
 /* 🩺 Diagnostics safe repairs — persistent, page-wide (localStorage me save hote hain) */
-html.ff-diag-repairs, html.ff-diag-repairs body { overflow-x: hidden; }
+html.ff-diag-repairs, html.ff-diag-repairs body { overflow-x: hidden; overflow-x: clip; }
 html.ff-diag-repairs .ff-diagnostic-fixed { min-width: 0 !important; max-width: 100% !important; overflow-wrap: anywhere !important; word-break: break-word !important; white-space: normal !important; }
 html.ff-diag-repairs .ff-diagnostic-control-fixed { max-width: 100% !important; min-width: 0 !important; flex-shrink: 1 !important; white-space: normal !important; }
 html.ff-diag-repairs .ff-diagnostic-kpi-fixed { min-width: 0 !important; max-width: 100% !important; }
@@ -5233,7 +5233,7 @@ body.side-open .side-backdrop {
 /* Final touch-device guard v102: some Android browsers in "Desktop site"
    report a wide CSS viewport. Keep touch/PWA devices in the real app layout. */
 @media (pointer: coarse), (display-mode: standalone) {
-html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
+html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
 .content { width: 100%; min-width: 0; margin-left: 0; }
 .sidebar { transform: translateX(-100%); }
 body.side-open .sidebar { transform: translateX(0); }
