@@ -1,0 +1,1 @@
+  assert.match(src, /\|\| ws\.backupAlertAt\) return;/);
