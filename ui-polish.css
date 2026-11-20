@@ -245,7 +245,7 @@ html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(td.num, th.nu
 }
 html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) .tbl tbody tr:focus-within { outline: 2px solid var(--brand); outline-offset: -2px; }
 html[data-ui-polish="clean"][data-density="compact"] :is(.content, .drawer, .ms-panel) .tbl :is(td, th),
-html[data-ui-polish="clean"][data-table-density="compact"] :is(.content, .drawer, .ms-panel) .tbl :is(td, th) { padding: 6px 10px; }
+html[data-ui-polish="clean"][data-table-density="compact"] :is(.content, .drawer, .ms-panel) .tbl :is(td, th) { padding: 4.5px 8px !important; font-size: 11.5px !important; line-height: 1.35 !important; }
 
 /* Mobile refinements: no fixed widths, no hidden actions, and no changes to bottom navigation. */
 @media (max-width: 760px) {
