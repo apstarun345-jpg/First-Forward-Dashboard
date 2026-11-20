@@ -1631,7 +1631,25 @@ window.FF = window.FF || {};
 
   // ---- table experience: density, columns, sticky context and export ------------------------------
   function tableDensity() { try { return localStorage.getItem('ff_table_density') || 'comfortable'; } catch { return 'comfortable'; } }
-  function setTableDensity(value) { try { localStorage.setItem('ff_table_density', value); } catch {} document.documentElement.dataset.tableDensity = value; }
+  function setTableDensity(value) {
+    try { localStorage.setItem('ff_table_density', value); } catch {}
+    document.documentElement.dataset.tableDensity = value;
+    document.querySelectorAll('table').forEach((t) => t.classList.toggle('table-density-compact', value === 'compact'));
+    const btn = U.$('#density-toggle');
+    if (btn) {
+      btn.textContent = value === 'compact' ? '≡' : '▦';
+      btn.title = value === 'compact' ? 'Compact density active — tap for Comfortable · डेंसिटी' : 'Comfortable density active — tap for Compact · डेंसिटी';
+      btn.setAttribute('aria-label', btn.title);
+    }
+    document.querySelectorAll('[data-table-density]').forEach((b) => {
+      b.textContent = value === 'compact' ? '↕ Comfortable' : '↕ Compact';
+    });
+  }
+  function toggleTableDensity() {
+    const next = tableDensity() === 'compact' ? 'comfortable' : 'compact';
+    setTableDensity(next);
+    if (U.toast) U.toast(next === 'compact' ? '≡ Compact view enabled' : '▦ Comfortable view enabled', 'info');
+  }
   /** 🏷️ Barcode / serial columns → dash wala format (608116-011-0558601) har table me. */
   const BARCODE_HEAD_RE = /barcode|serial|serial\s*number|bc\b/i;
   function barcodeColumnIndexes(table) {
@@ -1788,6 +1806,8 @@ window.FF = window.FF || {};
     window.addEventListener('hashchange', () => { paramOverride = null; renderCurrent(); toggleUserMenu(false); });
     U.$('#menu-btn').addEventListener('click', toggleSidebar);
     const themeBtn = U.$('#theme-toggle'); if (themeBtn) themeBtn.addEventListener('click', toggleThemeMode);
+    const densBtn = U.$('#density-toggle'); if (densBtn) densBtn.addEventListener('click', toggleTableDensity);
+    setTableDensity(tableDensity());
     const langBtn = U.$('#lang-toggle');
     if (langBtn) {
       langBtn.addEventListener('click', toggleLangMenu);
@@ -1830,7 +1850,7 @@ window.FF = window.FF || {};
       if (!document.documentElement.classList.contains('mobile-ui')) {
         const pop = document.createElement('div');
         pop.className = 'top-more-pop'; pop.id = 'top-more-pop'; pop.hidden = true;
-        ['#lang-toggle', '#theme-pack-btn', '#theme-toggle', '#a11y-btn'].forEach((sel) => {
+        ['#lang-toggle', '#theme-pack-btn', '#density-toggle', '#theme-toggle', '#a11y-btn'].forEach((sel) => {
           const el = U.$(sel); if (!el) return;
           pop.appendChild(el.closest('.theme-wrap') || el);
         });
