@@ -79,7 +79,19 @@ const PACKS = {
     brand: '#ff8c00', brand2: '#ffd000', sideBg: '#100803', sideBg2: '#5a2a07', sideInk: '#ffeccc',
     surface2: '#21120a', head: '#38200d', topbar: 'rgba(24,13,5,.9)', soft: '#33200e',
     palette: ['#c2410c', '#b45309', '#a16207', '#be123c', '#92400e', '#d97706', '#9a3412', '#854d0e'],
-    auth: ['#100803', '#5a2a07', '#ff8c00'] }
+    auth: ['#100803', '#5a2a07', '#ff8c00'] },
+  obsidian: { name: 'Obsidian Gold', icon: '👑', mode: 'dark', desc: 'Luxury jet-black with warm imperial gold',
+    bg: '#08080a', card: '#121216', ink: '#fef3c7', muted: '#a89d85', line: '#2a261c',
+    brand: '#f59e0b', brand2: '#fbbf24', sideBg: '#050507', sideBg2: '#18140c', sideInk: '#fef3c7',
+    surface2: '#0b0b0e', head: '#1a1811', topbar: 'rgba(8,8,10,.92)', soft: '#1c1911',
+    palette: ['#d97706', '#b45309', '#f59e0b', '#fbbf24', '#78350f', '#ca8a04', '#92400e', '#fde68a'],
+    auth: ['#050507', '#18140c', '#f59e0b'] },
+  cyber: { name: 'Cyber Neon', icon: '⚡', mode: 'dark', desc: 'Electric matrix cyan and emerald terminal',
+    bg: '#040711', card: '#0b1122', ink: '#e0f2fe', muted: '#7dd3fc', line: '#162846',
+    brand: '#06b6d4', brand2: '#10b981', sideBg: '#02050e', sideBg2: '#061a2e', sideInk: '#cffafe',
+    surface2: '#070c1a', head: '#0e1d38', topbar: 'rgba(4,7,17,.92)', soft: '#0c223c',
+    palette: ['#0891b2', '#059669', '#06b6d4', '#10b981', '#0284c7', '#34d399', '#0e7490', '#67e8f9'],
+    auth: ['#02050e', '#061a2e', '#06b6d4'] }
 };
 
 // ---- colour helpers ---------------------------------------------------------------------------

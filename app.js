@@ -1136,7 +1136,7 @@ window.FF = window.FF || {};
       // Data fetching/query/cache/export paths are untouched, so downloads stay identical.
       const polish = () => {
         if (token !== current.token || !root.isConnected) return;
-        enhanceCharts(root); enhanceTables(root);
+        enhanceCharts(root); enhanceTables(root); runOdometerCounters(root);
       };
       if (typeof requestIdleCallback === 'function') requestIdleCallback(polish, { timeout: 250 });
       else setTimeout(polish, 0);
@@ -1806,7 +1806,90 @@ window.FF = window.FF || {};
     });
   }
 
+  // 🔢 Animated Odometer Number Ticker for metric counters
+  function runOdometerCounters(root) {
+    if (!root || typeof window === 'undefined' || typeof requestAnimationFrame === 'undefined') return;
+    const items = root.querySelectorAll('.kpi-value, .mini-value');
+    items.forEach((el) => {
+      if (el.dataset.odometerRan) return;
+      const raw = (el.textContent || '').trim();
+      if (!raw || raw === '—' || raw === '...' || raw === 'loading…') return;
+      const m = raw.match(/^([^\d\-+]*)([-+]?[\d,]+(?:\.\d+)?)(.*)$/);
+      if (!m) return;
+      const prefix = m[1] || '';
+      const numStr = m[2].replace(/,/g, '');
+      const targetNum = parseFloat(numStr);
+      const suffix = m[3] || '';
+      if (isNaN(targetNum) || targetNum === 0) return;
+      el.dataset.odometerRan = '1';
+      const isDec = m[2].includes('.');
+      const decimals = isDec ? (m[2].split('.')[1] || '').length : 0;
+
+      const duration = 480; // ms
+      const startTime = performance.now();
+      const startNum = Math.max(0, Math.floor(targetNum * 0.15));
+      el.classList.add('odometer-active');
+
+      function step(now) {
+        const elapsed = now - startTime;
+        const p = Math.min(elapsed / duration, 1);
+        const ease = 1 - Math.pow(1 - p, 3); // cubic ease-out
+        const current = startNum + (targetNum - startNum) * ease;
+        const formatted = U.fmt ? U.fmt(isDec ? current : Math.round(current), decimals) : Math.round(current);
+        el.textContent = `${prefix}${formatted}${suffix}`;
+        if (p < 1) {
+          requestAnimationFrame(step);
+        } else {
+          const finalFmt = U.fmt ? U.fmt(targetNum, decimals) : targetNum;
+          el.textContent = `${prefix}${finalFmt}${suffix}`;
+          el.classList.remove('odometer-active');
+        }
+      }
+      requestAnimationFrame(step);
+    });
+  }
+  FF.runOdometerCounters = runOdometerCounters;
+
+  let odoObserver = null;
+  function observeOdometer(root = (typeof document !== 'undefined' ? document.body : null)) {
+    if (typeof MutationObserver === 'undefined' || !root || odoObserver) return;
+    odoObserver = new MutationObserver((mutations) => {
+      let needsScan = false;
+      for (const m of mutations) {
+        if (m.type === 'childList' && m.addedNodes.length) {
+          needsScan = true;
+          break;
+        }
+      }
+      if (needsScan) runOdometerCounters(root);
+    });
+    try {
+      odoObserver.observe(root, { childList: true, subtree: true });
+    } catch { /* ignore */ }
+  }
+
+  // 🌟 Cursor Spotlight & Border Glow Effect (Vercel / Stripe Style)
+  function initSpotlight() {
+    if (typeof document === 'undefined' || window.__ffSpotlightReady) return;
+    window.__ffSpotlightReady = true;
+    let spotRaf = 0;
+    document.addEventListener('pointermove', (e) => {
+      if (spotRaf) return;
+      spotRaf = requestAnimationFrame(() => {
+        spotRaf = 0;
+        const target = e.target && e.target.closest && e.target.closest('.card, .kpi, .grid-card, .pro-card, .ua-card');
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
+        const x = Math.round(e.clientX - rect.left);
+        const y = Math.round(e.clientY - rect.top);
+        target.style.setProperty('--spot-x', `${x}px`);
+        target.style.setProperty('--spot-y', `${y}px`);
+      });
+    }, { passive: true });
+  }
+
   function bind() {
+    initSpotlight();
     // Sidebar stays fixed/visible on desktop — the old hover auto-hide mode is removed.
     document.body.classList.remove('sidebar-auto'); try { localStorage.removeItem('ff_sidebar_auto'); } catch { /* private mode */ }
     window.addEventListener('hashchange', () => { paramOverride = null; renderCurrent(); toggleUserMenu(false); });
@@ -2524,6 +2607,7 @@ window.FF = window.FF || {};
 
   async function init() {
     U.initTooltip();
+    observeOdometer();
     applySavedTweaks();          // ⚡ saved speed prefs + diagnostic repairs — sabse pehle
     bind();
     // 🌐 Public employee link (/tag-request) — yahan login ka koi chakkar nahi: seedha form khulta
