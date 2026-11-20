@@ -2063,7 +2063,9 @@ FF.pages = FF.pages || {};
         for (const r of rows) {
           if ((ch === 'gv') !== isGv(r)) continue;
           if (!(Number(r.n) > 0)) continue;
-          const hit = isTl ? (normName(r.tlName) === nk || normName(r.agentName) === nk) : (normName(r.agentName) === nk || (id && normName(r.agentId) === id));
+          const rid = normName(r.agentId);
+          const hit = isTl ? (normName(r.tlName) === nk || normName(r.agentName) === nk)
+            : (id && rid ? (rid === id || (rid.length !== id.length && normName(r.agentName) === nk)) : normName(r.agentName) === nk);   // same-type ID alag = doosra agent
           if (!hit) continue;
           const k = String(r.key || ''); if (!k) continue;
           if (k > best) { best = k; qty = 0; time = ''; }
@@ -2250,9 +2252,11 @@ FF.pages = FF.pages || {};
       const dayChip = (() => {
         try {
           const nk = normName(pr.name), pid = normName(pr.id || '');
+          // v3.125.377 — ID tabhi decide kare jab dono ek hi tarah ki ID hon (purani 8-digit vs nayi 18-digit alag hoti hain → naam se)
+          const idEq = (a, b, nameOk) => { const x = normName(a); if (!pid || !x) return nameOk; if (x === pid) return true; return x.length === pid.length ? false : nameOk; };
           const same = (r) => (isTl
-            ? ((pid && r.tlId) ? normName(r.tlId) === pid : normName(r.tlName) === nk)
-            : ((pid && r.agentId) ? normName(r.agentId) === pid : normName(r.agentName) === nk));   // ID ho to ID hi decide kare
+            ? idEq(r.tlId, null, normName(r.tlName) === nk)
+            : idEq(r.agentId, null, normName(r.agentName) === nk));
           let rows, key, label, icon, tail;
           if (ch === 'gv') {
             rows = (FF.gv && FF.gv.issuanceRows && FF.gv.issuanceRows()) || [];
