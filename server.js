@@ -156,7 +156,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip'
 };
-const BLOCKED_FILES = new Set(['server.js', 'address-import.js', 'pin-geo.json', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'issuedBarcodes.js', 'address-import.js', 'pin-geo.json', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const robotPushState = new Map(); // 🤖 robot push dedupe / rate (per admin)
 const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
@@ -1427,7 +1427,7 @@ function headers(extra = {}) {
     // Voice search needs microphone access after an explicit user click; camera stays disabled.
     'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(self)',
     ...(FRAME_PROTECTION ? { 'X-Frame-Options': 'SAMEORIGIN' } : {}),
-    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://tile.openstreetmap.org; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://docs.google.com",
+    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://docs.google.com",
     ...extra
   };
 }
