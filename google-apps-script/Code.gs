@@ -74,8 +74,8 @@ const TAB = 'APP_STORAGE';
 const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
-const HISTORY_MAX_ROWS = 60; // bounded to 60 snapshots to avoid Google Sheets document size limits
-const CODE_VERSION = 'v3.80';
+const HISTORY_MAX_ROWS = 30; // 30 snapshots tak — sheet size limit se bachao (live data APP_STORAGE me alag rehta hai, history sirf purane backup copies hain)
+const CODE_VERSION = 'v3.81';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
