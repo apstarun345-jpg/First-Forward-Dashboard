@@ -1641,7 +1641,8 @@ window.FF = window.FF || {};
       btn.title = value === 'compact' ? 'Compact density active — tap for Comfortable · डेंसिटी' : 'Comfortable density active — tap for Compact · डेंसिटी';
       btn.setAttribute('aria-label', btn.title);
     }
-    document.querySelectorAll('[data-table-density]').forEach((b) => {
+    document.querySelectorAll('button[data-table-density]').forEach((b) => {
+      if (b === document.documentElement || b === document.body) return;
       b.textContent = value === 'compact' ? '↕ Comfortable' : '↕ Compact';
     });
   }
@@ -1761,8 +1762,7 @@ window.FF = window.FF || {};
       wrap.appendChild(menu);
       toolbar.querySelector('[data-table-density]').addEventListener('click', () => {
         const next = tableDensity() === 'compact' ? 'comfortable' : 'compact';
-        setTableDensity(next); root.querySelectorAll('table').forEach((t) => t.classList.toggle('table-density-compact', next === 'compact'));
-        document.querySelectorAll('[data-table-density]').forEach((b) => { b.textContent = next === 'compact' ? '↕ Comfortable' : '↕ Compact'; });
+        setTableDensity(next);
       });
       toolbar.querySelector('[data-table-columns]').addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
       toolbar.querySelector('[data-table-export]').addEventListener('click', () => {

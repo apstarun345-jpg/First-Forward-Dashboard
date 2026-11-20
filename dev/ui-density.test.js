@@ -37,4 +37,7 @@ test('UI Density & Table Overlap safeguards in index.html, styles.css & app.js',
   assert.ok(appJs.includes('function setTableDensity('), 'app.js must declare setTableDensity()');
   assert.ok(appJs.includes('function toggleTableDensity('), 'app.js must declare toggleTableDensity()');
   assert.ok(appJs.includes('#density-toggle'), 'app.js must wire #density-toggle');
+
+  // 6. Ensure setTableDensity never selects document.documentElement with unqualified [data-table-density]
+  assert.ok(!appJs.includes("querySelectorAll('[data-table-density]')"), 'must not query unqualified [data-table-density] which matches document.documentElement and erases DOM');
 });
