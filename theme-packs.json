@@ -143,5 +143,29 @@
    "#100803",
    "#180d05"
   ]
+ },
+ "obsidian": {
+  "name": "Obsidian Gold",
+  "icon": "👑",
+  "mode": "dark",
+  "desc": "Luxury jet-black with warm imperial gold",
+  "swatch": [
+   "#f59e0b",
+   "#fbbf24",
+   "#050507",
+   "#08080a"
+  ]
+ },
+ "cyber": {
+  "name": "Cyber Neon",
+  "icon": "⚡",
+  "mode": "dark",
+  "desc": "Electric matrix cyan and emerald terminal",
+  "swatch": [
+   "#06b6d4",
+   "#10b981",
+   "#02050e",
+   "#040711"
+  ]
  }
 }

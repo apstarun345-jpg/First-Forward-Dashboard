@@ -72,7 +72,7 @@
   // Pehle pack wowzone.js se aata tha jo login ke BAAD load hota tha, aur branding rang server settings
   // se login ke baad — isliye pehle default theme dikhta tha, phir badalta tha. Ab dono device par
   // yaad rehte hain aur head me hi lag jaate hain; themes.css pack ke saare rang CSS se deta hai.
-  const PACK_MODES = { desk: 'light', navy: 'light', ocean: 'light', forest: 'light', sunset: 'light', royal: 'light', gold: 'light', mono: 'light', glass: 'light', midnight: 'dark', neon: 'dark', diwali: 'dark' };
+  const PACK_MODES = { desk: 'light', navy: 'light', ocean: 'light', forest: 'light', sunset: 'light', royal: 'light', gold: 'light', mono: 'light', glass: 'light', midnight: 'dark', neon: 'dark', diwali: 'dark', obsidian: 'dark', cyber: 'dark' };
   window.FF_PACK_MODES = PACK_MODES;
   try {
     const root = document.documentElement;

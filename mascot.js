@@ -866,6 +866,68 @@
     bubble.hidden = true;
   }
 
+  // 🛸 Smart Command Wheel / Quick-HUD Orbit Menu
+  function updateHudOrbit() {
+    if (!el) return;
+    const hud = el.querySelector('.mc-orbit-hud');
+    if (!hud) return;
+    const g = (typeof geo === 'function') ? geo() : { vw: window.innerWidth, vh: window.innerHeight };
+    const nearRight = pos[0] > (g.vw - 160);
+    const nearLeft = pos[0] < 120;
+    const nearTop = pos[1] < 140;
+    let angles;
+    if (nearRight) {
+      angles = [-185, -155, -125, -95, -65];
+    } else if (nearLeft) {
+      angles = [-115, -85, -55, -25, 5];
+    } else if (nearTop) {
+      angles = [0, 45, 90, 135, 180];
+    } else {
+      angles = [-160, -125, -90, -55, -20];
+    }
+    const radius = 74;
+    const btns = hud.querySelectorAll('.mc-hud-btn');
+    btns.forEach((btn, idx) => {
+      const angle = angles[idx] != null ? angles[idx] : -90;
+      const rad = (angle * Math.PI) / 180;
+      const x = Math.round(Math.cos(rad) * radius);
+      const y = Math.round(Math.sin(rad) * radius);
+      btn.style.setProperty('--hx', `${x}px`);
+      btn.style.setProperty('--hy', `${y}px`);
+    });
+  }
+
+  function toggleHud() {
+    if (!el) return;
+    el.classList.toggle('hud-open');
+    if (el.classList.contains('hud-open')) updateHudOrbit();
+  }
+
+  function closeHud() {
+    if (!el) return;
+    el.classList.remove('hud-open');
+  }
+
+  function handleHudAction(act) {
+    closeHud();
+    if (act === 'ask') {
+      openAssistant();
+    } else if (act === 'stock') {
+      location.hash = '#/stock';
+    } else if (act === 'analytics') {
+      location.hash = '#/aiAnalyst';
+    } else if (act === 'mapping') {
+      location.hash = '#/mapping';
+    } else if (act === 'notif') {
+      try {
+        if (window.FF && FF.app && FF.app.openNotifications) FF.app.openNotifications('center');
+        else location.hash = '#/notifications';
+      } catch {
+        location.hash = '#/notifications';
+      }
+    }
+  }
+
   function build() {
     if (el) return;
     el = document.createElement('div');
@@ -875,9 +937,16 @@
       <div class="mc-stick" aria-hidden="true"></div>
       <div class="mc-board" role="status" aria-live="polite"></div>
       <div class="mc-bubble" role="status" aria-live="polite" hidden><span class="mc-bubble-txt"></span><i class="mc-bubble-tail"></i></div>
+      <div class="mc-orbit-hud" role="toolbar" aria-label="Gems Command HUD">
+        <button type="button" class="mc-hud-btn" data-hud="ask" title="Talk with Gems AI" aria-label="Ask AI"><span class="mc-hud-ico">🎙</span><span class="mc-hud-tip">Gems AI</span></button>
+        <button type="button" class="mc-hud-btn" data-hud="stock" title="FASTag Stock" aria-label="Stock"><span class="mc-hud-ico">📦</span><span class="mc-hud-tip">Stock</span></button>
+        <button type="button" class="mc-hud-btn" data-hud="analytics" title="AI Analyst" aria-label="AI Analyst"><span class="mc-hud-ico">🧠</span><span class="mc-hud-tip">Analyst</span></button>
+        <button type="button" class="mc-hud-btn" data-hud="mapping" title="FASTag Mapping Hub" aria-label="Mapping"><span class="mc-hud-ico">⚡</span><span class="mc-hud-tip">Mapping</span></button>
+        <button type="button" class="mc-hud-btn" data-hud="notif" title="Notifications & Activity" aria-label="Alerts"><span class="mc-hud-ico">🔔</span><span class="mc-hud-tip">Alerts</span></button>
+      </div>
       <div class="mc-chhotu" aria-hidden="true"><img src="${ASSET('robot.png')}" alt="" draggable="false"><span class="mc-cb"></span></div>
       <span class="mc-mb" aria-hidden="true"></span>
-      <button type="button" class="mc-bot" aria-label="Gems robot — kya kya bataya (24h history)" title="🤖 Gems — click: maine kya bataya (24h) · drag: jagah badlo">
+      <button type="button" class="mc-bot" aria-label="Gems robot — kya kya bataya (24h history)" title="🤖 Gems — click: maine kya bataya (24h) · drag: jagah badlo · right-click: quick HUD">
         <i class="mc-glow" aria-hidden="true"></i>
         <i class="mc-halo" aria-hidden="true"></i>
         <span class="mc-arm l"><img src="${ASSET('robot-arm-l.png')}" alt="" draggable="false"></span>
@@ -886,6 +955,7 @@
         <span class="mc-headwrap"><img class="mc-head" src="${ASSET('robot-head.png')}" alt="" draggable="false"><i class="mc-eye l"><b></b></i><i class="mc-eye r"><b></b></i><i class="mc-mouth"><b></b></i></span>
         <span class="mc-fx" aria-hidden="true"></span><span class="mc-hat" aria-hidden="true"></span>
         <span class="mc-dot" hidden></span>
+        <span class="mc-hud-toggle" title="Quick Actions HUD" aria-label="Quick Actions">⚡</span>
       </button>`;
     document.body.appendChild(el);
     bot = el.querySelector('.mc-bot');
@@ -900,8 +970,29 @@
         if (mode === 'hist') closeHist(); else openHist();
       });
     }
-    el.addEventListener('mouseenter', () => { hover = true; });
+    el.addEventListener('mouseenter', () => { hover = true; updateHudOrbit(); });
     el.addEventListener('mouseleave', () => { hover = false; });
+    const toggle = el.querySelector('.mc-hud-toggle');
+    if (toggle) {
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleHud();
+      });
+    }
+    bot.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleHud();
+    });
+    const hud = el.querySelector('.mc-orbit-hud');
+    if (hud) {
+      hud.addEventListener('click', (e) => {
+        const b = e.target.closest('.mc-hud-btn');
+        if (!b) return;
+        e.stopPropagation();
+        handleHudAction(b.dataset.hud);
+      });
+    }
     board.addEventListener('click', (e) => {
       const b = e.target.closest('[data-mc]');
       if (b) { e.stopPropagation(); onCtl(b.dataset.mc, b); return; }
@@ -939,8 +1030,17 @@
       if (mode === 'show' || busy) { histSoon(); return; } // board chal raha ho tab bhi click → history (sawaal poochhne ke liye)
       if (mode === 'hist') closeHist(); else openHist();
     });
-    document.addEventListener('click', (e) => { if (mode === 'hist' && !el.contains(e.target)) closeHist(); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (mode === 'hist') closeHist(); else if (skip) skip(); } });
+    document.addEventListener('click', (e) => {
+      if (mode === 'hist' && !el.contains(e.target)) closeHist();
+      if (el && el.classList.contains('hud-open') && !el.contains(e.target)) closeHud();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (el && el.classList.contains('hud-open')) closeHud();
+        else if (mode === 'hist') closeHist();
+        else if (skip) skip();
+      }
+    });
     window.addEventListener('resize', () => { if (mode === 'dock') place(dockPos()); });
     // Gems assistant ki state robot par bhi: sun raha / soch raha / bol raha
     const fab = document.getElementById('ask-fab');
@@ -1274,7 +1374,7 @@
     return [Math.max(4, Math.min(g.vw - g.W - 4, g.vw - g.W - d.r)), Math.max(g.minY, Math.min(g.vh - g.H - 4, g.vh - g.H - d.b))];
   }
   const tf = (p, extra) => `translate3d(${Math.round(p[0])}px, ${Math.round(p[1])}px, 0)${extra || ''}`;
-  function place(p) { pos = [p[0], p[1]]; if (el) { el.style.setProperty('--w', `${geo().W}px`); el.style.transform = tf(pos); } }
+  function place(p) { pos = [p[0], p[1]]; if (el) { el.style.setProperty('--w', `${geo().W}px`); el.style.transform = tf(pos); updateHudOrbit(); } }
   const clampP = (g, p) => [Math.max(6, Math.min(g.vw - g.W - 6, p[0])), Math.max(g.minY - 20, Math.min(g.vh - g.H - 6, p[1]))];
 
   // Raste: arc · zig-zag · loop-de-loop · pehle upar phir side (right→up) · hop-hop
