@@ -189,7 +189,7 @@
   }
 
   // ---- 👁 Live view ------------------------------------------------------------------------------
-  const live = { user: '', publicSessionId: '', timer: null, modal: null, lastPage: '', lastEventAt: 0, mirror: true, busy: false, speed: 1000, lastRenderAt: 0 };
+  const live = { user: '', publicSessionId: '', timer: null, modal: null, lastPage: '', lastEventAt: 0, mirror: true, busy: false, speed: 500, lastRenderAt: 0 };
   /** Exact instant label — HH:MM:SS.mmm (jaise live telemetry me hota hai). */
   const exactClock = (ts) => {
     const d = new Date(ts || Date.now());
@@ -302,9 +302,13 @@
     if (!trail.length || trail[trail.length - 1] !== pg.label) trail.push(pg.label);
     const pageSince = (() => { for (let i = ev.length - 1; i >= 0; i--) if (ev[i].kind === 'page') return now - ev[i].at; return null; })();
     let head, tone = 'info';
-    const online = p.online !== false;
-    if (p.kind !== 'personal' && p.visible === false) { head = `🙈 Dashboard tab par nahi hai — dusra tab / app chala raha hai (${agoS(idle)} se)`; tone = 'away'; }
-    else if (!online) { head = `📴 Offline / band — aakhri signal ${agoS(now - Number(p.updatedAt || p.lastSeen || now))} pehle`; tone = 'away'; }
+    const sigAge = now - Number(p.updatedAt || p.lastSeen || now);           // aakhri signal kitna purana — isse zyada kuch claim nahi karte
+    const online = p.online !== false && sigAge < 35e3;
+    const what = p.kind === 'personal' ? 'Link' : p.mirror === undefined && /^public:/.test(String(p.username || '')) ? 'Employee link' : 'Dashboard';
+    const noShare = p.kind !== 'personal' && p.sharing === false;
+    if (!online) { head = `📴 ${what} abhi band / tab chhupa — aakhri signal ${agoS(sigAge)} pehle (is waqt kuch pata nahi, purani cheez nahi dikha rahe)`; tone = 'away'; }
+    else if (p.visible === false) { head = `🙈 ${what} tab par nahi hai — dusra tab / app chala raha hai (${agoS(idle)} se)`; tone = 'away'; }
+    else if (noShare) { head = `🔒 ${what} khula hai (online) — par user ne live sharing allow nahi ki, isliye click / search nahi dikhte`; tone = 'info'; }
     else if (p.overlay) { head = `🗂 ${p.overlay} khola hua hai`; tone = 'busy'; }
     else if (last && lastAge < 12e3) {
       const l = String(last.label || '');
@@ -322,7 +326,8 @@
       ...(vw ? [[vw < 700 ? '📱 Device' : '💻 Device', `${vw}×${(p.viewport && p.viewport.h) || '?'}`]] : []),
       ...(sc != null ? [['↕️ Scroll', `${sc}%`]] : [])
     ];
-    return { head, tone, chips, trail: trail.slice(-6), searches, counts };
+    const lastAction = last ? `${({ search: '🔍', click: '👆', page: '📄', select: '🔽', tab: '🪟', kpi: '📊' })[last.kind] || '•'} ${last.label} · ${agoS(lastAge)} pehle` : '';
+    return { head, tone, chips, trail: trail.slice(-6), searches, counts, lastAction, online };
   }
   function renderIntent(p) {
     const box = live.modal && U.$('#lv-intent', live.modal);
@@ -333,6 +338,7 @@
     const html = `<div class="li-head ${esc(it.tone)}">${esc(it.head)}</div>
       <div class="li-chips">${it.chips.map(([k, v]) => `<span class="li-chip"><i>${esc(k)}</i><b>${esc(v)}</b></span>`).join('')}</div>
       <div class="li-counts" title="Pichhle 10 min">👆 ${c.click} click · 🔍 ${c.search} search · 📄 ${c.page} page · 🔽 ${c.select} filter${c.typing ? ` · ⌨️ ${c.typing} typing` : ''}</div>
+      ${it.lastAction ? `<div class="li-line"><i>Aakhri action:</i> ${esc(it.lastAction)}</div>` : ''}
       ${it.searches.length ? `<div class="li-line"><i>Search:</i> ${it.searches.map((q) => `<code>${esc(q)}</code>`).join(' ')}</div>` : ''}
       ${it.trail.length > 1 ? `<div class="li-line"><i>Raasta:</i> ${it.trail.map(esc).join(' → ')}</div>` : ''}`;
     if (box.dataset.h !== html) { box.dataset.h = html; box.innerHTML = html; }

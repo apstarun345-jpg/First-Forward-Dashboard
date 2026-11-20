@@ -1167,6 +1167,7 @@ window.FF = window.FF || {};
     state.events.push({ at: Date.now(), kind, label: String(label || '').slice(0, 140), page: state.page });
     if (state.events.length > 30) state.events.shift();
     state.dirty = true;
+    if (Date.now() - (state.lastSent || 0) > 250) sendPresence();   // ⚡ click / search / page turant — 400 ms tick ka wait nahi
   }
   function overlayLabel() {
     const drawer = document.getElementById('drawer');
@@ -1182,6 +1183,7 @@ window.FF = window.FF || {};
       body.pointer = state.pointer; body.viewport = { w: window.innerWidth, h: window.innerHeight };
       body.scroll = { y: Math.round(window.scrollY), h: document.documentElement.scrollHeight };
       body.overlay = overlayLabel();
+      body.sharing = true;
       body.hash = location.hash;
       if (state.events.length) { body.events = state.events.splice(0); }
     } else body.pointer = null;
@@ -1241,19 +1243,20 @@ window.FF = window.FF || {};
       if (document.visibilityState === 'visible') { poll(false); retryPush(); }
     });
     bindPushWatchers();
-    state.presenceTimer = setInterval(() => sendPresence(), 45e3);
+    // 💓 heartbeat: sharing ON to 10 s (taaki admin ko 'online / offline' 100% sahi dikhe), warna 45 s
+    state.presenceTimer = setInterval(() => { if (sharing() || Date.now() - (state.lastSent || 0) >= 44e3) sendPresence(); }, 10e3);
     // 👁 Admin live-view pointer/scroll share — sirf tab chalao jab share ON ho (warna 400ms ka
     //    timer din bhar CPU ko jagata rehta tha, chahe koi admin dekh hi na raha ho).
     const fastTick = () => {
       if (!sharing() || document.visibilityState !== 'visible') return;
       const sc = Math.round(window.scrollY);
       if (sc !== state.lastScroll) { state.lastScroll = sc; state.dirty = true; }
-      if (state.dirty && Date.now() - state.lastSent > 800) sendPresence();
+      if (state.dirty && Date.now() - state.lastSent > 300) sendPresence();
     };
-    state.fastTimer = setInterval(fastTick, 400);
+    state.fastTimer = setInterval(fastTick, 250);
     state.shareWatchTimer = setInterval(() => {
       const want = sharing() && !EMBED && !!(FF.auth && FF.auth.user && FF.auth.user.role !== 'admin');
-      if (want && !state.fastTimer) state.fastTimer = setInterval(fastTick, 400);
+      if (want && !state.fastTimer) state.fastTimer = setInterval(fastTick, 250);
       else if (!want && state.fastTimer) { clearInterval(state.fastTimer); state.fastTimer = null; }
     }, 10e3);
     if (!state.pointerBound) {

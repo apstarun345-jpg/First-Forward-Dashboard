@@ -264,6 +264,7 @@ const DEFAULT_NOTIFICATION_ROUTES = Object.freeze({
   champion: 'both', reportUpdate: 'both', inactiveUsers: 'admin', backupReminder: 'admin',
   smartAlert: 'admin', // 🧠 Smart Action Center
   tagRequest: 'admin',  // 🏷️ IDFC Agents Tag Request → admin ke paas
+  userLive: 'admin',     // 👁 v3.125.359 — user / employee link ke live search + click events
   entityUpdate: 'admin', // 🎯 v3.125.358 — Direct agents + TLs (GV/FF) ke har update (issuance / stock)
   personalLink: 'admin' // 🔗 Personal link activity (login · search · page open) → admin
 });
@@ -1122,6 +1123,30 @@ const PL_KIND_META = {
   dispatch_filter: ['🚚', 'Dispatch filter', 'tab'], refresh: ['🔄', 'Refreshed data', 'click'], export: ['⬇️', 'Exported', 'click'], logout: ['🚪', 'Logged out', 'action'], target: ['🎯', 'Set a target', 'click']
 };
 const PL_THROTTLE_MS = { search: 20e3, search_open: 5e3, tab: 15e3, channel: 5e3, dispatch_filter: 15e3, page_open: 10 * 60e3, link_open: 10 * 60e3, login_failed: 30e3 };
+// 👁 v3.125.359 — logged-in user / employee link ke live events (search, click, page, tab) ek-ek karke nahi, 2.5 s me batch karke turant bell + robot me
+const liveNotifyBuf = new Map();
+const LIVE_NOTIFY_KINDS = new Set(['search', 'click', 'select', 'change', 'page', 'submit', 'kpi', 'tab']);
+function liveEventNotify(key, who, events, meta = {}) {
+  try {
+    const ev = (events || []).filter((e) => e && LIVE_NOTIFY_KINDS.has(e.kind) && e.label);
+    if (!ev.length) return;
+    let b = liveNotifyBuf.get(key);
+    if (!b) { b = { buf: [], last: 0, timer: null }; liveNotifyBuf.set(key, b); }
+    b.buf.push(...ev); b.who = who; b.meta = meta;
+    const IC = { search: '🔍', click: '👆', select: '🔽', change: '🔽', page: '📄', submit: '✅', kpi: '📊', tab: '🪟' };
+    const flush = () => {
+      b.timer = null;
+      const list = b.buf.splice(0).slice(-8);
+      if (!list.length) return;
+      b.last = Date.now();
+      const last = list[list.length - 1];
+      recordNotification({ type: 'activity', routeKey: 'userLive', title: `${IC[last.kind] || '•'} ${b.who} · ${last.label}`.slice(0, 110), body: list.map((e) => `${IC[e.kind] || '•'} ${e.label}`).join('\n'), target: 'admin', meta: { ...b.meta, live: true } });
+    };
+    const wait = 2500 - (Date.now() - b.last);
+    if (wait <= 0) flush(); else if (!b.timer) { b.timer = setTimeout(flush, wait); if (b.timer.unref) b.timer.unref(); }
+    if (liveNotifyBuf.size > 300) for (const [k, v] of liveNotifyBuf) if (!v.timer && Date.now() - v.last > 3600e3) liveNotifyBuf.delete(k);
+  } catch { /* notification optional */ }
+}
 const plActivityLog = [];
 const plNotifyLast = new Map();
 function plAlertCfg() {
@@ -8037,15 +8062,18 @@ async function handleApi(req, res, url) {
     const viewport = body.viewport && typeof body.viewport === 'object' ? { w: clamp(body.viewport.w, 200, 8000), h: clamp(body.viewport.h, 200, 8000) } : previous.viewport || null;
     const scroll = body.scroll && typeof body.scroll === 'object' ? { y: clamp(body.scroll.y, 0, 1e6), h: clamp(body.scroll.h, 0, 1e6), el: cleanText(body.scroll.el, 20) } : previous.scroll || null;
     const events = Array.isArray(previous.events) ? previous.events.slice() : [];
+    const freshEv = [];
     if (Array.isArray(body.events)) {
       for (const ev of body.events.slice(-20)) {
         if (!ev || typeof ev !== 'object') continue;
-        events.push({ at: Number(ev.at) || Date.now(), kind: cleanText(ev.kind, 20) || 'action', label: cleanText(ev.label, 140), page: cleanText(ev.page, 80) });
+        const evx = { at: Number(ev.at) || Date.now(), kind: cleanText(ev.kind, 20) || 'action', label: cleanText(ev.label, 140), page: cleanText(ev.page, 80) };
+        events.push(evx); freshEv.push(evx);
       }
     }
     const now = Date.now();
     const lastSeen = body.engaged === true ? now : (previous.lastSeen || now);
-    livePresence.set(user.username, { username: user.username, name: user.name || user.username, mobile: user.mobile || '', page, title: cleanText(body.title, 80) || previous.title || '', overlay: body.overlay !== undefined ? cleanText(body.overlay, 120) : (previous.overlay || ''), visible: body.visible !== false, pointer, viewport, scroll, events: events.slice(-60), lastSeen, updatedAt: now });
+    livePresence.set(user.username, { username: user.username, name: user.name || user.username, mobile: user.mobile || '', page, title: cleanText(body.title, 80) || previous.title || '', overlay: body.overlay !== undefined ? cleanText(body.overlay, 120) : (previous.overlay || ''), visible: body.visible !== false, sharing: body.sharing === true, pointer, viewport, scroll, events: events.slice(-60), lastSeen, updatedAt: now });
+    if (freshEv.length) liveEventNotify(`u:${user.username}`, user.name || user.username, freshEv, { username: user.username, page });
     for (const [key, entry] of livePresence) if (Date.now() - entry.lastSeen > 7 * 86400e3) livePresence.delete(key);
     return sendJson(res, 200, { ok: true });
   }
@@ -8056,7 +8084,7 @@ async function handleApi(req, res, url) {
     if (one) {
       const entry = livePresence.get(normUser(one));
       if (!entry) return sendJson(res, 200, { person: null, checkAt: new Date(now).toISOString() });
-      return sendJson(res, 200, { person: { ...entry, active: now - entry.lastSeen < 90e3, online: now - (entry.updatedAt || entry.lastSeen) < 45e3 }, checkAt: new Date(now).toISOString() });
+      return sendJson(res, 200, { person: { ...entry, active: now - entry.lastSeen < 90e3, online: now - (entry.updatedAt || entry.lastSeen) < 30e3 }, checkAt: new Date(now).toISOString() });
     }
     const people = [...livePresence.values()].filter((entry) => now - entry.lastSeen < 7 * 86400e3)
       .sort((a,b) => b.lastSeen - a.lastSeen)
@@ -11734,14 +11762,17 @@ async function handleApi(req, res, url) {
     entry.engaged = body.engaged === true;
     entry.updatedAt = now;
     entry.lastSeen = now;
+    const freshPub = [];
     if (Array.isArray(body.events)) {
       for (const ev of body.events.slice(-15)) {
         if (!ev || typeof ev !== 'object') continue;
         const kind = cleanLive(ev.kind, 20);
         const label = cleanLive(ev.label, 100);
         if (!label) continue;
-        entry.events.push({ at: now, kind: ['click', 'focus', 'change', 'scroll', 'tab', 'submit', 'share'].includes(kind) ? kind : 'action', label, page: 'tag-request' });
+        const evx = { at: now, kind: ['click', 'focus', 'change', 'scroll', 'tab', 'submit', 'share'].includes(kind) ? kind : 'action', label, page: 'tag-request' };
+        entry.events.push(evx); freshPub.push(evx);
       }
+      if (freshPub.length) liveEventNotify(`p:${id}`, entry.name || 'Employee link visitor', freshPub, { publicSessionId: id });
       entry.events = entry.events.slice(-80);
     }
     prunePublicLiveSessions(now);
