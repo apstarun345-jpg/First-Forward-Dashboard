@@ -9173,6 +9173,7 @@ async function handleApi(req, res, url) {
       }
     };
     await walk(__dirname, '', 0);
+    try { const ws = workspaceStore(); ws.backupLastPullAt = new Date().toISOString(); ws.backupAlertAt = ''; persist('notify').catch(() => {}); } catch { /* best effort */ }
     const viewer = { username: 'backup', name: 'Backup (read-only)', role: 'user', approved: true, permissions: allPermKeysNow(), notifyAccess: false, createdAt: new Date().toISOString() };
     return sendJson(res, 200, {
       ok: true, version: SW_VERSION || '', builtAt: new Date().toISOString(), assets,
@@ -11030,6 +11031,14 @@ async function handleApi(req, res, url) {
         const rows = (workspaceStore().tagRequests || []).filter((r) => r && r.status === 'approved' && !isSheetSynced(r) && tagReqNeedsSheet(r)
           && ts(r.updatedAt || r.at) > cutoff && now - ts(r.updatedAt || r.at) > 90e3
           && !(r.sheetSyncStartedAt && now - ts(r.sheetSyncStartedAt) < 10 * 60e3));
+        // 🚨 v3.125.371 — 30 min se zyada atki sheet entry → admin ko ek alert (6 ghante me ek baar).
+        const stuck = rows.filter((r) => now - ts(r.updatedAt || r.at) > 30 * 60e3);
+        if (stuck.length && now - (globalThis.__tagSheetStuckAlertAt || 0) > 6 * 3600e3) {
+          globalThis.__tagSheetStuckAlertAt = now;
+          const why = String((stuck.find((r) => r.sheetSync && r.sheetSync.error) || {}).sheetSync?.error || '').slice(0, 120);
+          recordNotification({ type: 'alert', title: `📗 ${stuck.length} request ki Google Sheet entry atki hai`, body: `Approved request(s) sheet me nahi gayi${why ? ` — ${why}` : ''}. Tag Request → 📗 Sheet entry se dobara bhejo ya Link & Sheet settings check karo.`, target: 'admin', routeKey: 'tagRequest', meta: { link: '#/tagRequest', stuck: stuck.length } });
+          persist('notify').catch(() => {});
+        }
         if (rows.length) { console.log(`tag-request sheet sweep: ${rows.length} approved request(s) bina sheet entry — bhej rahe hain`); syncApprovedToSheet(rows); }
       } catch (err) { console.warn('tag-request sheet sweep:', err && err.message); }
     };
@@ -17253,6 +17262,16 @@ async function start() {
   tagReqBaselineSync(); // 🛡️ v3.50 — notify guard ka base: jo tag requests abhi durable hain
   await tagBackupGuard(); // 🛡️ v3.125.215 — live list kam ho to doosri backup copy se wapas
   { const t = setInterval(() => { tagBackupGuard().catch(() => {}); }, 3 * 60e3); if (t.unref) t.unref(); }
+  // 💾 v3.125.371 — Backup site roz snapshot kheenchti hai; 36 ghante se na aaye to admin ko alert (har 6 ghante check, ek alert ek stretch me).
+  { const t = setInterval(() => {
+      try {
+        const ws = workspaceStore(); const last = Date.parse(ws.backupLastPullAt || '') || 0;
+        if (!last || Date.now() - last < 36 * 3600e3 || ws.backupAlertAt) return;
+        ws.backupAlertAt = new Date().toISOString();
+        recordNotification({ type: 'alert', title: '💾 Backup site ka sync ruka hua hai', body: `Backup (Apps Script) ne ${Math.round((Date.now() - last) / 3600e3)} ghante se data nahi uthaya. Apps Script → Triggers me bkSync check karo / bkSync ek baar run karo.`, target: 'admin', routeKey: 'tagRequest', meta: { link: '#/settings' } });
+        persist('notify').catch(() => {});
+      } catch { /* ignore */ }
+    }, 6 * 3600e3); if (t.unref) t.unref(); }
   // Upgrade the known previous/default product title in durable settings; preserve admin custom names.
   if (/^First Forward Dashboard(?:\s*[-–—]\s*Robo\s*v?3\.2)?$/i.test(String(db.settings.appName || '').trim())) {
     db.settings.appName = 'First Forward & Gv Partner Dashboard';
