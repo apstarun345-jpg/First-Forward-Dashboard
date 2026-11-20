@@ -8,7 +8,7 @@ test('address add/edit: server routes + validation + per-term stats', () => {
   assert.match(srv, /\/api\/address-book\/lookup/);
   assert.match(srv, /termStats/);
   assert.match(srv, /Mobile number 10 digit ka sahi likho/);
-  assert.match(srv, /Tag request ka address yahan edit nahi hota/);
+  assert.match(srv, /if \(ex\.src === 'Tag request'\) \{[\s\S]*?e0\.key !== key/);   // v3.125.376 — tag request address bhi edit hota hai
 });
 test('address add/edit: popup + not-found panel client', () => {
   assert.match(cli, /function addModal/);

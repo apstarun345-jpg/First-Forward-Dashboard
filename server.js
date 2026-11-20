@@ -11689,6 +11689,10 @@ async function handleApi(req, res, url) {
       const kpi = { total: view.length, ff: counts.ff, gv: counts.gv, noMobile: 0, noPin: 0, noAddr: 0, complete: 0, tagReq: 0, multi: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size };
       const okM = (x) => last10(x.mobile).length === 10, okP = (x) => /^\d{6}$/.test(String(x.pincode || '').trim()), okA = (x) => String(x.address || '').trim().length >= 8;
       view.forEach((x) => { if (!okM(x)) kpi.noMobile++; if (!okP(x)) kpi.noPin++; if (!okA(x)) kpi.noAddr++; if (okM(x) && okP(x) && okA(x)) kpi.complete++; if (x.src === 'Tag request') kpi.tagReq++; });
+      // 🔎 v3.125.376 — search ho to KPI sirf search ke result par (kitne mile · mobile/pincode/address nahi)
+      let skpi = null;
+      if (terms.length) { skpi = { total: hit.length, noMobile: 0, noPin: 0, noAddr: 0, complete: 0, tagReq: 0, multi: new Set(hit.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, terms: rawTerms.length, found: termStats.filter((x) => x.n).length };
+        hit.forEach((x) => { if (!okM(x)) skpi.noMobile++; if (!okP(x)) skpi.noPin++; if (!okA(x)) skpi.noAddr++; if (okM(x) && okP(x) && okA(x)) skpi.complete++; if (x.src === 'Tag request') skpi.tagReq++; }); }
       const kf = String(url.searchParams.get('kf') || '');
       const KF = { nomobile: (x) => !okM(x), nopin: (x) => !okP(x), noaddr: (x) => !okA(x), complete: (x) => okM(x) && okP(x) && okA(x), tagreq: (x) => x.src === 'Tag request', multi: (x) => x.gsize > 1 };
       if (KF[kf]) hit = hit.filter(KF[kf]);
@@ -11696,7 +11700,7 @@ async function handleApi(req, res, url) {
       let pins;
       if (url.searchParams.get('geo') === '1') { pins = {}; rows.forEach((r) => { if (r.pincode && !pins[r.pincode]) { const g = pinGeoOf(r.pincode); if (g) pins[r.pincode] = g; } }); }
       res.setHeader('Cache-Control', 'private, no-store');
-      return sendJson(res, 200, { ok: true, kpi, kf, termStats, total: hit.length, all: view.length, multiCount: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, counts, channels: chans, canUpload: addrCanUpload(user), rows, pins, sync: syncInfo(), cache: { at: addressBookRuntime.at ? new Date(addressBookRuntime.at).toISOString() : '', everyHours: 8 } });
+      return sendJson(res, 200, { ok: true, kpi, skpi, kf, termStats, total: hit.length, all: view.length, multiCount: new Set(view.filter((x) => x.gsize > 1).map((x) => x.gkey)).size, counts, channels: chans, canUpload: addrCanUpload(user), rows, pins, sync: syncInfo(), cache: { at: addressBookRuntime.at ? new Date(addressBookRuntime.at).toISOString() : '', everyHours: 8 } });
     }
     if (p === '/api/address-book/status' && method === 'GET') {
       if (!chans.length) throw new HttpError(403, 'Permission nahi hai.');
@@ -11741,8 +11745,18 @@ async function handleApi(req, res, url) {
         const key = String(body.key).slice(0, 200);
         const ex = (await addressBookView()).find((x) => x.key === key);
         if (!ex) throw new HttpError(404, 'Ye address ab nahi mila — page refresh karo.');
-        if (ex.src === 'Tag request') throw new HttpError(400, 'Tag request ka address yahan edit nahi hota (Tag Request page se badlo).');
         if (!chans.includes(ex.channel)) throw new HttpError(403, 'Is channel ki permission nahi hai.');
+        // ✏️ v3.125.376 — Tag request wala address bhi edit: us agent ki saari requests ka agent mobile/address/pincode/TL update (wahi layer sabse upar hai).
+        if (ex.src === 'Tag request') {
+          let n = 0;
+          for (const r of (workspaceStore().tagRequests || [])) {
+            const e0 = addressEntryFromRequest(r);
+            if (!e0 || e0.key !== key || !r.agent) continue;
+            r.agent = { ...r.agent, name: name || r.agent.name, mobile, address, ...(pincode ? { pincode } : {}), ...(tl ? { tl } : {}), ...(agentId ? { agentId } : {}) };
+            n++;
+          }
+          if (!n) throw new HttpError(404, 'Is address ki tag request nahi mili — page refresh karo.');
+        }
         rememberAddressBook([{ key, agentId: agentId || ex.id, agent: name, channel: channel || ex.channel, mobile, address, pincode, tl: tl || ex.tl, updatedAt: new Date().toISOString(), pendingSync: true, importedFrom: 'Manual edit' }]);
         /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
         try { await persist('notify'); } catch (err) { console.warn('address persist:', err && err.message); }
