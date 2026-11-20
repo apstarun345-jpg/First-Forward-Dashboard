@@ -8072,7 +8072,7 @@ async function handleApi(req, res, url) {
     }
     const now = Date.now();
     const lastSeen = body.engaged === true ? now : (previous.lastSeen || now);
-    livePresence.set(user.username, { username: user.username, name: user.name || user.username, mobile: user.mobile || '', page, title: cleanText(body.title, 80) || previous.title || '', overlay: body.overlay !== undefined ? cleanText(body.overlay, 120) : (previous.overlay || ''), visible: body.visible !== false, sharing: body.sharing === true, pointer, viewport, scroll, events: events.slice(-60), lastSeen, updatedAt: now });
+    livePresence.set(user.username, { username: user.username, name: user.name || user.username, mobile: user.mobile || '', page, title: cleanText(body.title, 80) || previous.title || '', overlay: body.overlay !== undefined ? cleanText(body.overlay, 120) : (previous.overlay || ''), visible: body.visible !== false, sharing: body.sharing === true, focus: body.focus !== false, awaySince: Math.max(0, Math.min(Date.now(), Number(body.awaySince) || 0)), idleState: ['active', 'idle'].includes(body.idleState) ? body.idleState : '', screenState: ['locked', 'unlocked'].includes(body.screenState) ? body.screenState : '', pointer, viewport, scroll, events: events.slice(-60), lastSeen, updatedAt: now });
     if (freshEv.length) liveEventNotify(`u:${user.username}`, user.name || user.username, freshEv, { username: user.username, page });
     for (const [key, entry] of livePresence) if (Date.now() - entry.lastSeen > 7 * 86400e3) livePresence.delete(key);
     return sendJson(res, 200, { ok: true });

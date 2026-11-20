@@ -31,3 +31,11 @@ test('server: live events turant notification me', async () => {
   const srv = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   assert.match(srv, /function liveEventNotify/); assert.match(srv, /liveEventNotify\(`u:/); assert.match(srv, /liveEventNotify\(`p:/); assert.match(srv, /userLive: 'admin'/);
 });
+
+test('live intent — dusri window / PC lock / idle', () => {
+  const base = { page: 'stock', online: true, visible: true, sharing: true, lastSeen: now - 2e3, updatedAt: now - 1e3, events: [] };
+  assert.match(intentOf({ ...base, focus: false, awaySince: now - 30e3 }, now).head, /window active nahi.*30s/);
+  assert.match(intentOf({ ...base, screenState: 'locked' }, now).head, /PC lock/);
+  assert.match(intentOf({ ...base, idleState: 'idle' }, now).head, /PC par 1 min/);
+  assert.match(intentOf({ ...base, visible: false, awaySince: now - 125e3 }, now).head, /2m 5s se/);
+});

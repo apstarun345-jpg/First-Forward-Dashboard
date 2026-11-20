@@ -307,7 +307,10 @@
     const what = p.kind === 'personal' ? 'Link' : p.mirror === undefined && /^public:/.test(String(p.username || '')) ? 'Employee link' : 'Dashboard';
     const noShare = p.kind !== 'personal' && p.sharing === false;
     if (!online) { head = `📴 ${what} abhi band / tab chhupa — aakhri signal ${agoS(sigAge)} pehle (is waqt kuch pata nahi, purani cheez nahi dikha rahe)`; tone = 'away'; }
-    else if (p.visible === false) { head = `🙈 ${what} tab par nahi hai — dusra tab / app chala raha hai (${agoS(idle)} se)`; tone = 'away'; }
+    else if (p.screenState === 'locked') { head = `🔒 PC lock hai — user device ke paas nahi`; tone = 'away'; }
+    else if (p.visible === false) { head = `🙈 ${what} tab par nahi hai — dusra tab / app chala raha hai (${agoS(p.awaySince ? now - p.awaySince : idle)} se)`; tone = 'away'; }
+    else if (p.focus === false && p.kind !== 'personal') { head = `🪟 ${what} dikh raha hai par window active nahi — dusri window / app par kaam kar raha hai (${agoS(p.awaySince ? now - p.awaySince : idle)} se)`; tone = 'idle'; }
+    else if (p.idleState === 'idle') { head = `💤 PC par 1 min+ se koi activity nahi (keyboard / mouse)`; tone = 'idle'; }
     else if (noShare) { head = `🔒 ${what} khula hai (online) — par user ne live sharing allow nahi ki, isliye click / search nahi dikhte`; tone = 'info'; }
     else if (p.overlay) { head = `🗂 ${p.overlay} khola hua hai`; tone = 'busy'; }
     else if (last && lastAge < 12e3) {
@@ -322,6 +325,8 @@
       ['📄 Page', pg.label],
       ...(pageSince != null ? [['⏱ Is page par', agoS(pageSince)]] : []),
       ['💤 Idle', idle < 5e3 ? 'abhi active' : agoS(idle)],
+      ...(p.kind !== 'personal' && p.sharing ? [['🪟 Window', p.focus === false ? 'active nahi' : 'active']] : []),
+      ...(p.kind !== 'personal' && p.sharing ? [['🔒 PC', p.screenState === 'locked' ? 'lock' : p.idleState === 'idle' ? 'idle' : p.idleState === 'active' ? 'chal raha' : 'permission nahi']] : []),
       ['🖥 Screen', p.kind === 'personal' ? (p.visible === false ? 'chhupa' : 'dikh raha') : p.visible === false ? 'tab chhupa' : 'dikh raha'],
       ...(vw ? [[vw < 700 ? '📱 Device' : '💻 Device', `${vw}×${(p.viewport && p.viewport.h) || '?'}`]] : []),
       ...(sc != null ? [['↕️ Scroll', `${sc}%`]] : [])

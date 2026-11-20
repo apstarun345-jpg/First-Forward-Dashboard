@@ -1175,6 +1175,29 @@ window.FF = window.FF || {};
     const modal = document.querySelector('.kpi-modal, .live-modal');
     return modal ? 'Popup open' : '';
   }
+  // ---- 🪟 v3.125.361 — screen par hai / dusri window-app par / PC idle-lock (Chrome/Edge IdleDetector, user ki ek baar ki permission se) ----
+  const away = { since: 0, idle: '', screen: '', det: null };
+  const awayMark = () => { const gone = document.visibilityState !== 'visible' || !document.hasFocus(); if (gone && !away.since) away.since = Date.now(); if (!gone) away.since = 0; };
+  const idleSupported = () => typeof window !== 'undefined' && 'IdleDetector' in window;
+  async function idleStart() {
+    if (!idleSupported() || away.det) return false;
+    try {
+      const d = new window.IdleDetector();
+      d.addEventListener('change', () => { away.idle = d.userState || ''; away.screen = d.screenState || ''; state.dirty = true; sendPresence(true); });
+      await d.start({ threshold: 60000 });
+      away.det = d; away.idle = d.userState || ''; away.screen = d.screenState || ''; state.dirty = true;
+      return true;
+    } catch { return false; }
+  }
+  async function idlePermission() {
+    if (!idleSupported()) return 'unsupported';
+    try { const q = await navigator.permissions.query({ name: 'idle-detection' }); return q.state; } catch { return 'prompt'; }
+  }
+  FF.presenceIdle = {
+    supported: idleSupported,
+    permission: idlePermission,
+    async enable() { if (!idleSupported()) return 'unsupported'; try { const r = await window.IdleDetector.requestPermission(); if (r === 'granted') await idleStart(); return r; } catch { return 'denied'; } }
+  };
   function sendPresence(force) {
     if (EMBED || !FF.auth || !FF.auth.user || FF.auth.user.role === 'admin') return;
     const share = sharing();
@@ -1184,6 +1207,8 @@ window.FF = window.FF || {};
       body.scroll = { y: Math.round(window.scrollY), h: document.documentElement.scrollHeight };
       body.overlay = overlayLabel();
       body.sharing = true;
+      awayMark();
+      body.focus = document.hasFocus(); body.awaySince = away.since || 0; body.idleState = away.idle || ''; body.screenState = away.screen || '';
       body.hash = location.hash;
       if (state.events.length) { body.events = state.events.splice(0); }
     } else body.pointer = null;
@@ -1243,6 +1268,7 @@ window.FF = window.FF || {};
       if (document.visibilityState === 'visible') { poll(false); retryPush(); }
     });
     bindPushWatchers();
+    idlePermission().then((st) => { if (st === 'granted' && FF.auth && FF.auth.user && FF.auth.user.role !== 'admin') idleStart(); });   // permission pehle mil chuki ho to chup-chaap shuru (popup dobara nahi)
     // 💓 heartbeat: sharing ON to 10 s (taaki admin ko 'online / offline' 100% sahi dikhe), warna 45 s
     state.presenceTimer = setInterval(() => { if (sharing() || Date.now() - (state.lastSent || 0) >= 44e3) sendPresence(); }, 10e3);
     // 👁 Admin live-view pointer/scroll share — sirf tab chalao jab share ON ho (warna 400ms ka
@@ -1274,8 +1300,10 @@ window.FF = window.FF || {};
         track('click', labelOf(e.target));
       }, { passive: true, capture: true });
       document.addEventListener('change', (e) => { if (e.target && e.target.matches && e.target.matches('select')) track('select', `${labelOf(e.target.closest('label') || e.target)} → ${e.target.options[e.target.selectedIndex] ? e.target.options[e.target.selectedIndex].text : ''}`); }, true);
+      window.addEventListener('blur', () => { awayMark(); track('tab', 'Window active nahi (dusri window / app par gaya)'); });
+      window.addEventListener('focus', () => { awayMark(); track('tab', 'Dashboard window par wapas aaya'); });
       window.addEventListener('hashchange', () => track('page', `Opened ${location.hash.replace(/^#\/?/, '') || 'home'}`));
-      document.addEventListener('visibilitychange', () => { track('tab', document.visibilityState === 'visible' ? 'Came back to the tab' : 'Switched away from the tab'); sendPresence(); });
+      document.addEventListener('visibilitychange', () => { awayMark(); track('tab', document.visibilityState === 'visible' ? 'Came back to the tab' : 'Switched away from the tab'); sendPresence(); });
       ['keydown', 'wheel', 'touchstart'].forEach((type) => document.addEventListener(type, () => { state.lastInteraction = Date.now(); }, { passive: true }));
     }
   }
