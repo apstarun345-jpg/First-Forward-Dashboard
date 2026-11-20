@@ -1632,14 +1632,20 @@ window.FF = window.FF || {};
   // ---- table experience: density, columns, sticky context and export ------------------------------
   function tableDensity() { try { return localStorage.getItem('ff_table_density') || 'comfortable'; } catch { return 'comfortable'; } }
   function setTableDensity(value) {
-    try { localStorage.setItem('ff_table_density', value); } catch {}
+    try {
+      localStorage.setItem('ff_table_density', value);
+      localStorage.setItem('ff_density', value);
+    } catch {}
     document.documentElement.dataset.tableDensity = value;
+    if (value === 'compact') document.documentElement.setAttribute('data-density', 'compact');
+    else document.documentElement.removeAttribute('data-density');
     document.querySelectorAll('table').forEach((t) => t.classList.toggle('table-density-compact', value === 'compact'));
     const btn = U.$('#density-toggle');
     if (btn) {
       btn.textContent = value === 'compact' ? '≡' : '▦';
       btn.title = value === 'compact' ? 'Compact density active — tap for Comfortable · डेंसिटी' : 'Comfortable density active — tap for Compact · डेंसिटी';
       btn.setAttribute('aria-label', btn.title);
+      btn.setAttribute('aria-pressed', String(value === 'compact'));
     }
     document.querySelectorAll('button[data-table-density]').forEach((b) => {
       if (b === document.documentElement || b === document.body) return;
