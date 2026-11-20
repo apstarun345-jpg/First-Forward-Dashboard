@@ -60,7 +60,7 @@ test('Pincode public API endpoint and geo lookup', async () => {
 });
 
 test('NPCI FASTag class badges and skeleton loaders exist in stylesheets', async () => {
-  const css = await fs.readFile(path.join(root, 'ui-polish.css'), 'utf8');
+  const css = await fs.readFile(path.join(root, 'styles.css'), 'utf8');
 
   // NPCI class badges
   assert.match(css, /\.badge-vc\.vc4/);
