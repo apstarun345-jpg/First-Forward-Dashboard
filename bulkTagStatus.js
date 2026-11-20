@@ -294,16 +294,15 @@ window.FF = window.FF || {};
     const make = (key, sheet, definitions, matchKeys, gid) => {
       const defs = definitions.map((d) => ({ key: d.key, col: col(d.col) })).filter((d) => d.col);
       const cols = uniq(defs.map((d) => d.col));
-      return {
-        key, sheet, gid: gid || '', defs, cols, matchKeys,
-        mapRow: (raw) => {
-          const row = valAt(raw, defs);
-          row.source = key;
-          row._keys = uniq(matchKeys.map((k) => normId(row[k])).filter(Boolean));
-          row._signature = rowSignature(key, row);
-          return row;
-        }
+      const spec = { key, sheet, gid: gid || '', defs, cols, matchKeys };
+      spec.mapRow = (raw) => {
+        const row = valAt(raw, spec.defs);   // spec.defs badal sakti hai (sheet me jo column nahi hai wo hata diya jata hai)
+        row.source = key;
+        row._keys = uniq(matchKeys.map((k) => normId(row[k])).filter(Boolean));
+        row._signature = rowSignature(key, row);
+        return row;
       };
+      return spec;
     };
     const stockSheet = (cfg.stock && cfg.stock.sheet) || 'StockDataa';
     const gvMasterTab = 'GV Master';
@@ -377,6 +376,7 @@ window.FF = window.FF || {};
   }
   function matchedRows(record, rows) {
     const wanted = new Set((record.fields || []).map((f) => normId(f.value)).filter(Boolean));
+    if (record.extra) record.extra.forEach((k) => wanted.add(k));   // dusre pass me mile Tag ID / barcode
     return (rows || []).filter((r) => (r._keys || rowKeys(r)).some((k) => wanted.has(k)));
   }
   function className(r) { return clean(r.cls || r.cch); }
@@ -500,6 +500,25 @@ window.FF = window.FF || {};
       details, matchedCount: allRows.length, incompleteSources
     };
   }
+  /** Sheet me jo column hai hi nahi (NO_COLUMN: M) use query se hata kar dobara try — poora source fail nahi hota. */
+  async function queryTolerant(spec, batch) {
+    for (let i = 0; i < 4; i++) {
+      const tq = makeQuery(spec, batch);
+      try {
+        return await D.query(spec.sheet, tq, { gid: spec.gid, fresh: state.fresh });
+      } catch (err) {
+        const m = /NO_COLUMN:\s*([A-Z]+)/i.exec(String(err && err.message || err));
+        if (!m) throw err;
+        const bad = m[1].toUpperCase();
+        if (spec.matchKeys.some((k) => ((spec.defs.find((d) => d.key === k)) || {}).col === bad)) throw err;   // match wala column hi nahi — asli error
+        spec.defs = spec.defs.filter((d) => d.col !== bad);
+        spec.cols = spec.cols.filter((c) => c !== bad);
+        const note = spec.sheet + ': column ' + bad + ' sheet me nahi hai — Settings me mapping check karo (baaki columns se check ho gaya).';
+        try { console.warn('Bulk Tag Status:', note); } catch { /* ignore */ }
+      }
+    }
+    throw new Error(spec.sheet + ': columns match nahi hue');
+  }
   function makeQuery(spec, tokens) {
     const where = makeWhere(spec, tokens);
     if (!where.length) return '';
@@ -543,25 +562,22 @@ window.FF = window.FF || {};
     const signatures = { eir: new Set(), ffStock: new Set(), gvMaster: new Set(), gvStock: new Set() };
     const sourceFailures = { eir: new Set(), ffStock: new Set(), gvMaster: new Set(), gvStock: new Set() };
     const sourceFailureMessages = {};
-    const batches = chunks(tokenList, QUERY_CHUNK);
-    try {
+    async function runPass(tokens, label, from, to) {
+      const batches = chunks(tokens, QUERY_CHUNK);
       for (let bi = 0; bi < batches.length; bi++) {
         if (generation !== state.queryGeneration) return;
         const batch = batches[bi];
-        const percent = Math.round((bi / Math.max(1, batches.length)) * 90);
-        paintProgress(root, 'Source query ' + (bi + 1) + ' / ' + batches.length + ' · ' + batch.length + ' identifiers', percent);
+        const percent = Math.round(from + (bi / Math.max(1, batches.length)) * (to - from));
+        paintProgress(root, label + ' ' + (bi + 1) + ' / ' + batches.length + ' · ' + batch.length + ' identifiers', percent);
         const jobs = specs.map(async (spec) => {
-          const tq = makeQuery(spec, batch);
-          if (!tq || !spec.cols.length || !spec.defs.length) {
+          const tq0 = makeQuery(spec, batch);
+          if (!tq0 || !spec.cols.length || !spec.defs.length) {
             batch.forEach((t) => sourceFailures[spec.key].add(normId(t)));
             sourceFailureMessages[spec.key] = 'Column mapping missing/invalid in Settings for ' + spec.sheet;
             return { key: spec.key, error: sourceFailureMessages[spec.key] };
           }
           try {
-            const table = await D.query(spec.sheet, tq, {
-              gid: spec.gid,
-              fresh: state.fresh
-            });
+            const table = await queryTolerant(spec, batch);
             const rows = (table.rows || []).map((r) => spec.mapRow(r));
             rows.forEach((r) => {
               if (signatures[spec.key].has(r._signature)) return;
@@ -581,8 +597,29 @@ window.FF = window.FF || {};
           const errs = done.filter((x) => x.error).map((x) => specs.find((s) => s.key === x.key).sheet + ': ' + x.error);
           state.warnings.push(...errs);
         }
-        paintProgress(root, 'Checked batch ' + (bi + 1) + ' / ' + batches.length, Math.round(((bi + 1) / Math.max(1, batches.length)) * 90));
+        paintProgress(root, 'Checked batch ' + (bi + 1) + ' / ' + batches.length, Math.round(from + ((bi + 1) / Math.max(1, batches.length)) * (to - from)));
       }
+    }
+    try {
+      await runPass(tokenList, 'Source query', 0, 70);
+      if (generation !== state.queryGeneration) return;
+      // 🔁 Dusra pass — VRN se jo Tag ID / barcode mila use baaki sources (GV Master, Tag Assignment…) me bhi dhundo.
+      // (GV Master me VRN ki jagah chassis no. ho to bhi tag ID se GV issuance mil jata hai.)
+      const seenTok = new Set(tokenList.map((t) => normId(t)));
+      const extraTokens = [];
+      const everyRow = [].concat(sourceData.eir, sourceData.ffStock, sourceData.gvMaster, sourceData.gvStock);
+      valid.forEach((record) => {
+        record.extra = new Set();
+        matchedRows(record, everyRow).forEach((r) => {
+          [r.tagId, r.barcode, r.serial].forEach((v) => {
+            const raw = clean(v), k = normId(raw);
+            if (!k || k.length < 8 || record.extra.has(k)) return;
+            record.extra.add(k);
+            if (!seenTok.has(k)) { seenTok.add(k); extraTokens.push(raw.toUpperCase()); }
+          });
+        });
+      });
+      if (extraTokens.length) await runPass(extraTokens.slice(0, 600), 'Tag ID se cross-check', 70, 92);
       if (generation !== state.queryGeneration) return;
       state.results = valid.map((record) => resolveStatus(record, sourceData, sourceFailures));
       state.lastCheckedAt = new Date().toISOString();
