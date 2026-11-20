@@ -12,7 +12,7 @@ const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 test('CSP allows map tiles; vendor files present; server module blocked', () => {
   const s = read('server.js');
-  assert.match(s, /img-src 'self' data: blob: https:\/\/tile\.openstreetmap\.org https:\/\/\*\.basemaps\.cartocdn\.com https:\/\/server\.arcgisonline\.com;/);
+  assert.match(s, /img-src 'self' data: blob: https:\/\/tile\.openstreetmap\.org https:\/\/server\.arcgisonline\.com;/);
   assert.match(s, /script-src 'self'/, 'bahar ki script nahi');
   assert.match(s, /BLOCKED_FILES = new Set\(\['server\.js', 'issuedBarcodes\.js'/);
   ['vendor-leaflet.js', 'vendor-leaflet-cluster.js', 'vendor-leaflet.css'].forEach((f) => assert.ok(fs.statSync(path.join(ROOT, f)).size > 500, f));
