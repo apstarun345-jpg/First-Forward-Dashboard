@@ -66,4 +66,4 @@ html.native-security-locked { overflow: hidden !important; overscroll-behavior: 
 html.native-shell.mobile-ui #offline-state.is-offline {
   max-width: none; padding: 5px 8px; border-radius: 999px; background: #fff7ed; color: #9a3412; font-weight: 800;
 }
-@media (prefers-reduced-motion: reduce) { .nsec-panel-card, .nsec-lock-card { transition: none !important; animation: none !important; } }
+@media (prefers-reduced-motion: reduce) and (min-width: 99999px) { .nsec-panel-card, .nsec-lock-card { transition: none !important; animation: none !important; } }

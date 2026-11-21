@@ -333,7 +333,7 @@ html.native-shell .nptr-ico { display: grid; place-items: center; }
 @keyframes nSpin { to { transform: rotate(360deg); } }
 @keyframes nFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes nSheetUp { from { transform: translateY(40%); opacity: .4; } to { transform: none; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) and (min-width: 99999px) {
   html.native-shell .nsheet, html.native-shell .nsheet-scrim, html.native-shell.mobile-ui #drawer, html.native-shell.mobile-ui .sidebar { transition: none !important; animation: none !important; }
 }
 

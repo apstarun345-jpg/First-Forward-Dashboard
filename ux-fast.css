@@ -84,7 +84,7 @@ html.ff-no-anim .pro-panel .pro-login-header,
 html.ff-no-anim .pro-panel .pro-tabs,
 html.ff-no-anim .pro-panel .pro-form > * { animation: none !important; opacity: 1; transform: none; }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) and (min-width: 99999px) {
   .auth-shell.pro-shell,
   .auth-visual.pro-visual .pro-glow,
   .auth-visual.pro-visual .pro-grid,
@@ -109,4 +109,4 @@ html[data-theme="dark"] .ux-sk i::after, html.dark .ux-sk i::after { background:
 .empty-state.compact::before { font-size: 24px; }
 @keyframes uxFloat { 50% { transform: translateY(-5px); } }
 .ux-empty-act { margin-top: 4px; }
-@media (prefers-reduced-motion: reduce) { .ux-sk i::after, .empty-state::before { animation: none; } }
+@media (prefers-reduced-motion: reduce) and (min-width: 99999px) { .ux-sk i::after, .empty-state::before { animation: none; } }

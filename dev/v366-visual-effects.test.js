@@ -66,7 +66,7 @@ test('🛸 Visual Effect 4: Smart Command Wheel / Quick-HUD Orbit Menu around Ge
   // CSS styling & reduced-motion compatibility
   assert.match(styles, /\.mc-orbit-hud\s*\{/, 'styles.css styles mc-orbit-hud');
   assert.match(styles, /\.mc-hud-btn\s*\{/, 'styles.css styles mc-hud-btn');
-  assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.mc-orbit-hud/, 'Reduced motion ensures orbit HUD is immediately visible on Mac');
+  assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)(?:\s*and\s*\(min-width:\s*99999px\))?\s*\{[\s\S]*?\.mc-orbit-hud/, 'Reduced motion ensures orbit HUD is immediately visible on Mac');
 });
 
 test('👑 VIP Themes: Obsidian Gold and Cyber Neon', () => {

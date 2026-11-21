@@ -1,0 +1,56 @@
+/* v3.125.386 — UI motion + utilities. OS "Reduce motion" ko ignore karta hai; sirf site ka apna Settings → Animations band (html.ff-no-anim) rokta hai. */
+/* 6 · status colours */
+td.ux-st, .ux-st-chip { font-weight: 700; }
+td.ux-st::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: currentColor; vertical-align: 1px; }
+td.ux-st.st-ok, .ux-st-chip.st-ok { color: #15803d; }
+td.ux-st.st-bad, .ux-st-chip.st-bad { color: #dc2626; }
+td.ux-st.st-wait, .ux-st-chip.st-wait { color: #b45309; }
+td.ux-st.st-ok::before { animation: uxDot 1.8s ease-in-out infinite; }
+td.ux-st.st-wait::before { animation: uxDot 1s ease-in-out infinite; }
+@keyframes uxDot { 0%,100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; } 50% { box-shadow: 0 0 0 5px transparent; opacity: .55; } }
+@media (prefers-color-scheme: dark) { td.ux-st.st-ok { color: #4ade80; } td.ux-st.st-bad { color: #f87171; } td.ux-st.st-wait { color: #fbbf24; } }
+/* 7 · KPI sparkline draw-in */
+html body .kpi .kpi-spark { animation: uxDraw 1.1s ease-out both; }
+@keyframes uxDraw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+/* 8 · empty states */
+.empty-state::before { animation: uxFloat 3s ease-in-out infinite !important; }
+.ux-empty-hint { display: block; margin-top: 2px; font-size: 12px; opacity: .75; animation: uxFadeUp .6s ease both; }
+@keyframes uxFadeUp { from { opacity: 0; transform: translateY(6px); } }
+/* 9 · skeleton shimmer + page progress bar + row stagger */
+.ux-sk i::after { animation: uxSk 1.3s ease-in-out infinite !important; }
+#ux-prog { position: fixed; left: 0; top: 0; height: 3px; width: 0; z-index: 3000; background: linear-gradient(90deg, #6366f1, #06b6d4, #22c55e); box-shadow: 0 0 8px rgba(99,102,241,.6); opacity: 0; pointer-events: none; }
+#ux-prog.on { opacity: 1; transition: width 6s cubic-bezier(.1,.7,.2,1); width: 88%; }
+#ux-prog.done { opacity: 0; width: 100%; transition: width .25s ease, opacity .5s ease .25s; }
+html:not(.ff-no-anim) #main tbody tr.ux-in { animation: uxRow .45s ease both; animation-delay: calc(var(--i, 0) * 28ms); }
+@keyframes uxRow { from { opacity: 0; transform: translateY(8px); } }
+/* 10 · server waking banner */
+#ux-wake { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 3100; display: none; max-width: min(92vw, 520px); padding: 10px 16px 12px; border-radius: 14px; background: #1e1b4b; color: #fff; font-size: 13px; box-shadow: 0 10px 30px rgba(30,27,75,.35); }
+#ux-wake.on { display: block; animation: uxDrop .4s ease both; }
+#ux-wake b { display: block; margin-bottom: 2px; } #ux-wake i { display: block; height: 3px; margin-top: 8px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; position: relative; }
+#ux-wake i::after { content: ''; position: absolute; inset: 0; width: 40%; background: linear-gradient(90deg, #818cf8, #22d3ee); animation: uxSlide 1.1s ease-in-out infinite; }
+@keyframes uxDrop { from { opacity: 0; transform: translate(-50%, -20px); } } @keyframes uxSlide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+/* 11 · bulk select + 12 · dock */
+#ux-dock { position: fixed; left: 14px; bottom: 14px; z-index: 1200; display: none; gap: 6px; animation: uxUp2 .5s ease both; }
+#ux-dock.on { display: flex; }
+#ux-dock button { border: 0; cursor: pointer; padding: 7px 12px; border-radius: 999px; font: 700 12px/1 inherit; color: #3730a3; background: #fff; box-shadow: 0 3px 12px rgba(15,23,42,.22); transition: transform .15s ease, background .15s ease; }
+#ux-dock button:hover { transform: translateY(-2px) scale(1.04); background: #eef2ff; }
+#ux-dock button.on { background: #4f46e5; color: #fff; }
+@keyframes uxUp2 { from { opacity: 0; transform: translateY(24px); } }
+#main tbody tr { transition: background .18s ease, box-shadow .18s ease; }
+html.ux-bsel #main tbody tr { cursor: copy; }
+html.ux-bsel #main tbody tr:hover { background: rgba(99,102,241,.10) !important; }
+#main tbody tr.ux-sel { background: rgba(34,197,94,.16) !important; box-shadow: inset 4px 0 0 #16a34a; }
+#ux-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 1250; display: none; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 16px; background: #0f172a; color: #fff; font-size: 13px; box-shadow: 0 12px 34px rgba(15,23,42,.4); flex-wrap: wrap; justify-content: center; max-width: 94vw; }
+#ux-bar.on { display: flex; animation: uxUp2 .35s ease both; }
+#ux-bar b { font-size: 15px; } #ux-bar button { border: 0; cursor: pointer; padding: 6px 11px; border-radius: 10px; font: 700 12px/1 inherit; background: #334155; color: #fff; }
+#ux-bar button:hover { background: #4f46e5; } #ux-bar button.x { background: #7f1d1d; }
+html.ff-no-anim #ux-dock, html.ff-no-anim #ux-bar.on, html.ff-no-anim #ux-wake.on, html.ff-no-anim .kpi-spark, html.ff-no-anim td.ux-st::before { animation: none !important; }
+#ux-print-head { display: none; }
+@media print {
+  .sidebar, .topbar, .drawer, #ux-dock, #ux-bar, #ux-wake, #ux-prog, .ask-fab, .toast-wrap, .ux-sticky, .mobile-nav { display: none !important; }
+  html, body, .main, #main { background: #fff !important; color: #000 !important; margin: 0 !important; padding: 0 !important; width: 100% !important; max-width: none !important; }
+  #ux-print-head { display: block; padding: 0 0 8px; margin-bottom: 8px; border-bottom: 2px solid #4f46e5; font: 700 16px/1.3 system-ui, sans-serif; }
+  #ux-print-head small { font-weight: 500; opacity: .7; margin-left: 8px; }
+  .card, .kpi, tr { break-inside: avoid; box-shadow: none !important; }
+  * { animation: none !important; transition: none !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

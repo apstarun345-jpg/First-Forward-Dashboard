@@ -73,7 +73,7 @@ window.FF = window.FF || {};
   @keyframes ta-fill{from{width:0}to{width:var(--w)}}
   @keyframes ta-stripes{to{background-position:22px 0}}
   @keyframes ta-conf{0%{opacity:1;transform:translate(0,0) rotate(0)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--r))}}
-  @media (prefers-reduced-motion:reduce){.ta-card::before,.ta-live::before,.ta-ticker,.ta-row,.ta-row::after,.ta-row .ta-ic,.ta-tag,.ta-bar i,.ta-confetti i{animation:none!important}.ta-confetti{display:none}}`;
+  @media (prefers-reduced-motion: reduce) and (min-width: 99999px){.ta-card::before,.ta-live::before,.ta-ticker,.ta-row,.ta-row::after,.ta-row .ta-ic,.ta-tag,.ta-bar i,.ta-confetti i{animation:none!important}.ta-confetti{display:none}}`;
   function ensureCss() { if (document.getElementById('ta-css')) return; const st = document.createElement('style'); st.id = 'ta-css'; st.textContent = CSS; document.head.appendChild(st); }
 
   const norm = (s) => U.clean(s).toUpperCase().replace(/\s+/g, ' ');

@@ -7,7 +7,7 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const H = document.documentElement;
-  const noAnim = () => H.classList.contains('ff-no-anim') || H.classList.contains('a11y-motion') || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const noAnim = () => H.classList.contains('ff-no-anim') || H.classList.contains('a11y-motion') || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce) and (min-width: 99999px)').matches);
   const mobile = () => H.classList.contains('mobile-ui') || (window.matchMedia && matchMedia('(max-width: 760px)').matches);
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const LS = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { /* private */ } } };

@@ -264,7 +264,7 @@ html[data-ui-polish="clean"].mobile-ui :is(.content, .drawer, .ms-panel) .tbl td
 html[data-ui-polish="clean"].mobile-ui .content .card-head h3 { font-size: 14px !important; line-height: 1.5 !important; }
 
 /* Reduced motion leaves loading/status feedback intact; only ornamental motion is removed. */
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) and (min-width: 99999px) {
   html[data-ui-polish="clean"] :is(.content, .drawer, .ms-panel) :is(.btn, .icon-btn, .kpi, .page),
   html[data-ui-polish="clean"] .sidebar .nav-item {
     transition: none !important; animation: none !important; transform: none !important;

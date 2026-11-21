@@ -126,7 +126,7 @@ html.mobile-ui.pwa-standalone .topbar{
 }
 
 /* Respect users who disable motion. */
-@media (prefers-reduced-motion:reduce){
+@media (prefers-reduced-motion: reduce) and (min-width: 99999px){
   .app-boot::before,.app-boot img,.boot-fireworks .fw,.boot-progress::after{
     animation:none !important;
   }
