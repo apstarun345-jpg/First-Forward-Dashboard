@@ -291,8 +291,9 @@ const DEFAULT_SETTINGS = {
   commissionAlerts: { enabled: true, outlierPct: 25, gvGapPct: 40, mismatchPct: 5, mismatchMin: 50, zeroEarnedMin: 1 }, // cockpit.js alert thresholds
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
   stockLedger: { // 📒 dispatch ledger (barcode → dispatch date / name): First–Last barcode wali stock sheets
+    ff1: { enabled: false, label: 'FF · IDFC Stock Sheet', layout: 'ff', sheetId: '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M', gid: '0', tab: 'IDFC Stock Sheet' },
     ff2: { enabled: true, label: 'FF Stock Sheet (Sheet11)', layout: 'ff', sheetId: '1IWQfXDDM67gtZdjM21_WfvN-tVRZz4GxA3DeOnHuGj4', gid: '811063112' },
-    gv3: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315' }
+    gv3: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315', tab: 'STOCK SHEET' }
   },
   agentRegistry: { // 🆕 Agent master (Sheet4): col A = New Agent ID (EIR J se match). EIR me jo ID yahan nahi → "New IDs" page
     enabled: true, label: 'Agent master (Sheet4)', sheetId: '1AQZC4i7-MdO1jMC3PS-sWZHrizzaJm7G-tLW81gBdjk', gid: '917852070', idCol: 'A', legacyCol: 'B', nameCol: 'C', tlIdCol: 'D', tlNameCol: 'E', assistCol: 'M', mobCol: 'H', tab: ''
@@ -3899,13 +3900,15 @@ async function multiCustomerTags(ids) {
 // ---------------------------------------------------------------------------------------------
 // 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet(s): First–Last barcode ranges → interval index.
 const LEDGER_TTL = 30 * 60e3;   // Google gviz rate-limit (429) se bachne ke liye 30 min
-const ledgerState = { at: 0, index: null, promise: null, key: '', errors: {}, counts: {}, retryAt: 0, good: {} };   // good = source id → last successful rows (fail hone par purana data rahe)
+const ledgerState = { at: 0, index: null, promise: null, key: '', errors: {}, counts: {}, retryAt: 0, good: {}, perm: {} };   // perm = private/404 sheet (dobara-dobara retry nahi)   // good = source id → last successful rows (fail hone par purana data rahe)
 const ledgerSources = () => {
   const raw = (db.settings && db.settings.stockLedger) || {};
   const cfg = {};
-  for (const [k, v] of Object.entries(raw)) if (k !== 'gv1' && k !== 'gv2' && !(v && v.sheetId === '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M')) cfg[k] = v   // purane (galat ID / private tab) GV entries ignore
-  return Object.entries(cfg).filter(([, v]) => v && v.enabled !== false && /^[A-Za-z0-9_-]{20,}$/.test(String(v.sheetId || '')) && /^\d+$/.test(String(v.gid ?? ''))).map(([id, v]) => ({ id, ch: String(v.layout) === 'gv' ? 'gv' : 'ff', layout: String(v.layout) === 'gv' ? 'gv' : 'ff', sheetId: String(v.sheetId), gid: String(v.gid), label: String(v.label || id).slice(0, 60) }));
+  for (const [k, v] of Object.entries(raw)) if (k !== 'gv1' && k !== 'gv2' && !(v && v.sheetId === '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M' && String(v.layout) === 'gv')) cfg[k] = v   // purane (galat ID / private tab) GV entries ignore (FF 'IDFC Stock Sheet' allowed)
+  return Object.entries(cfg).filter(([, v]) => v && v.enabled !== false && /^[A-Za-z0-9_-]{20,}$/.test(String(v.sheetId || '')) && (/^\d+$/.test(String(v.gid ?? '')) || String(v.tab || '').trim())).map(([id, v]) => ({ id, ch: String(v.layout) === 'gv' ? 'gv' : 'ff', layout: String(v.layout) === 'gv' ? 'gv' : 'ff', sheetId: String(v.sheetId), gid: /^\d+$/.test(String(v.gid ?? '')) ? String(v.gid) : '', tab: String(v.tab || '').trim(), label: String(v.label || id).slice(0, 60) }));
 };
+const ledgerRef = (src) => (/^\d+$/.test(String(src.gid)) ? `gid:${src.gid}` : src.tab);
+const ledgerSetSheet = (qp, src) => { if (/^\d+$/.test(String(src.gid))) qp.set('gid', String(src.gid)); else qp.set('sheet', src.tab); };
 function ledgerEntry(row, letters, src, rowNo) {
   const cells = letters.map((_, k) => serverCell(row, k));
   const c0 = row && row.c && row.c[0];
@@ -3916,7 +3919,7 @@ function ledgerEntry(row, letters, src, rowNo) {
 /** Sheet ke khaali aakhri columns gviz me hote hi nahi (NO_COLUMN: K) → us column se pehle tak hi select karo, aur yaad rakho. */
 const ledgerColsCache = new Map();
 async function withLedgerLetters(src, fn) {
-  const key = `${src.sheetId}|${src.gid}|${src.layout}`;
+  const key = `${src.sheetId}|${src.gid}|${src.tab}|${src.layout}`;
   let letters = LAYOUT_LETTERS(src.layout);
   if (ledgerColsCache.has(key)) letters = letters.slice(0, ledgerColsCache.get(key));
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -3970,14 +3973,14 @@ async function ledgerDirect(barcodes) {
     const fc = letters[src.layout === 'gv' ? 6 : 5], lc = letters[src.layout === 'gv' ? 7 : 6];
     for (const c of clusters) {
       const lo = fmt(c.pfx, c.lo), hi = fmt(c.pfx, c.hi);
-      const ck = `${src.id}|${src.sheetId}|${src.gid}|${lo}|${hi}`;
+      const ck = `${src.id}|${src.sheetId}|${src.gid}|${src.tab}|${lo}|${hi}`;
       const hit = ledgerDirectCache.get(ck);
       if (hit && Date.now() - hit.at < 10 * 60e3) { for (const e of hit.rows) entries[src.ch].push(e); sourcesOk[src.id] = true; continue; }
       jobs.push((async () => {
         try {
           const { rows, L } = await withLedgerLetters(src, async (lt) => {
-            const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${lt.join(', ')} where ${fc} <= '${hi}' and ${lc} >= '${lo}' limit ${LEDGER_DIRECT_LIMIT}` });
-            const out = await gvizPageServer(qp, `gid:${src.gid}`);
+            const qp = new URLSearchParams({ id: src.sheetId, headers: '1', tq: `select ${lt.join(', ')} where ${fc} <= '${hi}' and ${lc} >= '${lo}' limit ${LEDGER_DIRECT_LIMIT}` }); ledgerSetSheet(qp, src);
+            const out = await gvizPageServer(qp, ledgerRef(src));
             return { rows: out.rows, L: lt };
           });
           if (rows.length >= LEDGER_DIRECT_LIMIT) { usable = false; return; }   // bahut zyada overlap → poora index
@@ -4028,7 +4031,7 @@ async function loadLedgerAgg() {
     const tmp = { ff: new Map(), gv: new Map() };   // per attempt — withLedgerLetters may retry the read
     try {
       let n = 0;
-      await withLedgerLetters(src, (lt) => { n = 0; tmp.ff.clear(); tmp.gv.clear(); return gvizPagesServerRaw(src.sheetId, `gid:${src.gid}`, lt, `${firstCol} is not null`, async (rows) => {
+      await withLedgerLetters(src, (lt) => { n = 0; tmp.ff.clear(); tmp.gv.clear(); return gvizPagesServerRaw(src.sheetId, ledgerRef(src), lt, `${firstCol} is not null`, async (rows) => {
         for (let i = 0; i < rows.length; i++) {
           const e = ledgerEntry(rows[i], lt, src, n + 1);
           n++;
@@ -4161,7 +4164,7 @@ async function ledgerDirectAgent(ch, body) {
           for (const cond of alts) {
             try {
               const qp = new URLSearchParams({ id: String(src.sheetId || '').replace(/[^A-Za-z0-9_-]/g, ''), tq: `select ${lt.join(', ')} where ${cond} limit 3000`, headers: '1' });
-              qp.set('gid', String(src.gid));
+              ledgerSetSheet(qp, src);
               const pu = upstreamUrl(qp); GVIZ_PRIORITY_URLS.add(pu); if (GVIZ_PRIORITY_URLS.size > 300) GVIZ_PRIORITY_URLS.delete(GVIZ_PRIORITY_URLS.values().next().value);   // priority lane
               return (await gvizPageServerInner(qp, src.label)).rows;
             } catch (err) { lastErr = err; if (/NO_COLUMN/i.test(String(err && err.message))) throw err; }
@@ -4223,7 +4226,7 @@ async function ledgerAggSnapLoad() {
     const rows = (out && out.rows) || [];
     const head = JSON.parse((rows[0] && rows[0][0]) || 'null');
     if (!head || head.kind !== 'ledgerAgg' || Date.now() - head.at > LEDGER_AGG_TTL) return false;
-    const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.layout]));
+    const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.tab, x.layout]));
     if (head.key !== key) return false;
     const body = rows.slice(1, 1 + head.n).map((r) => r[0] || '').join('');
     const j = JSON.parse(zlib.gunzipSync(Buffer.from(body, 'base64')).toString('utf8'));
@@ -4242,7 +4245,7 @@ async function ledgerAggSnapLoad() {
   } catch (err) { console.warn('dispatch snapshot load:', String(err && err.message || err).slice(0, 200)); return false; }
 }
 function ledgerAggregate(fresh) {
-  const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.layout]));
+  const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.tab, x.layout]));
   const have = ledgerAggState.data && ledgerAggState.key === key ? ledgerAggState.data : null;
   const due = have && Date.now() - ledgerAggState.at >= LEDGER_AGG_TTL;
   if (have && !fresh && !due) return Promise.resolve(have);
@@ -4265,7 +4268,7 @@ async function loadLedger() {
     let n = 0;
     try {
       // heavyScanChain ke bahar: ye chhoti sheets hain; bade StockDataa scan ke peeche atakne se dispatch kabhi load nahi hota tha.
-      await withLedgerLetters(src, (lt) => { n = 0; mine.length = 0; return gvizPagesServerRaw(src.sheetId, `gid:${src.gid}`, lt, `${firstCol} is not null`, async (rows) => {
+      await withLedgerLetters(src, (lt) => { n = 0; mine.length = 0; return gvizPagesServerRaw(src.sheetId, ledgerRef(src), lt, `${firstCol} is not null`, async (rows) => {
         for (let i = 0; i < rows.length; i++) {
           const e = ledgerEntry(rows[i], lt, src, n + 1);
           n++;
@@ -4274,10 +4277,12 @@ async function loadLedger() {
         }
       }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30, priority: true }); });
       counts[src.id] = n;
+      ledgerState.perm[src.id] = false;
       ledgerState.good[src.id] = { ch: src.ch, rows: mine, at: Date.now() };
       return { src, rows: mine };
     } catch (err) {
       errors[src.id] = ledgerErrText(src, err);
+      ledgerState.perm[src.id] = /\b40[134]\b/.test(String((err && err.message) || err));
       // Fail hua source → pichla successful data hi use karo (khaali index nahi)
       const prev = ledgerState.good[src.id];
       if (prev) { counts[src.id] = prev.rows.length; return { src, rows: prev.rows }; }
@@ -4285,17 +4290,18 @@ async function loadLedger() {
     }
   }));
   for (const r of results) for (const e of r.rows) entries[r.src.ch].push(e);
-  return { index: { ff: buildLedgerIndex(entries.ff), gv: buildLedgerIndex(entries.gv) }, errors, counts, key: JSON.stringify(srcs.map((x) => [x.id, x.sheetId, x.gid, x.layout])) };
+  return { index: { ff: buildLedgerIndex(entries.ff), gv: buildLedgerIndex(entries.gv) }, errors, counts, key: JSON.stringify(srcs.map((x) => [x.id, x.sheetId, x.gid, x.tab, x.layout])) };
 }
 function ledgerIndex(fresh) {
-  const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.layout]));
+  const key = JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.tab, x.layout]));
   const have = ledgerState.index && ledgerState.key === key ? ledgerState.index : null;
-  const due = have && (Date.now() - ledgerState.at >= LEDGER_TTL || (Object.keys(ledgerState.errors).length && Date.now() >= ledgerState.retryAt));
+  const retryErr = Object.keys(ledgerState.errors).some((k) => !ledgerState.perm[k]);
+  const due = have && (Date.now() - ledgerState.at >= LEDGER_TTL || (retryErr && Date.now() >= ledgerState.retryAt));
   if (have && !fresh && !due) return Promise.resolve(have);
   if (!ledgerState.promise) {
     ledgerState.promise = loadLedger().then((out) => {
       ledgerState.index = out.index; ledgerState.key = out.key; ledgerState.errors = out.errors; ledgerState.counts = out.counts; ledgerState.at = Date.now();
-      ledgerState.retryAt = Object.keys(out.errors).length ? Date.now() + 5 * 60e3 : 0;
+      ledgerState.retryAt = Object.keys(out.errors).some((k) => !ledgerState.perm[k]) ? Date.now() + 5 * 60e3 : 0;
       return out.index;
     }).catch((err) => { ledgerState.errors = { all: String((err && err.message) || err).slice(0, 200) }; ledgerState.retryAt = Date.now() + 5 * 60e3; return ledgerState.index; })
       .finally(() => { ledgerState.promise = null; });
@@ -8476,8 +8482,8 @@ async function handleApi(req, res, url) {
       const letters = LAYOUT_LETTERS(src.layout);
       try {
         const { rows, L } = await withLedgerLetters(src, async (lt) => {
-          const qp = new URLSearchParams({ id: src.sheetId, gid: src.gid, headers: '1', tq: `select ${lt.join(', ')} where ${letters[src.layout === 'gv' ? 6 : 5]} is not null limit 3` });
-          const o = await gvizPageServer(qp, `gid:${src.gid}`);
+          const qp = new URLSearchParams({ id: src.sheetId, headers: '1', tq: `select ${lt.join(', ')} where ${letters[src.layout === 'gv' ? 6 : 5]} is not null limit 3` }); ledgerSetSheet(qp, src);
+          const o = await gvizPageServer(qp, ledgerRef(src));
           return { rows: o.rows, L: lt };
         });
         const sample = rows.map((r) => ledgerEntry(r, L, src, 0)).filter(Boolean).map((e) => ({ date: e.date, agent: e.agent, first: e.first, last: e.last }));
@@ -13927,6 +13933,7 @@ async function handleApi(req, res, url) {
         if (v.enabled !== undefined) v.enabled = v.enabled === true || v.enabled === 'true';
         if (v.sheetId !== undefined) { v.sheetId = sheetIdFrom(v.sheetId) || String(v.sheetId).trim(); if (v.sheetId && !/^[A-Za-z0-9_-]{20,}$/.test(v.sheetId)) throw new HttpError(400, `${k}: Google Sheet ka valid link / ID dein.`); }
         if (v.gid !== undefined) { v.gid = String(v.gid).trim(); if (v.gid !== '' && !/^\d{1,12}$/.test(v.gid)) throw new HttpError(400, `${k}: gid sirf number hota hai (URL me gid=...).`); }
+        if (v.tab !== undefined) v.tab = String(v.tab).trim().slice(0, 100);
         if (v.layout !== undefined) v.layout = String(v.layout) === 'gv' ? 'gv' : 'ff';
         if (v.label !== undefined) v.label = String(v.label).slice(0, 60);
       }

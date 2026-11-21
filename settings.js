@@ -613,17 +613,18 @@ FF.pages = FF.pages || {};
   /** 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet: First/Last barcode ranges → Master Search & Barcode Checker me dispatch date/naam. */
   function ledgerSection() {
     const sl = settings.stockLedger || {};
-    const defs = { ff2: { label: 'FF Stock Sheet (Sheet11)', layout: 'ff' }, gv3: { label: 'GV STOCK SHEET', layout: 'gv' } };
-    const row = (k) => {
+    const defs = { ff1: { label: 'FF · IDFC Stock Sheet', layout: 'ff', tab: 'IDFC Stock Sheet' }, ff2: { label: 'FF backup copy (Sheet11)', layout: 'ff' }, gv3: { label: 'GV · STOCK SHEET', layout: 'gv', tab: 'STOCK SHEET' } };
+    const row = (k, title) => {
       const v = Object.assign({}, defs[k], sl[k] || {});
-      return `<tr><td><label class="check"><input type="checkbox" data-path="stockLedger.${k}.enabled" ${v.enabled !== false ? 'checked' : ''}></label></td>
-        <td><input class="input" data-path="stockLedger.${k}.label" value="${esc(v.label || '')}"></td>
-        <td><select class="input" data-path="stockLedger.${k}.layout"><option value="ff" ${v.layout !== 'gv' ? 'selected' : ''}>FF layout</option><option value="gv" ${v.layout === 'gv' ? 'selected' : ''}>GV layout</option></select></td>
+      return `<tr><td><b>${esc(title)}</b><br><label class="check"><input type="checkbox" data-path="stockLedger.${k}.enabled" ${v.enabled !== false ? 'checked' : ''}> On</label>
+        <input type="hidden" data-path="stockLedger.${k}.layout" value="${v.layout === 'gv' ? 'gv' : 'ff'}"><input type="hidden" data-path="stockLedger.${k}.label" value="${esc(v.label || '')}"></td>
         <td><input class="input mono" data-path="stockLedger.${k}.sheetId" value="${esc(v.sheetId || '')}" placeholder="Sheet link ya ID"></td>
-        <td><input class="input mono" data-path="stockLedger.${k}.gid" value="${esc(v.gid || '')}" placeholder="gid" style="width:110px"></td></tr>`;
+        <td><input class="input" data-ldg-tab="${k}" data-path="stockLedger.${k}.tab" value="${esc(v.tab || '')}" placeholder="Tab name (jaise STOCK SHEET)"></td>
+        <td><input class="input mono" data-ldg-gid="${k}" data-path="stockLedger.${k}.gid" value="${esc(v.gid || '')}" placeholder="gid (optional)" style="width:110px"></td></tr>`;
     };
-    return section('📒 Dispatch ledger · stock sheets', `<p class="dim small">Master Search aur Barcode Checker me <b>dispatch date + kisko diya</b> in sheets ke <b>First / Last barcode</b> range se aata hai (server khud range expand karta hai). Har sheet <b>"Anyone with the link: Viewer"</b> honi chahiye. FF layout: <i>Date · Agent · ID · Class · Qty · First · Last…</i> · GV layout: <i>Date · ID · Agent · Mobile · Class · Qty · First · Last…</i>. Link paste karo — ID automatically nikal li jaati hai; <b>gid</b> = URL me <code>gid=…</code>.</p>
-      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>On</th><th>Naam</th><th>Layout</th><th>Sheet link / ID</th><th>gid</th></tr></thead><tbody>${['ff2', 'gv3'].map(row).join('')}</tbody></table></div><p class="dim small">Sheet ya tab badalni ho to naya <b>link</b> aur <b>gid</b> (URL me <code>gid=…</code>, tab kholne par address bar me dikhta hai) daalo → Save → <b>Test</b> dabao. Sheet "Anyone with the link: Viewer" honi chahiye.</p>${saveBar('stockLedger')}<div class="btn-row" style="margin-top:8px"><button class="btn small" id="ldg-test">🧪 Test sources</button></div><div id="ldg-test-out" class="small" style="margin-top:6px"></div>`);
+    return section('📒 Dispatch sheet · FF + GV', `<p class="dim small">Master Search ka <b>Last dispatch</b>, Barcode Checker aur Home ka <b>Dispatched · still in office stock</b> box in sheets ke <b>First / Last barcode</b> range se chalte hain. FF aur GV ki <b>alag sheet link + tab name</b> daalo. Har sheet <b>"Anyone with the link: Viewer"</b> honi chahiye. FF layout: <i>Date · Agent · ID · Class · Qty · First · Last…</i> · GV layout: <i>Date · ID · Agent · Mobile · Class · Qty · First · Last…</i></p>
+      <div class="table-wrap"><table class="tbl compact"><thead><tr><th>Dispatch sheet</th><th>Sheet link / ID</th><th>Tab name</th><th>gid</th></tr></thead><tbody>${row('ff1', 'FF dispatch sheet')}${row('gv3', 'GV dispatch sheet')}${row('ff2', 'FF backup (copy)')}</tbody></table></div>
+      <p class="dim small">Tab name badalne par gid khud khaali ho jaata hai (tab name se hi sheet milti hai). <b>FF dispatch sheet</b> abhi <b>Off</b> hai kyunki wo file private hai (Google 401) — Share → "Anyone with the link: Viewer" karke On karo. Tab tak <b>FF backup</b> (uski public copy) se data aata hai; FF sheet On hone par backup Off kar sakte ho. Save → <b>Test</b> dabao.</p>${saveBar('stockLedger')}<div class="btn-row" style="margin-top:8px"><button class="btn small" id="ldg-test">🧪 Test sources</button></div><div id="ldg-test-out" class="small" style="margin-top:6px"></div>`);
   }
   /** 🆕 Agent master (Sheet4) — New IDs page isse EIR ke agents compare karta hai. */
   function complaintsSection() {
@@ -3081,6 +3082,7 @@ FF.pages = FF.pages || {};
           o.innerHTML = `✅ ${U.fmt(r.total)} rows read · <b>${U.fmt(r.assistants)}</b> with Assistant ID${ex ? `<br><span class="dim">Sample: ${ex}</span>` : ''}${r.assistants ? '' : '<br>⚠️ No Assistant IDs found — check the Assistant ID column letter.'}`;
         } catch (err) { o.innerHTML = `❌ ${esc(String((err && err.message) || err))}`; }
       }, 'Syncing…'));
+      body.querySelectorAll('[data-ldg-tab]').forEach((t) => t.addEventListener('input', () => { const g = body.querySelector(`[data-ldg-gid="${t.dataset.ldgTab}"]`); if (g && t.value.trim()) g.value = ''; }));   // tab badla → purana gid hata do
       const ldgBtn = U.$('#ldg-test', body);
       if (ldgBtn) ldgBtn.addEventListener('click', () => U.withButtonBusy(ldgBtn, async () => {
         const o = U.$('#ldg-test-out', body);
