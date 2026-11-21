@@ -72,11 +72,11 @@ window.FF = window.FF || {};
     $('#amx-map').innerHTML = '';
     map = L.map($('#amx-map'), { zoomControl: false, worldCopyJump: true, minZoom: 4, maxZoom: 18 }).setView([22.5, 80], 5);
     const layers = {
-      '🗺 Street': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }),
-      '🧭 Road (Esri)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles © Esri' }),
+      '🗺 Street (English)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles © Esri' }),
+      '🧭 Local names (OSM)': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }),
       '🛰 Satellite': L.layerGroup([L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles © Esri' }), L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 })])
     };
-    layers['🗺 Street'].addTo(map);
+    layers['🗺 Street (English)'].addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     L.control.layers(layers, null, { position: 'topright', collapsed: false }).addTo(map);
     L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
