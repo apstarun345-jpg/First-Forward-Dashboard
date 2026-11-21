@@ -5251,11 +5251,13 @@ async function buildOfficeDispatched() {
   officeDispState.phase = 'stock'; officeDispState.t0 = Date.now();
   const sidx = await stockAgeIndexWithin(60e3, false);
   if (!sidx || !sidx.ff || (sidx.errors && sidx.errors.ff)) throw new Error('StockDataa index abhi ready nahi — thodi der baad try karo');
+  // Site jise "Office stock" kehti hai wahi: StockDataa me agent blank / Not assigned AUR GV Tag Assignment me bhi kisi agent par nahi
+  // (sirf agent-blank lene par GV ko diye tags bhi office me gin jaate the — GV tags FF StockDataa me blank agent ke saath hote hain).
   const office = [];
-  for (const r of sidx.ff.raw || []) {
-    const bc = ibDigits(r[1]);
-    if (!bc || !isUnassignedName(r[4])) continue;
-    office.push({ tagId: String(r[0] || '').trim(), barcode: bc, cls: r[2], bcDate: Number.isFinite(Number(r[3])) && Number(r[3]) > 10000 ? new Date(Number(r[3]) * 86400e3).toISOString().slice(0, 10) : '', agentId: String(r[5] || '').trim(), agentName: String(r[4] || '').trim() });
+  for (const r of stockMapRows(sidx, { bucket: 'office' })) {
+    const bc = ibDigits(r.barcode);
+    if (!bc) continue;
+    office.push({ tagId: String(r.tagId || '').trim(), barcode: bc, cls: r.cls, bcDate: '', agentId: String(r.ffAgentId || '').trim(), agentName: String(r.ffAgent || '').trim() });
   }
   officeDispState.officeRows = office.length;
   officeDispState.phase = 'ledger'; console.log(`🟧 office-dispatched: StockDataa office rows ${office.length} (${Math.round((Date.now() - officeDispState.t0) / 1000)}s) — ledger index…`);
