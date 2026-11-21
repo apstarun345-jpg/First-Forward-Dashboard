@@ -38,7 +38,7 @@ test('full-screen map opens with clustered pins, filters and geolocation', { ski
   const doc = w.document;
   assert.ok(doc.getElementById('amx'), 'overlay khula');
   assert.ok(doc.getElementById('amx').classList.contains('fs'), 'host nahi → full screen');
-  assert.match(doc.getElementById('amx-sub').textContent, /2 agents map par · 2 pincode · 1 ka pincode galat/);
+  assert.match(doc.getElementById('amx-sub').textContent, /2 agents map par · 2 \/ 36 states · 2 pincode · 1 ka pincode galat/);
   assert.match(doc.getElementById('amx-chips').textContent, /Active 1/);
   assert.ok(doc.querySelector('.leaflet-control-zoom'), 'zoom +/-');
   assert.ok(doc.querySelector('.leaflet-control-layers'), 'layer switcher');
@@ -47,6 +47,12 @@ test('full-screen map opens with clustered pins, filters and geolocation', { ski
   tl.value = 'TL Two'; tl.onchange();
   assert.match(doc.getElementById('amx-sub').textContent, /^1 agents/);
   tl.value = ''; tl.onchange();
+  // states tab
+  doc.querySelector('[data-tab="state"]').click();
+  const stx = doc.getElementById('amx-list').textContent;
+  assert.match(stx, /2 states me agents/); assert.match(stx, /34 me koi nahi/); assert.match(stx, /Kerala/);
+  doc.querySelector('[data-st="Chhattisgarh"]').click();
+  assert.match(doc.getElementById('amx-list').textContent, /Korba/);
   // bad pincode tab
   doc.querySelector('[data-tab="bad"]').click();
   assert.match(doc.getElementById('amx-list').textContent, /Bad Pin/);
