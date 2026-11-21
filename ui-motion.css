@@ -58,3 +58,5 @@ html.ff-no-anim #ux-dock, html.ff-no-anim #ux-bar.on, html.ff-no-anim #ux-wake.o
   .card, .kpi, tr { break-inside: avoid; box-shadow: none !important; }
   * { animation: none !important; transition: none !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+/* dock sidebar ke upar na aaye (laptop/desktop) */
+@media (min-width: 1001px) { #ux-dock { left: calc(var(--sidebar-w, 272px) + 16px); } }
