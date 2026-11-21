@@ -4257,7 +4257,8 @@ function ledgerAggregate(fresh) {
 async function loadLedger() {
   const srcs = ledgerSources();
   const entries = { ff: [], gv: [] }, errors = {}, counts = {};
-  for (const src of srcs) {
+  // ⚡ v3.125.407 — sources ek saath (pehle ek-ek karke = cold start par 10–20 min); order wahi rakha (pehla source jeetta hai).
+  const results = await Promise.all(srcs.map(async (src) => {
     const letters = LAYOUT_LETTERS(src.layout);
     const mine = [];
     const firstCol = letters[src.layout === 'gv' ? 6 : 5];
@@ -4271,17 +4272,19 @@ async function loadLedger() {
           if (e) mine.push(e);
           if (i % 4000 === 3999) await yieldLoop();
         }
-      }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30 }); });
+      }, { headers: 1, pageRows: 4000, window: 1, maxPages: 30, priority: true }); });
       counts[src.id] = n;
       ledgerState.good[src.id] = { ch: src.ch, rows: mine, at: Date.now() };
-      for (const e of mine) entries[src.ch].push(e);   // (rows were only added on the failure path — a fresh load gave an empty index)
+      return { src, rows: mine };
     } catch (err) {
       errors[src.id] = ledgerErrText(src, err);
       // Fail hua source → pichla successful data hi use karo (khaali index nahi)
       const prev = ledgerState.good[src.id];
-      if (prev) { counts[src.id] = prev.rows.length; for (const e of prev.rows) entries[src.ch].push(e); }
+      if (prev) { counts[src.id] = prev.rows.length; return { src, rows: prev.rows }; }
+      return { src, rows: [] };
     }
-  }
+  }));
+  for (const r of results) for (const e of r.rows) entries[r.src.ch].push(e);
   return { index: { ff: buildLedgerIndex(entries.ff), gv: buildLedgerIndex(entries.gv) }, errors, counts, key: JSON.stringify(srcs.map((x) => [x.id, x.sheetId, x.gid, x.layout])) };
 }
 function ledgerIndex(fresh) {
@@ -17721,7 +17724,9 @@ async function start() {
     cacheLoadDisk().then((n) => { if (n) console.log(`💾 gviz cache: ${n} entries disk se wapas (deploy ke baad turant garam)`); }).catch(() => {});
     setInterval(() => { cacheSaveDisk().catch(() => {}); }, 10 * 60e3).unref();
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
-    setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
+    setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
+    setTimeout(() => { officeDispatched(false).catch(() => {}); }, 150e3).unref?.();   // 🟧 Home box ke liye pehle se taiyar (cold start par 1st open turant)
+    setInterval(() => { officeDispatched(false).catch(() => {}); }, 3 * 3600e3).unref();   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
     setInterval(() => { hotSaveMaybe(false); }, 30 * 60e3).unref();
     setTimeout(() => { hotSaveMaybe(false); }, 12 * 60e3).unref?.();
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
