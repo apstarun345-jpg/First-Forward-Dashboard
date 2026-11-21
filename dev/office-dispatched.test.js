@@ -34,3 +34,12 @@ test('v411: nightly snapshot + chunked drawer + vc16 cell', async () => {
   const c = fs.readFileSync(new URL('../npci-colors.css', import.meta.url), 'utf8');
   assert.match(c, /td\.npci-cell\[data-vc="vc16"\]/);
 });
+
+test('v412: barcode checker shows FF/GV mapping', async () => {
+  const fs = await import('node:fs');
+  const s = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(s, /function gvMapInfo/);
+  assert.match(s, /\.\.\.gvMapInfo\(/);
+  const c = fs.readFileSync(new URL('../barcodeChecker.js', import.meta.url), 'utf8');
+  assert.match(c, /GV Tag Assignment me map/);
+});

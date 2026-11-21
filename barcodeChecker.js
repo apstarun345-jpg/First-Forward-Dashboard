@@ -109,7 +109,12 @@ FF.pages = FF.pages || {};
   /** Ek barcode ka final row: stock row + EIR hit + anumaanit tag. */
   function makeRow(label, st, tag, inferred, is) {
     if (is) return { barcode: label, k: 'iss', tagId: tag, cls: is.cls, agent: is.agent, agentId: is.agentId, tl: is.tl, date: is.date, vrn: is.vrn, note: `${is.ch === 'GV Partner' ? 'GV' : 'FF'}${st ? ' · StockDataa me bhi hai' : inferred ? ' · tag ID barcode se anumaanit' : ''}${is.type ? ' · ' + is.type : ''}` };
-    if (st) return { barcode: label, k: st.agent ? 'st' : 'bc', tagId: tag, cls: st.cls, agent: st.agent || st.inventory || '', agentId: st.agentId || '', tl: st.tl || '', date: st.agentAt || st.bcAt || '', vrn: '', note: st.agent ? '' : 'Agent ko allocate nahi' };
+    if (st) {
+      const gvA = st.gvAgent || '', mapIn = st.mapIn || '';
+      const ffMapped = !!st.agent, gvMapped = mapIn === 'gv' || mapIn === 'both';
+      const where = !mapIn ? '' : mapIn === 'both' ? 'FF + GV dono me map' : mapIn === 'ff' ? 'FF StockDataa me map · GV Tag Assignment me nahi' : mapIn === 'gv' ? `GV Tag Assignment me map${gvA ? ' (' + gvA + (st.gvAgentId ? ' · ' + st.gvAgentId : '') + ')' : ''} · FF me agent nahi` : 'Na FF me agent, na GV Tag Assignment me map (office stock)';
+      return { barcode: label, k: ffMapped || gvMapped ? 'st' : 'bc', tagId: tag, cls: st.cls, agent: st.agent || (gvMapped ? gvA : '') || st.inventory || '', agentId: st.agentId || (gvMapped ? st.gvAgentId || '' : ''), tl: st.tl || (gvMapped ? st.gvTl || '' : ''), date: st.agentAt || st.bcAt || '', vrn: '', note: where || (ffMapped ? '' : 'Agent ko allocate nahi') };
+    }
     return { barcode: label, k: 'nf', tagId: tag, cls: '', agent: '', agentId: '', tl: '', date: '', vrn: '', note: tag ? 'Na stock me, na EIR me (tag ID anumaanit)' : 'Stock me nahi mila · tag ID ka andaza nahi laga' };
   }
 

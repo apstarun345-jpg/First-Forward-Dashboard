@@ -30,7 +30,7 @@ import { createMappingJobs } from './mapping-job.js';
 import { createNpciEngine, cleanItem as npciCleanItem } from './npci-engine.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS, LAYOUTS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
-import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
+import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, mapBucketOf as stockMapBucketOf, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
 import { createIssuedStore, diffLeft, applyResolved, deriveTagId, digits as ibDigits } from './issuedBarcodes.js';
 import { loadFfDispatchRows, loadGvDispatchRows, isDirect as dispatchIsDirect, directLabel as dispatchDirectLabel } from './dispatch-report.js';
 import { parseAnyFile, cleanAddressText } from './address-import.js';
@@ -4986,6 +4986,17 @@ function stockAgeStatus() {
 // ---------------------------------------------------------------------------------------------
 // 🧠 v3.125.106 — FASTag Mapping ab ALAG StockDataa copy nahi banata: stock ageing wala hi index (ek copy, snapshot-backed,
 // sheet badalne par hi naya). Pehle mapping apni poori copy + byBarcode / byTag Maps rakhta tha (~60-80 MB extra).
+// 🔗 v3.125.412 — Barcode Checker: FF StockDataa row ke saath GV Tag Assignment me bhi map hai ya nahi (dono sheet ka stock index, memory/snapshot se).
+function gvMapInfo(x) {
+  try {
+    const idx = stockAgeState.index;
+    if (!idx || !idx.mapGv) return {};
+    const r = [String(x.tagId || ''), String(x.barcode || ''), x.cls, 0, String(x.agent || ''), String(x.agentId || ''), String(x.tl || '')];
+    const m = stockMapBucketOf(r, idx.mapGv, idx.mapOpts || {});
+    const g = m.gvInfo || null;
+    return { mapIn: m.bucket, gvAgent: g ? String(g[0] || '') : '', gvAgentId: g ? String(g[1] || '') : '', gvTl: g ? String(g[2] || '') : '' };
+  } catch { return {}; }
+}
 const mappingStock = (() => {
   const keyOf = (v) => mappingIdKey(v);
   const strip = (k) => (/^\d+$/.test(k) ? k.replace(/^0+(?=\d)/, '') : k);
@@ -13246,7 +13257,7 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const list = (Array.isArray(body && body.barcodes) ? body.barcodes : []).map((x) => String(x || '').trim().slice(0, 60)).filter(Boolean).slice(0, 5000);
     if (!list.length) throw new HttpError(400, 'Barcodes chahiye.');
-    const slim = (x) => ({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, tagType: x.tagType, inventory: x.inventoryName, bcAt: x.barcodeAllocatedAt, agentId: x.stockAgentId, agent: x.stockAgentName, agentAt: x.agentAllocatedAt, tl: x.tlName });
+    const slim = (x) => ({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, tagType: x.tagType, inventory: x.inventoryName, bcAt: x.barcodeAllocatedAt, agentId: x.stockAgentId, agent: x.stockAgentName, agentAt: x.agentAllocatedAt, tl: x.tlName, ...gvMapInfo({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, agent: x.stockAgentName, agentId: x.stockAgentId, tl: x.tlName }) });
     try {
       const out = await mappingStock.lookup(list.map((b) => ({ type: 'barcode', barcode: b })), { fresh: !!(body && body.fresh) });
       const results = list.map((b, i) => ({ barcode: b, rows: ((out.results[i] || {}).rows || []).map(slim) }));
@@ -13270,7 +13281,7 @@ async function handleApi(req, res, url) {
       const out = await mappingStock.lookup([{ type: 'range', first, last }], { fresh: !!(body && body.fresh) });
       const r = (out.results && out.results[0]) || {};
       if (r.error) throw new HttpError(400, r.error);
-      const rows = (r.rows || []).map((x) => ({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, tagType: x.tagType, inventory: x.inventoryName, bcAt: x.barcodeAllocatedAt, agentId: x.stockAgentId, agent: x.stockAgentName, agentAt: x.agentAllocatedAt, tl: x.tlName }));
+      const rows = (r.rows || []).map((x) => ({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, tagType: x.tagType, inventory: x.inventoryName, bcAt: x.barcodeAllocatedAt, agentId: x.stockAgentId, agent: x.stockAgentName, agentAt: x.agentAllocatedAt, tl: x.tlName, ...gvMapInfo({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, agent: x.stockAgentName, agentId: x.stockAgentId, tl: x.tlName }) }));
       return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, rows, meta: out.meta }), { 'Cache-Control': 'no-store' });
     } catch (err) {
       if (err instanceof HttpError) throw err;
