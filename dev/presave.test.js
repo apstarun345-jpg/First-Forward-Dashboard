@@ -17,3 +17,7 @@ test('gv live delta: offset query + periodic full refresh', () => {
   assert.match(s, /offset \$\{dBase\.rows\.length\}/);
   assert.match(s, /'\+delta'|\+delta/);
 });
+test('robot brain boot retry + gc after warm', () => {
+  assert.match(s, /robotBrain\.retried/);
+  assert.match(s, /global\.gc\(\)/);
+});

@@ -5665,7 +5665,11 @@ async function robotBrainRun(reason) {
       robotBrain.lastErr = ''; const rr = await robotEirRows(); robotBrain.rows = rr.length;
       const ins = robotInsights(rr); items.push(...ins);
       if (ins.ctx) { try { items.push(...(await robotKycItems(ins.ctx))); } catch (e2) { console.warn('🤖 robot KYC:', e2.message); } }
-    } catch (e) { robotBrain.lastErr = e.message; }
+    } catch (e) {
+      robotBrain.lastErr = e.message;
+      // v3.125.398 — deploy ke baad cold cache: badi EIR query abort ho to 4 min baad ek baar dobara (pehle agle 30 min tak robot khaali rehta tha)
+      if (reason === 'boot' && !robotBrain.retried) { robotBrain.retried = true; setTimeout(() => { robotBrainRun('daily').catch(() => {}); }, 4 * 60e3).unref?.(); }
+    }
     if (db.notify.watch.robotFix !== 137 && robotBrain.gvRows > 0) { // sirf tab jab GV sach me aa gaya
       for (const k of Object.keys(sent)) if (k.startsWith('srv:') && !/^srv:(disp|stock):/.test(k)) { fixed.add(k); delete sent[k]; }
       db.notify.watch.robotFix = 137;
@@ -7128,6 +7132,7 @@ async function hotWarm(reason) {
       await new Promise((r2) => setTimeout(r2, 1200));   // Google par halka — ek-ek query
     }
   } finally { hotState.running = false; }
+  try { if (typeof global.gc === 'function') global.gc(); } catch { /* optional */ }   // warm ke baad memory wapas
   console.log(`🔥 presave warm (${reason}): ${hotState.warmed} bhari · ${hotState.skipped} pehle se garam · ${hotState.failed} fail / ${hotState.total}`);
   return hotState;
 }
