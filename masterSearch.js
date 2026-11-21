@@ -3138,12 +3138,10 @@ FF.pages = FF.pages || {};
         // v3.125.107 — class-wise: har class ka Issued / Stock, aakhri column Total
         const cls = Object.entries(list[i].stCls || {}).filter(([, v]) => v && v.total > 0).sort((a, b) => dispClsNum(a[0]) - dispClsNum(b[0]));
         if (cls.length) {
-          const cell = (k, kind, v, cl) => `<td><button type="button" class="dsp-cell ${kind === 'issued' ? 'iss' : 'stk'}" data-dsp-open="${i}|${kind}|${esc(k)}" title="${esc(cl)} · ${kind === 'issued' ? 'issue ho chuke' : 'abhi stock me'} — click = list + CSV">${U.fmt(v)}</button></td>`;
+          const cell = (k, kind, v, cl) => `<button type="button" class="dsp-cell ${kind === 'issued' ? 'iss' : 'stk'}" data-dsp-open="${i}|${kind}|${esc(k)}" title="${esc(cl)} · ${kind === 'issued' ? 'issue ho chuke' : 'abhi stock me'} — click = list + CSV"><i>${kind === 'issued' ? 'Issued' : 'Stock'}</i> <b>${U.fmt(v)}</b></button>`;
+          const grp = (k, v, label) => `<span class="dsp-g${k === null ? ' tot' : ''}"><span class="dsp-gl">${k === null ? 'Total' : `<span class="dsp-pill cg-${k === 'N/A' ? 'other na' : k.toLowerCase()}"><i>${esc(k === 'N/A' ? 'Class ?' : k)}</i></span>`}</span>${cell(k === null ? '' : k, 'issued', v.issued, label)}${cell(k === null ? '' : k, 'stock', v.stock, label)}</span>`;
           slot.classList.add('dsp-st-tbl');
-          slot.innerHTML = `<table class="dsp-ctbl"><thead><tr><th></th>${cls.map(([k]) => `<th><span class="dsp-pill cg-${k === 'N/A' ? 'other na' : k.toLowerCase()}"><i>${esc(k === 'N/A' ? 'Class ?' : k)}</i></span></th>`).join('')}<th class="tot">Total</th></tr></thead><tbody>
-            <tr><th class="iss">Issued</th>${cls.map(([k, v]) => cell(k, 'issued', v.issued, k)).join('')}${cell('', 'issued', c.issued, 'Total').replace('<td>', '<td class="tot">')}</tr>
-            <tr><th class="stk">Stock</th>${cls.map(([k, v]) => cell(k, 'stock', v.stock, k)).join('')}${cell('', 'stock', c.stock, 'Total').replace('<td>', '<td class="tot">')}</tr>
-          </tbody></table>`;
+          slot.innerHTML = `<div class="dsp-line">${cls.map(([k, v]) => grp(k, v, k)).join('')}${grp(null, c, 'Total')}</div>`;
           continue;
         }
         slot.innerHTML = `<button type="button" class="dsp-sb iss" data-dsp-open="${i}|issued" title="Stock list se nikal chuke (issue) — click = list + CSV"><i>Issued</i><b>${U.fmt(c.issued)}</b></button><button type="button" class="dsp-sb stk" data-dsp-open="${i}|stock" title="Abhi stock me — click = list + CSV"><i>Stock</i><b>${U.fmt(c.stock)}</b></button>`;

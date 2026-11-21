@@ -8951,3 +8951,15 @@ html[data-theme="light"] .mc-hud-btn {
     visibility: visible !important;
   }
 }
+
+/* v3.125.385 — Last dispatch: class-wise Issued/Stock ek hi line me (horizontal, chhote boxes) */
+.dsp-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.dsp-g { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.dsp-g.tot { padding-left: 8px; border-left: 1.5px solid rgba(148,163,184,.45); }
+.dsp-gl { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: #334155; }
+.dsp-gl .dsp-pill { background: none !important; box-shadow: none !important; padding: 0 2px; font-size: 11px; }
+.dsp-g .dsp-cell { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; padding: 0 6px; line-height: 17px; font-size: 11px; }
+.dsp-g .dsp-cell i { font-style: normal; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; opacity: .85; }
+.dsp-g .dsp-cell b { font-size: 12px; font-weight: 800; }
+.dsp-g.tot .dsp-cell { box-shadow: inset 0 0 0 1px currentColor; }
+@media (prefers-color-scheme: dark) { .dsp-gl { color: #cbd5e1; } }
