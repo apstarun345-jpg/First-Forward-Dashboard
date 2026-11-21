@@ -98,13 +98,21 @@ window.FF = window.FF || {};
     const b = D.createElement('b'); b.textContent = (h || '').trim(); const s = D.createElement('small'); s.textContent = 'ApnaPayment · ' + new Date().toLocaleString('en-IN'); ph.append(b, s);
     window.print();
   }
+  // ---- row density (Compact / Normal / Bada) ------------------------------------------------------
+  const DEN = ['compact', 'normal', 'large'], DEN_L = { compact: '↕ Compact', normal: '↕ Normal', large: '↕ Bada' };
+  const denGet = () => { try { const v = localStorage.getItem('ff_ux_den'); return DEN.indexOf(v) >= 0 ? v : 'normal'; } catch { return 'normal'; } };
+  function denApply(v) {
+    H.setAttribute('data-ux-den', v); try { localStorage.setItem('ff_ux_den', v); } catch { /* private */ }
+    const b = $('[data-d="den"]', dock); if (b) b.textContent = DEN_L[v];
+  }
   function buildDock() {
     dock = D.createElement('div'); dock.id = 'ux-dock';
-    dock.innerHTML = '<button type="button" data-d="sel" title="Rows chun kar copy / CSV / WhatsApp">☑ Select</button><button type="button" data-d="print" title="Is page ka saaf PDF / print">🖨 PDF</button>';
+    dock.innerHTML = '<button type="button" data-d="sel" title="Rows chun kar copy / CSV / WhatsApp">☑ Select</button><button type="button" data-d="den" title="Table row ki gehraai: Compact / Normal / Bada"></button><button type="button" data-d="print" title="Is page ka saaf PDF / print">🖨 PDF</button>';
+    denApply(denGet());
     bar = D.createElement('div'); bar.id = 'ux-bar';
     bar.innerHTML = '<b>0</b> chuni<button type="button" data-b="copy">📋 Copy</button><button type="button" data-b="csv">⬇ CSV</button><button type="button" data-b="wa">💬 WhatsApp</button><button type="button" data-b="all">Sab</button><button type="button" class="x" data-b="x">✕ Band</button>';
     D.body.append(dock, bar);
-    dock.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.d === 'sel') setMode(!selMode); else actPrint(); });
+    dock.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.d === 'sel') setMode(!selMode); else if (b.dataset.d === 'den') denApply(DEN[(DEN.indexOf(denGet()) + 1) % 3]); else actPrint(); });
     bar.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; ({ copy: actCopy, csv: actCsv, wa: actWa, all: actAll, x: () => setMode(false) })[b.dataset.b](); });
     D.addEventListener('keydown', (e) => { if (e.key === 'Escape' && selMode) setMode(false); });
     // capture: select mode me row click sirf select/deselect kare (page ke apne click handler na chale)

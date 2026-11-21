@@ -44,6 +44,10 @@ html.ux-bsel #main tbody tr:hover { background: rgba(99,102,241,.10) !important;
 #ux-bar.on { display: flex; animation: uxUp2 .35s ease both; }
 #ux-bar b { font-size: 15px; } #ux-bar button { border: 0; cursor: pointer; padding: 6px 11px; border-radius: 10px; font: 700 12px/1 inherit; background: #334155; color: #fff; }
 #ux-bar button:hover { background: #4f46e5; } #ux-bar button.x { background: #7f1d1d; }
+/* row density */
+html[data-ux-den="compact"] #main .tbl th, html[data-ux-den="compact"] #main .tbl td { padding-top: 3px !important; padding-bottom: 3px !important; font-size: 12px !important; line-height: 1.25 !important; }
+html[data-ux-den="large"] #main .tbl th, html[data-ux-den="large"] #main .tbl td { padding-top: 13px !important; padding-bottom: 13px !important; font-size: 15px !important; line-height: 1.45 !important; }
+#main .tbl th, #main .tbl td { transition: padding .25s ease, font-size .25s ease; }
 html.ff-no-anim #ux-dock, html.ff-no-anim #ux-bar.on, html.ff-no-anim #ux-wake.on, html.ff-no-anim .kpi-spark, html.ff-no-anim td.ux-st::before { animation: none !important; }
 #ux-print-head { display: none; }
 @media print {

@@ -15,3 +15,4 @@ test('ui-motion is loaded and covers items 6-12', () => {
   for (const k of ['td.ux-st', 'uxDraw', '#ux-wake', '#ux-bar', '@media print']) assert.ok(css.includes(k), k);
   assert.ok(!/prefers-reduced-motion/.test(css + js), 'ui-motion must not obey OS reduce motion');
 });
+test('row density control', () => { assert.match(r('ui-motion.js'), /ff_ux_den/); assert.match(r('ui-motion.css'), /data-ux-den="compact"/); });
