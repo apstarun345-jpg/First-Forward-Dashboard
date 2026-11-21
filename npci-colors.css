@@ -31,3 +31,7 @@ html body .msp-vc3 .npci-chip, html body .msp-vc3 small .npci-chip { background:
 /* v3.125.400 — VC16 (black) chip: kaala pill par text bhi dark ho jata tha (parent ka --c / color) → hamesha safed. */
 html body .npci-chip[data-vc="vc16"], html body .msp-vcs .vc i.npci-chip[data-vc="vc16"], html body .msp-vcs .vc i[data-vc="vc16"], html body .msp-vcs .vc i[data-vc="vc16"] .npci-chip { background: #1f2937 !important; color: #f9fafb !important; border-color: #4b5563 !important; }
 html[data-theme="dark"] body .npci-chip[data-vc="vc16"] { background: #000 !important; color: #e5e7eb !important; }
+/* v3.125.401 — Unusual Activity tiles (gradient bg): unit text ("agents"/"tags"), CTA ("scan pending…") aur icon dark-on-dark the → readable. */
+html body .ua-kpi-card small, html body .ua-kpi-card small.dim, html body .ua-kpi-card .ua-kpi-cta { color: rgba(255, 255, 255, .88) !important; }
+html body .ua-kpi-card .kpi-icon { color: #fff !important; background: rgba(255, 255, 255, .22) !important; }
+html body .ua-hero .ua-kicker, html body .ua-head .ua-kicker { color: #fff !important; }

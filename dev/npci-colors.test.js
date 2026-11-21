@@ -20,5 +20,5 @@ test('VC16 chip text always light', () => {
 });
 
 test('unusual tiles: unit/CTA/icon readable on gradient', () => {
-  assert.match(r('styles-unusual.css'), /ua-kpi-card \.ua-kpi-cta[^}]*color: rgba\(255, 255, 255/);
+  assert.match(r('npci-colors.css'), /ua-kpi-card \.ua-kpi-cta[^}]*color: rgba\(255, 255, 255/);
 });
