@@ -1,0 +1,28 @@
+/* v3.125.393 — NPCI FASTag colour coding har jagah: VC4 Violet · VC5 Orange · VC6 Yellow · VC7 Green · VC12 Pink · VC15 Blue · VC16 Black.
+   (VC20 ka NPCI colour tay nahi — teal; VC5+ = class 5 se upar ka group — Orange.) */
+:root { --npci-4: #7c3aed; --npci-5: #f97316; --npci-5p: #f97316; --npci-6: #eab308; --npci-7: #16a34a; --npci-12: #ec4899; --npci-15: #2563eb; --npci-16: #1f2937; --npci-20: #0d9488; }
+/* 1 · pills / badges (styles.css ke [data-vc] aur .badge-vc ko NPCI par theek) */
+html body .badge-vc.vc5p, html body .badge-vc.vc5plus, html body .pb-badge-vc.vc5p, html body [data-vc="vc5p"] { background: #ffedd5; color: #9a3412; border-color: #fed7aa; }
+html body .badge-vc.vc16, html body .pb-badge-vc.vc16, html body [data-vc="vc16"] { background: #1f2937; color: #f9fafb; border-color: #4b5563; }
+html body .badge-vc.vc15, html body .pb-badge-vc.vc15, html body [data-vc="vc15"] { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+html[data-theme="dark"] body .badge-vc.vc5p, html[data-theme="dark"] body .pb-badge-vc.vc5p, html[data-theme="dark"] body [data-vc="vc5p"] { background: #431407; color: #fed7aa; border-color: #7c2d12; }
+html[data-theme="dark"] body .badge-vc.vc16, html[data-theme="dark"] body .pb-badge-vc.vc16, html[data-theme="dark"] body [data-vc="vc16"] { background: #000; color: #e5e7eb; border-color: #6b7280; }
+html[data-theme="dark"] body .badge-vc.vc15, html[data-theme="dark"] body .pb-badge-vc.vc15, html[data-theme="dark"] body [data-vc="vc15"] { background: #1e3a8a; color: #bfdbfe; border-color: #1d4ed8; }
+/* auto-detect (npci-colors.js) — text-only "VC4" jaise label */
+.npci-chip { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid transparent; font-weight: 800; font-size: .92em; line-height: 1.5; white-space: nowrap; }
+td.npci-cell, th.npci-cell { font-weight: 800; box-shadow: inset 3px 0 0 var(--npci-c, transparent); }
+[data-vc="vc4"] { --npci-c: var(--npci-4); } [data-vc="vc5"] { --npci-c: var(--npci-5); } [data-vc="vc5p"] { --npci-c: var(--npci-5p); } [data-vc="vc6"] { --npci-c: var(--npci-6); } [data-vc="vc7"] { --npci-c: var(--npci-7); }
+[data-vc="vc12"] { --npci-c: var(--npci-12); } [data-vc="vc15"] { --npci-c: var(--npci-15); } [data-vc="vc16"] { --npci-c: var(--npci-16); } [data-vc="vc20"] { --npci-c: var(--npci-20); }
+td.npci-cell[data-vc], th.npci-cell[data-vc] { background-image: linear-gradient(90deg, color-mix(in srgb, var(--npci-c) 14%, transparent), transparent 70%); }
+/* 2 · class-group pills (Master Search dispatch etc.) */
+.cg-vc4, .cg-c.cg-vc4 { --cg: var(--npci-4); } .cg-vc5 { --cg: var(--npci-5); } .cg-vc6, .cg-c.cg-vc6 { --cg: var(--npci-6); } .cg-vc7 { --cg: var(--npci-7); }
+.cg-vc12 { --cg: var(--npci-12); } .cg-vc15 { --cg: var(--npci-15); } .cg-vc16 { --cg: var(--npci-16); } .cg-vc20, .cg-c.cg-vc20 { --cg: var(--npci-20); }
+.cg-c.cg-vc5 { --cg: var(--npci-5); } .cg-c.cg-vc7 { --cg: var(--npci-7); } .cg-c.cg-vc12 { --cg: var(--npci-12); } .cg-c.cg-vc16 { --cg: var(--npci-16); }
+/* 3 · Home / KPI cards (title se pehchan) + sparkline */
+html body .page-home .kpi[data-kpi-title="VC4"], html body .kpi[data-kpi-title="VC4"] { --ac: var(--npci-4); --cc-a: var(--npci-4); }
+html body .page-home .kpi[data-kpi-title="VC20"], html body .kpi[data-kpi-title="VC20"] { --ac: var(--npci-20); --cc-a: var(--npci-20); }
+html body .page-home .kpi[data-kpi-title="VC5+"], html body .kpi[data-kpi-title="VC5+"] { --ac: var(--npci-5p); --cc-a: var(--npci-5p); }
+html body .page-home .kpi[data-kpi-title="VC5"], html body .kpi[data-kpi-title="VC5"] { --ac: var(--npci-5); --cc-a: var(--npci-5); }
+html body .page-home .kpi[data-kpi-title="VC6"] { --ac: var(--npci-6); } html body .page-home .kpi[data-kpi-title="VC7"] { --ac: var(--npci-7); }
+html body .page-home .kpi[data-kpi-title="VC12"] { --ac: var(--npci-12); } html body .page-home .kpi[data-kpi-title="VC16"] { --ac: var(--npci-16); }
+html body .kpi .kpi-spark.tone-vc4 { color: var(--npci-4); } html body .kpi .kpi-spark.tone-vc20 { color: var(--npci-20); } html body .kpi .kpi-spark.tone-vc5p { color: var(--npci-5p); }

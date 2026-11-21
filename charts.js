@@ -6,7 +6,7 @@ window.FF = window.FF || {};
   const esc = U.esc;
   const PALETTE = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#0ea5e9', '#8b5cf6', '#f97316', '#14b8a6', '#ef4444', '#84cc16', '#06b6d4', '#d946ef', '#64748b'];
   const COLORS = {
-    VC4: '#2563eb', VC20: '#fb923c', 'VC5+': '#c2410c', NVC4: '#f97316', Commercial: '#f97316',
+    VC4: '#7c3aed', VC20: '#0d9488', 'VC5+': '#f97316', NVC4: '#f97316', Commercial: '#f97316',
     ISSUANCE: '#10b981', REPLACEMENT: '#f97316',
     'First Forward': '#8b5cf6', 'GV Partner': '#0ea5e9',
     current: '#6366f1', last: '#ec4899',
@@ -123,8 +123,8 @@ window.FF = window.FF || {};
 
   // 🚗v226 — har class ka ek pakka rang, poori site par: VC4 = neela, VC20 / VC5+ / commercial = orange.
   // v3.125.271 — VC4 = neela · VC20 = halka orange · VC5+ = gehra orange (har chart / chip / donut me yehi)
-  const CLS = { VC4: '#2563eb', VC20: '#fb923c', 'VC5+': '#c2410c', NVC4: '#f97316', COMMERCIAL: '#f97316', 'ALL COMM': '#f97316', COMM: '#f97316',
-    VC5: '#c2410c', VC6: '#f97316', VC7: '#ea580c', VC12: '#d9480f', VC16: '#c2410c' };
+  const CLS = { VC4: '#7c3aed', VC20: '#0d9488', 'VC5+': '#f97316', NVC4: '#f97316', COMMERCIAL: '#f97316', 'ALL COMM': '#f97316', COMM: '#f97316',
+    VC5: '#f97316', VC6: '#eab308', VC7: '#16a34a', VC12: '#ec4899', VC15: '#2563eb', VC16: '#1f2937' };   // v3.125.393 — NPCI tag colours
   const cc = (n) => CLS[String(n == null ? '' : n).trim().toUpperCase().replace(/\s+/g, ' ')] || null;
   function color(name, i) { return cc(name) || COLORS[name] || PALETTE[i % PALETTE.length]; }
   function fmtVal(v, f) { return f ? f(v) : U.fmt(v); }
