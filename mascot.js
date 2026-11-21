@@ -1734,7 +1734,7 @@
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
       const top = (r && r.items || []).reduce((m, x) => Math.max(m, Date.parse(x.createdAt) || 0), last);
       if (top) cfg.lastNotif = new Date(top).toISOString();
-      latestOnly(fresh, (x) => `n|${x.type || ''}|${noEmo(x.title)}`, (x) => Date.parse(x.createdAt) || 0, (x) => {
+      latestOnly(fresh, (x) => `n|${x.type || ''}|${noEmo(x.title)}|${(x.meta && (x.meta.username || x.meta.publicSessionId)) || ''}`, (x) => Date.parse(x.createdAt) || 0, (x) => {
         const ic = emo(x.title) || '🔔';
         const link = x.meta && x.meta.link ? String(x.meta.link) : '';
         return {

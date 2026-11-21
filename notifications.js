@@ -1250,24 +1250,26 @@ window.FF = window.FF || {};
     bind();
     syncBellVisibility();
     if (state.started || EMBED) return;
-    if (!hasAccess()) { state.started = true; return; } // bell off — no polling, no push
+    // v3.125.394 — bell band ho tab bhi presence / activity / live-screen chalta rahe (admin ko 'never seen' na dikhe); sirf polling + push band
+    const acc = hasAccess();
     state.started = true;
-    loadPrefs().then(() => { setupPush(true); render(); });
-    poll(true);
+    if (acc) { loadPrefs().then(() => { setupPush(true); render(); }); poll(true); }
     sendPresence();
     // ⚡ v3.60 cadence: pehla fast poll 800ms, phir 15s visible / 60s hidden (pehle 5s/15s tha).
     // Bell ka kaam "naya alert turant dikhe" hai — 15s me bhi wahi hota hai, aur phone par requests
     // 1/3 reh jaati hain (server + battery + 6-connection limit sab par asar). Push (OS panel) waise
     // bhi instant hai, wo is poll par depend nahi karta.
-    setTimeout(() => poll(false), 800);
+    if (acc) setTimeout(() => poll(false), 800);
     // 📉 v3.74 bandwidth: visible 15 s → 30 s, background 60 s → 5 min (OS push alerts waise bhi turant aate hain).
     const pollMs = () => (document.visibilityState === 'visible' ? 30e3 : 300e3);
-    state.timer = setInterval(() => poll(false), pollMs());
-    document.addEventListener('visibilitychange', () => {
-      if (state.timer) { clearInterval(state.timer); state.timer = setInterval(() => poll(false), pollMs()); }
-      if (document.visibilityState === 'visible') { poll(false); retryPush(); }
-    });
-    bindPushWatchers();
+    if (acc) {
+      state.timer = setInterval(() => poll(false), pollMs());
+      document.addEventListener('visibilitychange', () => {
+        if (state.timer) { clearInterval(state.timer); state.timer = setInterval(() => poll(false), pollMs()); }
+        if (document.visibilityState === 'visible') { poll(false); retryPush(); }
+      });
+      bindPushWatchers();
+    }
     idlePermission().then((st) => { if (st === 'granted' && FF.auth && FF.auth.user && FF.auth.user.role !== 'admin') idleStart(); });   // permission pehle mil chuki ho to chup-chaap shuru (popup dobara nahi)
     // 💓 heartbeat: sharing ON to 10 s (taaki admin ko 'online / offline' 100% sahi dikhe), warna 45 s
     state.presenceTimer = setInterval(() => { if (sharing() || Date.now() - (state.lastSent || 0) >= 44e3) sendPresence(); }, 10e3);
