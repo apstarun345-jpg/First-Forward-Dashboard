@@ -14,3 +14,7 @@ test('gradient vc tiles: npci-chip label stays visible', async () => {
   const css = readFileSync(new URL('../npci-colors.css', import.meta.url), 'utf8');
   assert.match(css, /\.msp-vc3 \.npci-chip[^}]*background: transparent/);
 });
+
+test('VC16 chip text always light', () => {
+  assert.match(r('npci-colors.css'), /npci-chip\[data-vc="vc16"\][^}]*color: #f9fafb !important/);
+});

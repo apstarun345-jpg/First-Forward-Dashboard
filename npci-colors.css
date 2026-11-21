@@ -28,3 +28,6 @@ html body .page-home .kpi[data-kpi-title="VC12"] { --ac: var(--npci-12); } html 
 html body .kpi .kpi-spark.tone-vc4 { color: var(--npci-4); } html body .kpi .kpi-spark.tone-vc20 { color: var(--npci-20); } html body .kpi .kpi-spark.tone-vc5p { color: var(--npci-5p); }
 /* v3.125.399 — rang-birange gradient tiles (VC4/VC20/VC5+) ke andar chip ka light background + safed text = label gayab. Tile ka apna rang rahe. */
 html body .msp-vc3 .npci-chip, html body .msp-vc3 small .npci-chip { background: transparent !important; border-color: transparent !important; color: #fff !important; padding: 0 !important; }
+/* v3.125.400 — VC16 (black) chip: kaala pill par text bhi dark ho jata tha (parent ka --c / color) → hamesha safed. */
+html body .npci-chip[data-vc="vc16"], html body .msp-vcs .vc i.npci-chip[data-vc="vc16"], html body .msp-vcs .vc i[data-vc="vc16"], html body .msp-vcs .vc i[data-vc="vc16"] .npci-chip { background: #1f2937 !important; color: #f9fafb !important; border-color: #4b5563 !important; }
+html[data-theme="dark"] body .npci-chip[data-vc="vc16"] { background: #000 !important; color: #e5e7eb !important; }
