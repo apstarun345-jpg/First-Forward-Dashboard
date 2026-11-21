@@ -7077,6 +7077,47 @@ function markHot(url) {
   HOT.set(url, h);
   if (HOT.size > HOT_LIMIT) HOT.delete(HOT.keys().next().value);
 }
+// 🔥 v3.125.396 — PRESAVE: jo daily-sheet queries (EIR · StockDataa · Tag Assignment · priority) sach me use hoti hain unki list DURABLE (settings)
+// me save; deploy / sleep ke baad boot par wahi queries ek-ek karke (Google par halka) pehle se bhar di jaati hain → pehli search bhi turant, error nahi.
+// GV live today jaan-boojh kar isme nahi (wo hamesha live).
+const hotState = { saved: 0, warmed: 0, skipped: 0, failed: 0, total: 0, at: 0, running: false, savedAt: 0 };
+function hotStatus() { return { ...hotState, listed: ((db.settings && db.settings.hotUrls && db.settings.hotUrls.n) || 0) }; }
+function hotCandidates() {
+  return [...HOT.entries()].filter(([u]) => { try { return dailyKeyOfUrl(u) || GVIZ_PRIORITY_URLS.has(u); } catch { return false; } })
+    .sort((a, b) => b[1].hits - a[1].hits).slice(0, 80).map(([u]) => u);
+}
+function hotSaveMaybe(force) {
+  try {
+    const urls = hotCandidates(); if (urls.length < 3) return false;
+    const prev = db.settings && db.settings.hotUrls;
+    if (!force && prev && Date.now() - (prev.at || 0) < 6 * 3600e3) return false;
+    const blob = zlib.gzipSync(Buffer.from(JSON.stringify(urls))).toString('base64');
+    if (prev && prev.blob === blob) return false;
+    db.settings.hotUrls = { at: Date.now(), n: urls.length, blob };
+    persist('settings').catch(() => {}); hotState.saved = urls.length; hotState.savedAt = Date.now();
+    return true;
+  } catch { return false; }
+}
+async function hotWarm(reason) {
+  if (hotState.running) return hotState;
+  let urls = [];
+  try { const b = db.settings && db.settings.hotUrls && db.settings.hotUrls.blob; if (b) urls = JSON.parse(zlib.gunzipSync(Buffer.from(b, 'base64')).toString('utf8')); } catch { urls = []; }
+  if (!Array.isArray(urls) || !urls.length) return hotState;
+  Object.assign(hotState, { running: true, warmed: 0, skipped: 0, failed: 0, total: urls.length, at: Date.now() });
+  try {
+    for (const u of urls) {
+      if (typeof u !== 'string' || !/^https:\/\/docs\.google\.com\//.test(u)) { hotState.skipped++; continue; }
+      const hit = cache.get(u);
+      if (hit && cacheFresh(u, hit)) { hotState.skipped++; continue; }
+      if (gvizCooldownActive()) { await new Promise((r) => setTimeout(r, 15e3)); if (gvizCooldownActive()) { hotState.failed++; continue; } }
+      const r = await refreshCache(u);
+      if (r) hotState.warmed++; else hotState.failed++;
+      await new Promise((r2) => setTimeout(r2, 1200));   // Google par halka — ek-ek query
+    }
+  } finally { hotState.running = false; }
+  console.log(`🔥 presave warm (${reason}): ${hotState.warmed} bhari · ${hotState.skipped} pehle se garam · ${hotState.failed} fail / ${hotState.total}`);
+  return hotState;
+}
 const goodGvizBody = (body) => typeof body === 'string' && body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(body);
 async function upstreamOnce(url) {
   let p = inflight.get(url);
@@ -7385,6 +7426,40 @@ async function issuedResolvePending(list, stats) {
   }
 }
 /** Raat ki job: stock snapshot diff → jo barcode stock se nikle → GV Master / EIR se data → register me save. */
+// 💾 v3.125.396 — issued register ko DURABLE rakho: Render par DATA_DIR har deploy / sleep me mit jaata hai → pehle har deploy par register khaali ho jata tha.
+// Dono gz files Google Sheet ke CACHE_ISSUED tab me (45 KB chunks) — boot par wapas.
+const IB_SNAP_TAB = 'CACHE_ISSUED';
+const ibSnapState = { savedAt: 0, loadedAt: 0, err: '' };
+async function ibSnapSave() {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return false;
+  try {
+    const dir = path.join(DATA_DIR, 'issued'), rd = (n) => { try { return readFileSync(path.join(dir, n)).toString('base64'); } catch { return ''; } };
+    const body = Buffer.from(JSON.stringify({ a: rd('issued-barcodes.json.gz'), b: rd('stock-barcodes-prev.json.gz') })).toString('base64');
+    const parts = []; for (let i = 0; i < body.length; i += SNAP_CHUNK) parts.push(body.slice(i, i + SNAP_CHUNK));
+    if (!parts.length || parts.length > 300) { ibSnapState.err = `bad size (${parts.length})`; return false; }
+    const head = JSON.stringify({ v: 1, kind: 'issued', at: Date.now(), n: parts.length });
+    const writes = [{ row: 1, value: head }, ...parts.map((v, i) => ({ row: i + 2, value: v })), ...Array.from({ length: 5 }, (_, j) => ({ row: parts.length + 2 + j, value: '' }))];
+    await sheetsStore.call('writecells', { spreadsheetId: '', tab: IB_SNAP_TAB, column: 'A', writes });
+    ibSnapState.savedAt = Date.now(); ibSnapState.err = '';
+    console.log(`💾 issued snapshot saved (${parts.length} chunk)`);
+    return true;
+  } catch (err) { ibSnapState.err = String(err && err.message || err).slice(0, 160); return false; }
+}
+async function ibSnapLoad() {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return false;
+  try {
+    const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: IB_SNAP_TAB, startRow: 1, columns: ['A'] }, { timeoutMs: 60e3, attempts: 3 });
+    const rows = (out && out.rows) || []; const head = JSON.parse((rows[0] && rows[0][0]) || 'null');
+    if (!head || head.kind !== 'issued') return false;
+    const j = JSON.parse(Buffer.from(rows.slice(1, 1 + head.n).map((r) => r[0] || '').join(''), 'base64').toString('utf8'));
+    const dir = path.join(DATA_DIR, 'issued'); mkdirSync(dir, { recursive: true });
+    if (j.a) writeFileSync(path.join(dir, 'issued-barcodes.json.gz'), Buffer.from(j.a, 'base64'));
+    if (j.b) writeFileSync(path.join(dir, 'stock-barcodes-prev.json.gz'), Buffer.from(j.b, 'base64'));
+    issuedStore.load(); ibSnapState.loadedAt = Date.now();
+    console.log(`💾 issued snapshot wapas (${issuedStore.meta().resolved} resolved)`);
+    return true;
+  } catch (err) { ibSnapState.err = String(err && err.message || err).slice(0, 160); return false; }
+}
 function issuedBarcodesRun(reason, opts = {}) {
   if (issuedRunning) return issuedRunning;
   issuedRunning = (async () => {
@@ -7418,6 +7493,7 @@ function issuedBarcodesRun(reason, opts = {}) {
     } catch (err) { stats.error = String((err && err.message) || err).slice(0, 200); }
     issuedStore.meta({ lastRun: Date.now(), lastRunDay: istTodayKey(), lastStats: stats });
     issuedStore.flush();
+    ibSnapSave().catch(() => {});
     console.log(`🏷️ issued register (${reason}):`, JSON.stringify(stats));
     return stats;
   })().finally(() => { issuedRunning = null; });
@@ -8543,7 +8619,7 @@ async function handleApi(req, res, url) {
   // 🏷️ v3.125.374 — Issued barcode register: status + "abhi chalao" (admin).
   if (p === '/api/issued-barcodes/status' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
-    return sendJson(res, 200, { ok: true, running: !!issuedRunning, ...issuedStore.meta() }, { 'Cache-Control': 'no-store' });
+    return sendJson(res, 200, { ok: true, running: !!issuedRunning, ...issuedStore.meta(), snapshot: { ...ibSnapState }, presave: hotStatus() }, { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/issued-barcodes/run' && method === 'POST') {
     requireAdmin(user);
@@ -17567,12 +17643,16 @@ async function start() {
     cacheLoadDisk().then((n) => { if (n) console.log(`💾 gviz cache: ${n} entries disk se wapas (deploy ke baad turant garam)`); }).catch(() => {});
     setInterval(() => { cacheSaveDisk().catch(() => {}); }, 10 * 60e3).unref();
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
+    setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
+    setInterval(() => { hotSaveMaybe(false); }, 30 * 60e3).unref();
+    setTimeout(() => { hotSaveMaybe(false); }, 12 * 60e3).unref?.();
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
     setTimeout(() => eirRawPrewarm('boot'), 240e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
     setInterval(() => eirRawPrewarm('30 min'), 30 * 60e3).unref();   // jo din fail / missing hain wahi dobara (baaki disk se)
     setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();
     // 🏷️ v3.125.374 — roz raat ~3 baje (IST) issued-barcode register update; pehli baar boot ke 5 min baad (snapshot lene ke liye).
+    setTimeout(() => { if (!issuedStore.meta().lastRun) ibSnapLoad().catch(() => {}); }, 25e3).unref();   // 💾 deploy ke baad register sheet se wapas
     setTimeout(() => { if (!issuedStore.meta().lastRun) issuedBarcodesRun('first-boot').catch(() => {}); }, 5 * 60e3).unref();
     setInterval(() => {
       try { const ist = new Date(Date.now() + 5.5 * 3600e3); if (ist.getUTCHours() >= 3 && issuedStore.meta().lastRunDay !== istTodayKey()) issuedBarcodesRun('nightly').catch(() => {}); } catch { /* ignore */ }
