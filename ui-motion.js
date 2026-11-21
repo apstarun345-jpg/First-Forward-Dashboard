@@ -105,14 +105,34 @@ window.FF = window.FF || {};
     H.setAttribute('data-ux-den', v); try { localStorage.setItem('ff_ux_den', v); } catch { /* private */ }
     const b = $('[data-d="den"]', dock); if (b) b.textContent = DEN_L[v];
   }
+  // ---- 🧊 3D look: on/off + mouse tilt (KPI tiles, logo) ----------------------------------------------
+  const get3d = () => { try { return localStorage.getItem('ff_ux_3d') !== '0'; } catch { return true; } };
+  function set3d(on) { H.classList.toggle('ff-3d', !!on); try { localStorage.setItem('ff_ux_3d', on ? '1' : '0'); } catch { /* private */ } const b = $('[data-d="3d"]', dock); if (b) b.classList.toggle('on', !!on); }
+  function tiltInit() {
+    if (!window.matchMedia || !matchMedia('(pointer: fine)').matches) return;
+    let el = null, tick = 0;
+    D.addEventListener('mousemove', (e) => {
+      if (!H.classList.contains('ff-3d') || H.classList.contains('ff-no-anim')) return;
+      const t = e.target.closest && e.target.closest('.kpi, .brand-logo');
+      if (el && el !== t) { el.style.removeProperty('--rx'); el.style.removeProperty('--ry'); el = null; }
+      if (!t) return; el = t;
+      if (tick) return; tick = requestAnimationFrame(() => {
+        tick = 0; const r = t.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+        const k = t.classList.contains('brand-logo') ? 22 : 9;
+        t.style.setProperty('--ry', ((x - .5) * k).toFixed(2) + 'deg'); t.style.setProperty('--rx', ((.5 - y) * k).toFixed(2) + 'deg');
+        t.style.setProperty('--gx', (x * 100).toFixed(0) + '%'); t.style.setProperty('--gy', (y * 100).toFixed(0) + '%');
+      });
+    }, { passive: true });
+    D.addEventListener('mouseleave', () => { if (el) { el.style.removeProperty('--rx'); el.style.removeProperty('--ry'); el = null; } });
+  }
   function buildDock() {
     dock = D.createElement('div'); dock.id = 'ux-dock';
-    dock.innerHTML = '<button type="button" data-d="sel" title="Rows chun kar copy / CSV / WhatsApp">☑ Select</button><button type="button" data-d="den" title="Table row ki gehraai: Compact / Normal / Bada"></button><button type="button" data-d="print" title="Is page ka saaf PDF / print">🖨 PDF</button>';
-    denApply(denGet());
+    dock.innerHTML = '<button type="button" data-d="sel" title="Rows chun kar copy / CSV / WhatsApp">☑ Select</button><button type="button" data-d="3d" title="3D look on / off">🧊 3D</button><button type="button" data-d="den" title="Table row ki gehraai: Compact / Normal / Bada"></button><button type="button" data-d="print" title="Is page ka saaf PDF / print">🖨 PDF</button>';
+    denApply(denGet()); set3d(get3d()); tiltInit();
     bar = D.createElement('div'); bar.id = 'ux-bar';
     bar.innerHTML = '<b>0</b> chuni<button type="button" data-b="copy">📋 Copy</button><button type="button" data-b="csv">⬇ CSV</button><button type="button" data-b="wa">💬 WhatsApp</button><button type="button" data-b="all">Sab</button><button type="button" class="x" data-b="x">✕ Band</button>';
     D.body.append(dock, bar);
-    dock.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.d === 'sel') setMode(!selMode); else if (b.dataset.d === 'den') denApply(DEN[(DEN.indexOf(denGet()) + 1) % 3]); else actPrint(); });
+    dock.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.d === 'sel') setMode(!selMode); else if (b.dataset.d === '3d') set3d(!H.classList.contains('ff-3d')); else if (b.dataset.d === 'den') denApply(DEN[(DEN.indexOf(denGet()) + 1) % 3]); else actPrint(); });
     bar.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; ({ copy: actCopy, csv: actCsv, wa: actWa, all: actAll, x: () => setMode(false) })[b.dataset.b](); });
     D.addEventListener('keydown', (e) => { if (e.key === 'Escape' && selMode) setMode(false); });
     // capture: select mode me row click sirf select/deselect kare (page ke apne click handler na chale)

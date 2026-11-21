@@ -16,3 +16,10 @@ test('ui-motion is loaded and covers items 6-12', () => {
   assert.ok(!/prefers-reduced-motion/.test(css + js), 'ui-motion must not obey OS reduce motion');
 });
 test('row density control', () => { assert.match(r('ui-motion.js'), /ff_ux_den/); assert.match(r('ui-motion.css'), /data-ux-den="compact"/); });
+test('3D design system: tokens, components, branding, toggle', () => {
+  const css = r('ui-3d.css'), js = r('ui-motion.js'), html = r('index.html');
+  assert.match(html, /ui-3d\.css/);
+  for (const k of ['--d-e1', '--d-e4', 'body .kpi', 'body .btn', '.brand-logo', '.sidebar', '.table-wrap']) assert.ok(css.includes(k), k);
+  assert.ok(!/prefers-reduced-motion/.test(css));
+  assert.match(js, /ff_ux_3d/); assert.match(js, /tiltInit/);
+});
