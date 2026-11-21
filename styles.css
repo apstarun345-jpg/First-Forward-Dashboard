@@ -8963,3 +8963,6 @@ html[data-theme="light"] .mc-hud-btn {
 .dsp-g .dsp-cell b { font-size: 12px; font-weight: 800; }
 .dsp-g.tot .dsp-cell { box-shadow: inset 0 0 0 1px currentColor; }
 @media (prefers-color-scheme: dark) { .dsp-gl { color: #cbd5e1; } }
+/* 🚚 v3.125.405 — Dispatched · still in office stock box */
+.hm-offdisp { background: linear-gradient(135deg, #ea580c, #f59e0b) !important; }
+html body .hm-offdisp .kpi-title, html body .hm-offdisp .kpi-value, html body .hm-offdisp .kpi-foot, html body .hm-offdisp .kpi-foot * { color: #fff !important; }

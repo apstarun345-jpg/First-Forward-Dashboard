@@ -5239,6 +5239,56 @@ async function unusualScanIndex({ from, to, fresh }) {
 }
 
 /** StockDataa (First Forward) current stock. */
+// 🟧 v3.125.405 — "Dispatch ho chuka par office stock me dikh raha": StockDataa ke wo barcode jinka agent blank / "Not assigned" hai
+// aur jo FF ya GV dispatch ledger ki First–Last range me aate hain (matlab tag nikal chuka, sheet me abhi office stock).
+const officeDispState = { at: 0, key: '', data: null, promise: null, err: '' };
+const isUnassignedName = (v) => { const t = String(v == null ? '' : v).trim().toLowerCase(); return !t || /^(-|--|na|n\/a|nil|none|null|blank|0)$/.test(t) || /not\s*assign|un\s*assign|unalloc|not\s*alloc/.test(t); };
+async function buildOfficeDispatched() {
+  const s = db.settings || {}, st = s.stock || {};
+  const L = { tag: colLetter(st.tagId, 'C'), bc: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), at: colLetter(st.bcAllocatedAt, 'G'), aid: colLetter(st.agentId, 'H'), an: colLetter(st.agentName, 'I') };
+  const id = cleanId(s.sheetId) || DEFAULT_SHEET_ID, sheet = s.stockSheet || 'StockDataa';
+  const tabs = (Array.isArray(s.tabs) && s.tabs.length) ? s.tabs : DEFAULT_TABS;
+  const gid = (() => { const t = tabs.find((x) => x && x.tab === sheet); return t && /^\d+$/.test(String(t.gid || '')) ? String(t.gid) : ''; })();
+  const sel = `${L.tag}, ${L.bc}, ${L.cls}, ${L.at}, ${L.aid}, ${L.an}`;
+  const where = `${L.bc} is not null and (${L.an} is null or lower(${L.an}) contains 'assign' or lower(${L.an}) contains 'alloc' or lower(${L.an}) matches '(-|--|na|n/a|nil|none|null|blank|0)')`;
+  const PAGE = 20000, office = [];
+  for (let off = 0; off < 400000; off += PAGE) {
+    const qp = new URLSearchParams({ id, tq: `select ${sel} where ${where} limit ${PAGE} offset ${off}` });
+    if (gid) qp.set('gid', gid); else qp.set('sheet', sheet);
+    const page = await gvizPageServer(qp, sheet);
+    for (const row of page.rows) {
+      const bc = ibDigits(idCellText(row, 1));
+      if (!bc || !isUnassignedName(serverCell(row, 5))) continue;
+      office.push({ tagId: String(serverCell(row, 0) || '').trim(), barcode: bc, cls: classBucket(serverCell(row, 2)), bcDate: serverDate(row.c && row.c[3] ? row.c[3].v : '') || String(serverCell(row, 3) || ''), agentId: String(serverCell(row, 4) || '').trim(), agentName: String(serverCell(row, 5) || '').trim() });
+    }
+    if (page.rows.length < PAGE) break;
+    await yieldLoop();
+  }
+  const index = await ledgerIndex(false);
+  if (!index) throw new Error('Dispatch ledger abhi ready nahi — thodi der baad try karo');
+  const rows = [];
+  for (const o of office) {
+    const d = dispatchFor(index, o.barcode);
+    const hit = (d.ff && d.ff[0]) || (d.gv && d.gv[0]);
+    if (!hit) continue;
+    const ch = (d.ff && d.ff[0]) ? (d.gv && d.gv[0] ? 'FF + GV' : 'FF') : 'GV';
+    rows.push({ ...o, ch, dispDate: hit.date || '', dispAgent: hit.agent || '', dispAgentId: hit.agentId || '', dispCls: hit.cls || '', row: hit.row || '', status: hit.status || '', approx: !!hit.approx });
+  }
+  rows.sort((a, b) => String(b.dispDate).localeCompare(String(a.dispDate)) || a.barcode.localeCompare(b.barcode));
+  const byCls = {}, byCh = {};
+  rows.forEach((r) => { byCls[r.cls] = (byCls[r.cls] || 0) + 1; byCh[r.ch] = (byCh[r.ch] || 0) + 1; });
+  return { at: Date.now(), officeTotal: office.length, total: rows.length, byCls, byCh, rows, ledgerErrors: Object.keys(ledgerState.errors || {}).length ? ledgerState.errors : null };
+}
+function officeDispatched(fresh) {
+  const key = `${dailySig(dailyTabs().find((t) => t.label === 'StockDataa')?.key)}|${ledgerState.at}`;
+  if (!fresh && officeDispState.data && officeDispState.key === key && Date.now() - officeDispState.at < 3 * 3600e3) return Promise.resolve(officeDispState.data);
+  if (!officeDispState.promise) {
+    officeDispState.promise = buildOfficeDispatched().then((d) => { officeDispState.data = d; officeDispState.at = Date.now(); officeDispState.key = `${dailySig(dailyTabs().find((t) => t.label === 'StockDataa')?.key)}|${ledgerState.at}`; officeDispState.err = ''; return d; })
+      .catch((err) => { officeDispState.err = String((err && err.message) || err).slice(0, 200); if (officeDispState.data) return officeDispState.data; throw err; })
+      .finally(() => { officeDispState.promise = null; });
+  }
+  return officeDispState.data && !fresh ? Promise.resolve(officeDispState.data) : officeDispState.promise;
+}
 async function stockSnapshot() {
   const s = db.settings, cfg = s.stock || {};
   return stockSnapshotFrom(s.sheetId, s.stockSheet || 'StockDataa', cfg.cls || 'E', cfg.tagId || 'C', 'FF stock');
@@ -8838,6 +8888,23 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, total: rows.length, results: searchRegistry(rows, terms) }, { 'Cache-Control': 'no-store' });
   }
   // 🗺️ Stock mapping summary (home page): StockDataa tags → FF / GV / GV+FF / Office (same index, naya scan nahi).
+  if (p === '/api/office-dispatched' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (user.role !== 'admin') { const pm = new Set(user.permissions || []); if (!(pm.has('sheet:StockDataa') || pm.has('masterSearch'))) throw new HttpError(403, 'StockDataa permission chahiye'); }
+    let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 25000); });
+    let d; try { d = await Promise.race([officeDispatched(url.searchParams.get('fresh') === '1'), wait]); } finally { clearTimeout(timer); }
+    if (!d) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 }, { 'Cache-Control': 'no-store' });
+    const cls = url.searchParams.get('cls') || '', q = String(url.searchParams.get('q') || '').toLowerCase();
+    let rows = d.rows.filter((r) => (!cls || r.cls === cls) && (!q || `${r.barcode} ${r.tagId} ${r.dispAgent} ${r.dispAgentId}`.toLowerCase().includes(q)));
+    if (url.searchParams.get('csv') === '1') {
+      const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+      const head = ['Barcode', 'Tag ID', 'Class', 'Channel', 'Dispatch date', 'Dispatched to (agent)', 'Agent ID', 'Sheet agent name', 'Barcode date', 'Ledger row'];
+      const csv = [head.join(','), ...rows.map((r) => [`\t${r.barcode}`, r.tagId, r.cls, r.ch, r.dispDate, r.dispAgent, r.dispAgentId, r.agentName || 'Blank', r.bcDate, r.row].map(esc).join(','))].join('\n');
+      return sendMaybeCompressed(req, res, 200, 'text/csv; charset=utf-8', `﻿${csv}`, { 'Content-Disposition': `attachment; filename="office-stock-but-dispatched-${dateKeyNow()}.csv"`, 'Cache-Control': 'no-store' });
+    }
+    const limit = Math.min(Number(url.searchParams.get('limit')) || 200, 5000), offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
+    return sendJson(res, 200, { ok: true, at: new Date(d.at).toISOString(), officeTotal: d.officeTotal, total: d.total, byCls: d.byCls, byCh: d.byCh, filtered: rows.length, rows: url.searchParams.get('all') === '1' ? rows : rows.slice(offset, offset + limit), ledgerErrors: d.ledgerErrors }, { 'Cache-Control': 'no-store' });
+  }
   if (p === '/api/stock-map' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
     const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, url.searchParams.get('fresh') === '1');

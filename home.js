@@ -803,6 +803,7 @@ FF.pages = FF.pages || {};
         ${kpi('g1', 'First Forward · Stock in field', '📦', U.fmt(ff.total), `VC4 <b>${U.fmt(ff.vc4)}</b> · Comm <b>${U.fmt(ff.comm)}</b> · cover <b>${esc(cover(ff.total, ffRate))}</b> din`, 'src=ff&scope=stock')}
         ${kpi('g2', 'GV Partner · Stock in field', '📦', U.fmt(gv.total), `VC4 <b>${U.fmt(gv.vc4)}</b> · Comm <b>${U.fmt(gv.comm)}</b> · cover <b>${esc(cover(gv.total, gvRate))}</b> din`, 'src=gv&scope=stock')}
         <div class="kpi g3 hm-gvonly" id="hm-gvonly"><div class="hm-gvonly-open" role="button" tabindex="0" aria-label="GV tags not in FF stock: open tag list"><div class="kpi-top"><span class="kpi-title">GV tags · not in FF stock</span><span class="kpi-icon">🔎</span></div><div class="kpi-value">…</div><div class="kpi-foot">loading…</div></div><div class="hm-gvonly-actions" hidden><button type="button" data-gvo-list>📋 Tag list</button><button type="button" data-gvo-summary>Class-wise</button>${FF.auth.can('export') ? '<a href="/api/stock-map/csv?bucket=gvonly" download>⬇ CSV</a>' : ''}</div></div>
+        <div class="kpi hm-gvonly hm-offdisp" id="hm-offdisp"><div class="hm-gvonly-open" role="button" tabindex="0" aria-label="Dispatched barcodes still in office stock: open list"><div class="kpi-top"><span class="kpi-title">Dispatched · still in office stock</span><span class="kpi-icon">🚚</span></div><div class="kpi-value">…</div><div class="kpi-foot">StockDataa × dispatch sheets…</div></div><div class="hm-gvonly-actions" hidden><button type="button" data-od-list>📋 Barcode list</button>${FF.auth.can('export') ? '<a href="/api/office-dispatched?csv=1" download>⬇ CSV</a>' : ''}</div></div>
       </div>
       <div class="grid g-2" style="margin-top:12px">
         ${card('📊 Stock · FF vs GV <span class="dim">(class-wise)</span>', bars, '')}
@@ -1217,6 +1218,60 @@ FF.pages = FF.pages || {};
     }
   }
 
+  // 🚚 v3.125.405 — StockDataa me agent blank / "Not assigned" par dispatch ledger (FF + GV) me dispatch ho chuke barcodes
+  async function fetchOffDisp(extra) {
+    for (let i = 0; i < 40; i++) {
+      const d = await FF.auth.api(`/api/office-dispatched${extra ? `?${extra}` : ''}`);
+      if (d && d.pending) { await new Promise((r) => setTimeout(r, 3000)); continue; }
+      return d;
+    }
+    throw new Error('Dispatch data abhi ready nahi — thodi der baad try karo');
+  }
+  async function mountOffDisp(host) {
+    const chip = host && host.querySelector('#hm-offdisp');
+    if (!chip || !FF.auth || typeof FF.auth.api !== 'function') return;
+    try {
+      const d = await fetchOffDisp('limit=1');
+      if (!chip.isConnected) return;
+      chip.querySelector('.kpi-value').textContent = U.fmt(d.total);
+      const cls = Object.entries(d.byCls || {}).sort((a, b) => b[1] - a[1]);
+      chip.querySelector('.kpi-foot').innerHTML = d.total ? `${cls.map(([c, n]) => `${esc(c)} <b>${U.fmt(n)}</b>`).join(' · ')}<br><small>Office stock rows: ${U.fmt(d.officeTotal)}</small>` : 'Koi nahi — office stock sahi hai';
+      chip.title = 'StockDataa me agent blank / Not assigned hai, par FF ya GV dispatch sheet me dispatch ho chuka';
+      const actions = chip.querySelector('.hm-gvonly-actions'); if (actions) actions.hidden = false;
+      if (!chip._odBound) {
+        chip._odBound = true;
+        const open = () => openOffDispDrawer(d);
+        const target = chip.querySelector('.hm-gvonly-open');
+        target.addEventListener('click', open);
+        target.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+        chip.querySelector('[data-od-list]').addEventListener('click', open);
+      }
+    } catch {
+      if (chip.isConnected) { chip.querySelector('.kpi-value').textContent = '—'; chip.querySelector('.kpi-foot').textContent = 'Ready nahi — thodi der baad refresh karo'; }
+    }
+  }
+  function openOffDispDrawer(sum) {
+    if (!FF.app || !FF.app.openDrawer) return;
+    const canExp = FF.auth.can('export');
+    const body = FF.app.openDrawer({ kicker: '🚚 Stock check', title: 'Dispatched · still in office stock', sub: `StockDataa me agent blank / Not assigned — par dispatch sheet (FF / GV) me dispatch ho chuka · ${U.fmt(sum.total)} barcodes`, body: U.spinner('List load ho rahi hai…'), wide: true });
+    const host = body && body.querySelector ? body : U.$('#drawer-body');
+    if (!host) return;
+    const st = { q: '', cls: '' };
+    const load = async () => {
+      const d = await fetchOffDisp(`all=1${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`);
+      const rows = d.rows || [];
+      const clsBtns = Object.entries(sum.byCls || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => `<button class="btn small${st.cls === c ? ' primary' : ''}" data-od-c="${esc(c)}">${esc(c)} ${U.fmt(n)}</button>`).join('');
+      const csvQs = `csv=1${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`;
+      host.innerHTML = `<div class="btn-row"><input class="input" id="od-q" placeholder="Barcode / Tag ID / agent…" value="${esc(st.q)}">${clsBtns}${st.cls ? '<button class="btn small" data-od-c="">✕ All</button>' : ''}${canExp ? `<a class="btn small primary" href="/api/office-dispatched?${csvQs}" download>⬇ CSV (${U.fmt(d.filtered)})</a>` : ''}<button class="btn small" id="od-copy">📋 Copy barcodes</button></div>
+        <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Barcode</th><th>Tag ID</th><th>Class</th><th>Channel</th><th>Dispatch date</th><th>Dispatched to</th><th>Sheet agent</th></tr></thead><tbody>${rows.slice(0, 1500).map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.barcode)}</b></td><td>${esc(r.tagId)}</td><td>${esc(r.cls)}</td><td>${esc(r.ch)}</td><td>${esc(r.dispDate)}</td><td>${esc(r.dispAgent)} <small class="dim">${esc(r.dispAgentId)}</small></td><td>${r.agentName ? esc(r.agentName) : '<span class="dim">Blank</span>'}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Koi barcode nahi</td></tr>'}</tbody></table></div>
+        ${rows.length > 1500 ? `<p class="dim small">Pehle 1,500 dikh rahe hain — baaki CSV me.</p>` : ''}`;
+      const q = host.querySelector('#od-q'); let tm = null;
+      q.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => { st.q = q.value.trim(); load().catch(() => {}); }, 400); });
+      host.querySelectorAll('[data-od-c]').forEach((b) => b.addEventListener('click', () => { st.cls = b.dataset.odC; load().catch(() => {}); }));
+      host.querySelector('#od-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(rows.map((r) => r.barcode).join('\n')); U.toast(`${U.fmt(rows.length)} barcodes copy ho gaye`); } catch { U.toast('Copy nahi hua', 'err'); } });
+    };
+    load().catch((err) => { host.innerHTML = `<div class="card-body">${esc(err.message || err)}</div>`; });
+  }
   // 🔎 GV in-stock tags jinka barcode FF StockDataa me nahi — chip + class-wise drawer + download
   async function mountGvOnly(host) {
     const chip = host && host.querySelector('#hm-gvonly');
@@ -1970,6 +2025,7 @@ FF.pages = FF.pages || {};
     };
     stockMount.innerHTML = stockHtml(ffStock, gvStock, sf);
     mountGvOnly(stockMount);
+    mountOffDisp(stockMount);
     paintPulse({ total: ffStock.total + gvStock.total });
     // GV agent-wise stock (agar permission/load ho to) — top holders
     const gvStockAgentP = canGv ? G.need('stockAgent', { only: true }).catch(() => null) : Promise.resolve(null);
