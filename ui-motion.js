@@ -44,26 +44,6 @@ window.FF = window.FF || {};
     const rows = root.querySelectorAll ? root.querySelectorAll('tbody tr:not(.ux-in)') : [];
     let i = 0; rows.forEach((tr) => { if (i < 14) { tr.style.setProperty('--i', i); tr.classList.add('ux-in'); } else tr.classList.add('ux-in'); i++; });
   }
-  // ---- 10 · server waking banner ---------------------------------------------------------------
-  let inflight = 0, wakeT = 0, wake = null;
-  function wakeShow() {
-    if (!wake) { wake = D.createElement('div'); wake.id = 'ux-wake'; wake.innerHTML = '<b>😴 Server jaag raha hai…</b>Free server so jata hai — 20–40 sec lagenge, data apne aap aa jayega.<i></i>'; D.body.appendChild(wake); }
-    wake.classList.add('on');
-  }
-  function wakeHide() { clearTimeout(wakeT); if (wake) wake.classList.remove('on'); }
-  const _fetch = window.fetch;
-  if (typeof _fetch === 'function') {
-    window.fetch = function (input, init) {
-      const url = typeof input === 'string' ? input : (input && input.url) || '';
-      const mine = /^\/api\//.test(url) || url.indexOf(location.origin + '/api/') === 0;
-      if (!mine) return _fetch.apply(this, arguments);
-      inflight++; if (inflight === 1) { clearTimeout(wakeT); wakeT = setTimeout(wakeShow, 6000); }
-      const done = () => { inflight = Math.max(0, inflight - 1); if (!inflight) wakeHide(); };
-      const p = _fetch.apply(this, arguments);
-      p.then(done, done);
-      return p;
-    };
-  }
   // ---- 11 · bulk select ------------------------------------------------------------------------
   let dock = null, bar = null, selMode = false;
   const rowsSel = () => [...D.querySelectorAll('#main tbody tr.ux-sel')];

@@ -23,12 +23,6 @@ html body .kpi .kpi-spark { animation: uxDraw 1.1s ease-out both; }
 #ux-prog.done { opacity: 0; width: 100%; transition: width .25s ease, opacity .5s ease .25s; }
 html:not(.ff-no-anim) #main tbody tr.ux-in { animation: uxRow .45s ease both; animation-delay: calc(var(--i, 0) * 28ms); }
 @keyframes uxRow { from { opacity: 0; transform: translateY(8px); } }
-/* 10 · server waking banner */
-#ux-wake { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 3100; display: none; max-width: min(92vw, 520px); padding: 10px 16px 12px; border-radius: 14px; background: #1e1b4b; color: #fff; font-size: 13px; box-shadow: 0 10px 30px rgba(30,27,75,.35); }
-#ux-wake.on { display: block; animation: uxDrop .4s ease both; }
-#ux-wake b { display: block; margin-bottom: 2px; } #ux-wake i { display: block; height: 3px; margin-top: 8px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; position: relative; }
-#ux-wake i::after { content: ''; position: absolute; inset: 0; width: 40%; background: linear-gradient(90deg, #818cf8, #22d3ee); animation: uxSlide 1.1s ease-in-out infinite; }
-@keyframes uxDrop { from { opacity: 0; transform: translate(-50%, -20px); } } @keyframes uxSlide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 /* 11 · bulk select + 12 · dock */
 #ux-dock { position: fixed; left: 14px; bottom: 14px; z-index: 1200; display: none; gap: 6px; animation: uxUp2 .5s ease both; }
 #ux-dock.on { display: flex; }
@@ -48,10 +42,10 @@ html.ux-bsel #main tbody tr:hover { background: rgba(99,102,241,.10) !important;
 html[data-ux-den="compact"] #main .tbl th, html[data-ux-den="compact"] #main .tbl td { padding-top: 3px !important; padding-bottom: 3px !important; font-size: 12px !important; line-height: 1.25 !important; }
 html[data-ux-den="large"] #main .tbl th, html[data-ux-den="large"] #main .tbl td { padding-top: 13px !important; padding-bottom: 13px !important; font-size: 15px !important; line-height: 1.45 !important; }
 #main .tbl th, #main .tbl td { transition: padding .25s ease, font-size .25s ease; }
-html.ff-no-anim #ux-dock, html.ff-no-anim #ux-bar.on, html.ff-no-anim #ux-wake.on, html.ff-no-anim .kpi-spark, html.ff-no-anim td.ux-st::before { animation: none !important; }
+html.ff-no-anim #ux-dock, html.ff-no-anim #ux-bar.on, html.ff-no-anim html.ff-no-anim .kpi-spark, html.ff-no-anim td.ux-st::before { animation: none !important; }
 #ux-print-head { display: none; }
 @media print {
-  .sidebar, .topbar, .drawer, #ux-dock, #ux-bar, #ux-wake, #ux-prog, .ask-fab, .toast-wrap, .ux-sticky, .mobile-nav { display: none !important; }
+  .sidebar, .topbar, .drawer, #ux-dock, #ux-bar, #ux-prog, .ask-fab, .toast-wrap, .ux-sticky, .mobile-nav { display: none !important; }
   html, body, .main, #main { background: #fff !important; color: #000 !important; margin: 0 !important; padding: 0 !important; width: 100% !important; max-width: none !important; }
   #ux-print-head { display: block; padding: 0 0 8px; margin-bottom: 8px; border-bottom: 2px solid #4f46e5; font: 700 16px/1.3 system-ui, sans-serif; }
   #ux-print-head small { font-weight: 500; opacity: .7; margin-left: 8px; }

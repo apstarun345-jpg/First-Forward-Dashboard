@@ -11,8 +11,8 @@ test('OS reduce-motion no longer kills site effects (only Settings toggle does)'
 test('ui-motion is loaded and covers items 6-12', () => {
   const html = r('index.html'), js = r('ui-motion.js'), css = r('ui-motion.css');
   assert.match(html, /ui-motion\.css/); assert.match(html, /ui-motion\.js/);
-  for (const k of ['paintStatus', 'paintEmpty', 'progStart', 'wakeShow', 'actCsv', 'actWa', 'actPrint']) assert.match(js, new RegExp(k));
-  for (const k of ['td.ux-st', 'uxDraw', '#ux-wake', '#ux-bar', '@media print']) assert.ok(css.includes(k), k);
+  for (const k of ['paintStatus', 'paintEmpty', 'progStart', 'actCsv', 'actWa', 'actPrint']) assert.match(js, new RegExp(k));
+  for (const k of ['td.ux-st', 'uxDraw', '#ux-bar', '@media print']) assert.ok(css.includes(k), k);
   assert.ok(!/prefers-reduced-motion/.test(css + js), 'ui-motion must not obey OS reduce motion');
 });
 test('row density control', () => { assert.match(r('ui-motion.js'), /ff_ux_den/); assert.match(r('ui-motion.css'), /data-ux-den="compact"/); });
