@@ -5241,29 +5241,21 @@ async function unusualScanIndex({ from, to, fresh }) {
 /** StockDataa (First Forward) current stock. */
 // 🟧 v3.125.405 — "Dispatch ho chuka par office stock me dikh raha": StockDataa ke wo barcode jinka agent blank / "Not assigned" hai
 // aur jo FF ya GV dispatch ledger ki First–Last range me aate hain (matlab tag nikal chuka, sheet me abhi office stock).
-const officeDispState = { at: 0, key: '', data: null, promise: null, err: '' };
+const officeDispState = { at: 0, key: '', data: null, promise: null, err: '', phase: '', t0: 0, pages: 0, officeRows: 0 };
 const isUnassignedName = (v) => { const t = String(v == null ? '' : v).trim().toLowerCase(); return !t || /^(-|--|na|n\/a|nil|none|null|blank|0)$/.test(t) || /not\s*assign|un\s*assign|unalloc|not\s*alloc/.test(t); };
 async function buildOfficeDispatched() {
-  const s = db.settings || {}, st = s.stock || {};
-  const L = { tag: colLetter(st.tagId, 'C'), bc: colLetter(st.barcode, 'D'), cls: colLetter(st.cls, 'E'), at: colLetter(st.bcAllocatedAt, 'G'), aid: colLetter(st.agentId, 'H'), an: colLetter(st.agentName, 'I') };
-  const id = cleanId(s.sheetId) || DEFAULT_SHEET_ID, sheet = s.stockSheet || 'StockDataa';
-  const tabs = (Array.isArray(s.tabs) && s.tabs.length) ? s.tabs : DEFAULT_TABS;
-  const gid = (() => { const t = tabs.find((x) => x && x.tab === sheet); return t && /^\d+$/.test(String(t.gid || '')) ? String(t.gid) : ''; })();
-  const sel = `${L.tag}, ${L.bc}, ${L.cls}, ${L.at}, ${L.aid}, ${L.an}`;
-  const where = `${L.bc} is not null and (${L.an} is null or lower(${L.an}) contains 'assign' or lower(${L.an}) contains 'alloc' or lower(${L.an}) matches '(-|--|na|n/a|nil|none|null|blank|0)')`;
-  const PAGE = 20000, office = [];
-  for (let off = 0; off < 400000; off += PAGE) {
-    const qp = new URLSearchParams({ id, tq: `select ${sel} where ${where} limit ${PAGE} offset ${off}` });
-    if (gid) qp.set('gid', gid); else qp.set('sheet', sheet);
-    const page = await gvizPageServer(qp, sheet);
-    for (const row of page.rows) {
-      const bc = ibDigits(idCellText(row, 1));
-      if (!bc || !isUnassignedName(serverCell(row, 5))) continue;
-      office.push({ tagId: String(serverCell(row, 0) || '').trim(), barcode: bc, cls: classBucket(serverCell(row, 2)), bcDate: serverDate(row.c && row.c[3] ? row.c[3].v : '') || String(serverCell(row, 3) || ''), agentId: String(serverCell(row, 4) || '').trim(), agentName: String(serverCell(row, 5) || '').trim() });
-    }
-    if (page.rows.length < PAGE) break;
-    await yieldLoop();
+  // StockDataa ke saare rows pehle se stock index me (memory / snapshot) — Google par naya heavy query nahi.
+  officeDispState.phase = 'stock'; officeDispState.t0 = Date.now();
+  const sidx = await stockAgeIndexWithin(60e3, false);
+  if (!sidx || !sidx.ff || (sidx.errors && sidx.errors.ff)) throw new Error('StockDataa index abhi ready nahi — thodi der baad try karo');
+  const office = [];
+  for (const r of sidx.ff.raw || []) {
+    const bc = ibDigits(r[1]);
+    if (!bc || !isUnassignedName(r[4])) continue;
+    office.push({ tagId: String(r[0] || '').trim(), barcode: bc, cls: r[2], bcDate: Number.isFinite(Number(r[3])) && Number(r[3]) > 10000 ? new Date(Number(r[3]) * 86400e3).toISOString().slice(0, 10) : '', agentId: String(r[5] || '').trim(), agentName: String(r[4] || '').trim() });
   }
+  officeDispState.officeRows = office.length;
+  officeDispState.phase = 'ledger'; console.log(`🟧 office-dispatched: StockDataa office rows ${office.length} (${Math.round((Date.now() - officeDispState.t0) / 1000)}s) — ledger index…`);
   const index = await ledgerIndex(false);
   if (!index) throw new Error('Dispatch ledger abhi ready nahi — thodi der baad try karo');
   const rows = [];
@@ -5274,6 +5266,7 @@ async function buildOfficeDispatched() {
     const ch = (d.ff && d.ff[0]) ? (d.gv && d.gv[0] ? 'FF + GV' : 'FF') : 'GV';
     rows.push({ ...o, ch, dispDate: hit.date || '', dispAgent: hit.agent || '', dispAgentId: hit.agentId || '', dispCls: hit.cls || '', row: hit.row || '', status: hit.status || '', approx: !!hit.approx });
   }
+  officeDispState.phase = 'done'; console.log(`🟧 office-dispatched: ${rows.length} dispatched of ${office.length} office rows (${Math.round((Date.now() - officeDispState.t0) / 1000)}s)`);
   rows.sort((a, b) => String(b.dispDate).localeCompare(String(a.dispDate)) || a.barcode.localeCompare(b.barcode));
   const byCls = {}, byCh = {};
   rows.forEach((r) => { byCls[r.cls] = (byCls[r.cls] || 0) + 1; byCh[r.ch] = (byCh[r.ch] || 0) + 1; });
@@ -8893,7 +8886,7 @@ async function handleApi(req, res, url) {
     if (user.role !== 'admin') { const pm = new Set(user.permissions || []); if (!(pm.has('sheet:StockDataa') || pm.has('masterSearch'))) throw new HttpError(403, 'StockDataa permission chahiye'); }
     let timer; const wait = new Promise((r) => { timer = setTimeout(() => r(null), 25000); });
     let d; try { d = await Promise.race([officeDispatched(url.searchParams.get('fresh') === '1'), wait]); } finally { clearTimeout(timer); }
-    if (!d) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000 }, { 'Cache-Control': 'no-store' });
+    if (!d) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000, phase: officeDispState.phase, pages: officeDispState.pages, officeRows: officeDispState.officeRows, err: officeDispState.err }, { 'Cache-Control': 'no-store' });
     const cls = url.searchParams.get('cls') || '', q = String(url.searchParams.get('q') || '').toLowerCase();
     let rows = d.rows.filter((r) => (!cls || r.cls === cls) && (!q || `${r.barcode} ${r.tagId} ${r.dispAgent} ${r.dispAgentId}`.toLowerCase().includes(q)));
     if (url.searchParams.get('csv') === '1') {
