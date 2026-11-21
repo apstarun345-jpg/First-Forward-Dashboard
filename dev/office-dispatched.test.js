@@ -15,3 +15,9 @@ test('office-dispatched: home box + drawer', () => {
   assert.match(h, /mountOffDisp\(stockMount\)/);
   assert.match(h, /function openOffDispDrawer/);
 });
+test('office-dispatched: bad ledger ranges are ignored', () => {
+  const s = r('server.js');
+  assert.match(s, /const sane = \(h\) =>/);
+  assert.match(s, /Math\.abs\(size - qty\) > 5/);
+  assert.match(s, /pending\|cancel\|return/);
+});

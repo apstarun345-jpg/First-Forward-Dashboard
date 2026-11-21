@@ -5262,18 +5262,33 @@ async function buildOfficeDispatched() {
   const index = await ledgerIndex(false);
   if (!index) throw new Error('Dispatch ledger abhi ready nahi — thodi der baad try karo');
   const rows = [];
+  // 🛡️ v3.125.408 — sheet ki galat/adhoori rows (end < start, alag prefix, 10 lakh wali range, qty se bahut badi range, pending/cancel/return)
+  // pehle poore stock ko "dispatched" dikha deti thi. Sirf wahi range jo QNT se match karti ho (±5) aur exact (approx nahi) maani jaati hai.
+  const sane = (h) => {
+    if (!h || h.approx) return false;
+    const a = parseBarcode(h.first), b = parseBarcode(h.last);
+    if (!a || !b || a.pfx !== b.pfx) return false;
+    const size = b.n - a.n + 1, qty = Number(h.qty) || 0;
+    if (size <= 0 || size > 5000) return false;
+    if (qty > 0 && Math.abs(size - qty) > 5) return false;
+    if (/pending|cancel|return|reject|hold/i.test(String(h.status || ''))) return false;
+    return true;
+  };
+  let skippedBad = 0;
   for (const o of office) {
     const d = dispatchFor(index, o.barcode);
-    const hit = (d.ff && d.ff[0]) || (d.gv && d.gv[0]);
-    if (!hit) continue;
-    const ch = (d.ff && d.ff[0]) ? (d.gv && d.gv[0] ? 'FF + GV' : 'FF') : 'GV';
-    rows.push({ ...o, ch, dispDate: hit.date || '', dispAgent: hit.agent || '', dispAgentId: hit.agentId || '', dispCls: hit.cls || '', row: hit.row || '', status: hit.status || '', approx: !!hit.approx });
+    const ffHit = (d.ff || []).find(sane), gvHit = (d.gv || []).find(sane);
+    const hit = ffHit || gvHit;
+    if (!hit) { if ((d.ff && d.ff[0]) || (d.gv && d.gv[0])) skippedBad++; continue; }
+    const ch = ffHit ? (gvHit ? 'FF + GV' : 'FF') : 'GV';
+    rows.push({ ...o, ch, dispDate: hit.date || '', dispAgent: hit.agent || '', dispAgentId: hit.agentId || '', dispCls: hit.cls || '', row: hit.row || '', status: hit.status || '', first: hit.first || '', last: hit.last || '', qty: hit.qty || 0 });
   }
+  officeDispState.skippedBad = skippedBad;
   officeDispState.phase = 'done'; console.log(`🟧 office-dispatched: ${rows.length} dispatched of ${office.length} office rows (${Math.round((Date.now() - officeDispState.t0) / 1000)}s)`);
   rows.sort((a, b) => String(b.dispDate).localeCompare(String(a.dispDate)) || a.barcode.localeCompare(b.barcode));
   const byCls = {}, byCh = {};
   rows.forEach((r) => { byCls[r.cls] = (byCls[r.cls] || 0) + 1; byCh[r.ch] = (byCh[r.ch] || 0) + 1; });
-  return { at: Date.now(), officeTotal: office.length, total: rows.length, byCls, byCh, rows, ledgerErrors: Object.keys(ledgerState.errors || {}).length ? ledgerState.errors : null };
+  return { at: Date.now(), officeTotal: office.length, total: rows.length, skippedBad, byCls, byCh, rows, ledgerErrors: Object.keys(ledgerState.errors || {}).length ? ledgerState.errors : null };
 }
 function officeDispatched(fresh) {
   const key = `${dailySig(dailyTabs().find((t) => t.label === 'StockDataa')?.key)}|${ledgerState.at}`;
@@ -8894,12 +8909,12 @@ async function handleApi(req, res, url) {
     let rows = d.rows.filter((r) => (!cls || r.cls === cls) && (!q || `${r.barcode} ${r.tagId} ${r.dispAgent} ${r.dispAgentId}`.toLowerCase().includes(q)));
     if (url.searchParams.get('csv') === '1') {
       const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-      const head = ['Barcode', 'Tag ID', 'Class', 'Channel', 'Dispatch date', 'Dispatched to (agent)', 'Agent ID', 'Sheet agent name', 'Barcode date', 'Ledger row'];
-      const csv = [head.join(','), ...rows.map((r) => [`\t${r.barcode}`, r.tagId, r.cls, r.ch, r.dispDate, r.dispAgent, r.dispAgentId, r.agentName || 'Blank', r.bcDate, r.row].map(esc).join(','))].join('\n');
+      const head = ['Barcode', 'Tag ID', 'Class', 'Channel', 'Dispatch date', 'Dispatched to (agent)', 'Agent ID', 'Sheet agent name', 'Barcode date', 'Ledger row', 'First barcode', 'Last barcode', 'Qty'];
+      const csv = [head.join(','), ...rows.map((r) => [`\t${r.barcode}`, r.tagId, r.cls, r.ch, r.dispDate, r.dispAgent, r.dispAgentId, r.agentName || 'Blank', r.bcDate, r.row, r.first, r.last, r.qty].map(esc).join(','))].join('\n');
       return sendMaybeCompressed(req, res, 200, 'text/csv; charset=utf-8', `﻿${csv}`, { 'Content-Disposition': `attachment; filename="office-stock-but-dispatched-${dateKeyNow()}.csv"`, 'Cache-Control': 'no-store' });
     }
     const limit = Math.min(Number(url.searchParams.get('limit')) || 200, 5000), offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
-    return sendJson(res, 200, { ok: true, at: new Date(d.at).toISOString(), officeTotal: d.officeTotal, total: d.total, byCls: d.byCls, byCh: d.byCh, filtered: rows.length, rows: url.searchParams.get('all') === '1' ? rows : rows.slice(offset, offset + limit), ledgerErrors: d.ledgerErrors }, { 'Cache-Control': 'no-store' });
+    return sendJson(res, 200, { ok: true, at: new Date(d.at).toISOString(), officeTotal: d.officeTotal, total: d.total, skippedBad: d.skippedBad, byCls: d.byCls, byCh: d.byCh, filtered: rows.length, rows: url.searchParams.get('all') === '1' ? rows : rows.slice(offset, offset + limit), ledgerErrors: d.ledgerErrors }, { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/stock-map' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
