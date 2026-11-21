@@ -2121,6 +2121,8 @@ async function gvTodayApiRows(settings, day, secret) {
     return rows;
   } finally { clearTimeout(timer); }
 }
+const GV_DELTA_FULL_MS = 15 * 60e3;
+let gvDelta = { key: '', rows: [], fullAt: 0, lastDeltaAt: 0, lastNew: 0 };
 async function gvTodayFeed(force, opts) {
   const ttl = Math.max(30e3, gvLiveMs()); // live today: chuni hui der tak cache (default 1 min), full 30-day history kabhi scan nahi
   if (!force && gvTodayFeedCache.body && Date.now() - gvTodayFeedCache.at < ttl) return { ...gvTodayFeedCache.body, cached: true };
@@ -2188,9 +2190,15 @@ async function gvTodayFeed(force, opts) {
       catch (err) { console.warn('GV direct API failed — sheet fallback:', err && err.message); }
     }
     let lastErr = null;
+    // ⏱️ v3.125.397 — DELTA load: aaj ke jitne rows pehle aa chuke (time T tak) wo save; agle round me sirf T ke baad ke naye rows (offset) —
+    // edits (status badlav) pakadne ke liye har GV_DELTA_FULL_MS me poora refresh.
+    const dKey = `${day}|${select}|${classMapVersion}`;
+    const dBase = (!force && gvDelta.key === dKey && gvDelta.rows.length && Date.now() - gvDelta.fullAt < GV_DELTA_FULL_MS) ? gvDelta : null;
     for (const attempt of attempts) {
       try {
-        const params = new URLSearchParams({ id, sheet: tab, tq: attempt.tq });
+        const useDelta = !!dBase && attempt.kind === 'today-date';
+        const tqUse = useDelta ? attempt.tq.replace(/limit 100000$/, `limit 100000 offset ${dBase.rows.length}`) : attempt.tq;
+        const params = new URLSearchParams({ id, sheet: tab, tq: tqUse });
         const out = await fetchUpstreamCached(upstreamUrl(params), { maxAgeMs: force ? 0 : ttl });
         const table = parseGvizServer(out.body);
         const rows = [];
@@ -2210,7 +2218,12 @@ async function gvTodayFeed(force, opts) {
             vrnSt: vrnLengthStatus(serverCell(row, typeIndex + 1), settings)
           });
         }
-        const result = buildResult(rows, attempt.kind, out);
+        let allRows = rows;
+        if (attempt.kind === 'today-date') {
+          if (useDelta) { allRows = dBase.rows.concat(rows); gvDelta.rows = allRows; gvDelta.lastDeltaAt = Date.now(); gvDelta.lastNew = rows.length; }
+          else { gvDelta = { key: dKey, rows, fullAt: Date.now(), lastDeltaAt: 0, lastNew: 0 }; }
+        }
+        const result = buildResult(allRows, attempt.kind + (useDelta ? '+delta' : ''), out);
         return result;
       } catch (err) {
         lastErr = err;
@@ -8619,7 +8632,7 @@ async function handleApi(req, res, url) {
   // 🏷️ v3.125.374 — Issued barcode register: status + "abhi chalao" (admin).
   if (p === '/api/issued-barcodes/status' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
-    return sendJson(res, 200, { ok: true, running: !!issuedRunning, ...issuedStore.meta(), snapshot: { ...ibSnapState }, presave: hotStatus() }, { 'Cache-Control': 'no-store' });
+    return sendJson(res, 200, { ok: true, running: !!issuedRunning, ...issuedStore.meta(), snapshot: { ...ibSnapState }, presave: hotStatus(), gvDelta: { rows: gvDelta.rows.length, fullAgoSec: gvDelta.fullAt ? Math.round((Date.now() - gvDelta.fullAt) / 1000) : null, lastNew: gvDelta.lastNew } }, { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/issued-barcodes/run' && method === 'POST') {
     requireAdmin(user);

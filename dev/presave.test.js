@@ -12,3 +12,8 @@ test('presave: issued register durable snapshot', () => {
   assert.match(s, /ibSnapSave\(\)\.catch/);
   assert.match(s, /ibSnapLoad\(\)\.catch/);
 });
+test('gv live delta: offset query + periodic full refresh', () => {
+  assert.match(s, /GV_DELTA_FULL_MS/);
+  assert.match(s, /offset \$\{dBase\.rows\.length\}/);
+  assert.match(s, /'\+delta'|\+delta/);
+});
