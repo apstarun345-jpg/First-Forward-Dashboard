@@ -141,7 +141,10 @@ FF.pages = FF.pages || {};
   // 🗺 v3.125.379 — Full-screen map (Leaflet) — addressMap.js on demand
   async function openFullMap() {
     try {
-      if (!FF.addressMap) await new Promise((ok, no) => { let v = ''; try { const m = document.querySelector('meta[name="ff-asset-versions"]'); const j = m ? JSON.parse(m.content) : {}; if (j.addressMap) v = `?v=${j.addressMap}`; } catch { /* ignore */ } const s = document.createElement('script'); s.src = `./addressMap.js${v}`; s.onload = ok; s.onerror = () => no(new Error('Map module load nahi hua — page reload karo')); document.head.appendChild(s); });
+      // v3.125.382 — map file hamesha server ke current version se (page ka purana cache map ko purana na chalaye)
+      let ver = ''; try { ver = (await FF.auth.api('/api/version')).version || ''; } catch { ver = String(Date.now()); }
+      if (!FF.addressMap || FF.addressMap.ver !== ver) await new Promise((ok, no) => { const s = document.createElement('script'); s.src = `./addressMap.js?v=${encodeURIComponent(ver)}`; s.onload = ok; s.onerror = () => no(new Error('Map module load nahi hua — page reload karo')); document.head.appendChild(s); });
+      if (FF.addressMap) FF.addressMap.ver = ver;
       const rootEl = document.querySelector('.abx-scard') || document.body;
       let host = document.getElementById('ab-maphost');
       if (!host) { host = document.createElement('div'); host.id = 'ab-maphost'; rootEl.parentNode.insertBefore(host, rootEl.nextSibling); }
