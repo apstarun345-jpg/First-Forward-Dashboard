@@ -18,3 +18,7 @@ test('gradient vc tiles: npci-chip label stays visible', async () => {
 test('VC16 chip text always light', () => {
   assert.match(r('npci-colors.css'), /npci-chip\[data-vc="vc16"\][^}]*color: #f9fafb !important/);
 });
+
+test('unusual tiles: unit/CTA/icon readable on gradient', () => {
+  assert.match(r('styles-unusual.css'), /ua-kpi-card \.ua-kpi-cta[^}]*color: rgba\(255, 255, 255/);
+});
