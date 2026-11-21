@@ -24,3 +24,8 @@ test('3D design system: tokens, components, branding, toggle', () => {
   assert.match(js, /ff_ux_3d/); assert.match(js, /tiltInit/);
 });
 test('dock sirf admin ko dikhta hai', () => { assert.match(r('ui-motion.js'), /FF\.auth\.isAdmin\(\)/); });
+test('button feedback, friendly errors, field checks, champions wired', () => {
+  const js = r('ui-motion.js'), html = r('index.html'), home = r('home.js'), pal = r('palette.js');
+  for (const k of ['ux-fb', 'FRIENDLY', 'checkField', 'Mobile 10 digit']) assert.ok(js.includes(k), k);
+  assert.match(html, /champions\.js/); assert.match(home, /FF\.champions\.update/); assert.match(pal, /#\/masterSearch\?q=/);
+});

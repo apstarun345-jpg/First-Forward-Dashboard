@@ -44,6 +44,73 @@ window.FF = window.FF || {};
     const rows = root.querySelectorAll ? root.querySelectorAll('tbody tr:not(.ux-in)') : [];
     let i = 0; rows.forEach((tr) => { if (i < 14) { tr.style.setProperty('--i', i); tr.classList.add('ux-in'); } else tr.classList.add('ux-in'); i++; });
   }
+  // ---- 5 · button feedback (⏳ → ✓ / ✗) -----------------------------------------------------------
+  let lastBtn = null, lastAt = 0;
+  D.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('button, .btn, [role=button]'); if (b && !b.closest('#ux-dock, #ux-bar')) { lastBtn = b; lastAt = Date.now(); } }, true);
+  const _fetch = window.fetch;
+  if (typeof _fetch === 'function') {
+    window.fetch = function (input, init) {
+      const p = _fetch.apply(this, arguments);
+      try {
+        const method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const btn = lastBtn;
+        if (method !== 'GET' && btn && btn.isConnected && Date.now() - lastAt < 700 && /\/api\//.test(url)) {
+          lastBtn = null; btn.classList.add('ux-busy'); btn.setAttribute('aria-busy', 'true');
+          const tag = (cls, txt) => { const old = btn.querySelector(':scope > .ux-fb'); if (old) old.remove(); const sp = D.createElement('span'); sp.className = 'ux-fb ' + cls; sp.textContent = txt; btn.appendChild(sp); return sp; };
+          tag('spin', '');
+          const fin = (ok) => { btn.classList.remove('ux-busy'); btn.removeAttribute('aria-busy'); const sp = tag(ok ? 'ok' : 'fail', ok ? '✓ Ho gaya' : '✗ Nahi hua'); setTimeout(() => sp.remove(), 1600); };
+          p.then((r) => fin(!!(r && r.ok)), () => fin(false));
+        }
+      } catch { /* optional */ }
+      return p;
+    };
+  }
+  // ---- 6 · friendly error messages ---------------------------------------------------------------
+  const FRIENDLY = [
+    [/failed to fetch|networkerror|load failed|network request failed|err_internet/i, '📡 Server se connect nahi ho pa raha — internet check karke dobara try karo.'],
+    [/timeout|timed out|aborterror|aborted/i, '⏱ Server ne der kar di — ek baar dobara try karo.'],
+    [/\b401\b|unauthori[sz]ed|session (expired|invalid)|token (expired|invalid)/i, '🔒 Session khatam ho gaya — dobara login karo.'],
+    [/\b403\b|forbidden|permission denied|not permitted/i, '🚫 Is kaam ki permission nahi hai — admin se poochho.'],
+    [/\b429\b|too many requests|rate limit/i, '🐢 Bahut zyada requests — 1 minute ruk ke try karo.'],
+    [/\b50[0-4]\b|internal server error|bad gateway|service unavailable|gateway timeout/i, '🛠 Server me dikkat aayi — thodi der baad try karo.'],
+    [/unexpected token|is not valid json|json\.parse|undefined|cannot read prop/i, '⚠️ Kuch gadbad hui — page refresh karke dobara try karo.']
+  ];
+  function friendly(msg) {
+    const t = String(msg == null ? '' : msg); if (!t || t.length > 220 || /[ऀ-ॿ]/.test(t)) return t;
+    for (const [re, out] of FRIENDLY) if (re.test(t)) return out;
+    return t;
+  }
+  function wrapToast() {
+    const u = FF.util; if (!u || typeof u.toast !== 'function') return false;
+    if (u.toast.__ux) return true;
+    const orig = u.toast; const w = function (m, t, ...rest) { const tone = String(t || ''); const out = /err|warn|bad|fail|red/i.test(tone) ? friendly(m) : m; if (out !== m) { try { console.info('[ux] original:', m); } catch { /* ignore */ } } return orig.call(this, out, t, ...rest); };
+    w.__ux = true; u.toast = w; return true;
+  }
+  // ---- 6b · field check: mobile (10 digit) / pincode (6 digit) -------------------------------------
+  function fieldKind(el) {
+    if (!el || el.tagName !== 'INPUT' || el.dataset.uxNov || el.closest('.topbar, [role=search], .ms-panel')) return '';
+    const ty = (el.type || '').toLowerCase(); if (ty === 'search' || ty === 'checkbox' || ty === 'radio' || ty === 'hidden' || ty === 'file') return '';
+    const k = `${el.name || ''} ${el.id || ''} ${el.getAttribute('aria-label') || ''}`.toLowerCase();
+    if (/mobile|phone|\bmob\b/.test(k) || ty === 'tel') return 'mob';
+    if (/pin ?code|pincode|\bpin\b/.test(k)) return 'pin';
+    return '';
+  }
+  function checkField(el) {
+    const kind = fieldKind(el); if (!kind) return;
+    const d = String(el.value || '').replace(/\D/g, ''); let msg = '';
+    if (d) {
+      if (kind === 'mob' && !(d.length === 10 || (d.length === 12 && d.startsWith('91')))) msg = `Mobile 10 digit ka hona chahiye (abhi ${d.length})`;
+      if (kind === 'pin' && d.length !== 6) msg = `Pincode 6 digit ka hona chahiye (abhi ${d.length})`;
+    }
+    let note = el.nextElementSibling && el.nextElementSibling.classList && el.nextElementSibling.classList.contains('ux-ferr') ? el.nextElementSibling : null;
+    el.classList.toggle('ux-bad', !!msg);
+    if (msg) { if (!note) { note = D.createElement('small'); note.className = 'ux-ferr'; el.insertAdjacentElement('afterend', note); } note.textContent = '⚠ ' + msg; }
+    else if (note) note.remove();
+  }
+  D.addEventListener('focusout', (e) => checkField(e.target), true);
+  D.addEventListener('input', (e) => { if (e.target.classList && e.target.classList.contains('ux-bad')) checkField(e.target); }, true);
+  (function waitToast(n) { if (!wrapToast() && n < 40) setTimeout(() => waitToast(n + 1), 500); })(0);
   // ---- 11 · bulk select ------------------------------------------------------------------------
   let dock = null, bar = null, selMode = false;
   const rowsSel = () => [...D.querySelectorAll('#main tbody tr.ux-sel')];

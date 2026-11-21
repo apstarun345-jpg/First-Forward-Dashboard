@@ -1661,6 +1661,7 @@ FF.pages = FF.pages || {};
       if (!gvLiveMount || !gvLiveMount.isConnected) return;
       const pace = liveState.total > 0 ? Math.round((liveState.total / hoursGone) * 24) : null;
       liveState.pace = pace;
+      try { if (FF.champions && liveState.highest) FF.champions.update(liveState.highest); } catch { /* optional */ }
       // Expected Today: pichhle same-weekday EIR (GV = master ID wali rows) se — card aur click ka drawer ek hi din / total dikhayein.
       const wdEir = ui.daily ? eirWeekdays(todayK(), ui.daily) : null;
       const bars = wdEir ? wdEir.bars : wdBars;

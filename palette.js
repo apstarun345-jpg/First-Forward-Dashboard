@@ -176,8 +176,9 @@ window.FF = window.FF || {};
     let sugg = [];
     try { sugg = FF.store && FF.store.suggestions ? FF.store.suggestions({ agents: true, tls: true }) : []; } catch { sugg = []; }
     sugg.forEach((s) => {
-      if (s.kind === 'agent') items.push({ group: 'Agents', icon: '🧑‍💼', label: s.label, sub: s.sub || '', href: `#/stock?agent=${encodeURIComponent(s.value)}`, kw: s.keywords || '' });
-      else if (s.kind === 'tl') items.push({ group: 'TLs', icon: '👥', label: s.label, sub: s.sub || '', href: `#/stock?tl=${encodeURIComponent(s.value)}` });
+      const msOk = FF.auth.can('masterSearch');   // v392 — Master Search ho to seedha poora profile (call · WhatsApp · tags)
+      if (s.kind === 'agent') items.push({ group: 'Agents', icon: '🧑‍💼', label: s.label, sub: s.sub || '', href: msOk ? `#/masterSearch?q=${encodeURIComponent(s.value)}` : `#/stock?agent=${encodeURIComponent(s.value)}`, kw: s.keywords || '' });
+      else if (s.kind === 'tl') items.push({ group: 'TLs', icon: '👥', label: s.label, sub: s.sub || '', href: msOk ? `#/masterSearch?q=${encodeURIComponent(s.value)}` : `#/stock?tl=${encodeURIComponent(s.value)}` });
     });
     // 📅 Date shortcuts → Range Report (from/to seedha khulta hai)
     if (FF.auth.can('tagIssued')) {
