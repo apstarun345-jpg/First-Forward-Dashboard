@@ -8,3 +8,9 @@ test('NPCI FASTag colours: VC4 violet, VC5 orange, VC6 yellow, VC7 green, VC12 p
   assert.match(r('index.html'), /npci-colors\.css/); assert.match(r('index.html'), /npci-colors\.js/);
   const ch = r('charts.js'); assert.match(ch, /VC4: '#7c3aed'/); assert.match(ch, /VC16: '#1f2937'/);
 });
+
+test('gradient vc tiles: npci-chip label stays visible', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../npci-colors.css', import.meta.url), 'utf8');
+  assert.match(css, /\.msp-vc3 \.npci-chip[^}]*background: transparent/);
+});
