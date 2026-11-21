@@ -37,6 +37,7 @@ test('full-screen map opens with clustered pins, filters and geolocation', { ski
   await w.FF.addressMap.open({ channel: 'all', q: '', fields: ['name'], kf: '', loadActivity: async () => act, actOf: (m, r) => m.get(`${r.channel}|${r.id}`) || null });
   const doc = w.document;
   assert.ok(doc.getElementById('amx'), 'overlay khula');
+  assert.ok(doc.getElementById('amx').classList.contains('fs'), 'host nahi → full screen');
   assert.match(doc.getElementById('amx-sub').textContent, /2 agents map par · 2 pincode · 1 ka pincode galat/);
   assert.match(doc.getElementById('amx-chips').textContent, /Active 1/);
   assert.ok(doc.querySelector('.leaflet-control-zoom'), 'zoom +/-');
@@ -59,4 +60,11 @@ test('full-screen map opens with clustered pins, filters and geolocation', { ski
   // Esc closes
   doc.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape' }));
   assert.equal(doc.getElementById('amx'), null);
+});
+
+test('host diya to map page ke andar (full screen nahi), ⛶ se toggle', { skip: !JSDOM && 'jsdom nahi hai' }, async () => {
+  const src = read('addressMap.js');
+  assert.match(src, /o\.host \? 'amx inline' : 'amx fs'/);
+  assert.match(src, /if \(!o\.host\) document\.documentElement\.classList\.add\('amx-lock'\)/);
+  assert.match(read('addressBook.js'), /FF\.addressMap\.open\(\{ host,/);
 });
