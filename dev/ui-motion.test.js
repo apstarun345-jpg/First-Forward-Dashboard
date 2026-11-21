@@ -23,3 +23,4 @@ test('3D design system: tokens, components, branding, toggle', () => {
   assert.ok(!/prefers-reduced-motion/.test(css));
   assert.match(js, /ff_ux_3d/); assert.match(js, /tiltInit/);
 });
+test('dock sirf admin ko dikhta hai', () => { assert.match(r('ui-motion.js'), /FF\.auth\.isAdmin\(\)/); });

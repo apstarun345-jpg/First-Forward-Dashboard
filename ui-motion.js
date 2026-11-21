@@ -124,7 +124,9 @@ window.FF = window.FF || {};
   function dockVis() {
     const has = !!D.querySelector('#main tbody tr, #main .kpi, #main .card');
     const login = /login|auth/i.test(location.hash) || !!D.querySelector('.auth-shell');
-    dock.classList.toggle('on', has && !login);
+    let adm = false; try { adm = !!(FF.auth && FF.auth.isAdmin()); } catch { adm = false; }
+    dock.classList.toggle('on', has && !login && adm);
+    if (!adm && selMode) setMode(false);
   }
   // ---- observer ---------------------------------------------------------------------------------
   let q = [], raf = 0;
