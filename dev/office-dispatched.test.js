@@ -21,3 +21,16 @@ test('office-dispatched: bad ledger ranges are ignored', () => {
   assert.match(s, /Math\.abs\(size - qty\) > 5/);
   assert.match(s, /pending\|cancel\|return/);
 });
+
+test('v411: nightly snapshot + chunked drawer + vc16 cell', async () => {
+  const fs = await import('node:fs');
+  const s = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(s, /OD_SNAP_TAB = 'CACHE_OFFDISP'/);
+  assert.match(s, /function officeDispatchedNightly/);
+  assert.match(s, /ff2: \{ enabled: true, tab: 'Sheet11'/);
+  const h = fs.readFileSync(new URL('../home.js', import.meta.url), 'utf8');
+  assert.match(h, /od-shown/);
+  assert.doesNotMatch(h, /slice\(0, 1500\)/);
+  const c = fs.readFileSync(new URL('../npci-colors.css', import.meta.url), 'utf8');
+  assert.match(c, /td\.npci-cell\[data-vc="vc16"\]/);
+});

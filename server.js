@@ -292,7 +292,7 @@ const DEFAULT_SETTINGS = {
   dispatch: { tagsPerBox: 25, horizon: 7, minNeed: 1, top: 40 }, // dispatch planner defaults
   stockLedger: { // 📒 dispatch ledger (barcode → dispatch date / name): First–Last barcode wali stock sheets
     ff1: { enabled: false, label: 'FF · IDFC Stock Sheet', layout: 'ff', sheetId: '1X99R7C6edYx1VOMkqg3ze3vmHP2Ydm6xy4-oHgLwY2M', gid: '0', tab: 'IDFC Stock Sheet' },
-    ff2: { enabled: true, label: 'FF Stock Sheet (Sheet11)', layout: 'ff', sheetId: '1IWQfXDDM67gtZdjM21_WfvN-tVRZz4GxA3DeOnHuGj4', gid: '811063112' },
+    ff2: { enabled: true, tab: 'Sheet11', label: 'FF Stock Sheet (Sheet11)', layout: 'ff', sheetId: '1IWQfXDDM67gtZdjM21_WfvN-tVRZz4GxA3DeOnHuGj4', gid: '811063112' },
     gv3: { enabled: true, label: 'GV STOCK SHEET', layout: 'gv', sheetId: '1-IFccHrMTpbGvFZkPKna2vFFxD5plH5MT-L-dpyn1qA', gid: '774013315', tab: 'STOCK SHEET' }
   },
   agentRegistry: { // 🆕 Agent master (Sheet4): col A = New Agent ID (EIR J se match). EIR me jo ID yahan nahi → "New IDs" page
@@ -5298,15 +5298,61 @@ async function buildOfficeDispatched() {
   rows.forEach((r) => { byCls[r.cls] = (byCls[r.cls] || 0) + 1; byCh[r.ch] = (byCh[r.ch] || 0) + 1; });
   return { at: Date.now(), officeTotal: office.length, total: rows.length, skippedBad, byCls, byCh, rows, ledgerErrors: Object.keys(ledgerState.errors || {}).length ? ledgerState.errors : null };
 }
-function officeDispatched(fresh) {
-  const key = `${dailySig(dailyTabs().find((t) => t.label === 'StockDataa')?.key)}|${ledgerState.at}`;
-  if (!fresh && officeDispState.data && officeDispState.key === key && Date.now() - officeDispState.at < 3 * 3600e3) return Promise.resolve(officeDispState.data);
+// 🌙 v3.125.411 — office-dispatched data ROZ RAAT EK BAAR (IST 02:30 ke baad) banta hai aur Google Sheet (CACHE_OFFDISP) me durable save hota hai.
+// Din me koi bhi dekhe to bana-banaya result turant; sheet par us waqt koi load nahi. fresh=1 sirf manual refresh ke liye.
+const OD_SNAP_TAB = 'CACHE_OFFDISP';
+const istDay = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+const istHour = () => new Date(Date.now() + 5.5 * 3600e3).getUTCHours();
+async function odSnapSave(d) {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function' || !d) return false;
+  try {
+    const slim = Object.assign({}, d, { rows: d.rows.map((r) => [r.tagId, r.barcode, r.cls, r.agentId, r.agentName, r.ch, r.dispDate, r.dispAgent, r.dispAgentId, r.dispCls, r.row, r.status, r.first, r.last, r.qty]) });
+    const body = zlib.gzipSync(Buffer.from(JSON.stringify(slim)), { level: 9 }).toString('base64');
+    const parts = []; for (let i = 0; i < body.length; i += SNAP_CHUNK) parts.push(body.slice(i, i + SNAP_CHUNK));
+    if (!parts.length || parts.length > 300) return false;
+    const head = JSON.stringify({ v: 1, kind: 'offdisp', at: d.at, day: d.builtDay || istDay(), n: parts.length });
+    const writes = [{ row: 1, value: head }, ...parts.map((v, i) => ({ row: i + 2, value: v })), ...Array.from({ length: 5 }, (_, j) => ({ row: parts.length + 2 + j, value: '' }))];
+    await sheetsStore.call('writecells', { spreadsheetId: '', tab: OD_SNAP_TAB, column: 'A', writes });
+    console.log(`🌙 office-dispatched snapshot saved (${parts.length} chunk, ${d.rows.length} rows)`);
+    return true;
+  } catch (err) { officeDispState.err = 'snap save: ' + String((err && err.message) || err).slice(0, 120); return false; }
+}
+async function odSnapLoad() {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return null;
+  try {
+    const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: OD_SNAP_TAB, startRow: 1, columns: ['A'] }, { timeoutMs: 60e3, attempts: 3 });
+    const rows = (out && out.rows) || []; const head = JSON.parse((rows[0] && rows[0][0]) || 'null');
+    if (!head || head.kind !== 'offdisp') return null;
+    const j = JSON.parse(zlib.gunzipSync(Buffer.from(rows.slice(1, 1 + head.n).map((r) => r[0] || '').join(''), 'base64')).toString('utf8'));
+    j.rows = j.rows.map((a) => ({ tagId: a[0], barcode: a[1], cls: a[2], agentId: a[3], agentName: a[4], ch: a[5], dispDate: a[6], dispAgent: a[7], dispAgentId: a[8], dispCls: a[9], row: a[10], status: a[11], first: a[12], last: a[13], qty: a[14] }));
+    j.builtDay = head.day; console.log(`🌙 office-dispatched snapshot wapas (${j.rows.length} rows, ${head.day})`);
+    return j;
+  } catch (err) { officeDispState.err = 'snap load: ' + String((err && err.message) || err).slice(0, 120); return null; }
+}
+function officeDispatchedBuild() {
   if (!officeDispState.promise) {
-    officeDispState.promise = buildOfficeDispatched().then((d) => { officeDispState.data = d; officeDispState.at = Date.now(); officeDispState.key = `${dailySig(dailyTabs().find((t) => t.label === 'StockDataa')?.key)}|${ledgerState.at}`; officeDispState.err = ''; return d; })
+    officeDispState.promise = buildOfficeDispatched().then((d) => { d.builtDay = istDay(); officeDispState.data = d; officeDispState.at = Date.now(); officeDispState.err = ''; odSnapSave(d).catch(() => {}); return d; })
       .catch((err) => { officeDispState.err = String((err && err.message) || err).slice(0, 200); if (officeDispState.data) return officeDispState.data; throw err; })
       .finally(() => { officeDispState.promise = null; });
   }
-  return officeDispState.data && !fresh ? Promise.resolve(officeDispState.data) : officeDispState.promise;
+  return officeDispState.promise;
+}
+function officeDispatched(fresh) {
+  if (!fresh && officeDispState.data) return Promise.resolve(officeDispState.data);
+  if (fresh) return officeDispatchedBuild();
+  if (!officeDispState.promise) {
+    officeDispState.promise = odSnapLoad().then((snap) => { if (snap) { officeDispState.data = snap; officeDispState.at = snap.at; officeDispState.promise = null; return snap; } officeDispState.promise = null; return officeDispatchedBuild(); }).catch(() => { officeDispState.promise = null; return officeDispatchedBuild(); });
+  }
+  return officeDispState.promise;
+}
+/** Roz raat: aaj ka build nahi hua aur IST 02:30 ho gaya → ek baar banao + save. */
+function officeDispatchedNightly() {
+  if (officeDispState.promise) return;
+  const h = new Date(Date.now() + 5.5 * 3600e3), mins = h.getUTCHours() * 60 + h.getUTCMinutes();
+  const d = officeDispState.data;
+  if (d && d.builtDay === istDay()) return;
+  if (d && mins < 150) return;   // snapshot hai aur abhi 02:30 se pehle → purana chalega
+  officeDispatchedBuild().catch(() => {});
 }
 async function stockSnapshot() {
   const s = db.settings, cfg = s.stock || {};
@@ -13937,6 +13983,7 @@ async function handleApi(req, res, url) {
         if (v.layout !== undefined) v.layout = String(v.layout) === 'gv' ? 'gv' : 'ff';
         if (v.label !== undefined) v.label = String(v.label).slice(0, 60);
       }
+      setTimeout(() => { try { ledgerState.at = 0; officeDispatchedBuild().catch(() => {}); } catch {} }, 8000).unref?.();   // sheet badli → office-dispatched data dobara banao (ek baar)
     }
     if (patch.agentRegistry !== undefined) {
       const ar = patch.agentRegistry;
@@ -17749,8 +17796,8 @@ async function start() {
     setInterval(() => { cacheSaveDisk().catch(() => {}); }, 10 * 60e3).unref();
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
-    setTimeout(() => { officeDispatched(false).catch(() => {}); }, 150e3).unref?.();   // 🟧 Home box ke liye pehle se taiyar (cold start par 1st open turant)
-    setInterval(() => { officeDispatched(false).catch(() => {}); }, 3 * 3600e3).unref();   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
+    setTimeout(() => { officeDispatched(false).then(() => officeDispatchedNightly()).catch(() => {}); }, 150e3).unref?.();   // 🟧 snapshot sheet se turant; aaj ka nahi bana to raat wali rebuild
+    setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
     setInterval(() => { hotSaveMaybe(false); }, 30 * 60e3).unref();
     setTimeout(() => { hotSaveMaybe(false); }, 12 * 60e3).unref?.();
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check

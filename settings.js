@@ -613,7 +613,7 @@ FF.pages = FF.pages || {};
   /** 📒 Dispatch ledger — IDFC Stock Sheet (FF) + GV Stock Sheet: First/Last barcode ranges → Master Search & Barcode Checker me dispatch date/naam. */
   function ledgerSection() {
     const sl = settings.stockLedger || {};
-    const defs = { ff1: { label: 'FF · IDFC Stock Sheet', layout: 'ff', tab: 'IDFC Stock Sheet' }, ff2: { label: 'FF backup copy (Sheet11)', layout: 'ff' }, gv3: { label: 'GV · STOCK SHEET', layout: 'gv', tab: 'STOCK SHEET' } };
+    const defs = { ff1: { label: 'FF · IDFC Stock Sheet', layout: 'ff', tab: 'IDFC Stock Sheet' }, ff2: { label: 'FF backup copy (Sheet11)', layout: 'ff', tab: 'Sheet11' }, gv3: { label: 'GV · STOCK SHEET', layout: 'gv', tab: 'STOCK SHEET' } };
     const row = (k, title) => {
       const v = Object.assign({}, defs[k], sl[k] || {});
       return `<tr><td><b>${esc(title)}</b><br><label class="check"><input type="checkbox" data-path="stockLedger.${k}.enabled" ${v.enabled !== false ? 'checked' : ''}> On</label>

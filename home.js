@@ -1257,14 +1257,21 @@ FF.pages = FF.pages || {};
     const host = body && body.querySelector ? body : U.$('#drawer-body');
     if (!host) return;
     const st = { q: '', cls: '' };
+    const CH = 400;
+    const rowHtml = (r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.barcode)}</b></td><td>${esc(r.tagId)}</td><td>${esc(r.cls)}</td><td>${esc(r.ch)}</td><td>${esc(r.dispDate)}</td><td>${esc(r.dispAgent)} <small class="dim">${esc(r.dispAgentId)}</small></td><td>${r.agentName ? esc(r.agentName) : '<span class="dim">Blank</span>'}</td></tr>`;
     const load = async () => {
       const d = await fetchOffDisp(`all=1${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`);
       const rows = d.rows || [];
       const clsBtns = Object.entries(sum.byCls || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => `<button class="btn small${st.cls === c ? ' primary' : ''}" data-od-c="${esc(c)}">${esc(c)} ${U.fmt(n)}</button>`).join('');
       const csvQs = `csv=1${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`;
       host.innerHTML = `<div class="btn-row"><input class="input" id="od-q" placeholder="Barcode / Tag ID / agent…" value="${esc(st.q)}">${clsBtns}${st.cls ? '<button class="btn small" data-od-c="">✕ All</button>' : ''}${canExp ? `<a class="btn small primary" href="/api/office-dispatched?${csvQs}" download>⬇ CSV (${U.fmt(d.filtered)})</a>` : ''}<button class="btn small" id="od-copy">📋 Copy barcodes</button></div>
-        <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Barcode</th><th>Tag ID</th><th>Class</th><th>Channel</th><th>Dispatch date</th><th>Dispatched to</th><th>Sheet agent</th></tr></thead><tbody>${rows.slice(0, 1500).map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.barcode)}</b></td><td>${esc(r.tagId)}</td><td>${esc(r.cls)}</td><td>${esc(r.ch)}</td><td>${esc(r.dispDate)}</td><td>${esc(r.dispAgent)} <small class="dim">${esc(r.dispAgentId)}</small></td><td>${r.agentName ? esc(r.agentName) : '<span class="dim">Blank</span>'}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Koi barcode nahi</td></tr>'}</tbody></table></div>
-        ${rows.length > 1500 ? `<p class="dim small">Pehle 1,500 dikh rahe hain — baaki CSV me.</p>` : ''}`;
+        <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Barcode</th><th>Tag ID</th><th>Class</th><th>Channel</th><th>Dispatch date</th><th>Dispatched to</th><th>Sheet agent</th></tr></thead><tbody>${rows.slice(0, CH).map(rowHtml).join('') || '<tr><td colspan="8" class="empty">Koi barcode nahi</td></tr>'}</tbody></table></div>
+        <p class="dim small" id="od-count">Total <b>${U.fmt(rows.length)}</b> barcodes${rows.length > CH ? ` · <span id="od-shown">${U.fmt(Math.min(CH, rows.length))}</span> dikh rahe — neeche scroll karo, baaki aate jayenge` : ''}</p>`;
+      const sc = host.querySelector('.kd-scroll'), tb = host.querySelector('tbody'); let shown = Math.min(CH, rows.length);
+      if (sc && tb && rows.length > CH) {
+        const more = () => { if (shown >= rows.length) return; const to = Math.min(rows.length, shown + CH); tb.insertAdjacentHTML('beforeend', rows.slice(shown, to).map((r, k) => rowHtml(r, shown + k)).join('')); shown = to; const el = host.querySelector('#od-shown'); if (el) el.textContent = U.fmt(shown); };
+        sc.addEventListener('scroll', () => { if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 600) more(); }, { passive: true });
+      }
       const q = host.querySelector('#od-q'); let tm = null;
       q.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => { st.q = q.value.trim(); load().catch(() => {}); }, 400); });
       host.querySelectorAll('[data-od-c]').forEach((b) => b.addEventListener('click', () => { st.cls = b.dataset.odC; load().catch(() => {}); }));

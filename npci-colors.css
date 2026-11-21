@@ -38,3 +38,7 @@ html:not([data-theme="dark"]) body .ua-kpi-card .kpi-value { color: #0f172a !imp
 html:not([data-theme="dark"]) body .ua-kpi-card .kpi-value small, html:not([data-theme="dark"]) body .ua-kpi-card small, html:not([data-theme="dark"]) body .ua-kpi-card small.dim { color: #64748b !important; }
 html:not([data-theme="dark"]) body .ua-kpi-card .kpi-foot, html:not([data-theme="dark"]) body .ua-kpi-card .ua-kpi-cta { color: #475569 !important; opacity: 1; }
 html body .ua-kpi-card .kpi-icon { color: var(--ua-accent, #4f46e5) !important; background: color-mix(in srgb, var(--ua-accent, #4f46e5) 14%, #fff) !important; }
+
+/* v3.125.411 — table cell VC16 (kaala): text safed (pehle dark text kaale par chhup jata tha) */
+html body td.npci-cell[data-vc="vc16"], html body th.npci-cell[data-vc="vc16"] { color: #f9fafb !important; background-color: #1f2937; background-image: none; }
+html[data-theme="dark"] body td.npci-cell[data-vc="vc16"], html[data-theme="dark"] body th.npci-cell[data-vc="vc16"] { color: #e5e7eb !important; background-color: #000; }
