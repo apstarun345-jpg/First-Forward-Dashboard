@@ -58,7 +58,7 @@
 .page-settings .perm-group label.check input:checked { background: var(--pg); } .page-settings .perm-group label.check input:checked::after { transform: translateX(16px); }
 .page-settings .perm-group label.check input:disabled { opacity: .55; cursor: not-allowed; }
 .pmx-tx { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; min-width: 0; }
-.pmx-tx b { font-size: 13px; font-weight: 700; } .pmx-tx small { font-size: 11.5px; opacity: .7; }
+.pmx-tx b { font-size: 13px; font-weight: 700; } .pmx-tx small { font-size: 11.5px; opacity: .7; text-transform: none !important; letter-spacing: 0 !important; font-weight: 500 !important; }
 .pmx-sens { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: 10px; font-weight: 800; background: #fee2e2; color: #b91c1c; vertical-align: 1px; }
 .page-settings .perm-group label.check.pmx-hide, .page-settings .perm-group.pmx-hide { display: none; }
 .page-settings .user-perms > .btn-row { display: none; }
