@@ -9008,3 +9008,8 @@ html[data-theme="dark"] .pf-m small, html[data-theme="dark"] .pf-t small, html[d
 html[data-theme="dark"] .pf-bk b { color: #f1f5f9; } html[data-theme="dark"] .pf-pr { background: rgba(15,23,42,.45); } html[data-theme="dark"] .pf-pt { color: #c7d2fe; }
 
 .pf-gc { white-space: nowrap; } .pf-gcs { display: flex; flex-direction: column; align-items: flex-start; margin: 4px 0 0; }
+
+/* v3.125.413d — growth chips: .msp-det-f small {display:block} ki wajah se label neeche tut raha tha */
+.msp-det-f .pf-gcs { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 5px 0 0; }
+.msp-det-f .pf-gc { display: inline-flex; flex-direction: row; align-items: center; gap: 5px; width: max-content; max-width: none; white-space: nowrap; line-height: 1.25; padding: 3px 10px; font-size: .8rem; }
+.msp-det-f .pf-gc small { display: inline !important; margin: 0; white-space: nowrap; font-size: .68rem; color: inherit; opacity: .8; text-transform: none; letter-spacing: 0; }
