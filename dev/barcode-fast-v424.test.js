@@ -20,7 +20,7 @@ test('dispatch lookup serves stale cache / ready index instantly', () => {
 test('dispatch ledger pack: nightly durable save + boot load + live fallback for misses', () => {
   assert.match(sv, /CACHE_LEDGER/);
   assert.match(sv, /ledgerPackNightly\(\)/);
-  assert.match(sv, /ledgerPackLoad\(\)\.catch/);
+  assert.match(sv, /ledgerPackLoad\(\)\.then/);
   assert.match(sv, /ledgerDirect\(ml\)/);
 });
 test('office-dispatched drawer has FF/GV filter with counts', () => {
