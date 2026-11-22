@@ -17511,6 +17511,23 @@ function bootResponse(res, status = 503) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    // 🛡️ v3.125.424 — 504 guard: koi /api/ jawab 45s me shuru na kare to proxy ke 504 se pehle hum 503 + retry hint de dete hain
+    // (client FF.auth.api 503 par apne aap dobara try karta hai; server ka kaam peeche chalta rehta hai aur cache bharta hai).
+    if (url.pathname.startsWith('/api/')) {
+      const wd = setTimeout(() => {
+        if (res.headersSent || res.writableEnded) return;
+        try {
+          const body = JSON.stringify({ ok: false, pending: true, busy: true, retryAfterMs: 3000, error: 'Server abhi busy hai — dobara try ho raha hai…' });
+          res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Retry-After': '3', 'Cache-Control': 'no-store' });
+          res.end(body);
+          res.writeHead = () => res; res.write = () => true; res.end = () => res;   // peeche se aane wala jawab ignore
+          console.warn(`⏱️ 504-guard: ${req.method} ${url.pathname} 45s se zyada — 503 retry bheja`);
+        } catch { /* socket gone */ }
+      }, 45e3);
+      if (wd.unref) wd.unref();
+      res.on('close', () => clearTimeout(wd));
+      res.on('finish', () => clearTimeout(wd));
+    }
     // Render health checks must stay green while durable storage is booting; otherwise a slow
     // Apps Script response makes Render keep restarting an otherwise healthy Node process.
     if (!appReady && url.pathname === '/api/health' && req.method === 'GET') {

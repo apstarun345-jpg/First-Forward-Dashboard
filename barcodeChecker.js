@@ -49,9 +49,12 @@ FF.pages = FF.pages || {};
       return t > 0n ? t.toString(16).toUpperCase().padStart(best.len, '0') : '';
     };
   }
-  async function eirByTags(tags) {
+  const EIR_CACHE = new Map();   // ⚡ v424 — tag → EIR row (dobara check instant)
+  async function eirByTags(tagsAll) {
     const e = FF.config.eir, D = FF.data;
     const out = new Map();
+    const tags = [];
+    tagsAll.forEach((t) => { if (EIR_CACHE.has(t)) { const v = EIR_CACHE.get(t); if (v) out.set(t, v); } else tags.push(t); });
     const parts = []; for (let i = 0; i < tags.length; i += 120) parts.push(tags.slice(i, i + 120));
     let next = 0;
     const worker = async () => {
@@ -67,6 +70,8 @@ FF.pages = FF.pages || {};
       }
     };
     await Promise.all([worker(), worker(), worker()]);
+    tags.forEach((t) => { EIR_CACHE.set(t, out.get(t) || null); });
+    if (EIR_CACHE.size > 20000) EIR_CACHE.clear();
     return out;
   }
   const STATUS = {
@@ -119,7 +124,7 @@ FF.pages = FF.pages || {};
   }
 
   // ---- 🔎 checks --------------------------------------------------------------------------------------
-  async function checkRange(first, last, firstTag) {
+  async function checkRange(first, last, firstTag, early) {
     const list = expandRange(first, last);
     const res = await FF.auth.api('/api/barcode-range', 'POST', { first, last });
     const byKey = new Map();
@@ -130,8 +135,10 @@ FF.pages = FF.pages || {};
     const infer = tagInfer(pts);
     const tagOf = new Map(), inferred = new Set();
     list.forEach((b) => { const r = byKey.get(b.key); let t = r && r.tagId ? String(r.tagId).toUpperCase() : ''; if (!t && infer) { t = infer(b.n); if (t) inferred.add(b.key); } if (t) tagOf.set(b.key, t); });
+    const build = (eir) => list.map((b) => { const t = tagOf.get(b.key) || ''; return makeRow(b.label, byKey.get(b.key), t, inferred.has(b.key), t ? eir.get(t) : null); });
+    if (early && tagOf.size) early(build(new Map()));   // ⚡ stock turant dikhao, EIR (issued) peeche se
     const eir = tagOf.size ? await eirByTags([...new Set(tagOf.values())]) : new Map();
-    return list.map((b) => { const t = tagOf.get(b.key) || ''; return makeRow(b.label, byKey.get(b.key), t, inferred.has(b.key), t ? eir.get(t) : null); });
+    return build(eir);
   }
   /** v3.125.42 — List me "A to B" / "A se B" / "A - B" / "A → B" = range: first se last tak saare barcodes.
    *  Faltu shabd (VC6, to, se…) chhod do — sirf barcode (6+ digit) ya tag ID (hex) ginte hain. */
@@ -159,7 +166,7 @@ FF.pages = FF.pages || {};
     out.errors = errors;
     return out;
   }
-  async function checkMulti(list) {
+  async function checkMulti(list, early) {
     if (list.length > MAX) throw new Error(`Ek baar me max ${MAX.toLocaleString('en-IN')} barcodes`);
     const res = await FF.auth.api('/api/barcode-lookup', 'POST', { barcodes: list });
     const items = (res.results || []).map((r) => {
@@ -171,8 +178,10 @@ FF.pages = FF.pages || {};
       }
       return { label: r.barcode, st, tag, inf };
     });
+    const build = (eir) => items.map((x) => makeRow(x.label, x.st, x.tag, x.inf, x.tag ? eir.get(x.tag) : null));
+    if (early && items.some((x) => x.tag)) early(build(new Map()));   // ⚡ stock turant, EIR peeche se
     const eir = await eirByTags([...new Set(items.map((x) => x.tag).filter(Boolean))]);
-    return items.map((x) => makeRow(x.label, x.st, x.tag, x.inf, x.tag ? eir.get(x.tag) : null));
+    return build(eir);
   }
 
   // ---- 🖼️ render ----------------------------------------------------------------------------------------
@@ -307,6 +316,12 @@ FF.pages = FF.pages || {};
     const seq = ++state.busy;
     try {
       let rows, title, dispatchP = null;
+      const earlyPaint = (er) => {
+        if (seq !== state.busy) return;
+        er.forEach((r, i) => { r._i = i; r.dDate = r.dName = SEARCHING; });
+        state.rows = er; state.filter = 'all'; state.agent = ''; state.q = ''; state.dispMeta = null;
+        paintResults();
+      };
       if (kind === 'range') {
         const f = root.querySelector('[data-bcc-form="range"]');
         const first = f.first.value.trim(), last = f.last.value.trim(), tag = f.tag.value.trim().toUpperCase();
@@ -317,7 +332,7 @@ FF.pages = FF.pages || {};
         out.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain (stock + issuance)…`);
         dispatchP = FF.data.dispatchLookup(list.map((x) => x.label));   // ⚡ stock check ke saath-saath dispatch lookup shuru
         dispatchP.catch(() => {});
-        rows = await checkRange(first, last, isHex(tag) ? tag : '');
+        rows = await checkRange(first, last, isHex(tag) ? tag : '', earlyPaint);
         title = `${first}_${last}`; state.lastKey = key;
       } else {
         const f = root.querySelector('[data-bcc-form="multi"]');
@@ -329,7 +344,7 @@ FF.pages = FF.pages || {};
         out.innerHTML = U.spinner(`${U.fmt(list.length)} barcodes check ho rahe hain…`);
         dispatchP = FF.data.dispatchLookup(list);
         dispatchP.catch(() => {});
-        rows = await checkMulti(list);
+        rows = await checkMulti(list, earlyPaint);
         title = `${list.length}-barcodes`; state.lastKey = key;
       }
       if (seq !== state.busy) return;
