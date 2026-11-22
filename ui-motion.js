@@ -229,20 +229,66 @@ window.FF = window.FF || {};
   function headerScroll() { let on = false; addEventListener('scroll', () => { const v = (window.scrollY || 0) > 24; if (v !== on) { on = v; D.documentElement.classList.toggle('ff-scrolled', v); } }, { passive: true }); }
   // 🎞️ page transition — route badalne par main ek baar slide/fade
   function pageTrans() { const m = mainEl(); if (!m || REDUCE) return; m.classList.remove('ux-pt'); void m.offsetWidth; m.classList.add('ux-pt'); }
+  // 🔔 v3.125.418 — sound toggle (default OFF) · tiny WebAudio chime
+  const sndOn = () => { try { return localStorage.getItem('ff_sound') === '1'; } catch { return false; } };
+  let actx = null;
+  function chime(kind) {
+    if (!sndOn()) return;
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)(); const notes = kind === 'alert' ? [440, 330] : [523, 659, 784];
+      notes.forEach((f, i) => { const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i * 0.13; o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28); o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.3); });
+    } catch { /* audio blocked */ }
+  }
+  function heroExtras(root) {
+    const heroes = root.matches && root.matches('.home-hero') ? [root] : Array.from(root.querySelectorAll ? root.querySelectorAll('.home-hero') : []);
+    heroes.forEach((h) => {
+      const hr = new Date().getHours(); h.dataset.tod = hr < 5 ? 'night' : hr < 12 ? 'morning' : hr < 17 ? 'noon' : hr < 20 ? 'evening' : 'night';
+      const side = h.querySelector('.home-hero-side'); if (!side || side.querySelector('#home-sound')) return;
+      const b = D.createElement('button'); b.className = 'btn'; b.id = 'home-sound'; b.type = 'button';
+      const paint = () => { b.textContent = sndOn() ? '🔔 Sound ON' : '🔕 Sound off'; b.title = 'Record / stock alert par halki awaaz'; };
+      paint(); b.addEventListener('click', () => { try { localStorage.setItem('ff_sound', sndOn() ? '0' : '1'); } catch { /* storage blocked */ } paint(); chime('win'); }); side.appendChild(b);
+    });
+  }
+  // 🧑‍💼 row hover — agent mini card (data-agent wali rows par, thodi der ruko to)
+  let acMap = null, acAt = 0, acTimer = 0, acEl = null;
+  function acBuild() {
+    if (acMap && Date.now() - acAt < 60e3) return acMap; acMap = new Map(); acAt = Date.now();
+    try {
+      const U = FF.util, tk = U.dateKey(new Date()), ym = tk.slice(0, 7);
+      for (const r of (FF.gv && FF.gv.rows ? FF.gv.rows() : [])) { if (!r.date || !r.agentName) continue; const k = U.dateKey(r.date); if (k.slice(0, 7) !== ym) continue; const a = acMap.get(r.agentName) || { td: 0, mtd: 0 }; const n = Number(r.n) || 1; a.mtd += n; if (k === tk) a.td += n; acMap.set(r.agentName, a); }
+    } catch { /* gv optional */ }
+    return acMap;
+  }
+  function acHide() { clearTimeout(acTimer); if (acEl) { acEl.remove(); acEl = null; } }
+  function acInit() {
+    D.addEventListener('mouseover', (e) => {
+      const tr = e.target.closest && e.target.closest('tr[data-agent]'); if (!tr) return;
+      if (tr.__acT === acEl) return; clearTimeout(acTimer);
+      acTimer = setTimeout(() => {
+        const nm = tr.getAttribute('data-agent'); const a = acBuild().get(nm); if (!a) return; acHide();
+        const ranked = [...acBuild().entries()].sort((x, y) => y[1].mtd - x[1].mtd); const rk = ranked.findIndex((x) => x[0] === nm) + 1;
+        const r = tr.getBoundingClientRect(); acEl = D.createElement('div'); acEl.className = 'ux-ac';
+        acEl.innerHTML = `<b>${FF.util.esc(nm)}</b><div><span>Aaj</span><strong>${FF.util.fmt(a.td)}</strong></div><div><span>Is mahine</span><strong>${FF.util.fmt(a.mtd)}</strong></div><div><span>Rank (GV)</span><strong>#${rk}</strong></div>`;
+        D.body.appendChild(acEl); const w = acEl.offsetWidth; acEl.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + 24)) + 'px'; acEl.style.top = Math.min(innerHeight - acEl.offsetHeight - 8, r.bottom + 4) + 'px';
+      }, 500);
+    }, { passive: true });
+    D.addEventListener('mouseout', (e) => { const tr = e.target.closest && e.target.closest('tr[data-agent]'); if (tr && !(e.relatedTarget && tr.contains(e.relatedTarget))) acHide(); }, { passive: true });
+    addEventListener('scroll', acHide, { passive: true, capture: true });
+  }
   // ---- observer ---------------------------------------------------------------------------------
   let q = [], raf = 0;
   function flush() {
     raf = 0; const m = mainEl(); if (!m) return; const nodes = q; q = [];
-    nodes.forEach((n) => { if (n.isConnected) { paintStatus(n); paintEmpty(n); stagger(n); countUp(n); barGrow(n); } });
+    nodes.forEach((n) => { if (n.isConnected) { paintStatus(n); paintEmpty(n); stagger(n); countUp(n); barGrow(n); heroExtras(n); } });
     dockVis(); progDone();
   }
   function init() {
     if (!D.body) return; buildDock();
     const m = mainEl(); if (!m) { setTimeout(init, 300); return; }
     new MutationObserver((recs) => { recs.forEach((r) => r.addedNodes.forEach((n) => { if (n.nodeType === 1) q.push(n); })); if (!raf) raf = requestAnimationFrame(flush); }).observe(m, { childList: true, subtree: true });
-    window.addEventListener('hashchange', () => { setMode(false); progStart(); pageTrans(); }); headerScroll();
+    window.addEventListener('hashchange', () => { setMode(false); progStart(); pageTrans(); }); headerScroll(); acInit();
     q.push(m); flush();
   }
-  FF.motion = { setMode, print: actPrint, confetti };
+  FF.motion = { setMode, print: actPrint, confetti, chime };
   if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', init); else init();
 })(window.FF);

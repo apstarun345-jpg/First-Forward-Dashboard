@@ -108,3 +108,18 @@ html.ff-no-anim .ux-pt { animation: none !important; }
 .hs-rec { border-color: #fcd34d; background: linear-gradient(135deg, rgba(254,243,199,.8), rgba(255,255,255,0)); }
 .hs-rec > b { font-size: 16px; color: #b45309; }
 .ux-confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 99999; }
+
+/* v3.125.418 — hero by time of day, row hover lift, agent mini card */
+.home-hero[data-tod="morning"] { background: linear-gradient(120deg, #fff7d6, #ffe1c2 55%, #ffd0d8) !important; }
+.home-hero[data-tod="noon"] { background: linear-gradient(120deg, #dbeafe, #c7e6ff 55%, #d6f5ee) !important; }
+.home-hero[data-tod="evening"] { background: linear-gradient(120deg, #ffd9b8, #ffb7c5 55%, #c9b6ff) !important; }
+.home-hero[data-tod="night"] { background: linear-gradient(120deg, #1e1b4b, #312e81 55%, #0f172a) !important; color: #e8edff; }
+.home-hero[data-tod="night"] .sub, .home-hero[data-tod="night"] .home-greeting, .home-hero[data-tod="night"] h1 { color: #e8edff; }
+.home-hero[data-tod] { position: relative; overflow: hidden; }
+.home-hero[data-tod]::after { position: absolute; right: 22px; top: 8px; font-size: 54px; opacity: .22; pointer-events: none; animation: uxFloat 4s ease-in-out infinite; }
+.home-hero[data-tod="morning"]::after { content: '🌅'; } .home-hero[data-tod="noon"]::after { content: '☀️'; } .home-hero[data-tod="evening"]::after { content: '🌇'; } .home-hero[data-tod="night"]::after { content: '🌙'; }
+.tbl tbody tr.clickable { transition: background .15s, box-shadow .15s; }
+.tbl tbody tr.clickable:hover { background: color-mix(in srgb, var(--brand, #6366f1) 9%, transparent); box-shadow: inset 3px 0 0 var(--brand, #6366f1), 0 6px 14px -8px rgba(30,27,75,.35); }
+.ux-ac { position: fixed; z-index: 9990; min-width: 190px; padding: 10px 14px; border-radius: 14px; background: linear-gradient(160deg, #312e81, #1e1b4b); color: #fff; box-shadow: 0 12px 28px rgba(30,27,75,.4), 0 30px 50px -16px rgba(79,70,229,.5), inset 0 1px 0 rgba(255,255,255,.18); display: grid; gap: 4px; pointer-events: none; animation: uxPt .18s ease both; }
+.ux-ac b { font-size: 14px; } .ux-ac div { display: flex; justify-content: space-between; gap: 16px; font-size: 12.5px; } .ux-ac span { opacity: .75; } .ux-ac strong { font-weight: 800; }
+@media (prefers-reduced-motion: reduce) { .home-hero[data-tod]::after { animation: none; } }

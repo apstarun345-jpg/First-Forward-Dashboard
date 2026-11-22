@@ -1764,6 +1764,7 @@ FF.pages = FF.pages || {};
         alerts.sort((a, b) => a.cov - b.cov);
       }
       ui.stockAlerts = alerts;
+      try { const sk = `ff_stk_snd_${tk}`; if (alerts.length && !localStorage.getItem(sk)) { localStorage.setItem(sk, '1'); if (FF.motion && FF.motion.chime) FF.motion.chime('alert'); } } catch { /* optional */ }
       const al = alerts[0];
       const alertHtml = al ? `<div class="hs-box hs-alert"><span class="hs-k">🔴 Zaroori alert</span><b>${esc(al.label)} stock sirf ${U.fmt(al.qty)}</b><small>~${al.cov.toFixed(1)} din ka cover${alerts.length > 1 ? ` · +${alerts.length - 1} aur low` : ''}</small></div>` : `<div class="hs-box hs-ok"><span class="hs-k">✅ Alert</span><b>Stock theek hai</b><small>Koi class 5 din se kam nahi</small></div>`;
       mount.innerHTML = `<div class="hs-strip">
@@ -1774,7 +1775,7 @@ FF.pages = FF.pages || {};
         let best = 0; const per = new Map(); const f30 = new Date(TODAY()); f30.setDate(f30.getDate() - 30); const k30 = dayKey(f30);
         for (const r of rows) { if (r.key && r.key < tk && r.key >= k30) per.set(r.key, (per.get(r.key) || 0) + (Number(r.n) || 0)); }
         per.forEach((v) => { if (v > best) best = v; });
-        if (best > 50 && t > best) { const rk = `ff_rec_${tk}`; mount.querySelector('.hs-strip').insertAdjacentHTML('afterbegin', `<div class="hs-box hs-rec"><span class="hs-k">🎉 Record!</span><b>Aaj ka din best</b><small>30 din ka best ${U.fmt(best)} tha</small></div>`); if (!localStorage.getItem(rk)) { localStorage.setItem(rk, '1'); if (FF.motion && FF.motion.confetti) FF.motion.confetti(); } }
+        if (best > 50 && t > best) { const rk = `ff_rec_${tk}`; mount.querySelector('.hs-strip').insertAdjacentHTML('afterbegin', `<div class="hs-box hs-rec"><span class="hs-k">🎉 Record!</span><b>Aaj ka din best</b><small>30 din ka best ${U.fmt(best)} tha</small></div>`); if (!localStorage.getItem(rk)) { localStorage.setItem(rk, '1'); if (FF.motion && FF.motion.confetti) FF.motion.confetti(); if (FF.motion.chime) FF.motion.chime('win'); } }
       } catch { /* optional */ }
       const badge = U.$('#hm-stock-badge', root);
       if (badge) { badge.hidden = !alerts.length; badge.textContent = alerts.length ? `🔴 ${alerts.length} low` : ''; }
