@@ -1550,7 +1550,7 @@ const MEM_SOFT_MB = Number(process.env.MEM_SOFT_MB) || 400;
 const MEM_HARD_MB = Number(process.env.MEM_HARD_MB) || 470;
 const memGuard = { lastSoftAt: 0, softCount: 0, peakMB: 0 };
 function rssMB() { return Math.round(process.memoryUsage().rss / 1048576); }
-const MEM_HEAP_SOFT_MB = Number(process.env.MEM_HEAP_SOFT_MB) || 240;
+const MEM_HEAP_SOFT_MB = Number(process.env.MEM_HEAP_SOFT_MB) || 200;   // v3.125.414: jaldi gc — heap 240+ par RSS 470 cross hota tha (restart → 502)
 const MEM_CACHE_TRIM_MB = Number(process.env.MEM_CACHE_TRIM_MB) || 455;   // gc ke baad bhi RSS itna ho tabhi cache ghatao
 function heapMB() { return Math.round(process.memoryUsage().heapUsed / 1048576); }
 /** Soft trim = purani AADHI gviz cache entries hatao (poora cache nahi) + chhote page caches. Pehle har 30s poora cache
@@ -5399,6 +5399,7 @@ async function profilePackWarm() {
 }
 function profilePackNightly() {
   if (profilePack.promise) return;
+  if (rssMB() > 360) return;   // memory ooncha → 10 min baad dobara
   const h = new Date(Date.now() + 5.5 * 3600e3), mins = h.getUTCHours() * 60 + h.getUTCMinutes();
   if (profilePack.addr && profilePack.day === istDay()) return;
   if (profilePack.addr && mins < 165) return;   // snapshot hai aur abhi 02:45 se pehle → purana chalega
@@ -5423,6 +5424,7 @@ function officeDispatched(fresh) {
 /** Roz raat: aaj ka build nahi hua aur IST 02:30 ho gaya → ek baar banao + save. */
 function officeDispatchedNightly() {
   if (officeDispState.promise) return;
+  if (rssMB() > 360) return;   // memory ooncha → 10 min baad dobara (restart / 502 se bachne ke liye)
   const h = new Date(Date.now() + 5.5 * 3600e3), mins = h.getUTCHours() * 60 + h.getUTCMinutes();
   const d = officeDispState.data;
   if (d && d.builtDay === istDay()) return;

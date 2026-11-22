@@ -31,8 +31,8 @@ window.FF = window.FF || {};
 
   // 🔁 v3.125.16 — Server restart (Render memory guard) ke ~30-80 s me 502/503/504 aata tha aur boxes "HTTP 502" dikha dete the.
   //    Read calls (GET + read-only POST) ab chup-chaap retry karte hain: 2s · 5s · 10s · 20s · 30s.
-  const READ_POSTS = /^\/api\/(dispatch-by|stock-age|gv-agent-commission|kyc)/;
-  const RETRY_WAITS = [2000, 5000, 10000, 20000, 30000];
+  const READ_POSTS = /^\/api\/(dispatch-by|dispatch-status|dispatch-lookup|dispatch-test|stock-age|gv-agent-commission|kyc|barcode-lookup|barcode-range|sheet-freshness|offdisp|office-dispatched|profile-pack)/;
+  const RETRY_WAITS = [2000, 4000, 8000, 15000, 25000, 30000, 30000];   // ~2 min: Render restart 30-90 s leta hai
   async function api(path, method, body) {
     const m = String(method || 'GET').toUpperCase();
     const retryable = !/^\/api\/auth\//.test(path) && (m === 'GET' || READ_POSTS.test(path));
