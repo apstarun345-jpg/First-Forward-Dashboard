@@ -63,4 +63,7 @@
 
 /* v3.125.421 — audit fixes: tiny text floor + dock should not cover the mobile bottom-nav */
 .nav-count, .rf-full, .hm-expected-change, .npci-chip, .vcol-val, .vcol-label, .notification-count, #notification-count { font-size: 11px !important; }
-@media (max-width: 900px) { #ux-dock { bottom: calc(var(--mobile-nav-h, 64px) + 118px + env(safe-area-inset-bottom, 0px)) !important; } }
+@media (max-width: 900px) { #ux-dock { bottom: calc(var(--mobile-nav-h, 72px) + 10px + env(safe-area-inset-bottom, 0px)) !important; } }
+/* bottom nav me 6 items hon to 2nd row me na girein (pehle 5 columns fixed the → "More" neeche dock/page se takrata tha) */
+html.mobile-ui #mobile-nav.mobile-nav, .mobile-nav { grid-auto-flow: column !important; grid-auto-columns: minmax(0, 1fr) !important; grid-template-columns: none !important; }
+.mobile-nav-item small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
