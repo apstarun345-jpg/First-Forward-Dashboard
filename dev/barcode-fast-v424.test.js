@@ -23,3 +23,8 @@ test('dispatch ledger pack: nightly durable save + boot load + live fallback for
   assert.match(sv, /ledgerPackLoad\(\)\.catch/);
   assert.match(sv, /ledgerDirect\(ml\)/);
 });
+test('office-dispatched drawer has FF/GV filter with counts', () => {
+  const hm = fs.readFileSync(new URL('../home.js', import.meta.url), 'utf8');
+  assert.match(hm, /data-od-ch/);
+  assert.match(sv, /chCounts: odChAll/);
+});

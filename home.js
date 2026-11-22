@@ -1066,11 +1066,11 @@ FF.pages = FF.pages || {};
       const stale = list.filter(isAlertStale);
       if (!stale.length) return '';
       const sig = staleSig(list);
-      try { const d = JSON.parse(localStorage.getItem(DISMISS_KEY) || 'null'); if (d && d.sig === sig && Date.now() - d.at < 3 * 3600e3) return ''; } catch { /* ignore */ }
+      try { const d = JSON.parse(localStorage.getItem(DISMISS_KEY) || 'null'); if (d && d.sig === sig && Date.now() - d.at < 3600e3) return ''; } catch { /* ignore */ }
       const li = stale.map((r) => `<li><b>${esc(r.icon)} ${esc(r.tab)}</b> <span class="dim">(${esc(r.title)})</span> — last data: <b>${esc(fmtDT(r.value))}</b> · <span class="fresh-pill bad">${esc(ago(r.value))}</span></li>`).join('');
       return `<div class="fresh-alert" role="alert" data-fresh-sig="${esc(sig)}"><div class="fresh-alert-ic">⚠️</div>
         <div class="fresh-alert-body"><b>${stale.length === 1 ? 'Ek sheet' : stale.length + ' sheets'} me naya data nahi aaya</b><ul>${li}</ul><small class="dim">Apps Script import chala ya nahi check karo — dashboard abhi purana data dikha raha hai.</small></div>
-        <div class="fresh-alert-act"><button class="btn small" data-fresh-refresh>↻ Dobara check</button><button class="btn small" data-fresh-dismiss title="3 ghante ke liye chhupao">✕</button></div></div>`;
+        <div class="fresh-alert-act"><button class="btn small" data-fresh-refresh>↻ Dobara check</button><button class="btn small" data-fresh-dismiss title="1 ghante ke liye chhupao">✕</button></div></div>`;
     }
     let alertToasted = '';
     function paintAlert(root, list, final) {
@@ -1256,15 +1256,17 @@ FF.pages = FF.pages || {};
     const body = FF.app.openDrawer({ kicker: '🚚 Stock check', title: 'Dispatched · still in office stock', sub: `StockDataa me agent blank / Not assigned — par dispatch sheet (FF / GV) me dispatch ho chuka · ${U.fmt(sum.total)} barcodes`, body: U.spinner('List load ho rahi hai…'), wide: true });
     const host = body && body.querySelector ? body : U.$('#drawer-body');
     if (!host) return;
-    const st = { q: '', cls: '', days: 0, done: false };
+    const st = { q: '', cls: '', days: 0, done: false, ch: '' };
     const CH = 400;
     const rowHtml = (r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.barcode)}</b></td><td>${esc(r.tagId)}</td><td>${esc(r.cls)}</td><td>${esc(r.ch)}</td><td>${esc(r.dispDate)}</td><td>${esc(r.dispAgent)} <small class="dim">${esc(r.dispAgentId)}</small></td><td>${r.agentName ? esc(r.agentName) : '<span class="dim">Blank</span>'}</td></tr>`;
     const load = async () => {
-      const d = await fetchOffDisp(`all=1${st.days ? `&days=${st.days}` : ''}${st.done ? '&status=done' : ''}${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`);
+      const d = await fetchOffDisp(`all=1${st.ch ? `&ch=${st.ch}` : ''}${st.days ? `&days=${st.days}` : ''}${st.done ? '&status=done' : ''}${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`);
       const rows = d.rows || [];
       const clsBtns = Object.entries(sum.byCls || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => `<button class="btn small${st.cls === c ? ' primary' : ''}" data-od-c="${esc(c)}">${esc(c)} ${U.fmt(n)}</button>`).join('');
-      const csvQs = `csv=1${st.days ? `&days=${st.days}` : ''}${st.done ? '&status=done' : ''}${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`;
-      const flt = `<button class="btn small${st.days === 30 ? ' primary' : ''}" data-od-d="30">📅 Last 30 din</button><button class="btn small${st.done ? ' primary' : ''}" data-od-done="1">✅ Sirf Issued/Done</button>`;
+      const csvQs = `csv=1${st.ch ? `&ch=${st.ch}` : ''}${st.days ? `&days=${st.days}` : ''}${st.done ? '&status=done' : ''}${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`;
+      const cc = d.chCounts || { FF: 0, GV: 0 };
+      const chBtns = `<button class="btn small${!st.ch ? ' primary' : ''}" data-od-ch="">Total ${U.fmt((cc.FF || 0) + (cc.GV || 0))}</button><button class="btn small${st.ch === 'FF' ? ' primary' : ''}" data-od-ch="FF">🟦 FF ${U.fmt(cc.FF || 0)}</button><button class="btn small${st.ch === 'GV' ? ' primary' : ''}" data-od-ch="GV">🟩 GV ${U.fmt(cc.GV || 0)}</button>`;
+      const flt = chBtns + `<button class="btn small${st.days === 30 ? ' primary' : ''}" data-od-d="30">📅 Last 30 din</button><button class="btn small${st.done ? ' primary' : ''}" data-od-done="1">✅ Sirf Issued/Done</button>`;
       host.innerHTML = `<div class="btn-row"><input class="input" id="od-q" placeholder="Barcode / Tag ID / agent…" value="${esc(st.q)}">${flt}${clsBtns}${st.cls ? '<button class="btn small" data-od-c="">✕ All</button>' : ''}${canExp ? `<a class="btn small primary" href="/api/office-dispatched?${csvQs}" download>⬇ CSV (${U.fmt(d.filtered)})</a>` : ''}<button class="btn small" id="od-copy">📋 Copy barcodes</button></div>
         <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Barcode</th><th>Tag ID</th><th>Class</th><th>Channel</th><th>Dispatch date</th><th>Dispatched to</th><th>Sheet agent</th></tr></thead><tbody>${rows.slice(0, CH).map(rowHtml).join('') || '<tr><td colspan="8" class="empty">Koi barcode nahi</td></tr>'}</tbody></table></div>
         <p class="dim small" id="od-count">Total <b>${U.fmt(rows.length)}</b> barcodes${rows.length > CH ? ` · <span id="od-shown">${U.fmt(Math.min(CH, rows.length))}</span> dikh rahe — neeche scroll karo, baaki aate jayenge` : ''}</p>`;
@@ -1275,6 +1277,7 @@ FF.pages = FF.pages || {};
       }
       const q = host.querySelector('#od-q'); let tm = null;
       q.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => { st.q = q.value.trim(); load().catch(() => {}); }, 400); });
+      host.querySelectorAll('[data-od-ch]').forEach((b) => b.addEventListener('click', () => { st.ch = b.dataset.odCh; load().catch(() => {}); }));
       host.querySelectorAll('[data-od-d]').forEach((b) => b.addEventListener('click', () => { st.days = st.days === 30 ? 0 : 30; load().catch(() => {}); }));
       host.querySelectorAll('[data-od-done]').forEach((b) => b.addEventListener('click', () => { st.done = !st.done; load().catch(() => {}); }));
       host.querySelectorAll('[data-od-c]').forEach((b) => b.addEventListener('click', () => { st.cls = b.dataset.odC; load().catch(() => {}); }));

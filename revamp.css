@@ -70,3 +70,9 @@ html.mobile-ui #mobile-nav.mobile-nav, .mobile-nav { grid-auto-flow: column !imp
 
 /* v3.125.431 — robot ke charo or ke emoji bubbles (HUD) hata diye */
 .mc-orbit-hud, .mc.hud-open .mc-orbit-hud, .mc:hover .mc-orbit-hud { display: none !important; }
+
+/* v3.125.432 — 24h+ purana sheet data: Home ke upar highlighted alert */
+.fresh-alert { position: sticky; top: 8px; z-index: 30; border-width: 2px; box-shadow: 0 6px 22px rgba(220, 38, 38, .28); background: linear-gradient(90deg, #fee2e2, #fff1f2); animation: fresh-pulse 2.2s ease-in-out infinite; }
+.fresh-alert-body > b { font-size: 15px; color: #991b1b; }
+@keyframes fresh-pulse { 0%, 100% { box-shadow: 0 6px 22px rgba(220, 38, 38, .22); } 50% { box-shadow: 0 6px 30px rgba(220, 38, 38, .5); } }
+@media (prefers-reduced-motion: reduce) { .fresh-alert { animation: none; } }

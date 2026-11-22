@@ -9091,6 +9091,9 @@ async function handleApi(req, res, url) {
       rows = rows.filter((r) => { const v = pd(r.dispDate); return Number.isFinite(v) && v >= lim; });
     }
     if (url.searchParams.get('status') === 'done') rows = rows.filter((r) => /issued|done/i.test(String(r.status || '')));
+    const odChAll = { FF: rows.filter((r) => /^ff/i.test(String(r.ch || ''))).length, GV: rows.filter((r) => /^gv/i.test(String(r.ch || ''))).length };
+    const odCh = String(url.searchParams.get('ch') || '').toUpperCase();
+    if (odCh === 'FF' || odCh === 'GV') rows = rows.filter((r) => String(r.ch || '').toUpperCase().startsWith(odCh));
     if (url.searchParams.get('csv') === '1') {
       const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
       const head = ['Barcode', 'Tag ID', 'Class', 'Channel', 'Dispatch date', 'Dispatched to (agent)', 'Agent ID', 'Sheet agent name', 'Barcode date', 'Ledger row', 'First barcode', 'Last barcode', 'Qty'];
@@ -9098,7 +9101,7 @@ async function handleApi(req, res, url) {
       return sendMaybeCompressed(req, res, 200, 'text/csv; charset=utf-8', `﻿${csv}`, { 'Content-Disposition': `attachment; filename="office-stock-but-dispatched-${dateKeyNow()}.csv"`, 'Cache-Control': 'no-store' });
     }
     const limit = Math.min(Number(url.searchParams.get('limit')) || 200, 5000), offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
-    return sendJson(res, 200, { ok: true, at: new Date(d.at).toISOString(), officeTotal: d.officeTotal, total: d.total, skippedBad: d.skippedBad, byCls: d.byCls, byCh: d.byCh, filtered: rows.length, rows: url.searchParams.get('all') === '1' ? rows : rows.slice(offset, offset + limit), ledgerErrors: d.ledgerErrors }, { 'Cache-Control': 'no-store' });
+    return sendJson(res, 200, { ok: true, at: new Date(d.at).toISOString(), officeTotal: d.officeTotal, total: d.total, skippedBad: d.skippedBad, byCls: d.byCls, byCh: d.byCh, chCounts: odChAll, filtered: rows.length, rows: url.searchParams.get('all') === '1' ? rows : rows.slice(offset, offset + limit), ledgerErrors: d.ledgerErrors }, { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/stock-map' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required');
