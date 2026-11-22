@@ -812,6 +812,42 @@ FF.pages = FF.pages || {};
   }
 
   const ADDR_CACHE = new Map();   // v3.125.321 — agent address (Master Search card)
+  // 🧑‍💼 v3.125.413 — roz raat server par bana Address pack: ek baar aata hai (ETag), phir har profile ka address browser me turant.
+  const ADDR_PACK = { state: 'idle', p: null, ff: null, byId: new Map(), byMob: new Map(), byName: new Map(), at: 0, day: '' };
+  const packNorm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  function addrPackLoad() {
+    if (ADDR_PACK.p) return ADDR_PACK.p;
+    ADDR_PACK.state = 'loading';
+    ADDR_PACK.p = (async () => {
+      for (let k = 0; k < 8; k++) {
+        let r = null;
+        try { r = await fetch('/api/profile-pack', { credentials: 'same-origin', cache: 'no-cache' }); } catch { r = null; }
+        if (!r || !r.ok) { await new Promise((ok) => setTimeout(ok, 3000)); continue; }
+        const j = await r.json();
+        if (j.pending) { await new Promise((ok) => setTimeout(ok, j.retryAfterMs || 5000)); continue; }
+        const idx = { byId: new Map(), byMob: new Map(), byName: new Map() };
+        const put = (m, key, row) => { if (!key) return; const a = m.get(key); if (a) a.push(row); else m.set(key, [row]); };
+        (j.addr || []).forEach((a) => {
+          const row = { channel: a[0], id: a[1], name: a[2], mobile: a[3], address: a[4], pincode: a[5], tl: a[6], src: a[7] || 'Address' };
+          put(idx.byId, `${row.channel}|${packNorm(row.id)}`, row);
+          const m10 = String(row.mobile || '').replace(/\D/g, '').slice(-10); if (m10.length === 10) put(idx.byMob, `${row.channel}|${m10}`, row);
+          put(idx.byName, `${row.channel}|${packNorm(row.name)}`, row);
+        });
+        Object.assign(ADDR_PACK, idx, { state: 'ready', at: j.at || 0, day: j.day || '', none: !!j.none });
+        return true;
+      }
+      ADDR_PACK.state = 'failed'; ADDR_PACK.p = null; return false;
+    })();
+    return ADDR_PACK.p;
+  }
+  function addrPackFind(ch, id, mob, name) {
+    if (ADDR_PACK.state !== 'ready') return null;
+    const pick = (a) => (a && a.length ? a : null);
+    let r = id ? pick(ADDR_PACK.byId.get(`${ch}|${packNorm(id)}`)) : null;
+    if (!r && mob && mob.length === 10) r = pick(ADDR_PACK.byMob.get(`${ch}|${mob}`));
+    if (!r && name) { const a = ADDR_PACK.byName.get(`${ch}|${packNorm(name)}`); if (a && a.length === 1) r = a; }
+    return r ? r.map((x) => ({ ...x })) : [];
+  }
   function search(q) {
     const idx = state.full || state.light;
     // v3.125.283 — "varsha kanwar TL" / "TL varsha" / "ramesh agent" → role shabd hata ke naam se dhoondo, sirf wahi role
@@ -2611,9 +2647,19 @@ FF.pages = FF.pages || {};
         const id = (q && q.id) || pp.sub || '', mob = String((q && q.mobile) || '').replace(/\D/g, '').slice(-10);
         const key = `${ch}|${aNorm(id)}|${mob}|${aNorm(pp.name)}`;
         if (ADDR_CACHE.has(key)) return ADDR_CACHE.get(key);
+        // ⚡ pack ready ho to turant (kuch nahi mila to bhi turant "nahi mila"; background me purana tarika sirf aaj ke naye address pakadne ke liye)
+        const fast = addrPackFind(ch, id, mob, pp.name);
+        if (fast && fast.length) { ADDR_CACHE.set(key, fast); return fast; }
+        if (ADDR_PACK.state === 'idle') addrPackLoad();
+        if (fast && !fast.length) {
+          ADDR_CACHE.set(key, []);
+          (async () => { try { const tries2 = []; if (id) tries2.push(['id', id]); if (mob.length === 10) tries2.push(['mobile', mob]); for (const [fld, val] of tries2) { const j = await FF.auth.api(`/api/address-book?channel=${ch}&fields=${fld}&q=${encodeURIComponent(val)}&limit=5`); const r = (j.rows || []).filter((x) => (fld === 'id' ? aNorm(x.id) === aNorm(val) : String(x.mobile || '').replace(/\D/g, '').slice(-10) === val)); if (r.length) { ADDR_CACHE.set(key, r); if (current === g) paintDet(); return; } } } catch { /* optional */ } })();
+          return [];
+        }
         ADDR_CACHE.set(key, 'loading');
         (async () => {
           let rows = [];
+          if (ADDR_PACK.p) { try { await ADDR_PACK.p; const again = addrPackFind(ch, id, mob, pp.name); if (again && again.length) { ADDR_CACHE.set(key, again); if (current === g) paintDet(); return; } } catch { /* fallback below */ } }
           const tries = [];
           if (id) tries.push(['id', id]);
           if (mob.length === 10) tries.push(['mobile', mob]);
@@ -2660,6 +2706,17 @@ FF.pages = FF.pages || {};
           <div class="msp-det-al"><small>Mobile Number - </small><b>${esc(row.mobile)}</b></div>
           <div class="msp-det-al"><small>Address with Pincode - </small><b>${esc(withPin)}</b></div></div>`;
       };
+      const PI_CACHE = new WeakMap();
+      const profileInfoFor = (pp, ch) => {
+        const none = { hero: '', growth: '' };
+        try {
+          if (!MP() || !MP().buildNow || !FF.profileInsights || !FF.profileInsights.heroHtml) return none;
+          const loaded = MP().isLoaded ? MP().isLoaded() : true;
+          let c = PI_CACHE.get(pp);
+          if (!c || c.loaded !== loaded) { c = { loaded, pr: MP().buildNow(pp) }; c.hero = FF.profileInsights.heroHtml(c.pr, { ch }); c.growth = FF.profileInsights.growthHtml(c.pr); PI_CACHE.set(pp, c); }
+          return { hero: c.hero || '', growth: c.growth || '' };
+        } catch { return none; }
+      };
       const paintDet = () => {
         const host = out.querySelector('#msp-det');
         if (!host || current !== g) return;
@@ -2676,17 +2733,19 @@ FF.pages = FF.pages || {};
           const tlName = tlKind ? pp.name : (tl.name || [...(pp.tlSet || [])][0] || '');
           const tlId = tlKind ? id : (tl.id || '');
           const tlMob = tlKind ? (q && q.mobile) : tl.mobile;
-          return `<div class="msp-det-card ${ch}"><div class="msp-det-h">${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${tlKind ? 'Team Leader' : 'Agent'}</div><div class="msp-det-grid">
+          const prInfo = profileInfoFor(pp, ch);
+          return `<div class="msp-det-card ${ch}"><div class="msp-det-h">${ch === 'gv' ? '🟩 GV Partner' : '🟦 First Forward'} · ${tlKind ? 'Team Leader' : 'Agent'}</div>${prInfo.hero}<div class="msp-det-grid">
             <div class="msp-det-f"><small>${tlKind ? 'TL mobile' : 'Mobile'}</small><b>${mob(q && q.mobile)}</b></div>
             ${tlKind ? '' : (pp.direct || !tlName ? f('TL name', pp.direct ? (pp.directLabel || 'Direct') : tlName) : `<div class="msp-det-f"><small>TL name</small><b><button type="button" class="mp-link-btn" data-ms-open-tl="1" data-ms-tl-name="${esc(tlName)}" data-ms-tl-id="${esc(tlId || '')}" data-ms-tl-ch="${ch}" title="${esc(tlName)} — Master Search me kholo">${esc(tlName)} ↗</button></b></div>`)}
             ${tlKind ? '' : (pp.direct ? f('Agent ID', id, true) : f('TL ID', tlId, true))}
             ${tlKind ? '' : `<div class="msp-det-f"><small>${pp.direct ? 'Agent mobile' : 'TL mobile'}</small><b>${mob(pp.direct ? (q && q.mobile) : tlMob)}</b></div>`}
-            ${q && q.status ? f('Status', q.status) : ''}${(() => { const li = lastActInfo({ name: pp.name, id: id }, tlKind, ch); if (!li) return q && q.lastActive ? f('Last active', q.lastActive) : ''; const tone = li.days <= 3 ? 'green' : li.days <= 10 ? 'amber' : 'red'; return `<div class="msp-det-f msp-det-act ${tone}"><small>🕒 Last activation</small><b>${esc(U.labelDateKey(li.key))}${li.time ? ` · ${esc(li.time)}` : ''}</b><em>${li.days === 0 ? 'aaj' : li.days === 1 ? 'kal' : `${li.days} din pehle`}${li.days >= 15 ? ' · ⚠️ inactive' : ''} · ${esc(U.fmt(li.qty))} tags</em></div>`; })()}
+            ${q && q.status ? `<div class="msp-det-f"><small>Status</small><b>${esc(q.status)}</b>${prInfo.growth}</div>` : (prInfo.growth ? `<div class="msp-det-f"><small>Growth</small>${prInfo.growth}</div>` : '')}${(() => { const li = lastActInfo({ name: pp.name, id: id }, tlKind, ch); if (!li) return q && q.lastActive ? f('Last active', q.lastActive) : ''; const tone = li.days <= 3 ? 'green' : li.days <= 10 ? 'amber' : 'red'; return `<div class="msp-det-f msp-det-act ${tone}"><small>🕒 Last activation</small><b>${esc(U.labelDateKey(li.key))}${li.time ? ` · ${esc(li.time)}` : ''}</b><em>${li.days === 0 ? 'aaj' : li.days === 1 ? 'kal' : `${li.days} din pehle`}${li.days >= 15 ? ' · ⚠️ inactive' : ''} · ${esc(U.fmt(li.qty))} tags</em></div>`; })()}
             ${pp.last ? f('Last allocation', pp.last) : ''}
           </div>${addrBlock(pp, ch, q)}</div>`;
         };
         copyBuf.length = 0; addBuf.length = 0;
         host.innerHTML = [card(viewGroup.ff, 'ff'), card(viewGroup.gv, 'gv')].join('');
+        try { if (FF.profileInsights && FF.profileInsights.bindHero) FF.profileInsights.bindHero(host, (ch2) => { const person = ch2 === 'gv' ? viewGroup.gv : viewGroup.ff; if (person && MP()) MP().open(person); }); } catch { /* optional */ }
         host.querySelectorAll('[data-addr-add]').forEach((b) => { b.onclick = async () => {
           const it = addBuf[Number(b.dataset.addrAdd)]; if (!it) return;
           try { if (!FF.addressBook && FF.lazy) await FF.lazy.inject('addressBook'); } catch { /* ignore */ }
@@ -3725,7 +3784,7 @@ FF.pages = FF.pages || {};
     }
   });
 
-  FF.pages.masterSearch = { title: 'Master Search', render: pageRender };
+  FF.pages.masterSearch = { title: 'Master Search', render: (...a) => { try { if (FF.auth && (FF.auth.isAdmin && FF.auth.isAdmin() || FF.auth.can && (FF.auth.can('addressFF') || FF.auth.can('addressGV')))) addrPackLoad(); } catch { /* optional */ } return pageRender(...a); } };
 
   /** v3.78 — barcode suggestions (Fastag Mapping ke barcode box ke liye). Barcode ke prefix/beech ke digits se
    *  match; har item me tag ID, agent, TL, class. Full (barcode) index ready na ho to pending:true deta hai. */

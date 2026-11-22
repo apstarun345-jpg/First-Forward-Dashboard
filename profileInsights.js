@@ -405,5 +405,82 @@ window.FF = window.FF || {};
     tip.style.top = '8px';
   }
 
-  FF.profileInsights = { html, bind, analyze, _boxes: BOXES, _tipHtml: tipHtml, _chartSvg: chartSvg };
+  // ------------------------------------------------------------------ 🧑‍💼 v3.125.413 — Master Search "Profile" section (rangeen, chhote clickable boxes)
+  const REG = new Map();                       // key → pr (hero ke click / payout fill ke liye)
+  const inr0 = (n) => `₹${fmt(Math.round(Number(n) || 0))}`;
+  const pcts = (p) => (p === null || p === undefined || !isFinite(p) ? null : Math.round(p));
+  const chip = (p, label, tip) => {
+    const v = pcts(p);
+    if (v === null) return '';
+    const cls = v > 0 ? 'up' : v < 0 ? 'dn' : 'eq';
+    return `<span class="pf-gc ${cls}" title="${esc(tip || '')}">${v > 0 ? '▲' : v < 0 ? '▼' : '•'} ${v > 0 ? '+' : ''}${v}% <small>${esc(label)}</small></span>`;
+  };
+  /** Status ke saath: same-days growth % + FULL month % (is mahine ka projected vs poora pichhla mahina). */
+  function growthHtml(pr) {
+    try {
+      if (!pr || !FF.masterProfile || !FF.masterProfile.insightRows) return '';
+      const an = analyze(pr); if (!an.ready && !an.rowCount) return '';
+      const lastTotal = an.monthTot.last.t;
+      const full = lastTotal > 0 ? ((an.projected - lastTotal) / lastTotal) * 100 : null;
+      const html = chip(an.growth, `same ${an.cutDay} days`, 'Is mahine ke pehle din vs pichhle mahine ke utne hi din') + chip(full, 'full month', `Projected ${fmt(an.projected)} vs pichhla poora mahina ${fmt(lastTotal)}`);
+      return html ? `<span class="pf-gcs">${html}</span>` : '';
+    } catch { return ''; }
+  }
+  function heroHtml(pr, o) {
+    try {
+      if (!pr || !FF.masterProfile || !FF.masterProfile.insightRows) return '';
+      const ch = (o && o.ch) || pr.ch || 'ff';
+      const an = analyze(pr);
+      if (!an.ready && !an.rowCount) return '<section class="pf pf-wait" role="status">⏳ Profile stats load ho rahe hain…</section>';
+      const key = keyOf(pr); REG.set(key, pr);
+      const t = an.monthTot, lastTotal = t.last.t;
+      const full = lastTotal > 0 ? ((an.projected - lastTotal) / lastTotal) * 100 : null;
+      const tile = (cls, ic, lab, val, sub) => `<div class="pf-t ${cls}"><i>${ic}</i><small>${lab}</small><b>${val}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
+      const tiles = [
+        tile('t1', '🗓️', 'This month', fmt(t.cur.t), `${split(t.cur)}`),
+        tile('t2', '⏮️', 'Last month', fmt(lastTotal), `${an.lastYm}`),
+        tile('t3', '⚡', 'Run-rate / day', fmt(an.rate.t, 1), `last month ${fmt(an.lastRate, 1)}`),
+        tile('t4', '🎯', 'Full month (proj.)', fmt(an.projected), full === null ? '' : `${pcts(full) > 0 ? '+' : ''}${pcts(full)}% vs last`),
+        tile('t5', '🏆', 'Best day', an.best ? fmt(an.best.t) : '—', an.best ? esc(dayLabel(an.best.key)) : ''),
+        tile('t6', '✅', 'Active days', `${fmt(an.activeDays)}<small>/${an.elapsed}</small>`, '')
+      ].join('');
+      const minis = an.isTl ? `<div class="pf-minis" role="group" aria-label="Team health">${BOXES.map((b) => `<button type="button" class="pf-m tone-${b.tone}" data-pf-mini="${b.id}" data-pf-key="${esc(key)}" data-pf-ch="${ch}" title="${esc(b.hint)} — click: poori list"><b>${fmt(an.counts[b.id])}</b><small>${esc(b.label)}</small></button>`).join('')}</div>` : '';
+      const pay = ch === 'ff' && FF.auth && ((FF.auth.isAdmin && FF.auth.isAdmin()) || (FF.auth.can && FF.auth.can('payout'))) ? `<div class="pf-pay" data-pf-pay data-pf-key="${esc(key)}"><span class="dim small">🏦 Account & max-rate details load ho rahe…</span></div>` : '';
+      return `<section class="pf pf-${ch}" data-pf><div class="pf-h"><b>📈 ${an.isTl ? 'Team health & performance' : 'Activity & run-rate'}</b>${an.isTl ? `<small>${fmt(an.counts.all)} agents</small>` : ''}</div>
+        <div class="pf-tiles">${tiles}</div>${minis}${pay}</section>`;
+    } catch (e) { try { console.warn('profileInsights hero:', e); } catch { /* ignore */ } return ''; }
+  }
+  function bankHtml(b) {
+    if (!b) return '';
+    const it = (l, v) => (v ? `<span class="pf-bk"><small>${l}</small><b>${esc(v)}</b></span>` : '');
+    return `${it('Bank', b.bank)}${it('IFSC', b.ifsc)}${it('A/c', b.account)}${it('Name (PAN)', b.panName)}${it('PAN', b.pan)}`;
+  }
+  async function fillPay(host) {
+    const els = host ? [...host.querySelectorAll('[data-pf-pay]')] : [];
+    if (!els.length) return;
+    try { if (!FF.payslip && FF.lazy && FF.lazy.inject) await FF.lazy.inject('payslip'); } catch { /* optional */ }
+    for (const el of els) {
+      if (el.__pfDone) continue; el.__pfDone = true;
+      const pr = REG.get(el.dataset.pfKey);
+      if (!pr || !FF.payslip || !FF.payslip.infoFor || !FF.payslip.idsOf) { el.innerHTML = ''; continue; }
+      FF.payslip.infoFor({ ids: FF.payslip.idsOf(pr), name: pr.name || '' }).then((d) => {
+        if (!el.isConnected) return;
+        if (!d) { el.innerHTML = '<span class="dim small">🏦 Payout data abhi nahi mila (Home → 💰 Payout refresh)</span>'; return; }
+        const mx = d.maxes.filter((m) => m.n || m.amt);
+        const maxHtml = mx.length ? mx.map((m) => `<span class="pf-mx"><small>${esc(String(m.label).replace(/ (\d{4})$/, " '$1").replace(/'20/, "'"))}</small><b>${fmt(m.n)} tags</b><em>${inr0(m.amt)}</em></span>`).join('') : '<span class="dim small">Max-rate payout abhi nahi</span>';
+        el.innerHTML = `<div class="pf-pr"><div class="pf-pt">🏅 Issuance at max rate <small class="dim">(payout months)</small></div><div class="pf-mxs">${maxHtml}</div></div>
+          <div class="pf-pr pf-acct"><div class="pf-pt">🏦 Account details <small class="dim">${d.role === 'agent' ? `· paid via ${esc(d.payee)}` : d.payee ? `· ${esc(d.payee)}` : ''}</small></div><div class="pf-bks">${d.bank ? bankHtml(d.bank) : '<span class="dim small">Bank details sheet me nahi mili</span>'}</div></div>`;
+      }).catch(() => { el.__pfDone = false; if (el.isConnected) el.innerHTML = ''; });
+    }
+  }
+  /** Mini box click → full profile khule, wahi box selected. openFn(ch) profile open karta hai. */
+  function bindHero(host, openFn) {
+    if (!host) return;
+    host.querySelectorAll('[data-pf-mini]').forEach((b) => {
+      b.onclick = () => { const pr = REG.get(b.dataset.pfKey); if (!pr) return; uiOf(pr).box = b.dataset.pfMini; uiOf(pr).sort = ''; try { openFn && openFn(b.dataset.pfCh, pr); } catch { /* ignore */ } };
+    });
+    fillPay(host);
+  }
+
+  FF.profileInsights = { heroHtml, growthHtml, bindHero, fillPay, html, bind, analyze, _boxes: BOXES, _tipHtml: tipHtml, _chartSvg: chartSvg };
 })(window.FF);

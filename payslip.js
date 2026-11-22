@@ -800,5 +800,23 @@ window.FF = window.FF || {};
     ov.onchange = async (e) => { if (e.target.matches('[data-pst-month]')) { d = await payStatus(e.target.value); paint(); } };
   }
 
-  FF.payslip = { payStatus, payChipHtml, openPayStatus, xlSummary, curRows, boxHtml, fill, openPicker, download, downloadExcel, xlMonthSheet, words, idsOf, refresh, status, getSnap, fileName, payeeNameOf };
+  /** 🏦 v3.125.413 — Profile section ke liye: snapshot se (instant) masked bank details + har mahine "max rate" (max_n tags · po_max ₹). */
+  async function infoFor(spec) {
+    if (!canSee()) return null;
+    const S = await getSnap(); if (!S || S.empty) return null;
+    await loadCore();
+    const want = { ids: (spec && spec.ids) || [], name: (spec && spec.name) || '' };
+    let bank = null, role = '', payee = '';
+    const maxes = [];
+    for (const m of S.months || []) {
+      let data = null; try { data = core.matchMonth(m.apn, m.fnf, want); } catch { data = null; }
+      if (!data) continue;
+      if (!bank && data.bank && (data.bank.bank || data.bank.account || data.bank.ifsc)) bank = data.bank;
+      if (!role) { role = data.role; payee = `${data.payeeId || ''} ${data.payeeName || ''}`.trim(); }
+      const t = data.totals || {};
+      maxes.push({ label: m.label, n: Number(t.max_n) || 0, amt: Number(t.po_max) || 0, tags: Number(t.pay_total) || 0, iss: Number(t.iss_total) || 0 });
+    }
+    return { bank, role, payee, maxes: maxes.slice(0, 3), at: S.at };
+  }
+  FF.payslip = { infoFor, canSee, payStatus, payChipHtml, openPayStatus, xlSummary, curRows, boxHtml, fill, openPicker, download, downloadExcel, xlMonthSheet, words, idsOf, refresh, status, getSnap, fileName, payeeNameOf };
 })(window.FF);

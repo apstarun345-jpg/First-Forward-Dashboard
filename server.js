@@ -5340,6 +5340,63 @@ async function odSnapLoad() {
     return j;
   } catch (err) { officeDispState.err = 'snap load: ' + String((err && err.message) || err).slice(0, 120); return null; }
 }
+// 🧑‍💼 v3.125.413 — PROFILE PACK: roz raat (IST 02:45) ek baar Agents Address ka poora index banta hai + Sheet (CACHE_PROFILE) me durable save.
+// Search par profile kholte hi address turant (browser ek baar pack le leta hai) — har profile par 3-4 API call + Google wait nahi.
+const profilePack = { at: 0, day: '', addr: null, promise: null, err: '', bufs: new Map(), token: crypto.randomBytes(12).toString('hex'), viaSnap: false };
+async function durSave(tab, kind, obj, meta) {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return false;
+  try {
+    const body = zlib.gzipSync(Buffer.from(JSON.stringify(obj)), { level: 9 }).toString('base64');
+    const parts = []; for (let i = 0; i < body.length; i += SNAP_CHUNK) parts.push(body.slice(i, i + SNAP_CHUNK));
+    if (!parts.length || parts.length > 300) return false;
+    const head = JSON.stringify({ v: 1, kind, n: parts.length, ...meta });
+    const writes = [{ row: 1, value: head }, ...parts.map((v, i) => ({ row: i + 2, value: v })), ...Array.from({ length: 5 }, (_, j) => ({ row: parts.length + 2 + j, value: '' }))];
+    await sheetsStore.call('writecells', { spreadsheetId: '', tab, column: 'A', writes });
+    return true;
+  } catch (err) { profilePack.err = `save ${tab}: ` + String((err && err.message) || err).slice(0, 120); return false; }
+}
+async function durLoad(tab, kind) {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return null;
+  try {
+    const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab, startRow: 1, columns: ['A'] }, { timeoutMs: 60e3, attempts: 3 });
+    const rows = (out && out.rows) || []; const head = JSON.parse((rows[0] && rows[0][0]) || 'null');
+    if (!head || head.kind !== kind) return null;
+    const obj = JSON.parse(zlib.gunzipSync(Buffer.from(rows.slice(1, 1 + head.n).map((r) => r[0] || '').join(''), 'base64')).toString('utf8'));
+    return { head, obj };
+  } catch (err) { profilePack.err = `load ${tab}: ` + String((err && err.message) || err).slice(0, 120); return null; }
+}
+async function profilePackLoad() {
+  if (profilePack.addr) return true;
+  const r = await durLoad('CACHE_PROFILE', 'profile');
+  if (!r || !Array.isArray(r.obj && r.obj.addr)) return false;
+  profilePack.addr = r.obj.addr; profilePack.at = r.head.at || Date.now(); profilePack.day = r.head.day || ''; profilePack.viaSnap = true; profilePack.bufs.clear();
+  console.log(`🧑‍💼 profile pack snapshot wapas (${profilePack.addr.length} address, ${profilePack.day})`);
+  return true;
+}
+function profilePackBuild(viewFn) {
+  if (profilePack.promise) return profilePack.promise;
+  profilePack.promise = (async () => {
+    const t0 = Date.now();
+    const rows = await viewFn();
+    const addr = rows.filter((x) => x && (x.address || x.pincode)).map((x) => [x.channel === 'gv' ? 'gv' : 'ff', x.id || '', x.name || '', x.mobile || '', x.address || '', x.pincode || '', x.tl || '', x.src || '']);
+    profilePack.addr = addr; profilePack.at = Date.now(); profilePack.day = istDay(); profilePack.err = ''; profilePack.viaSnap = false; profilePack.bufs.clear();
+    console.log(`🧑‍💼 profile pack ready: ${addr.length} address (${Math.round((Date.now() - t0) / 1000)} s)`);
+    await durSave('CACHE_PROFILE', 'profile', { addr }, { at: profilePack.at, day: profilePack.day });
+    return addr;
+  })().catch((err) => { profilePack.err = String((err && err.message) || err).slice(0, 160); throw err; }).finally(() => { profilePack.promise = null; });
+  return profilePack.promise;
+}
+/** Server ke andar se hi handleApi ko bulao (addressBookView wahin ka closure hai) — token sirf is process ko pata hai. */
+async function profilePackWarm() {
+  try { const r = await fetch(`http://127.0.0.1:${PORT}/api/profile-pack/warm?t=${profilePack.token}`, { signal: AbortSignal.timeout(170e3) }); return r.ok; } catch { return false; }
+}
+function profilePackNightly() {
+  if (profilePack.promise) return;
+  const h = new Date(Date.now() + 5.5 * 3600e3), mins = h.getUTCHours() * 60 + h.getUTCMinutes();
+  if (profilePack.addr && profilePack.day === istDay()) return;
+  if (profilePack.addr && mins < 165) return;   // snapshot hai aur abhi 02:45 se pehle → purana chalega
+  profilePackWarm().catch(() => {});
+}
 function officeDispatchedBuild() {
   if (!officeDispState.promise) {
     officeDispState.promise = buildOfficeDispatched().then((d) => { d.builtDay = istDay(); officeDispState.data = d; officeDispState.at = Date.now(); officeDispState.err = ''; odSnapSave(d).catch(() => {}); return d; })
@@ -11894,6 +11951,32 @@ async function handleApi(req, res, url) {
     res.setHeader('Cache-Control', 'private, no-store');
     return sendJson(res, 200, { ok: true, company: 'APNAPAYMENT SERVICES PRIVATE LIMITED', months, readtab: PO.readtab, at: new Date().toISOString() });
   }
+  // 🧑‍💼 v3.125.413 — Profile pack (address index): pehle se bana hua, ETag ke saath; sirf wahi channel jiski user ko address permission hai.
+  if (p === '/api/profile-pack/warm' && method === 'GET') {
+    if (url.searchParams.get('t') !== profilePack.token) throw new HttpError(403, 'forbidden');
+    await profilePackBuild(addressBookView);
+    return sendJson(res, 200, { ok: true, n: (profilePack.addr || []).length });
+  }
+  if (p === '/api/profile-pack' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required.');
+    const chans = addrChannels(user);
+    if (!chans.length) return sendJson(res, 200, { ok: true, none: true, addr: [] }, { 'Cache-Control': 'private, no-store' });
+    if (!profilePack.addr) {
+      const ok = await Promise.race([profilePackLoad(), new Promise((r) => setTimeout(() => r(false), 20e3))]);
+      if (!ok && !profilePack.addr) { void profilePackBuild(addressBookView).catch(() => {}); return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 5000, addr: [] }, { 'Cache-Control': 'private, no-store' }); }
+    }
+    const ck = chans.join('');
+    let hit = profilePack.bufs.get(ck);
+    if (!hit) {
+      const addr = profilePack.addr.filter((a) => chans.includes(a[0]));
+      const body = Buffer.from(JSON.stringify({ ok: true, at: profilePack.at, day: profilePack.day, chans, addr }));
+      hit = { buf: zlib.gzipSync(body, { level: 6 }), etag: `"pp-${profilePack.at}-${ck}"` };
+      profilePack.bufs.set(ck, hit);
+    }
+    if (String(req.headers['if-none-match'] || '') === hit.etag) { res.writeHead(304, { ETag: hit.etag, 'Cache-Control': 'private, no-cache' }); return res.end(); }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', ETag: hit.etag, 'Cache-Control': 'private, no-cache', 'Content-Length': hit.buf.length });
+    return res.end(hit.buf);
+  }
   // 📍 Agents Address (v3.125.312) — search / preview / commit / sync. Channel-wise access admin deta hai (addressFF / addressGV), upload: admin ya addressUpload.
   if (p.startsWith('/api/address-book')) {
     if (!user) throw new HttpError(401, 'Login required.');
@@ -17808,7 +17891,9 @@ async function start() {
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
     setTimeout(() => { officeDispatched(false).then(() => officeDispatchedNightly()).catch(() => {}); }, 150e3).unref?.();   // 🟧 snapshot sheet se turant; aaj ka nahi bana to raat wali rebuild
-    setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
+    setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar
+    setTimeout(() => { profilePackLoad().then((ok) => { if (!ok) return profilePackWarm(); profilePackNightly(); }).catch(() => {}); }, 45e3).unref?.();   // 🧑‍💼 snapshot sheet se; na ho to ek baar bana lo
+    setInterval(() => { profilePackNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:45 ke baad ek baar   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
     setInterval(() => { hotSaveMaybe(false); }, 30 * 60e3).unref();
     setTimeout(() => { hotSaveMaybe(false); }, 12 * 60e3).unref?.();
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
