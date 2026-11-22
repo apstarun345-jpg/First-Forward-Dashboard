@@ -909,7 +909,8 @@ FF.pages = FF.pages || {};
       const tabOf = (n) => { const t = FF.config.sheetByName && FF.config.sheetByName(n); return (t && t.tab) || n; };
       const items = [
         { key: 'ff-eir', source: 'ff', tab: tabOf(cfgE.sheet), keyCol: cfgE.tagId || 'A' },
-        { key: 'ff-stock', source: 'ff', tab: tabOf(cfgS.sheet), keyCol: cfgS.tagId || 'C' },
+        // StockDataa me allocation date purani ho sakti hai par stock aaj hi import hua ho → content-fingerprint (barcode + agent) se "kab badla" yaad rakho
+        { key: 'ff-stock', source: 'ff', tab: tabOf(cfgS.sheet), keyCol: cfgS.tagId || 'C', sigCols: [cfgS.barcode || 'D', cfgS.agentId || 'H', cfgS.tagId || 'C'] },
         { key: 'gv-master', source: 'gv', tab: tabOf('GV Master'), keyCol: (gvc.master && gvc.master.tagId) || 'I' },
         // Tag Assignment me date/time column hai hi nahi → Apps Script har check par tag/status/agent columns ka fingerprint
         // mila kar "content kab badla" yaad rakhta hai (file-level edit time GV Master ke saath shared hota hai, isliye wo galat padta).
@@ -931,7 +932,7 @@ FF.pages = FF.pages || {};
         // 📥 v211 — IMPORT_LOG (import script ka asli run time) mile to wahi final
         const imp = t.importAt ? parseText(t.importAt) : null;
         if (plausible(imp)) { const x = { ...imp, hasTime: true, col: String(t.importFrom || 'import log').toLowerCase().replace(/_/g, ' '), imported: true }; return { key, icon, title, tab: tabName, exact: true, value: x, rowTime: x, importAt: x, file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' }; }
-        const value = later(rowTime, changed) || (tracking ? null : file.updated) || null;
+        const value = later(later(rowTime, changed), key === 'ff-stock' && tracking ? file.updated : null) || (tracking ? null : file.updated) || null;
         return { key, icon, title, tab: tabName, exact: true, value, tracking, rowTime: later(rowTime, changed), file, lastRow: t.lastRow || 0, totalRows: t.totalRows || 0, err: t.error || '' };
       });
     }
