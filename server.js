@@ -5373,13 +5373,19 @@ async function durLoad(tab, kind) {
 // Restart / deploy ke baad bhi turant wahi index load → Barcode Checker ka dispatch date / naam ms me (live Google query nahi).
 const LEDGER_SNAP_TAB = 'CACHE_LEDGER';
 const ledgerPackKey = () => JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.tab, x.layout]));
+const ledgerPackInfo = { step: 'idle', err: '', at: 0, saved: false, rows: 0 };
 async function ledgerPackNightly() {
+  ledgerPackInfo.step = 'building'; ledgerPackInfo.err = '';
   const idx = await ledgerIndex(true);
-  if (!idx) return false;
+  if (!idx) { ledgerPackInfo.step = 'no-index'; console.warn('📒 ledger pack: index nahi bana', JSON.stringify(ledgerState.errors).slice(0, 200)); return false; }
   const obj = { ff: [], gv: [] };
   for (const src of ledgerSources()) { const g = ledgerState.good[src.id]; if (g && g.rows && obj[src.ch]) for (const e of g.rows) obj[src.ch].push(e); }
-  if (!obj.ff.length && !obj.gv.length) return false;
-  return durSave(LEDGER_SNAP_TAB, 'ledger', obj, { at: Date.now(), key: ledgerPackKey(), day: istTodayKey() });
+  ledgerPackInfo.rows = obj.ff.length + obj.gv.length;
+  if (!ledgerPackInfo.rows) { ledgerPackInfo.step = 'empty'; return false; }
+  const ok = await durSave(LEDGER_SNAP_TAB, 'ledger', obj, { at: Date.now(), key: ledgerPackKey(), day: istTodayKey() });
+  ledgerPackInfo.step = ok ? 'saved' : 'save-failed'; ledgerPackInfo.saved = !!ok; ledgerPackInfo.at = Date.now(); ledgerPackInfo.err = profilePack.err || '';
+  console.log(`📒 ledger pack: ${ledgerPackInfo.step} · ${ledgerPackInfo.rows} rows ${ledgerPackInfo.err}`);
+  return ok;
 }
 async function ledgerPackLoad() {
   if (ledgerState.index) return true;
@@ -11930,6 +11936,10 @@ async function handleApi(req, res, url) {
       if (!st) throw new HttpError(404, 'Job nahi mila (server restart hua hoga) — page bache hue apne aap resume karega.');
       return sendJson(res, 200, st);
     }
+  }
+  if (p === '/api/ledger-pack/status' && method === 'GET') {
+    requireAdmin(user);
+    return sendJson(res, 200, { ok: true, ...ledgerPackInfo, indexReady: !!ledgerState.index, indexAt: ledgerState.at, building: !!ledgerState.promise, errors: ledgerState.errors, counts: ledgerState.counts });
   }
   if (p === '/api/eir-raw/status' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login karo.');
