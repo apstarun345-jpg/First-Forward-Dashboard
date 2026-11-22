@@ -11939,6 +11939,7 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/ledger-pack/status' && method === 'GET') {
     requireAdmin(user);
+    if (url.searchParams.get('run') === '1' && ledgerPackInfo.step !== 'building') ledgerPackNightly().catch((e) => { ledgerPackInfo.step = 'error'; ledgerPackInfo.err = String((e && e.message) || e).slice(0, 160); });
     return sendJson(res, 200, { ok: true, ...ledgerPackInfo, indexReady: !!ledgerState.index, indexAt: ledgerState.at, building: !!ledgerState.promise, errors: ledgerState.errors, counts: ledgerState.counts });
   }
   if (p === '/api/eir-raw/status' && method === 'GET') {
