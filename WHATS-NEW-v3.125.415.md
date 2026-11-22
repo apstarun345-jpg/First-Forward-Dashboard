@@ -4,3 +4,4 @@
 - 🗞️ Home "Aaj ka summary": today tags vs kal, top 3 agents, ek zaroori alert
 - 🔴 Stock alert: class stock < 5 din cover → red badge (+ browser notification if allowed, admin)
 - 🚚 Office-dispatched drawer: Last 30 din + Sirf Issued/Done filters (server `days`, `status=done`)
+- v416: summary top-3 agents GV rows se (FF daily me agent nahi)

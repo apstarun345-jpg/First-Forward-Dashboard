@@ -1747,7 +1747,8 @@ FF.pages = FF.pages || {};
       const rows = ui.sf.rows || [], tk = todayK();
       const yd = new Date(TODAY()); yd.setDate(yd.getDate() - 1); const yk = dayKey(yd);
       let t = 0, y = 0; const ag = new Map();
-      for (const r of rows) { const n = Number(r.n) || 0; if (r.key === tk) { t += n; const nm = String(r.agentName || r.agentId || '').trim(); if (nm) ag.set(nm, (ag.get(nm) || 0) + n); } else if (r.key === yk) y += n; }
+      for (const r of rows) { const n = Number(r.n) || 0; if (r.key === tk) t += n; else if (r.key === yk) y += n; }
+      try { for (const r of (G && G.rows ? G.rows() : [])) { if (!r.date || dayKey(r.date) !== tk) continue; const nm = String(r.agentName || r.agentId || '').trim(); if (nm) ag.set(nm, (ag.get(nm) || 0) + (Number(r.n) || 1)); } } catch { /* gv optional */ }
       const top = [...ag.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
       const diff = t - y, pct = y ? Math.round((diff / y) * 100) : null;
       // stock cover: pichhle 14 din ki roz ki rate se
@@ -1766,8 +1767,8 @@ FF.pages = FF.pages || {};
       const al = alerts[0];
       const alertHtml = al ? `<div class="hs-box hs-alert"><span class="hs-k">🔴 Zaroori alert</span><b>${esc(al.label)} stock sirf ${U.fmt(al.qty)}</b><small>~${al.cov.toFixed(1)} din ka cover${alerts.length > 1 ? ` · +${alerts.length - 1} aur low` : ''}</small></div>` : `<div class="hs-box hs-ok"><span class="hs-k">✅ Alert</span><b>Stock theek hai</b><small>Koi class 5 din se kam nahi</small></div>`;
       mount.innerHTML = `<div class="hs-strip">
-        <div class="hs-box"><span class="hs-k">🏷️ Aaj ke tags</span><b class="kpi-value">${U.fmt(t)}</b><small class="${diff >= 0 ? 'hs-up' : 'hs-dn'}">${diff >= 0 ? '▲' : '▼'} ${U.fmt(Math.abs(diff))} vs kal (${U.fmt(y)})${pct !== null ? ` · ${pct >= 0 ? '+' : ''}${pct}%` : ''}</small></div>
-        <div class="hs-box"><span class="hs-k">🏆 Aaj ke top 3 agent</span>${top.length ? top.map(([n, v], i) => `<div class="hs-ag"><span>${i + 1}</span>${esc(n)}<em>${U.fmt(v)}</em></div>`).join('') : '<small>Abhi data nahi</small>'}</div>
+        <div class="hs-box"><span class="hs-k">🏷️ Aaj ke tags</span><b class="kpi-value">${U.fmt(t)}</b><small class="${diff >= 0 ? 'hs-up' : 'hs-dn'}">${diff >= 0 ? '▲' : '▼'} ${U.fmt(Math.abs(diff))} vs kal poora din (${U.fmt(y)})${pct !== null ? ` · ${pct >= 0 ? '+' : ''}${pct}%` : ''}</small></div>
+        <div class="hs-box"><span class="hs-k">🏆 Aaj ke top 3 agent · GV</span>${top.length ? top.map(([n, v], i) => `<div class="hs-ag"><span>${i + 1}</span>${esc(n)}<em>${U.fmt(v)}</em></div>`).join('') : '<small>Abhi data nahi</small>'}</div>
         ${alertHtml}</div>`;
       const badge = U.$('#hm-stock-badge', root);
       if (badge) { badge.hidden = !alerts.length; badge.textContent = alerts.length ? `🔴 ${alerts.length} low` : ''; }
