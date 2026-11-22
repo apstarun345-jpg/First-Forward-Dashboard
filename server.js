@@ -17966,7 +17966,7 @@ async function start() {
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
     setTimeout(() => { officeDispatched(false).then(() => officeDispatchedNightly()).catch(() => {}); }, 150e3).unref?.();   // 🟧 snapshot sheet se turant; aaj ka nahi bana to raat wali rebuild
     setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar
-    setTimeout(() => { ledgerPackLoad().catch(() => {}); }, 30e3).unref?.();
+    setTimeout(() => { ledgerPackLoad().then((ok) => { if (!ok && !ledgerState.index) return ledgerPackNightly(); }).catch(() => {}); }, 30e3).unref?.();   // snapshot na ho to ek baar abhi bana lo
     setTimeout(() => { profilePackLoad().then((ok) => { if (!ok) return profilePackWarm(); profilePackNightly(); }).catch(() => {}); }, 45e3).unref?.();   // 🧑‍💼 snapshot sheet se; na ho to ek baar bana lo
     setInterval(() => { profilePackNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:45 ke baad ek baar   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
     setInterval(() => { hotSaveMaybe(false); }, 30 * 60e3).unref();
