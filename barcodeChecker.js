@@ -480,7 +480,9 @@ FF.pages = FF.pages || {};
       scanCount();
     });
   }
+  const scanOk = (c) => /^[\d-]+$/.test(String(c || '').trim()) && /^\d{12,20}$/.test(String(c || '').replace(/\D/g, ''));
   function scanAdd(code) {
+    if (!scanOk(code)) { U.toast && U.toast('Ye FASTag barcode nahi hai — skip', 'warn'); return false; }
     const k = scanKey(code), ex = scan.map.get(k);
     if (ex) { ex._dup = Date.now(); scanBeep('dup'); scanPaint(); return false; }
     scan.order.push(k); scan.map.set(k, pendingRow(code)); scan.queue.push(code);
@@ -506,6 +508,12 @@ FF.pages = FF.pages || {};
       put(rows); scanPaint();
       await attachDispatch(rows, dp); scanPaint();
     } catch (err) {
+      const msg = String((err && err.message) || err);
+      if (/429|50[234]|rate|busy|pending|timeout|fetch/i.test(msg)) {
+        const left = batch.filter((c) => { const o = scan.map.get(scanKey(c)); if (!o) return false; o._try = (o._try || 0) + 1; o.note = '⏳ server busy — dobara try (' + o._try + ')'; return o._try <= 5; });
+        scanPaint();
+        if (left.length) { scan.queue.push(...left); clearTimeout(scan.t); scan.t = setTimeout(scanFlush, 2500 * Math.min(4, left.length ? (scan.map.get(scanKey(left[0]))._try || 1) : 1)); return; }
+      }
       batch.forEach((c) => { const o = scan.map.get(scanKey(c)); if (o) { o.note = '⚠️ check nahi hua: ' + String((err && err.message) || err).slice(0, 80); o.k = 'nf'; } });
       scanPaint();
     }
