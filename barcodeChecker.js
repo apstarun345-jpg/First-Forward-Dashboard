@@ -309,7 +309,7 @@ FF.pages = FF.pages || {};
             <button type="button" class="btn small" data-scan="clear">🗑 List saaf</button>
             <span class="bcc-scan-count" data-scan-count></span>
           </div>
-          <div class="bcc-cam" data-scan-cam hidden><video playsinline muted></video><div class="bcc-cam-aim"></div><div class="bcc-cam-msg" data-scan-msg></div></div>
+          <div class="bcc-cam" data-scan-cam hidden><video playsinline muted></video><div class="bcc-cam-aim"></div><div class="bcc-cam-msg" data-scan-msg></div><div class="bcc-cam-confirm" data-scan-confirm hidden><div class="bcc-cc-t">Ye barcode sahi hai?</div><div class="bcc-cc-code" data-scan-code></div><div class="bcc-cc-dup" data-scan-dupnote></div><div class="bcc-cc-b"><button type="button" class="btn" data-scan-no>🔁 Dobara</button><button type="button" class="btn primary" data-scan-yes>✅ Sahi hai — Save</button></div></div></div>
           <label class="field"><span class="dim small">Scanner gun / bluetooth scanner / haath se — barcode daalo + Enter (ek ke baad ek, list banti jayegi)</span>
             <input class="input mono" data-scan-in placeholder="⌨️ Yahan scan karo ya barcode type karke Enter…" autocomplete="off" inputmode="text"></label>
         </div>
@@ -399,7 +399,10 @@ FF.pages = FF.pages || {};
       const t = (e.clipboardData && e.clipboardData.getData('text')) || '';
       if (/[\n,;\s]/.test(t.trim())) { e.preventDefault(); scanText(t); }
     });
+    try { document.addEventListener('keydown', (e) => { if (!scanPend.open) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); camConfirmClose(true); } else if (e.key === 'Escape') { e.preventDefault(); camConfirmClose(false); } }); } catch { /* optional */ }
     root.addEventListener('click', (e) => {
+      if (e.target.closest('[data-scan-yes]')) { camConfirmClose(true); return; }
+      if (e.target.closest('[data-scan-no]')) { camConfirmClose(false); return; }
       const sb = e.target.closest('[data-scan]');
       if (sb) { const a = sb.dataset.scan; if (a === 'cam') (scanCam.on ? camStop() : camStart()); else if (a === 'clear') scanClear(); else if (a === 'sound') { scan.sound = !scan.sound; sb.textContent = scan.sound ? '🔊' : '🔇'; try { localStorage.setItem('ff_bcc_scan_snd', scan.sound ? '1' : '0'); } catch { /* optional */ } } else if (a === 'torch') camTorch(); return; }
       const scan0 = e.target.closest('[data-dup-scan]');
@@ -539,12 +542,30 @@ FF.pages = FF.pages || {};
     if (window.ZXing) return Promise.resolve(window.ZXing);
     return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'vendor/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('ZXing load nahi hua'))); s.onerror = () => no(new Error('Scanner library load nahi hui')); document.head.appendChild(s); });
   }
+  // Camera sirf poora 16-digit FASTag barcode (608116-039-0598684) maanta hai; QR / adhura / galat padha hua ignore.
+  // Padhne ke baad confirm popup: sahi hai to Save (Enter / Space), warna Dobara.
+  const camValid = (raw) => { const d = String(raw || '').replace(/\D/g, ''); return /^\d{16}$/.test(d) && /^[\d-]+$/.test(String(raw || '').trim()) ? d : ''; };
+  const camFmt = (d) => d.slice(0, 6) + '-' + d.slice(6, 9) + '-' + d.slice(9);
+  const scanPend = { code: '', open: false };
+  function camConfirmClose(save) {
+    const box = state.root && state.root.querySelector('[data-scan-confirm]'); if (box) box.hidden = true;
+    if (save && scanPend.code) { scan.last = { k: scanKey(scanPend.code), at: Date.now() }; scanAdd(scanPend.code); }
+    scanPend.code = ''; scanPend.open = false;
+    if (!save) scan.last = { k: '', at: 0 };
+    camMsg(scanCam.on ? 'Agla barcode scan karo' : '');
+  }
   function camOnRaw(raw) {
-    const list = parseMulti(String(raw || '')); if (!list.length) return;
-    const c = list[0], k = scanKey(c), now = Date.now();
-    if (scan.last.k === k && now - scan.last.at < 1800) { scan.last.at = now; return; }   // same barcode camera ke saamne — baar-baar nahi
-    scan.last = { k, at: now };
-    scanAdd(c);
+    if (scanPend.open) return;
+    const d = camValid(raw); if (!d) return;
+    const c = camFmt(d), k = scanKey(c), now = Date.now();
+    if (scan.last.k === k && now - scan.last.at < 1800) { scan.last.at = now; return; }
+    const box = state.root && state.root.querySelector('[data-scan-confirm]'); if (!box) { scanAdd(c); return; }
+    scanPend.code = c; scanPend.open = true;
+    const dup = scan.map.has(k);
+    box.querySelector('[data-scan-code]').textContent = c;
+    box.querySelector('[data-scan-dupnote]').textContent = dup ? '⚠️ Ye barcode list me pehle se hai' : '';
+    box.hidden = false; try { navigator.vibrate && navigator.vibrate(40); } catch { /* optional */ }
+    const ok = box.querySelector('[data-scan-yes]'); if (ok) ok.focus({ preventScroll: true });
   }
   async function camStart() {
     if (scanCam.on) return;
@@ -561,10 +582,10 @@ FF.pages = FF.pages || {};
     let useNative = false;
     if ('BarcodeDetector' in window) {
       try {
-        const want = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'itf', 'codabar', 'upc_a', 'upc_e', 'qr_code', 'data_matrix'];
+        const want = ['code_128', 'code_39', 'code_93', 'itf', 'codabar'];
         const sup = await window.BarcodeDetector.getSupportedFormats();
         const fm = want.filter((f) => sup.includes(f));
-        if (fm.length >= 3) { scanCam.det = new window.BarcodeDetector({ formats: fm }); useNative = true; }
+        if (fm.length >= 1) { scanCam.det = new window.BarcodeDetector({ formats: fm }); useNative = true; }
       } catch { /* ZXing fallback */ }
     }
     if (useNative) {
@@ -581,7 +602,7 @@ FF.pages = FF.pages || {};
     } else {
       try {
         const Z = await loadZxing();
-        const hints = new Map(); hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.ITF, Z.BarcodeFormat.QR_CODE, Z.BarcodeFormat.DATA_MATRIX, Z.BarcodeFormat.CODABAR]); hints.set(Z.DecodeHintType.TRY_HARDER, true);
+        const hints = new Map(); hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODABAR]); hints.set(Z.DecodeHintType.TRY_HARDER, true);
         scanCam.reader = new Z.BrowserMultiFormatReader(hints, 120);
         scanCam.reader.decodeFromStream(scanCam.stream, video, (res) => { if (res && scanCam.on) camOnRaw(res.getText()); });
       } catch (err) { camStop(); U.toast && U.toast('Scanner start nahi hua: ' + String((err && err.message) || err), 'error'); }
@@ -589,6 +610,7 @@ FF.pages = FF.pages || {};
   }
   function camStop() {
     const was = scanCam.on || scanCam.stream;
+    scanPend.code = ''; scanPend.open = false; try { const cb = state.root && state.root.querySelector('[data-scan-confirm]'); if (cb) cb.hidden = true; } catch { /* optional */ }
     scanCam.on = false; cancelAnimationFrame(scanCam.raf); clearTimeout(scanCam.timer);
     try { if (scanCam.reader) scanCam.reader.reset(); } catch { /* optional */ }
     scanCam.reader = null; scanCam.det = null;

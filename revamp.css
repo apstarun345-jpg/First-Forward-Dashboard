@@ -92,3 +92,12 @@ html.mobile-ui #mobile-nav.mobile-nav, .mobile-nav { grid-auto-flow: column !imp
 @keyframes bcc-flash-dup { from { background: #fde68a; } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .bcc-cam-aim::after, .bcc-page tr.bcc-new td, .bcc-page tr.bcc-dupflash td { animation: none; } }
 @media (max-width: 640px) { .bcc-cam { max-height: 38vh; } .bcc-scan-count { width: 100%; margin-left: 0; text-align: center; } }
+
+/* Scan: confirm popup (camera ke upar) */
+.bcc-cam-confirm { position: absolute; left: 6%; right: 6%; bottom: 8%; background: #fff; color: #0f172a; border-radius: 16px; padding: 14px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.45); z-index: 5; }
+.bcc-cam-confirm[hidden] { display: none; }
+.bcc-cc-t { font-size: 13px; opacity: .7; }
+.bcc-cc-code { font-size: 24px; font-weight: 800; letter-spacing: .5px; margin: 4px 0; font-variant-numeric: tabular-nums; word-break: break-all; }
+.bcc-cc-dup { color: #b45309; font-weight: 600; font-size: 13px; min-height: 0; }
+.bcc-cc-b { display: flex; gap: 8px; margin-top: 10px; }
+.bcc-cc-b .btn { flex: 1; padding: 12px 8px; font-size: 15px; }
