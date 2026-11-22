@@ -289,7 +289,7 @@ FF.pages = FF.pages || {};
       <div class="page-head"><div><h1>🔢 Barcode Checker</h1>
         <p class="sub">Barcode range or many barcodes → status of every tag: <b>✅ issued</b> (when, on which VRN) · <b>📦 in which agent's stock</b> · <b>🏢 master/BC</b> · <b>❓ missing</b>. Stock = StockDataa · Issued = EIR.</p></div></div>
       <div class="card"><div class="card-body">
-        <div class="seg bcc-tabs"><button type="button" class="seg-btn${state.tab === 'range' ? ' on' : ''}" data-bcc-tab="range">↔️ Range (first → last)</button><button type="button" class="seg-btn${state.tab === 'multi' ? ' on' : ''}" data-bcc-tab="multi">📋 Multiple barcodes</button><button type="button" class="seg-btn${state.tab === 'scan' ? ' on' : ''}" data-bcc-tab="scan">📷 Scan</button></div>
+        <div class="seg bcc-tabs"><button type="button" class="seg-btn${state.tab === 'range' ? ' on' : ''}" data-bcc-tab="range">↔️ Range (first → last)</button><button type="button" class="seg-btn${state.tab === 'multi' ? ' on' : ''}" data-bcc-tab="multi">📋 Multiple barcodes</button><button type="button" class="seg-btn${state.tab === 'scan' ? ' on' : ''}" data-bcc-tab="scan">📷 Scan</button><button type="button" class="seg-btn${state.tab === 'emp' ? ' on' : ''}" data-bcc-tab="emp">👥 Employee scans <span class="badge" data-emp-badge hidden></span></button></div>
         <form class="bcc-form" data-bcc-form="range" ${state.tab === 'range' ? '' : 'hidden'}>
           <label class="field"><span class="dim small">First barcode</span><input class="input mono" name="first" value="${esc(p.first || '')}" placeholder="608116-011-0558283" autocomplete="off" inputmode="numeric"></label>
           <label class="field"><span class="dim small">Last barcode</span><input class="input mono" name="last" value="${esc(p.last || '')}" placeholder="608116-011-0558331" autocomplete="off" inputmode="numeric"></label>
@@ -313,6 +313,11 @@ FF.pages = FF.pages || {};
           <label class="field"><span class="dim small">Scanner gun / bluetooth scanner / haath se — barcode daalo + Enter (ek ke baad ek, list banti jayegi)</span>
             <input class="input mono" data-scan-in placeholder="⌨️ Yahan scan karo ya barcode type karke Enter…" autocomplete="off" inputmode="text"></label>
         </div>
+        <div class="bcc-emp" data-bcc-form="emp" ${state.tab === 'emp' ? '' : 'hidden'}>
+          <div class="bcc-scan-bar"><span class="bcc-scan-count" data-emp-count></span><input class="input" data-emp-q placeholder="🔎 Naam / barcode / agent…" style="max-width:260px"><button type="button" class="btn small" data-emp-rf>↻ Refresh</button><button type="button" class="btn small" data-emp-link title="Employee ko ye link bhejo">🔗 Employee scan link copy</button><button type="button" class="btn small" data-emp-csv>⬇ CSV</button></div>
+          <div class="bcc-emp-chips" data-emp-chips></div>
+          <div class="table-wrap tall"><table class="tbl compact bcc-tbl"><thead><tr><th>Scan time</th><th>👤 Employee</th><th>Barcode</th><th>Status</th><th>Class</th><th>Agent</th><th>Agent ID</th><th>TL</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody data-emp-body><tr><td colspan="10" class="empty">Loading…</td></tr></tbody></table></div>
+        </div>
         <p class="dim small bcc-note">Max ${MAX.toLocaleString('en-IN')} barcodes ek baar me. Jo tag stock me nahi, uska Tag ID aas-paas ke stock tags se anumaan lagaya jaata hai (note me likha aata hai). Range ka koi bhi tag stock me na ho to first barcode ka Tag ID daal do.</p>
       </div></div>
       <div class="card"><div class="card-body" data-bcc-out>${state.rows ? resultsHtml() : '<div class="empty-state compact">👆 Barcode daalo — result yahan aayega</div>'}</div></div>
@@ -322,6 +327,7 @@ FF.pages = FF.pages || {};
     camStop();
     bind(root);
     scanInit(root);
+    empStop(); if (state.tab === 'emp') empStart();
     if (p.first && p.last) run('range');
   }
   async function run(kind) {
@@ -400,7 +406,12 @@ FF.pages = FF.pages || {};
       if (/[\n,;\s]/.test(t.trim())) { e.preventDefault(); scanText(t); }
     });
     try { document.addEventListener('keydown', (e) => { if (!scanPend.open) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); camConfirmClose(true); } else if (e.key === 'Escape') { e.preventDefault(); camConfirmClose(false); } }); } catch { /* optional */ }
+    root.addEventListener('input', (e) => { if (e.target.matches('[data-emp-q]')) { emp.q = e.target.value; empPaint(); } });
     root.addEventListener('click', (e) => {
+      const en = e.target.closest('[data-emp-name]'); if (en) { emp.name = en.dataset.empName; empPaint(); return; }
+      if (e.target.closest('[data-emp-rf]')) { empLoad(); return; }
+      if (e.target.closest('[data-emp-csv]')) { empCsv(); return; }
+      if (e.target.closest('[data-emp-link]')) { copyOut(location.origin + '/scan', 'Employee scan link'); return; }
       if (e.target.closest('[data-scan-yes]')) { camConfirmClose(true); return; }
       if (e.target.closest('[data-scan-no]')) { camConfirmClose(false); return; }
       const sb = e.target.closest('[data-scan]');
@@ -415,6 +426,7 @@ FF.pages = FF.pages || {};
         root.querySelectorAll('[data-bcc-tab]').forEach((b) => b.classList.toggle('on', b === tab));
         root.querySelectorAll('[data-bcc-form]').forEach((f) => { f.hidden = f.dataset.bccForm !== state.tab; });
         if (state.tab !== 'scan') camStop(); else scanEnter();
+        if (state.tab === 'emp') empStart(); else empStop();
         return;
       }
       const fl = e.target.closest('[data-bcc-filter]');
@@ -527,6 +539,53 @@ FF.pages = FF.pages || {};
     scanPaint(); scanCount();
     const inp = state.root && state.root.querySelector('[data-scan-in]');
     if (inp && !(window.matchMedia && matchMedia('(pointer:coarse)').matches)) inp.focus();
+  }
+  // ---- 👥 Employee scans: public /scan link se employees ke scan (naam ke saath) — live ----
+  const emp = { rows: [], by: {}, cache: new Map(), name: '', q: '', timer: 0, busy: false, total: 0, seen: 0 };
+  const empTime = (iso) => { try { return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; } };
+  function empPaint() {
+    const root = state.root, body = root && root.querySelector('[data-emp-body]'); if (!body) return;
+    const q = emp.q.trim().toLowerCase();
+    const list = emp.rows.filter((r) => (!emp.name || r.name === emp.name) && (!q || `${r.name} ${r.code} ${(emp.cache.get(r.code) || {}).agent || ''}`.toLowerCase().includes(q) || (/\d/.test(q) && r.code.replace(/\D/g, '').includes(q.replace(/\D/g, '')))));
+    body.innerHTML = list.slice(0, 1500).map((r) => {
+      const c = emp.cache.get(r.code), fresh = r._f && Date.now() - r._f < 4000;
+      const st = c ? `<span class="badge ${STATUS[c.k].tone}">${esc(STATUS[c.k].label || STATUS[c.k].text || c.k)}</span>` : '<span class="dim">⏳</span>';
+      return `<tr class="${c ? 'bcc-' + c.k : ''}${fresh ? ' bcc-new' : ''}"><td>${esc(empTime(r.at))}</td><td><b>${esc(r.name)}</b></td><td class="mono">${esc(r.code)}</td><td>${st}</td><td>${esc(c ? c.cls : '')}</td><td>${esc(c ? c.agent : '')}</td><td>${esc(c ? c.agentId : '')}</td><td>${esc(c ? c.tl : '')}</td><td>${esc(c && c.dDate && c.dDate !== SEARCHING ? c.dDate : '')}</td><td>${esc(c && c.dName && c.dName !== SEARCHING ? c.dName : '')}</td></tr>`;
+    }).join('') || '<tr><td colspan="10" class="empty">Abhi kisi employee ne scan nahi kiya</td></tr>';
+    const cnt = root.querySelector('[data-emp-count]'); if (cnt) cnt.textContent = `${U.fmt(list.length)} scan · ${U.fmt(Object.keys(emp.by).length)} employee`;
+    const ch = root.querySelector('[data-emp-chips]');
+    if (ch) ch.innerHTML = `<button type="button" class="seg-btn${emp.name ? '' : ' on'}" data-emp-name="">Sab (${U.fmt(emp.total)})</button>` + Object.entries(emp.by).sort((a, b) => b[1] - a[1]).map(([n, c]) => `<button type="button" class="seg-btn${emp.name === n ? ' on' : ''}" data-emp-name="${esc(n)}">👤 ${esc(n)} · ${U.fmt(c)}</button>`).join('');
+  }
+  async function empEnrich() {
+    const need = [...new Set(emp.rows.filter((r) => !emp.cache.has(r.code)).map((r) => r.code))].slice(0, 400);
+    if (!need.length) return;
+    try {
+      const rows = await checkMulti(need);
+      rows.forEach((r) => { r.dDate = r.dName = SEARCHING; });
+      rows.forEach((r) => emp.cache.set(r.barcode, r));
+      empPaint();
+      const dp = FF.data.dispatchLookup(need); dp.catch(() => {});
+      await attachDispatch(rows, dp); empPaint();
+    } catch { /* agli baar dobara try */ }
+  }
+  async function empLoad() {
+    if (emp.busy || !state.root || document.hidden) return; emp.busy = true;
+    try {
+      const j = await FF.auth.api('/api/scan-log', 'GET');
+      const prev = new Set(emp.rows.map((r) => r.code));
+      emp.rows = (j.rows || []).map((r) => { if (emp.seen && !prev.has(r.code)) r._f = Date.now(); return r; }); emp.by = j.byName || {}; emp.total = j.total || 0; emp.seen = 1;
+      const bd = state.root.querySelector('[data-emp-badge]'); if (bd) { bd.hidden = !emp.total; bd.textContent = U.fmt(emp.total); }
+      empPaint(); await empEnrich();
+    } catch (err) { const b = state.root && state.root.querySelector('[data-emp-body]'); if (b && !emp.rows.length) b.innerHTML = `<tr><td colspan="10" class="empty">⚠️ ${esc(String((err && err.message) || err))}</td></tr>`; }
+    emp.busy = false;
+  }
+  function empStart() { empStop(); empLoad(); emp.timer = setInterval(() => { if (state.tab === 'emp') empLoad(); else empStop(); }, 8000); }
+  function empStop() { clearInterval(emp.timer); emp.timer = 0; }
+  function empCsv() {
+    const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const lines = [['Scan time', 'Employee', 'Barcode', 'Status', 'Class', 'Agent', 'Agent ID', 'TL'].map(q).join(',')];
+    emp.rows.filter((r) => !emp.name || r.name === emp.name).forEach((r) => { const c = emp.cache.get(r.code) || {}; lines.push([empTime(r.at), r.name, r.code, c.k ? (STATUS[c.k].label || STATUS[c.k].text || c.k) : '', c.cls, c.agent, c.agentId, c.tl].map(q).join(',')); });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' })); a.download = 'employee-scans.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
   function scanInit(root) {
     try { scan.sound = localStorage.getItem('ff_bcc_scan_snd') !== '0'; } catch { /* optional */ }

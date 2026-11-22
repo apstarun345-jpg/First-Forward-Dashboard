@@ -12542,6 +12542,64 @@ async function handleApi(req, res, url) {
     const sessions = [...publicLiveSessions.values()].sort((a, b) => Number(b.lastSeen || 0) - Number(a.lastSeen || 0)).map((entry) => publicLiveSummary(entry, now, false));
     return sendJson(res, 200, { sessions, checkAt: new Date(now).toISOString() });
   }
+  // 📷 v3.125.441 — PUBLIC SCAN LINK (/scan): employee naam daal kar barcode scan karta hai, list server par jaati hai,
+  // admin ko Barcode Checker → "Employee scans" me naam ke saath live dikhti hai. Login nahi; naam mandatory.
+  const scanCodeOf = (v) => { const raw = String(v == null ? '' : v).trim(); if (!/^[\d-]+$/.test(raw)) return ''; const d = raw.replace(/\D/g, ''); return /^\d{16}$/.test(d) ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : ''; };
+  const scanLogStore = () => { const w = workspaceStore(); if (!Array.isArray(w.scanLog)) w.scanLog = []; return w.scanLog; };
+  const scanNameKey = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  let scanPersistT = null;
+  const scanPersistSoon = () => { if (scanPersistT) return; scanPersistT = setTimeout(() => { scanPersistT = null; persist('notify').catch(() => {}); }, 4000); };
+  if (p === '/api/public/scan' && method === 'POST') {
+    const body = await readBody(req);
+    const name = cleanVisitorName(body.name);
+    if (!name) throw new HttpError(400, 'Employee name zaroori hai (kam se kam 2 characters).');
+    const code = scanCodeOf(body.code);
+    if (!code) throw new HttpError(400, 'Poora 16-digit FASTag barcode chahiye.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`scan:${ip}`, 900, 10 * 60e3)) throw new HttpError(429, 'Bahut tez scan — thoda ruk kar try karo.');
+    const log = scanLogStore();
+    const key = code.replace(/\D/g, '');
+    const hit = log.find((r) => r.k === key);
+    if (hit) return sendJson(res, 200, { ok: true, dup: true, by: hit.name, at: hit.at, mine: scanNameKey(hit.name) === scanNameKey(name) });
+    const row = { k: key, code, name, at: new Date().toISOString(), ip: String(ip || '').slice(0, 45) };
+    log.push(row);
+    if (log.length > 30000) log.splice(0, log.length - 30000);
+    scanPersistSoon();
+    return sendJson(res, 200, { ok: true, dup: false, at: row.at });
+  }
+  if (p === '/api/public/scan' && method === 'GET') {
+    const name = cleanVisitorName(url.searchParams.get('name'));
+    if (!name) throw new HttpError(400, 'Employee name zaroori hai.');
+    const who = scanNameKey(name);
+    const rows = scanLogStore().filter((r) => scanNameKey(r.name) === who).slice(-500).reverse().map((r) => ({ code: r.code, at: r.at }));
+    return sendJson(res, 200, { ok: true, name, total: rows.length, rows });
+  }
+  if (p === '/api/public/scan' && method === 'DELETE') {
+    const body = await readBody(req).catch(() => ({}));
+    const name = cleanVisitorName(body.name), code = scanCodeOf(body.code);
+    if (!name || !code) throw new HttpError(400, 'Naam aur barcode chahiye.');
+    const log = scanLogStore(), key = code.replace(/\D/g, '');
+    const i = log.findIndex((r) => r.k === key && scanNameKey(r.name) === scanNameKey(name));
+    if (i >= 0) { log.splice(i, 1); scanPersistSoon(); }
+    return sendJson(res, 200, { ok: true, removed: i >= 0 });
+  }
+  if (p === '/api/scan-log' && method === 'GET') {
+    if (!user || (user.role !== 'admin' && !(user.permissions || []).includes('barcodeChecker'))) throw new HttpError(403, 'Access nahi hai.');
+    const all = scanLogStore();
+    const since = Number(url.searchParams.get('since')) || 0;
+    const rows = all.filter((r) => !since || Date.parse(r.at) > since).slice(-3000).reverse().map((r) => ({ code: r.code, name: r.name, at: r.at }));
+    const byName = {}; all.forEach((r) => { byName[r.name] = (byName[r.name] || 0) + 1; });
+    return sendJson(res, 200, { ok: true, total: all.length, now: Date.now(), byName, rows });
+  }
+  if (p === '/api/scan-log' && method === 'DELETE') {
+    if (!user || user.role !== 'admin') throw new HttpError(403, 'Sirf admin.');
+    const body = await readBody(req).catch(() => ({}));
+    const log = scanLogStore(); const before = log.length;
+    if (body.all === true) log.length = 0;
+    else if (body.name) { const w = scanNameKey(body.name); for (let i = log.length - 1; i >= 0; i--) if (scanNameKey(log[i].name) === w) log.splice(i, 1); }
+    scanPersistSoon();
+    return sendJson(res, 200, { ok: true, removed: before - log.length });
+  }
   if (p === '/api/public/tag-request' && method === 'GET') {
     return sendJson(res, 200, { ok: true, config: publicTagView() });
   }
@@ -17653,6 +17711,7 @@ const server = http.createServer(async (req, res) => {
       try { return await servePersonalPage(req, res, url.pathname.slice(3)); } catch (err) { console.error(err); return sendText(res, 500, 'Server error'); }
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendText(res, 405, 'Method not allowed');
+    if (url.pathname === '/scan' || url.pathname === '/scan/') return await serveStatic(req, res, '/scan.html', '');
     return await serveStatic(req, res, url.pathname, url.search);
   } catch (error) {
     console.error(error);

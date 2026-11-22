@@ -101,3 +101,5 @@ html.mobile-ui #mobile-nav.mobile-nav, .mobile-nav { grid-auto-flow: column !imp
 .bcc-cc-dup { color: #b45309; font-weight: 600; font-size: 13px; min-height: 0; }
 .bcc-cc-b { display: flex; gap: 8px; margin-top: 10px; }
 .bcc-cc-b .btn { flex: 1; padding: 12px 8px; font-size: 15px; }
+
+.bcc-emp-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.bcc-emp-chips .seg-btn{white-space:nowrap}

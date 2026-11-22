@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#1e3a8a">
+<title>Barcode Scan</title>
+<link rel="stylesheet" href="scan-public.css?v=1">
+</head>
+<body>
+<main class="sp">
+  <header class="sp-h"><div class="sp-t">📷 Barcode Scan</div><div class="sp-who" id="who" hidden></div></header>
+
+  <section class="sp-card" id="gate">
+    <h2>Pehle apna naam likho</h2>
+    <p class="sp-dim">Naam ke bina scan nahi hoga. Admin ko dikhega ki kisne scan kiya.</p>
+    <input id="nm" class="sp-inp" maxlength="60" placeholder="Employee name" autocomplete="name">
+    <button id="go" class="sp-btn pri" type="button">Aage badho →</button>
+    <div class="sp-err" id="gerr"></div>
+  </section>
+
+  <section id="app" hidden>
+    <div class="sp-card">
+      <div class="sp-row">
+        <button id="cam" class="sp-btn pri big" type="button">📷 Camera scan shuru</button>
+        <button id="snd" class="sp-btn" type="button" title="Sound">🔊</button>
+        <button id="tor" class="sp-btn" type="button" hidden>🔦</button>
+      </div>
+      <div class="sp-cam" id="camBox" hidden>
+        <video id="vid" playsinline muted></video><div class="sp-aim"></div><div class="sp-msg" id="msg"></div>
+        <div class="sp-conf" id="conf" hidden>
+          <div class="sp-ct">Ye barcode sahi hai?</div><div class="sp-cc" id="ccode"></div><div class="sp-cd" id="cdup"></div>
+          <div class="sp-cb"><button id="no" class="sp-btn" type="button">🔁 Dobara</button><button id="yes" class="sp-btn pri" type="button">✅ Sahi hai — Save</button></div>
+        </div>
+      </div>
+      <div class="sp-row" style="margin-top:10px"><input id="kb" class="sp-inp" inputmode="numeric" placeholder="Scanner gun / type karke Enter" autocomplete="off"></div>
+      <div class="sp-note" id="note"></div>
+    </div>
+
+    <div class="sp-card">
+      <div class="sp-lh"><b id="cnt">0 scan</b><button id="rf" class="sp-btn sm" type="button">↻</button></div>
+      <div class="sp-list" id="list"><div class="sp-dim">Abhi koi scan nahi — upar se scan karo.</div></div>
+    </div>
+  </section>
+</main>
+<div class="sp-toast" id="toast" hidden></div>
+<script src="scan-public.js?v=1"></script>
+</body>
+</html>
