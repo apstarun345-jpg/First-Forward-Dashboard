@@ -17,3 +17,9 @@ test('dispatch lookup serves stale cache / ready index instantly', () => {
   assert.match(sv, /stale-while-revalidate/);
   assert.match(sv, /mode: 'index', at: new Date\(ledgerState\.at\)/);
 });
+test('dispatch ledger pack: nightly durable save + boot load + live fallback for misses', () => {
+  assert.match(sv, /CACHE_LEDGER/);
+  assert.match(sv, /ledgerPackNightly\(\)/);
+  assert.match(sv, /ledgerPackLoad\(\)\.catch/);
+  assert.match(sv, /ledgerDirect\(ml\)/);
+});

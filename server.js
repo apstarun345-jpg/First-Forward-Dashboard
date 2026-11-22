@@ -5369,6 +5369,27 @@ async function durLoad(tab, kind) {
     return { head, obj };
   } catch (err) { profilePack.err = `load ${tab}: ` + String((err && err.message) || err).slice(0, 120); return null; }
 }
+// 📒 v3.125.427 — DISPATCH LEDGER PACK: roz raat (IST 01:30) poora ledger ek baar padh kar index banta hai + Sheet (CACHE_LEDGER) me durable save.
+// Restart / deploy ke baad bhi turant wahi index load → Barcode Checker ka dispatch date / naam ms me (live Google query nahi).
+const LEDGER_SNAP_TAB = 'CACHE_LEDGER';
+const ledgerPackKey = () => JSON.stringify(ledgerSources().map((x) => [x.id, x.sheetId, x.gid, x.tab, x.layout]));
+async function ledgerPackNightly() {
+  const idx = await ledgerIndex(true);
+  if (!idx) return false;
+  const obj = { ff: [], gv: [] };
+  for (const src of ledgerSources()) { const g = ledgerState.good[src.id]; if (g && g.rows && obj[src.ch]) for (const e of g.rows) obj[src.ch].push(e); }
+  if (!obj.ff.length && !obj.gv.length) return false;
+  return durSave(LEDGER_SNAP_TAB, 'ledger', obj, { at: Date.now(), key: ledgerPackKey(), day: istTodayKey() });
+}
+async function ledgerPackLoad() {
+  if (ledgerState.index) return true;
+  const r = await durLoad(LEDGER_SNAP_TAB, 'ledger');
+  if (!r || !r.obj || r.head.key !== ledgerPackKey() || ledgerState.index) return false;
+  ledgerState.index = { ff: buildLedgerIndex(r.obj.ff || []), gv: buildLedgerIndex(r.obj.gv || []) };
+  ledgerState.key = r.head.key; ledgerState.at = Number(r.head.at) || Date.now(); ledgerState.errors = {};
+  for (const src of ledgerSources()) ledgerState.good[src.id] = { ch: src.ch, rows: (r.obj[src.ch] || []), at: ledgerState.at };
+  return true;
+}
 async function profilePackLoad() {
   if (profilePack.addr) return true;
   const r = await durLoad('CACHE_PROFILE', 'profile');
@@ -8626,9 +8647,19 @@ async function handleApi(req, res, url) {
     if (!list.length) throw new HttpError(400, 'Barcodes chahiye.');
     if (ledgerSources().length) {
       try {
-        if (ledgerState.index && Date.now() - ledgerState.at < 6 * 3600e3) {   // ⚡ v424 — poora index ready ho to wahi (ms me)
+        if (ledgerState.index && Date.now() - ledgerState.at < 30 * 3600e3) {   // ⚡ v424 — poora index ready ho to wahi (ms me)
           const ix = ledgerState.index;
-          return sendJson(res, 200, { ok: true, results: list.map((b) => dispatchFor(ix, b)), meta: { mode: 'index', at: new Date(ledgerState.at).toISOString() } }, { 'Cache-Control': 'no-store' });
+          const results = list.map((b) => dispatchFor(ix, b));
+          // aaj ke naye dispatch raat se pehle index me nahi hote → sirf jo na mile unhe live dhundo (max 8 s, warna jo hai wahi)
+          const miss = []; results.forEach((r, i) => { if (!((r.ff && r.ff.length) || (r.gv && r.gv.length))) miss.push(i); });
+          if (miss.length && miss.length <= 700) {
+            try {
+              const ml = miss.map((i) => list[i]);
+              const d2 = await Promise.race([ledgerDirect(ml), new Promise((r) => setTimeout(() => r(null), 8000))]);
+              if (d2 && d2.usable) miss.forEach((i, k) => { const x = dispatchFor(d2.index, ml[k]); if ((x.ff && x.ff.length) || (x.gv && x.gv.length)) results[i] = x; });
+            } catch { /* index wala jawab hi */ }
+          }
+          return sendJson(res, 200, { ok: true, results, meta: { mode: 'index', at: new Date(ledgerState.at).toISOString() } }, { 'Cache-Control': 'no-store' });
         }
         const d = await ledgerDirect(list);
         if (d.usable) return sendJson(res, 200, { ok: true, results: list.map((b) => dispatchFor(d.index, b)), meta: { mode: 'direct', errors: d.errors, sources: d.sources } }, { 'Cache-Control': 'no-store' });
@@ -17935,6 +17966,7 @@ async function start() {
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
     setTimeout(() => { officeDispatched(false).then(() => officeDispatchedNightly()).catch(() => {}); }, 150e3).unref?.();   // 🟧 snapshot sheet se turant; aaj ka nahi bana to raat wali rebuild
     setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar
+    setTimeout(() => { ledgerPackLoad().catch(() => {}); }, 30e3).unref?.();
     setTimeout(() => { profilePackLoad().then((ok) => { if (!ok) return profilePackWarm(); profilePackNightly(); }).catch(() => {}); }, 45e3).unref?.();   // 🧑‍💼 snapshot sheet se; na ho to ek baar bana lo
     setInterval(() => { profilePackNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:45 ke baad ek baar   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
     setInterval(() => { hotSaveMaybe(false); }, 30 * 60e3).unref();
@@ -17959,7 +17991,7 @@ async function start() {
     setInterval(() => {
       const ist = new Date(Date.now() + 5.5 * 3600e3);
       const day = ist.toISOString().slice(0, 10);
-      if (ist.getUTCHours() === 1 && ledgerDailyDone !== day) { ledgerDailyDone = day; ledgerAggregate(true).catch(() => {}); }
+      if (ist.getUTCHours() === 1 && ledgerDailyDone !== day) { ledgerDailyDone = day; ledgerAggregate(true).catch(() => {}); setTimeout(() => ledgerPackNightly().catch(() => {}), 10 * 60e3).unref?.(); }
     }, 5 * 60e3).unref?.();
     setInterval(() => maybeMonthlyReport(), 60 * 60e3).unref();
     // 🕒 v209 — har 15 min sheet row-count check (home khule na khule), taaki "data kab aaya" ka time sahi rahe
