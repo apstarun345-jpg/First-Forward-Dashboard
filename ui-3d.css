@@ -67,3 +67,11 @@ html.ff-no-anim.ff-3d body .kpi, html.ff-no-anim.ff-3d body .brand-logo { transf
 html.ff-no-anim.ff-3d body .brand-logo::after { animation: none !important; }
 @media (pointer: coarse) { html.ff-3d body .kpi { transform: translate3d(0,0,0); } html.ff-3d body .btn:hover { transform: none; } }
 @media print { html.ff-3d body, html.ff-3d body .card, html.ff-3d body .kpi, html.ff-3d body .btn { box-shadow: none !important; background-image: none !important; transform: none !important; } }
+
+/* v3.125.417 — dark-mode 3D polish: glow edge + deeper depth */
+html[data-theme="dark"].ff-3d .card, html.dark.ff-3d .card, html[data-theme="dark"].ff-3d .kpi, html.dark.ff-3d .kpi, html[data-theme="dark"].ff-3d .hs-box, html.dark.ff-3d .hs-box {
+  border-color: rgba(129,140,248,.22); box-shadow: var(--d-e2), var(--d-hi), 0 0 0 1px rgba(99,102,241,.08), 0 0 24px -10px rgba(99,102,241,.45);
+  background-image: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0) 40%);
+}
+html[data-theme="dark"].ff-3d .card:hover, html.dark.ff-3d .card:hover, html[data-theme="dark"].ff-3d .kpi:hover, html.dark.ff-3d .kpi:hover { box-shadow: var(--d-e3), var(--d-hi), 0 0 30px -8px rgba(129,140,248,.6); }
+html[data-theme="dark"].ff-3d .btn.primary, html.dark.ff-3d .btn.primary { box-shadow: 0 6px 18px rgba(99,102,241,.45), inset 0 1px 0 rgba(255,255,255,.25); }

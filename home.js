@@ -797,7 +797,7 @@ FF.pages = FF.pages || {};
     const topList = (rows, cls) => {
       const list = (rows || []).slice(0, 5);
       if (!list.length) return '<p class="dim small">Koi stock row nahi mili.</p>';
-      return `<div class="hm-toplist">${list.map((r, i) => `<div class="hm-toprow"><span class="rank">${i + 1}</span><b>${esc(r.name)}</b><span class="tag ${cls}">${cls === 'gv' ? 'GV' : 'FF'}</span><strong>${U.fmt(r.n)}</strong></div>`).join('')}</div>`;
+      return `<div class="hm-toplist">${list.map((r, i) => `<div class="hm-toprow"><span class="rank${i < 3 ? ' medal m' + (i + 1) : ''}">${i < 3 ? '🥇🥈🥉'.slice(i * 2, i * 2 + 2) : i + 1}</span><b>${esc(r.name)}</b><span class="tag ${cls}">${cls === 'gv' ? 'GV' : 'FF'}</span><strong>${U.fmt(r.n)}</strong></div>`).join('')}</div>`;
     };
     return `<div class="hs-badge-row"><span id="hm-stock-badge" class="hs-badge" hidden></span></div><div class="kpi-grid mini hm-stock-grid">
         ${kpi('g1', 'First Forward · Stock in field', '📦', U.fmt(ff.total), `VC4 <b>${U.fmt(ff.vc4)}</b> · Comm <b>${U.fmt(ff.comm)}</b> · cover <b>${esc(cover(ff.total, ffRate))}</b> din`, 'src=ff&scope=stock')}
@@ -1768,8 +1768,14 @@ FF.pages = FF.pages || {};
       const alertHtml = al ? `<div class="hs-box hs-alert"><span class="hs-k">🔴 Zaroori alert</span><b>${esc(al.label)} stock sirf ${U.fmt(al.qty)}</b><small>~${al.cov.toFixed(1)} din ka cover${alerts.length > 1 ? ` · +${alerts.length - 1} aur low` : ''}</small></div>` : `<div class="hs-box hs-ok"><span class="hs-k">✅ Alert</span><b>Stock theek hai</b><small>Koi class 5 din se kam nahi</small></div>`;
       mount.innerHTML = `<div class="hs-strip">
         <div class="hs-box"><span class="hs-k">🏷️ Aaj ke tags</span><b class="kpi-value">${U.fmt(t)}</b><small class="${diff >= 0 ? 'hs-up' : 'hs-dn'}">${diff >= 0 ? '▲' : '▼'} ${U.fmt(Math.abs(diff))} vs kal poora din (${U.fmt(y)})${pct !== null ? ` · ${pct >= 0 ? '+' : ''}${pct}%` : ''}</small></div>
-        <div class="hs-box"><span class="hs-k">🏆 Aaj ke top 3 agent · GV</span>${top.length ? top.map(([n, v], i) => `<div class="hs-ag"><span>${i + 1}</span>${esc(n)}<em>${U.fmt(v)}</em></div>`).join('') : '<small>Abhi data nahi</small>'}</div>
+        <div class="hs-box"><span class="hs-k">🏆 Aaj ke top 3 agent · GV</span>${top.length ? top.map(([n, v], i) => `<div class="hs-ag"><span class="medal m${i + 1}">${'🥇🥈🥉'.slice(i * 2, i * 2 + 2)}</span>${esc(n)}<em>${U.fmt(v)}</em></div>`).join('') : '<small>Abhi data nahi</small>'}</div>
         ${alertHtml}</div>`;
+      try { // 🎉 aaj ka record (pichhle 30 din ka best) — din me ek baar confetti
+        let best = 0; const per = new Map(); const f30 = new Date(TODAY()); f30.setDate(f30.getDate() - 30); const k30 = dayKey(f30);
+        for (const r of rows) { if (r.key && r.key < tk && r.key >= k30) per.set(r.key, (per.get(r.key) || 0) + (Number(r.n) || 0)); }
+        per.forEach((v) => { if (v > best) best = v; });
+        if (best > 50 && t > best) { const rk = `ff_rec_${tk}`; mount.querySelector('.hs-strip').insertAdjacentHTML('afterbegin', `<div class="hs-box hs-rec"><span class="hs-k">🎉 Record!</span><b>Aaj ka din best</b><small>30 din ka best ${U.fmt(best)} tha</small></div>`); if (!localStorage.getItem(rk)) { localStorage.setItem(rk, '1'); if (FF.motion && FF.motion.confetti) FF.motion.confetti(); } }
+      } catch { /* optional */ }
       const badge = U.$('#hm-stock-badge', root);
       if (badge) { badge.hidden = !alerts.length; badge.textContent = alerts.length ? `🔴 ${alerts.length} low` : ''; }
       try {
@@ -2083,7 +2089,7 @@ FF.pages = FF.pages || {};
       if (!rows || !stockMount.isConnected) return;
       const top = [...rows].sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 5).map((r) => ({ name: r.agentName || r.agentId || '—', n: r.n }));
       const host = stockMount.querySelectorAll('.hm-toplist')[1];
-      if (host && top.length) host.innerHTML = top.map((r, i) => `<div class="hm-toprow"><span class="rank">${i + 1}</span><b>${esc(r.name)}</b><span class="tag gv">GV</span><strong>${U.fmt(r.n)}</strong></div>`).join('');
+      if (host && top.length) host.innerHTML = top.map((r, i) => `<div class="hm-toprow"><span class="rank${i < 3 ? ' medal m' + (i + 1) : ''}">${i < 3 ? '🥇🥈🥉'.slice(i * 2, i * 2 + 2) : i + 1}</span><b>${esc(r.name)}</b><span class="tag gv">GV</span><strong>${U.fmt(r.n)}</strong></div>`).join('');
     }).catch(() => {});
 
     const morningBtn = U.$('#home-morning-card', root);

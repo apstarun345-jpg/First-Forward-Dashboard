@@ -531,3 +531,27 @@ html[data-theme-pack="desk"] .mobile-nav-item.active, html[data-theme-pack="desk
 .login-only-shell .pro-info-box { background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 7%, var(--card)), color-mix(in srgb, var(--brand-2) 7%, var(--card))) !important; border-color: color-mix(in srgb, var(--brand) 20%, var(--line)) !important; }
 .login-only-shell .pro-info-box b:first-child, .login-only-shell .pro-info-box li b { color: var(--brand); }
 .login-only-shell .pro-info-box li { color: var(--muted); }
+
+/* v3.125.417 — new packs: Aurora (dark) + Rose (light) */
+html[data-theme-pack="aurora"] {
+  color-scheme: dark;
+  --bg: #0a0f1e; --card: #111a2e; --ink: #e9f5f1; --muted: #8fb3ad; --line: #1d3a46;
+  --brand: #34d399; --brand-2: #a78bfa; --brand2: #a78bfa;
+  --side-bg: #060b17; --side-bg2: #123a3a; --side-ink: #d6fbef;
+  --pk-surface2: #0d1628; --pk-head: #142640; --pk-topbar: rgba(10,15,30,.88); --pk-soft: #12273a;
+  --chart-pal: #34d399, #a78bfa, #22d3ee, #f0abfc, #5eead4, #818cf8, #86efac, #67e8f9, #c084fc;
+  --auth-1: #060b17; --auth-2: #123a3a; --auth-3: #7c3aed;
+  --shadow: 0 8px 26px rgba(0, 0, 0, .5), 0 1px 2px rgba(0, 0, 0, .4);
+  --green: #34d399; --red: #fb7185; --amber: #fbbf24;
+}
+html[data-theme-pack="rose"] {
+  color-scheme: light;
+  --bg: #fff5f7; --card: #ffffff; --ink: #3b0d1c; --muted: #8a5a68; --line: #f6d5de;
+  --brand: #e11d48; --brand-2: #f472b6; --brand2: #f472b6;
+  --side-bg: #4c0519; --side-bg2: #be123c; --side-ink: #ffe4ec;
+  --pk-surface2: #ffffff; --pk-head: #ffe9ef; --pk-topbar: rgba(255,255,255,.92); --pk-soft: #ffe4ec;
+  --chart-pal: #e11d48, #f472b6, #fb923c, #a855f7, #f43f5e, #ec4899, #f59e0b, #be123c, #d946ef;
+  --auth-1: #4c0519; --auth-2: #be123c; --auth-3: #f472b6;
+  --shadow: 0 6px 24px rgba(225, 29, 72, 0.1), 0 1px 2px rgba(225, 29, 72, 0.08);
+  --green: #10b981; --red: #ef4444; --amber: #f59e0b;
+}

@@ -216,6 +216,19 @@ window.FF = window.FF || {};
     const els = root.querySelectorAll ? root.querySelectorAll('.vcol-stack:not(.ux-g), .hbar-fill:not(.ux-g), svg.spark rect:not(.ux-g)') : [];
     let i = 0; els.forEach((el) => { if (i++ > 400) return; el.classList.add('ux-g'); });
   }
+  // 🎉 v3.125.417 — full-screen confetti (canvas, ~2.5s), reduced-motion me skip
+  function confetti() {
+    if (REDUCE || D.documentElement.classList.contains('ff-no-anim')) return;
+    const c = D.createElement('canvas'); c.className = 'ux-confetti'; c.width = innerWidth; c.height = innerHeight; D.body.appendChild(c);
+    const x = c.getContext('2d'), cols = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#0ea5e9', '#ef4444'];
+    const ps = Array.from({ length: 140 }, () => ({ x: Math.random() * c.width, y: -20 - Math.random() * c.height * 0.4, vx: -2 + Math.random() * 4, vy: 2 + Math.random() * 4, w: 6 + Math.random() * 6, h: 4 + Math.random() * 6, r: Math.random() * 6, vr: -0.2 + Math.random() * 0.4, c: cols[(Math.random() * cols.length) | 0] }));
+    const t0 = performance.now();
+    (function tick(now) { const k = now - t0; x.clearRect(0, 0, c.width, c.height); ps.forEach((p) => { p.x += p.vx; p.y += p.vy; p.vy += 0.04; p.r += p.vr; x.save(); x.translate(p.x, p.y); x.rotate(p.r); x.fillStyle = p.c; x.globalAlpha = Math.max(0, 1 - k / 2800); x.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); x.restore(); }); if (k < 2800) requestAnimationFrame(tick); else c.remove(); })(t0);
+  }
+  // 🪟 glass header — scroll par chhota + blur
+  function headerScroll() { let on = false; addEventListener('scroll', () => { const v = (window.scrollY || 0) > 24; if (v !== on) { on = v; D.documentElement.classList.toggle('ff-scrolled', v); } }, { passive: true }); }
+  // 🎞️ page transition — route badalne par main ek baar slide/fade
+  function pageTrans() { const m = mainEl(); if (!m || REDUCE) return; m.classList.remove('ux-pt'); void m.offsetWidth; m.classList.add('ux-pt'); }
   // ---- observer ---------------------------------------------------------------------------------
   let q = [], raf = 0;
   function flush() {
@@ -227,9 +240,9 @@ window.FF = window.FF || {};
     if (!D.body) return; buildDock();
     const m = mainEl(); if (!m) { setTimeout(init, 300); return; }
     new MutationObserver((recs) => { recs.forEach((r) => r.addedNodes.forEach((n) => { if (n.nodeType === 1) q.push(n); })); if (!raf) raf = requestAnimationFrame(flush); }).observe(m, { childList: true, subtree: true });
-    window.addEventListener('hashchange', () => { setMode(false); progStart(); });
+    window.addEventListener('hashchange', () => { setMode(false); progStart(); pageTrans(); }); headerScroll();
     q.push(m); flush();
   }
-  FF.motion = { setMode, print: actPrint };
+  FF.motion = { setMode, print: actPrint, confetti };
   if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', init); else init();
 })(window.FF);

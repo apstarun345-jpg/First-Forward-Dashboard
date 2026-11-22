@@ -669,6 +669,8 @@ FF.pages = FF.pages || {};
     midnight: { name: "Midnight Navy", icon: "🌌", mode: "dark", description: "Dark navy for night work", contrast: "Light text on dark", swatch: ["#38bdf8","#818cf8","#050c19","#07101f"] },
     neon: { name: "Neon", icon: "🌃", mode: "dark", description: "Dark, high-energy TV mode", contrast: "Light text on dark", swatch: ["#00e5ff","#ff2bd6","#07070f","#0a0a12"] },
     diwali: { name: "Diwali Festive", icon: "🪔", mode: "dark", description: "Warm festive lights", contrast: "Light text on dark", swatch: ["#ff8c00","#ffd000","#100803","#180d05"] },
+    aurora: { name: "Aurora", icon: "🌌", mode: "dark", description: "Green and violet glow", contrast: "Light text on dark", swatch: ["#34d399","#a78bfa","#060b17","#0a0f1e"] },
+    rose: { name: "Rose", icon: "🌹", mode: "light", description: "Soft rose and pink", contrast: "Dark text on light", swatch: ["#e11d48","#f472b6","#4c0519","#fff5f7"] },
     obsidian: { name: "Obsidian Gold", icon: "👑", mode: "dark", description: "Luxury jet-black with warm imperial gold", contrast: "Light text on dark", swatch: ["#f59e0b","#fbbf24","#050507","#08080a"] },
     cyber: { name: "Cyber Neon", icon: "⚡", mode: "dark", description: "Electric matrix cyan and emerald terminal", contrast: "Light text on dark", swatch: ["#06b6d4","#10b981","#02050e","#040711"] },
   };
