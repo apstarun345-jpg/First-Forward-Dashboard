@@ -195,11 +195,32 @@ window.FF = window.FF || {};
     dock.classList.toggle('on', has && !login && adm);
     if (!adm && selMode) setMode(false);
   }
+  // ✨ v3.125.415 — count-up (KPI numbers) + bars grow. Sirf naye aaye nodes par, ek baar; reduced-motion me skip.
+  const REDUCE = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function countUp(root) {
+    if (REDUCE || document.documentElement.classList.contains('ff-no-anim')) return;
+    const els = root.matches && root.matches('.kpi-value') ? [root] : Array.from(root.querySelectorAll ? root.querySelectorAll('.kpi-value') : []);
+    els.slice(0, 60).forEach((el) => {
+      if (el.dataset.cu || el.children.length) return; el.dataset.cu = '1';
+      const t = el.textContent.trim(); const m = t.match(/^([^\d-]*)(-?[\d,]+(?:\.\d+)?)(.*)$/);
+      if (!m) return; const raw = m[2]; const to = parseFloat(raw.replace(/,/g, '')); if (!isFinite(to) || Math.abs(to) < 10) return;
+      const dec = (raw.split('.')[1] || '').length; const comma = raw.indexOf(',') >= 0;
+      const fmt = (v) => { const n = dec ? v.toFixed(dec) : String(Math.round(v)); return m[1] + (comma ? Number(n).toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec }) : n) + m[3]; };
+      const t0 = performance.now(), D = 700;
+      const step = (now) => { if (!el.isConnected) return; const k = Math.min(1, (now - t0) / D); const e = 1 - Math.pow(1 - k, 3); el.textContent = k >= 1 ? t : fmt(to * e); if (k < 1) requestAnimationFrame(step); };
+      requestAnimationFrame(step);
+    });
+  }
+  function barGrow(root) {
+    if (REDUCE || document.documentElement.classList.contains('ff-no-anim')) return;
+    const els = root.querySelectorAll ? root.querySelectorAll('.vcol-stack:not(.ux-g), .hbar-fill:not(.ux-g), svg.spark rect:not(.ux-g)') : [];
+    let i = 0; els.forEach((el) => { if (i++ > 400) return; el.classList.add('ux-g'); });
+  }
   // ---- observer ---------------------------------------------------------------------------------
   let q = [], raf = 0;
   function flush() {
     raf = 0; const m = mainEl(); if (!m) return; const nodes = q; q = [];
-    nodes.forEach((n) => { if (n.isConnected) { paintStatus(n); paintEmpty(n); stagger(n); } });
+    nodes.forEach((n) => { if (n.isConnected) { paintStatus(n); paintEmpty(n); stagger(n); countUp(n); barGrow(n); } });
     dockVis(); progDone();
   }
   function init() {

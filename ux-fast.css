@@ -110,3 +110,12 @@ html[data-theme="dark"] .ux-sk i::after, html.dark .ux-sk i::after { background:
 @keyframes uxFloat { 50% { transform: translateY(-5px); } }
 .ux-empty-act { margin-top: 4px; }
 @media (prefers-reduced-motion: reduce) and (min-width: 99999px) { .ux-sk i::after, .empty-state::before { animation: none; } }
+
+/* v3.125.415 — card-shaped skeleton (tiles + rows) */
+.ux-sk-card { width: min(520px, 92%); gap: 10px; }
+.ux-sk-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.ux-sk-tiles b { display: block; height: 54px; border-radius: 12px; background: rgba(148,163,184,.16); position: relative; overflow: hidden; }
+.ux-sk-tiles b::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent); animation: uxSk 1.3s ease infinite; }
+html[data-theme="dark"] .ux-sk-tiles b::after, html.dark .ux-sk-tiles b::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,.12), transparent); }
+html.ff-3d .ux-sk-tiles b { box-shadow: var(--d-e1); }
+.ux-sk-card i:nth-of-type(1) { width: 100%; }

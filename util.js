@@ -576,7 +576,7 @@ window.FF = window.FF || {};
   function spinner(text, opts) {
     const o = opts || {};
     const t = String(text || 'Loading data from Google Sheet…').replace(/(\.\.\.|…)\s*$/, '');
-    const sk = (o.size && o.size !== 'lg') || o.skeleton === false ? '' : '<div class="ux-sk" aria-hidden="true"><i></i><i></i><i></i></div>';   // ✨ v213 shimmer skeleton
+    const sk = (o.size && o.size !== 'lg') || o.skeleton === false ? '' : '<div class="ux-sk ux-sk-card" aria-hidden="true"><div class="ux-sk-tiles"><b></b><b></b><b></b></div><i></i><i></i><i></i></div>';   // ✨ v213 shimmer skeleton
     return `<div class="loading" role="status" aria-live="polite">${loader(o.style, { size: o.size || 'lg' })}<div class="loading-text">${esc(t)}${ellipsis()}</div>${o.hint ? `<div class="loading-hint">${esc(o.hint)}</div>` : ''}${sk}</div>`;
   }
   const FASTAG_CLASSES = ['VC4', 'VC5', 'VC6', 'VC7', 'VC12', 'VC16', 'VC20', 'VC5+'];

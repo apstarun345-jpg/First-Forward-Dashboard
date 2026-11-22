@@ -9038,6 +9038,14 @@ async function handleApi(req, res, url) {
     if (!d) return sendJson(res, 200, { ok: true, pending: true, retryAfterMs: 3000, phase: officeDispState.phase, pages: officeDispState.pages, officeRows: officeDispState.officeRows, err: officeDispState.err }, { 'Cache-Control': 'no-store' });
     const cls = url.searchParams.get('cls') || '', q = String(url.searchParams.get('q') || '').toLowerCase();
     let rows = d.rows.filter((r) => (!cls || r.cls === cls) && (!q || `${r.barcode} ${r.tagId} ${r.dispAgent} ${r.dispAgentId}`.toLowerCase().includes(q)));
+    // 🔎 v3.125.415 — days=N (last N din) + status=done (sirf Issued/Done wale)
+    const odDays = Math.max(0, Math.min(3650, Number(url.searchParams.get('days')) || 0));
+    if (odDays) {
+      const lim = Date.now() - odDays * 86400e3;
+      const pd = (t) => { t = String(t || '').trim(); let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]); m = t.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/); if (m) return Date.UTC(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[2] - 1, +m[1]); const v = Date.parse(t); return Number.isFinite(v) ? v : NaN; };
+      rows = rows.filter((r) => { const v = pd(r.dispDate); return Number.isFinite(v) && v >= lim; });
+    }
+    if (url.searchParams.get('status') === 'done') rows = rows.filter((r) => /issued|done/i.test(String(r.status || '')));
     if (url.searchParams.get('csv') === '1') {
       const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
       const head = ['Barcode', 'Tag ID', 'Class', 'Channel', 'Dispatch date', 'Dispatched to (agent)', 'Agent ID', 'Sheet agent name', 'Barcode date', 'Ledger row', 'First barcode', 'Last barcode', 'Qty'];

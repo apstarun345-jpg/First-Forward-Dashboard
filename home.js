@@ -799,7 +799,7 @@ FF.pages = FF.pages || {};
       if (!list.length) return '<p class="dim small">Koi stock row nahi mili.</p>';
       return `<div class="hm-toplist">${list.map((r, i) => `<div class="hm-toprow"><span class="rank">${i + 1}</span><b>${esc(r.name)}</b><span class="tag ${cls}">${cls === 'gv' ? 'GV' : 'FF'}</span><strong>${U.fmt(r.n)}</strong></div>`).join('')}</div>`;
     };
-    return `<div class="kpi-grid mini hm-stock-grid">
+    return `<div class="hs-badge-row"><span id="hm-stock-badge" class="hs-badge" hidden></span></div><div class="kpi-grid mini hm-stock-grid">
         ${kpi('g1', 'First Forward · Stock in field', '📦', U.fmt(ff.total), `VC4 <b>${U.fmt(ff.vc4)}</b> · Comm <b>${U.fmt(ff.comm)}</b> · cover <b>${esc(cover(ff.total, ffRate))}</b> din`, 'src=ff&scope=stock')}
         ${kpi('g2', 'GV Partner · Stock in field', '📦', U.fmt(gv.total), `VC4 <b>${U.fmt(gv.vc4)}</b> · Comm <b>${U.fmt(gv.comm)}</b> · cover <b>${esc(cover(gv.total, gvRate))}</b> din`, 'src=gv&scope=stock')}
         <div class="kpi g3 hm-gvonly" id="hm-gvonly"><div class="hm-gvonly-open" role="button" tabindex="0" aria-label="GV tags not in FF stock: open tag list"><div class="kpi-top"><span class="kpi-title">GV tags · not in FF stock</span><span class="kpi-icon">🔎</span></div><div class="kpi-value">…</div><div class="kpi-foot">loading…</div></div><div class="hm-gvonly-actions" hidden><button type="button" data-gvo-list>📋 Tag list</button><button type="button" data-gvo-summary>Class-wise</button>${FF.auth.can('export') ? '<a href="/api/stock-map/csv?bucket=gvonly" download>⬇ CSV</a>' : ''}</div></div>
@@ -1256,15 +1256,16 @@ FF.pages = FF.pages || {};
     const body = FF.app.openDrawer({ kicker: '🚚 Stock check', title: 'Dispatched · still in office stock', sub: `StockDataa me agent blank / Not assigned — par dispatch sheet (FF / GV) me dispatch ho chuka · ${U.fmt(sum.total)} barcodes`, body: U.spinner('List load ho rahi hai…'), wide: true });
     const host = body && body.querySelector ? body : U.$('#drawer-body');
     if (!host) return;
-    const st = { q: '', cls: '' };
+    const st = { q: '', cls: '', days: 0, done: false };
     const CH = 400;
     const rowHtml = (r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.barcode)}</b></td><td>${esc(r.tagId)}</td><td>${esc(r.cls)}</td><td>${esc(r.ch)}</td><td>${esc(r.dispDate)}</td><td>${esc(r.dispAgent)} <small class="dim">${esc(r.dispAgentId)}</small></td><td>${r.agentName ? esc(r.agentName) : '<span class="dim">Blank</span>'}</td></tr>`;
     const load = async () => {
-      const d = await fetchOffDisp(`all=1${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`);
+      const d = await fetchOffDisp(`all=1${st.days ? `&days=${st.days}` : ''}${st.done ? '&status=done' : ''}${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`);
       const rows = d.rows || [];
       const clsBtns = Object.entries(sum.byCls || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => `<button class="btn small${st.cls === c ? ' primary' : ''}" data-od-c="${esc(c)}">${esc(c)} ${U.fmt(n)}</button>`).join('');
-      const csvQs = `csv=1${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`;
-      host.innerHTML = `<div class="btn-row"><input class="input" id="od-q" placeholder="Barcode / Tag ID / agent…" value="${esc(st.q)}">${clsBtns}${st.cls ? '<button class="btn small" data-od-c="">✕ All</button>' : ''}${canExp ? `<a class="btn small primary" href="/api/office-dispatched?${csvQs}" download>⬇ CSV (${U.fmt(d.filtered)})</a>` : ''}<button class="btn small" id="od-copy">📋 Copy barcodes</button></div>
+      const csvQs = `csv=1${st.days ? `&days=${st.days}` : ''}${st.done ? '&status=done' : ''}${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`;
+      const flt = `<button class="btn small${st.days === 30 ? ' primary' : ''}" data-od-d="30">📅 Last 30 din</button><button class="btn small${st.done ? ' primary' : ''}" data-od-done="1">✅ Sirf Issued/Done</button>`;
+      host.innerHTML = `<div class="btn-row"><input class="input" id="od-q" placeholder="Barcode / Tag ID / agent…" value="${esc(st.q)}">${flt}${clsBtns}${st.cls ? '<button class="btn small" data-od-c="">✕ All</button>' : ''}${canExp ? `<a class="btn small primary" href="/api/office-dispatched?${csvQs}" download>⬇ CSV (${U.fmt(d.filtered)})</a>` : ''}<button class="btn small" id="od-copy">📋 Copy barcodes</button></div>
         <div class="table-wrap kd-scroll tall"><table class="tbl compact"><thead><tr><th>#</th><th>Barcode</th><th>Tag ID</th><th>Class</th><th>Channel</th><th>Dispatch date</th><th>Dispatched to</th><th>Sheet agent</th></tr></thead><tbody>${rows.slice(0, CH).map(rowHtml).join('') || '<tr><td colspan="8" class="empty">Koi barcode nahi</td></tr>'}</tbody></table></div>
         <p class="dim small" id="od-count">Total <b>${U.fmt(rows.length)}</b> barcodes${rows.length > CH ? ` · <span id="od-shown">${U.fmt(Math.min(CH, rows.length))}</span> dikh rahe — neeche scroll karo, baaki aate jayenge` : ''}</p>`;
       const sc = host.querySelector('.kd-scroll'), tb = host.querySelector('tbody'); let shown = Math.min(CH, rows.length);
@@ -1274,6 +1275,8 @@ FF.pages = FF.pages || {};
       }
       const q = host.querySelector('#od-q'); let tm = null;
       q.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => { st.q = q.value.trim(); load().catch(() => {}); }, 400); });
+      host.querySelectorAll('[data-od-d]').forEach((b) => b.addEventListener('click', () => { st.days = st.days === 30 ? 0 : 30; load().catch(() => {}); }));
+      host.querySelectorAll('[data-od-done]').forEach((b) => b.addEventListener('click', () => { st.done = !st.done; load().catch(() => {}); }));
       host.querySelectorAll('[data-od-c]').forEach((b) => b.addEventListener('click', () => { st.cls = b.dataset.odC; load().catch(() => {}); }));
       host.querySelector('#od-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(rows.map((r) => r.barcode).join('\n')); U.toast(`${U.fmt(rows.length)} barcodes copy ho gaye`); } catch { U.toast('Copy nahi hua', 'err'); } });
     };
@@ -1503,6 +1506,7 @@ FF.pages = FF.pages || {};
         </div>
       </div>
       <div id="home-stats"></div>
+      <div id="home-summary"></div>
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
       <div id="home-month">${U.spinner('Building month KPI cards from the EIR sheet…')}</div>
       <div id="home-overview"></div>
@@ -1737,7 +1741,44 @@ FF.pages = FF.pages || {};
     }
     // 🧩 Merge fix: yeh teen painter main me call hote the par define nahi the (Home render
     //    ReferenceError: paintMonth is not defined → poore KPI cards gayab). Base v3.47 se wapas.
+    // 🗞️ v3.125.415 — "Aaj ka summary" strip + stock alert (class stock < 5 din ka cover → red)
+    function paintSummary() {
+      const mount = U.$('#home-summary', root); if (!mount || !mount.isConnected || !ui.ready || !ui.sf) return;
+      const rows = ui.sf.rows || [], tk = todayK();
+      const yd = new Date(TODAY()); yd.setDate(yd.getDate() - 1); const yk = dayKey(yd);
+      let t = 0, y = 0; const ag = new Map();
+      for (const r of rows) { const n = Number(r.n) || 0; if (r.key === tk) { t += n; const nm = String(r.agentName || r.agentId || '').trim(); if (nm) ag.set(nm, (ag.get(nm) || 0) + n); } else if (r.key === yk) y += n; }
+      const top = [...ag.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const diff = t - y, pct = y ? Math.round((diff / y) * 100) : null;
+      // stock cover: pichhle 14 din ki roz ki rate se
+      const alerts = [];
+      const st = ui.stock;
+      if (st) {
+        const from = new Date(TODAY()); from.setDate(from.getDate() - 14); const fk = dayKey(from);
+        const rate = (gv, vc4) => { let n = 0; for (const r of rows) { if (!r.key || r.key < fk || r.key >= tk) continue; if ((r.channel === 'GV Partner') !== gv) continue; if ((r.group === 'VC4') !== vc4) continue; n += Number(r.n) || 0; } return n / 14; };
+        [['FF', false, st.ff], ['GV', true, st.gv]].forEach(([nm, gv, sk]) => [['VC4', true, sk.vc4], ['Commercial', false, sk.comm]].forEach(([cn, v4, qty]) => {
+          const rt = rate(gv, v4); if (rt < 1) return; const cov = qty / rt;
+          if (cov < 5) alerts.push({ label: `${nm} ${cn}`, qty, cov });
+        }));
+        alerts.sort((a, b) => a.cov - b.cov);
+      }
+      ui.stockAlerts = alerts;
+      const al = alerts[0];
+      const alertHtml = al ? `<div class="hs-box hs-alert"><span class="hs-k">🔴 Zaroori alert</span><b>${esc(al.label)} stock sirf ${U.fmt(al.qty)}</b><small>~${al.cov.toFixed(1)} din ka cover${alerts.length > 1 ? ` · +${alerts.length - 1} aur low` : ''}</small></div>` : `<div class="hs-box hs-ok"><span class="hs-k">✅ Alert</span><b>Stock theek hai</b><small>Koi class 5 din se kam nahi</small></div>`;
+      mount.innerHTML = `<div class="hs-strip">
+        <div class="hs-box"><span class="hs-k">🏷️ Aaj ke tags</span><b class="kpi-value">${U.fmt(t)}</b><small class="${diff >= 0 ? 'hs-up' : 'hs-dn'}">${diff >= 0 ? '▲' : '▼'} ${U.fmt(Math.abs(diff))} vs kal (${U.fmt(y)})${pct !== null ? ` · ${pct >= 0 ? '+' : ''}${pct}%` : ''}</small></div>
+        <div class="hs-box"><span class="hs-k">🏆 Aaj ke top 3 agent</span>${top.length ? top.map(([n, v], i) => `<div class="hs-ag"><span>${i + 1}</span>${esc(n)}<em>${U.fmt(v)}</em></div>`).join('') : '<small>Abhi data nahi</small>'}</div>
+        ${alertHtml}</div>`;
+      const badge = U.$('#hm-stock-badge', root);
+      if (badge) { badge.hidden = !alerts.length; badge.textContent = alerts.length ? `🔴 ${alerts.length} low` : ''; }
+      try {
+        if (alerts.length && typeof Notification !== 'undefined' && Notification.permission === 'granted' && FF.auth.can('refresh')) {
+          const nk = `ff_stk_alert_${tk}`; if (!localStorage.getItem(nk)) { localStorage.setItem(nk, '1'); new Notification('⚠️ Stock low', { body: alerts.slice(0, 3).map((a) => `${a.label}: ${U.fmt(a.qty)} (${a.cov.toFixed(1)} din)`).join('\n') }); }
+        }
+      } catch { /* notification optional */ }
+    }
     function paintMonth() {
+      try { paintSummary(); } catch { /* summary optional */ }
       if (!monthMount || !monthMount.isConnected || !ui.ready) return;
       // 📅 Month KPI cards = sirf EIR (GV = master ID 5845036 wali rows). GV Master / live rows card me plus nahi hote (double count).
       const eir = ui.daily || [];
@@ -2031,6 +2072,7 @@ FF.pages = FF.pages || {};
       rows: []
     };
     stockMount.innerHTML = stockHtml(ffStock, gvStock, sf);
+    ui.stock = { ff: ffStock, gv: gvStock }; try { paintSummary(); } catch { /* optional */ }
     mountGvOnly(stockMount);
     mountOffDisp(stockMount);
     paintPulse({ total: ffStock.total + gvStock.total });
