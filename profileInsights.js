@@ -437,7 +437,7 @@ window.FF = window.FF || {};
       const full = lastTotal > 0 ? ((an.projected - lastTotal) / lastTotal) * 100 : null;
       const tile = (cls, ic, lab, val, sub) => `<div class="pf-t ${cls}"><i>${ic}</i><small>${lab}</small><b>${val}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
       const tiles = [
-        tile('t1', '🗓️', 'This month', fmt(t.cur.t), `${split(t.cur)}`),
+        tile('t1', '🗓️', 'This month', fmt(t.cur.t), `VC4 ${fmt(t.cur.VC4)} · VC20 ${fmt(t.cur.VC20)} · VC5+ ${fmt(t.cur['VC5+'])}`),
         tile('t2', '⏮️', 'Last month', fmt(lastTotal), `${an.lastYm}`),
         tile('t3', '⚡', 'Run-rate / day', fmt(an.rate.t, 1), `last month ${fmt(an.lastRate, 1)}`),
         tile('t4', '🎯', 'Full month (proj.)', fmt(an.projected), full === null ? '' : `${pcts(full) > 0 ? '+' : ''}${pcts(full)}% vs last`),

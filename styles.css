@@ -9006,3 +9006,5 @@ html[data-theme="dark"] .pf-h { color: #e0e7ff; }
 html[data-theme="dark"] .pf-t, html[data-theme="dark"] .pf-m, html[data-theme="dark"] .pf-mx, html[data-theme="dark"] .pf-bk { background: rgba(15,23,42,.65); }
 html[data-theme="dark"] .pf-m small, html[data-theme="dark"] .pf-t small, html[data-theme="dark"] .pf-t em { color: #cbd5e1; }
 html[data-theme="dark"] .pf-bk b { color: #f1f5f9; } html[data-theme="dark"] .pf-pr { background: rgba(15,23,42,.45); } html[data-theme="dark"] .pf-pt { color: #c7d2fe; }
+
+.pf-gc { white-space: nowrap; } .pf-gcs { display: flex; flex-direction: column; align-items: flex-start; margin: 4px 0 0; }
