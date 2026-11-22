@@ -17,7 +17,7 @@ test('master search: instant address from pack + hero section', () => {
   const p = r('profileInsights.js');
   assert.match(p, /function heroHtml/);
   assert.match(p, /full month/);
-  assert.match(p, /Issuance at max rate/);
+  assert.match(p, /VC4 rate with max issuance/);
   assert.match(p, /Account details/);
   const pay = r('payslip.js');
   assert.match(pay, /async function infoFor/);

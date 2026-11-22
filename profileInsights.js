@@ -466,10 +466,9 @@ window.FF = window.FF || {};
       FF.payslip.infoFor({ ids: FF.payslip.idsOf(pr), name: pr.name || '' }).then((d) => {
         if (!el.isConnected) return;
         if (!d) { el.innerHTML = '<span class="dim small">🏦 Payout data abhi nahi mila (Home → 💰 Payout refresh)</span>'; return; }
-        const m0 = d.maxes.find((m) => m.n > 0 && m.amt > 0) || d.maxes[0];
-        const rate = m0 && m0.n > 0 && m0.amt > 0 ? m0.amt / m0.n : 0;
-        const maxHtml = m0 && m0.n ? `<span class="pf-mx"><small>${esc(String(m0.label).replace(/ (\d{4})$/, " '$1").replace(/'20/, "'"))}</small><b>${fmt(m0.n)} tags</b>${rate ? `<em>Max rate ₹${fmt(Math.round(rate * 100) / 100, rate % 1 ? 2 : 0)} / tag</em>` : ''}</span>` : '<span class="dim small">Max-rate issuance nahi mila</span>';
-        el.innerHTML = `<div class="pf-pr"><div class="pf-pt">🏅 Issuance at max rate <small class="dim">(last month)</small></div><div class="pf-mxs">${maxHtml}</div></div>
+        const m0 = d.maxes.find((m) => m.vc4max > 0);
+        const maxHtml = m0 ? `<span class="pf-mx"><small>${esc(String(m0.label).replace(/ (\d{4})$/, " '$1").replace(/'20/, "'"))}</small><b>₹${fmt(m0.vc4max, m0.vc4max % 1 ? 2 : 0)} <small>/ tag</small></b></span>` : '<span class="dim small">VC4 max-issuance rate sheet me nahi mila</span>';
+        el.innerHTML = `<div class="pf-pr"><div class="pf-pt">🏅 VC4 rate with max issuance <small class="dim">(last month)</small></div><div class="pf-mxs">${maxHtml}</div></div>
           <div class="pf-pr pf-acct"><div class="pf-pt">🏦 Account details <small class="dim">${d.role === 'agent' ? `· paid via ${esc(d.payee)}` : d.payee ? `· ${esc(d.payee)}` : ''}</small></div><div class="pf-bks">${d.bank ? bankHtml(d.bank) : '<span class="dim small">Bank details sheet me nahi mili</span>'}</div></div>`;
       }).catch(() => { el.__pfDone = false; if (el.isConnected) el.innerHTML = ''; });
     }

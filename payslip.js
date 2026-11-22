@@ -814,7 +814,8 @@ window.FF = window.FF || {};
       if (!bank && data.bank && (data.bank.bank || data.bank.account || data.bank.ifsc)) bank = data.bank;
       if (!role) { role = data.role; payee = `${data.payeeId || ''} ${data.payeeName || ''}`.trim(); }
       const t = data.totals || {};
-      maxes.push({ label: m.label, n: Number(t.max_n) || 0, amt: Number(t.po_max) || 0, tags: Number(t.pay_total) || 0, iss: Number(t.iss_total) || 0 });
+      const vc4max = Math.max(0, ...((data.agents || []).map((r) => Number(r.rate_vc4max) || 0)));   // sheet column "VC4 Rate With Max Issuance"
+      maxes.push({ label: m.label, vc4max, n: Number(t.max_n) || 0, amt: Number(t.po_max) || 0 });
     }
     return { bank, role, payee, maxes: maxes.slice(0, 3), at: S.at };
   }
