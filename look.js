@@ -77,6 +77,7 @@ window.FF = window.FF || {};
     if (!FF.app || !FF.app.openDrawer) return;
     const body = FF.app.openDrawer({ kicker: '🎨 Look studio', title: 'Site ka look', sub: 'Badlaav turant dikhta hai · sirf is browser me save hota hai', body: panel() });
     const host = body && body.querySelector ? body : D.getElementById('drawer-body'); if (!host) return;
+    const act = D.getElementById('drawer-actions'); if (act) act.innerHTML = '';   // CSV/PDF yahan kaam ke nahi
     const repaint = () => { host.innerHTML = panel(); };
     host.addEventListener('click', (e) => {
       const b = e.target.closest('[data-lk]'); if (b) { cfg[b.dataset.lk] = b.dataset.v; save(); apply(); repaint(); return; }
