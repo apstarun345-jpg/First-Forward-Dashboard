@@ -17941,6 +17941,7 @@ async function start() {
     setTimeout(() => { hotSaveMaybe(false); }, 12 * 60e3).unref?.();
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
+    setTimeout(() => { try { if (ledgerSources().length) ledgerDirect(['608116-039-0000001']).catch(() => {}); } catch { /* optional */ } }, 60e3).unref?.();   // ⚡ v425 — dispatch ledger ka pehla (cold) query boot par hi
     setTimeout(() => eirRawPrewarm('boot'), 240e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
     setInterval(() => eirRawPrewarm('30 min'), 30 * 60e3).unref();   // jo din fail / missing hain wahi dobara (baaki disk se)
     setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();
