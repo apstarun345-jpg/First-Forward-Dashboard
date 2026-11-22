@@ -13,3 +13,7 @@ test('server has 504 guard returning retryable 503', () => {
   assert.match(sv, /504-guard/);
   assert.match(sv, /retryAfterMs: 3000/);
 });
+test('dispatch lookup serves stale cache / ready index instantly', () => {
+  assert.match(sv, /stale-while-revalidate/);
+  assert.match(sv, /mode: 'index', at: new Date\(ledgerState\.at\)/);
+});

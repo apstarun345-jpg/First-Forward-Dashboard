@@ -3976,7 +3976,10 @@ async function ledgerDirect(barcodes) {
       const ck = `${src.id}|${src.sheetId}|${src.gid}|${src.tab}|${lo}|${hi}`;
       const hit = ledgerDirectCache.get(ck);
       if (hit && Date.now() - hit.at < 10 * 60e3) { for (const e of hit.rows) entries[src.ch].push(e); sourcesOk[src.id] = true; continue; }
-      jobs.push((async () => {
+      // ⚡ v424 — 10 min–6 ghante purana jawab turant do, naya peeche se (stale-while-revalidate): dobara check instant
+      const stale = hit && Date.now() - hit.at < 6 * 3600e3;
+      if (stale) { for (const e of hit.rows) entries[src.ch].push(e); sourcesOk[src.id] = true; hit.at = Date.now() - 9.5 * 60e3; }
+      const runJob = (async () => {
         try {
           const { rows, L } = await withLedgerLetters(src, async (lt) => {
             const qp = new URLSearchParams({ id: src.sheetId, headers: '1', tq: `select ${lt.join(', ')} where ${fc} <= '${hi}' and ${lc} >= '${lo}' limit ${LEDGER_DIRECT_LIMIT}` }); ledgerSetSheet(qp, src);
@@ -3990,8 +3993,9 @@ async function ledgerDirect(barcodes) {
           ledgerDirectCache.set(ck, { at: Date.now(), rows: mine });
           for (const e of mine) entries[src.ch].push(e);
           sourcesOk[src.id] = true;
-        } catch (err) { errors[src.id] = ledgerErrText(src, err); }
-      })());
+        } catch (err) { if (!stale) errors[src.id] = ledgerErrText(src, err); }
+      })();
+      if (stale) runJob.catch(() => {}); else jobs.push(runJob);
     }
   }
   await Promise.all(jobs);
@@ -8622,6 +8626,10 @@ async function handleApi(req, res, url) {
     if (!list.length) throw new HttpError(400, 'Barcodes chahiye.');
     if (ledgerSources().length) {
       try {
+        if (ledgerState.index && Date.now() - ledgerState.at < 6 * 3600e3) {   // ⚡ v424 — poora index ready ho to wahi (ms me)
+          const ix = ledgerState.index;
+          return sendJson(res, 200, { ok: true, results: list.map((b) => dispatchFor(ix, b)), meta: { mode: 'index', at: new Date(ledgerState.at).toISOString() } }, { 'Cache-Control': 'no-store' });
+        }
         const d = await ledgerDirect(list);
         if (d.usable) return sendJson(res, 200, { ok: true, results: list.map((b) => dispatchFor(d.index, b)), meta: { mode: 'direct', errors: d.errors, sources: d.sources } }, { 'Cache-Control': 'no-store' });
       } catch { /* neeche poora index */ }
