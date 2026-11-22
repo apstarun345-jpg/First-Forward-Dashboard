@@ -67,3 +67,6 @@
 /* bottom nav me 6 items hon to 2nd row me na girein (pehle 5 columns fixed the → "More" neeche dock/page se takrata tha) */
 html.mobile-ui #mobile-nav.mobile-nav, .mobile-nav { grid-auto-flow: column !important; grid-auto-columns: minmax(0, 1fr) !important; grid-template-columns: none !important; }
 .mobile-nav-item small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* v3.125.431 — robot ke charo or ke emoji bubbles (HUD) hata diye */
+.mc-orbit-hud, .mc.hud-open .mc-orbit-hud, .mc:hover .mc-orbit-hud { display: none !important; }

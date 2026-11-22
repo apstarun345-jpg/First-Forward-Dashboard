@@ -958,7 +958,7 @@
       </div>
       <div class="mc-chhotu" aria-hidden="true"><img src="${ASSET('robot.png')}" alt="" draggable="false"><span class="mc-cb"></span></div>
       <span class="mc-mb" aria-hidden="true"></span>
-      <button type="button" class="mc-bot" aria-label="Gems robot — kya kya bataya (24h history)" title="🤖 Gems — click: maine kya bataya (24h) · drag: jagah badlo · right-click: quick HUD">
+      <button type="button" class="mc-bot" aria-label="Gems robot — kya kya bataya (24h history)" title="🤖 Gems — click: maine kya bataya (24h) · drag: jagah badlo">
         <i class="mc-glow" aria-hidden="true"></i>
         <i class="mc-halo" aria-hidden="true"></i>
         <span class="mc-arm l"><img src="${ASSET('robot-arm-l.png')}" alt="" draggable="false"></span>
