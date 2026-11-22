@@ -1258,7 +1258,8 @@ FF.pages = FF.pages || {};
     if (!host) return;
     const st = { q: '', cls: '', days: 0, done: false, ch: '' };
     const CH = 400;
-    const rowHtml = (r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.barcode)}</b></td><td>${esc(r.tagId)}</td><td>${esc(r.cls)}</td><td>${esc(r.ch)}</td><td>${esc(r.dispDate)}</td><td>${esc(r.dispAgent)} <small class="dim">${esc(r.dispAgentId)}</small></td><td>${r.agentName ? esc(r.agentName) : '<span class="dim">Blank</span>'}</td></tr>`;
+    const fb = (b) => { const d = String(b || '').replace(/\D/g, ''); return d.length === 16 ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : String(b || ''); };
+    const rowHtml = (r, i) => `<tr><td>${i + 1}</td><td><b>${esc(fb(r.barcode))}</b></td><td>${esc(r.tagId)}</td><td>${esc(r.cls)}</td><td>${esc(r.ch)}</td><td>${esc(r.dispDate)}</td><td>${esc(r.dispAgent)} <small class="dim">${esc(r.dispAgentId)}</small></td><td>${r.agentName ? esc(r.agentName) : '<span class="dim">Blank</span>'}</td></tr>`;
     const load = async () => {
       const d = await fetchOffDisp(`all=1${st.ch ? `&ch=${st.ch}` : ''}${st.days ? `&days=${st.days}` : ''}${st.done ? '&status=done' : ''}${st.cls ? `&cls=${encodeURIComponent(st.cls)}` : ''}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}`);
       const rows = d.rows || [];
@@ -1281,7 +1282,7 @@ FF.pages = FF.pages || {};
       host.querySelectorAll('[data-od-d]').forEach((b) => b.addEventListener('click', () => { st.days = st.days === 30 ? 0 : 30; load().catch(() => {}); }));
       host.querySelectorAll('[data-od-done]').forEach((b) => b.addEventListener('click', () => { st.done = !st.done; load().catch(() => {}); }));
       host.querySelectorAll('[data-od-c]').forEach((b) => b.addEventListener('click', () => { st.cls = b.dataset.odC; load().catch(() => {}); }));
-      host.querySelector('#od-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(rows.map((r) => r.barcode).join('\n')); U.toast(`${U.fmt(rows.length)} barcodes copy ho gaye`); } catch { U.toast('Copy nahi hua', 'err'); } });
+      host.querySelector('#od-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(rows.map((r) => fb(r.barcode)).join('\n')); U.toast(`${U.fmt(rows.length)} barcodes copy ho gaye`); } catch { U.toast('Copy nahi hua', 'err'); } });
     };
     load().catch((err) => { host.innerHTML = `<div class="card-body">${esc(err.message || err)}</div>`; });
   }

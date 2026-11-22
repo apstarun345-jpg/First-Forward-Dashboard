@@ -9097,7 +9097,7 @@ async function handleApi(req, res, url) {
     if (url.searchParams.get('csv') === '1') {
       const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
       const head = ['Barcode', 'Tag ID', 'Class', 'Channel', 'Dispatch date', 'Dispatched to (agent)', 'Agent ID', 'Sheet agent name', 'Barcode date', 'Ledger row', 'First barcode', 'Last barcode', 'Qty'];
-      const csv = [head.join(','), ...rows.map((r) => [`\t${r.barcode}`, r.tagId, r.cls, r.ch, r.dispDate, r.dispAgent, r.dispAgentId, r.agentName || 'Blank', r.bcDate, r.row, r.first, r.last, r.qty].map(esc).join(','))].join('\n');
+      const csv = [head.join(','), ...rows.map((r) => [`\t${(() => { const d = String(r.barcode || '').replace(/\D/g, ''); return d.length === 16 ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : r.barcode; })()}`, r.tagId, r.cls, r.ch, r.dispDate, r.dispAgent, r.dispAgentId, r.agentName || 'Blank', r.bcDate, r.row, r.first, r.last, r.qty].map(esc).join(','))].join('\n');
       return sendMaybeCompressed(req, res, 200, 'text/csv; charset=utf-8', `﻿${csv}`, { 'Content-Disposition': `attachment; filename="office-stock-but-dispatched-${dateKeyNow()}.csv"`, 'Cache-Control': 'no-store' });
     }
     const limit = Math.min(Number(url.searchParams.get('limit')) || 200, 5000), offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
