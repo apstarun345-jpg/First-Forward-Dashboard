@@ -76,3 +76,19 @@ html.mobile-ui #mobile-nav.mobile-nav, .mobile-nav { grid-auto-flow: column !imp
 .fresh-alert-body > b { font-size: 15px; color: #991b1b; }
 @keyframes fresh-pulse { 0%, 100% { box-shadow: 0 6px 22px rgba(220, 38, 38, .22); } 50% { box-shadow: 0 6px 30px rgba(220, 38, 38, .5); } }
 @media (prefers-reduced-motion: reduce) { .fresh-alert { animation: none; } }
+
+/* v3.125.436 — Barcode Checker: 📷 Scan */
+.bcc-scan-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.bcc-scan-count { font-size: 13px; margin-left: auto; padding: 4px 10px; border-radius: 999px; background: var(--surface-2, #eef2ff); }
+.bcc-cam { position: relative; width: 100%; max-width: 560px; aspect-ratio: 4 / 3; max-height: 46vh; margin: 0 auto 12px; border-radius: 16px; overflow: hidden; background: #000; box-shadow: 0 8px 28px rgba(0, 0, 0, .28); }
+.bcc-cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bcc-cam-aim { position: absolute; inset: 22% 8%; border: 3px solid rgba(34, 197, 94, .9); border-radius: 14px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .28); pointer-events: none; }
+.bcc-cam-aim::after { content: ""; position: absolute; left: 4%; right: 4%; top: 50%; height: 2px; background: #ef4444; box-shadow: 0 0 10px #ef4444; animation: bcc-laser 1.6s ease-in-out infinite alternate; }
+@keyframes bcc-laser { from { top: 12%; } to { top: 88%; } }
+.bcc-cam-msg { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; color: #fff; font-size: 12px; text-shadow: 0 1px 3px #000; }
+.bcc-page tr.bcc-new td { animation: bcc-flash-ok 1.5s ease-out; }
+.bcc-page tr.bcc-dupflash td { animation: bcc-flash-dup 1.5s ease-out; }
+@keyframes bcc-flash-ok { from { background: #bbf7d0; } to { background: transparent; } }
+@keyframes bcc-flash-dup { from { background: #fde68a; } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .bcc-cam-aim::after, .bcc-page tr.bcc-new td, .bcc-page tr.bcc-dupflash td { animation: none; } }
+@media (max-width: 640px) { .bcc-cam { max-height: 38vh; } .bcc-scan-count { width: 100%; margin-left: 0; text-align: center; } }

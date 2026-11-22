@@ -204,7 +204,7 @@ FF.pages = FF.pages || {};
     if (!errs.length && src) return `<p class="dim small">📒 Dispatch ledger: ${src}</p>`;
     return errs.length ? `<p class="dim small">⚠️ Dispatch ledger — ${src ? src + ' · ' : ''}${errs.map(([, v]) => esc(v)).join(' · ')}</p>` : '';
   }
-  const rowsHtml = (show) => show.map((r) => `<tr class="bcc-${r.k}" data-bcc-i="${r._i}"><td class="bcc-cp"><button type="button" class="bcc-rowcopy" data-bcc-row title="Copy Barcode + Tag ID + Status">📋</button></td>${cells(r).map((v, i) => `<td${i === 0 || i === 1 ? ` class="mono bcc-cell" data-bcc-cell="${i === 0 ? 'bc' : 'tag'}" title="Click = copy"` : ''}>${i === 2 ? `<span class="badge ${STATUS[r.k].tone}">${esc(v)}</span>` : esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${HEAD.length + 1}" class="empty">Is filter me kuch nahi</td></tr>`;
+  const rowsHtml = (show) => show.map((r) => `<tr class="bcc-${r.k}${r._new && Date.now() - r._new < 1600 ? ' bcc-new' : ''}${r._dup && Date.now() - r._dup < 1600 ? ' bcc-dupflash' : ''}" data-bcc-i="${r._i}"><td class="bcc-cp"><button type="button" class="bcc-rowcopy" data-bcc-row title="Copy Barcode + Tag ID + Status">📋</button></td>${cells(r).map((v, i) => `<td${i === 0 || i === 1 ? ` class="mono bcc-cell" data-bcc-cell="${i === 0 ? 'bc' : 'tag'}" title="Click = copy"` : ''}>${i === 2 ? `<span class="badge ${STATUS[r.k].tone}">${esc(v)}</span>` : esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${HEAD.length + 1}" class="empty">Is filter me kuch nahi</td></tr>`;
   const noteHtml = (vis, show) => `${U.fmt(vis.length)} rows${vis.length > show.length ? ` · pehli ${U.fmt(show.length)} dikh rahi — sab ke liye Copy / Excel` : ''}`;
   function resultsHtml() {
     const rows = state.rows;
@@ -289,7 +289,7 @@ FF.pages = FF.pages || {};
       <div class="page-head"><div><h1>🔢 Barcode Checker</h1>
         <p class="sub">Barcode range or many barcodes → status of every tag: <b>✅ issued</b> (when, on which VRN) · <b>📦 in which agent's stock</b> · <b>🏢 master/BC</b> · <b>❓ missing</b>. Stock = StockDataa · Issued = EIR.</p></div></div>
       <div class="card"><div class="card-body">
-        <div class="seg bcc-tabs"><button type="button" class="seg-btn${state.tab === 'range' ? ' on' : ''}" data-bcc-tab="range">↔️ Range (first → last)</button><button type="button" class="seg-btn${state.tab === 'multi' ? ' on' : ''}" data-bcc-tab="multi">📋 Multiple barcodes</button></div>
+        <div class="seg bcc-tabs"><button type="button" class="seg-btn${state.tab === 'range' ? ' on' : ''}" data-bcc-tab="range">↔️ Range (first → last)</button><button type="button" class="seg-btn${state.tab === 'multi' ? ' on' : ''}" data-bcc-tab="multi">📋 Multiple barcodes</button><button type="button" class="seg-btn${state.tab === 'scan' ? ' on' : ''}" data-bcc-tab="scan">📷 Scan</button></div>
         <form class="bcc-form" data-bcc-form="range" ${state.tab === 'range' ? '' : 'hidden'}>
           <label class="field"><span class="dim small">First barcode</span><input class="input mono" name="first" value="${esc(p.first || '')}" placeholder="608116-011-0558283" autocomplete="off" inputmode="numeric"></label>
           <label class="field"><span class="dim small">Last barcode</span><input class="input mono" name="last" value="${esc(p.last || '')}" placeholder="608116-011-0558331" autocomplete="off" inputmode="numeric"></label>
@@ -301,13 +301,27 @@ FF.pages = FF.pages || {};
             <textarea class="input mono" name="list" rows="6" placeholder="608116-011-0558283&#10;608116-011-0558290&#10;6081160110558301">${esc(p.list || '')}</textarea></label>
           <div class="btn-row"><button class="btn primary" type="submit">🔎 Check</button><span class="dim small" data-bcc-count></span></div>
         </form>
+        <div class="bcc-scan" data-bcc-form="scan" ${state.tab === 'scan' ? '' : 'hidden'}>
+          <div class="bcc-scan-bar">
+            <button type="button" class="btn primary" data-scan="cam">📷 Camera scan shuru</button>
+            <button type="button" class="btn small" data-scan="torch" hidden>🔦 Torch</button>
+            <button type="button" class="btn small" data-scan="sound" title="Beep ON/OFF">🔊</button>
+            <button type="button" class="btn small" data-scan="clear">🗑 List saaf</button>
+            <span class="bcc-scan-count" data-scan-count></span>
+          </div>
+          <div class="bcc-cam" data-scan-cam hidden><video playsinline muted></video><div class="bcc-cam-aim"></div><div class="bcc-cam-msg" data-scan-msg></div></div>
+          <label class="field"><span class="dim small">Scanner gun / bluetooth scanner / haath se — barcode daalo + Enter (ek ke baad ek, list banti jayegi)</span>
+            <input class="input mono" data-scan-in placeholder="⌨️ Yahan scan karo ya barcode type karke Enter…" autocomplete="off" inputmode="text"></label>
+        </div>
         <p class="dim small bcc-note">Max ${MAX.toLocaleString('en-IN')} barcodes ek baar me. Jo tag stock me nahi, uska Tag ID aas-paas ke stock tags se anumaan lagaya jaata hai (note me likha aata hai). Range ka koi bhi tag stock me na ho to first barcode ka Tag ID daal do.</p>
       </div></div>
       <div class="card"><div class="card-body" data-bcc-out>${state.rows ? resultsHtml() : '<div class="empty-state compact">👆 Barcode daalo — result yahan aayega</div>'}</div></div>
       <section class="card" style="margin-top:14px"><div class="card-head"><h3>🔁 Duplicate barcode checker</h3></div><div class="card-body"><p class="dim small">Checks repeated barcodes within each sheet separately: FF StockDataa or GV Tag Assignment (all statuses). A barcode appearing once in each sheet is normal and is not a duplicate. Formatting, leading zeroes and scientific notation are normalized.</p><div class="btn-row">${FF.auth.can('sheet:StockDataa') ? '<button class="btn small" data-dup-scan="ff">🔎 Scan FF</button>' : ''}${FF.auth.can('sheet:Tag Assignment') ? '<button class="btn small" data-dup-scan="gv">🔎 Scan GV</button>' : ''}</div><div data-dup-out></div></div></section>
     </div>`;
     dup.data = null; dup.seq++; dupPaint(root);
+    camStop();
     bind(root);
+    scanInit(root);
     if (p.first && p.last) run('range');
   }
   async function run(kind) {
@@ -377,9 +391,19 @@ FF.pages = FF.pages || {};
       if (e.target.matches('[data-bcc-q]')) { state.q = e.target.value; if (!qRaf) qRaf = requestAnimationFrame(() => { qRaf = 0; paintTable(); }); }
       if (e.target.matches('[data-dup-q]')) { dup.q = e.target.value; dup.limit = 300; const pos = e.target.selectionStart; dupPaint(root); const next = root.querySelector('[data-dup-q]'); if (next) { next.focus(); next.setSelectionRange(pos, pos); } }
     });
+    root.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.matches('[data-scan-in]')) { e.preventDefault(); const v = e.target.value; e.target.value = ''; scanText(v); }
+    });
+    root.addEventListener('paste', (e) => {
+      if (!e.target.matches('[data-scan-in]')) return;
+      const t = (e.clipboardData && e.clipboardData.getData('text')) || '';
+      if (/[\n,;\s]/.test(t.trim())) { e.preventDefault(); scanText(t); }
+    });
     root.addEventListener('click', (e) => {
-      const scan = e.target.closest('[data-dup-scan]');
-      if (scan) { dupScan(root, scan.dataset.dupScan); return; }
+      const sb = e.target.closest('[data-scan]');
+      if (sb) { const a = sb.dataset.scan; if (a === 'cam') (scanCam.on ? camStop() : camStart()); else if (a === 'clear') scanClear(); else if (a === 'sound') { scan.sound = !scan.sound; sb.textContent = scan.sound ? '🔊' : '🔇'; try { localStorage.setItem('ff_bcc_scan_snd', scan.sound ? '1' : '0'); } catch { /* optional */ } } else if (a === 'torch') camTorch(); return; }
+      const scan0 = e.target.closest('[data-dup-scan]');
+      if (scan0) { dupScan(root, scan0.dataset.dupScan); return; }
       if (e.target.closest('[data-dup-more]')) { dup.limit += 300; dupPaint(root); return; }
       if (e.target.closest('[data-dup-csv]') && dup.data && FF.auth.can('export')) { dupCsv(); return; }
       const tab = e.target.closest('[data-bcc-tab]');
@@ -387,6 +411,7 @@ FF.pages = FF.pages || {};
         state.tab = tab.dataset.bccTab;
         root.querySelectorAll('[data-bcc-tab]').forEach((b) => b.classList.toggle('on', b === tab));
         root.querySelectorAll('[data-bcc-form]').forEach((f) => { f.hidden = f.dataset.bccForm !== state.tab; });
+        if (state.tab !== 'scan') camStop(); else scanEnter();
         return;
       }
       const fl = e.target.closest('[data-bcc-filter]');
@@ -411,6 +436,174 @@ FF.pages = FF.pages || {};
     });
   }
 
-  FF.barcodeChecker = { expandRange, tagInfer, parseMulti, makeRow, paintResults, visible, copyText, checkRange, _state: state };
+
+  // ---- 📷 Scan (v3.125.436) — camera + scanner-gun: har scan turant list me, status peeche se bharta hai ------------------
+  // Camera: browser ka BarcodeDetector (phone / Chrome — fast, native); na ho to ZXing (vendor/zxing.min.js, sirf zarurat par load).
+  // List localStorage me (ff_bcc_scan) — reload / app band hone par bhi bachi rehti hai.
+  const SCAN_KEY = 'ff_bcc_scan';
+  const scan = { order: [], map: new Map(), queue: [], t: 0, paintRaf: 0, saveT: 0, sound: true, last: { k: '', at: 0 }, ctx: null };
+  const scanCam = { on: false, stream: null, raf: 0, timer: 0, det: null, reader: null, busy: false, torch: false };
+  const scanKey = (c) => strip0(bcDigits(c)) || String(c || '').toUpperCase();
+  const pendingRow = (label) => { const r = makeRow(label, null, '', false, null); r.note = '⏳ check ho raha hai…'; r.dDate = r.dName = ''; r._new = Date.now(); return r; };
+  function scanBeep(kind) {
+    try { if (navigator.vibrate) navigator.vibrate(kind === 'ok' ? 35 : [30, 40, 30]); } catch { /* optional */ }
+    if (!scan.sound) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      scan.ctx = scan.ctx || new AC(); const c = scan.ctx, o = c.createOscillator(), g = c.createGain();
+      o.type = 'square'; o.frequency.value = kind === 'ok' ? 1040 : 380; g.gain.value = 0.06; o.connect(g); g.connect(c.destination);
+      o.start(); o.stop(c.currentTime + (kind === 'ok' ? 0.07 : 0.16));
+    } catch { /* optional */ }
+  }
+  function scanSave() {
+    clearTimeout(scan.saveT);
+    scan.saveT = setTimeout(() => { try { if (scan.order.length) localStorage.setItem(SCAN_KEY, JSON.stringify(scan.order.slice(-MAX).map((k) => scan.map.get(k).barcode))); else localStorage.removeItem(SCAN_KEY); } catch { /* optional */ } }, 300);
+  }
+  function scanCount() {
+    const el = state.root && state.root.querySelector('[data-scan-count]'); if (!el) return;
+    const rows = scan.order.map((k) => scan.map.get(k)), c = (k) => rows.filter((r) => r.k === k).length;
+    el.innerHTML = rows.length ? `<b>${U.fmt(rows.length)}</b> scan · ✅ ${U.fmt(c('iss'))} · 📦 ${U.fmt(c('st'))} · 🏢 ${U.fmt(c('bc'))} · ❓ ${U.fmt(c('nf'))}` : '<span class="dim">Abhi koi scan nahi</span>';
+  }
+  function scanPaint() {
+    if (scan.paintRaf) return;
+    scan.paintRaf = requestAnimationFrame(() => {
+      scan.paintRaf = 0;
+      if (state.tab !== 'scan' || !state.root) return;
+      const rows = scan.order.slice().reverse().map((k) => scan.map.get(k));
+      rows.forEach((r, i) => { r._i = i; });
+      state.rows = rows.length ? rows : null; state.title = 'scanned-list'; state.lastKey = 'scan'; state.dispMeta = state.dispMeta || null;
+      if (rows.length) { if (state.q || state.agent || state.filter !== 'all') paintTable(); else paintResults(); }
+      else { const out = state.root.querySelector('[data-bcc-out]'); if (out) out.innerHTML = '<div class="empty-state compact">📷 Scan karo — har barcode yahan jodta jayega</div>'; }
+      scanCount();
+    });
+  }
+  function scanAdd(code) {
+    const k = scanKey(code), ex = scan.map.get(k);
+    if (ex) { ex._dup = Date.now(); scanBeep('dup'); scanPaint(); return false; }
+    scan.order.push(k); scan.map.set(k, pendingRow(code)); scan.queue.push(code);
+    scanBeep('ok'); scanSave(); scanPaint();
+    if (!scan.t) scan.t = setTimeout(scanFlush, 220);
+    return true;
+  }
+  /** Text (scanner gun / paste) → barcodes → list. */
+  function scanText(text) {
+    const list = parseMulti(text); let n = 0, d = 0;
+    list.forEach((c) => { if (scanAdd(c)) n++; else d++; });
+    if (!list.length && String(text || '').trim() && U.toast) U.toast('Ye barcode jaisa nahi laga', 'warn');
+    return { n, d };
+  }
+  async function scanFlush() {
+    scan.t = 0;
+    const batch = scan.queue.splice(0); if (!batch.length) return;
+    const put = (rows, fresh) => rows.forEach((r) => { const k = scanKey(r.barcode), old = scan.map.get(k); if (!old) return; if (!r.dDate) { r.dDate = old.dDate || ''; r.dName = old.dName || ''; } r._new = old._new; scan.map.set(k, r); });
+    const dp = FF.data.dispatchLookup(batch); dp.catch(() => {});
+    try {
+      const rows = await checkMulti(batch, (early) => { early.forEach((r) => { r.dDate = r.dName = SEARCHING; }); put(early); scanPaint(); });
+      rows.forEach((r) => { const o = scan.map.get(scanKey(r.barcode)); r.dDate = (o && o.dDate) || SEARCHING; r.dName = (o && o.dName) || SEARCHING; });
+      put(rows); scanPaint();
+      await attachDispatch(rows, dp); scanPaint();
+    } catch (err) {
+      batch.forEach((c) => { const o = scan.map.get(scanKey(c)); if (o) { o.note = '⚠️ check nahi hua: ' + String((err && err.message) || err).slice(0, 80); o.k = 'nf'; } });
+      scanPaint();
+    }
+  }
+  function scanClear() {
+    if (scan.order.length > 3 && !window.confirm(`${scan.order.length} scanned barcodes ki list saaf karni hai?`)) return;
+    scan.order = []; scan.map.clear(); scan.queue = []; state.rows = null; try { localStorage.removeItem(SCAN_KEY); } catch { /* optional */ }
+    scanPaint(); scanCount();
+  }
+  function scanEnter() {
+    scanPaint(); scanCount();
+    const inp = state.root && state.root.querySelector('[data-scan-in]');
+    if (inp && !(window.matchMedia && matchMedia('(pointer:coarse)').matches)) inp.focus();
+  }
+  function scanInit(root) {
+    try { scan.sound = localStorage.getItem('ff_bcc_scan_snd') !== '0'; } catch { /* optional */ }
+    const sb = root.querySelector('[data-scan="sound"]'); if (sb) sb.textContent = scan.sound ? '🔊' : '🔇';
+    if (!scan.order.length) {
+      let saved = []; try { saved = JSON.parse(localStorage.getItem(SCAN_KEY) || '[]'); } catch { /* optional */ }
+      (Array.isArray(saved) ? saved : []).slice(-MAX).forEach((c) => { const k = scanKey(c); if (!scan.map.has(k)) { scan.order.push(k); scan.map.set(k, pendingRow(String(c))); scan.queue.push(String(c)); } });
+      if (scan.queue.length && !scan.t) scan.t = setTimeout(scanFlush, 300);
+    }
+    scanCount();
+    if (state.tab === 'scan') scanEnter();
+  }
+  // ---- 📷 camera --------------------------------------------------------------------------------------
+  const camMsg = (t) => { const m = state.root && state.root.querySelector('[data-scan-msg]'); if (m) m.textContent = t || ''; };
+  function camBtn(on) {
+    const b = state.root && state.root.querySelector('[data-scan="cam"]'); if (b) { b.textContent = on ? '⏹ Camera band karo' : '📷 Camera scan shuru'; b.classList.toggle('danger', !!on); }
+    const box = state.root && state.root.querySelector('[data-scan-cam]'); if (box) box.hidden = !on;
+    const tb = state.root && state.root.querySelector('[data-scan="torch"]'); if (tb && !on) tb.hidden = true;
+  }
+  function loadZxing() {
+    if (window.ZXing) return Promise.resolve(window.ZXing);
+    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'vendor/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('ZXing load nahi hua'))); s.onerror = () => no(new Error('Scanner library load nahi hui')); document.head.appendChild(s); });
+  }
+  function camOnRaw(raw) {
+    const list = parseMulti(String(raw || '')); if (!list.length) return;
+    const c = list[0], k = scanKey(c), now = Date.now();
+    if (scan.last.k === k && now - scan.last.at < 1800) { scan.last.at = now; return; }   // same barcode camera ke saamne — baar-baar nahi
+    scan.last = { k, at: now };
+    scanAdd(c);
+  }
+  async function camStart() {
+    if (scanCam.on) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { U.toast && U.toast('Is browser / app me camera available nahi (HTTPS + permission chahiye)', 'error'); return; }
+    const video = state.root && state.root.querySelector('.bcc-cam video'); if (!video) return;
+    camBtn(true); camMsg('Camera khul raha hai…');
+    try {
+      scanCam.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    } catch (err) { camBtn(false); camMsg(''); U.toast && U.toast('Camera permission nahi mili — browser / app settings me allow karo', 'error'); return; }
+    scanCam.on = true;
+    video.srcObject = scanCam.stream; try { await video.play(); } catch { /* autoplay */ }
+    try { const tr = scanCam.stream.getVideoTracks()[0]; const caps = tr && tr.getCapabilities ? tr.getCapabilities() : {}; const tb = state.root.querySelector('[data-scan="torch"]'); if (tb) tb.hidden = !caps.torch; } catch { /* optional */ }
+    camMsg('Barcode ko frame ke beech me rakho');
+    let useNative = false;
+    if ('BarcodeDetector' in window) {
+      try {
+        const want = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'itf', 'codabar', 'upc_a', 'upc_e', 'qr_code', 'data_matrix'];
+        const sup = await window.BarcodeDetector.getSupportedFormats();
+        const fm = want.filter((f) => sup.includes(f));
+        if (fm.length >= 3) { scanCam.det = new window.BarcodeDetector({ formats: fm }); useNative = true; }
+      } catch { /* ZXing fallback */ }
+    }
+    if (useNative) {
+      const tick = async () => {
+        if (!scanCam.on) return;
+        if (!scanCam.busy && video.readyState >= 2 && !document.hidden) {
+          scanCam.busy = true;
+          try { const found = await scanCam.det.detect(video); found.forEach((f) => camOnRaw(f.rawValue)); } catch { /* frame skip */ }
+          scanCam.busy = false;
+        }
+        scanCam.timer = setTimeout(() => { scanCam.raf = requestAnimationFrame(tick); }, 70);
+      };
+      tick();
+    } else {
+      try {
+        const Z = await loadZxing();
+        const hints = new Map(); hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.ITF, Z.BarcodeFormat.QR_CODE, Z.BarcodeFormat.DATA_MATRIX, Z.BarcodeFormat.CODABAR]); hints.set(Z.DecodeHintType.TRY_HARDER, true);
+        scanCam.reader = new Z.BrowserMultiFormatReader(hints, 120);
+        scanCam.reader.decodeFromStream(scanCam.stream, video, (res) => { if (res && scanCam.on) camOnRaw(res.getText()); });
+      } catch (err) { camStop(); U.toast && U.toast('Scanner start nahi hua: ' + String((err && err.message) || err), 'error'); }
+    }
+  }
+  function camStop() {
+    const was = scanCam.on || scanCam.stream;
+    scanCam.on = false; cancelAnimationFrame(scanCam.raf); clearTimeout(scanCam.timer);
+    try { if (scanCam.reader) scanCam.reader.reset(); } catch { /* optional */ }
+    scanCam.reader = null; scanCam.det = null;
+    try { if (scanCam.stream) scanCam.stream.getTracks().forEach((t) => t.stop()); } catch { /* optional */ }
+    scanCam.stream = null; scanCam.torch = false;
+    if (was) camBtn(false); camMsg('');
+  }
+  async function camTorch() {
+    try { const tr = scanCam.stream && scanCam.stream.getVideoTracks()[0]; if (!tr) return; scanCam.torch = !scanCam.torch; await tr.applyConstraints({ advanced: [{ torch: scanCam.torch }] }); } catch { U.toast && U.toast('Torch is device par nahi chala', 'warn'); }
+  }
+  try {
+    window.addEventListener('hashchange', () => { if (!/barcodeChecker/i.test(location.hash)) camStop(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) camStop(); });
+    window.addEventListener('pagehide', camStop);
+  } catch { /* test / non-browser sandbox */ }
+  FF.barcodeChecker = { expandRange, tagInfer, parseMulti, makeRow, paintResults, visible, copyText, checkRange, scanAdd, scanText, scanKey, _scan: scan, _state: state };
   FF.pages.barcodeChecker = { title: 'Barcode Checker', render };
 })(window.FF);
