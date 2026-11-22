@@ -5387,8 +5387,15 @@ function profilePackBuild(viewFn) {
   return profilePack.promise;
 }
 /** Server ke andar se hi handleApi ko bulao (addressBookView wahin ka closure hai) — token sirf is process ko pata hai. */
+let addrViewRef = null;   // handleApi har request par isse addressBookView set karta hai
 async function profilePackWarm() {
-  try { const r = await fetch(`http://127.0.0.1:${PORT}/api/profile-pack/warm?t=${profilePack.token}`, { signal: AbortSignal.timeout(170e3) }); return r.ok; } catch { return false; }
+  console.log('🧑‍💼 profile pack: warm shuru');
+  try {
+    if (addrViewRef) { await profilePackBuild(addrViewRef); return true; }
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/profile-pack/warm?t=${profilePack.token}`, { signal: AbortSignal.timeout(300e3) });
+    if (!r.ok) console.warn(`🧑‍💼 profile pack warm: HTTP ${r.status}`);
+    return r.ok;
+  } catch (err) { console.warn('🧑‍💼 profile pack warm:', String((err && err.message) || err).slice(0, 160)); return false; }
 }
 function profilePackNightly() {
   if (profilePack.promise) return;
@@ -10957,6 +10964,7 @@ async function handleApi(req, res, url) {
     }
     return out.map((x) => ({ key: x.key, id: x.agentId || '', name: x.agent || '', mobile: last10(x.mobile) || x.mobile || '', tl: x.tl || '', address: x.address || '', pincode: tagDigits(x.pincode).slice(0, 6), channel: x.channel === 'gv' ? 'gv' : 'ff', src: x.src, updatedAt: x.updatedAt || '', gkey: x.gkey || '', gsize: x.gsize || 1, conflict: !!x.conflict, altKeys: x.altKeys || [], members: x.members || [{ key: x.key, src: x.src }] }));
   }
+  addrViewRef = addressBookView;
   /** Mobile se agent pehchano: (1) tag requests (2) Address book (3) mobile directory (4) REPORT sheets (TL / channel / naam). */
   async function enrichAddressEntries(entries) {
     const byMob = new Map();
