@@ -123,3 +123,24 @@ html.ff-no-anim .ux-pt { animation: none !important; }
 .ux-ac { position: fixed; z-index: 9990; min-width: 190px; padding: 10px 14px; border-radius: 14px; background: linear-gradient(160deg, #312e81, #1e1b4b); color: #fff; box-shadow: 0 12px 28px rgba(30,27,75,.4), 0 30px 50px -16px rgba(79,70,229,.5), inset 0 1px 0 rgba(255,255,255,.18); display: grid; gap: 4px; pointer-events: none; animation: uxPt .18s ease both; }
 .ux-ac b { font-size: 14px; } .ux-ac div { display: flex; justify-content: space-between; gap: 16px; font-size: 12.5px; } .ux-ac span { opacity: .75; } .ux-ac strong { font-weight: 800; }
 @media (prefers-reduced-motion: reduce) { .home-hero[data-tod]::after { animation: none; } }
+
+/* v3.125.419 — odometer roll, ripple, morph, scroll-reveal, micro, shared-element ghost, mini-bars */
+@keyframes uxRoll { from { transform: translateY(45%); opacity: .2; filter: blur(3px); } to { transform: none; opacity: 1; filter: none; } }
+.kpi-value.ux-roll { display: inline-block; animation: uxRoll .5s var(--ds-ease, ease) both; }
+@keyframes uxRipple { 0% { box-shadow: 0 0 0 0 rgba(99,102,241,.55); } 100% { box-shadow: 0 0 0 20px rgba(99,102,241,0); } }
+.kpi.ux-ripple { animation: uxRipple .9s ease-out 1; }
+@keyframes uxMorph { from { opacity: 0; filter: blur(6px); transform: translateY(6px); } to { opacity: 1; filter: none; transform: none; } }
+.ux-morph { animation: uxMorph .45s var(--ds-ease, ease) both; }
+.ux-rv { opacity: 0; transform: translateY(22px); }
+.ux-rv-in { animation: uxMorph .5s var(--ds-ease, ease) both; }
+.btn { transition: transform .18s var(--ds-ease, ease), box-shadow .18s, background .15s; }
+.btn:active { transform: scale(.96) !important; }
+@keyframes uxPop { 50% { transform: scale(1.25); } }
+input[type=checkbox]:checked, input[type=radio]:checked { animation: uxPop .28s ease; }
+.btn.ux-copied { background: #059669 !important; color: #fff !important; border-color: #059669 !important; }
+.ux-ghost { position: fixed; z-index: 9998; pointer-events: none; background: linear-gradient(135deg, var(--brand, #6366f1), var(--brand-2, #ec4899)); box-shadow: 0 20px 50px rgba(79,70,229,.35); }
+.hm-toprow.ux-bar, .hs-ag.ux-bar { background-image: linear-gradient(90deg, color-mix(in srgb, var(--brand, #6366f1) 16%, transparent) var(--bar, 0%), transparent var(--bar, 0%)); border-radius: 8px; }
+html.ff-no-anim .ux-morph, html.ff-no-anim .ux-rv-in, html.ff-no-anim .kpi-value.ux-roll, html.ff-no-anim .kpi.ux-ripple { animation: none !important; }
+html.ff-no-anim .ux-rv { opacity: 1; transform: none; }
+@media print { .ux-rv, .ux-morph { opacity: 1 !important; transform: none !important; animation: none !important; filter: none !important; } }
+@media (prefers-reduced-motion: reduce) { .ux-rv { opacity: 1; transform: none; } .ux-morph, .ux-rv-in, .kpi-value.ux-roll, .kpi.ux-ripple { animation: none !important; } }

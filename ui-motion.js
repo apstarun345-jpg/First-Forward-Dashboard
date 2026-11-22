@@ -197,17 +197,24 @@ window.FF = window.FF || {};
   }
   // ✨ v3.125.415 — count-up (KPI numbers) + bars grow. Sirf naye aaye nodes par, ek baar; reduced-motion me skip.
   const REDUCE = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const kpiPrev = new Map();
   function countUp(root) {
     if (REDUCE || document.documentElement.classList.contains('ff-no-anim')) return;
     const els = root.matches && root.matches('.kpi-value') ? [root] : Array.from(root.querySelectorAll ? root.querySelectorAll('.kpi-value') : []);
     els.slice(0, 60).forEach((el) => {
       if (el.dataset.cu || el.children.length) return; el.dataset.cu = '1';
       const t = el.textContent.trim(); const m = t.match(/^([^\d-]*)(-?[\d,]+(?:\.\d+)?)(.*)$/);
-      if (!m) return; const raw = m[2]; const to = parseFloat(raw.replace(/,/g, '')); if (!isFinite(to) || Math.abs(to) < 10) return;
+      if (!m) return; const raw = m[2]; const to = parseFloat(raw.replace(/,/g, '')); if (!isFinite(to)) return;
+      const card = el.closest('.kpi'); const tt = card && card.querySelector('.kpi-title'); const key = tt ? tt.textContent.trim() : '';
+      const prev = key ? kpiPrev.get(key) : undefined; if (key) kpiPrev.set(key, to);
+      if (prev !== undefined && prev === to) return;                 // wahi value dobara render — animate nahi
+      const from = prev !== undefined ? prev : 0;
+      if (prev === undefined && Math.abs(to) < 10) return;
+      if (prev !== undefined && card) { card.classList.add('ux-ripple'); setTimeout(() => card.classList.remove('ux-ripple'), 1000); el.classList.add('ux-roll'); setTimeout(() => el.classList.remove('ux-roll'), 700); }
       const dec = (raw.split('.')[1] || '').length; const comma = raw.indexOf(',') >= 0;
       const fmt = (v) => { const n = dec ? v.toFixed(dec) : String(Math.round(v)); return m[1] + (comma ? Number(n).toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec }) : n) + m[3]; };
-      const t0 = performance.now(), D = 700;
-      const step = (now) => { if (!el.isConnected) return; const k = Math.min(1, (now - t0) / D); const e = 1 - Math.pow(1 - k, 3); el.textContent = k >= 1 ? t : fmt(to * e); if (k < 1) requestAnimationFrame(step); };
+      const t0 = performance.now(), D = prev !== undefined ? 900 : 700;
+      const step = (now) => { if (!el.isConnected) return; const k = Math.min(1, (now - t0) / D); const e = 1 - Math.pow(1 - k, 3); el.textContent = k >= 1 ? t : fmt(from + (to - from) * e); if (k < 1) requestAnimationFrame(step); };
       requestAnimationFrame(step);
     });
   }
@@ -247,6 +254,7 @@ window.FF = window.FF || {};
       const b = D.createElement('button'); b.className = 'btn'; b.id = 'home-sound'; b.type = 'button';
       const paint = () => { b.textContent = sndOn() ? '🔔 Sound ON' : '🔕 Sound off'; b.title = 'Record / stock alert par halki awaaz'; };
       paint(); b.addEventListener('click', () => { try { localStorage.setItem('ff_sound', sndOn() ? '0' : '1'); } catch { /* storage blocked */ } paint(); chime('win'); }); side.appendChild(b);
+      if (!side.querySelector('#home-bento')) { const g = D.createElement('button'); g.className = 'btn'; g.id = 'home-bento'; g.type = 'button'; const pg = () => { g.textContent = D.documentElement.classList.contains('ff-bento') ? '▦ Bento ON' : '▤ Classic'; g.title = 'Home layout: Bento / Classic'; }; pg(); g.addEventListener('click', () => { D.documentElement.classList.toggle('ff-bento'); lsSet('ff_bento', D.documentElement.classList.contains('ff-bento') ? '1' : '0'); pg(); }); side.appendChild(g); }
     });
   }
   // 🧑‍💼 row hover — agent mini card (data-agent wali rows par, thodi der ruko to)
@@ -275,18 +283,107 @@ window.FF = window.FF || {};
     D.addEventListener('mouseout', (e) => { const tr = e.target.closest && e.target.closest('tr[data-agent]'); if (tr && !(e.relatedTarget && tr.contains(e.relatedTarget))) acHide(); }, { passive: true });
     addEventListener('scroll', acHide, { passive: true, capture: true });
   }
+  // ✨ v3.125.419 — morph, scroll-reveal, mini-bars, profile tabs
+  function morph(root) {
+    if (REDUCE || D.documentElement.classList.contains('ff-no-anim')) return;
+    const els = root.matches && root.matches('.table-wrap,.chart-shot,.kpi-grid') ? [root] : Array.from(root.querySelectorAll ? root.querySelectorAll('.table-wrap,.chart-shot,.kpi-grid') : []);
+    els.slice(0, 20).forEach((e) => { if (!e.dataset.mo) { e.dataset.mo = '1'; e.classList.add('ux-morph'); } });
+  }
+  let rvIO = null;
+  function reveal(root) {
+    if (REDUCE || !('IntersectionObserver' in window) || D.documentElement.classList.contains('ff-no-anim')) return;
+    rvIO = rvIO || new IntersectionObserver((es) => es.forEach((en) => { if (en.isIntersecting) { en.target.classList.remove('ux-rv'); en.target.classList.add('ux-rv-in'); rvIO.unobserve(en.target); } }), { rootMargin: '0px 0px -40px 0px', threshold: 0.06 });
+    const els = Array.from(root.querySelectorAll ? root.querySelectorAll('.card, .kpi-grid') : []);
+    let c = 0; els.forEach((e) => { if (c > 50 || e.dataset.rv || e.closest('.drawer,#drawer,.modal')) return; const r = e.getBoundingClientRect(); if (r.top > innerHeight + 40) { e.dataset.rv = '1'; e.classList.add('ux-rv'); rvIO.observe(e); c++; } });
+  }
+  function miniBars(root) {
+    const lists = Array.from(root.querySelectorAll ? root.querySelectorAll('.hm-toplist, .hs-strip') : []);
+    lists.forEach((l) => {
+      const rows = Array.from(l.querySelectorAll('.hm-toprow, .hs-ag')); if (rows.length < 2) return;
+      const val = (r) => Number(String((r.querySelector('strong, em') || {}).textContent || '').replace(/[^\d.]/g, '')) || 0; const mx = Math.max(...rows.map(val), 1);
+      rows.forEach((r) => { if (!r.dataset.mb) { r.dataset.mb = '1'; r.classList.add('ux-bar'); r.style.setProperty('--bar', Math.round(val(r) / mx * 100) + '%'); } });
+    });
+  }
+  function profileTabs(root) {
+    const pfs = root.matches && root.matches('.pf') ? [root] : Array.from(root.querySelectorAll ? root.querySelectorAll('.pf') : []);
+    pfs.forEach((pf) => {
+      if (pf.dataset.tb) return; const defs = [['📊 Overview', '.pf-tiles'], ['🩺 Health', '.pf-minis'], ['📈 Growth', '.pf-gcs'], ['🏦 Account', '.pf-pay, .pf-bks']];
+      const found = defs.map(([l, sel]) => [l, pf.querySelector(sel)]).filter((x) => x[1]); if (found.length < 2) return; pf.dataset.tb = '1';
+      const bar = D.createElement('div'); bar.className = 'pf-tabs';
+      found.forEach(([l, el], i) => { const b = D.createElement('button'); b.type = 'button'; b.textContent = l; if (!i) b.className = 'on'; b.addEventListener('click', () => { bar.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); el.scrollIntoView({ behavior: REDUCE ? 'auto' : 'smooth', block: 'center' }); }); bar.appendChild(b); });
+      const h = pf.querySelector('.pf-h'); if (h && h.parentNode === pf) h.after(bar); else pf.prepend(bar);
+    });
+  }
+  // 🧩 shared-element: KPI card click → card phailke drawer ban jaye, band ho to wapas sikud jaye
+  let seRect = null, seAt = 0, seCard = null;
+  function ghost(a, b, dur) {
+    if (REDUCE) return; const g = D.createElement('div'); g.className = 'ux-ghost';
+    Object.assign(g.style, { left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px' }); D.body.appendChild(g);
+    const an = g.animate([{ left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px', opacity: .85, borderRadius: '16px' }, { left: b.left + 'px', top: b.top + 'px', width: b.width + 'px', height: b.height + 'px', opacity: 0, borderRadius: '0px' }], { duration: dur || 380, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' });
+    an.onfinish = () => g.remove(); an.oncancel = () => g.remove();
+  }
+  function sharedInit() {
+    D.addEventListener('click', (e) => { const c = e.target.closest && e.target.closest('.kpi'); if (c) { seCard = c; seRect = c.getBoundingClientRect(); seAt = Date.now(); } }, true);
+    const dr = D.getElementById('drawer'); if (!dr) return; let was = dr.classList.contains('open');
+    new MutationObserver(() => {
+      const now = dr.classList.contains('open'); if (now === was) return; was = now;
+      const w = Math.min(dr.offsetWidth || 560, innerWidth), box = { left: innerWidth - w, top: 0, width: w, height: innerHeight };
+      if (now && seRect && Date.now() - seAt < 1500) ghost(seRect, box, 380);
+      else if (!now && seCard && seCard.isConnected && Date.now() - seAt < 120e3) { const r = seCard.getBoundingClientRect(); if (r.bottom > 0 && r.top < innerHeight) ghost(box, r, 300); }
+    }).observe(dr, { attributes: true, attributeFilter: ['class'] });
+  }
+  // 🧲 micro-interactions: magnetic primary buttons + copy ✓
+  function microInit() {
+    if (REDUCE) return;
+    if (matchMedia && matchMedia('(hover: hover)').matches) {
+      D.addEventListener('mousemove', (e) => { const b = e.target.closest && e.target.closest('.btn.primary'); if (!b) return; const r = b.getBoundingClientRect(); b.style.transform = `translate(${((e.clientX - r.left) / r.width - .5) * 5}px, ${((e.clientY - r.top) / r.height - .5) * 4}px)`; }, { passive: true });
+      D.addEventListener('mouseout', (e) => { const b = e.target.closest && e.target.closest('.btn.primary'); if (b && !(e.relatedTarget && b.contains(e.relatedTarget))) b.style.transform = ''; }, { passive: true });
+    }
+    D.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('button.btn'); if (!b || b.dataset.cp) return; const t = b.textContent.trim();
+      if (!/^(📋\s*)?Copy\b/i.test(t)) return; b.dataset.cp = '1'; setTimeout(() => { if (b.textContent.trim() !== t) { delete b.dataset.cp; return; } b.textContent = '✓ Copied'; b.classList.add('ux-copied'); setTimeout(() => { b.textContent = t; b.classList.remove('ux-copied'); delete b.dataset.cp; }, 1200); }, 30);
+    });
+  }
+  // 🧭 sidebar rail (collapse) + recent pages + bento toggle
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* blocked */ } };
+  function railTitles() { D.querySelectorAll('#nav .nav-item').forEach((a) => { if (!a.title) { const b = a.querySelector('.nav-text b'); if (b) a.title = b.textContent.trim(); } }); }
+  function recentPaint() {
+    const nav = D.getElementById('nav'); if (!nav) return; let box = D.getElementById('nav-recent');
+    let list = []; try { list = JSON.parse(lsGet('ff_recent') || '[]'); } catch { list = []; }
+    if (!list.length) { if (box) box.remove(); return; }
+    if (!box) { box = D.createElement('div'); box.id = 'nav-recent'; box.className = 'nav-recent'; nav.parentNode.insertBefore(box, nav); }
+    box.innerHTML = '<small>🕘 Recent</small>' + list.map((x) => `<a href="#/${FF.util.esc(x.id)}">${FF.util.esc(x.label)}</a>`).join('');
+  }
+  function recentPush() {
+    const id = (location.hash.replace(/^#\/?/, '').split(/[?/]/)[0] || '').trim(); if (!id || id === 'home') return;
+    const a = D.querySelector(`#nav .nav-item[data-page="${id}"] .nav-text b`); const label = a ? a.textContent.trim() : ''; if (!label) return;
+    let list = []; try { list = JSON.parse(lsGet('ff_recent') || '[]'); } catch { list = []; }
+    list = [{ id, label }].concat(list.filter((x) => x.id !== id)).slice(0, 4); lsSet('ff_recent', JSON.stringify(list)); recentPaint();
+  }
+  function railInit() {
+    const root = D.documentElement; if (lsGet('ff_rail') === '1') root.classList.add('ff-rail');
+    if (lsGet('ff_bento') !== '0') root.classList.add('ff-bento');
+    const brand = D.querySelector('.sidebar .brand'); if (brand && !D.getElementById('rail-toggle')) {
+      const b = D.createElement('button'); b.id = 'rail-toggle'; b.type = 'button'; b.className = 'rail-toggle'; b.title = 'Sidebar chhota / bada';
+      const paint = () => { b.textContent = root.classList.contains('ff-rail') ? '›' : '‹'; }; paint();
+      b.addEventListener('click', () => { root.classList.toggle('ff-rail'); lsSet('ff_rail', root.classList.contains('ff-rail') ? '1' : '0'); paint(); railTitles(); }); brand.appendChild(b);
+    }
+    const nav = D.getElementById('nav'); if (nav) new MutationObserver(() => { railTitles(); recentPush(); }).observe(nav, { childList: true, subtree: true });
+    railTitles(); recentPaint();
+  }
   // ---- observer ---------------------------------------------------------------------------------
   let q = [], raf = 0;
   function flush() {
     raf = 0; const m = mainEl(); if (!m) return; const nodes = q; q = [];
-    nodes.forEach((n) => { if (n.isConnected) { paintStatus(n); paintEmpty(n); stagger(n); countUp(n); barGrow(n); heroExtras(n); } });
+    nodes.forEach((n) => { if (n.isConnected) { paintStatus(n); paintEmpty(n); stagger(n); countUp(n); barGrow(n); heroExtras(n); morph(n); reveal(n); miniBars(n); profileTabs(n); } });
     dockVis(); progDone();
   }
   function init() {
     if (!D.body) return; buildDock();
     const m = mainEl(); if (!m) { setTimeout(init, 300); return; }
     new MutationObserver((recs) => { recs.forEach((r) => r.addedNodes.forEach((n) => { if (n.nodeType === 1) q.push(n); })); if (!raf) raf = requestAnimationFrame(flush); }).observe(m, { childList: true, subtree: true });
-    window.addEventListener('hashchange', () => { setMode(false); progStart(); pageTrans(); }); headerScroll(); acInit();
+    window.addEventListener('hashchange', () => { setMode(false); progStart(); pageTrans(); setTimeout(recentPush, 600); }); headerScroll(); acInit(); railInit(); sharedInit(); microInit();
     q.push(m); flush();
   }
   FF.motion = { setMode, print: actPrint, confetti, chime };

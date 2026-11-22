@@ -1,0 +1,62 @@
+/* v3.125.419 — 🔄 Revamp: bento Home, sidebar rail + recent, profile tabs, clean tables, login, mobile-first. */
+/* ---- 1) Bento Home (desktop) ---- */
+@media (min-width: 901px) {
+  html.ff-bento #home-month .kpi-grid, html.ff-bento #home-gv-live .kpi-grid { grid-auto-flow: dense; }
+  html.ff-bento #home-month .kpi-grid > .kpi:first-child, html.ff-bento #home-gv-live .kpi-grid > .kpi:first-child { grid-column: span 2; }
+  html.ff-bento #home-month .kpi-grid > .kpi:first-child .kpi-value, html.ff-bento #home-gv-live .kpi-grid > .kpi:first-child .kpi-value { font-size: 2.2em; }
+  html.ff-bento #home-overview .grid.g-2, html.ff-bento #home-charts .grid.g-2 { grid-template-columns: 1.7fr 1fr; }
+  html.ff-bento .hs-strip { grid-template-columns: 1.2fr 1fr 1fr; }
+  html.ff-bento .kpi { border-radius: 18px; }
+}
+/* ---- 2) Sidebar rail + recent ---- */
+.rail-toggle { margin-left: auto; width: 26px; height: 26px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.08); color: var(--side-ink, #fff); cursor: pointer; font-size: 16px; line-height: 1; }
+.rail-toggle:hover { background: rgba(255,255,255,.2); }
+.nav-recent { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 12px 8px; }
+.nav-recent small { width: 100%; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; opacity: .65; color: var(--side-ink, #fff); }
+.nav-recent a { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.1); color: var(--side-ink, #fff); text-decoration: none; white-space: nowrap; }
+.nav-recent a:hover { background: rgba(255,255,255,.22); }
+@media (min-width: 901px) {
+  html.ff-rail { --sidebar-w: 72px; }
+  html.ff-rail .brand-text, html.ff-rail .nav-text, html.ff-rail .nav-recent, html.ff-rail .nav-sec, html.ff-rail .side-foot #status, html.ff-rail .nav-item .badge { display: none !important; }
+  html.ff-rail .nav-group-body[hidden] { display: block !important; }
+  html.ff-rail .nav-item { justify-content: center; padding: 9px 0; }
+  html.ff-rail .brand { justify-content: center; flex-wrap: wrap; gap: 6px; }
+  html.ff-rail .rail-toggle { margin: 0; }
+  html.ff-rail #user-box { display: none; }
+}
+@media (max-width: 900px) { .rail-toggle, .nav-recent { display: none; } }
+/* ---- 3) Profile: cover + tabs ---- */
+.pf { position: relative; border-radius: 20px; overflow: hidden; }
+.pf::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 70px; background: linear-gradient(90deg, var(--brand, #6366f1), var(--brand-2, #ec4899)); opacity: .16; pointer-events: none; }
+.pf-tabs { position: sticky; top: 54px; z-index: 6; display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 0 8px; background: transparent; }
+.pf-tabs button { border: 1px solid var(--line, #e2e8f0); background: var(--card, #fff); color: inherit; padding: 5px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: all .15s; }
+.pf-tabs button:hover { border-color: var(--brand, #6366f1); }
+.pf-tabs button.on { background: var(--brand, #6366f1); color: #fff; border-color: var(--brand, #6366f1); }
+/* ---- 4) Clean tables (zebra hata, patli lines, sticky head in scroll boxes) ---- */
+.tbl tbody tr:nth-child(even), .ins-table tbody tr:nth-child(even) { background: transparent !important; }
+.tbl tbody td { border-bottom: 1px solid color-mix(in srgb, var(--line, #e2e8f0) 70%, transparent); }
+.tbl thead th { text-transform: none; letter-spacing: .01em; }
+.kd-scroll .tbl thead th, .table-wrap.tall .tbl thead th { position: sticky; top: 0; z-index: 2; background: var(--pk-head, #eef2ff); }
+/* ---- 5) Login: animated gradient + soft orbs ---- */
+.auth-screen.pro { background-image: linear-gradient(125deg, var(--auth-1, #1e1b4b), var(--auth-2, #312e81), var(--auth-3, #6366f1), var(--auth-2, #312e81)) !important; background-size: 320% 320% !important; animation: uxAuthBg 22s ease infinite; position: relative; overflow: hidden; }
+.auth-screen.pro::before, .auth-screen.pro::after { content: ''; position: absolute; width: 46vmax; height: 46vmax; border-radius: 50%; filter: blur(70px); opacity: .28; pointer-events: none; animation: uxFloat 9s ease-in-out infinite; }
+.auth-screen.pro::before { background: var(--auth-3, #6366f1); left: -12vmax; top: -14vmax; }
+.auth-screen.pro::after { background: #ec4899; right: -14vmax; bottom: -16vmax; animation-delay: -4s; }
+@keyframes uxAuthBg { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@media (prefers-reduced-motion: reduce) { .auth-screen.pro, .auth-screen.pro::before, .auth-screen.pro::after { animation: none; } }
+/* ---- 6) Mobile-first compact layout ---- */
+@media (max-width: 640px) {
+  .topbar { padding: 8px 12px; }
+  .card-body { padding: 10px 12px; }
+  .kpi { padding: 11px 12px; }
+  .kpi-value { font-size: 22px; }
+  .tbl { font-size: 12.5px; }
+  .tbl th, .tbl td { padding: 7px 8px; }
+  .btn { min-height: 40px; }
+  .hs-strip { grid-template-columns: 1fr; gap: 8px; }
+  .home-hero { padding: 14px; }
+  .home-hero-side { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+  .btn-row { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .btn-row > * { flex: 0 0 auto; }
+  .pf-tabs { top: 46px; }
+}

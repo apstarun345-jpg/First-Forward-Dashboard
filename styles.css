@@ -1815,7 +1815,6 @@ html[data-theme="dark"] .tbl th.section { background: linear-gradient(90deg, #1e
 html[data-theme="dark"] .tbl th.section:not(.has) { background: #16213a; }
 html[data-theme="dark"] .tbl th, html[data-theme="dark"] .tbl td { border-bottom-color: #22304e; }
 html[data-theme="dark"] .tbl tbody tr:hover, html[data-theme="dark"] tr.clickable:hover { background: rgba(99, 102, 241, .09); }
-html[data-theme="dark"] .tbl tbody tr:nth-child(even) { background: rgba(255, 255, 255, .02); }
 html[data-theme="dark"] .total-row, html[data-theme="dark"] .tbl tfoot td { background: #182342; }
 html[data-theme="dark"] .table-wrap { border-color: #22304e; }
 html[data-theme="dark"] .empty-state, html[data-theme="dark"] .notification-empty { background: #141d33; border-color: #2b3a5e; color: var(--muted); }
