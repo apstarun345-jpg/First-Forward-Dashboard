@@ -553,7 +553,7 @@ FF.pages = FF.pages || {};
     camBtn(true); camMsg('Camera khul raha hai…');
     try {
       scanCam.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
-    } catch (err) { camBtn(false); camMsg(''); U.toast && U.toast('Camera permission nahi mili — browser / app settings me allow karo', 'error'); return; }
+    } catch (err) { camBtn(false); camMsg(''); const nm = err && err.name; U.toast && U.toast(nm === 'NotAllowedError' ? 'Camera allow nahi hua — address bar ke 🔒 / camera icon se Allow karke dobara dabao' : nm === 'NotFoundError' ? 'Camera nahi mila is device me' : nm === 'NotReadableError' ? 'Camera doosri app me use ho raha hai — band karke dobara try karo' : 'Camera start nahi hua (' + (nm || 'error') + ')', 'error'); return; }
     scanCam.on = true;
     video.srcObject = scanCam.stream; try { await video.play(); } catch { /* autoplay */ }
     try { const tr = scanCam.stream.getVideoTracks()[0]; const caps = tr && tr.getCapabilities ? tr.getCapabilities() : {}; const tb = state.root.querySelector('[data-scan="torch"]'); if (tb) tb.hidden = !caps.torch; } catch { /* optional */ }
