@@ -1,0 +1,69 @@
+/* v3.125.420 — 🎨 Look studio styles. Sab opt-in classes `html.ff-*` (look.js) — default look bina class ke wahi rehta hai. */
+:root { --ch-ff: #7c3aed; --ch-gv: #0d9488; }
+/* ---- always-on polish: scrollbar, empty-state art, channel tags ---- */
+html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--brand, #6366f1) 45%, transparent) transparent; }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--brand, #6366f1) 38%, transparent) transparent; }
+.tag.ff { background: color-mix(in srgb, var(--ch-ff) 16%, transparent); color: var(--ch-ff); }
+.tag.gv { background: color-mix(in srgb, var(--ch-gv) 16%, transparent); color: var(--ch-gv); }
+.empty-state::before { content: ''; width: 96px; height: 72px; font-size: 0; opacity: 1; background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 72'><rect x='10' y='34' width='60' height='28' rx='6' fill='%23e0e7ff'/><path d='M10 40l14-14h32l14 14z' fill='%23c7d2fe'/><circle cx='68' cy='30' r='14' fill='none' stroke='%236366f1' stroke-width='5'/><path d='M78 40l10 10' stroke='%236366f1' stroke-width='5' stroke-linecap='round'/></svg>") center / contain no-repeat; }
+.empty-state.compact::before { width: 64px; height: 48px; }
+/* ---- font ---- */
+html.ff-font-custom body, html.ff-font-custom button, html.ff-font-custom input, html.ff-font-custom select, html.ff-font-custom textarea { font-family: var(--ff-font); }
+html.ff-font-custom .kpi-value { letter-spacing: -.01em; }
+/* ---- corners ---- */
+html.ff-rad-sharp { --rad: 6px; } html.ff-rad-round { --rad: 24px; }
+html.ff-rad-sharp .card, html.ff-rad-sharp .kpi, html.ff-rad-sharp .hs-box, html.ff-rad-sharp .table-wrap, html.ff-rad-sharp .pf, html.ff-rad-sharp .home-hero, html.ff-rad-sharp .ux-ac,
+html.ff-rad-round .card, html.ff-rad-round .kpi, html.ff-rad-round .hs-box, html.ff-rad-round .table-wrap, html.ff-rad-round .pf, html.ff-rad-round .home-hero, html.ff-rad-round .ux-ac { border-radius: var(--rad); }
+html.ff-rad-sharp .btn, html.ff-rad-sharp .input, html.ff-rad-sharp select, html.ff-rad-sharp .nav-item { border-radius: 4px; }
+html.ff-rad-round .btn, html.ff-rad-round .input, html.ff-rad-round select { border-radius: 14px; }
+html.ff-rad-round .card, html.ff-rad-round .hs-box, html.ff-rad-round .kpi { overflow: hidden; }
+/* ---- sidebar styles ---- */
+html.ff-side-light { --side-bg: #ffffff; --side-bg2: #eef2ff; --side-ink: #1e293b; }
+html.ff-side-light .sidebar { border-right: 1px solid var(--line, #e2e8f0); }
+html.ff-side-light .nav-item:hover { background: rgba(99,102,241,.1); }
+html.ff-side-light .nav-item small { color: #64748b; }
+html.ff-side-light .nav-item.active small { color: rgba(255,255,255,.9); }
+html.ff-side-light .rail-toggle { border-color: rgba(15,23,42,.18); background: rgba(15,23,42,.05); color: #334155; }
+html.ff-side-light .nav-recent a { background: rgba(15,23,42,.07); color: #334155; }
+html.ff-side-light .nav-recent small { color: #334155; }
+@media (min-width: 901px) {
+  html.ff-side-float .sidebar { inset: 10px auto 10px 10px; width: calc(var(--sidebar-w) - 10px); border-radius: 22px; box-shadow: 0 20px 50px rgba(30,27,75,.3); }
+  html.ff-side-float .content { margin-left: calc(var(--sidebar-w) + 8px); }
+}
+/* ---- background ---- */
+html.ff-bg-mesh body { background-image: radial-gradient(900px 500px at 6% -5%, color-mix(in srgb, var(--brand, #6366f1) 15%, transparent), transparent 62%), radial-gradient(800px 500px at 100% 0%, color-mix(in srgb, var(--brand-2, #ec4899) 13%, transparent), transparent 62%), radial-gradient(700px 600px at 50% 112%, rgba(16,185,129,.09), transparent 62%); background-attachment: fixed; }
+html.ff-bg-dots body { background-image: radial-gradient(color-mix(in srgb, var(--ink, #0f172a) 14%, transparent) 1px, transparent 1.3px); background-size: 22px 22px; background-attachment: fixed; }
+/* ---- glass ---- */
+html.ff-glass .card, html.ff-glass .hs-box, html.ff-glass .pf, html.ff-glass .table-wrap { background-color: color-mix(in srgb, var(--card, #fff) 70%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); border-color: color-mix(in srgb, var(--line, #e2e8f0) 55%, rgba(255,255,255,.6)); }
+/* ---- gradient borders ---- */
+html.ff-gb .hs-alert { border: 1.5px solid transparent; background: linear-gradient(var(--card, #fff), var(--card, #fff)) padding-box, linear-gradient(120deg, #ef4444, #f59e0b) border-box; }
+html.ff-gb .hs-rec { border: 1.5px solid transparent; background: linear-gradient(var(--card, #fff), var(--card, #fff)) padding-box, linear-gradient(120deg, #f59e0b, #fde047, #f97316) border-box; }
+html.ff-gb .hs-ok { border: 1.5px solid transparent; background: linear-gradient(var(--card, #fff), var(--card, #fff)) padding-box, linear-gradient(120deg, #10b981, #22d3ee) border-box; }
+html.ff-gb .pf { border: 1.5px solid transparent; background: linear-gradient(var(--card, #fff), var(--card, #fff)) padding-box, linear-gradient(120deg, var(--brand, #6366f1), var(--brand-2, #ec4899)) border-box; }
+/* ---- icon badges ---- */
+html.ff-ico .nav-ico { background: linear-gradient(135deg, var(--brand, #6366f1), var(--brand-2, #ec4899)); color: #fff; border-radius: 10px; box-shadow: 0 3px 8px rgba(0,0,0,.2); }
+html.ff-ico .kpi-icon { background: linear-gradient(135deg, rgba(255,255,255,.4), rgba(255,255,255,.12)); box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 4px 10px rgba(0,0,0,.16); }
+/* ---- gradient headings ---- */
+html.ff-ghead .home-greeting-text, html.ff-ghead .home-name, html.ff-ghead .page-head h1 { background: linear-gradient(90deg, var(--brand, #6366f1), var(--brand-2, #ec4899)); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; }
+/* ---- avatar ring ---- */
+html.ff-ring .user-btn .user-avatar, html.ff-ring .user-chip .user-avatar { position: relative; }
+html.ff-ring .user-btn .user-avatar::after, html.ff-ring .user-chip .user-avatar::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; background: conic-gradient(from 0deg, var(--brand, #6366f1), var(--brand-2, #ec4899), #f59e0b, var(--brand, #6366f1)); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); animation: rot 5s linear infinite; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { html.ff-ring .user-avatar::after { animation: none; } }
+/* ---- charts ---- */
+html.ff-c-round .vcol-stack { border-radius: 10px 10px 4px 4px; }
+html.ff-c-round .hbar-fill, html.ff-c-round .hbar-track { border-radius: 999px; }
+html.ff-c-grad .vseg, html.ff-c-grad .hbar-fill { box-shadow: inset 0 10px 14px -8px rgba(255,255,255,.55); }
+html.ff-hl .vbars:hover .vcol:not(:hover) { opacity: .55; }
+html.ff-hl .hbars:hover .hbar-row:not(:hover) { opacity: .6; }
+html.ff-hl .vcol, html.ff-hl .hbar-row { transition: opacity .18s; }
+/* ---- look panel ---- */
+.lk h4 { margin: 14px 0 6px; font-size: 12.5px; font-weight: 800; opacity: .8; }
+.lk-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.lk-chip { border: 1px solid var(--line, #e2e8f0); background: var(--card, #fff); color: inherit; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.lk-chip.on { background: var(--brand, #6366f1); border-color: var(--brand, #6366f1); color: #fff; }
+.lk-sw { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--card, #fff); box-shadow: 0 0 0 1px var(--line, #cbd5e1); cursor: pointer; padding: 0; }
+.lk-sw.on { box-shadow: 0 0 0 2px var(--ink, #0f172a); }
+.lk-color { width: 36px; height: 30px; padding: 0; border: 1px solid var(--line, #cbd5e1); border-radius: 8px; background: none; cursor: pointer; }
+.lk-tog { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; cursor: pointer; }
+.lk-tog input { margin-top: 3px; }
+.lk-tog span { display: flex; flex-direction: column; } .lk-tog small { opacity: .7; font-size: 11.5px; }

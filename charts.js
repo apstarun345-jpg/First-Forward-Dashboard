@@ -8,7 +8,7 @@ window.FF = window.FF || {};
   const COLORS = {
     VC4: '#7c3aed', VC20: '#0d9488', 'VC5+': '#f97316', NVC4: '#f97316', Commercial: '#f97316',
     ISSUANCE: '#10b981', REPLACEMENT: '#f97316',
-    'First Forward': '#8b5cf6', 'GV Partner': '#0ea5e9',
+    'First Forward': '#7c3aed', 'GV Partner': '#0d9488',
     current: '#6366f1', last: '#ec4899',
     ACTIVATED: '#10b981', HOTLISTED: '#ef4444', 'LOW BALANCE': '#f59e0b', ISSUED: '#0ea5e9',
     'With Max': '#6366f1', 'Without max': '#0ea5e9', Chassis: '#f59e0b', 'Wrong VRN': '#ef4444'
@@ -253,13 +253,16 @@ window.FF = window.FF || {};
     const paths = series.map((s, si) => {
       const pts = s.values.map((v, i) => (v === null || v === undefined ? null : [x(i), y(v)]));
       let d = '', started = false;
-      pts.forEach((p) => { if (!p) { started = false; return; } d += `${started ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)} `; started = true; });
+      const smooth = document.documentElement.classList.contains('ff-c-smooth'); let run = [];
+      const bez = (a, b, c2, e) => { const t = 0.18, lo = Math.min(b[1], c2[1]), hi = Math.max(b[1], c2[1]); const cl = (v) => Math.min(Math.max(v, lo), hi); return `C${(b[0] + (c2[0] - a[0]) * t).toFixed(1)},${cl(b[1] + (c2[1] - a[1]) * t).toFixed(1)} ${(c2[0] - (e[0] - b[0]) * t).toFixed(1)},${cl(c2[1] - (e[1] - b[1]) * t).toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} `; };
+      pts.forEach((p, pi) => { if (!p) { started = false; run = []; return; } if (smooth && started && run.length) { const a = run[run.length - 2] || run[run.length - 1], b = run[run.length - 1], nx = pts[pi + 1] || p; d += bez(a, b, p, nx); } else d += `${started ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)} `; run.push(p); started = true; });
       const gid = `g${seq}_${si}`;
       defs += `<linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="${s.color}" stop-opacity="0.28"></stop><stop offset="100%" stop-color="${s.color}" stop-opacity="0"></stop></linearGradient>`;
       const valid = pts.filter(Boolean);
       const area = s.area !== false && valid.length > 1 ? `<path d="M${valid[0][0].toFixed(1)},${(H - B).toFixed(1)} ${valid.map((p) => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')} L${valid[valid.length - 1][0].toFixed(1)},${(H - B).toFixed(1)} Z" fill="url(#${gid})"></path>` : '';
+      const areaS = smooth && s.area !== false && valid.length > 1 && !pts.includes(null) ? `<path d="${d.trim()} L${valid[valid.length - 1][0].toFixed(1)},${(H - B).toFixed(1)} L${valid[0][0].toFixed(1)},${(H - B).toFixed(1)} Z" fill="url(#${gid})"></path>` : null;
       const dots = pts.map((p, i) => (p ? `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${n > 40 ? 2.2 : 3.4}" fill="#fff" stroke="${s.color}" stroke-width="2" data-tip="${esc(`<b>${(opts.tipLabels || opts.labels)[i]}</b><br>${series.map((ss) => `<i style="background:${ss.color}"></i>${ss.name}: <b>${ss.values[i] === null || ss.values[i] === undefined ? '—' : fmtVal(ss.values[i], opts.format)}</b>`).join('<br>')}`)}"></circle>` : '')).join('');
-      return `${area}<path d="${d.trim()}" fill="none" stroke="${s.color}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" ${s.dash ? 'stroke-dasharray="6 5"' : ''}></path>${dots}`;
+      return `${areaS || area}<path d="${d.trim()}" fill="none" stroke="${s.color}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" ${s.dash ? 'stroke-dasharray="6 5"' : ''}></path>${dots}`;
     }).join('');
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="linesvg"><defs>${defs}</defs>${grid}${xlabels}${paths}</svg>${series.length > 1 ? legend(series) : ''}`;
   }

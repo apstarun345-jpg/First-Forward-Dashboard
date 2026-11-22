@@ -154,7 +154,7 @@ const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
-  '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip'
+  '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip'
 };
 const BLOCKED_FILES = new Set(['server.js', 'issuedBarcodes.js', 'address-import.js', 'pin-geo.json', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const robotPushState = new Map(); // 🤖 robot push dedupe / rate (per admin)

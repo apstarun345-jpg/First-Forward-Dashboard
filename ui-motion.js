@@ -254,6 +254,7 @@ window.FF = window.FF || {};
       const b = D.createElement('button'); b.className = 'btn'; b.id = 'home-sound'; b.type = 'button';
       const paint = () => { b.textContent = sndOn() ? '🔔 Sound ON' : '🔕 Sound off'; b.title = 'Record / stock alert par halki awaaz'; };
       paint(); b.addEventListener('click', () => { try { localStorage.setItem('ff_sound', sndOn() ? '0' : '1'); } catch { /* storage blocked */ } paint(); chime('win'); }); side.appendChild(b);
+      if (!side.querySelector('#home-look')) { const l = D.createElement('button'); l.className = 'btn'; l.id = 'home-look'; l.type = 'button'; l.textContent = '🎨 Look'; l.title = 'Site ka look badlo (colour, font, sidebar, charts…)'; l.addEventListener('click', () => { if (FF.look) FF.look.open(); }); side.appendChild(l); }
       if (!side.querySelector('#home-bento')) { const g = D.createElement('button'); g.className = 'btn'; g.id = 'home-bento'; g.type = 'button'; const pg = () => { g.textContent = D.documentElement.classList.contains('ff-bento') ? '▦ Bento ON' : '▤ Classic'; g.title = 'Home layout: Bento / Classic'; }; pg(); g.addEventListener('click', () => { D.documentElement.classList.toggle('ff-bento'); lsSet('ff_bento', D.documentElement.classList.contains('ff-bento') ? '1' : '0'); pg(); }); side.appendChild(g); }
     });
   }
