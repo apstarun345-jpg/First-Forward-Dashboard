@@ -43,6 +43,13 @@
         });
       } catch (e) { if (/403|admin|access/i.test(String(e && e.message))) denyFeed = true; }
     }
+    if (news.length < 8) {   // server ki list khaali (restart ke baad) → robot ki aaj ki history se bharo
+      try {
+        const h = (W.FF.mascot && W.FF.mascot.history && W.FF.mascot.history()) || [];
+        const have = new Set(news);
+        h.slice(0, 14).forEach((x) => { if (!x || !x.title) return; const s = `<b>${esc(String(x.icon || '') + ' ' + String(x.title).replace(/^🤖\s*/, ''))}</b>${x.head ? ' · ' + esc(String(x.head).slice(0, 90)) : ''}`; if (!have.has(s)) news.push(s); });
+      } catch { /* optional */ }
+    }
     if (!denyScan) {
       try {
         const r = await api('/api/scan-log?limit=12');
