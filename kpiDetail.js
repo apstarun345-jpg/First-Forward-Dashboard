@@ -891,7 +891,16 @@ window.FF = window.FF || {};
       const addK = (k, n) => { const d = U.fromDateKey(k); d.setDate(d.getDate() + n); return U.dateKey(d); };
       for (let a = p.from; a <= p.to && spans.length < 60;) { const b0 = addK(a, 3); const b = b0 > p.to ? p.to : b0; spans.push([a, b]); a = addK(b, 1); }
       const parts = new Array(spans.length); let nextSpan = 0, doneSpans = 0, gotRows = 0;
-      const prog = (msg) => { const el = U.$('#kd-raw-body'); const sp = el && el.querySelector('.kd-raw-prog'); if (sp) sp.textContent = msg; else if (el && keep) el.insertAdjacentHTML('afterbegin', `<p class="dim small kd-raw-prog">${esc(msg)}</p>`); };
+      const prog = (msg) => {
+        const el = U.$('#kd-raw-body'); const sp = el && el.querySelector('.kd-raw-prog');
+        if (sp) sp.textContent = msg; else if (el && keep) el.insertAdjacentHTML('afterbegin', `<p class="dim small kd-raw-prog">${esc(msg)}</p>`);
+        // v3.125.450 — smart loader: "3 / 5 hisse" par bharti bar, warna chalti hui bar
+        try {
+          const m = /(\d+) \/ (\d+) hisse/.exec(String(msg)); const host = el && el.querySelector('.kd-raw-prog'); if (!host) return;
+          let bar = el.querySelector('.ux3-prog'); if (!bar) { host.insertAdjacentHTML('afterend', '<div class="ux3-prog"><i></i></div>'); bar = el.querySelector('.ux3-prog'); }
+          if (m) { bar.classList.remove('ind'); bar.firstChild.style.width = Math.max(8, Math.round((+m[1] / +m[2]) * 100)) + '%'; } else bar.classList.add('ind');
+        } catch { /* optional */ }
+      };
       const tqFor = (a, b) => `select ${cols.join(', ')} where toDate(${e.date}) >= date '${a}' and toDate(${e.date}) <= date '${b}'${pre} order by ${e.date} desc limit 60000`;
       const worker = async () => {
         while (nextSpan < spans.length) {

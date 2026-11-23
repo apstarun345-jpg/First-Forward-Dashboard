@@ -1238,7 +1238,7 @@ body.colorful .from-hdr { color: #166534; }
       const part = batch.slice(i, i + 12);
       try {
         const j = await scApi('POST', '/api/public/scan-info', { codes: part });
-        part.forEach((c) => { const it = SC.map.get(c); if (it) { const had = !!it.info; it.info = (j.info || {})[c] || null; it.err = it.info ? '' : 'Data nahi mila'; if (it.info && !had && (Date.now() - Date.parse(it.at)) < 60e3) { scAlert(it); try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: it.info.k, code: it.code, agent: it.info.agent } })); } catch { /* */ } } } });
+        part.forEach((c) => { const it = SC.map.get(c); if (it) { const had = !!it.info; it.info = (j.info || {})[c] || null; it.err = it.info ? '' : 'Data nahi mila'; if (it.info && !had && (Date.now() - Date.parse(it.at)) < 60e3) { scAlert(it); try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: it.info.k, code: it.code, agent: it.info.agent, dispatch: !!it.info.dispatch } })); } catch { /* */ } } } });
       } catch (e) {
         const off = !navigator.onLine || (!e.status && !e.pending);
         part.forEach((c) => { const it = SC.map.get(c); if (!it) return; if (off) { it.err = '📴 Offline — net aate hi data aa jayega'; SC.q.push(c); return; } const n = (SC.tries.get(c) || 0) + 1; SC.tries.set(c, n); if (n <= 6 && (e.pending || e.status === 429 || e.status >= 500 || !e.status)) { it.err = '⏳ Server busy — dobara try…'; SC.q.push(c); } else it.err = e.message; });
