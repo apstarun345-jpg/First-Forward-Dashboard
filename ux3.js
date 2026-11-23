@@ -31,7 +31,7 @@
   /* (4) ring burst at 100% */
   function rings(root) {
     q('.abx-hs.ring:not([data-ux3r]), [data-ring]:not([data-ux3r])', root).forEach((r) => {
-      r.dataset.ux3r = '1'; const p = parseFloat(getComputedStyle(r).getPropertyValue('--p')) || parseFloat(r.getAttribute('data-ring')) || 0;
+      r.dataset.ux3r = '1'; const p = parseFloat(r.style.getPropertyValue('--p')) || parseFloat(r.getAttribute('data-ring')) || 0;   // inline value (computed animation me 0 se shuru hota hai)
       if (p >= 100 && !off()) setTimeout(() => { if (getComputedStyle(r).position === 'static') r.style.position = 'relative'; const b = D.createElement('i'); b.className = 'ux3-burst'; r.appendChild(b); setTimeout(() => b.remove(), 1000); }, 1100);
     });
   }
