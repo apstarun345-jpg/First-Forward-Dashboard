@@ -25,3 +25,11 @@ test('scanCodeOf logic', () => {
   assert.equal(f('6081160390598684'), '608116-039-0598684');
   assert.equal(f('upi://pay?x=1'), ''); assert.equal(f('12345'), '');
 });
+const tr = fs.readFileSync(new URL('../tagRequest.js', import.meta.url), 'utf8');
+test('Tag Request: Barcode Scan tab + public scan-info', () => {
+  assert.match(tr, /tab\('scan', '📷 Barcode Scan'\)/);
+  assert.match(tr, /state\.view === 'scan'\) return renderScanView/);
+  assert.match(tr, /\/api\/public\/scan-info/);
+  assert.match(srv, /p === '\/api\/public\/scan-info' && method === 'POST'/);
+  assert.doesNotMatch(tr.slice(tr.indexOf('function scCamStart'), tr.indexOf('function scCamStop')), /qr_code/);
+});

@@ -3840,6 +3840,86 @@ function multiCustomerData(fresh) {
   }
   return have && !fresh ? Promise.resolve(have) : mcState.promise;
 }
+// ---------------------------------------------------------------------------------------------
+// 📷 v3.125.442 — PUBLIC SCAN INFO: Tag Request link ke "Barcode Scan" tab ke liye ek barcode ka poora data
+// (stock / kis agent me map / issued / dispatch). Sirf wahi fields jo office employee ko chahiye — VRN / customer nahi.
+// ---------------------------------------------------------------------------------------------
+const scanInfoCache = new Map();    // code(16 digit) → { at, info }
+const scanEirCache = new Map();     // tagId → { at, row|null }
+const scanTagInfer = (pts) => {
+  const P = pts.filter((x) => /^[0-9A-F]{6,}$/i.test(x.tagId)).map((x) => ({ n: x.n, t: BigInt('0x' + x.tagId), len: x.tagId.length }));
+  if (!P.length) return null;
+  P.sort((a, b) => (a.n < b.n ? -1 : a.n > b.n ? 1 : 0));
+  let step = 32n;
+  if (P.length >= 2) { const a = P[0], b = P[P.length - 1], dn = b.n - a.n; if (dn > 0n && (b.t - a.t) % dn === 0n && (b.t - a.t) / dn > 0n) step = (b.t - a.t) / dn; }
+  return (n) => { let best = P[0]; const d = (p) => (p.n > n ? p.n - n : n - p.n); for (const p of P) if (d(p) < d(best)) best = p; const t = best.t + (n - best.n) * step; return t > 0n ? t.toString(16).toUpperCase().padStart(best.len, '0') : ''; };
+};
+async function scanEirByTags(tags) {
+  const out = new Map(), need = [];
+  for (const t of tags) { const h = scanEirCache.get(t); if (h && Date.now() - h.at < 10 * 60e3) { if (h.row) out.set(t, h.row); } else need.push(t); }
+  if (!need.length) return out;
+  const s = db.settings || {}, e = s.eir || {};
+  const sheetId = String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const sheet = s.eirSheet || e.sheet || 'EIR';
+  const L = { tag: colLetter(e.tagId, 'A'), date: colLetter(e.date, 'AA'), cls: colLetter(e.cls, 'D'), aid: colLetter(e.agentId, 'J'), an: colLetter(e.agentName, 'L'), tl: colLetter(e.tlName, 'BA'), type: colLetter(e.type, 'P'), status: colLetter(e.status, 'Z'), master: colLetter(e.masterId, 'AU'), gvn: colLetter(e.gvName, 'AX') };
+  const cols = [L.tag, L.date, L.cls, L.aid, L.an, L.tl, L.type, L.status, L.master, L.gvn];
+  const q = new URLSearchParams({ id: sheetId, sheet, tq: `select ${cols.join(', ')} where ${need.map((t) => `${L.tag} = '${t.replace(/'/g, '')}'`).join(' or ')} limit 100` });
+  const res = await gvizPageServer(q, sheet);
+  const at = (c) => res.ids.indexOf(c);
+  const gvMasterId = String(e.gvMasterId || '5845036');
+  for (const r of res.rows) {
+    const g = (c) => (at(c) >= 0 ? idCellText(r, at(c)) : '');
+    const dc = r.c && r.c[at(L.date)];
+    const iso = dc ? (serverDate(dc.v) || serverDate(dc.f) || '') : '';
+    const gv = idNorm(g(L.master)) === idNorm(gvMasterId);
+    const tl = g(L.tl);
+    out.set(g(L.tag).toUpperCase(), { date: iso, cls: g(L.cls), agent: (gv ? g(L.gvn) : '') || g(L.an), agentId: g(L.aid), tl: /^(NA|N\/A|#N\/A|-|0)$/i.test(tl) ? '' : tl, type: g(L.type), status: g(L.status), ch: gv ? 'GV' : 'FF' });
+  }
+  need.forEach((t) => scanEirCache.set(t, { at: Date.now(), row: out.get(t) || null }));
+  if (scanEirCache.size > 5000) scanEirCache.clear();
+  return out;
+}
+async function scanInfoServer(codes) {
+  const out = {}, todo = [];
+  for (const c of codes) { const h = scanInfoCache.get(c); if (h && Date.now() - h.at < 90e3) out[c] = h.info; else todo.push(c); }
+  if (!todo.length) return out;
+  const slim = (x) => ({ tagId: x.tagId, cls: x.vcType, inventory: x.inventoryName, bcAt: x.barcodeAllocatedAt, agentId: x.stockAgentId, agent: x.stockAgentName, agentAt: x.agentAllocatedAt, tl: x.tlName, ...gvMapInfo({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, agent: x.stockAgentName, agentId: x.stockAgentId, tl: x.tlName }) });
+  const timeout = (ms) => new Promise((_, no) => setTimeout(() => no(new Error('busy')), ms));
+  const sres = await Promise.race([mappingStock.lookup(todo.map((b) => ({ type: 'barcode', barcode: b })), {}), timeout(12000)]);
+  const stock = todo.map((b, i) => ((sres.results[i] || {}).rows || []).map(slim)[0] || null);
+  const tagOf = todo.map((b, i) => (stock[i] && stock[i].tagId ? String(stock[i].tagId).toUpperCase() : ''));
+  const inferred = todo.map(() => false);
+  const missI = todo.map((b, i) => i).filter((i) => !tagOf[i]);
+  if (missI.length) {
+    const rng = missI.map((i) => { const d = todo[i].replace(/\D/g, ''), n = BigInt(d), w = d.length, f = (v) => (v < 0n ? 0n : v).toString().padStart(w, '0'); return { type: 'range', first: f(n - 40n), last: f(n + 40n) }; });
+    const near = await Promise.race([mappingStock.lookup(rng, {}), timeout(8000)]).catch(() => null);
+    if (near) missI.forEach((i, k) => {
+      const pts = (((near.results[k] || {}).rows) || []).map((x) => ({ n: BigInt(String(x.barcode || '').replace(/\D/g, '') || '0'), tagId: String(x.tagId || '').toUpperCase() }));
+      const f = scanTagInfer(pts); if (f) { const t = f(BigInt(todo[i].replace(/\D/g, ''))); if (t) { tagOf[i] = t; inferred[i] = true; } }
+    });
+  }
+  let eir = new Map();
+  try { eir = await Promise.race([scanEirByTags([...new Set(tagOf.filter(Boolean))]), timeout(10000)]); } catch { /* issued check agli baar */ }
+  let disp = null;
+  try { if (ledgerState.index) { const ix = ledgerState.index; disp = todo.map((b) => dispatchFor(ix, b)); } } catch { disp = null; }
+  todo.forEach((b, i) => {
+    const st = stock[i], is = tagOf[i] ? eir.get(tagOf[i]) : null;
+    let info;
+    if (is) info = { k: 'iss', label: '✅ Issued', cls: is.cls, agent: is.agent, agentId: is.agentId, tl: is.tl, date: is.date, ch: is.ch, note: `${is.ch}${st ? ' · StockDataa me bhi hai' : inferred[i] ? ' · tag ID anumaanit' : ''}${is.type ? ' · ' + is.type : ''}` };
+    else if (st) {
+      const gvA = st.gvAgent || '', mapIn = st.mapIn || '';
+      const ffMapped = !!st.agent, gvMapped = mapIn === 'gv' || mapIn === 'both';
+      const where = !mapIn ? '' : mapIn === 'both' ? 'FF + GV dono me map' : mapIn === 'ff' ? 'FF StockDataa me map' : mapIn === 'gv' ? `GV Tag Assignment me map${gvA ? ' (' + gvA + ')' : ''}` : 'Office stock (kisi agent me map nahi)';
+      info = { k: ffMapped || gvMapped ? 'st' : 'bc', label: ffMapped || gvMapped ? '📦 Agent stock' : '🏢 Master / BC stock', cls: st.cls, agent: st.agent || (gvMapped ? gvA : '') || st.inventory || '', agentId: st.agentId || (gvMapped ? st.gvAgentId || '' : ''), tl: st.tl || (gvMapped ? st.gvTl || '' : ''), date: st.agentAt || st.bcAt || '', ch: mapIn === 'both' ? 'FF+GV' : mapIn === 'gv' ? 'GV' : mapIn === 'ff' ? 'FF' : '', note: where };
+    } else info = { k: 'nf', label: '❓ Not found', cls: '', agent: '', agentId: '', tl: '', date: '', ch: '', note: 'Stock aur EIR dono me nahi mila' };
+    info.tagId = tagOf[i] || '';
+    const d = disp && disp[i];
+    if (d) { const parts = []; ['ff', 'gv'].forEach((ch) => (d[ch] || []).slice(0, 1).forEach((e) => parts.push(`${parts.length || (d.ff && d.ff.length && d.gv && d.gv.length) ? ch.toUpperCase() + ' · ' : ''}${e.date ? String(e.date).slice(0, 10) : ''} ${e.agent || ''}${e.agentId ? ' (' + e.agentId + ')' : ''}`.trim()))); info.dispatch = parts.join(' | '); } else info.dispatch = '';
+    scanInfoCache.set(b, { at: Date.now(), info }); out[b] = info;
+  });
+  if (scanInfoCache.size > 3000) scanInfoCache.clear();
+  return out;
+}
 /** Ek (ya kai) customer ke tag-level EIR rows. */
 async function multiCustomerTags(ids) {
   const s = db.settings || {}, e = s.eir || {};
@@ -12566,6 +12646,15 @@ async function handleApi(req, res, url) {
     if (log.length > 30000) log.splice(0, log.length - 30000);
     scanPersistSoon();
     return sendJson(res, 200, { ok: true, dup: false, at: row.at });
+  }
+  if (p === '/api/public/scan-info' && method === 'POST') {
+    const body = await readBody(req);
+    const codes = [...new Set((Array.isArray(body && body.codes) ? body.codes : []).map(scanCodeOf).filter(Boolean))].slice(0, 12);
+    if (!codes.length) throw new HttpError(400, 'Poora 16-digit barcode chahiye.');
+    const ip = clientIp(req);
+    if (!publicRateOk(`scaninfo:${ip}`, 1500, 10 * 60e3)) throw new HttpError(429, 'Bahut tez scan — thoda ruk kar try karo.');
+    try { return sendJson(res, 200, { ok: true, info: await scanInfoServer(codes) }, { 'Cache-Control': 'no-store' }); }
+    catch (err) { return sendJson(res, 503, { ok: false, pending: true, error: 'Data abhi load ho raha hai — thodi der me dobara try hoga.' }, { 'Cache-Control': 'no-store' }); }
   }
   if (p === '/api/public/scan' && method === 'GET') {
     const name = cleanVisitorName(url.searchParams.get('name'));
