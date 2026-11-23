@@ -183,7 +183,8 @@ FF.pages = FF.pages || {};
       const pre = await FF.auth.api('/api/tih/send', 'POST', { ...body, dry: true });
       const lines = (pre.groups || []).map((g) => `✅ ${g.label} → ${g.to}\n     ${g.n} tags · ${g.agents} agents · "${g.subject}"`).concat((pre.skipped || []).map((s) => `⚠ ${s.label} (${s.n}) — ${s.why}`));
       if (!(pre.groups || []).length) { st.msg = lines.join(' · ') || 'Bhejne layak kuch nahi.'; paint(); return; }
-      if (!window.confirm(`${pre.groups.length} mail bhejni hain? (${pre.rows} tags)\n\n${lines.join('\n')}`)) { btn.disabled = false; return; }
+      if (pre.quota !== null && pre.quota !== undefined && pre.quota < pre.groups.length) { st.msg = `⛔ Aaj ki Google mail quota sirf ${pre.quota} bachi hai, aur ${pre.groups.length} mail bhejni hain. Kal bhejo ya Settings → Email me Resend / Brevo / SMTP lagao.`; paint(); return; }
+      if (!window.confirm(`${pre.groups.length} mail bhejni hain? (${pre.rows} tags${pre.quota != null ? ` · Google quota bachi: ${pre.quota}` : ''})\n\n${lines.join('\n')}`)) { btn.disabled = false; return; }
       const out = await FF.auth.api('/api/tih/send', 'POST', body);
       st.msg = (out.results || []).map((r) => `${r.ok ? '✅' : '❌'} ${r.label} (${r.n})${r.ok ? '' : ' ' + (r.error || '')}`).join(' · ') + ((out.skipped || []).length ? ` · ⚠ ${(out.skipped || []).length} skip` : '');
       st.sel.clear(); await load();

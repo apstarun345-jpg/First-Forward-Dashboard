@@ -9173,7 +9173,9 @@ async function handleApi(req, res, url) {
       const v = await tihSvc.view();
       const rows = v.rows.filter((r) => (keys ? keys.has(r.k) : days.length ? days.includes(r.day) : (r.day || '').startsWith(month)));
       const plan = tihPlanSend({ rows, mode, target: String(body.target || ''), cfg, to });
-      if (body.dry) return sendJson(res, 200, { ok: true, dry: true, days: plan.days, rows: rows.length, groups: plan.groups.map((g) => ({ label: g.label, to: g.to, n: g.rows.length, agents: new Set(g.rows.map((r) => r.agentId || r.agentName)).size, subject: tihBuildMail({ kind: g.kind, name: g.name, days: g.days, rows: g.rows, cfg }).subject })), skipped: plan.skipped });
+      let quota = null;
+      if (body.dry) { try { const st0 = complaintsSvc.getStore ? complaintsSvc.getStore() : null; if (st0 && String(db.settings.email && db.settings.email.provider || 'auto') !== 'smtp') { const q = await Promise.race([st0.call('mailping'), new Promise((r) => setTimeout(() => r(null), 5000))]); if (q && q.quota !== undefined) quota = q.quota; } } catch { /* optional */ } }
+      if (body.dry) return sendJson(res, 200, { ok: true, dry: true, quota, days: plan.days, rows: rows.length, groups: plan.groups.map((g) => ({ label: g.label, to: g.to, n: g.rows.length, agents: new Set(g.rows.map((r) => r.agentId || r.agentName)).size, subject: tihBuildMail({ kind: g.kind, name: g.name, days: g.days, rows: g.rows, cfg }).subject })), skipped: plan.skipped });
       const base = { ...(db.settings.email || {}) };
       if (cfg.from) base.from = cfg.from;
       if (!resolveProviders({ ...base, to: 'x@x.x' }).length) throw new HttpError(400, 'Email provider configure nahi — Settings → Features → Email.');
@@ -9184,7 +9186,15 @@ async function handleApi(req, res, url) {
           await sendMail({ ...base, to: [g.to, g.cc].filter(Boolean).join(', ') }, m.subject, m.text, { html: m.html, attachments: [{ name: m.fileName, type: 'text/csv', content: Buffer.from('﻿' + m.csv, 'utf8').toString('base64'), base64: true }] });
           await tihSvc.markSent(g.rows.map((r) => r.k), g.to, user.username);
           results.push({ label: g.label, to: g.to, n: g.rows.length, ok: true });
-        } catch (err) { results.push({ label: g.label, to: g.to, n: g.rows.length, ok: false, error: String((err && err.message) || err).slice(0, 160) }); }
+        } catch (err) {
+          const em = String((err && err.message) || err);
+          results.push({ label: g.label, to: g.to, n: g.rows.length, ok: false, error: em.slice(0, 160) });
+          if (/too many times|quota|limit exceeded|rate limit/i.test(em)) {   // daily mail quota khatam — baaki par bhi fail hogi, rok do
+            const left = plan.groups.length - results.length;
+            results.push({ label: `⛔ Mail quota khatam${left > 0 ? ` — baaki ${left} mail nahi bheji` : ''}. Quota kal reset hoti hai (Google: ~12:30 PM IST); ya Settings → Features → Email me Resend / Brevo / SMTP lagao.`, to: '', n: 0, ok: false, error: '' });
+            break;
+          }
+        }
       }
       return sendJson(res, 200, { ok: results.length > 0 && results.every((r) => r.ok), results, skipped: plan.skipped }, { 'Cache-Control': 'no-store' });
     }
