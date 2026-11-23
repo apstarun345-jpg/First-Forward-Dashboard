@@ -1,0 +1,78 @@
+/* v3.125.449 — ux2: view transitions · container queries · scroll animations · animated gradient · undo toast · spotlight.
+   Sab kuch Settings → "Animations band" (html.ff-no-anim) se band; purane browsers me apne aap ignore (@supports). */
+
+/* (4) container queries — layout screen ke nahi, content-area ki chaudai ke hisaab se (split-screen / tablet) */
+.main { container: ux2main / inline-size; }
+@container ux2main (max-width: 980px) {
+  .kpi-grid, .kpi-grid.six { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container ux2main (max-width: 700px) {
+  .kpi-grid, .kpi-grid.six { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pb-card-head { flex-wrap: wrap; gap: 6px; }
+}
+@container ux2main (max-width: 440px) {
+  .kpi-grid, .kpi-grid.six { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* (3) view transitions — sirf #main animate hota hai, sidebar/topbar sthir rehte hain */
+@supports (view-transition-name: none) {
+  #main { view-transition-name: ux2-main; }
+  ::view-transition-group(root) { animation-duration: 0s; }
+  ::view-transition-old(ux2-main) { animation: ux2-out .16s ease both; }
+  ::view-transition-new(ux2-main) { animation: ux2-in .32s cubic-bezier(.2, .8, .2, 1) both; }
+}
+@keyframes ux2-out { to { opacity: 0; transform: translateY(-8px) scale(.995); filter: blur(2px); } }
+@keyframes ux2-in { from { opacity: 0; transform: translateY(14px) scale(.992); filter: blur(3px); } }
+html.ff-no-anim ::view-transition-group(*), html.ff-no-anim ::view-transition-old(*), html.ff-no-anim ::view-transition-new(*) { animation: none !important; }
+
+/* (5) scroll-driven animations — scroll karte hi cards/KPI ubhar kar aate hain (JS nahi, GPU par) */
+@supports (animation-timeline: view()) {
+  html:not(.ff-no-anim) .kpi, html:not(.ff-no-anim) .pb-card, html:not(.ff-no-anim) .main > .card, html:not(.ff-no-anim) .main section > .card {
+    animation: ux2-rise linear both; animation-timeline: view(); animation-range: entry 0% entry 38%;
+  }
+  html:not(.ff-no-anim) .pb-tbl tbody tr, html:not(.ff-no-anim) .tbl tbody tr {
+    animation: ux2-row linear both; animation-timeline: view(); animation-range: entry 0% entry 60%;
+  }
+  html:not(.ff-no-anim) .main::before {   /* upar patli scroll-progress line */
+    content: ""; position: fixed; left: 0; top: 0; height: 3px; width: 100%; z-index: 60; pointer-events: none;
+    background: linear-gradient(90deg, #6366f1, #0d9488, #f59e0b); transform-origin: 0 50%;
+    animation: ux2-prog linear both; animation-timeline: scroll(root block);
+  }
+}
+@keyframes ux2-rise { from { opacity: 0; translate: 0 26px; scale: .985; } to { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes ux2-row { from { opacity: 0; translate: -10px 0; } to { opacity: 1; translate: 0 0; } }
+@keyframes ux2-prog { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* (6) animated gradient — @property se angle ghumta hai (header line + primary buttons) */
+@property --ux2-a { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes ux2-spin { to { --ux2-a: 360deg; } }
+@supports (background: conic-gradient(from 1turn at 50% 50%, red, blue)) {
+  html:not(.ff-no-anim) .btn.primary:not(:disabled) {
+    background: linear-gradient(var(--ux2-a), #6366f1, #0d9488, #4f46e5, #6366f1); background-size: 100% 100%;
+    animation: ux2-spin 9s linear infinite;
+  }
+  html:not(.ff-no-anim) .topbar { position: sticky; }
+  html:not(.ff-no-anim) .topbar::before {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; pointer-events: none; opacity: .75;
+    background: linear-gradient(var(--ux2-a), #6366f1, #ec4899, #f59e0b, #10b981, #6366f1); background-size: 300% 100%;
+    animation: ux2-spin 12s linear infinite, ux2-slide 8s linear infinite;
+  }
+}
+@keyframes ux2-slide { to { background-position: 300% 0; } }
+
+/* (9) spotlight — cursor ke saath halki roshni, sirf cards/rows par */
+#ux2-spot { position: fixed; left: 0; top: 0; width: 320px; height: 320px; margin: -160px 0 0 -160px; border-radius: 50%; pointer-events: none; z-index: 40;
+  background: radial-gradient(circle, rgba(99, 102, 241, .18), rgba(99, 102, 241, 0) 68%); mix-blend-mode: multiply; opacity: 0; transition: opacity .25s; will-change: transform; }
+#ux2-spot.on { opacity: 1; }
+html[data-theme="dark"] #ux2-spot { mix-blend-mode: screen; background: radial-gradient(circle, rgba(129, 140, 248, .22), rgba(129, 140, 248, 0) 68%); }
+html.ff-no-anim #ux2-spot, html.ff-no-spot #ux2-spot { display: none; }
+
+/* (7) undo toast */
+.ux2-undo { position: fixed; left: 18px; bottom: 18px; z-index: 9999; display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 12px; background: #111827; color: #fff;
+  font-size: 13px; box-shadow: 0 12px 30px rgba(0, 0, 0, .35); animation: ux2-in .28s cubic-bezier(.2, .8, .2, 1) both; max-width: min(92vw, 420px); }
+.ux2-undo button { all: unset; cursor: pointer; font-weight: 700; color: #a5b4fc; padding: 4px 8px; border-radius: 8px; }
+.ux2-undo button:hover, .ux2-undo button:focus-visible { background: rgba(255, 255, 255, .12); outline: none; }
+.ux2-undo kbd { font: 600 10px/1 inherit; opacity: .6; border: 1px solid rgba(255, 255, 255, .3); border-radius: 4px; padding: 2px 4px; }
+.ux2-undo i { position: absolute; left: 0; bottom: 0; height: 3px; background: #6366f1; border-radius: 0 0 12px 12px; animation: ux2-bar linear forwards; }
+@keyframes ux2-bar { from { width: 100%; } to { width: 0; } }
+@media print { #ux2-spot, .ux2-undo, .main::before, .topbar::before { display: none !important; } }

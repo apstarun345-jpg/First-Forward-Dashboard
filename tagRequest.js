@@ -1373,8 +1373,10 @@ body.colorful .from-hdr { color: #166534; }
     });
     root.querySelector('[data-sc-list]').addEventListener('click', async (e) => {
       const b = e.target.closest('[data-sc-del]'); if (!b) return; const c = b.dataset.scDel;
+      const gone = SC.map.get(c);
       SC.items = SC.items.filter((x) => x.code !== c); SC.map.delete(c); scPaint();
       try { await scApi('DELETE', '/api/public/scan', { name: clean(state.employee.name), code: c }); } catch { /* */ }
+      if (gone && typeof window !== 'undefined' && window.FF && window.FF.undo) window.FF.undo.offer('Scan hata diya', () => { if (SC.map.has(c)) return; SC.map.set(c, gone); SC.items.unshift(gone); gone.fresh = false; scPaint(); scSend(c, gone.at); });
     });
     scPaint(); scLoadMine();
   }
