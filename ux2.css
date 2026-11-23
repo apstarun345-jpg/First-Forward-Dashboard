@@ -60,12 +60,6 @@ html.ff-no-anim ::view-transition-group(*), html.ff-no-anim ::view-transition-ol
 }
 @keyframes ux2-slide { to { background-position: 300% 0; } }
 
-/* (9) spotlight — cursor ke saath halki roshni, sirf cards/rows par */
-#ux2-spot { position: fixed; left: 0; top: 0; width: 320px; height: 320px; margin: -160px 0 0 -160px; border-radius: 50%; pointer-events: none; z-index: 40;
-  background: radial-gradient(circle, rgba(99, 102, 241, .18), rgba(99, 102, 241, 0) 68%); mix-blend-mode: multiply; opacity: 0; transition: opacity .25s; will-change: transform; }
-#ux2-spot.on { opacity: 1; }
-html[data-theme="dark"] #ux2-spot { mix-blend-mode: screen; background: radial-gradient(circle, rgba(129, 140, 248, .22), rgba(129, 140, 248, 0) 68%); }
-html.ff-no-anim #ux2-spot, html.ff-no-spot #ux2-spot { display: none; }
 
 /* (7) undo toast */
 .ux2-undo { position: fixed; left: 18px; bottom: 18px; z-index: 9999; display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 12px; background: #111827; color: #fff;
@@ -75,4 +69,4 @@ html.ff-no-anim #ux2-spot, html.ff-no-spot #ux2-spot { display: none; }
 .ux2-undo kbd { font: 600 10px/1 inherit; opacity: .6; border: 1px solid rgba(255, 255, 255, .3); border-radius: 4px; padding: 2px 4px; }
 .ux2-undo i { position: absolute; left: 0; bottom: 0; height: 3px; background: #6366f1; border-radius: 0 0 12px 12px; animation: ux2-bar linear forwards; }
 @keyframes ux2-bar { from { width: 100%; } to { width: 0; } }
-@media print { #ux2-spot, .ux2-undo, .main::before, .topbar::before { display: none !important; } }
+@media print {   .ux2-undo, .main::before, .topbar::before { display: none !important; } }

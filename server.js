@@ -9051,6 +9051,47 @@ async function handleApi(req, res, url) {
     const extra = admin ? { cfg: normalizeComplaintsCfg((db.settings || {}).complaints), mailLog: mst.log.slice(-200).reverse(), mailErr: complaintsMailRun.lastErr, placeholders: MAIL_PLACEHOLDERS_LIST } : {};
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, rows: complaintsSvc.rows({ from, to }), meta: complaintsSvc.meta(), ...extra }), { 'Cache-Control': 'no-store' });
   }
+  // 📨 v3.125.456 — Home · Smart Notification Center: sirf cache se (Gmail nahi chhoota) — nayi complaints, bank deduction, GV mail status
+  if (p === '/api/complaints/live' && method === 'GET') {
+    if (!user) throw new HttpError(401, 'Login required');
+    if (!complaintsAllowed(user)) throw new HttpError(403, 'Complaints access nahi hai.');
+    const nowMs = Date.now(), H48 = 48 * 3600e3;
+    const istDay = (ms) => new Date(ms + 19800e3).toISOString().slice(0, 10);
+    const todayIst = istDay(nowMs), monthFrom = `${todayIst.slice(0, 7)}-01`;
+    const cfg = normalizeComplaintsCfg((db.settings || {}).complaints);
+    const mailOn = !!(cfg.enabled && cfg.mail && cfg.mail.enabled);
+    const mst = complaintsMailState();
+    const rows = complaintsSvc.rows({ from: monthFrom });
+    const mailFor = (r, kind) => {
+      if (!r.issuerSrc) return null;                       // sirf GV ki complaints ka mail-status
+      if (!mailOn) return { s: 'off' };
+      const rules = cfg.mail.rules.filter((x) => x.enabled && x.to && complaintRuleMatches(x, r));
+      if (!rules.length) return { s: 'norule' };
+      const f = kind === 'new' ? 'n' : 'd';
+      let at = 0;
+      for (const x of rules) { const v = (mst.sent[`${r.key}|${x.id}`] || {})[f]; if (v && v > at) at = v; }
+      if (at) return { s: 'sent', at };
+      const bad = mst.log.filter((l) => l.caseNo === r.caseNo && l.kind === kind && l.ok === false).pop();
+      if (bad) return { s: 'fail', at: bad.at, err: String(bad.error || '').slice(0, 120) };
+      return { s: 'queued' };
+    };
+    const slim = (r) => ({ caseNo: r.caseNo, agent: r.agentName || '', agentId: r.agentId || '', tl: r.tlName || '', vrn: r.vrn || '', tag: r.tagId || '', desc: String(r.description || '').slice(0, 90), status: r.status, gv: !!r.issuerSrc, breach: !!r.tatBreached, link: r.link || '' });
+    const events = [];
+    let pending = 0, pendingGv = 0, breach = 0, newToday = 0, dedToday = 0, dedAmt = 0, mailBad = 0;
+    for (const r of rows) {
+      if (r.status === 'Pending') { pending++; if (r.issuerSrc) pendingGv++; if (r.tatBreached) breach++; }
+      if (r.day === todayIst) newToday++;
+      if (nowMs - r.date < H48) { const m = mailFor(r, 'new'); if (m && m.s === 'fail') mailBad++; events.push({ t: 'new', at: r.date, ...slim(r), mail: m }); }
+      if (r.status === 'Solved by Bank' && r.deducted > 0 && (r.resolvedAt || 0) > nowMs - H48) {
+        if (istDay(r.resolvedAt) === todayIst) { dedToday++; dedAmt += r.deducted; }
+        const m = mailFor(r, 'deduct'); if (m && m.s === 'fail') mailBad++;
+        events.push({ t: 'deduct', at: r.resolvedAt, amount: r.deducted, note: r.bankNote ? String(r.bankNote).slice(0, 110) : '', ...slim(r), mail: m });
+      }
+    }
+    events.sort((a, b) => b.at - a.at);
+    const meta = complaintsSvc.meta();
+    return sendJson(res, 200, { ok: true, now: nowMs, ready: !!meta.okAt, okAt: meta.okAt, error: meta.error || '', mailOn, stats: { pending, pendingGv, breach, newToday, dedToday, dedAmt, mailBad }, events: events.slice(0, 40) }, { 'Cache-Control': 'no-store' });
+  }
   // 📨 Resend: ek complaint ki alert mail dobara bhejo (matching rules ke recipients ko, ya diye gaye `to` par)
   if (p === '/api/complaints/mail-resend' && method === 'POST') {
     if (!user || user.role !== 'admin') throw new HttpError(403, 'Admin only.');

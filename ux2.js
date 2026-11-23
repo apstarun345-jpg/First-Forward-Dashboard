@@ -1,4 +1,4 @@
-/* v3.125.449 — ux2: view transitions · spotlight · global Undo (Ctrl+Z). CSS-only parts ux2.css me. */
+/* v3.125.449 — ux2: view transitions · global Undo (Ctrl+Z). CSS-only parts ux2.css me. */
 (function (W) {
   'use strict';
   const D = document, H = D.documentElement;
@@ -27,20 +27,7 @@
     }, true);
   }
 
-  /* (9) Spotlight — cursor ke saath roshni (sirf mouse, cards/rows par) */
-  function spot() {
-    if (!matchMedia('(hover: hover) and (pointer: fine)').matches || lowEnd()) return;
-    const s = D.createElement('div'); s.id = 'ux2-spot'; D.body.appendChild(s);
-    let x = 0, y = 0, on = false, raf = 0;
-    const SEL = '.kpi, .card, .pb-card, .trs-card, .pb-tbl tr, .tbl tr';
-    const paint = () => { raf = 0; s.style.transform = `translate3d(${x}px,${y}px,0)`; s.classList.toggle('on', on); };
-    D.addEventListener('pointermove', (e) => {
-      if (off() || e.pointerType !== 'mouse') return;
-      x = e.clientX; y = e.clientY; on = !!(e.target.closest && e.target.closest(SEL));
-      if (!raf) raf = requestAnimationFrame(paint);
-    }, { passive: true });
-    D.addEventListener('pointerleave', () => { on = false; if (!raf) raf = requestAnimationFrame(paint); });
-  }
+  /* (9) Spotlight hata diya (v3.125.456) */
 
   /* (7) Undo — FF.undo.offer('Scan hata diya', fn) ; Ctrl+Z se bhi */
   const U = { stack: [], el: null, tm: 0 };
@@ -68,6 +55,6 @@
     if (U.stack.length && U.run()) e.preventDefault();
   });
 
-  const init = () => { vt(); spot(); };
+  const init = () => { vt(); try { const o = D.getElementById('ux2-spot'); if (o) o.remove(); } catch { /* */ } };
   if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', init); else init();
 })(window);

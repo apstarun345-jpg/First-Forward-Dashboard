@@ -45,6 +45,28 @@ window.FF = window.FF || {};
   .sc-ok{font-size:12.5px;color:#15803d;font-weight:600}
   .sc-more{font-size:12px;color:#64748b;margin:6px 0 0}
   html[data-theme="dark"] .sc-al p{color:#94a3b8}
+
+  .sc-cmp{border:1px solid rgba(99,102,241,.35);border-top:4px solid #6366f1;border-radius:14px;background:color-mix(in srgb,#6366f1 5%,var(--card,#fff));overflow:hidden}
+  .sc-cmp-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px}
+  .sc-cmp-h .t{font-weight:800;font-size:13px;color:#4338ca;text-transform:uppercase;letter-spacing:.03em;flex:0 0 auto}
+  .sc-cmp-h .t small{font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted,#64748b);margin-left:6px}
+  .sc-cmp-p{display:inline-flex;align-items:baseline;gap:5px;padding:3px 10px;border-radius:999px;font-weight:700;font-size:12px;background:#e0e7ff;color:#3730a3;text-decoration:none}
+  .sc-cmp-p b{font-size:15px;font-variant-numeric:tabular-nums}
+  .sc-cmp-p.new{background:#dbeafe;color:#1e40af}.sc-cmp-p.pend{background:#ffedd5;color:#c2410c}.sc-cmp-p.bad{background:#fee2e2;color:#b91c1c}.sc-cmp-p.ded{background:#dcfce7;color:#166534}.sc-cmp-p.mail{background:#fef3c7;color:#92400e}
+  .sc-cmp-l{display:flex;flex-direction:column;border-top:1px solid rgba(99,102,241,.2)}
+  .sc-ce{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 14px;text-decoration:none;color:inherit}
+  .sc-ce:hover{background:rgba(99,102,241,.07)}.sc-ce + .sc-ce{border-top:1px dashed rgba(99,102,241,.22)}
+  .sc-ce .ic{font-size:18px;text-align:center}
+  .sc-ce b{font-size:13px}.sc-ce p{margin:1px 0 0;font-size:11.5px;color:var(--muted,#64748b);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sc-ce .rt{display:flex;flex-direction:column;align-items:flex-end;gap:3px;white-space:nowrap}
+  .sc-ce time{font-size:11px;color:var(--muted,#64748b)}
+  .sc-mb{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}
+  .sc-mb.sent{background:#dcfce7;color:#166534}.sc-mb.fail{background:#fee2e2;color:#b91c1c}.sc-mb.queued{background:#fef3c7;color:#92400e}.sc-mb.off,.sc-mb.norule{background:#e2e8f0;color:#475569}
+  .sc-st{display:inline-block;padding:1px 7px;border-radius:6px;font-size:10.5px;font-weight:800;margin-left:4px}
+  .sc-st.pend{background:#ffedd5;color:#c2410c}.sc-st.bank{background:#dcfce7;color:#166534}.sc-st.team,.sc-st.me{background:#e0e7ff;color:#3730a3}
+  .sc-cmp-more{display:block;padding:6px 14px;font-size:12px;font-weight:700;color:#4338ca;text-decoration:none;border-top:1px dashed rgba(99,102,241,.22)}
+  .sc-cmp-empty{padding:8px 14px 12px;font-size:12.5px;color:var(--muted,#64748b)}
+  html[data-theme="dark"] .sc-cmp-p,html[data-theme="dark"] .sc-mb,html[data-theme="dark"] .sc-st{filter:brightness(.92)}
   `;
   function css() {
     if (document.getElementById('sc-css')) return;
@@ -178,14 +200,14 @@ window.FF = window.FF || {};
         cache = null;
       });
     }
-    if (cache && Date.now() - cache.at < 60e3) { el.innerHTML = cache.html; payMount(el); return; }
+    if (cache && Date.now() - cache.at < 60e3) { el.innerHTML = cache.html; payMount(el); cmpMount(el); return; }
     el.innerHTML = shell('<div class="sc-chip"><div class="sc-chip-t">🎯 Dispatch priority</div><div class="sc-seg"><span class="dim small">load ho raha hai…</span></div></div>', '', 'data load ho raha hai…');
     try { await Promise.allSettled([G && G.need && G.need('master'), S && S.need && S.need('daily')]); } catch { /* ignore */ }
     const alerts = alertsHtml(alertsAll());
     const counts = await dispatchCounts();
     const html = shell(counts ? dispatchHtml(counts) : '', alerts, 'GV + FF · live');
     if (counts) cache = { at: Date.now(), html };
-    if (el.isConnected) { el.innerHTML = html; payMount(el); }
+    if (el.isConnected) { el.innerHTML = html; payMount(el); cmpMount(el); }
   }
   /** 💰 v3.125.254 — FNF payout status chips (Hold / Account details missing / Processing / Negative / Paid …).
    *  Sirf admin / payout permission. Click = rangeen table + CSV (payslip.js). */
@@ -202,6 +224,67 @@ window.FF = window.FF || {};
       const first = wrap.querySelector('.sc-chip');
       if (first && first.nextSibling) wrap.insertBefore(chip, first.nextSibling); else wrap.appendChild(chip);
       chip.addEventListener('click', (e) => { const b = e.target.closest('[data-pay-st]'); if (b) FF.payslip.openPayStatus(b.dataset.paySt, d.tab); });
+    } catch { /* optional */ }
+  }
+
+
+  /** 📨 v3.125.456 — Agents Complaints: mail aate hi, bank ne paisa kaata (status), aur GV ki complaint par alert mail gayi ya nahi. */
+  const CMP = { at: 0, d: null, seen: 0, timer: 0, busy: false };
+  const ago = (ms) => { const m = Math.max(0, Math.round((Date.now() - ms) / 60e3)); return m < 1 ? 'abhi' : m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} ghante` : `${Math.round(m / 1440)} din`; };
+  const clock = (ms) => { try { return new Date(ms).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }); } catch { return ''; } };
+  const stCls = (s) => (/^pending/i.test(s) ? 'pend' : /bank/i.test(s) ? 'bank' : /team/i.test(s) ? 'team' : 'me');
+  function mailBadge(m) {
+    if (!m) return '';
+    const t = { sent: `✉️ Mail gayi · ${clock(m.at)}`, fail: '✉️ Mail fail — dobara try', queued: '✉️ Mail jaane wali hai', off: '✉️ Mail band (Settings)', norule: '✉️ Mail rule nahi' }[m.s] || '';
+    return t ? `<span class="sc-mb ${m.s}" ${m.err ? `title="${esc(m.err)}"` : ''}>${t}</span>` : '';
+  }
+  function cmpHtml(d) {
+    const st = d.stats || {}, ev = d.events || [];
+    const pill = (cls, n, label) => `<span class="sc-cmp-p ${cls}"><b>${U.fmt(n)}</b> ${label}</span>`;
+    const pills = [pill('new', st.newToday || 0, 'aaj nayi'), pill('pend', st.pending || 0, `pending${st.pendingGv ? ` (GV ${st.pendingGv})` : ''}`), st.breach ? pill('bad', st.breach, 'TAT cross') : '',
+      st.dedToday ? `<span class="sc-cmp-p ded"><b>${U.fmt(st.dedToday)}</b> bank deduct aaj · ₹${U.fmt(Math.round(st.dedAmt || 0))}</span>` : '', st.mailBad ? pill('bad', st.mailBad, 'mail fail') : ''].filter(Boolean).join('');
+    const row = (e) => {
+      const who = `${esc(e.agent || 'Agent ?')}${e.tl ? ` <small class="dim">· TL ${esc(e.tl)}</small>` : ''}`;
+      const ch = e.gv ? '🟩 GV' : '🟦 FF';
+      const line = e.t === 'deduct'
+        ? `Bank ne <b>₹${U.fmt(Math.round(e.amount || 0))}</b> kaat liya${e.note ? ` · ${esc(e.note)}` : ''}`
+        : `Nayi complaint aayi${e.vrn ? ` · ${esc(e.vrn)}` : ''}${e.desc ? ` · ${esc(e.desc)}` : ''}`;
+      return `<a class="sc-ce" href="#/complaints" title="Agents Complaints Summary kholo"><span class="ic">${e.t === 'deduct' ? '💸' : '🆕'}</span>
+        <div><b>${who}</b> <span class="sc-st ${stCls(e.status)}">${esc(e.status)}</span><p>${ch} · Case ${esc(e.caseNo)} · ${line}</p></div>
+        <div class="rt"><time>${ago(e.at)} pehle</time>${mailBadge(e.mail)}</div></a>`;
+    };
+    const shown = ev.slice(0, 6);
+    const body = shown.length ? `<div class="sc-cmp-l">${shown.map(row).join('')}${ev.length > shown.length ? `<a class="sc-cmp-more" href="#/complaints">+${ev.length - shown.length} aur · poori list ›</a>` : ''}</div>` : '<div class="sc-cmp-empty">Pichhle 48 ghante me koi nayi complaint ya bank deduction nahi.</div>';
+    return `<div class="sc-cmp"><div class="sc-cmp-h"><span class="t">📨 Complaints <small>${d.ready ? 'live' : 'Gmail se aa rahi hain…'}${d.error ? ' · ⚠️ ' + esc(String(d.error).slice(0, 60)) : ''}</small></span>${pills}</div>${body}</div>`;
+  }
+  function cmpAnnounce(d) {
+    try {
+      const last = Number(localStorage.getItem('ff_cmp_seen') || 0), fresh = (d.events || []).filter((e) => e.at > last);
+      const top = Math.max(0, ...(d.events || []).map((e) => e.at)); if (top) localStorage.setItem('ff_cmp_seen', String(Math.max(top, last)));
+      if (!last || !fresh.length || !(FF.mascot && FF.mascot.push)) return;   // pehli baar sirf seen set; baad me naye par robot bolega
+      fresh.slice(0, 3).forEach((e) => FF.mascot.push({ key: `cmp:${e.t}:${e.caseNo}`, grp: 'cmp', fast: true, view: 'big', q: '#/complaints', mood: e.t === 'deduct' ? 'happy' : 'alert', icon: e.t === 'deduct' ? '💸' : '📨',
+        title: e.t === 'deduct' ? 'Bank ne paisa kaat liya' : 'Nayi complaint mail aayi', head: `${e.agent || 'Agent'}${e.tl ? ` (TL ${e.tl})` : ''} · Case ${e.caseNo}${e.t === 'deduct' ? ` · ₹${Math.round(e.amount || 0)}` : ''}`,
+        rows: [{ name: e.agent || '', sub: `${e.gv ? 'GV' : 'FF'} · ${e.status}`, val: e.mail ? (e.mail.s === 'sent' ? 'Mail gayi' : e.mail.s === 'fail' ? 'Mail fail' : '') : '' }] }));
+    } catch { /* optional */ }
+  }
+  async function cmpMount(el) {
+    try {
+      if (!(FF.auth && (FF.auth.isAdmin() || FF.auth.can('complaints')))) return;
+      const paint = (d) => {
+        if (!d || !el.isConnected) return;
+        const wrap = el.querySelector('.sc-wrap'); if (!wrap) return;
+        const host = document.createElement('div'); host.innerHTML = cmpHtml(d); const node = host.firstElementChild;
+        const old = wrap.querySelector('.sc-cmp'); if (old) old.replaceWith(node);
+        else { const anchor = wrap.querySelector('.sc-pay') || wrap.querySelector('.sc-chip'); if (anchor && anchor.nextSibling) wrap.insertBefore(node, anchor.nextSibling); else wrap.appendChild(node); }
+      };
+      if (CMP.d && Date.now() - CMP.at < 60e3) paint(CMP.d);
+      const pull = async () => {
+        if (CMP.busy) return; CMP.busy = true;
+        try { const d = await FF.auth.api('/api/complaints/live'); if (d && d.ok) { CMP.d = d; CMP.at = Date.now(); const e2 = document.getElementById('home-smart'); paint(d); if (e2 && e2 !== el) cmpMount.last = e2; cmpAnnounce(d); } } catch { /* optional */ } finally { CMP.busy = false; }
+      };
+      if (!CMP.d || Date.now() - CMP.at >= 60e3) await pull();
+      clearInterval(CMP.timer); CMP.timer = setInterval(() => { const cur = document.getElementById('home-smart'); if (!cur || !cur.isConnected || document.hidden) return; cmpMount(cur); }, 90e3);
+      if (CMP.timer && CMP.timer.unref) CMP.timer.unref();
     } catch { /* optional */ }
   }
 
