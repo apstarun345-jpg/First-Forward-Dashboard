@@ -35,19 +35,19 @@ html.ff-no-anim .wow-sk { animation: none; }
 .wow-gd-x { border: 0; background: rgba(255,255,255,.1); color: #fff; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 15px; }
 .wow-gd-hint { font-size: 12px; opacity: .65; margin: 6px 0 0; }
 .wow-gd-empty { padding: 60px 10px; text-align: center; opacity: .8; }
-.wow-gd-scene { height: 380px; display: grid; place-items: center; perspective: 1300px; cursor: grab; touch-action: none; overflow: hidden; }
+.wow-gd-scene { height: 420px; display: grid; place-items: center; perspective: 1300px; cursor: grab; touch-action: none; overflow: hidden; }
 .wow-gd-scene:active { cursor: grabbing; }
-.wow-gd-world { position: relative; transform-style: preserve-3d; transition: none; }
-.wow-gd-floor { position: absolute; left: -20px; top: -20px; border-radius: 14px; transform: rotateX(90deg) translateZ(0); transform-origin: center; background: repeating-linear-gradient(0deg, rgba(129,140,248,.18) 0 1px, transparent 1px 38px), repeating-linear-gradient(90deg, rgba(129,140,248,.18) 0 1px, transparent 1px 38px), rgba(30,27,75,.55); box-shadow: 0 0 60px rgba(99,102,241,.35); }
-.wow-box { position: absolute; left: 0; top: 0; width: 74px; height: 74px; transform-style: preserve-3d; transform: translate3d(var(--x), 0, var(--z)); }
-.wow-box .f { position: absolute; display: block; background: var(--c); }
-.wow-box .t  { width: 74px; height: 74px; transform: rotateX(90deg) translateZ(var(--h)); transform-origin: top; filter: brightness(1.25); top: 0; }
-.wow-box .fr { width: 74px; height: var(--h); bottom: 0; transform: translateZ(74px); transform-origin: bottom; filter: brightness(.95); animation: wowGrow .9s var(--d, 0ms) cubic-bezier(.2,1.1,.3,1) both; }
-.wow-box .bk { width: 74px; height: var(--h); bottom: 0; filter: brightness(.7); animation: wowGrow .9s var(--d, 0ms) cubic-bezier(.2,1.1,.3,1) both; }
-.wow-box .rt { width: 74px; height: var(--h); bottom: 0; left: 0; transform: rotateY(90deg) translateZ(74px); transform-origin: left; filter: brightness(.8); }
-.wow-box .lf { width: 74px; height: var(--h); bottom: 0; left: 0; transform: rotateY(-90deg); transform-origin: left; filter: brightness(.75); }
-@keyframes wowGrow { from { transform-origin: bottom; clip-path: inset(100% 0 0 0); } to { clip-path: inset(0 0 0 0); } }
-.wow-box b { position: absolute; left: 0; width: 74px; bottom: calc(var(--h) + 4px); transform: translateZ(74px); text-align: center; font-size: 12px; text-shadow: 0 1px 3px #000; color: #fff; pointer-events: none; }
+.wow-gd-world { position: relative; transform-style: preserve-3d; transition: none; margin-top: 120px; }
+.wow-gd-floor { position: absolute; left: 0; top: 0; border-radius: 14px; transform-origin: 0 0; transform: translate3d(-20px, 0, -20px) rotateX(90deg); background: repeating-linear-gradient(0deg, rgba(129,140,248,.2) 0 1px, transparent 1px 38px), repeating-linear-gradient(90deg, rgba(129,140,248,.2) 0 1px, transparent 1px 38px), rgba(30,27,75,.6); box-shadow: 0 0 60px rgba(99,102,241,.4); }
+.wow-box { position: absolute; left: 0; top: 0; width: 74px; height: var(--h); transform-style: preserve-3d; transform: translate3d(var(--x), calc(var(--h) * -1), var(--z)); }
+.wow-box .f { position: absolute; left: 0; display: block; width: 74px; background: var(--c); backface-visibility: hidden; }
+.wow-box .fr, .wow-box .bk, .wow-box .rt, .wow-box .lf { top: 0; height: var(--h); }
+.wow-box .fr { transform: translateZ(37px); filter: brightness(1); display: grid; place-items: center; color: #fff; font: 800 13px/1 inherit; text-shadow: 0 1px 3px rgba(0,0,0,.7); animation: wowGrow .9s var(--d, 0ms) cubic-bezier(.2,1.1,.3,1) both; }
+.wow-box .bk { transform: rotateY(180deg) translateZ(37px); filter: brightness(.7); }
+.wow-box .rt { transform: rotateY(90deg) translateZ(37px); filter: brightness(.82); }
+.wow-box .lf { transform: rotateY(-90deg) translateZ(37px); filter: brightness(.74); }
+.wow-box .t { top: 0; height: 74px; transform: rotateX(90deg) translateZ(37px); filter: brightness(1.3); }
+@keyframes wowGrow { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0 0 0 0); } }
 .wow-gd-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: center; font-size: 12px; opacity: .85; margin: 4px 0 10px; }
 .wow-gd-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
 .wow-gd-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }

@@ -49,10 +49,11 @@ window.FF = window.FF || {};
     let boxes = '';
     rows.forEach((r, ri) => r.forEach((v, ci) => {
       const h = Math.max(6, Math.round(Math.sqrt(v / max) * HMAX)), x = ci * (cell + gap), z = ri * (cell + gap);
-      boxes += `<div class="wow-box" style="--x:${x}px;--z:${z}px;--h:${h}px;--c:${AGE_COL[ci]};--d:${(ri * 5 + ci) * 55}ms" data-tip="${esc(names[ri])} · ${esc(labels[ci])}: ${fmt(v)}"><i class="f t"></i><i class="f fr"></i><i class="f rt"></i><i class="f lf"></i><i class="f bk"></i><b>${v >= max * 0.12 ? fmt(v) : ''}</b></div>`;
+      const lab = v >= max * 0.08 ? fmt(v) : '';
+      boxes += `<div class="wow-box" style="--x:${x}px;--z:${z}px;--h:${h}px;--c:${AGE_COL[ci]};--d:${(ri * 5 + ci) * 55}ms" data-tip="${esc(names[ri])} · ${esc(labels[ci])}: ${fmt(v)}"><i class="f t"></i><i class="f fr">${lab}</i><i class="f bk"></i><i class="f rt"></i><i class="f lf"></i></div>`;
     }));
     const old = rows.flat().filter((_, i) => i % 5 >= 2).reduce((a, b) => a + b, 0), tot = (o.t[0] || 0) + (o.t[1] || 0);
-    return `<div class="wow-gd-scene"><div class="wow-gd-world" data-gd-world style="width:${W}px;height:${Dp}px;transform:rotateX(${gd.rx}deg) rotateY(${gd.ry}deg)"><div class="wow-gd-floor" style="width:${W + 40}px;height:${Dp + 40}px"></div>${boxes}</div></div>
+    return `<div class="wow-gd-scene"><div class="wow-gd-world" data-gd-world style="width:${W}px;height:${Dp}px;transform-origin:${W / 2}px 0 ${Dp / 2}px;transform:rotateX(${gd.rx}deg) rotateY(${gd.ry}deg)"><div class="wow-gd-floor" style="width:${W + 40}px;height:${Dp + 40}px"></div>${boxes}</div></div>
       <div class="wow-gd-legend">${labels.map((l, i) => `<span><i style="background:${AGE_COL[i]}"></i>${esc(l)}</span>`).join('')}</div>
       <div class="wow-gd-sum"><div><small>Total stock</small><b>${fmt(tot)}</b></div><div><small>VC4</small><b>${fmt(o.t[0])}</b></div><div><small>Commercial</small><b>${fmt(o.t[1])}</b></div><div class="${old / Math.max(1, tot) > 0.3 ? 'bad' : ''}"><small>90 din se purana</small><b>${fmt(old)} <em>${Math.round(old / Math.max(1, tot) * 100)}%</em></b></div></div>`;
   }
