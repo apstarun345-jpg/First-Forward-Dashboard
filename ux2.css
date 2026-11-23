@@ -27,7 +27,7 @@ html.ff-no-anim ::view-transition-group(*), html.ff-no-anim ::view-transition-ol
 
 /* (5) scroll-driven animations — scroll karte hi cards/KPI ubhar kar aate hain (JS nahi, GPU par) */
 @supports (animation-timeline: view()) {
-  html:not(.ff-no-anim) .kpi, html:not(.ff-no-anim) .pb-card, html:not(.ff-no-anim) .main > .card, html:not(.ff-no-anim) .main section > .card {
+  html:not(.ff-no-anim) .kpi, html:not(.ff-no-anim) .main :is(.card, .pb-card):not(:is(.card, .pb-card) :is(.card, .pb-card)) {
     animation: ux2-rise linear both; animation-timeline: view(); animation-range: entry 0% entry 38%;
   }
   html:not(.ff-no-anim) .pb-tbl tbody tr, html:not(.ff-no-anim) .tbl tbody tr {

@@ -7,7 +7,7 @@
   const fine = () => { try { return matchMedia('(hover: hover) and (pointer: fine)').matches; } catch { return false; } };
   const lowEnd = () => { try { return (navigator.deviceMemory && navigator.deviceMemory < 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 3); } catch { return false; } };
   const WA = typeof Element !== 'undefined' && Element.prototype.animate;
-  const q = (s, r) => Array.from((r || D).querySelectorAll(s));
+  const q = (s, r) => { r = r || D; const l = Array.from(r.querySelectorAll(s)); try { if (r.matches && r.matches(s)) l.unshift(r); } catch { /* */ } return l; };
 
   /* (3) charts draw-in */
   function charts(root) {
