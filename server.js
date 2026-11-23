@@ -4734,10 +4734,10 @@ function stockSnapLoad() {
       // v3.125.442 — deploy ke turant baad Apps Script "busy" deta hai (boot par kai storage reads ek saath) → ek hi koshish me
       // snapshot chhoot jaata tha aur kai minute ka poora StockDataa scan chalta tha (barcode scan / lookup "building" me atka rehta).
       // Ab 6 koshish, har baar thoda zyada ruk kar.
-      for (let attempt = 0; attempt < 6 && (!gz || !meta); attempt++) {
+      for (let attempt = 0; attempt < 14 && (!gz || !meta); attempt++) {
         try {
-          if (attempt) await new Promise((r) => setTimeout(r, 6000 * attempt));
-          const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: STOCK_SNAP_TAB, startRow: 1, columns: ['A'] }, { timeoutMs: 90e3, attempts: 3 });
+          if (attempt) await new Promise((r) => setTimeout(r, Math.min(2500 * attempt, 10000)));   // v3.125.448 — chhote gap: lock chhootte hi snapshot utha lo
+          const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: STOCK_SNAP_TAB, startRow: 1, columns: ['A'] }, { timeoutMs: 60e3, attempts: 1 });
           const rows = (out && out.rows) || [];
           meta = JSON.parse((rows[0] && rows[0][0]) || 'null');
           if (meta && meta.n) { gz = Buffer.from(rows.slice(1, 1 + meta.n).map((r) => r[0] || '').join(''), 'base64'); stockSnapLastParts = meta.n; }
@@ -16028,8 +16028,7 @@ async function servePersonalPage(req, res, rawToken) {
         return { name, counts, total: counts.reduce((sum, n) => sum + n, 0) };
       })
       .filter((r) => !isTeamLink(link) || r.total > 0)
-      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
-      .slice(0, 80);
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
     const matrixTableHtml = `<section class="pb-card pb-matrix-card">
       <div class="pb-card-head">
         <div><h3>🗓️ Daily Issuance · Agent × Date</h3><p class="pb-matrix-note">Rows = Agent Name · Columns = date · Current month through yesterday</p></div>
