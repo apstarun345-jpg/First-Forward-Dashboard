@@ -168,7 +168,7 @@ const attachmentsOf = (opts) => (opts.attachments || []).map((a) => ({ name: Str
 async function sendResend(key, msg) {
   const res = await withTimeout('https://api.resend.com/emails', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: msg.fromHeader, to: msg.to, subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}), ...(msg.attachments.length ? { attachments: msg.attachments.map((a) => ({ filename: a.name, content: a.content })) } : {}) })
+    body: JSON.stringify({ from: msg.fromHeader, to: msg.to, ...(msg.replyTo ? { reply_to: msg.replyTo } : {}), subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}), ...(msg.attachments.length ? { attachments: msg.attachments.map((a) => ({ filename: a.name, content: a.content })) } : {}) })
   });
   const body = await res.text();
   if (!res.ok) throw new Error(`Resend HTTP ${res.status}: ${body.slice(0, 300)}`);
@@ -177,7 +177,7 @@ async function sendResend(key, msg) {
 async function sendBrevo(key, msg) {
   const res = await withTimeout('https://api.brevo.com/v3/smtp/email', {
     method: 'POST', headers: { 'api-key': key, 'Content-Type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ sender: { email: msg.from, ...(msg.fromName ? { name: msg.fromName } : {}) }, to: msg.to.map((email) => ({ email })), subject: msg.subject, ...(msg.html ? { htmlContent: msg.html } : {}), textContent: msg.text, ...(msg.attachments.length ? { attachment: msg.attachments.map((a) => ({ name: a.name, content: a.content })) } : {}) })
+    body: JSON.stringify({ sender: { email: msg.from, ...(msg.fromName ? { name: msg.fromName } : {}) }, ...(msg.replyTo ? { replyTo: { email: msg.replyTo } } : {}), to: msg.to.map((email) => ({ email })), subject: msg.subject, ...(msg.html ? { htmlContent: msg.html } : {}), textContent: msg.text, ...(msg.attachments.length ? { attachment: msg.attachments.map((a) => ({ name: a.name, content: a.content })) } : {}) })
   });
   const body = await res.text();
   if (!res.ok) throw new Error(`Brevo HTTP ${res.status}: ${body.slice(0, 300)}`);
@@ -191,7 +191,7 @@ function appsScriptStore(env) {
 async function sendAppsScript(env, msg) {
   const store = appsScriptStore(env);
   if (!store) throw new Error('Apps Script URL/secret set nahi (APPS_SCRIPT_URL + APPS_SCRIPT_SECRET)');
-  await store.call('mail', { mail: { to: msg.to.join(','), subject: msg.subject, body: msg.text, htmlBody: msg.html || '', name: msg.fromName || '', attachments: msg.attachments } });
+  await store.call('mail', { mail: { to: msg.to.join(','), subject: msg.subject, body: msg.text, htmlBody: msg.html || '', name: msg.fromName || '', replyTo: msg.replyTo || '', attachments: msg.attachments } });
   return true;
 }
 
@@ -261,7 +261,8 @@ export async function sendMail(cfg, subject, text, opts = {}, env = process.env)
         if (!to.length) throw smtpError('"To" address set nahi hai', 'CONFIG');
         if (to.some((x) => !EMAIL_RE.test(x))) throw smtpError('"To" me ek email valid nahi hai', 'CONFIG');
         if (provider !== 'appsscript' && !EMAIL_RE.test(from)) throw smtpError('"From" email valid nahi hai (provider ke liye verified sender chahiye)', 'CONFIG');
-        const msg = { from, fromHeader: fromHeader || from, fromName: displayName(fromHeader), to, subject, text, html: opts.html || '', attachments: attachmentsOf(opts) };
+        const rt = String(opts.replyTo || '').trim();
+        const msg = { from, fromHeader: fromHeader || from, fromName: displayName(fromHeader), to, subject, text, html: opts.html || '', attachments: attachmentsOf(opts), replyTo: EMAIL_RE.test(rt) ? rt : '' };
         if (provider === 'resend') await sendResend(String(cfg.resendKey || env.RESEND_API_KEY).trim(), msg);
         else if (provider === 'brevo') await sendBrevo(String(cfg.brevoKey || env.BREVO_API_KEY).trim(), msg);
         else await sendAppsScript(env, msg);

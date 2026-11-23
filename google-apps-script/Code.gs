@@ -448,6 +448,7 @@ function doPost(e) {
       if (!m.subject || String(m.subject).length > 300) return json_({ ok: false, error: 'invalid subject' });
       const opts = { to: to.join(','), subject: String(m.subject), body: String(m.body || ' '), name: String(m.name || '') || 'Dashboard' };
       if (m.htmlBody) opts.htmlBody = String(m.htmlBody);
+      if (m.replyTo && /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(String(m.replyTo))) opts.replyTo = String(m.replyTo);   // jawab is mail par aaye
       const files = (m.attachments || []).slice(0, 5).map(function (a) {
         return Utilities.newBlob(Utilities.base64Decode(String(a.content || '')), String(a.type || 'text/csv'), String(a.name || 'report.csv'));
       });

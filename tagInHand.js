@@ -46,6 +46,7 @@ FF.pages = FF.pages || {};
   .tih-tpl{display:grid;gap:6px;padding:10px;border:1px dashed #a5b4fc;border-radius:12px}.tih-tpl b{color:#4338ca}
   .tih-set textarea{padding:7px 10px;border:1px solid var(--line,#cbd5e1);border-radius:8px;background:var(--card,#fff);color:inherit;font-size:12.5px;font-weight:400;font-family:inherit;width:100%;box-sizing:border-box}
   .tih-chips{display:inline-flex;gap:4px;flex-wrap:wrap}.tih-chip{border:1px solid #c7d2fe;background:var(--card,#fff);color:#4338ca;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer}.tih-chip.on{background:linear-gradient(120deg,#4f46e5,#db2777);color:#fff;border-color:transparent}
+  .tih-banner{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;margin:0 0 10px;padding:10px 14px;border-radius:12px;background:#fef3c7;border:1px solid #f59e0b;color:#78350f;font-weight:700;font-size:13px;white-space:pre-wrap}.tih-banner button{border:0;background:transparent;font-size:16px;cursor:pointer;color:inherit}
   .tih-note{font-size:12px;color:var(--muted,#64748b)}.tih-err{color:#b91c1c;font-weight:700;font-size:12.5px}
   .tih-empty{padding:30px;text-align:center;color:var(--muted,#64748b)}
   html[data-theme="dark"] .tih-ch,html[data-theme="dark"] .tih-rs,html[data-theme="dark"] .tih-src,html[data-theme="dark"] .tih-mb{filter:brightness(.92)}
@@ -97,8 +98,9 @@ FF.pages = FF.pages || {};
     const c = st.data.cfg, t = c.tpl || {};
     const tp = (k, title) => `<div class="tih-tpl"><b>${title}</b><label>Subject<input type="text" data-c="tpl.${k}.subject" value="${esc((t[k] || {}).subject)}"></label><label>Mail body<textarea data-c="tpl.${k}.body" rows="7">${esc((t[k] || {}).body)}</textarea></label></div>`;
     return `<div class="tih-set"><b>⚙ Mail settings</b>
-      <label>📤 Kis mail se jaye (From) — jaise: Apna Payment &lt;ops@domain.com&gt;<input type="text" data-c="from" value="${esc(c.from)}" placeholder="khaali = Settings → Email wala From"></label>
-      <div class="tih-note">Dhyan: SMTP / Resend / Brevo me ye From use hota hai (Resend/Brevo me verified sender chahiye). "Google Apps Script" relay me mail hamesha usi Google account se jaati hai — sirf naam badalta hai.</div>
+      <label>↩️ Reply-To — jawab is mail par aaye (verification nahi chahiye)<input type="text" data-c="replyTo" value="${esc(c.replyTo)}" placeholder="tarun.kumawat@apnapayment.com"></label>
+      <div class="tih-note">⚠ Mail kaun si ID se <b>jaati</b> hai: <b>Google Apps Script</b> relay me hamesha usi Google account se (jisme script bana hai) — doosri ID se bhejna sambhav nahi, bina verification ke koi bhi kisi ke naam se mail nahi bhej sakta. Isliye Reply-To use karo: mail jayegi script wale account se, par "Reply" dabane par aapki mail par jawab aayega (Code.gs ek baar New version deploy karna hai). Poori alag ID se bhejni ho to Resend / Brevo / SMTP me us domain / mail ko verify karke yahan From daalo.</div>
+      <label>📤 From (sirf SMTP / Resend / Brevo me chalta hai) — jaise: Apna Payment &lt;ops@domain.com&gt;<input type="text" data-c="from" value="${esc(c.from)}" placeholder="khaali = Settings → Email wala From"></label>
       <label>Mail ke neeche sender naam ({sender})<input type="text" data-c="sender" value="${esc(c.sender)}"></label>
       <label>🟩 GV ki report is mail par jaye (comma se alag)<input type="text" data-c="gvTo" value="${esc(c.gvTo)}" placeholder="gv-team@example.com"></label>
       <label>CC — GV (optional)<input type="text" data-c="gvCc" value="${esc(c.gvCc)}"></label>
@@ -123,7 +125,7 @@ FF.pages = FF.pages || {};
       <input type="text" data-f="tomail" placeholder="custom email (optional, sirf ek ko bhejne par)" value="${esc(st.toMail)}" style="min-width:220px">
       <button class="tih-btn ok" data-act="send" data-send="go">👁 Preview → Bhejo</button>
       ${n ? `<button class="tih-btn pri" data-act="send" data-send="sel">Selected ${n} rows bhejo</button>` : ''}
-      <span class="tih-note">${st.data.cfg.gvTo ? '' : '<span class="tih-err">GV mail set nahi (⚙)</span>'} Subject me TL / direct agent ka naam; TL ke saare agents ek hi mail me agent-wise table ke saath + CSV.</span><span class="tih-note">${esc(st.msg && !st.setOpen ? st.msg : '')}</span></div>`;
+      <span class="tih-note">${st.data.cfg.gvTo ? '' : '<span class="tih-err">GV mail set nahi (⚙)</span>'} Subject me TL / direct agent ka naam; TL ke saare agents ek hi mail me agent-wise table ke saath + CSV.</span></div>`;
   }
   function table() {
     const d = st.data;
@@ -147,11 +149,12 @@ FF.pages = FF.pages || {};
     }).join('');
     return `<div class="tih-wrap"><table class="tih-t"><thead><tr><th>${adm ? '<input type="checkbox" data-selall>' : ''}</th>${th('day', 'Report date')}${th('ch', 'Channel')}${th('vrn', 'VRN')}${th('tagId', 'Tag ID')}${th('reason', 'Reason')}${th('issueDate', 'Issue date')}${th('agentName', 'Agent')}${th('tlName', 'TL name')}<th>Mail to (TL / agent)</th>${th('remark', 'Remark')}<th>Mail</th></tr></thead><tbody>${body}</tbody></table></div>${rows.length > 1500 ? `<div class="tih-note" style="padding:6px">Pehle 1500 dikha raha hoon (${rows.length}) — filter lagao.</div>` : ''}<div class="tih-note" style="padding:6px 2px">${rows.length} tags</div>`;
   }
+  const banner = () => (st.msg ? `<div class="tih-banner"><span>${esc(st.msg)}</span><button data-act="clrmsg">✕</button></div>` : '');
   function paint() {
     if (!st.root) return;
     const keep = st.root.querySelector('.tih-wrap');
     const sx = keep ? keep.scrollLeft : 0, sy = keep ? keep.scrollTop : 0;
-    st.root.innerHTML = `<div class="tih">${head()}${bar()}${settings()}${sendBar()}${table()}</div>`;
+    st.root.innerHTML = `<div class="tih">${head()}${bar()}${banner()}${settings()}${sendBar()}${table()}</div>`;
     const w = st.root.querySelector('.tih-wrap'); if (w) { w.scrollLeft = sx; w.scrollTop = sy; }
   }
   async function load(quiet) {
@@ -182,13 +185,13 @@ FF.pages = FF.pages || {};
     try {
       const pre = await FF.auth.api('/api/tih/send', 'POST', { ...body, dry: true });
       const lines = (pre.groups || []).map((g) => `✅ ${g.label} → ${g.to}\n     ${g.n} tags · ${g.agents} agents · "${g.subject}"`).concat((pre.skipped || []).map((s) => `⚠ ${s.label} (${s.n}) — ${s.why}`));
-      if (!(pre.groups || []).length) { st.msg = lines.join(' · ') || 'Bhejne layak kuch nahi.'; paint(); return; }
-      if (pre.quota !== null && pre.quota !== undefined && pre.quota < pre.groups.length) { st.msg = `⛔ Aaj ki Google mail quota sirf ${pre.quota} bachi hai, aur ${pre.groups.length} mail bhejni hain. Kal bhejo ya Settings → Email me Resend / Brevo / SMTP lagao.`; paint(); return; }
+      if (!(pre.groups || []).length) { st.msg = lines.join('\n') || 'Bhejne layak kuch nahi.'; btn.disabled = false; paint(); return; }
+      if (pre.quota !== null && pre.quota !== undefined && pre.quota < pre.groups.length) { st.msg = `⛔ Aaj ki Google mail quota sirf ${pre.quota} bachi hai, aur ${pre.groups.length} mail bhejni hain — abhi nahi bhej sakta. Quota ~12:30 PM IST par reset hoti hai, ya Settings → Features → Email me Resend / Brevo / SMTP lagao.\n\nPreview:\n${lines.join('\n')}`; btn.disabled = false; paint(); return; }
       if (!window.confirm(`${pre.groups.length} mail bhejni hain? (${pre.rows} tags${pre.quota != null ? ` · Google quota bachi: ${pre.quota}` : ''})\n\n${lines.join('\n')}`)) { btn.disabled = false; return; }
       const out = await FF.auth.api('/api/tih/send', 'POST', body);
       st.msg = (out.results || []).map((r) => `${r.ok ? '✅' : '❌'} ${r.label} (${r.n})${r.ok ? '' : ' ' + (r.error || '')}`).join(' · ') + ((out.skipped || []).length ? ` · ⚠ ${(out.skipped || []).length} skip` : '');
       st.sel.clear(); await load();
-    } catch (e) { st.msg = String((e && e.message) || e); paint(); }
+    } catch (e) { st.msg = '❌ ' + String((e && e.message) || e); paint(); }
     btn.disabled = false;
   }
   async function saveSet() {
@@ -208,6 +211,7 @@ FF.pages = FF.pages || {};
       const act = a.dataset.act;
       if (act === 'refresh') refresh();
       else if (act === 'csv') csv();
+      else if (act === 'clrmsg') { st.msg = ''; paint(); }
       else if (act === 'set') { st.setOpen = !st.setOpen; st.msg = ''; paint(); }
       else if (act === 'saveset') saveSet();
       else if (act === 'gvretry') refresh({ gvRetry: true });

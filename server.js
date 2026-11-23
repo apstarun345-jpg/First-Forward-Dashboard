@@ -9153,7 +9153,7 @@ async function handleApi(req, res, url) {
     }
     if (p === '/api/tih/cfg' && method === 'POST') {
       const body = await readBody(req);
-      for (const f of ['gvTo', 'gvCc', 'ffCc']) { const bad = tihInvalidEmails(body[f]); if (bad.length) throw new HttpError(400, `Invalid email: ${bad[0]}`); }
+      for (const f of ['gvTo', 'gvCc', 'ffCc', 'replyTo']) { const bad = tihInvalidEmails(body[f]); if (bad.length) throw new HttpError(400, `Invalid email: ${bad[0]}`); }
       db.settings.tih = normalizeTihCfg({ ...(db.settings.tih || {}), ...body });
       await persist('settings');
       return sendJson(res, 200, { ok: true, cfg: db.settings.tih });

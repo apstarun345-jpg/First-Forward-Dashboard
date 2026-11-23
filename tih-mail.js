@@ -16,7 +16,7 @@ export const DEFAULT_TPL = {
   tl: { subject: 'Tag In Hand · TL {name} · {dates} · {count} tags ({agents} agents)', body: 'Dear {name},\n\nBank ki Tag In Hand report ({dates}) me aapke {agents} agents ke total {count} tag hotlist hue hain.\n\nKripya apne agents ke through customer se sampark karke tag windshield par lagwayein aur IDFC CRM Portal par HTBO category me KYV images ke saath whitelisting request daalein.\n\n{table}\n\nThanks,\n{sender}' },
   gv: { subject: 'Tag In Hand · GV · {dates} · {count} tags ({agents} agents)', body: 'Hi Team,\n\nGV ki Tag In Hand report ({dates}): {agents} agents ke {count} tag hotlist hue hain. Agent-wise detail neeche aur CSV me hai.\n\n{table}\n\nThanks,\n{sender}' }
 };
-export const DEFAULT_TIH_CFG = { enabled: true, months: 3, gvTo: '', gvCc: '', ffCc: '', from: '', sender: 'Apna Payment Team', tpl: DEFAULT_TPL };
+export const DEFAULT_TIH_CFG = { enabled: true, months: 3, gvTo: '', gvCc: '', ffCc: '', from: '', sender: 'Apna Payment Team', replyTo: '', tpl: DEFAULT_TPL };
 
 export function normalizeCfg(raw) {
   const c = raw && typeof raw === 'object' ? raw : {};
@@ -29,6 +29,7 @@ export function normalizeCfg(raw) {
     tpl[k] = { subject: String(x.subject || '').trim().slice(0, 200) || DEFAULT_TPL[k].subject, body: String(x.body || '').trim().slice(0, 4000) || DEFAULT_TPL[k].body };
   }
   return { enabled: c.enabled !== false && c.enabled !== 'false', months: m >= 1 && m <= 12 ? m : 3, gvTo: mails(c.gvTo), gvCc: mails(c.gvCc), ffCc: mails(c.ffCc),
+    replyTo: String(c.replyTo || '').replace(/[\r\n,;\s]/g, '').slice(0, 120),
     from: String(c.from || '').replace(/[\r\n]/g, ' ').trim().slice(0, 160), sender: String(c.sender || '').replace(/[\r\n]/g, ' ').trim().slice(0, 80) || 'Apna Payment Team', tpl };
 }
 export const invalidEmails = (list) => String(list || '').split(/[,;\n]/).map((x) => x.trim()).filter(Boolean).filter((x) => !/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(x));
