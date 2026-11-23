@@ -18184,6 +18184,8 @@ async function start() {
     const warmStockAge = process.env.STOCK_AGE_WARM ? process.env.STOCK_AGE_WARM !== '0' : !!process.env.RENDER;
     // 📦 v3.125.102 — pehle snapshot (seconds); na mile tab 45 s baad poora scan
     const snapP = stockSnapLoad();
+    // v3.125.443 — snapshot se index aate hi lookup index (barcode scan / checker) bhi garam: pehla scan 10 s nahi lagata
+    Promise.resolve(snapP).then((ok) => { if (ok) setTimeout(() => { try { const st = mappingStock.status(); if (!st.ready && !st.building) mappingStock.ensure({ fresh: false }).catch(() => {}); } catch { /* optional */ } }, 4000).unref?.(); }).catch(() => {});
     if (warmStockAge) setTimeout(() => { Promise.resolve(snapP).then((ok) => { if (!ok) stockAgeIndex(false).catch((err) => console.warn('stock ageing warm-up:', err.message)); }); }, 45e3).unref();   // pehle user ke Home loads (EIR/StockDataa) ke baad
     // 🔗 FASTag Mapping ka StockDataa lookup index bhi pehle se garam rakho — pehla Quick Map instant ho.
     // v3.72: boot ke 25 s ke bajaye 6 s baad shuru, aur fail (jaise Google rate limit) hone par
