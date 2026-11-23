@@ -4888,7 +4888,7 @@ function complaintsLookupAgent({ agentId, agentName }) {
   }
   const id = idNorm(agentId);
   const hit = id ? complaintsAgentIdx.byId.get(id) : (complaintsAgentIdx.byName.get(plNormName(agentName)) || null);
-  return hit ? { found: true, tlName: hit.tlName || '', tlId: hit.tlId || '' } : null;
+  return hit ? { found: true, tlName: hit.tlName || '', tlId: hit.tlId || '', newId: hit.newId || '', id: hit.id || '', name: hit.name || '' } : null;
 }
 /** 🔎 Complaint ke Tag ID / VRN se GV Master me asli agent (ID + naam) + TL nikalo. Bank mail me agent APNA PAYMENT (master ID) hota hai. */
 async function complaintsGvIssuers(items) {
@@ -4970,6 +4970,55 @@ const complaintsSvc = createComplaintsService({
 
 
 // 🏷️ Tag In Hand — "Tag In Hand Dated DD-MM-YYYY-AN01-Apna Payment" mails ki (password-protected .xls) attachments → month-wise table. tih-mail.js
+const tihBookState = { at: 0, book: null, promise: null, err: '' };
+/** TL / agent ki mail Google sheet se: TL_Email_Pivot (TL ID · TL Name · Email id) + Agent master (Sheet4) ka "Email id" column. 10 min cache. */
+async function tihLoadBook(force) {
+  if (!force && tihBookState.book && Date.now() - tihBookState.at < 10 * 60e3) return tihBookState.book;
+  if (tihBookState.promise) return tihBookState.promise;
+  tihBookState.promise = (async () => {
+    const ar = (db.settings || {}).agentRegistry || {};
+    const sid = String(ar.sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
+    if (!sid) throw new Error('Agent master sheet link set nahi');
+    const csv = async (gid) => {
+      const out = await fetchUpstream(`${GVIZ_BASE}/spreadsheets/d/${sid}/export?format=csv&gid=${encodeURIComponent(String(gid))}`);
+      if (out.status < 200 || out.status >= 300 || /^\s*<(!doctype|html)/i.test(out.body)) throw new Error(`CSV HTTP ${out.status}`);
+      return parseCsvText(out.body);
+    };
+    const nh = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const idn = (v) => String(v || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const nm = (v) => String(v || '').toUpperCase().replace(/\s+/g, ' ').trim();
+    const okMail = (v) => (/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(String(v || '').trim()) ? String(v).trim().toLowerCase() : '');
+    const tlById = new Map(), tlByName = new Map(), agentById = new Map();
+    const errs = [];
+    try {
+      const t = await csv(ar.tlMailGid || '2094506553');
+      const h = (t[0] || []).map(nh), ix = (k) => h.indexOf(k);
+      const cA = ix('agentid'), cT = ix('tlname'), cE = ix('emailid'), cI = ix('tlid');
+      for (const r of t.slice(1)) {
+        const e = okMail(r[cE]); if (!e) continue;
+        if (cI >= 0 && idn(r[cI])) tlById.set(idn(r[cI]), e);
+        if (cT >= 0 && nm(r[cT])) tlByName.set(nm(r[cT]), e);
+        if (cA >= 0 && idn(r[cA])) agentById.set(idn(r[cA]), e);
+      }
+    } catch (err) { errs.push(`TL_Email_Pivot: ${String((err && err.message) || err).slice(0, 80)}`); }
+    try {
+      const t = await csv(ar.gid || '917852070');
+      const h = (t[0] || []).map(nh), cE = h.indexOf('emailid');
+      const cNew = colIndex(ar.idCol || 'A'), cOld = colIndex(ar.legacyCol || 'B');
+      if (cE >= 0) for (const r of t.slice(1)) { const e = okMail(r[cE]); if (!e) continue; for (const c of [cNew, cOld]) { const k = idn(r[c]); if (k && !agentById.has(k)) agentById.set(k, e); } }
+    } catch (err) { errs.push(`Sheet4: ${String((err && err.message) || err).slice(0, 80)}`); }
+    tihBookState.err = errs.join(' · ');
+    tihBookState.book = {
+      tlMail: ({ tlId, tlName }) => tlById.get(idn(tlId)) || tlByName.get(nm(tlName)) || agentById.get(idn(tlId)) || '',
+      agentMail: ({ agentId, newId, id }) => agentById.get(idn(newId)) || agentById.get(idn(id)) || agentById.get(idn(agentId)) || '',
+      size: tlById.size + tlByName.size + agentById.size
+    };
+    tihBookState.at = Date.now();
+    return tihBookState.book;
+  })().finally(() => { tihBookState.promise = null; });
+  tihBookState.promise.catch(() => {});
+  return tihBookState.promise;
+}
 const TIH_TAB = 'CACHE_TIH';
 let tihXlsMod = null;
 const tihSvc = createTihService({
@@ -4978,6 +5027,7 @@ const tihSvc = createTihService({
   save: (obj, meta) => durSave(TIH_TAB, 'tih', obj, meta),
   lookupGv: (items) => complaintsGvIssuers(items),
   lookupTl: complaintsLookupAgent,
+  getBook: () => tihBookState.book,
   readXls: async (buf, pws) => { tihXlsMod = tihXlsMod || await import('./vendor/tih-xls.mjs'); return tihXlsMod.readEncryptedXls(buf, pws); },
   getCfg: () => (db.settings || {}).tih,
   log: (m) => console.log(m)
@@ -9076,13 +9126,16 @@ async function handleApi(req, res, url) {
     if (p === '/api/tih' && method === 'GET') {
       loadRegistryFull(false).catch(() => {});
       await Promise.race([loadRegistryFull(false).catch(() => null), new Promise((r) => setTimeout(r, 3000))]);
+      await Promise.race([tihLoadBook(false).catch(() => null), new Promise((r) => setTimeout(r, 6000))]);
       const v = await tihSvc.view();
-      if (!admin) v.cfg = { ...v.cfg, gvTo: '', gvCc: '', ffCc: '' };
+      v.meta.mailBook = tihBookState.err || '';
+      if (!admin) v.cfg = { months: v.cfg.months };
       return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, admin, ...v }), { 'Cache-Control': 'no-store' });
     }
     if (p === '/api/tih/refresh' && method === 'POST') {
       const body = await readBody(req);
       if (body.gvRetry && admin) await tihSvc.resetGvMisses();
+      tihLoadBook(true).catch(() => {});
       const r = await Promise.race([tihSvc.sync({ force: true, max: 25 }), new Promise((x) => setTimeout(() => x({ slow: true }), 50000))]);
       return sendJson(res, 200, { ok: true, result: r }, { 'Cache-Control': 'no-store' });
     }
@@ -9095,7 +9148,7 @@ async function handleApi(req, res, url) {
     if (p === '/api/tih/tlmail' && method === 'POST') {
       const body = await readBody(req);
       const bad = tihInvalidEmails(body.email); if (bad.length) throw new HttpError(400, `Invalid email: ${bad[0]}`);
-      const ok = await tihSvc.setTlMail(String(body.tl || ''), body.email);
+      const ok = await tihSvc.setTlMail(String(body.ent || body.tl || ''), body.email);
       return sendJson(res, 200, { ok });
     }
     if (p === '/api/tih/cfg' && method === 'POST') {
@@ -9107,22 +9160,28 @@ async function handleApi(req, res, url) {
     }
     if (p === '/api/tih/send' && method === 'POST') {
       const body = await readBody(req);
-      const day = String(body.day || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new HttpError(400, 'Date chuno.');
-      const ch = ['ff', 'gv', 'all'].includes(body.ch) ? body.ch : 'all';
+      const dk = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+      const days = Array.isArray(body.days) ? body.days.map(String).filter(dk) : (dk(body.day) ? [String(body.day)] : []);
+      const month = /^\d{4}-\d{2}$/.test(String(body.month || '')) ? String(body.month) : '';
+      const mode = ['all', 'gv', 'ff', 'tl', 'agent'].includes(body.mode) ? body.mode : 'all';
       const keys = Array.isArray(body.keys) ? new Set(body.keys.map(String)) : null;
+      const to = String(body.to || '').trim();
+      if (to) { const bad = tihInvalidEmails(to); if (bad.length || /[,;]/.test(to)) throw new HttpError(400, 'Custom email sahi nahi.'); }
+      if (!days.length && !month && !keys) throw new HttpError(400, 'Date chuno.');
       const cfg = normalizeTihCfg((db.settings || {}).tih);
-      await Promise.race([loadRegistryFull(false).catch(() => null), new Promise((r) => setTimeout(r, 3000))]);
+      await Promise.race([Promise.all([loadRegistryFull(false).catch(() => null), tihLoadBook(false).catch(() => null)]), new Promise((r) => setTimeout(r, 6000))]);
       const v = await tihSvc.view();
-      const rows = v.rows.filter((r) => r.day === day && (!keys || keys.has(r.k)));
-      const plan = tihPlanSend({ rows, ch, cfg });
-      if (body.dry) return sendJson(res, 200, { ok: true, dry: true, groups: plan.groups.map((g) => ({ label: g.label, to: g.to, n: g.rows.length })), skipped: plan.skipped });
+      const rows = v.rows.filter((r) => (keys ? keys.has(r.k) : days.length ? days.includes(r.day) : (r.day || '').startsWith(month)));
+      const plan = tihPlanSend({ rows, mode, target: String(body.target || ''), cfg, to });
+      if (body.dry) return sendJson(res, 200, { ok: true, dry: true, days: plan.days, rows: rows.length, groups: plan.groups.map((g) => ({ label: g.label, to: g.to, n: g.rows.length, agents: new Set(g.rows.map((r) => r.agentId || r.agentName)).size, subject: tihBuildMail({ kind: g.kind, name: g.name, days: g.days, rows: g.rows, cfg }).subject })), skipped: plan.skipped });
       const base = { ...(db.settings.email || {}) };
+      if (cfg.from) base.from = cfg.from;
       if (!resolveProviders({ ...base, to: 'x@x.x' }).length) throw new HttpError(400, 'Email provider configure nahi — Settings → Features → Email.');
       const results = [];
       for (const g of plan.groups) {
-        const m = tihBuildMail({ day, label: g.label, rows: g.rows });
+        const m = tihBuildMail({ kind: g.kind, name: g.name, days: g.days, rows: g.rows, cfg });
         try {
-          await sendMail({ ...base, to: [g.to, g.cc].filter(Boolean).join(', ') }, m.subject, m.text, { html: m.html, attachments: [{ name: m.fileName, type: 'text/csv', content: Buffer.from(m.csv, 'utf8').toString('base64'), base64: true }] });
+          await sendMail({ ...base, to: [g.to, g.cc].filter(Boolean).join(', ') }, m.subject, m.text, { html: m.html, attachments: [{ name: m.fileName, type: 'text/csv', content: Buffer.from('﻿' + m.csv, 'utf8').toString('base64'), base64: true }] });
           await tihSvc.markSent(g.rows.map((r) => r.k), g.to, user.username);
           results.push({ label: g.label, to: g.to, n: g.rows.length, ok: true });
         } catch (err) { results.push({ label: g.label, to: g.to, n: g.rows.length, ok: false, error: String((err && err.message) || err).slice(0, 160) }); }

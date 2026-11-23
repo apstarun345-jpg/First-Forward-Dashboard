@@ -11,13 +11,25 @@ export const TIH_SUBJECT_RE = /tag\s*in\s*hand\s*dated/i;
 const pad = (n) => String(n).padStart(2, '0');
 const istDay = (ms) => new Date(ms + 5.5 * 3600e3).toISOString().slice(0, 10);
 
-export const DEFAULT_TIH_CFG = { enabled: true, months: 3, gvTo: '', gvCc: '', ffCc: '' };
+export const DEFAULT_TPL = {
+  agent: { subject: 'Tag In Hand · Agent {name} · {dates} · {count} tags', body: 'Dear {name},\n\nBank ki Tag In Hand report ({dates}) ke hisaab se aapke {count} tag hotlist hue hain (tag hath me / dusri gaadi par use ho raha hai).\n\nKripya customer se sampark karke tag vehicle ki windshield par lagwayein aur IDFC CRM Portal par HTBO category me KYV images ke saath whitelisting request daalein.\n\n{table}\n\nThanks,\n{sender}' },
+  tl: { subject: 'Tag In Hand · TL {name} · {dates} · {count} tags ({agents} agents)', body: 'Dear {name},\n\nBank ki Tag In Hand report ({dates}) me aapke {agents} agents ke total {count} tag hotlist hue hain.\n\nKripya apne agents ke through customer se sampark karke tag windshield par lagwayein aur IDFC CRM Portal par HTBO category me KYV images ke saath whitelisting request daalein.\n\n{table}\n\nThanks,\n{sender}' },
+  gv: { subject: 'Tag In Hand · GV · {dates} · {count} tags ({agents} agents)', body: 'Hi Team,\n\nGV ki Tag In Hand report ({dates}): {agents} agents ke {count} tag hotlist hue hain. Agent-wise detail neeche aur CSV me hai.\n\n{table}\n\nThanks,\n{sender}' }
+};
+export const DEFAULT_TIH_CFG = { enabled: true, months: 3, gvTo: '', gvCc: '', ffCc: '', from: '', sender: 'Apna Payment Team', tpl: DEFAULT_TPL };
 
 export function normalizeCfg(raw) {
   const c = raw && typeof raw === 'object' ? raw : {};
   const m = Math.round(Number(c.months));
   const mails = (v) => String(v || '').split(/[,;\n]/).map((x) => x.trim()).filter(Boolean).slice(0, 10).join(', ');
-  return { enabled: c.enabled !== false && c.enabled !== 'false', months: m >= 1 && m <= 12 ? m : 3, gvTo: mails(c.gvTo), gvCc: mails(c.gvCc), ffCc: mails(c.ffCc) };
+  const t = c.tpl && typeof c.tpl === 'object' ? c.tpl : {};
+  const tpl = {};
+  for (const k of ['agent', 'tl', 'gv']) {
+    const x = t[k] && typeof t[k] === 'object' ? t[k] : {};
+    tpl[k] = { subject: String(x.subject || '').trim().slice(0, 200) || DEFAULT_TPL[k].subject, body: String(x.body || '').trim().slice(0, 4000) || DEFAULT_TPL[k].body };
+  }
+  return { enabled: c.enabled !== false && c.enabled !== 'false', months: m >= 1 && m <= 12 ? m : 3, gvTo: mails(c.gvTo), gvCc: mails(c.gvCc), ffCc: mails(c.ffCc),
+    from: String(c.from || '').replace(/[\r\n]/g, ' ').trim().slice(0, 160), sender: String(c.sender || '').replace(/[\r\n]/g, ' ').trim().slice(0, 80) || 'Apna Payment Team', tpl };
 }
 export const invalidEmails = (list) => String(list || '').split(/[,;\n]/).map((x) => x.trim()).filter(Boolean).filter((x) => !/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(x));
 
@@ -115,8 +127,9 @@ export function parseCsv(text) {
   return rows;
 }
 
-// ---------------------------------------------------------------- mail banana (date-wise bulk)
+// ---------------------------------------------------------------- mail banana (date-wise / multi-date bulk)
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const normTl = (v) => String(v || '').toUpperCase().replace(/\s+/g, ' ').trim();
 export const dmy = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? `${iso.slice(8)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}` : iso || '');
 export const csvCell = (v) => { const s = String(v == null ? '' : v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 export function csvOf(rows) {
@@ -125,43 +138,95 @@ export function csvOf(rows) {
   for (const r of rows) lines.push([dmy(r.day), String(r.ch || '').toUpperCase(), r.vrn, r.tagId, r.reason, dmy(r.issueDate), r.agentId, r.agentName, r.tlName, r.remark].map(csvCell).join(','));
   return lines.join('\r\n');
 }
-export function buildMail({ day, label, rows }) {
-  const n = rows.length;
-  const subject = `Tag In Hand · ${dmy(day)} · ${label} · ${n} tag${n === 1 ? '' : 's'}`;
-  const text = [`Tag In Hand report — ${dmy(day)} (${label})`, `Total: ${n} tags`, '',
-    ...rows.map((r, i) => `${i + 1}. ${r.vrn || '-'} | ${r.tagId} | ${r.reason || '-'} | ${r.agentName || r.agentId || '-'}${r.tlName ? ` | TL ${r.tlName}` : ''}${r.remark ? ` | ${r.remark}` : ''}`), '',
-    'Kripya in tags ke customer se sampark karke tag windshield par lagwayein. Details attached CSV me bhi hain.'].join('\n');
+export function datesLabel(days) {
+  const d = [...new Set(days || [])].filter(Boolean).sort();
+  if (!d.length) return '';
+  if (d.length === 1) return dmy(d[0]);
+  return `${dmy(d[0])} → ${dmy(d[d.length - 1])} (${d.length} dates)`;
+}
+export const agentKeyOf = (r) => String(r.agentId || r.agentName || '—');
+/** rows → agent-wise groups [{key, name, id, rows}] (zyada tags wale pehle). */
+export function byAgent(rows) {
+  const m = new Map();
+  for (const r of rows) { const k = agentKeyOf(r); if (!m.has(k)) m.set(k, { key: k, name: r.agentName || r.agentId || 'Agent ?', id: r.agentId || '', rows: [] }); m.get(k).rows.push(r); }
+  return [...m.values()].sort((a, b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name));
+}
+const fillTpl = (tpl, vars) => String(tpl || '').replace(/\{(\w+)\}/g, (w, k) => (k in vars ? String(vars[k]) : w));
+function tableText(groups) {
+  const out = ['Agent-wise summary:'];
+  groups.forEach((g, i) => out.push(`${i + 1}. ${g.name}${g.id ? ` (${g.id})` : ''} — ${g.rows.length} tags`));
+  out.push('');
+  for (const g of groups) {
+    out.push(`▶ ${g.name}${g.id ? ` (${g.id})` : ''} — ${g.rows.length} tags`);
+    g.rows.forEach((r, i) => out.push(`   ${i + 1}. ${dmy(r.day)} | ${r.vrn || '-'} | ${r.tagId} | ${r.reason || '-'} | issue ${dmy(r.issueDate) || '-'}${r.remark ? ` | ${r.remark}` : ''}`));
+    out.push('');
+  }
+  return out.join('\n');
+}
+function tableHtml(groups, showTotal) {
   const th = 'style="background:#4f46e5;color:#fff;padding:7px 9px;text-align:left;font-size:12px;white-space:nowrap"';
   const td = (i) => `style="padding:6px 9px;font-size:12px;border-bottom:1px solid #e2e8f0;background:${i % 2 ? '#f8fafc' : '#fff'}"`;
-  const head = ['#', 'VRN', 'Tag ID', 'Reason', 'Issue date', 'Agent', 'TL', 'Remark'].map((h) => `<th ${th}>${h}</th>`).join('');
-  const body = rows.map((r, i) => `<tr><td ${td(i)}>${i + 1}</td><td ${td(i)}><b>${esc(r.vrn)}</b></td><td ${td(i)} ><code>${esc(r.tagId)}</code></td><td ${td(i)}>${esc(r.reason)}</td><td ${td(i)}>${esc(dmy(r.issueDate))}</td><td ${td(i)}>${esc(r.agentName || r.agentId)}${r.agentId && r.agentName ? `<br><small style="color:#64748b">${esc(r.agentId)}</small>` : ''}</td><td ${td(i)}>${esc(r.tlName)}</td><td ${td(i)}>${esc(r.remark)}</td></tr>`).join('');
-  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;color:#0f172a"><h3 style="margin:0 0 4px">🏷️ Tag In Hand — ${esc(dmy(day))}</h3><p style="margin:0 0 10px;color:#475569">${esc(label)} · <b>${n}</b> tags hotlisted (tag hath me / dusri gaadi par). Customer se sampark karke tag windshield par lagwayein.</p><table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
-  return { subject, text, html, csv: csvOf(rows), fileName: `TagInHand_${day}_${String(label).replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)}.csv` };
+  const sum = `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:8px 0 14px;min-width:320px"><thead><tr><th ${th}>#</th><th ${th}>Agent</th><th ${th}>ID</th><th ${th} align="right">Tags</th></tr></thead><tbody>${groups.map((g, i) => `<tr><td ${td(i)}>${i + 1}</td><td ${td(i)}><b>${esc(g.name)}</b></td><td ${td(i)}>${esc(g.id)}</td><td ${td(i)} align="right"><b>${g.rows.length}</b></td></tr>`).join('')}${showTotal ? `<tr><td colspan="3" style="padding:7px 9px;font-weight:800;background:#e0e7ff">Total</td><td align="right" style="padding:7px 9px;font-weight:800;background:#e0e7ff">${groups.reduce((n, g) => n + g.rows.length, 0)}</td></tr>` : ''}</tbody></table>`;
+  const head = ['#', 'Date', 'VRN', 'Tag ID', 'Reason', 'Issue date', 'Remark'].map((h) => `<th ${th}>${h}</th>`).join('');
+  const det = groups.map((g) => `<div style="margin:12px 0 4px;padding:6px 10px;border-radius:8px;background:linear-gradient(90deg,#ede9fe,#fce7f3);font-weight:800;color:#4338ca">👤 ${esc(g.name)}${g.id ? ` <span style="font-weight:600;color:#64748b">(${esc(g.id)})</span>` : ''} — ${g.rows.length} tags</div><table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%"><thead><tr>${head}</tr></thead><tbody>${g.rows.map((r, i) => `<tr><td ${td(i)}>${i + 1}</td><td ${td(i)}>${esc(dmy(r.day))}</td><td ${td(i)}><b>${esc(r.vrn)}</b></td><td ${td(i)}><code>${esc(r.tagId)}</code></td><td ${td(i)}>${esc(r.reason)}</td><td ${td(i)}>${esc(dmy(r.issueDate))}</td><td ${td(i)}>${esc(r.remark)}</td></tr>`).join('')}</tbody></table>`).join('');
+  return `<div style="font-weight:800;margin-top:6px">Agent-wise summary</div>${sum}${det}`;
+}
+/** kind: 'agent' | 'tl' | 'gv'. name = agent / TL ka naam. tpl = cfg.tpl[kind]. */
+export function buildMail({ kind = 'tl', name = '', days = [], rows, cfg }) {
+  const c = normalizeCfg(cfg);
+  const tpl = c.tpl[kind] || c.tpl.tl;
+  const groups = byAgent(rows);
+  const vars = { name: name || (kind === 'gv' ? 'GV' : ''), kind: kind === 'agent' ? 'Agent' : kind === 'tl' ? 'TL' : 'GV', dates: datesLabel(days), count: rows.length, agents: groups.length, sender: c.sender };
+  const subject = fillTpl(tpl.subject, vars).replace(/\s+/g, ' ').trim();
+  const bodyText = fillTpl(tpl.body, { ...vars, table: '\u0000T\u0000' });
+  const textFinal = tpl.body.includes('{table}') ? bodyText.replace('\u0000T\u0000', tableText(groups)) : `${bodyText}\n\n${tableText(groups)}`;
+  const parts = bodyText.split('\u0000T\u0000');
+  const p2h = (t) => esc(t).replace(/\n/g, '<br>');
+  const tbl = tableHtml(groups, groups.length > 1);
+  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;color:#0f172a;font-size:13px">${p2h(parts[0])}${parts.length > 1 ? `${tbl}${p2h(parts.slice(1).join(''))}` : `<br>${tbl}`}</div>`;
+  const who = String(name || kind).replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40);
+  const dd = [...new Set(days)].sort();
+  return { subject, text: textFinal, html, csv: csvOf(rows), fileName: `TagInHand_${kind}_${who}_${dd.length > 1 ? `${dd[0]}_to_${dd[dd.length - 1]}` : dd[0] || ''}.csv`, agents: groups.length };
 }
 
-/** Date + channel ke rows → bhejne ke groups. GV → gvTo (ek mail). FF → TL ki mail (TL-wise). Bina mail wale `skipped` me. */
-export function planSend({ rows, ch = 'all', cfg }) {
+/** Rows (view) → bhejne ke groups.
+ *  mode: all | gv | ff | tl | agent ; target = TL naam / agent key (mode tl/agent) ; to = ek hi group ho to custom email.
+ *  GV → gvTo (ek mail). FF: direct agent → us agent ko (subject me agent naam) · TL ke agents → TL ko ek mail (TL naam). */
+export function planSend({ rows, mode = 'all', target = '', cfg, to = '' }) {
   const groups = [], skipped = [];
-  const day = rows.length ? rows[0].day : '';
-  if (ch === 'gv' || ch === 'all') {
+  const days = [...new Set(rows.map((r) => r.day))].filter(Boolean).sort();
+  const c = normalizeCfg(cfg);
+  const wantGv = mode === 'all' || mode === 'gv';
+  const wantFf = mode === 'all' || mode === 'ff' || mode === 'tl' || mode === 'agent';
+  if (wantGv) {
     const gv = rows.filter((r) => r.ch === 'gv');
-    if (gv.length) { if (cfg.gvTo) groups.push({ key: 'gv', ch: 'gv', label: 'GV', to: cfg.gvTo, cc: cfg.gvCc, rows: gv }); else skipped.push({ label: 'GV', n: gv.length, why: 'GV mail set nahi (⚙ GV mail)' }); }
+    if (gv.length) { if (c.gvTo || to) groups.push({ key: 'gv', kind: 'gv', ch: 'gv', name: 'GV', label: 'GV', to: to || c.gvTo, cc: to ? '' : c.gvCc, rows: gv, days }); else skipped.push({ label: 'GV', n: gv.length, why: 'GV mail set nahi (⚙ Mail settings)' }); }
   }
-  if (ch === 'ff' || ch === 'all') {
+  if (wantFf) {
     const by = new Map();
-    for (const r of rows.filter((x) => x.ch === 'ff')) { const k = r.tlName || '—'; if (!by.has(k)) by.set(k, []); by.get(k).push(r); }
-    for (const [tl, list] of by) {
-      const to = (list.find((r) => r.tlMail) || {}).tlMail || '';
-      if (to) groups.push({ key: `ff:${tl}`, ch: 'ff', label: `FF · TL ${tl}`, to, cc: cfg.ffCc, rows: list });
-      else skipped.push({ label: `FF · TL ${tl}`, n: list.length, why: tl === '—' ? 'TL pata nahi' : 'TL mail set nahi' });
+    for (const r of rows.filter((x) => x.ch === 'ff')) {
+      const direct = !!r.direct;
+      const k = direct ? `a:${agentKeyOf(r)}` : `t:${normTl(r.tlName) || '—'}`;
+      if (mode === 'tl' && (direct || normTl(r.tlName) !== normTl(target))) continue;
+      if (mode === 'agent' && agentKeyOf(r) !== target) continue;
+      if (!by.has(k)) by.set(k, { direct, name: direct ? (r.agentName || r.agentId) : (r.tlName || ''), list: [] });
+      by.get(k).list.push(r);
+    }
+    for (const [k, g] of by) {
+      const mail = (g.list.find((r) => r.mailTo) || {}).mailTo || '';
+      const label = g.direct ? `Agent ${g.name}` : `TL ${g.name || '—'}`;
+      if (!g.direct && !g.name) { skipped.push({ label: 'FF · TL pata nahi', n: g.list.length, why: 'TL registry me nahi mila' }); continue; }
+      if (to || mail) groups.push({ key: k, kind: g.direct ? 'agent' : 'tl', ch: 'ff', name: g.name, label, to: to || mail, cc: to ? '' : c.ffCc, rows: g.list, days });
+      else skipped.push({ label, n: g.list.length, why: g.direct ? 'Agent ki mail nahi (sheet / table me daalo)' : 'TL mail nahi (sheet / table me daalo)' });
     }
   }
-  return { day, groups, skipped };
+  if (to && groups.length > 1) return { days, groups: [], skipped: [{ label: 'Custom mail', n: groups.length, why: 'Custom email sirf ek TL / agent / GV ke liye — pehle ek chuno' }] };
+  groups.sort((a, b) => (a.ch === b.ch ? a.label.localeCompare(b.label) : a.ch < b.ch ? 1 : -1));
+  return { days, groups, skipped };
 }
 
 // ---------------------------------------------------------------- service
-const normTl = (v) => String(v || '').toUpperCase().replace(/\s+/g, ' ').trim();
-export function createTihService({ getStore, load, save, lookupGv, lookupTl, readXls, getCfg, now = () => Date.now(), log = () => {} }) {
+export function createTihService({ getStore, load, save, lookupGv, lookupTl, getBook, readXls, getCfg, now = () => Date.now(), log = () => {} }) {
   let data = null;                    // { v, threads, rows, gv, remarks, tlMails, sent }
   const st = { at: 0, ok: 0, error: '', running: null, loaded: false, lastNew: 0, pending: 0, gvErr: '' };
   const fresh = () => ({ v: 1, threads: {}, rows: [], gv: {}, remarks: {}, tlMails: {}, sent: {} });
@@ -279,21 +344,33 @@ export function createTihService({ getStore, load, save, lookupGv, lookupTl, rea
     const cfg = normalizeCfg(getCfg ? getCfg() : null);
     const memo = new Map();
     const tlOf = (r) => { const k = `${r.agentId}|${r.agentName}`; if (!memo.has(k)) { let v = null; try { v = lookupTl ? lookupTl({ agentId: r.agentId, agentName: r.agentName }) : null; } catch { v = null; } memo.set(k, v || {}); } return memo.get(k); };
+    const book = getBook ? getBook() : null;
+    const idn = (v) => String(v || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const mailOk = (v) => (/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(String(v || '').trim()) ? String(v).trim() : '');
     const rows = data.rows.map((r) => {
       const ff = !!(r.agentId || r.agentName);
       const g = ff ? null : data.gv[r.tagId];
       const hit = g && !g.miss ? g : null;
       const tl = ff ? tlOf(r) : null;
       const tlName = ff ? (tl && tl.tlName) || '' : (hit && hit.tlName) || '';
+      const tlId = ff ? (tl && tl.tlId) || '' : (hit && hit.tlId) || '';
+      const agentId = ff ? r.agentId : (hit ? hit.id : ''), agentName = ff ? r.agentName : (hit ? hit.name : '');
+      // direct agent = TL ID uska apna ID, ya TL ka naam = agent ka naam, ya TL hi nahi
+      const direct = ff && (!tlName || (tl && ((tl.tlId && [tl.newId, tl.id, agentId].some((x) => idn(x) && idn(x) === idn(tl.tlId))) || normTl(tlName) === normTl(tl.name || agentName))));
+      const entKey = direct ? `A:${idn(agentId) || normTl(agentName)}` : `T:${normTl(tlName)}`;
+      const manual = ff ? (data.tlMails[entKey] || (!direct ? data.tlMails[normTl(tlName)] : '') || '') : '';
+      let sheet = '';
+      if (ff && !manual && book) sheet = direct ? mailOk(book.agentMail && book.agentMail({ agentId, newId: tl && tl.newId, id: tl && tl.id })) : mailOk(book.tlMail && book.tlMail({ tlId, tlName }));
       const rm = data.remarks[r.k], sent = data.sent[r.k];
       return { k: r.k, tid: r.tid, day: r.day, vrn: r.vrn, tagId: r.tagId, reason: r.reason, issueDate: r.issueDate, ch: ff ? 'ff' : 'gv',
-        agentId: ff ? r.agentId : (hit ? hit.id : ''), agentName: ff ? r.agentName : (hit ? hit.name : ''), src: ff ? 'mail' : (hit ? 'gv' : (g && g.miss ? 'miss' : 'wait')),
-        tlName, tlMail: tlName ? data.tlMails[normTl(tlName)] || '' : '', remark: rm ? rm.t : '', sentAt: sent ? sent.at : 0, sentTo: sent ? sent.to : '' };
+        agentId, agentName, src: ff ? 'mail' : (hit ? 'gv' : (g && g.miss ? 'miss' : 'wait')),
+        tlName, tlId, direct, ent: ff ? entKey : '', mailTo: manual || sheet, mailSrc: manual ? 'manual' : sheet ? 'sheet' : '',
+        remark: rm ? rm.t : '', sentAt: sent ? sent.at : 0, sentTo: sent ? sent.to : '' };
     });
     rows.sort((a, b) => (b.day || '').localeCompare(a.day || '') || (a.ch < b.ch ? -1 : 1) || (a.agentName || '').localeCompare(b.agentName || ''));
     const months = [...new Set(rows.map((r) => (r.day || '').slice(0, 7)).filter(Boolean))].sort().reverse();
     const threads = Object.values(data.threads).sort((a, b) => (b.day || '').localeCompare(a.day || '')).slice(0, 80);
-    return { rows, months, threads, cfg, tlMails: data.tlMails, meta: { at: st.at ? new Date(st.at).toISOString() : '', okAt: st.ok ? new Date(st.ok).toISOString() : '', running: !!st.running, error: st.error, gvErr: st.gvErr, pending: st.pending, mails: Object.keys(data.threads).length, loaded: st.loaded } };
+    return { rows, months, threads, cfg, meta: { at: st.at ? new Date(st.at).toISOString() : '', okAt: st.ok ? new Date(st.ok).toISOString() : '', running: !!st.running, error: st.error, gvErr: st.gvErr, pending: st.pending, mails: Object.keys(data.threads).length, loaded: st.loaded } };
   }
 
   async function setRemark(key, text, by) {
@@ -303,9 +380,11 @@ export function createTihService({ getStore, load, save, lookupGv, lookupTl, rea
     if (t) data.remarks[key] = { t, at: now(), by: by || '' }; else delete data.remarks[key];
     saveSoon(); return true;
   }
-  async function setTlMail(tl, email) {
+  async function setTlMail(ent, email) {
     await ensure();
-    const k = normTl(tl); if (!k) return false;
+    let k = String(ent || '').trim();
+    if (!/^[AT]:/.test(k)) k = `T:${normTl(k)}`; else k = `${k[0]}:${k.slice(2).toUpperCase().replace(/\s+/g, ' ').trim()}`;
+    if (k.length < 3) return false;
     const e = String(email || '').trim().slice(0, 200);
     if (e) data.tlMails[k] = e; else delete data.tlMails[k];
     saveSoon(); return true;
