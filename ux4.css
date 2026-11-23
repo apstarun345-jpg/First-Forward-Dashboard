@@ -1,0 +1,21 @@
+/* v3.125.453 — ux4: live ticker (admin) — robot ki khabrein + employee scans, topbar ke neeche chalti patti. */
+#ux4-tick { position: sticky; top: var(--ux4-top, 52px); z-index: 19; display: flex; align-items: center; height: 28px; overflow: hidden; font-size: 12px; font-weight: 600;
+  background: linear-gradient(90deg, #1e1b4b, #312e81 40%, #134e4a); color: #e0e7ff; border-bottom: 1px solid rgba(255, 255, 255, .12); }
+#ux4-tick .lv { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 100%; background: rgba(0, 0, 0, .28); font-weight: 800; letter-spacing: .5px; font-size: 11px; }
+#ux4-tick .lv i { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 0 rgba(34, 197, 94, .7); animation: ux4-pulse 1.6s infinite; }
+@keyframes ux4-pulse { 70% { box-shadow: 0 0 0 7px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
+#ux4-tick .vp { flex: 1; overflow: hidden; height: 100%; display: flex; align-items: center; -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+#ux4-tick .tr { display: inline-flex; white-space: nowrap; animation: ux4-run var(--dur, 60s) linear infinite; will-change: transform; }
+#ux4-tick:hover .tr { animation-play-state: paused; }
+#ux4-tick .it { padding: 0 26px 0 0; display: inline-flex; gap: 6px; align-items: center; }
+#ux4-tick .it.new { color: #fde68a; }
+#ux4-tick .it b { color: #fff; }
+#ux4-tick .it::after { content: "•"; margin-left: 26px; opacity: .4; }
+@keyframes ux4-run { to { transform: translateX(-50%); } }
+#ux4-tick .x { flex: 0 0 auto; cursor: pointer; border: 0; background: rgba(0, 0, 0, .25); color: #c7d2fe; height: 100%; padding: 0 12px; font-size: 13px; }
+#ux4-tick .x:hover { background: rgba(0, 0, 0, .45); color: #fff; }
+html.ff-no-anim #ux4-tick .tr { animation: none; }
+html.ff-no-anim #ux4-tick .vp { justify-content: center; }
+html.ff-no-anim #ux4-tick .it:not(.cur) { display: none; }
+@media (max-width: 700px) { #ux4-tick { height: 26px; font-size: 11px; } #ux4-tick .lv span { display: none; } }
+@media print { #ux4-tick { display: none !important; } }

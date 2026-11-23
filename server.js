@@ -12690,7 +12690,8 @@ async function handleApi(req, res, url) {
     if (!user || (user.role !== 'admin' && !(user.permissions || []).includes('barcodeChecker'))) throw new HttpError(403, 'Access nahi hai.');
     const all = scanLogStore();
     const nowMs = Date.now(), dayStart = Math.floor((nowMs + 19800e3) / 86400e3) * 86400e3 - 19800e3;   // IST din ki shuruaat
-    const rows = all.slice(-3000).reverse().map((r) => ({ code: r.code, name: r.name, at: r.at, dups: r.dups || 0, hits: (r.hits || []).slice(-10) }));
+    const lim = Math.min(3000, Math.max(1, Number(new URL(req.url, 'http://x').searchParams.get('limit')) || 3000));   // v3.125.453 — ticker sirf 12 rows maangta hai
+    const rows = all.slice(-lim).reverse().map((r) => ({ code: r.code, name: r.name, at: r.at, dups: r.dups || 0, hits: (r.hits || []).slice(-10) }));
     const stats = {};
     const st = (n) => stats[n] || (stats[n] = { total: 0, today: 0, last: '', m5: 0, h1: 0, dupTries: 0, first: '' });
     all.forEach((r) => {
