@@ -66,6 +66,7 @@ window.FF = window.FF || {};
     newIds: ['newIds'],
     multiCustomer: ['multiCustomer'],
     complaints: ['complaints'],
+    tagInHand: ['tagInHand'],
     tagIssued: ['tagIssued'],
     performance: [...PROFILE_DEPS, 'agentBoard', 'perfWatch', 'performance'],
     targets: ['targets'],

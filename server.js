@@ -30,6 +30,7 @@ import { createMappingJobs } from './mapping-job.js';
 import { createNpciEngine, cleanItem as npciCleanItem } from './npci-engine.js';
 import { rowToEntry as ledgerRow, buildLedgerIndex, dispatchFor, parseBarcode, LAYOUT_LETTERS, LAYOUTS } from './dispatch-ledger.js';
 import { createComplaintsService, normalizeCfg as normalizeComplaintsCfg, DEFAULT_COMPLAINTS_CFG, planMails as planComplaintMails, ruleMatches as complaintRuleMatches, MAIL_PLACEHOLDERS as MAIL_PLACEHOLDERS_LIST, buildMail as buildComplaintMail, invalidEmails as complaintsInvalidEmails } from './complaints-mail.js';
+import { createTihService, normalizeCfg as normalizeTihCfg, planSend as tihPlanSend, buildMail as tihBuildMail, invalidEmails as tihInvalidEmails } from './tih-mail.js';
 import { createStockAgeBuilder, summaryOf as stockAgeSummary, tagsFor as stockAgeTags, personalStock, personalClassStockByAgent, mapRows as stockMapRows, mapBucketOf as stockMapBucketOf, gvOnlySummary as stockGvOnlySummary, followupAgeByAgent, snapshotLine } from './stock-age.js';
 import { createIssuedStore, diffLeft, applyResolved, deriveTagId, digits as ibDigits } from './issuedBarcodes.js';
 import { loadFfDispatchRows, loadGvDispatchRows, isDirect as dispatchIsDirect, directLabel as dispatchDirectLabel } from './dispatch-report.js';
@@ -156,9 +157,9 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip'
 };
-const BLOCKED_FILES = new Set(['server.js', 'issuedBarcodes.js', 'address-import.js', 'pin-geo.json', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
+const BLOCKED_FILES = new Set(['server.js', 'issuedBarcodes.js', 'address-import.js', 'pin-geo.json', 'sheets-storage.js', 'apps-script-storage.js', 'mailer.js', 'complaints-mail.js', 'tih-mail.js', 'tih-xls.mjs', 'stock-age.js', 'dispatch-ledger.js', 'mapping-stock.js', 'npci-engine.js', 'DEPLOYMENT.md', 'SHEETS_STORAGE.md', 'STORAGE_SETUP.md', 'RECOVERY.md', 'package.json', 'package-lock.json', 'render.yaml', 'README.md', '.env']);
 const robotPushState = new Map(); // 🤖 robot push dedupe / rate (per admin)
-const BLOCKED_DIRS = new Set(['data', 'dev', 'node_modules', '.git', 'google-apps-script']);
+const BLOCKED_DIRS = new Set(['vendor', 'data', 'dev', 'node_modules', '.git', 'google-apps-script']);
 // /api/health ka version ab package.json se aata hai (pehle yahan hardcoded purana string tha).
 let APP_VERSION = '3.65.0';
 try { APP_VERSION = String(JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION); } catch { /* keep fallback */ }
@@ -176,6 +177,7 @@ export const PAGE_PERMISSIONS = [
   { key: 'masterSearch', label: 'Management · Master Search (GV + FF naam/ID → seedha poora profile)', group: 'Management' },
   { key: 'barcodeChecker', label: 'Management · Barcode Checker (range / multiple barcodes)', group: 'Management' },
   { key: 'complaints', label: 'Management · Agents Complaints Summary (bank POS complaint mails → status table)', group: 'Management' },
+  { key: 'tagInHand', label: 'Management · Tag In Hand (bank mail attachments → month table · GV lookup · bulk mail)', group: 'Management' },
   { key: 'newIds', label: 'Management · New IDs (EIR me hain par Agent master Sheet4 me nahi)', group: 'Management' },
   { key: 'bulkTagStatus', label: 'Management · Bulk Tag Status (VRN / Tag ID / Barcode → GV / FF / stock lookup)', group: 'Management' },
   { key: 'targets', label: 'Targets · agent-wise monthly targets', group: 'Pages' },
@@ -4966,6 +4968,20 @@ const complaintsSvc = createComplaintsService({
   log: (m) => console.log(m)
 });
 
+
+// 🏷️ Tag In Hand — "Tag In Hand Dated DD-MM-YYYY-AN01-Apna Payment" mails ki (password-protected .xls) attachments → month-wise table. tih-mail.js
+const TIH_TAB = 'CACHE_TIH';
+let tihXlsMod = null;
+const tihSvc = createTihService({
+  getStore: () => (complaintsSvc.getStore ? complaintsSvc.getStore() : null),
+  load: async () => { const r = await durLoad(TIH_TAB, 'tih'); return r ? r.obj : null; },
+  save: (obj, meta) => durSave(TIH_TAB, 'tih', obj, meta),
+  lookupGv: (items) => complaintsGvIssuers(items),
+  lookupTl: complaintsLookupAgent,
+  readXls: async (buf, pws) => { tihXlsMod = tihXlsMod || await import('./vendor/tih-xls.mjs'); return tihXlsMod.readEncryptedXls(buf, pws); },
+  getCfg: () => (db.settings || {}).tih,
+  log: (m) => console.log(m)
+});
 // 📧 Complaints mail alerts: nayi complaint / bank deduction turant, pending ka reminder har N ghante — rule (TL / agent / all) ke hisaab se.
 
 const complaintFilesMemo = new Map();   // threadId → { at, files } (ek complaint ki attachments kai rules ke liye dobara Gmail se nahi)
@@ -9050,6 +9066,69 @@ async function handleApi(req, res, url) {
     const mst = admin ? complaintsMailState() : null;
     const extra = admin ? { cfg: normalizeComplaintsCfg((db.settings || {}).complaints), mailLog: mst.log.slice(-200).reverse(), mailErr: complaintsMailRun.lastErr, placeholders: MAIL_PLACEHOLDERS_LIST } : {};
     return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, rows: complaintsSvc.rows({ from, to }), meta: complaintsSvc.meta(), ...extra }), { 'Cache-Control': 'no-store' });
+  }
+  // 🏷️ Tag In Hand (v3.125.457)
+  if (p.startsWith('/api/tih') && (p === '/api/tih' || p.startsWith('/api/tih/'))) {
+    if (!user) throw new HttpError(401, 'Login required');
+    const tihOk = user.role === 'admin' || (user.permissions || []).includes('tagInHand');
+    if (!tihOk) throw new HttpError(403, 'Tag In Hand access nahi hai.');
+    const admin = user.role === 'admin';
+    if (p === '/api/tih' && method === 'GET') {
+      loadRegistryFull(false).catch(() => {});
+      await Promise.race([loadRegistryFull(false).catch(() => null), new Promise((r) => setTimeout(r, 3000))]);
+      const v = await tihSvc.view();
+      if (!admin) v.cfg = { ...v.cfg, gvTo: '', gvCc: '', ffCc: '' };
+      return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, admin, ...v }), { 'Cache-Control': 'no-store' });
+    }
+    if (p === '/api/tih/refresh' && method === 'POST') {
+      const body = await readBody(req);
+      if (body.gvRetry && admin) await tihSvc.resetGvMisses();
+      const r = await Promise.race([tihSvc.sync({ force: true, max: 25 }), new Promise((x) => setTimeout(() => x({ slow: true }), 50000))]);
+      return sendJson(res, 200, { ok: true, result: r }, { 'Cache-Control': 'no-store' });
+    }
+    if (p === '/api/tih/remark' && method === 'POST') {
+      const body = await readBody(req);
+      const ok = await tihSvc.setRemark(String(body.key || ''), body.text, user.username);
+      return sendJson(res, 200, { ok });
+    }
+    if (!admin) throw new HttpError(403, 'Admin only.');
+    if (p === '/api/tih/tlmail' && method === 'POST') {
+      const body = await readBody(req);
+      const bad = tihInvalidEmails(body.email); if (bad.length) throw new HttpError(400, `Invalid email: ${bad[0]}`);
+      const ok = await tihSvc.setTlMail(String(body.tl || ''), body.email);
+      return sendJson(res, 200, { ok });
+    }
+    if (p === '/api/tih/cfg' && method === 'POST') {
+      const body = await readBody(req);
+      for (const f of ['gvTo', 'gvCc', 'ffCc']) { const bad = tihInvalidEmails(body[f]); if (bad.length) throw new HttpError(400, `Invalid email: ${bad[0]}`); }
+      db.settings.tih = normalizeTihCfg({ ...(db.settings.tih || {}), ...body });
+      await persist('settings');
+      return sendJson(res, 200, { ok: true, cfg: db.settings.tih });
+    }
+    if (p === '/api/tih/send' && method === 'POST') {
+      const body = await readBody(req);
+      const day = String(body.day || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new HttpError(400, 'Date chuno.');
+      const ch = ['ff', 'gv', 'all'].includes(body.ch) ? body.ch : 'all';
+      const keys = Array.isArray(body.keys) ? new Set(body.keys.map(String)) : null;
+      const cfg = normalizeTihCfg((db.settings || {}).tih);
+      await Promise.race([loadRegistryFull(false).catch(() => null), new Promise((r) => setTimeout(r, 3000))]);
+      const v = await tihSvc.view();
+      const rows = v.rows.filter((r) => r.day === day && (!keys || keys.has(r.k)));
+      const plan = tihPlanSend({ rows, ch, cfg });
+      if (body.dry) return sendJson(res, 200, { ok: true, dry: true, groups: plan.groups.map((g) => ({ label: g.label, to: g.to, n: g.rows.length })), skipped: plan.skipped });
+      const base = { ...(db.settings.email || {}) };
+      if (!resolveProviders({ ...base, to: 'x@x.x' }).length) throw new HttpError(400, 'Email provider configure nahi — Settings → Features → Email.');
+      const results = [];
+      for (const g of plan.groups) {
+        const m = tihBuildMail({ day, label: g.label, rows: g.rows });
+        try {
+          await sendMail({ ...base, to: [g.to, g.cc].filter(Boolean).join(', ') }, m.subject, m.text, { html: m.html, attachments: [{ name: m.fileName, type: 'text/csv', content: Buffer.from(m.csv, 'utf8').toString('base64'), base64: true }] });
+          await tihSvc.markSent(g.rows.map((r) => r.k), g.to, user.username);
+          results.push({ label: g.label, to: g.to, n: g.rows.length, ok: true });
+        } catch (err) { results.push({ label: g.label, to: g.to, n: g.rows.length, ok: false, error: String((err && err.message) || err).slice(0, 160) }); }
+      }
+      return sendJson(res, 200, { ok: results.length > 0 && results.every((r) => r.ok), results, skipped: plan.skipped }, { 'Cache-Control': 'no-store' });
+    }
   }
   // 📨 v3.125.456 — Home · Smart Notification Center: sirf cache se (Gmail nahi chhoota) — nayi complaints, bank deduction, GV mail status
   if (p === '/api/complaints/live' && method === 'GET') {
@@ -18169,6 +18248,8 @@ async function start() {
     // 📨 Complaints: har 30s check — settings ka refreshMin poora hote hi Gmail se current month refresh
     setTimeout(() => { loadRegistryFull(false).catch(() => {}); complaintsSvc.tick(); }, 20e3).unref();
     setInterval(() => { complaintsSvc.tick(); complaintsMailTick().catch(() => {}); }, 30e3).unref();
+    setTimeout(() => tihSvc.sync().catch(() => {}), 90e3).unref();
+    setInterval(() => tihSvc.sync().catch(() => {}), 30 * 60e3).unref();
     setTimeout(() => warmPersonalLinks().catch(() => {}), 150e3).unref?.();
     setInterval(() => warmPersonalLinks().catch(() => {}), 10 * 60e3).unref();   // 10 min = gviz cache TTL (5 min par har link ke 3-4 queries dobara jaate the)
     setTimeout(() => maybeMonthlyReport(), 8000);
