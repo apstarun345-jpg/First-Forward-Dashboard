@@ -306,6 +306,8 @@ window.FF = window.FF || {};
     });
   }
   function profileTabs(root) {
+    return;   // v3.125.454 — Overview/Health/Growth/Account tab-bar hata diya (sab ek saath dikhta hai)
+    // eslint-disable-next-line no-unreachable
     const pfs = root.matches && root.matches('.pf') ? [root] : Array.from(root.querySelectorAll ? root.querySelectorAll('.pf') : []);
     pfs.forEach((pf) => {
       if (pf.dataset.tb) return; const defs = [['📊 Overview', '.pf-tiles'], ['🩺 Health', '.pf-minis'], ['📈 Growth', '.pf-gcs'], ['🏦 Account', '.pf-pay, .pf-bks']];

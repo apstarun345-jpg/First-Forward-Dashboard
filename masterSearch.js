@@ -3140,6 +3140,37 @@ FF.pages = FF.pages || {};
     return [...m.entries()].filter(([, n]) => n > 0).sort((a, b) => dispClsNum(a[0]) - dispClsNum(b[0]));
   };
   const dispPills = (cls) => dispClassPairs(cls).map(([c, n]) => `<span class="dsp-pill cg-${c === 'N/A' ? 'other na' : c.toLowerCase()}"><i>${esc(c === 'N/A' ? 'Class ?' : c)}</i><b>${U.fmt(n)}</b></span>`).join('');
+  // v3.125.454 — Last dispatch: date → class-wise  Dispatched | Issued | In stock  (compact table; Issued / In stock par click = list + CSV)
+  const dispKey = (c) => { const k0 = String(c || '').toUpperCase().replace(/\s+/g, ''); return !k0 || k0 === '—' || k0 === '-' ? 'N/A' : k0; };
+  const dtbPill = (c) => `<span class="dsp-pill cg-${c === 'N/A' ? 'other na' : String(c).toLowerCase()}"><i>${esc(c === 'N/A' ? 'Class ?' : c)}</i></span>`;
+  function dispTableHtml(list) {
+    const rows = list.map((r, i) => {
+      const cl = dispClassPairs(r.cls), multi = cl.length > 1, pend = (r.ranges || []).length ? '<span class="dtb-w">⏳</span>' : '<span class="dtb-z">—</span>';
+      const span = (cl.length || 1) + (multi ? 1 : 0), g = `${i === 0 ? ' f' : ''}${i % 2 ? ' odd' : ''}`;
+      const dt = `<td class="dt" rowspan="${span}"><b>${esc(dispDateY(r.date))}</b><small>${esc(dispAgo(r.date))}</small></td>`;
+      const cell = (key, kind) => `<td class="n" data-dtb="${i}|${esc(key)}|${kind}">${pend}</td>`;
+      const body = (cl.length ? cl : [['', r.total]]).map(([c, n], j) => `<tr class="g${g}${j === 0 ? ' g0' : ''}">${j === 0 ? dt : ''}<td class="c">${c ? dtbPill(c) : '<span class="dtb-z">—</span>'}</td><td class="n d">${U.fmt(n)}</td>${cell(c, 'i')}${cell(c, 's')}</tr>`).join('');
+      const tot = multi ? `<tr class="g t${g}"><td class="c">Total</td><td class="n d">${U.fmt(r.total)}</td>${cell('', 'i')}${cell('', 's')}</tr>` : '';
+      return body + tot;
+    }).join('');
+    return `<div class="dtb-wrap"><table class="dtb"><thead><tr><th>Date</th><th>Class</th><th class="n">Dispatched</th><th class="n">Issued</th><th class="n">In stock</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  function dtbSet(box, i, key, kind, v) {
+    const td = box.querySelector(`[data-dtb="${i}|${key}|${kind}"]`); if (!td) return false;
+    const val = Number(v) || 0, name = kind === 'i' ? 'issued' : 'stock';
+    td.innerHTML = `<button type="button" class="dtb-b ${kind === 'i' ? 'iss' : 'stk'}${val ? '' : ' zero'}" data-dsp-open="${i}|${name}|${esc(key)}" title="${kind === 'i' ? 'Issue ho chuke' : 'Abhi stock me'} — click = list + CSV">${U.fmt(val)}</button>`;
+    return true;
+  }
+  function dtbFill(box, i, cls, c) {   // cls = {KEY:{issued,stock}} (optional), c = totals {issued, stock}
+    let any = false;
+    Object.entries(cls || {}).forEach(([k, v]) => { const key = dispKey(k); if (dtbSet(box, i, key, 'i', v.issued)) any = true; dtbSet(box, i, key, 's', v.stock); });
+    const hadTot = dtbSet(box, i, '', 'i', c.issued); dtbSet(box, i, '', 's', c.stock);
+    if (!any && !hadTot) {   // ek hi class / class pata nahi — pehli row me totals
+      const tdI = box.querySelector(`[data-dtb^="${i}|"][data-dtb$="|i"]`), tdS = box.querySelector(`[data-dtb^="${i}|"][data-dtb$="|s"]`);
+      if (tdI) { const k = tdI.dataset.dtb.split('|')[1]; dtbSet(box, i, k, 'i', c.issued); dtbSet(box, i, k, 's', c.stock); }
+    }
+    box.querySelectorAll(`[data-dtb^="${i}|"] .dtb-w`).forEach((w) => { w.parentNode.innerHTML = '<span class="dtb-z">—</span>'; });
+  }
   function dispPaint(box, d) {
     const main = box.querySelector('.msp-disp-main'), sub = box.querySelector('.msp-disp-sub');
     if (!main || !sub) return;
@@ -3147,7 +3178,7 @@ FF.pages = FF.pages || {};
     if (!d.last) { main.textContent = 'No dispatch found'; sub.textContent = 'Not in the Stock sheet under this name / ID'; return; }
     const list = (d.recent || []).slice(0, 5);
     main.innerHTML = `${esc(dispDateY(d.last.date))} <small class="dim">${esc(dispAgo(d.last.date))}</small>`;
-    sub.innerHTML = `<div class="dsp-list">${list.map((r, i) => `<div class="dsp-row${i === 0 ? ' first' : ''}"><span class="dsp-date">${esc(dispDateY(r.date))}<small>${esc(dispAgo(r.date))}</small></span><span class="dsp-tot"><b>${U.fmt(r.total)}</b> tags</span><span class="dsp-cls">${dispPills(r.cls) || '<span class="dim small">—</span>'}</span><span class="dsp-st" data-dsp-st="${i}">${(r.ranges || []).length ? '<span class="dim small">⏳ issued / stock…</span>' : ''}</span></div>`).join('')}</div>${d.totalDispatches > list.length ? `<div class="dim small dsp-more">+${U.fmt(d.totalDispatches - list.length)} aur · click for all</div>` : ''}`;
+    sub.innerHTML = `${dispTableHtml(list)}${d.totalDispatches > list.length ? `<div class="dim small dsp-more">+${U.fmt(d.totalDispatches - list.length)} aur · click for all</div>` : ''}`;
   }
   // v3.125.82 — har dispatch: first–last barcode expand → kitne ISSUED (EIR me) aur kitne abhi STOCK me.
   const dspStCache = new Map();
@@ -3188,31 +3219,20 @@ FF.pages = FF.pages || {};
     const list = (d.recent || []).slice(0, 5).map((x) => ({ ...x, ch: d.ch || sc0.ch || 'ff' }));
     box.__dspRows = box.__dspRows || {};
     for (let i = 0; i < list.length; i++) {
-      const slot = box.querySelector(`[data-dsp-st="${i}"]`);
-      if (!slot || !(list[i].ranges || []).length) continue;
+      if (!box.querySelector(`[data-dtb^="${i}|"]`) || !(list[i].ranges || []).length) continue;
       // v3.125.105 — server ne count saath bhej diya (stock index se, din me ek baar) → turant; list click par hi
       if (list[i].st) {
-        const c = list[i].st;
         box.__dspRows[i] = { lazy: true, r: list[i] };
-        // v3.125.107 — class-wise: har class ka Issued / Stock, aakhri column Total
-        const cls = Object.entries(list[i].stCls || {}).filter(([, v]) => v && v.total > 0).sort((a, b) => dispClsNum(a[0]) - dispClsNum(b[0]));
-        if (cls.length) {
-          const cell = (k, kind, v, cl) => `<button type="button" class="dsp-cell ${kind === 'issued' ? 'iss' : 'stk'}" data-dsp-open="${i}|${kind}|${esc(k)}" title="${esc(cl)} · ${kind === 'issued' ? 'issue ho chuke' : 'abhi stock me'} — click = list + CSV"><i>${kind === 'issued' ? 'Issued' : 'Stock'}</i> <b>${U.fmt(v)}</b></button>`;
-          const grp = (k, v, label) => `<span class="dsp-g${k === null ? ' tot' : ''}"><span class="dsp-gl">${k === null ? 'Total' : `<span class="dsp-pill cg-${k === 'N/A' ? 'other na' : k.toLowerCase()}"><i>${esc(k === 'N/A' ? 'Class ?' : k)}</i></span>`}</span>${cell(k === null ? '' : k, 'issued', v.issued, label)}${cell(k === null ? '' : k, 'stock', v.stock, label)}</span>`;
-          slot.classList.add('dsp-st-tbl');
-          slot.innerHTML = `<div class="dsp-line">${cls.map(([k, v]) => grp(k, v, k)).join('')}${grp(null, c, 'Total')}</div>`;
-          continue;
-        }
-        slot.innerHTML = `<button type="button" class="dsp-sb iss" data-dsp-open="${i}|issued" title="Stock list se nikal chuke (issue) — click = list + CSV"><i>Issued</i><b>${U.fmt(c.issued)}</b></button><button type="button" class="dsp-sb stk" data-dsp-open="${i}|stock" title="Abhi stock me — click = list + CSV"><i>Stock</i><b>${U.fmt(c.stock)}</b></button>`;
+        dtbFill(box, i, list[i].stCls || null, list[i].st);
         continue;
       }
       try {
         const rows = await dspStatusOf(list[i]);
         box.__dspRows[i] = { rows, r: list[i] };
         const c = { issued: 0, stock: 0, nf: 0 }; rows.forEach((x) => { c[dspKind(x.k)]++; });
-        if (!slot.isConnected) return;
-        slot.innerHTML = `<button type="button" class="dsp-sb iss" data-dsp-open="${i}|issued" title="EIR me issue ho chuke — click = list + CSV"><i>Issued</i><b>${U.fmt(c.issued)}</b></button><button type="button" class="dsp-sb stk" data-dsp-open="${i}|stock" title="Abhi stock me — click = list + CSV"><i>Stock</i><b>${U.fmt(c.stock)}</b></button>${c.nf ? `<button type="button" class="dsp-sb nf" data-dsp-open="${i}|nf" title="Na stock me, na EIR me"><i>?</i><b>${U.fmt(c.nf)}</b></button>` : ''}`;
-      } catch (err) { if (slot.isConnected) slot.innerHTML = `<span class="dim small" title="${esc(String((err && err.message) || err))}">issued / stock —</span>`; }
+        if (!box.isConnected) return;
+        dtbFill(box, i, null, c);
+      } catch (err) { box.querySelectorAll(`[data-dtb^="${i}|"]`).forEach((td) => { td.innerHTML = `<span class="dtb-z" title="${esc(String((err && err.message) || err))}">—</span>`; }); }
     }
   }
   function openDspStatus(box, idx, kind, clsF) {

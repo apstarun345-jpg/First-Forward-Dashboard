@@ -60,7 +60,7 @@
   function magnet() {
     if (!fine() || lowEnd()) return;
     let cur = null;
-    const SEL = '.btn.primary, .btn.big, #wow-gd-btn';
+    const SEL = '.btn.primary, .btn.big';
     const reset = () => { if (cur) { cur.style.transform = ''; cur = null; } };
     D.addEventListener('pointermove', (e) => {
       if (off() || e.pointerType !== 'mouse') return;
