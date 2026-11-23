@@ -315,6 +315,7 @@ FF.pages = FF.pages || {};
         </div>
         <div class="bcc-emp" data-bcc-form="emp" ${state.tab === 'emp' ? '' : 'hidden'}>
           <div class="bcc-scan-bar"><span class="bcc-scan-count" data-emp-count></span><input class="input" data-emp-q placeholder="🔎 Naam / barcode / agent…" style="max-width:260px"><button type="button" class="btn small" data-emp-rf>↻ Refresh</button><button type="button" class="btn small" data-emp-link title="Employee ko ye link bhejo">🔗 Employee scan link copy</button><button type="button" class="btn small" data-emp-csv>⬇ CSV</button></div>
+          <div class="bcc-emp-dash" data-emp-dash></div>
           <div class="bcc-emp-chips" data-emp-chips></div>
           <div class="table-wrap tall"><table class="tbl compact bcc-tbl"><thead><tr><th>Scan time</th><th>👤 Employee</th><th>Barcode</th><th>Status</th><th>Class</th><th>Agent</th><th>Agent ID</th><th>TL</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody data-emp-body><tr><td colspan="10" class="empty">Loading…</td></tr></tbody></table></div>
         </div>
@@ -408,6 +409,7 @@ FF.pages = FF.pages || {};
     try { document.addEventListener('keydown', (e) => { if (!scanPend.open) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); camConfirmClose(true); } else if (e.key === 'Escape') { e.preventDefault(); camConfirmClose(false); } }); } catch { /* optional */ }
     root.addEventListener('input', (e) => { if (e.target.matches('[data-emp-q]')) { emp.q = e.target.value; empPaint(); } });
     root.addEventListener('click', (e) => {
+      const eh = e.target.closest('[data-emp-hist]'); if (eh) { const c = eh.dataset.empHist; if (emp.open.has(c)) emp.open.delete(c); else emp.open.add(c); empPaint(); return; }
       const en = e.target.closest('[data-emp-name]'); if (en) { emp.name = en.dataset.empName; empPaint(); return; }
       if (e.target.closest('[data-emp-rf]')) { empLoad(); return; }
       if (e.target.closest('[data-emp-csv]')) { empCsv(); return; }
@@ -541,8 +543,29 @@ FF.pages = FF.pages || {};
     if (inp && !(window.matchMedia && matchMedia('(pointer:coarse)').matches)) inp.focus();
   }
   // ---- 👥 Employee scans: public /scan link se employees ke scan (naam ke saath) — live ----
-  const emp = { rows: [], by: {}, cache: new Map(), name: '', q: '', timer: 0, busy: false, total: 0, seen: 0 };
+  const emp = { rows: [], by: {}, stats: {}, today: 0, open: new Set(), cache: new Map(), name: '', q: '', timer: 0, busy: false, total: 0, seen: 0 };
   const empTime = (iso) => { try { return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; } };
+  const agoTxt = (iso) => { const m = Math.round((Date.now() - (Date.parse(iso) || 0)) / 60e3); return !iso ? '—' : m < 1 ? 'abhi' : m < 60 ? m + ' min pehle' : m < 1440 ? Math.round(m / 60) + ' ghante pehle' : Math.round(m / 1440) + ' din pehle'; };
+  /** 📜 Ek barcode ka itihaas: pehla scan kisne/kab, uske baad dobara koshish, aur uska abhi ka status. */
+  function empHist(r, c) {
+    const hits = (r.hits || []).map((h) => `<li>🔁 <b>${esc(h.name)}</b> ne dobara scan kiya — ${esc(empTime(h.at))} <span class="dim">(${esc(agoTxt(h.at))})</span></li>`).join('');
+    return `<div class="bcc-emp-h"><b>📜 ${esc(r.code)} ka itihaas</b><ul><li>✅ Pehla scan: <b>${esc(r.name)}</b> — ${esc(empTime(r.at))} <span class="dim">(${esc(agoTxt(r.at))})</span></li>${hits}</ul>${c ? `<div class="dim small">Abhi ka status: ${esc(STATUS[c.k].label)}${c.agent ? ' · ' + esc(c.agent) : ''}${c.dName && c.dName !== SEARCHING ? ' · dispatch: ' + esc(c.dName) : ''}</div>` : ''}${r.dups > (r.hits || []).length ? `<div class="dim small">Kul ${r.dups} dobara koshish (sirf pichhli 10 dikh rahi hain)</div>` : ''}</div>`;
+  }
+  /** 📊 Live dashboard: aaj ke scan, abhi kaun active, per-employee speed + galat scan. */
+  function empDash(root) {
+    const box = root.querySelector('[data-emp-dash]'); if (!box) return;
+    const names = Object.keys(emp.stats); if (!names.length) { box.innerHTML = ''; return; }
+    const wrong = {}; emp.rows.forEach((r) => { const c = emp.cache.get(r.code); if (c && (c.k === 'iss' || c.k === 'nf')) { const o = wrong[r.name] || (wrong[r.name] = { iss: 0, nf: 0 }); o[c.k]++; } });
+    const active = names.filter((n) => emp.stats[n].m5 > 0);
+    const dupAll = names.reduce((a, n) => a + emp.stats[n].dupTries, 0), wrongAll = Object.values(wrong).reduce((a, o) => a + o.iss + o.nf, 0);
+    const card = (t, v, sub, tone) => `<div class="bcc-emp-card ${tone || ''}"><small>${t}</small><b>${v}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
+    const rows = names.sort((a, b) => (emp.stats[b].today - emp.stats[a].today) || (emp.stats[b].total - emp.stats[a].total)).map((n) => {
+      const o = emp.stats[n], w = wrong[n] || { iss: 0, nf: 0 }, live = o.m5 > 0;
+      return `<tr data-emp-name="${esc(n)}" class="clickable"><td>${live ? '🟢' : '⚪'} <b>${esc(n)}</b></td><td class="num"><b>${U.fmt(o.today)}</b></td><td class="num">${U.fmt(o.h1)}</td><td class="num">${U.fmt(o.total)}</td><td>${esc(agoTxt(o.last))}</td><td class="num">${o.dupTries ? '🔁 ' + o.dupTries : '—'}</td><td class="num">${w.iss ? '⛔ ' + w.iss : '—'}</td><td class="num">${w.nf ? '❓ ' + w.nf : '—'}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div class="bcc-emp-cards">${card('Aaj ke scan', U.fmt(emp.today), 'IST aaj', 'blue')}${card('Abhi active', U.fmt(active.length), active.slice(0, 3).join(', ') || 'koi nahi (5 min)', active.length ? 'green' : '')}${card('Kul scan', U.fmt(emp.total), U.fmt(names.length) + ' employee')}${card('🔁 Duplicate koshish', U.fmt(dupAll), 'pehle se scan hue', dupAll ? 'amber' : '')}${card('⛔ Galat scan', U.fmt(wrongAll), 'issued / stock me nahi', wrongAll ? 'red' : '')}</div>
+      <details class="bcc-emp-det" open><summary>👥 Employee-wise live</summary><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Employee</th><th class="num">Aaj</th><th class="num">1 ghanta</th><th class="num">Kul</th><th>Last scan</th><th class="num">Duplicate</th><th class="num">Issued</th><th class="num">Not found</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+  }
   function empPaint() {
     const root = state.root, body = root && root.querySelector('[data-emp-body]'); if (!body) return;
     const q = emp.q.trim().toLowerCase();
@@ -550,8 +573,10 @@ FF.pages = FF.pages || {};
     body.innerHTML = list.slice(0, 1500).map((r) => {
       const c = emp.cache.get(r.code), fresh = r._f && Date.now() - r._f < 4000;
       const st = c ? `<span class="badge ${STATUS[c.k].tone}">${esc(STATUS[c.k].label || STATUS[c.k].text || c.k)}</span>` : '<span class="dim">⏳</span>';
-      return `<tr class="${c ? 'bcc-' + c.k : ''}${fresh ? ' bcc-new' : ''}"><td>${esc(empTime(r.at))}</td><td><b>${esc(r.name)}</b></td><td class="mono">${esc(r.code)}</td><td>${st}</td><td>${esc(c ? c.cls : '')}</td><td>${esc(c ? c.agent : '')}</td><td>${esc(c ? c.agentId : '')}</td><td>${esc(c ? c.tl : '')}</td><td>${esc(c && c.dDate && c.dDate !== SEARCHING ? c.dDate : '')}</td><td>${esc(c && c.dName && c.dName !== SEARCHING ? c.dName : '')}</td></tr>`;
+      const hist = emp.open.has(r.code) ? `<tr class="bcc-emp-hist"><td colspan="10">${empHist(r, c)}</td></tr>` : '';
+      return `<tr class="${c ? 'bcc-' + c.k : ''}${fresh ? ' bcc-new' : ''}"><td>${esc(empTime(r.at))}</td><td><b>${esc(r.name)}</b></td><td class="mono bcc-cell" data-emp-hist="${esc(r.code)}" title="Click = itihaas (kisne kab scan kiya)">${esc(r.code)}${r.dups ? ` <span class="badge amber" title="${r.dups} baar dobara scan hua">🔁 ${r.dups}</span>` : ''}</td><td>${st}</td><td>${esc(c ? c.cls : '')}</td><td>${esc(c ? c.agent : '')}</td><td>${esc(c ? c.agentId : '')}</td><td>${esc(c ? c.tl : '')}</td><td>${esc(c && c.dDate && c.dDate !== SEARCHING ? c.dDate : '')}</td><td>${esc(c && c.dName && c.dName !== SEARCHING ? c.dName : '')}</td></tr>${hist}`;
     }).join('') || '<tr><td colspan="10" class="empty">Abhi kisi employee ne scan nahi kiya</td></tr>';
+    empDash(root);
     const cnt = root.querySelector('[data-emp-count]'); if (cnt) cnt.textContent = `${U.fmt(list.length)} scan · ${U.fmt(Object.keys(emp.by).length)} employee`;
     const ch = root.querySelector('[data-emp-chips]');
     if (ch) ch.innerHTML = `<button type="button" class="seg-btn${emp.name ? '' : ' on'}" data-emp-name="">Sab (${U.fmt(emp.total)})</button>` + Object.entries(emp.by).sort((a, b) => b[1] - a[1]).map(([n, c]) => `<button type="button" class="seg-btn${emp.name === n ? ' on' : ''}" data-emp-name="${esc(n)}">👤 ${esc(n)} · ${U.fmt(c)}</button>`).join('');
@@ -573,7 +598,7 @@ FF.pages = FF.pages || {};
     try {
       const j = await FF.auth.api('/api/scan-log', 'GET');
       const prev = new Set(emp.rows.map((r) => r.code));
-      emp.rows = (j.rows || []).map((r) => { if (emp.seen && !prev.has(r.code)) r._f = Date.now(); return r; }); emp.by = j.byName || {}; emp.total = j.total || 0; emp.seen = 1;
+      emp.rows = (j.rows || []).map((r) => { if (emp.seen && !prev.has(r.code)) r._f = Date.now(); return r; }); emp.by = j.byName || {}; emp.stats = j.stats || {}; emp.today = j.today || 0; emp.total = j.total || 0; emp.seen = 1;
       const bd = state.root.querySelector('[data-emp-badge]'); if (bd) { bd.hidden = !emp.total; bd.textContent = U.fmt(emp.total); }
       empPaint(); await empEnrich();
     } catch (err) { const b = state.root && state.root.querySelector('[data-emp-body]'); if (b && !emp.rows.length) b.innerHTML = `<tr><td colspan="10" class="empty">⚠️ ${esc(String((err && err.message) || err))}</td></tr>`; }
@@ -640,7 +665,7 @@ FF.pages = FF.pages || {};
     const video = state.root && state.root.querySelector('.bcc-cam video'); if (!video) return;
     camBtn(true); camMsg('Camera khul raha hai…');
     try {
-      scanCam.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      scanCam.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }, audio: false });
     } catch (err) { camBtn(false); camMsg(''); const nm = err && err.name; U.toast && U.toast(nm === 'NotAllowedError' ? 'Camera allow nahi hua — address bar ke 🔒 / camera icon se Allow karke dobara dabao' : nm === 'NotFoundError' ? 'Camera nahi mila is device me' : nm === 'NotReadableError' ? 'Camera doosri app me use ho raha hai — band karke dobara try karo' : 'Camera start nahi hua (' + (nm || 'error') + ')', 'error'); return; }
     scanCam.on = true;
     video.srcObject = scanCam.stream; try { await video.play(); } catch { /* autoplay */ }
@@ -663,7 +688,7 @@ FF.pages = FF.pages || {};
           try { const found = await scanCam.det.detect(video); found.forEach((f) => camOnRaw(f.rawValue)); } catch { /* frame skip */ }
           scanCam.busy = false;
         }
-        scanCam.timer = setTimeout(() => { scanCam.raf = requestAnimationFrame(tick); }, 70);
+        scanCam.timer = setTimeout(() => { scanCam.raf = requestAnimationFrame(tick); }, 30);
       };
       tick();
     } else {

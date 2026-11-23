@@ -33,3 +33,10 @@ test('Tag Request: Barcode Scan tab + public scan-info', () => {
   assert.match(srv, /p === '\/api\/public\/scan-info' && method === 'POST'/);
   assert.doesNotMatch(tr.slice(tr.indexOf('function scCamStart'), tr.indexOf('function scCamStop')), /qr_code/);
 });
+test('v445: wrong-barcode alert, offline outbox, camera zoom, admin dashboard + history', () => {
+  assert.match(tr, /function scAlert/); assert.match(tr, /ISSUED — ye tag pehle hi lag chuka hai/);
+  assert.match(tr, /ff_tr_scan_out/); assert.match(tr, /addEventListener\('online'/); assert.match(tr, /data-sc-act="zoom"/);
+  assert.match(pub, /alertBox/); assert.match(pub, /id="zm"|\$\('zm'\)/);
+  assert.match(bcc, /function empDash/); assert.match(bcc, /function empHist/); assert.match(bcc, /data-emp-hist/);
+  assert.match(srv, /hit\.hits\.push/); assert.match(srv, /stats, rows/);
+});

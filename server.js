@@ -12646,9 +12646,16 @@ async function handleApi(req, res, url) {
     if (!publicRateOk(`scan:${ip}`, 900, 10 * 60e3)) throw new HttpError(429, 'Bahut tez scan — thoda ruk kar try karo.');
     const log = scanLogStore();
     const key = code.replace(/\D/g, '');
+    // 📴 offline queue se aaya scan apne asli time ke saath (max 7 din purana, future nahi)
+    const given = Date.parse(body.at); const nowMs = Date.now();
+    const atIso = Number.isFinite(given) && given <= nowMs + 60e3 && given >= nowMs - 7 * 86400e3 ? new Date(given).toISOString() : new Date(nowMs).toISOString();
     const hit = log.find((r) => r.k === key);
-    if (hit) return sendJson(res, 200, { ok: true, dup: true, by: hit.name, at: hit.at, mine: scanNameKey(hit.name) === scanNameKey(name) });
-    const row = { k: key, code, name, at: new Date().toISOString(), ip: String(ip || '').slice(0, 45) };
+    if (hit) {
+      const mine = scanNameKey(hit.name) === scanNameKey(name);
+      if (!(mine && body.retry)) { hit.dups = (hit.dups || 0) + 1; if (!Array.isArray(hit.hits)) hit.hits = []; hit.hits.push({ name, at: atIso }); if (hit.hits.length > 30) hit.hits.splice(0, hit.hits.length - 30); scanPersistSoon(); }
+      return sendJson(res, 200, { ok: true, dup: true, by: hit.name, at: hit.at, mine });
+    }
+    const row = { k: key, code, name, at: atIso, ip: String(ip || '').slice(0, 45) };
     log.push(row);
     if (log.length > 30000) log.splice(0, log.length - 30000);
     scanPersistSoon();
@@ -12682,10 +12689,18 @@ async function handleApi(req, res, url) {
   if (p === '/api/scan-log' && method === 'GET') {
     if (!user || (user.role !== 'admin' && !(user.permissions || []).includes('barcodeChecker'))) throw new HttpError(403, 'Access nahi hai.');
     const all = scanLogStore();
-    const since = Number(url.searchParams.get('since')) || 0;
-    const rows = all.filter((r) => !since || Date.parse(r.at) > since).slice(-3000).reverse().map((r) => ({ code: r.code, name: r.name, at: r.at }));
-    const byName = {}; all.forEach((r) => { byName[r.name] = (byName[r.name] || 0) + 1; });
-    return sendJson(res, 200, { ok: true, total: all.length, now: Date.now(), byName, rows });
+    const nowMs = Date.now(), dayStart = Math.floor((nowMs + 19800e3) / 86400e3) * 86400e3 - 19800e3;   // IST din ki shuruaat
+    const rows = all.slice(-3000).reverse().map((r) => ({ code: r.code, name: r.name, at: r.at, dups: r.dups || 0, hits: (r.hits || []).slice(-10) }));
+    const stats = {};
+    const st = (n) => stats[n] || (stats[n] = { total: 0, today: 0, last: '', m5: 0, h1: 0, dupTries: 0, first: '' });
+    all.forEach((r) => {
+      const o = st(r.name), t = Date.parse(r.at) || 0;
+      o.total++; if (t >= dayStart) o.today++; if (nowMs - t < 5 * 60e3) o.m5++; if (nowMs - t < 3600e3) o.h1++;
+      if (!o.last || r.at > o.last) o.last = r.at; if (t >= dayStart && (!o.first || r.at < o.first)) o.first = r.at;
+      (r.hits || []).forEach((h) => { const q = st(h.name); q.dupTries++; if (h.at > q.last) q.last = h.at; });
+    });
+    const byName = {}; Object.entries(stats).forEach(([n, o]) => { if (o.total) byName[n] = o.total; });
+    return sendJson(res, 200, { ok: true, total: all.length, today: Object.values(stats).reduce((a, o) => a + o.today, 0), now: nowMs, byName, stats, rows });
   }
   if (p === '/api/scan-log' && method === 'DELETE') {
     if (!user || user.role !== 'admin') throw new HttpError(403, 'Sirf admin.');
