@@ -191,7 +191,7 @@ function appsScriptStore(env) {
 async function sendAppsScript(env, msg) {
   const store = appsScriptStore(env);
   if (!store) throw new Error('Apps Script URL/secret set nahi (APPS_SCRIPT_URL + APPS_SCRIPT_SECRET)');
-  await store.call('mail', { mail: { to: msg.to.join(','), subject: msg.subject, body: msg.text, htmlBody: msg.html || '', name: msg.fromName || '', replyTo: msg.replyTo || '', attachments: msg.attachments } });
+  await store.call('mail', { mail: { to: msg.to.join(','), subject: msg.subject, body: msg.text, htmlBody: msg.html || '', name: msg.fromName || '', from: msg.from || '', replyTo: msg.replyTo || '', attachments: msg.attachments } });
   return true;
 }
 

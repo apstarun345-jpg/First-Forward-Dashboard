@@ -9151,6 +9151,14 @@ async function handleApi(req, res, url) {
       const ok = await tihSvc.setTlMail(String(body.ent || body.tl || ''), body.email);
       return sendJson(res, 200, { ok });
     }
+    if (p === '/api/tih/sender' && method === 'GET') {
+      const cfg = normalizeTihCfg((db.settings || {}).tih);
+      const want = String(cfg.from || (db.settings.email || {}).from || '').replace(/^.*<([^>]+)>.*$/, '$1').trim().toLowerCase();
+      let ping = null, err = '';
+      try { const st0 = complaintsSvc.getStore ? complaintsSvc.getStore() : null; ping = st0 ? await st0.call('mailping') : null; } catch (e) { err = String((e && e.message) || e).slice(0, 160); }
+      const aliases = ((ping && ping.aliases) || []).map(String);
+      return sendJson(res, 200, { ok: true, want, account: (ping && ping.account) || '', quota: ping ? ping.quota : null, aliases, aliasKnown: !!(ping && Array.isArray(ping.aliases)), ready: !!want && aliases.some((a) => a.toLowerCase() === want), same: !!want && !!ping && String(ping.account || '').toLowerCase() === want, error: err }, { 'Cache-Control': 'no-store' });
+    }
     if (p === '/api/tih/cfg' && method === 'POST') {
       const body = await readBody(req);
       for (const f of ['gvTo', 'gvCc', 'ffCc', 'replyTo']) { const bad = tihInvalidEmails(body[f]); if (bad.length) throw new HttpError(400, `Invalid email: ${bad[0]}`); }

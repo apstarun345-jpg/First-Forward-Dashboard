@@ -391,7 +391,7 @@ function doPost(e) {
   // First time: after pasting this code, run any function once (e.g. authorizeMail) OR redeploy
   // as "New version" and click Allow when Google asks for the "send email" permission.
   if (body.action === 'mailping') {
-    try { return json_({ ok: true, quota: MailApp.getRemainingDailyQuota(), account: Session.getEffectiveUser().getEmail() }); }
+    try { var al = []; try { al = GmailApp.getAliases(); } catch (e0) {} return json_({ ok: true, quota: MailApp.getRemainingDailyQuota(), account: Session.getEffectiveUser().getEmail(), aliases: al }); }
     catch (err) { return json_({ ok: false, error: 'mail permission missing — Deploy → Manage deployments → Edit → New version, then Allow email permission (' + String(err && err.message || err) + ')' }); }
   }
   // 📨 Agents Complaints Summary (v3.112) — bank complaint mails ko Gmail se padho (READ-ONLY, kuch delete/send nahi hota).
@@ -453,6 +453,17 @@ function doPost(e) {
         return Utilities.newBlob(Utilities.base64Decode(String(a.content || '')), String(a.type || 'text/csv'), String(a.name || 'report.csv'));
       });
       if (files.length) opts.attachments = files;
+      // 📤 From: sirf Gmail "Send mail as" alias (is account me verified) ho to us ID se jaati hai, warna script account se
+      var wantFrom = String(m.from || '').trim().toLowerCase(), useAlias = '';
+      if (wantFrom) { try { GmailApp.getAliases().forEach(function (a) { if (String(a).toLowerCase() === wantFrom) useAlias = a; }); } catch (e1) {} }
+      if (useAlias) {
+        var go = { name: opts.name, from: useAlias };
+        if (opts.htmlBody) go.htmlBody = opts.htmlBody;
+        if (opts.replyTo) go.replyTo = opts.replyTo;
+        if (files.length) go.attachments = files;
+        GmailApp.sendEmail(opts.to, opts.subject, opts.body, go);
+        return json_({ ok: true, sent: to.length, from: useAlias, quota: MailApp.getRemainingDailyQuota() });
+      }
       MailApp.sendEmail(opts);
       return json_({ ok: true, sent: to.length, quota: MailApp.getRemainingDailyQuota() });
     } catch (err) {

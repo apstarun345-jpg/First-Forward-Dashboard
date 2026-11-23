@@ -52,7 +52,7 @@ FF.pages = FF.pages || {};
   html[data-theme="dark"] .tih-ch,html[data-theme="dark"] .tih-rs,html[data-theme="dark"] .tih-src,html[data-theme="dark"] .tih-mb{filter:brightness(.92)}
   @media(max-width:700px){.tih-hero h2{font-size:17px}.tih-t{font-size:12px}}
   `;
-  const st = { root: null, data: null, busy: false, err: '', ch: 'all', month: '', day: '', q: '', sort: 'day', dir: -1, sel: new Set(), setOpen: false, msg: '', timer: null, tl: '', agent: '', sendDays: new Set(), target: 'all', tname: '', toMail: '' };
+  const st = { root: null, data: null, busy: false, err: '', ch: 'all', month: '', day: '', q: '', sort: 'day', dir: -1, sel: new Set(), setOpen: false, msg: '', timer: null, tl: '', agent: '', sender: null, sendDays: new Set(), target: 'all', tname: '', toMail: '' };
   const dmy = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? `${iso.slice(8)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}` : iso || '—');
   const mlabel = (m) => { try { return new Date(`${m}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); } catch { return m; } };
   const css = () => { if (document.getElementById('tih-css')) return; const s = document.createElement('style'); s.id = 'tih-css'; s.textContent = CSS; document.head.appendChild(s); };
@@ -93,6 +93,17 @@ FF.pages = FF.pages || {};
       ${isAdmin() ? '<button class="tih-btn" data-act="set">⚙ Mail settings</button>' : ''}
       <span class="tih-note">${d.meta.pending ? `⏳ ${d.meta.pending} mail abhi padhni baaki` : ''} ${d.meta.error ? `<span class="tih-err">⚠ ${esc(d.meta.error)}</span>` : ''} ${d.meta.gvErr ? `<span class="tih-err">GV lookup: ${esc(d.meta.gvErr)}</span>` : ''}</span></div>`;
   }
+  function senderHtml(x) {
+    if (x.error) return `<span class="tih-err">Check fail: ${esc(x.error)}</span>`;
+    const bits = [`Script account: <b>${esc(x.account || '?')}</b>`, x.quota != null ? `quota bachi: <b>${x.quota}</b>` : ''];
+    let verdict;
+    if (!x.want) verdict = '<span class="tih-err">From set nahi</span>';
+    else if (x.same) verdict = `✅ <b>${esc(x.want)}</b> se hi jayegi (script isi account me hai)`;
+    else if (x.ready) verdict = `✅ <b>${esc(x.want)}</b> alias verified — isi se jayegi`;
+    else if (!x.aliasKnown) verdict = `⚠ Code.gs purana hai — naya code paste karke New version deploy karo`;
+    else verdict = `❌ <b>${esc(x.want)}</b> is Gmail account me alias nahi — mail script account se jayegi. Gmail → Settings → Accounts → "Send mail as" → "Add another email address" (verify ek baar), ya Code.gs usi ID ke account me deploy karo.`;
+    return `${bits.filter(Boolean).join(' · ')}<br>${verdict}`;
+  }
   function settings() {
     if (!st.setOpen || !isAdmin()) return '';
     const c = st.data.cfg, t = c.tpl || {};
@@ -100,6 +111,7 @@ FF.pages = FF.pages || {};
     return `<div class="tih-set"><b>⚙ Mail settings</b>
       <label>↩️ Reply-To — jawab is mail par aaye (verification nahi chahiye)<input type="text" data-c="replyTo" value="${esc(c.replyTo)}" placeholder="tarun.kumawat@apnapayment.com"></label>
       <div class="tih-note">⚠ Mail kaun si ID se <b>jaati</b> hai: <b>Google Apps Script</b> relay me hamesha usi Google account se (jisme script bana hai) — doosri ID se bhejna sambhav nahi, bina verification ke koi bhi kisi ke naam se mail nahi bhej sakta. Isliye Reply-To use karo: mail jayegi script wale account se, par "Reply" dabane par aapki mail par jawab aayega (Code.gs ek baar New version deploy karna hai). Poori alag ID se bhejni ho to Resend / Brevo / SMTP me us domain / mail ko verify karke yahan From daalo.</div>
+      <div class="tih-note" data-sender>📤 Sender check: <button class="tih-btn" data-act="sendercheck">🔍 Check karo</button> ${st.sender ? senderHtml(st.sender) : ''}</div>
       <label>📤 From (sirf SMTP / Resend / Brevo me chalta hai) — jaise: Apna Payment &lt;ops@domain.com&gt;<input type="text" data-c="from" value="${esc(c.from)}" placeholder="khaali = Settings → Email wala From"></label>
       <label>Mail ke neeche sender naam ({sender})<input type="text" data-c="sender" value="${esc(c.sender)}"></label>
       <label>🟩 GV ki report is mail par jaye (comma se alag)<input type="text" data-c="gvTo" value="${esc(c.gvTo)}" placeholder="gv-team@example.com"></label>
@@ -211,6 +223,7 @@ FF.pages = FF.pages || {};
       const act = a.dataset.act;
       if (act === 'refresh') refresh();
       else if (act === 'csv') csv();
+      else if (act === 'sendercheck') { a.disabled = true; FF.auth.api('/api/tih/sender').then((x) => { st.sender = x; }).catch((e) => { st.sender = { error: String((e && e.message) || e) }; }).then(() => paint()); }
       else if (act === 'clrmsg') { st.msg = ''; paint(); }
       else if (act === 'set') { st.setOpen = !st.setOpen; st.msg = ''; paint(); }
       else if (act === 'saveset') saveSet();
