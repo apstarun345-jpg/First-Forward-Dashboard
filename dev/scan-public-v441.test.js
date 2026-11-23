@@ -40,3 +40,10 @@ test('v445: wrong-barcode alert, offline outbox, camera zoom, admin dashboard + 
   assert.match(bcc, /function empDash/); assert.match(bcc, /function empHist/); assert.match(bcc, /data-emp-hist/);
   assert.match(srv, /hit\.hits\.push/); assert.match(srv, /stats, rows/);
 });
+test('v446: wow.js + wow.css wired, godown + shimmer + mascot events', () => {
+  const idx = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const wow = fs.readFileSync(new URL('../wow.js', import.meta.url), 'utf8');
+  assert.match(idx, /wow\.css/); assert.match(idx, /wow\.js/);
+  assert.match(wow, /function godown\(/); assert.match(wow, /\/api\/stock-age/); assert.match(wow, /ff-scan/); assert.match(wow, /wow-bump/);
+  assert.match(tr, /wow-sk/); assert.match(bcc, /wow-sk/); assert.match(tr, /ff-scan/);
+});

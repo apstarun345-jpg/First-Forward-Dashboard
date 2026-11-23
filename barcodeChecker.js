@@ -204,7 +204,7 @@ FF.pages = FF.pages || {};
     if (!errs.length && src) return `<p class="dim small">📒 Dispatch ledger: ${src}</p>`;
     return errs.length ? `<p class="dim small">⚠️ Dispatch ledger — ${src ? src + ' · ' : ''}${errs.map(([, v]) => esc(v)).join(' · ')}</p>` : '';
   }
-  const rowsHtml = (show) => show.map((r) => `<tr class="bcc-${r.k}${r._new && Date.now() - r._new < 1600 ? ' bcc-new' : ''}${r._dup && Date.now() - r._dup < 1600 ? ' bcc-dupflash' : ''}" data-bcc-i="${r._i}"><td class="bcc-cp"><button type="button" class="bcc-rowcopy" data-bcc-row title="Copy Barcode + Tag ID + Status">📋</button></td>${cells(r).map((v, i) => `<td${i === 0 || i === 1 ? ` class="mono bcc-cell" data-bcc-cell="${i === 0 ? 'bc' : 'tag'}" title="Click = copy"` : ''}>${i === 2 ? `<span class="badge ${STATUS[r.k].tone}">${esc(v)}</span>` : esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${HEAD.length + 1}" class="empty">Is filter me kuch nahi</td></tr>`;
+  const rowsHtml = (show) => show.map((r) => `<tr class="bcc-${r.k}${r._new && Date.now() - r._new < 1600 ? ' bcc-new' : ''}${r._dup && Date.now() - r._dup < 1600 ? ' bcc-dupflash' : ''}" data-bcc-i="${r._i}"><td class="bcc-cp"><button type="button" class="bcc-rowcopy" data-bcc-row title="Copy Barcode + Tag ID + Status">📋</button></td>${cells(r).map((v, i) => `<td${i === 0 || i === 1 ? ` class="mono bcc-cell" data-bcc-cell="${i === 0 ? 'bc' : 'tag'}" title="Click = copy"` : ''}>${i === 2 ? (r.pending ? '<span class="wow-sk"></span>' : `<span class="badge ${STATUS[r.k].tone}">${esc(v)}</span>`) : (r.pending && i > 2 && i < 10 ? '<span class="wow-sk" style="width:48px"></span>' : esc(v))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${HEAD.length + 1}" class="empty">Is filter me kuch nahi</td></tr>`;
   const noteHtml = (vis, show) => `${U.fmt(vis.length)} rows${vis.length > show.length ? ` · pehli ${U.fmt(show.length)} dikh rahi — sab ke liye Copy / Excel` : ''}`;
   function resultsHtml() {
     const rows = state.rows;
@@ -461,7 +461,7 @@ FF.pages = FF.pages || {};
   const scan = { order: [], map: new Map(), queue: [], t: 0, paintRaf: 0, saveT: 0, sound: true, last: { k: '', at: 0 }, ctx: null };
   const scanCam = { on: false, stream: null, raf: 0, timer: 0, det: null, reader: null, busy: false, torch: false };
   const scanKey = (c) => strip0(bcDigits(c)) || String(c || '').toUpperCase();
-  const pendingRow = (label) => { const r = makeRow(label, null, '', false, null); r.note = '⏳ check ho raha hai…'; r.dDate = r.dName = ''; r._new = Date.now(); return r; };
+  const pendingRow = (label) => { const r = makeRow(label, null, '', false, null); r.note = '⏳ check ho raha hai…'; r.pending = true; r.dDate = r.dName = ''; r._new = Date.now(); return r; };
   function scanBeep(kind) {
     try { if (navigator.vibrate) navigator.vibrate(kind === 'ok' ? 35 : [30, 40, 30]); } catch { /* optional */ }
     if (!scan.sound) return;
@@ -501,6 +501,7 @@ FF.pages = FF.pages || {};
     if (ex) { ex._dup = Date.now(); scanBeep('dup'); scanPaint(); return false; }
     scan.order.push(k); scan.map.set(k, pendingRow(code)); scan.queue.push(code);
     scanBeep('ok'); scanSave(); scanPaint();
+    try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: 'ok', code } })); } catch { /* optional */ }
     if (!scan.t) scan.t = setTimeout(scanFlush, 220);
     return true;
   }

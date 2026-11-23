@@ -1223,7 +1223,7 @@ body.colorful .from-hdr { color: #166534; }
     const kv = (k, v) => (v ? `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>` : '');
     const body = i
       ? `<div class="trs-grid">${kv('Class', i.cls)}${kv('Agent', i.agent)}${kv('Agent ID', i.agentId)}${kv('TL', i.tl)}${kv('Tag ID', i.tagId)}${kv(i.k === 'iss' ? 'Issue date' : 'Allocated', i.date)}${kv('Dispatch', i.dispatch)}${kv('Channel', i.ch)}</div>${i.note ? `<div class="trs-note">${esc(i.note)}</div>` : ''}`
-      : (it.err ? `<div class="trs-note bad">${esc(it.err)}</div>` : '<div class="trs-note">⏳ Data aa raha hai…</div>');
+      : (it.err ? `<div class="trs-note bad">${esc(it.err)}</div>` : '<div class="trs-note"><span class="wow-sk blk" style="width:70%"></span><span class="wow-sk blk" style="width:45%"></span><span class="wow-sk blk" style="width:60%"></span></div>');
     return `<div class="trs-card${it.fresh ? ' new' : ''}${i && (i.k === 'iss' || i.k === 'nf') ? ' bad' : ''}" style="border-left-color:${tone}"><div class="trs-top"><span class="trs-bc">${esc(it.code)}</span>${i ? `<span class="trs-badge" style="background:${tone}">${esc(i.label)}</span>` : ''}<button class="trs-x" data-sc-del="${esc(it.code)}" title="Hatao">✕</button></div>${body}<div class="trs-time">${esc(scTime(it.at))}</div></div>`;
   }
   function scPaint() {
@@ -1238,7 +1238,7 @@ body.colorful .from-hdr { color: #166534; }
       const part = batch.slice(i, i + 12);
       try {
         const j = await scApi('POST', '/api/public/scan-info', { codes: part });
-        part.forEach((c) => { const it = SC.map.get(c); if (it) { const had = !!it.info; it.info = (j.info || {})[c] || null; it.err = it.info ? '' : 'Data nahi mila'; if (it.info && !had && (Date.now() - Date.parse(it.at)) < 60e3) scAlert(it); } });
+        part.forEach((c) => { const it = SC.map.get(c); if (it) { const had = !!it.info; it.info = (j.info || {})[c] || null; it.err = it.info ? '' : 'Data nahi mila'; if (it.info && !had && (Date.now() - Date.parse(it.at)) < 60e3) { scAlert(it); try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: it.info.k, code: it.code, agent: it.info.agent } })); } catch { /* */ } } } });
       } catch (e) {
         const off = !navigator.onLine || (!e.status && !e.pending);
         part.forEach((c) => { const it = SC.map.get(c); if (!it) return; if (off) { it.err = '📴 Offline — net aate hi data aa jayega'; SC.q.push(c); return; } const n = (SC.tries.get(c) || 0) + 1; SC.tries.set(c, n); if (n <= 6 && (e.pending || e.status === 429 || e.status >= 500 || !e.status)) { it.err = '⏳ Server busy — dobara try…'; SC.q.push(c); } else it.err = e.message; });
