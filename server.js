@@ -4731,12 +4731,19 @@ function stockSnapLoad() {
       if (existsSync(STOCK_SNAP_FILE) && existsSync(`${STOCK_SNAP_FILE}.json`)) { meta = JSON.parse(readFileSync(`${STOCK_SNAP_FILE}.json`, 'utf8')); gz = readFileSync(STOCK_SNAP_FILE); }
     } catch { gz = null; meta = null; }
     if ((!gz || !meta) && sheetsStore && typeof sheetsStore.call === 'function') {
-      try {
-        const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: STOCK_SNAP_TAB, startRow: 1, columns: ['A'] }, { timeoutMs: 90e3, attempts: 3 });
-        const rows = (out && out.rows) || [];
-        meta = JSON.parse((rows[0] && rows[0][0]) || 'null');
-        if (meta && meta.n) { gz = Buffer.from(rows.slice(1, 1 + meta.n).map((r) => r[0] || '').join(''), 'base64'); stockSnapLastParts = meta.n; }
-      } catch (err) { console.warn('stock snapshot read:', String(err && err.message || err).slice(0, 160)); }
+      // v3.125.442 — deploy ke turant baad Apps Script "busy" deta hai (boot par kai storage reads ek saath) → ek hi koshish me
+      // snapshot chhoot jaata tha aur kai minute ka poora StockDataa scan chalta tha (barcode scan / lookup "building" me atka rehta).
+      // Ab 6 koshish, har baar thoda zyada ruk kar.
+      for (let attempt = 0; attempt < 6 && (!gz || !meta); attempt++) {
+        try {
+          if (attempt) await new Promise((r) => setTimeout(r, 6000 * attempt));
+          const out = await sheetsStore.call('readrange', { spreadsheetId: '', tab: STOCK_SNAP_TAB, startRow: 1, columns: ['A'] }, { timeoutMs: 90e3, attempts: 3 });
+          const rows = (out && out.rows) || [];
+          meta = JSON.parse((rows[0] && rows[0][0]) || 'null');
+          if (meta && meta.n) { gz = Buffer.from(rows.slice(1, 1 + meta.n).map((r) => r[0] || '').join(''), 'base64'); stockSnapLastParts = meta.n; }
+          break;
+        } catch (err) { console.warn(`stock snapshot read (try ${attempt + 1}):`, String(err && err.message || err).slice(0, 160)); }
+      }
     }
     if (!gz || !meta || meta.kind !== 'stock' || meta.v !== 2 || meta.key !== stockAgeKey() || Date.now() - meta.at > DAILY_MAX_MS) return false;
     if (stockAgeState.index) return true;
@@ -18128,14 +18135,14 @@ async function start() {
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
     setTimeout(() => { officeDispatched(false).then(() => officeDispatchedNightly()).catch(() => {}); }, 150e3).unref?.();   // 🟧 snapshot sheet se turant; aaj ka nahi bana to raat wali rebuild
     setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar
-    setTimeout(() => { ledgerPackLoad().then((ok) => { if (!ok && !ledgerState.index) return ledgerPackNightly(); }).catch(() => {}); }, 30e3).unref?.();   // snapshot na ho to ek baar abhi bana lo
+    setTimeout(() => { ledgerPackLoad().then((ok) => { if (!ok && !ledgerState.index) return ledgerPackNightly(); }).catch(() => {}); }, 120e3).unref?.();   // snapshot na ho to ek baar abhi bana lo
     setTimeout(() => { profilePackLoad().then((ok) => { if (!ok) return profilePackWarm(); profilePackNightly(); }).catch(() => {}); }, 45e3).unref?.();   // 🧑‍💼 snapshot sheet se; na ho to ek baar bana lo
     setInterval(() => { profilePackNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:45 ke baad ek baar   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
     setInterval(() => { hotSaveMaybe(false); }, 30 * 60e3).unref();
     setTimeout(() => { hotSaveMaybe(false); }, 12 * 60e3).unref?.();
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
-    setTimeout(() => { try { if (ledgerSources().length) ledgerDirect(['608116-039-0000001']).catch(() => {}); } catch { /* optional */ } }, 60e3).unref?.();   // ⚡ v425 — dispatch ledger ka pehla (cold) query boot par hi
+    setTimeout(() => { try { if (ledgerSources().length) ledgerDirect(['608116-039-0000001']).catch(() => {}); } catch { /* optional */ } }, 180e3).unref?.();   // ⚡ v425 — dispatch ledger ka pehla (cold) query boot par hi
     setTimeout(() => eirRawPrewarm('boot'), 240e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
     setInterval(() => eirRawPrewarm('30 min'), 30 * 60e3).unref();   // jo din fail / missing hain wahi dobara (baaki disk se)
     setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();
