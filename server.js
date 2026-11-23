@@ -9186,12 +9186,13 @@ async function handleApi(req, res, url) {
       if (body.dry) return sendJson(res, 200, { ok: true, dry: true, quota, days: plan.days, rows: rows.length, groups: plan.groups.map((g) => ({ label: g.label, to: g.to, n: g.rows.length, agents: new Set(g.rows.map((r) => r.agentId || r.agentName)).size, subject: tihBuildMail({ kind: g.kind, name: g.name, days: g.days, rows: g.rows, cfg }).subject })), skipped: plan.skipped });
       const base = { ...(db.settings.email || {}) };
       if (cfg.from) base.from = cfg.from;
+      const fromEmail = (/<([^>]+)>/.exec(cfg.from || '') || [])[1] || (/^[^\s@<>]+@[^\s@<>]+$/.test(cfg.from || '') ? cfg.from : '');
       if (!resolveProviders({ ...base, to: 'x@x.x' }).length) throw new HttpError(400, 'Email provider configure nahi — Settings → Features → Email.');
       const results = [];
       for (const g of plan.groups) {
         const m = tihBuildMail({ kind: g.kind, name: g.name, days: g.days, rows: g.rows, cfg });
         try {
-          await sendMail({ ...base, to: [g.to, g.cc].filter(Boolean).join(', ') }, m.subject, m.text, { html: m.html, attachments: [{ name: m.fileName, type: 'text/csv', content: Buffer.from('﻿' + m.csv, 'utf8').toString('base64'), base64: true }] });
+          await sendMail({ ...base, to: [g.to, g.cc].filter(Boolean).join(', ') }, m.subject, m.text, { html: m.html, ...((cfg.replyTo || fromEmail) ? { replyTo: cfg.replyTo || fromEmail } : {}), attachments: [{ name: m.fileName, type: 'text/csv', content: Buffer.from('﻿' + m.csv, 'utf8').toString('base64'), base64: true }] });
           await tihSvc.markSent(g.rows.map((r) => r.k), g.to, user.username);
           results.push({ label: g.label, to: g.to, n: g.rows.length, ok: true });
         } catch (err) {

@@ -109,7 +109,7 @@ FF.pages = FF.pages || {};
     const c = st.data.cfg, t = c.tpl || {};
     const tp = (k, title) => `<div class="tih-tpl"><b>${title}</b><label>Subject<input type="text" data-c="tpl.${k}.subject" value="${esc((t[k] || {}).subject)}"></label><label>Mail body<textarea data-c="tpl.${k}.body" rows="7">${esc((t[k] || {}).body)}</textarea></label></div>`;
     return `<div class="tih-set"><b>⚙ Mail settings</b>
-      <label>↩️ Reply-To — jawab is mail par aaye (verification nahi chahiye)<input type="text" data-c="replyTo" value="${esc(c.replyTo)}" placeholder="tarun.kumawat@apnapayment.com"></label>
+      <label>↩️ Reply-To — khaali chhodo to From wali mail hi lagegi<input type="text" data-c="replyTo" value="${esc(c.replyTo)}" placeholder="tarun.kumawat@apnapayment.com"></label>
       <div class="tih-note">⚠ Mail kaun si ID se <b>jaati</b> hai: <b>Google Apps Script</b> relay me hamesha usi Google account se (jisme script bana hai) — doosri ID se bhejna sambhav nahi, bina verification ke koi bhi kisi ke naam se mail nahi bhej sakta. Isliye Reply-To use karo: mail jayegi script wale account se, par "Reply" dabane par aapki mail par jawab aayega (Code.gs ek baar New version deploy karna hai). Poori alag ID se bhejni ho to Resend / Brevo / SMTP me us domain / mail ko verify karke yahan From daalo.</div>
       <div class="tih-note" data-sender>📤 Sender check: <button class="tih-btn" data-act="sendercheck">🔍 Check karo</button> ${st.sender ? senderHtml(st.sender) : ''}</div>
       <label>📤 From (sirf SMTP / Resend / Brevo me chalta hai) — jaise: Apna Payment &lt;ops@domain.com&gt;<input type="text" data-c="from" value="${esc(c.from)}" placeholder="khaali = Settings → Email wala From"></label>
