@@ -40,7 +40,29 @@ window.FF = window.FF || {};
     progT = setTimeout(progDone, 9000);
   }
   function progDone() { if (prog && prog.classList.contains('on')) { prog.className = 'done'; } }
+  // 🎴 v3.125.474 — cards ek-ek karke halke se aayein (pehle 12) + KPI number badle to chamke (▲ hara / ▼ laal)
+  const NOANIM = () => H.classList.contains('ff-no-anim') || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const kpiFlashPrev = new Map();
+  function cardsIn(root) {
+    if (NOANIM() || !root.querySelectorAll) return;
+    let i = 0;
+    root.querySelectorAll('.card:not(.ux-cin), .hs-box:not(.ux-cin)').forEach((c) => { c.classList.add('ux-cin'); if (i < 12) { c.style.setProperty('--ci', i); c.classList.add('ux-cin-a'); } i++; });
+  }
+  function kpiFlash(root) {
+    if (NOANIM() || !root.querySelectorAll) return;
+    root.querySelectorAll('.hs-box, .pf-t').forEach((t) => {
+      const lab = t.querySelector('small, .lab'), b = t.querySelector('b'); if (!lab || !b) return;
+      const key = `${location.hash.split('?')[0]}|${(lab.textContent || '').trim()}`, val = (b.textContent || '').trim();
+      const prev = kpiFlashPrev.get(key); kpiFlashPrev.set(key, val);
+      if (prev === undefined || prev === val) return;
+      const a = parseFloat(prev.replace(/[^0-9.\-]/g, '')), c = parseFloat(val.replace(/[^0-9.\-]/g, ''));
+      if (!isFinite(a) || !isFinite(c) || a === c) return;
+      t.classList.remove('ux-chg-up', 'ux-chg-dn'); void t.offsetWidth; t.classList.add(c > a ? 'ux-chg-up' : 'ux-chg-dn');
+      setTimeout(() => t.classList.remove('ux-chg-up', 'ux-chg-dn'), 1800);
+    });
+  }
   function stagger(root) {
+    cardsIn(root); kpiFlash(root);
     const rows = root.querySelectorAll ? root.querySelectorAll('tbody tr:not(.ux-in)') : [];
     let i = 0; rows.forEach((tr) => { if (i < 14) { tr.style.setProperty('--i', i); tr.classList.add('ux-in'); } else tr.classList.add('ux-in'); i++; });
   }

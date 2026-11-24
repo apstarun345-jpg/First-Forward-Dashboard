@@ -144,3 +144,17 @@ html.ff-no-anim .ux-morph, html.ff-no-anim .ux-rv-in, html.ff-no-anim .kpi-value
 html.ff-no-anim .ux-rv { opacity: 1; transform: none; }
 @media print { .ux-rv, .ux-morph { opacity: 1 !important; transform: none !important; animation: none !important; filter: none !important; } }
 @media (prefers-reduced-motion: reduce) { .ux-rv { opacity: 1; transform: none; } .ux-morph, .ux-rv-in, .kpi-value.ux-roll, .kpi.ux-ripple { animation: none !important; } }
+
+/* v3.125.474 — freshness skeleton, stale pill pulse, card entry, KPI change flash (sab GPU-sasta: opacity/transform/box-shadow) */
+.fresh-skel { display: inline-block; vertical-align: middle; width: 54px; height: 10px; margin-right: 6px; border-radius: 6px; position: relative; overflow: hidden; background: color-mix(in srgb, var(--muted, #64748b) 18%, transparent); }
+.fresh-skel::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.55) 50%, transparent 80%); animation: uxSk 1.2s ease-in-out infinite; }
+html:not(.ff-no-anim) .fresh-pill.bad, html:not(.ff-no-anim) .fresh-status.bad { animation: uxStale 1.8s ease-in-out infinite; }
+html:not(.ff-no-anim) .fresh-pill.warn, html:not(.ff-no-anim) .fresh-status.warn { animation: uxStale 3s ease-in-out infinite; }
+@keyframes uxStale { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } 50% { box-shadow: 0 0 0 5px rgba(239,68,68,.18); } }
+html:not(.ff-no-anim) #main .ux-cin-a { animation: uxCard .5s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--ci, 0) * 45ms); }
+@keyframes uxCard { from { opacity: 0; transform: translateY(10px); } }
+html:not(.ff-no-anim) .ux-chg-up { animation: uxUp 1.6s ease-out; }
+html:not(.ff-no-anim) .ux-chg-dn { animation: uxDn 1.6s ease-out; }
+@keyframes uxUp { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.55); background-color: rgba(34,197,94,.16); } 100% { box-shadow: 0 0 0 14px rgba(34,197,94,0); background-color: transparent; } }
+@keyframes uxDn { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,.5); background-color: rgba(239,68,68,.14); } 100% { box-shadow: 0 0 0 14px rgba(239,68,68,0); background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .fresh-skel::after, .fresh-pill, .fresh-status, .ux-cin-a, .ux-chg-up, .ux-chg-dn { animation: none !important; } }

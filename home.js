@@ -1061,7 +1061,7 @@ FF.pages = FF.pages || {};
     function html(list, loading) {
       const rows = list.map((r) => {
         let val;
-        if (!r.value) val = r.tracking ? '<span class="dim">Change tracking started — exact time appears after the next update</span>' : r.pending ? '<span class="dim">⏳ Checking the latest import time… (server busy — will retry)</span>' : r.noCol ? '<span class="dim">No date/time column in this sheet</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'checking…' : (r.err ? 'could not read' : '—')}</span>`;
+        if (!r.value) val = r.tracking ? '<span class="dim">Change tracking started — exact time appears after the next update</span>' : r.pending ? '<span class="dim fresh-wait"><span class="fresh-skel" aria-hidden="true"></span> Checking the latest import time… (server busy — will retry)</span>' : r.noCol ? '<span class="dim">No date/time column in this sheet</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? '<span class="fresh-skel" aria-hidden="true"></span> checking…' : (r.err ? 'could not read' : '—')}</span>`;
         else val = `<b>${esc(fmtDT(r.value))}</b>${r.value.hasTime ? '' : ' <small class="dim">(date only)</small>'}`;
         const pill = r.value ? `<span class="fresh-pill ${tone(r.value)}">${esc(ago(r.value))}</span>` : '';
         // 🟢 v228 — tech notes ki jagah ek saaf status line; poori detail row ke tooltip me
