@@ -904,12 +904,13 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
     const id = idOf(src) || (src === 'ff' ? DEFAULT_SHEET_ID : '');
     if (!id || !items.some((i) => i.source === src)) return;
     try {
-      const r = await gvizQuick(new URLSearchParams({ id, sheet: 'IMPORT_LOG', range: 'A1:C', tq: 'select A, max(B) where A is not null group by A' }), 'IMPORT_LOG');
+      const r = await gvizQuick(new URLSearchParams({ id, sheet: 'IMPORT_LOG', range: 'A1:C', tq: 'select A, B where A is not null order by B desc limit 80' }), 'IMPORT_LOG');
+      // ⚡ v3.125.469 — IMPORT_LOG bada ho gaya to `group by` poora scan karta tha (12 s+ timeout). Ab sirf latest 80 rows; har tab ka pehla (= sabse naya) rakho.
       (r.rows || []).forEach((row) => {
         const c = row.c || [];
         const tab = String((c[0] && c[0].v) || '').trim().toLowerCase();
         const v = c[1] && (c[1].v != null ? String(c[1].v) : '');
-        if (tab && v) imports[`${src}|${tab}`] = v;
+        if (tab && v && !imports[`${src}|${tab}`]) imports[`${src}|${tab}`] = v;
       });
     } catch (e) { (out.diag || (out.diag = {}))[`import-${src}`] = String((e && e.message) || e).slice(0, 160); }
   }));
