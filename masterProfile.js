@@ -1105,7 +1105,10 @@ window.FF = window.FF || {};
       ? withinOne(detailMemberTotal, memberReportParts.total)
       : memberDetails.length > 0;
     const detailClassComplete = classMapTotal(detailMemberMap) > 0 && withinOne(classMapTotal(detailMemberMap), detailMemberTotal);
+    // 🧩 v3.125.481 — live stock detail (StockDataa / Tag Assignment) class-wise poora ho aur REPORT snapshot se kam na ho
+    //    to wahi lo: REPORT purana (437) aur detail naya (544) hone par pehle sab "Commercial/Other" ban jaata tha.
     const useDetailMembers = (detailComplete && (detailClassComplete || (ch === 'ff' && !detailMemberTotal)))
+      || (detailClassComplete && detailMemberTotal >= memberReportParts.total - 1)
       || (!memberReports.length && memberDetails.length > 0);
     const memberMap = useDetailMembers && classMapTotal(detailMemberMap) ? detailMemberMap : memberReportMap;
     const memberParts = classMapParts(memberMap);
