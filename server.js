@@ -911,7 +911,7 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
         const v = c[1] && (c[1].v != null ? String(c[1].v) : '');
         if (tab && v) imports[`${src}|${tab}`] = v;
       });
-    } catch { /* tab nahi hai — optional */ }
+    } catch (e) { (out.diag || (out.diag = {}))[`import-${src}`] = String((e && e.message) || e).slice(0, 160); }
   }));
   // 📥 v3.78 — DATA_ARRIVAL_LOG (markDataArrived(): Tab | Last data arrived) + SHEET_UPDATE_LOG (tracker: "Last change detected")
   //    IMPORT_LOG na ho / usme tab na ho to inme se exact time lete hain. Dono optional.
