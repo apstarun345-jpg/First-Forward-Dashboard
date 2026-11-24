@@ -157,4 +157,4 @@ html:not(.ff-no-anim) .ux-chg-up { animation: uxUp 1.6s ease-out; }
 html:not(.ff-no-anim) .ux-chg-dn { animation: uxDn 1.6s ease-out; }
 @keyframes uxUp { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.55); background-color: rgba(34,197,94,.16); } 100% { box-shadow: 0 0 0 14px rgba(34,197,94,0); background-color: transparent; } }
 @keyframes uxDn { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,.5); background-color: rgba(239,68,68,.14); } 100% { box-shadow: 0 0 0 14px rgba(239,68,68,0); background-color: transparent; } }
-@media (prefers-reduced-motion: reduce) { .fresh-skel::after, .fresh-pill, .fresh-status, .ux-cin-a, .ux-chg-up, .ux-chg-dn { animation: none !important; } }
+html.ff-no-anim .fresh-skel::after, html.ff-no-anim .ux-cin-a, html.ff-no-anim .ux-chg-up, html.ff-no-anim .ux-chg-dn { animation: none !important; }

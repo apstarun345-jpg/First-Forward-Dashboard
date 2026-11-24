@@ -1288,6 +1288,14 @@ window.FF = window.FF || {};
       settings.js lazy load hota hai, isliye ye chhota sa hook app.js me hai: speed prefs (ff-no-anim /
       ff-lite) + attribute repairs (jaise `data-kpi-self="1"` — card ka click page khud handle kare,
       global kpiDetail hijack na kare). Rule localStorage me hai → reload ke baad bhi fix laga rehta hai. */
+  FF.fastMode = () => {
+    try {
+      const p = JSON.parse(localStorage.getItem('ff_speed_prefs') || '{}') || {};
+      if (typeof p.appFast === 'boolean') return p.appFast;
+      const mm = (q) => !!(window.matchMedia && window.matchMedia(q).matches);
+      return mm('(display-mode: standalone)') || mm('(display-mode: fullscreen)') || !!navigator.standalone || mm('(pointer: coarse)');
+    } catch { return false; }
+  };
   const DIAG_ATTR_FIX = { kpiSelf: ['data-kpi-self', '1'] };
   function applySavedTweaks(root) {
     try {
@@ -1296,6 +1304,9 @@ window.FF = window.FF || {};
       if (html && html.classList) {
         html.classList.toggle('ff-no-anim', !!prefs.reduceMotion);
         html.classList.toggle('ff-lite', !!prefs.lite);
+        // ⚡ v3.125.486 — App fast mode: installed app / phone par DEFAULT on (user Settings me band kar sakta hai)
+        html.classList.toggle('ff-fast', FF.fastMode ? FF.fastMode() : false);
+        if (html.classList.contains('ff-fast')) html.classList.remove('ff-3d');
       }
       const rules = JSON.parse(localStorage.getItem('ff_diag_attr_repairs') || '[]');
       if (!Array.isArray(rules) || !rules.length) return 0;

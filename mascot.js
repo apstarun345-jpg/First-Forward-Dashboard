@@ -20,6 +20,8 @@
   // 🔋 v3.125.177 — "Hey Gems" sunna ab default BAND (mic hamesha on = battery). User khud ON kare tabhi.
   if (!cfg.wakeV2) { cfg.wake = false; cfg.wakeV2 = 1; try { localStorage.setItem('ffMascotWakeV2', '1'); } catch { /* ignore */ } }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(cfg)); } catch { /* private mode */ } };
+  // 🤖 v3.125.486 — robot ab default BAND (app me lag karta tha). Settings → ⚡ Speed & Robot se ON.
+  if (cfg.offV486 !== 1) { cfg.on = false; cfg.offV486 = 1; save(); }
   const today = () => new Date().toISOString().slice(0, 10);
   // v3.125.122: robot ki chaal user ne khud maangi hai (aur ⚙ me band ho sakti hai) — OS ka reduced-motion ise nahi rokta
   const reduced = () => false;

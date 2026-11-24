@@ -92,3 +92,13 @@ html.ff-look26 .btn.primary { background: linear-gradient(180deg, color-mix(in s
 html.ff-look26 .kpi-value, html.ff-look26 .hs-box b, html.ff-look26 .pf-t b, html.ff-look26 .gs-kpi b, html.ff-look26 .msp-kpis b, html.ff-look26 .num { font-variant-numeric: tabular-nums; }
 html.ff-look26[data-theme="dark"] { --bg: #0a0f1f; --line: #1f2a44; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 28px -14px rgba(0,0,0,.6); }
 html.ff-look26[data-theme="dark"] .topbar { background: color-mix(in srgb, var(--bg) 92%, #fff); }
+
+/* ⚡ v3.125.486 — App fast mode (installed app / phone par default). Sirf bhaari cheezein band — look wahi rehta hai. */
+html.ff-fast *, html.ff-fast *::before, html.ff-fast *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html.ff-fast .card, html.ff-fast .hs-box, html.ff-fast .kpi, html.ff-fast .pf-t, html.ff-fast .gs-kpi { transition: none !important; will-change: auto !important; }
+html.ff-fast .card:hover, html.ff-fast .kpi:hover, html.ff-fast .hs-box:hover { transform: none !important; }
+html.ff-fast .ux-cin-a, html.ff-fast tbody tr.ux-in { animation: none !important; }
+html.ff-fast .card { box-shadow: 0 1px 2px rgba(15,23,42,.06) !important; }
+html.ff-fast body { background-image: none !important; }
+/* lambe page: screen ke bahar wale card tab tak render nahi hote jab tak scroll par paas na aayein (scroll smooth) */
+html.ff-fast #main .card:not(:first-child) { content-visibility: auto; contain-intrinsic-size: auto 420px; }

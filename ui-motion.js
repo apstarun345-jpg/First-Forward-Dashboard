@@ -41,7 +41,7 @@ window.FF = window.FF || {};
   }
   function progDone() { if (prog && prog.classList.contains('on')) { prog.className = 'done'; } }
   // 🎴 v3.125.474 — cards ek-ek karke halke se aayein (pehle 12) + KPI number badle to chamke (▲ hara / ▼ laal)
-  const NOANIM = () => H.classList.contains('ff-no-anim') || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const NOANIM = () => H.classList.contains('ff-no-anim') || H.classList.contains('ff-fast');   // OS reduce-motion jaan-boojh kar ignore (site ki apni setting)
   const kpiFlashPrev = new Map();
   function cardsIn(root) {
     if (NOANIM() || !root.querySelectorAll) return;
@@ -197,7 +197,7 @@ window.FF = window.FF || {};
   function buildDock() {
     dock = D.createElement('div'); dock.id = 'ux-dock';
     dock.innerHTML = '<button type="button" data-d="sel" title="Rows chun kar copy / CSV / WhatsApp">☑ Select</button><button type="button" data-d="3d" title="3D look on / off">🧊 3D</button><button type="button" data-d="den" title="Table row ki gehraai: Compact / Normal / Bada"></button><button type="button" data-d="print" title="Is page ka saaf PDF / print">🖨 PDF</button>';
-    denApply(denGet()); set3d(get3d()); tiltInit();
+    denApply(denGet()); set3d(get3d() && !H.classList.contains('ff-fast')); tiltInit();
     bar = D.createElement('div'); bar.id = 'ux-bar';
     bar.innerHTML = '<b>0</b> chuni<button type="button" data-b="copy">📋 Copy</button><button type="button" data-b="csv">⬇ CSV</button><button type="button" data-b="wa">💬 WhatsApp</button><button type="button" data-b="all">Sab</button><button type="button" class="x" data-b="x">✕ Band</button>';
     D.body.append(dock, bar);

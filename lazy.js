@@ -249,7 +249,9 @@ window.FF = window.FF || {};
       for (const wave of SHELL_WAVES) {
         // Paint/scroll se compete na kare: idle me hi agla wave, phone par thoda zyada gap.
         await new Promise((r) => idle(r, dev.coarse ? 4000 : 1500));
-        await loadList(wave);
+        // 🤖 v3.125.486 — robot default BAND: mascot.js (~300 KB) tabhi load jab Settings me ON ho
+        const robotOn = (() => { try { const m = JSON.parse(localStorage.getItem('ff_mascot_v1') || '{}'); return m.on === true && m.offV486 === 1; } catch { return false; } })();
+        await loadList(wave.filter((n) => n !== 'mascot' || robotOn));
         if (typeof o.afterWave === 'function') { try { o.afterWave(wave); } catch { /* hook optional */ } }
         if (dev.coarse) await wait(250);
       }

@@ -583,13 +583,37 @@ FF.pages = FF.pages || {};
       else U.toast('Assistant abhi load nahi hua — page refresh karo.', 'warn');
     });
   }
+  // ⚡ v3.125.486 — sabke liye: App fast mode + Robot on/off (pehle Diagnostics / Sound tab me chhupe the)
+  function speedRobotSection() {
+    const fast = FF.fastMode ? FF.fastMode() : false;
+    let robot = false; try { const m = JSON.parse(localStorage.getItem('ff_mascot_v1') || '{}'); robot = m.on === true && m.offV486 === 1; } catch { /* ignore */ }
+    const row = (key, on, label, hint) => `<label class="pref-row" style="display:flex;gap:10px;align-items:flex-start;padding:8px 0"><input type="checkbox" data-sr="${key}"${on ? ' checked' : ''} style="margin-top:3px"><span><b>${label}</b><br><small class="dim">${hint}</small></span></label>`;
+    return section('⚡ Speed & Robot', `${row('fast', fast, '⚡ App fast mode', 'Bhaari effects band (3D, blur, card animations) + lambe page ka neeche wala hissa scroll par hi banta hai. Installed app / phone par apne aap ON.')}
+      ${A.isAdmin() ? row('robot', robot, '🤖 Robot dost', 'Site par ghoomne wala robot. Band rehne par uska ~300 KB code load hi nahi hota — app halka.') : ''}
+      <p class="dim small" style="margin:4px 0 0">Badlav turant lagta hai; robot ON / OFF ke baad page ek baar reload hoga.</p>`);
+  }
+  function bindSpeedRobot(body) {
+    const f = body.querySelector('[data-sr="fast"]');
+    if (f) f.addEventListener('change', () => {
+      try { const p = JSON.parse(localStorage.getItem('ff_speed_prefs') || '{}') || {}; p.appFast = !!f.checked; localStorage.setItem('ff_speed_prefs', JSON.stringify(p)); } catch { /* ignore */ }
+      document.documentElement.classList.toggle('ff-fast', !!f.checked);
+      if (f.checked) document.documentElement.classList.remove('ff-3d');
+      U.toast(f.checked ? '⚡ Fast mode ON' : 'Fast mode OFF', 'ok');
+    });
+    const r = body.querySelector('[data-sr="robot"]');
+    if (r) r.addEventListener('change', () => {
+      try { const m = JSON.parse(localStorage.getItem('ff_mascot_v1') || '{}') || {}; m.on = !!r.checked; m.offV486 = 1; localStorage.setItem('ff_mascot_v1', JSON.stringify(m)); } catch { /* ignore */ }
+      U.toast(r.checked ? '🤖 Robot ON — reload ho raha hai' : '🤖 Robot OFF — reload ho raha hai', 'ok');
+      setTimeout(() => location.reload(), 700);
+    });
+  }
   function accountTab() {
     const u = A.user;
     const perms = A.permissions || [];
     const loc = u.lastLocation;
     const locationText = loc ? `Last shared: ${U.timeLabel(new Date(loc.at).getTime())} · ${loc.latitude}, ${loc.longitude}${loc.accuracy ? ` · ±${loc.accuracy}m` : ''}` : 'Location abhi share nahi ki gayi hai.';
     const locationLink = loc ? `https://www.google.com/maps?q=${encodeURIComponent(`${loc.latitude},${loc.longitude}`)}` : '';
-    return `${section('👤 Profile', avatarBlock() + `<div class="form-grid">${field('Username', `<input class="input" value="${esc(u.username)}" disabled>`)}${field('Full name', `<input class="input" id="pf-name" value="${esc(u.name || '')}">`)}${field('Mobile', `<input class="input" id="pf-mobile" value="${esc(u.mobile || '')}" inputmode="tel">`)}${field('Email', `<input class="input" id="pf-email" type="email" value="${esc(u.email || '')}">`)}</div><div class="save-bar"><button class="btn primary" id="pf-save">💾 Save profile</button><span class="dim small">Role: <b>${u.role === 'admin' ? '👑 Admin' : 'User'}</b> · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'}</span></div>`)}
+    return `${speedRobotSection()}${section('👤 Profile', avatarBlock() + `<div class="form-grid">${field('Username', `<input class="input" value="${esc(u.username)}" disabled>`)}${field('Full name', `<input class="input" id="pf-name" value="${esc(u.name || '')}">`)}${field('Mobile', `<input class="input" id="pf-mobile" value="${esc(u.mobile || '')}" inputmode="tel">`)}${field('Email', `<input class="input" id="pf-email" type="email" value="${esc(u.email || '')}">`)}</div><div class="save-bar"><button class="btn primary" id="pf-save">💾 Save profile</button><span class="dim small">Role: <b>${u.role === 'admin' ? '👑 Admin' : 'User'}</b> · joined ${u.createdAt ? U.timeLabel(new Date(u.createdAt).getTime()) : '—'}</span></div>`)}
       ${section('🧭 Workspace display & activity sharing', `<p class="dim small">Left navigation panel desktop par hamesha ek jagah fixed dikhta hai. Mobile me ☰ menu button se khulta hai.</p><div class="form-grid"><label>Tag Issued default range<select class="input" id="ti-range-days"><option value="1" ${localStorage.getItem('ti_range_days') === '7' || localStorage.getItem('ti_range_days') === '30' || localStorage.getItem('ti_range_days') === '90' ? '' : 'selected'}>Latest day</option><option value="7" ${localStorage.getItem('ti_range_days') === '7' ? 'selected' : ''}>Last 7 days</option><option value="30" ${localStorage.getItem('ti_range_days') === '30' ? 'selected' : ''}>Last 30 days</option><option value="90" ${localStorage.getItem('ti_range_days') === '90' ? 'selected' : ''}>Last 90 days</option></select></label><label>Top agent / team charts<select class="input" id="ti-chart-limit"><option value="5" ${localStorage.getItem('ti_chart_limit') === '5' ? 'selected' : ''}>Top 5</option><option value="10" ${localStorage.getItem('ti_chart_limit') !== '5' && localStorage.getItem('ti_chart_limit') !== '15' && localStorage.getItem('ti_chart_limit') !== '20' ? 'selected' : ''}>Top 10</option><option value="15" ${localStorage.getItem('ti_chart_limit') === '15' ? 'selected' : ''}>Top 15</option><option value="20" ${localStorage.getItem('ti_chart_limit') === '20' ? 'selected' : ''}>Top 20</option></select></label></div><label class="check"><input type="checkbox" id="presence-share-toggle" ${localStorage.getItem('ff_presence_pointer') !== '0' ? 'checked' : ''}> Admin <b>Live view</b> share karo — khula page, scroll, live cursor aur kin buttons / cards par click kiya.</label><p class="dim small">Admin notification panel se aapka live screen view (page + cursor + actions) dekh sakta hai. Typed text / passwords kabhi share nahi hote. Is option ko kabhi bhi band kar sakte hain.</p>`)}
       ${notificationsSection()}
       ${section('📍 Location (optional, consent ke saath)', `<p class="dim small">Location sirf tab li jayegi jab aap khud “Share my location” dabayenge. Browser permission ke bina koi GPS tracking nahi hoti. Admin ko aapki last shared location dikhegi.</p><div class="location-status">${loc ? '✅' : '⚪'} ${esc(locationText)} ${locationLink ? `<a class="btn small" href="${esc(locationLink)}" target="_blank" rel="noopener">🗺️ Maps me dekho</a>` : ''}</div><div class="save-bar"><button class="btn" id="location-share">📍 Share my location</button></div>`)}
@@ -2810,7 +2834,7 @@ FF.pages = FF.pages || {};
     const draw = async () => {
       U.$$('#set-tabs .seg-btn', root).forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
       history.replaceState(null, '', `#/settings?tab=${tab}`);
-      if (tab === 'account') body.innerHTML = accountTab();
+      if (tab === 'account') { body.innerHTML = accountTab(); bindSpeedRobot(body); }
       else if (tab === 'diagnostics') body.innerHTML = diagnosticsTab();
       else if (tab === 'sound') { body.innerHTML = mascotSection() + soundTab(); bindSoundTab(body, draw); bindMascot(body); }
       else if (tab === 'brand') body.innerHTML = brandTab();
