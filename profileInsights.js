@@ -467,7 +467,7 @@ window.FF = window.FF || {};
         if (!el.isConnected) return;
         if (!d) { el.innerHTML = '<span class="dim small">🏦 Payout data abhi nahi mila (Home → 💰 Payout refresh)</span>'; return; }
         const m0 = d.maxes.find((m) => m.vc4max > 0);
-        const maxHtml = m0 ? `<span class="pf-mx"><small>${esc(String(m0.label).replace(/ (\d{4})$/, " '$1").replace(/'20/, "'"))}</small><b>₹${fmt(m0.vc4max, m0.vc4max % 1 ? 2 : 0)} <small>/ tag</small></b></span>` : '<span class="dim small">VC4 max-issuance rate sheet me nahi mila</span>';
+        const maxHtml = m0 ? `<span class="pf-mx"><small>${esc(String(m0.label).replace(/ (\d{4})$/, " '$1").replace(/'20/, "'"))}</small><b>₹${fmt(m0.vc4max, m0.vc4max % 1 ? 2 : 0)} <small>/ tag</small></b>${m0.vc4n > 1 && m0.vc4mode && m0.vc4mode !== m0.vc4max ? `<small class="dim" title="Team ke agents ke alag alag rate hote hain; yahan sabse bada dikh raha hai">highest · ${fmt(m0.vc4maxN)} of ${fmt(m0.vc4n)} agents · most agents ₹${fmt(m0.vc4mode)} (${fmt(m0.vc4modeN)})</small>` : ''}</span>` : '<span class="dim small">VC4 max-issuance rate sheet me nahi mila</span>';
         el.innerHTML = `<div class="pf-pr"><div class="pf-pt">🏅 VC4 rate with max issuance <small class="dim">(last month)</small></div><div class="pf-mxs">${maxHtml}</div></div>
           <div class="pf-pr pf-acct"><div class="pf-pt">🏦 Account details <small class="dim">${d.role === 'agent' ? `· paid via ${esc(d.payee)}` : d.payee ? `· ${esc(d.payee)}` : ''}</small></div><div class="pf-bks">${d.bank ? bankHtml(d.bank) : '<span class="dim small">Bank details sheet me nahi mili</span>'}</div></div>`;
       }).catch(() => { el.__pfDone = false; if (el.isConnected) el.innerHTML = ''; });

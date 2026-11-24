@@ -814,8 +814,12 @@ window.FF = window.FF || {};
       if (!bank && data.bank && (data.bank.bank || data.bank.account || data.bank.ifsc)) bank = data.bank;
       if (!role) { role = data.role; payee = `${data.payeeId || ''} ${data.payeeName || ''}`.trim(); }
       const t = data.totals || {};
-      const vc4max = Math.max(0, ...((data.agents || []).map((r) => Number(r.rate_vc4max) || 0)));   // sheet column "VC4 Rate With Max Issuance"
-      maxes.push({ label: m.label, vc4max, n: Number(t.max_n) || 0, amt: Number(t.po_max) || 0 });
+      const rates = (data.agents || []).map((r) => Number(r.rate_vc4max) || 0).filter((v) => v > 0);   // sheet column "VC4 Rate With Max Issuance"
+      const vc4max = rates.length ? Math.max(...rates) : 0;
+      // 🔎 v3.125.472 — TL ke liye pehle sirf sabse bada rate dikhta tha (1 agent ka ₹150 poori team ka lagta tha) → sabse common rate + kitne agents bhi
+      const cnt = {}; rates.forEach((v) => { cnt[v] = (cnt[v] || 0) + 1; });
+      const mode = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0];
+      maxes.push({ label: m.label, vc4max, vc4maxN: rates.filter((v) => v === vc4max).length, vc4mode: Number(mode) || 0, vc4modeN: cnt[mode] || 0, vc4n: rates.length, n: Number(t.max_n) || 0, amt: Number(t.po_max) || 0 });
     }
     return { bank, role, payee, maxes: maxes.slice(0, 3), at: S.at };
   }
