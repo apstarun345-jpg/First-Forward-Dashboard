@@ -1516,6 +1516,8 @@ class PackedEntry {
     this.etag = bodyEtag(raw);
   }
   get body() { return zlib.gunzipSync(this.gz).toString('utf8'); }
+  /** Sheet snapshot se wapas — gzip bytes seedhe (dobara compress nahi). */
+  static fromGz(o) { const e = Object.create(PackedEntry.prototype); e.at = o.at; e.status = o.status || 200; e.ver = o.ver || ''; e.gz = o.gz; e.rawLen = o.rawLen || 0; e.etag = o.etag || ''; return e; }
 }
 class GvizCache extends Map {
   constructor() { super(); this.bytes = 0; }
@@ -5543,6 +5545,49 @@ async function odSnapLoad() {
     return j;
   } catch (err) { officeDispState.err = 'snap load: ' + String((err && err.message) || err).slice(0, 120); return null; }
 }
+// 💾 v3.125.488 — GVIZ CACHE SHEET SNAPSHOT: Render free plan ki disk har deploy / so-jaane par mit jaati hai → cache khaali →
+// pehle 2-3 min har query Google par 45s+. Ab sabse garam queries ka gzip cache har 30 min Google Sheet (CACHE_GVIZ) me save
+// aur boot par wapas — restart ke baad bhi data turant (stale), naya peeche se (stale-while-revalidate).
+const clientHealth = { since: Date.now(), errors: [], pages: new Map() };
+const GVIZ_SNAP_TAB = 'CACHE_GVIZ', GVIZ_SNAP_MAX = 6.5 * 1048576, GVIZ_SNAP_AGE = 12 * 3600e3;
+const gvizSnap = { savedAt: 0, loadedAt: 0, loaded: 0, saved: 0, sig: '', err: '' };
+async function gvizSnapSave() {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return false;
+  const now = Date.now(), list = [];
+  for (const [url, e] of cache.entries()) {
+    if (!e || !e.gz || !(e.status >= 200 && e.status < 300) || now - e.at > 3 * 3600e3) continue;
+    if (/gv-today|today/i.test(url) && !/sheet=/i.test(url)) continue;
+    const h = HOT.get(url);
+    list.push({ url, e, score: (h ? h.hits : 0) * 1e6 + e.at / 1e6 });
+  }
+  list.sort((a, b) => b.score - a.score);
+  const rows = []; let bytes = 0;
+  for (const { url, e } of list) {
+    if (bytes + e.gz.length > GVIZ_SNAP_MAX) continue;
+    bytes += e.gz.length;
+    rows.push([url, e.at, e.status, e.ver || '', e.etag || '', e.rawLen || 0, e.gz.toString('base64')]);
+  }
+  if (!rows.length) return false;
+  const sig = rows.map((r) => `${r[0].length}:${r[1]}`).join('|');
+  if (sig === gvizSnap.sig) return false;   // kuch naya nahi
+  const ok = await durSave(GVIZ_SNAP_TAB, 'gviz', rows, { at: now });
+  if (ok) { gvizSnap.sig = sig; gvizSnap.savedAt = now; gvizSnap.saved = rows.length; console.log(`💾 gviz snapshot sheet me: ${rows.length} queries · ${Math.round(bytes / 1024)} KB`); }
+  else gvizSnap.err = profilePack.err || 'save failed';
+  return ok;
+}
+async function gvizSnapLoad() {
+  const r = await durLoad(GVIZ_SNAP_TAB, 'gviz');
+  if (!r || !Array.isArray(r.obj)) return 0;
+  let n = 0;
+  for (const row of r.obj) {
+    const [url, at, status, ver, etag, rawLen, b64] = row || [];
+    if (!url || !b64 || Date.now() - Number(at) > GVIZ_SNAP_AGE || cache.has(url)) continue;
+    try { cache.set(url, PackedEntry.fromGz({ at: Number(at), status, ver, etag, rawLen, gz: Buffer.from(b64, 'base64') })); n++; } catch { /* skip */ }
+  }
+  gvizSnap.loadedAt = Date.now(); gvizSnap.loaded = n;
+  if (n) console.log(`💾 gviz cache: ${n} queries Google Sheet snapshot se wapas (restart ke baad turant)`);
+  return n;
+}
 // 🧑‍💼 v3.125.413 — PROFILE PACK: roz raat (IST 02:45) ek baar Agents Address ka poora index banta hai + Sheet (CACHE_PROFILE) me durable save.
 // Search par profile kholte hi address turant (browser ek baar pack le leta hai) — har profile par 3-4 API call + Google wait nahi.
 const profilePack = { at: 0, day: '', addr: null, promise: null, err: '', bufs: new Map(), token: crypto.randomBytes(12).toString('hex'), viaSnap: false };
@@ -8594,6 +8639,34 @@ async function handleApi(req, res, url) {
     }, { 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-cache' });
   }
 
+  // 🩺 v3.125.488 — browser errors + page timings (halka, memory me; Render log me bhi)
+  if (p === '/api/client-telemetry' && method === 'POST') {
+    if (!user) return sendJson(res, 200, { ok: true });
+    const body = await readBody(req).catch(() => ({}));
+    const now = Date.now(), who = user.username || '';
+    (Array.isArray(body.errors) ? body.errors : []).slice(0, 25).forEach((e) => {
+      const it = { msg: String(e.msg || '').slice(0, 300), src: String(e.src || '').slice(0, 120), line: Number(e.line) || 0, page: String(e.page || '').slice(0, 40), stack: String(e.stack || '').slice(0, 600), who, app: !!body.app, at: now };
+      const key = `${it.msg}|${it.src}|${it.line}`;
+      const ex = clientHealth.errors.find((x) => x.key === key);
+      if (ex) { ex.n++; ex.at = now; ex.who = who; ex.page = it.page; } else { clientHealth.errors.unshift({ ...it, key, n: 1, first: now }); console.warn(`🧯 client error [${who}] ${it.page}: ${it.msg} @ ${it.src}:${it.line}`); }
+    });
+    if (clientHealth.errors.length > 150) clientHealth.errors.length = 150;
+    (Array.isArray(body.pages) ? body.pages : []).slice(0, 60).forEach((t) => {
+      const pg = String(t.p || '').slice(0, 40), ms = Number(t.ms); if (!pg || !(ms >= 0)) return;
+      const k = `${pg}|${body.app ? 'app' : 'web'}`;
+      const o = clientHealth.pages.get(k) || { page: pg, app: !!body.app, n: 0, sum: 0, max: 0, slow: 0, last: 0, at: 0, recent: [] };
+      o.n++; o.sum += ms; o.max = Math.max(o.max, ms); if (ms > 4000) o.slow++; o.last = ms; o.at = now;
+      o.recent.push(ms); if (o.recent.length > 40) o.recent.shift();
+      clientHealth.pages.set(k, o);
+    });
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/admin/client-health' && method === 'GET') {
+    requireAdmin(user);
+    const pct = (a, q2) => { if (!a.length) return 0; const b = a.slice().sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(q2 * b.length))]; };
+    const pages = [...clientHealth.pages.values()].map((o) => ({ page: o.page, app: o.app, n: o.n, avg: Math.round(o.sum / o.n), p90: pct(o.recent, 0.9), max: o.max, slow: o.slow, last: o.last, at: o.at })).sort((a, b) => b.p90 - a.p90);
+    return sendJson(res, 200, { ok: true, since: clientHealth.since, errors: clientHealth.errors.slice(0, 80).map(({ key, ...r }) => r), pages, server: { gvizSnap, cacheEntries: cache.size, cacheMB: Math.round(cache.bytes / 1048576 * 10) / 10 } });
+  }
   if (p === '/api/health' && method === 'GET') {
     // pendingSignups sirf admin ko (sidebar badge ke liye) — public health me leak nahi.
     return sendJson(res, 200, { ok: true, service: 'first-forward-dashboard', version: APP_VERSION, storage: storageStatus(), push: pushHealth(), stockAge: stockAgeStatus(), users: db.users.length, cached: cache.size, cacheMB: Math.round(cache.bytes / 1048576), memory: (() => { const m = process.memoryUsage(); const r = (x) => Math.round(x / 1048576); return { rss: r(m.rss), heapUsed: r(m.heapUsed), heapTotal: r(m.heapTotal), external: r(m.external), arrayBuffers: r(m.arrayBuffers) }; })(), memoryMB: rssMB(), memoryPeakMB: memGuard.peakMB, memorySoftTrims: memGuard.softCount, cacheSeconds: cacheMs() / 1000, dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null, ...(user && user.role === 'admin' ? { pendingSignups: db.users.filter((u) => !u.approved).length, tagRequestRecovery: tagReqRecoveryInfo } : {}) });
@@ -18464,6 +18537,10 @@ async function start() {
     }
     // 💾 gviz cache: boot par disk se wapas, phir har 10 min disk par
     cacheLoadDisk().then((n) => { if (n) console.log(`💾 gviz cache: ${n} entries disk se wapas (deploy ke baad turant garam)`); }).catch(() => {});
+    // 💾 v3.125.488 — disk na ho (free plan) to Sheet snapshot se; phir har 30 min save
+    setTimeout(() => { gvizSnapLoad().catch(() => {}); }, 8e3).unref?.();
+    setInterval(() => { gvizSnapSave().catch(() => {}); }, 30 * 60e3).unref();
+    setTimeout(() => { gvizSnapSave().catch(() => {}); }, 6 * 60e3).unref?.();
     setInterval(() => { cacheSaveDisk().catch(() => {}); }, 10 * 60e3).unref();
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();

@@ -1138,6 +1138,7 @@ window.FF = window.FF || {};
     }
     current = { page, params, token: current.token + 1 };
     const token = current.token;
+    const routeT0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     renderGlobalFilters();
     renderMobileNav();
     const pageGroup = currentNavGroup(page, params);
@@ -1189,6 +1190,7 @@ window.FF = window.FF || {};
     routeProgress(false, token);
     if (token === current.token) {
       main.setAttribute('aria-busy', 'false'); updateStatus(); translateDom(root); applySavedTweaks(root);
+      try { FF.telemetry && FF.telemetry.page(page, ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - routeT0); } catch { /* optional */ }
       // ⚡ Paint-first: non-essential chart/table decoration is idle-deferred.
       // Data fetching/query/cache/export paths are untouched, so downloads stay identical.
       const polish = () => {
@@ -2751,4 +2753,38 @@ window.FF = window.FF || {};
   }
 
   document.addEventListener('DOMContentLoaded', init);
+})(window.FF);
+/* 🩺 v3.125.488 — Live errors + page speed → server (admin: Settings → Diagnostics → "Live errors & speed").
+   Halka: har error ek baar (dedupe), max 25 / session; timings batch me har 30s ya tab chhupne par (sendBeacon). */
+(function (FF) {
+  'use strict';
+  if (!FF || FF.telemetry) return;
+  const q = { errors: [], pages: [] }, seen = new Set();
+  let sent = 0, timer = 0;
+  const page = () => String(location.hash || '').replace(/^#\/?/, '').split('?')[0] || 'home';
+  function push(kind, item) { (kind === 'e' ? q.errors : q.pages).push(item); if (!timer) timer = setTimeout(flush, 30000); }
+  function err(msg, src, line, col, stack) {
+    const m = String(msg || '').slice(0, 300);
+    if (!m || /ResizeObserver loop|Script error\.?$|AbortError|The user aborted|Load failed|NetworkError/i.test(m)) return;
+    const key = `${m}|${src}|${line}`;
+    if (seen.has(key) || sent + q.errors.length >= 25) return;
+    seen.add(key);
+    push('e', { msg: m, src: String(src || '').replace(location.origin, '').split('?')[0].slice(0, 120), line: line || 0, col: col || 0, stack: String(stack || '').slice(0, 600), page: page(), at: Date.now() });
+  }
+  window.addEventListener('error', (e) => { if (e && e.message) err(e.message, e.filename, e.lineno, e.colno, e.error && e.error.stack); });
+  window.addEventListener('unhandledrejection', (e) => { const r = e && e.reason; err(r && r.message ? r.message : String(r), '', 0, 0, r && r.stack); });
+  function flush(beacon) {
+    clearTimeout(timer); timer = 0;
+    if (!q.errors.length && !q.pages.length) return;
+    const body = JSON.stringify({ errors: q.errors.splice(0), pages: q.pages.splice(0), fast: document.documentElement.classList.contains('ff-fast'), app: !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches) });
+    sent += 1;
+    try {
+      if (beacon && navigator.sendBeacon) { navigator.sendBeacon('/api/client-telemetry', new Blob([body], { type: 'application/json' })); return; }
+      fetch('/api/client-telemetry', { method: 'POST', credentials: 'same-origin', keepalive: true, headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body }).catch(() => {});
+    } catch { /* optional */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flush(true); });
+  FF.telemetry = { page: (p, ms) => { if (p && ms >= 0 && ms < 600000) push('p', { p: String(p).slice(0, 40), ms: Math.round(ms) }); }, flush };
+  // boot: pehla paint + pehli page tak ka time
+  try { window.addEventListener('load', () => setTimeout(() => { const n = performance.getEntriesByType('navigation')[0]; const fcp = (performance.getEntriesByName('first-contentful-paint')[0] || {}).startTime; if (n) push('p', { p: '__boot', ms: Math.round(fcp || n.domContentLoadedEventEnd) }); }, 3000)); } catch { /* optional */ }
 })(window.FF);
