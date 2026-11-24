@@ -814,7 +814,7 @@ window.FF = window.FF || {};
       if (!bank && data.bank && (data.bank.bank || data.bank.account || data.bank.ifsc)) bank = data.bank;
       if (!role) { role = data.role; payee = `${data.payeeId || ''} ${data.payeeName || ''}`.trim(); }
       const t = data.totals || {};
-      const rates = (data.agents || []).map((r) => Number(r.rate_vc4max) || 0).filter((v) => v > 0);   // sheet column "VC4 Rate With Max Issuance"
+      const rates = (data.agents || []).filter((r) => /^active$/i.test(String(r.status || '').trim())).map((r) => Number(r.rate_vc4max) || 0).filter((v) => v > 0);   // sirf ACTIVE agents ka rate   // sheet column "VC4 Rate With Max Issuance"
       const vc4max = rates.length ? Math.max(...rates) : 0;
       // 🔎 v3.125.472 — TL ke liye pehle sirf sabse bada rate dikhta tha (1 agent ka ₹150 poori team ka lagta tha) → sabse common rate + kitne agents bhi
       const cnt = {}; rates.forEach((v) => { cnt[v] = (cnt[v] || 0) + 1; });
