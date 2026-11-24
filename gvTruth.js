@@ -117,6 +117,13 @@ window.FF = window.FF || {};
     if (spec.name) names.push(nameKey(spec.name));
     return { isTl, ids: [...new Set(ids.filter(Boolean))], names: [...new Set(names.filter(Boolean))] };
   }
+  // 🆔 v3.125.477 — ID di gayi ho par uski rows na hon (naya agent / issuance nahi) to same-NAAM wale dusre agent ki rows mat lo
+  //    (Sushil Kumar APS111 ko APS023113 ka issuance/profile dikh raha tha). Naam se sirf tab, jab wo sab rows isi ID ki hon.
+  function nameRowsFor(rows, id, field) {
+    if (!id || !rows.length) return rows;
+    const ids = new Set(rows.map((r) => idKey(r && r[field || 'agentId'])).filter(Boolean));
+    return ids.size === 1 && ids.has(id) ? rows : [];
+  }
   function lookup(map, keys) {
     const out = [];
     const seen = new Set();
@@ -146,7 +153,7 @@ window.FF = window.FF || {};
     }
     // ID mile to sirf ID wali rows (same naam ke doosre agent ki rows nahi judti); ID na mile tab naam se.
     const byId = lookup(ix.ledger.byAgentId, id.ids);
-    return byId.length ? byId : lookup(ix.ledger.byAgentName, id.names);
+    return byId.length ? byId : nameRowsFor(lookup(ix.ledger.byAgentName, id.names), id.ids[0] || '');
   }
 
   // ---- stats ---------------------------------------------------------------------------------------
@@ -343,7 +350,7 @@ window.FF = window.FF || {};
   function reportRowFor(spec) {
     const id = identityOf(spec);
     const ix = index();
-    if (!id.isTl) return (lookup(ix.sheet.byAgentId, id.ids)[0]) || (lookup(ix.sheet.byAgentName, id.names)[0]) || null;
+    if (!id.isTl) return (lookup(ix.sheet.byAgentId, id.ids)[0]) || (nameRowsFor(lookup(ix.sheet.byAgentName, id.names), id.ids[0] || '')[0]) || null;
     const team = mergeLookups(lookup(ix.sheet.byTlId, id.ids), lookup(ix.sheet.byTlName, id.names));
     if (team.length) {
       // TL snapshot sheet ki har team row par repeat hota hai — koi bhi ek row ka snapshot wahi hota hai.
@@ -377,9 +384,11 @@ window.FF = window.FF || {};
   function eirFor(spec, ym) {
     const id = identityOf(spec);
     const y = ym || curYm();
+    const wantId = !id.isTl && id.ids[0] ? id.ids[0] : '';
     const matchRow = (r) => (id.isTl
       ? id.names.includes(nameKey(r.tlName))
-      : (id.names.includes(nameKey(r.name)) || id.names.includes(nameKey(r.agentName)) || id.names.includes(nameKey(r.gvName))));
+      : (id.names.includes(nameKey(r.name)) || id.names.includes(nameKey(r.agentName)) || id.names.includes(nameKey(r.gvName)))
+        && (!wantId || !idKey(r.agentId || r.id) || idKey(r.agentId || r.id) === wantId));   // same naam, dusra ID = alag agent
     const rows = eirAgentClass().filter((r) => /gv/i.test(String(r.channel || '')) && matchRow(r));
     const out = { cur: 0, last: 0, today: 0, rows: rows.length };
     rows.forEach((r) => {

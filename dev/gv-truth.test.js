@@ -417,3 +417,13 @@ test('v3.97 — GV month summary == sum of agent rollup == raw rows (no double-c
     assert.equal(G.summary(m).total, rawN, `${m}: summary == raw`);
   }
 });
+
+test('same naam, alag ID: jis ID ki rows nahi uska issuance/stock 0 — dusre agent ka nahi dikhta', async () => {
+  const T = FF.gvTruth;
+  const real = T.person({ kind: 'gv-agent', name: A1.name, id: A1.id });
+  assert.ok(real.ledger.cur.total + real.ledger.last.total > 0, 'real agent has issuance');
+  const twin = T.person({ kind: 'gv-agent', name: A1.name, id: 'APS999111' });
+  assert.equal(twin.ledger.cur.total, 0);
+  assert.equal(twin.ledger.last.total, 0);
+  assert.equal(twin.stock.total, 0);
+});
