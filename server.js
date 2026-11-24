@@ -5591,7 +5591,16 @@ async function gvizSnapLoad() {
 // 🧑‍💼 v3.125.413 — PROFILE PACK: roz raat (IST 02:45) ek baar Agents Address ka poora index banta hai + Sheet (CACHE_PROFILE) me durable save.
 // Search par profile kholte hi address turant (browser ek baar pack le leta hai) — har profile par 3-4 API call + Google wait nahi.
 const profilePack = { at: 0, day: '', addr: null, promise: null, err: '', bufs: new Map(), token: crypto.randomBytes(12).toString('hex'), viaSnap: false };
-async function durSave(tab, kind, obj, meta) {
+// 🆕 v3.125.490 — snapshot tab na ho to storage sheet me ek baar bana do (Code.gs badle bina: sheettest → id, appendrows → tab)
+async function durEnsureTab(tab) {
+  const t = await sheetsStore.call('sheettest', { spreadsheetId: '', tab }, { timeoutMs: 30e3, attempts: 2 });
+  if (t && t.exists) return true;
+  if (!t || !t.spreadsheetId) return false;
+  await sheetsStore.call('appendrows', { spreadsheetId: t.spreadsheetId, tab, header: ['snapshot'], rows: [] }, { timeoutMs: 40e3, attempts: 2 });
+  console.log(`🆕 snapshot tab bana: ${tab}`);
+  return true;
+}
+async function durSave(tab, kind, obj, meta, retried) {
   if (!sheetsStore || typeof sheetsStore.call !== 'function') return false;
   try {
     const body = zlib.gzipSync(Buffer.from(JSON.stringify(obj)), { level: 9 }).toString('base64');
@@ -5601,7 +5610,12 @@ async function durSave(tab, kind, obj, meta) {
     const writes = [{ row: 1, value: head }, ...parts.map((v, i) => ({ row: i + 2, value: v })), ...Array.from({ length: 5 }, (_, j) => ({ row: parts.length + 2 + j, value: '' }))];
     await sheetsStore.call('writecells', { spreadsheetId: '', tab, column: 'A', writes });
     return true;
-  } catch (err) { profilePack.err = `save ${tab}: ` + String((err && err.message) || err).slice(0, 120); return false; }
+  } catch (err) {
+    if (!retried && /nahi mila/i.test(String((err && err.message) || err))) {
+      try { if (await durEnsureTab(tab)) return durSave(tab, kind, obj, meta, true); } catch (e2) { profilePack.err = `create ${tab}: ` + String((e2 && e2.message) || e2).slice(0, 120); return false; }
+    }
+    profilePack.err = `save ${tab}: ` + String((err && err.message) || err).slice(0, 120); return false;
+  }
 }
 async function durLoad(tab, kind) {
   if (!sheetsStore || typeof sheetsStore.call !== 'function') return null;
