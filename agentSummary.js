@@ -1360,6 +1360,13 @@ FF.pages = FF.pages || {};
       const showDrop = () => {}; // shared U.suggest handles suggestions
 
 
+      // 🆔 v3.125.475 — same naam ke kai agents (Sushil Kumar × 3): box me wahi naam likha ho jo abhi chuna hai to NAAM se
+      // pehla match nahi, chuna hua (ID wala) person hi lo. Search / Enter / Refresh sab isi se.
+      const resolveQ = (q) => {
+        const pk = state.picked;
+        if (pk && norm(q) === norm(pk.name)) { const same = state.list.find((x) => x.kind === pk.kind && pk.id && idKey(x.id) === idKey(pk.id)); if (same) return [same]; }
+        return matchPeople(state.list, q);
+      };
       const pick = async (person, opts) => {
         if (!person) return;
         drop.hidden = true;
@@ -1454,19 +1461,19 @@ FF.pages = FF.pages || {};
               value: p.name, inputValue: p.name, person: p };
           }),
           onPick: (it) => { if (it && it.person) pick(it.person); },
-          onEnter: (q) => { const hit = matchPeople(state.list, q)[0]; if (hit) pick(hit); else if (clean(q)) U.toast('Koi matching Agent ya TL nahi mila', 'warn'); }
+          onEnter: (q) => { const hit = resolveQ(q)[0]; if (hit) pick(hit); else if (clean(q)) U.toast('Koi matching Agent ya TL nahi mila', 'warn'); }
         });
       } catch (err) { console.warn('[agentSummary] suggest init failed:', err); }
       let qTimer = 0;
       qEl.addEventListener('input', () => { state.q = qEl.value; clearTimeout(qTimer); qTimer = setTimeout(() => renderTopChips(qEl.value), 120); });
       qEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (!asSuggest || qEl.getAttribute('aria-expanded') !== 'true')) {
-          e.preventDefault(); const hit = matchPeople(state.list, qEl.value)[0]; if (hit) pick(hit); else U.toast('Koi matching Agent ya TL nahi mila', 'warn');
+          e.preventDefault(); const hit = resolveQ(qEl.value)[0]; if (hit) pick(hit); else U.toast('Koi matching Agent ya TL nahi mila', 'warn');
         }
       });
       if (searchBtn) searchBtn.addEventListener('click', () => {
         if (asSuggest && asSuggest.close) asSuggest.close();
-        const hit = matchPeople(state.list, qEl.value); if (hit[0]) pick(hit[0], { fresh: true }); else U.toast('Koi matching Agent ya TL nahi mila', 'warn');
+        const hit = resolveQ(qEl.value); if (hit[0]) pick(hit[0], { fresh: true }); else U.toast('Koi matching Agent ya TL nahi mila', 'warn');
       });
 
       const refreshBtn = U.$('#as-refresh-btn', root);
@@ -1477,7 +1484,7 @@ FF.pages = FF.pages || {};
             clearCaches();
             state.list = await loadPeople(channel);
             renderTopChips(qEl.value);
-            const target = (state.picked && matchPeople(state.list, state.picked.name)[0]) || (qEl.value && matchPeople(state.list, qEl.value)[0]);
+            const target = (state.picked && (state.list.find((x) => x.kind === state.picked.kind && state.picked.id && idKey(x.id) === idKey(state.picked.id)) || matchPeople(state.list, state.picked.name)[0])) || (qEl.value && matchPeople(state.list, qEl.value)[0]);
             if (target) await pick(target, { fresh: true });
             U.toast('Data refresh ho gaya ✓', 'ok');
           } catch (err) {
