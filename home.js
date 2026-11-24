@@ -1017,9 +1017,10 @@ FF.pages = FF.pages || {};
     async function compute(onPartial) {
       const gP = gvizCompute().catch(() => []);
       const sP = serverCompute().then((list) => ({ list }), (e) => ({ err: String((e && e.message) || e) }));
-      const g = await gP;
       // v220 — gviz ka andaza pehle nahi dikhate (galat ho sakta hai); pakka server data aate hi dikhate hain
       const s = await sP;
+      // 🛡️ v3.125.464 — gviz (browser) dheema ho to server ka pakka jawab uske liye nahi rukta (pehle yahi "checking…" par atka rehta tha)
+      const g = await Promise.race([gP, new Promise((r) => setTimeout(() => r([]), s.list ? 2500 : 20000))]);
       const list = mergeList(s.list || null, g, s.err || '');
       if (s.list) saveGood(s.list);
       // 🛣️ v3.125.355 — Toll Tags (daily mail import) ka asli import time — webhook se (/api/toll-import-info)
