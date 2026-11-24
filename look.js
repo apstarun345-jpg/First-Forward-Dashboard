@@ -3,7 +3,7 @@ window.FF = window.FF || {};
 (function (FF) {
   'use strict';
   const KEY = 'ff_look', D = document, H = D.documentElement;
-  const DEF = { accent: '', radius: 'soft', font: 'system', side: 'default', bg: 'none', glass: false, gb: true, ico: false, ghead: false, cround: true, cgrad: true, csmooth: false, hl: true, ring: true, autoDark: false, fav: true };
+  const DEF = { accent: '', radius: 'soft', font: 'system', side: 'default', bg: 'none', glass: false, gb: true, ico: false, ghead: false, cround: true, cgrad: true, csmooth: false, hl: true, ring: true, autoDark: false, fav: true, line: true, l26: true };
   const ACCENTS = ['#6366f1', '#0ea5e9', '#0d9488', '#16a34a', '#f59e0b', '#ea580c', '#e11d48', '#9333ea'];
   const FONTS = {
     system: { label: 'Default', stack: '' },
@@ -15,6 +15,8 @@ window.FF = window.FF || {};
   let cfg = Object.assign({}, DEF);
   try { cfg = Object.assign(cfg, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch { /* bad json */ }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch { /* blocked */ } };
+  // 🆕 v3.125.484 — naya look sabke liye ek baar on (Inter font + line icons + 2026 look). Look studio se wapas badal sakte hain.
+  if (!cfg.v26) { if (!cfg.font || cfg.font === 'system') cfg.font = 'inter'; cfg.line = true; cfg.l26 = true; cfg.v26 = 1; save(); }
   const loaded = new Set();
   function ensureFont(id) {
     const f = FONTS[id]; if (!f || !f.files || loaded.has(id)) return; loaded.add(id);
@@ -23,13 +25,13 @@ window.FF = window.FF || {};
     let css = ff(fam, f.files); if (f.dev) css += ff(fam, f.dev, 'U+0900-097F,U+1CD0-1CF9,U+200C-200D,U+20A8,U+20B9,U+25CC,U+A830-A839,U+A8E0-A8FF');
     const st = D.createElement('style'); st.id = 'ff-look-font-' + id; st.textContent = css; D.head.appendChild(st);
   }
-  const CLASSES = ['ff-rad-sharp', 'ff-rad-round', 'ff-side-light', 'ff-side-float', 'ff-bg-mesh', 'ff-bg-dots', 'ff-glass', 'ff-gb', 'ff-ico', 'ff-ghead', 'ff-c-round', 'ff-c-grad', 'ff-c-smooth', 'ff-hl', 'ff-ring', 'ff-font-custom'];
+  const CLASSES = ['ff-line-ico', 'ff-look26', 'ff-rad-sharp', 'ff-rad-round', 'ff-side-light', 'ff-side-float', 'ff-bg-mesh', 'ff-bg-dots', 'ff-glass', 'ff-gb', 'ff-ico', 'ff-ghead', 'ff-c-round', 'ff-c-grad', 'ff-c-smooth', 'ff-hl', 'ff-ring', 'ff-font-custom'];
   function apply() {
     const c = cfg, cl = H.classList; CLASSES.forEach((x) => cl.remove(x));
     if (c.radius === 'sharp') cl.add('ff-rad-sharp'); else if (c.radius === 'round') cl.add('ff-rad-round');
     if (c.side === 'light') cl.add('ff-side-light'); else if (c.side === 'float') cl.add('ff-side-float');
     if (c.bg === 'mesh' || (c.glass && c.bg === 'none')) cl.add('ff-bg-mesh'); else if (c.bg === 'dots') cl.add('ff-bg-dots');
-    [['glass', 'ff-glass'], ['gb', 'ff-gb'], ['ico', 'ff-ico'], ['ghead', 'ff-ghead'], ['cround', 'ff-c-round'], ['cgrad', 'ff-c-grad'], ['csmooth', 'ff-c-smooth'], ['hl', 'ff-hl'], ['ring', 'ff-ring']].forEach(([k, n]) => { if (c[k]) cl.add(n); });
+    [['glass', 'ff-glass'], ['gb', 'ff-gb'], ['ico', 'ff-ico'], ['ghead', 'ff-ghead'], ['cround', 'ff-c-round'], ['cgrad', 'ff-c-grad'], ['csmooth', 'ff-c-smooth'], ['hl', 'ff-hl'], ['ring', 'ff-ring'], ['line', 'ff-line-ico'], ['l26', 'ff-look26']].forEach(([k, n]) => { if (c[k]) cl.add(n); });
     if (/^#[0-9a-f]{6}$/i.test(c.accent)) { H.style.setProperty('--brand', c.accent); H.style.setProperty('--brand-2', `color-mix(in srgb, ${c.accent} 55%, #ec4899)`); H.style.setProperty('--brand2', `color-mix(in srgb, ${c.accent} 55%, #ec4899)`); }
     else { ['--brand', '--brand-2', '--brand2'].forEach((p) => H.style.removeProperty(p)); }
     const f = FONTS[c.font] || FONTS.system;
@@ -68,7 +70,7 @@ window.FF = window.FF || {};
       <h4>◼️ Corners</h4><div class="lk-row">${chip('radius', 'sharp', 'Sharp')}${chip('radius', 'soft', 'Soft')}${chip('radius', 'round', 'Round')}</div>
       <h4>🧭 Sidebar</h4><div class="lk-row">${chip('side', 'default', 'Default')}${chip('side', 'light', 'Light')}${chip('side', 'float', 'Floating')}</div>
       <h4>🖼️ Background</h4><div class="lk-row">${chip('bg', 'none', 'Plain')}${chip('bg', 'mesh', 'Gradient mesh')}${chip('bg', 'dots', 'Dot grid')}</div>
-      <h4>✨ Cards & text</h4>${tog('glass', 'Glass cards', 'Blur wale transparent cards (purane phone par slow ho sakta hai)')}${tog('gb', 'Gradient borders', 'Alert / record / profile pe chamakti border')}${tog('ico', 'Icon badges', 'Menu aur KPI icons gradient badge me')}${tog('ghead', 'Gradient headings', 'Bade titles par colour gradient')}${tog('ring', 'Avatar ring', 'Photo ke around ghoomti ring')}
+      <h4>✨ Cards & text</h4>${tog('l26', '2026 look', 'Naya saaf look — gradient sidebar, soft cards (fast, blur nahi)')}${tog('line', 'Line icons', 'Menu me ek jaise line icons (emoji ki jagah)')}${tog('glass', 'Glass cards', 'Blur wale transparent cards (purane phone par slow ho sakta hai)')}${tog('gb', 'Gradient borders', 'Alert / record / profile pe chamakti border')}${tog('ico', 'Icon badges', 'Menu aur KPI icons gradient badge me')}${tog('ghead', 'Gradient headings', 'Bade titles par colour gradient')}${tog('ring', 'Avatar ring', 'Photo ke around ghoomti ring')}
       <h4>📊 Charts</h4>${tog('cround', 'Rounded bars', 'Bars ke kone gol')}${tog('cgrad', 'Bar shine', 'Bars par halki chamak')}${tog('csmooth', 'Smooth lines', 'Line charts curve me')}${tog('hl', 'Hover highlight', 'Ek bar par jao to baaki halke')}
       <h4>🌙 Auto</h4>${tog('autoDark', 'Auto dark (7pm–6am)', 'Raat ko apne aap dark, subah light')}${tog('fav', 'Tab icon me count', 'Browser tab ke icon par aaj ke tags')}
       <div class="lk-row"><button type="button" class="btn" id="lk-reset">↺ Sab default karo</button></div></div>`;

@@ -67,3 +67,28 @@ html.ff-hl .vcol, html.ff-hl .hbar-row { transition: opacity .18s; }
 .lk-tog { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; cursor: pointer; }
 .lk-tog input { margin-top: 3px; }
 .lk-tog span { display: flex; flex-direction: column; } .lk-tog small { opacity: .7; font-size: 11.5px; }
+
+/* ✏️ v3.125.484 — Line icons (menu) — emoji har device par alag dikhte the */
+.nav-ico .li { display: none; }
+html.ff-line-ico .nav-ico .li { display: block; width: 18px; height: 18px; }
+html.ff-line-ico .nav-ico .ni-emoji { display: none; }
+html.ff-line-ico .nav-ico { background: rgba(255,255,255,.08); color: rgba(255,255,255,.92); }
+html.ff-line-ico .nav-item:hover .nav-ico { background: rgba(255,255,255,.16); }
+html.ff-line-ico .nav-item.active .nav-ico { background: rgba(255,255,255,.24); color: #fff; }
+html.ff-side-light.ff-line-ico .nav-ico { background: color-mix(in srgb, var(--brand) 10%, transparent); color: var(--brand); }
+
+/* 🆕 2026 look — saaf, halka, FAST (koi backdrop blur nahi; sirf colour/shadow) */
+html.ff-look26 { --bg: #f5f6fb; --line: #e8eaf3; --radius: 18px; --shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12); }
+html.ff-look26 body { letter-spacing: -.005em; }
+html.ff-look26 .sidebar { background: radial-gradient(120% 60% at 0% 0%, color-mix(in srgb, var(--brand) 55%, #0b1440) 0%, transparent 60%), linear-gradient(180deg, #0f1a45 0%, #121c4d 45%, #0b1336 100%); box-shadow: 1px 0 0 rgba(255,255,255,.04), 8px 0 30px -18px rgba(2,6,23,.6); }
+html.ff-look26 .nav-item { border-radius: 12px; }
+html.ff-look26 .nav-item.active { background: linear-gradient(90deg, color-mix(in srgb, var(--brand) 85%, #fff 0%), color-mix(in srgb, var(--brand) 60%, var(--brand-2))); box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--brand) 70%, transparent), inset 0 1px 0 rgba(255,255,255,.18); }
+html.ff-look26 .card { border: 1px solid var(--line); box-shadow: var(--shadow); }
+html.ff-look26 .card:hover { box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 16px 32px -16px rgba(15,23,42,.22); }
+html.ff-look26 .card-head h3 { letter-spacing: -.01em; }
+html.ff-look26 .topbar { background: color-mix(in srgb, var(--bg) 88%, #fff); border-bottom: 1px solid var(--line); }
+html.ff-look26 .btn.primary { background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 92%, #fff), var(--brand)); box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--brand) 80%, transparent), inset 0 1px 0 rgba(255,255,255,.2); }
+/* numbers: tabular digits — columns seedhe */
+html.ff-look26 .kpi-value, html.ff-look26 .hs-box b, html.ff-look26 .pf-t b, html.ff-look26 .gs-kpi b, html.ff-look26 .msp-kpis b, html.ff-look26 .num { font-variant-numeric: tabular-nums; }
+html.ff-look26[data-theme="dark"] { --bg: #0a0f1f; --line: #1f2a44; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 28px -14px rgba(0,0,0,.6); }
+html.ff-look26[data-theme="dark"] .topbar { background: color-mix(in srgb, var(--bg) 92%, #fff); }
