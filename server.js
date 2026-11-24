@@ -940,15 +940,19 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
     } catch { /* tab nahi hai — optional */ }
   }));
   const counts0 = counts;
-  counts = Promise.all([counts0, importP, arrivalP]).then(() => {
+  const assignImport = () => {
     items.forEach((it) => {
       const k = it.tab.toLowerCase();
       it.importAt = imports[`${it.source}|${k}`] || arrivals[`${it.source}|${k}`] || trackerLog[k] || '';
       it.importFrom = imports[`${it.source}|${k}`] ? 'IMPORT_LOG' : (arrivals[`${it.source}|${k}`] ? 'DATA_ARRIVAL_LOG' : (trackerLog[k] ? 'SHEET_UPDATE_LOG' : ''));
     });
-  });
+  };
+  counts = Promise.all([counts0, importP, arrivalP]).then(assignImport);
+  // row-count (select count) dheema ho to bhi import-log wale jawab ko utna hi rukte hain
+  const importsReady = Promise.all([importP, arrivalP]).then(assignImport);
   if (!url0 || !secret0) {
     await Promise.race([counts, new Promise((r) => setTimeout(r, 14000))]);
+    assignImport();
     out.unavailableAS = 'Apps Script connect nahi hai';
     items.forEach((it) => { out.tabs[it.key] = { tab: it.tab, changedMs: it.gvizMs || 0, gvizOnly: true, importAt: it.importAt || '', importFrom: it.importFrom || '' }; });
     return out;
@@ -970,7 +974,8 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
     }
   }));
   // 🛡️ v3.125.463 — pehle gviz + import-log (tez). Sab items ka exact import time mil gaya to Apps Script ka intezaar nahi (wo peeche chalta rahega)
-  await Promise.race([counts, new Promise((r) => setTimeout(r, 14000))]);
+  await Promise.race([Promise.all([counts, importsReady]), new Promise((r) => setTimeout(r, 14000))]);
+  assignImport();   // jo mil gaya wahi lagao (count atka ho tab bhi import time na chhute)
   const allExact = items.every((i) => i.importAt);
   if (!allExact) await Promise.race([metaP, new Promise((r) => setTimeout(() => { out.slowAS = true; r(); }, 8000))]);
   else { out.slowAS = false; metaP.catch(() => {}); }
