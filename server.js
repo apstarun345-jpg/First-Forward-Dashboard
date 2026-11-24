@@ -872,10 +872,14 @@ function trackSheetRows(sheetKey, t) {
 // ⚡ v3.125.464 — freshness ke gviz calls background-scan gate (bgScanGate) ke peeche line me lagte the aur 100 s × 3 timeout the → card hamesha "checking…".
 // Ab gate bypass + 12 s timeout + 1 koshish; poora compute bhi 14 s se zyada nahi rukta.
 async function gvizQuick(params, sheet) {
-  const url = upstreamUrl(params);
-  GVIZ_PRIORITY_URLS.add(url);   // chhoti query (count / import-log) — bade scan pages ke peeche line me na lage
+  // Chhoti query (count / import-log) — gate (gvizAcquire) ko bypass: bade scans slots bhare hon tab bhi seedha Google se.
+  const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 12000);
   let out;
-  try { out = await fetchUpstream(url, { timeoutMs: 12000 }); } finally { GVIZ_PRIORITY_URLS.delete(url); }
+  try {
+    const response = await fetch(upstreamUrl(params), { signal: ac.signal, redirect: 'follow', headers: { 'User-Agent': 'FirstForwardDashboard/2.0' } });
+    const body = await response.text();
+    out = gvizRateLimited(response.status, body) ? { status: 429, body, rateLimited: true, retryAfterMs: 0 } : { status: response.status, body };
+  } finally { clearTimeout(timer); }
   if (out.rateLimited) throw new Error(gvizLimitMessage(out.retryAfterMs));
   if (out.status < 200 || out.status >= 300) throw new Error(`${sheet}: Google responded ${out.status}`);
   const table = parseGvizServer(out.body);
