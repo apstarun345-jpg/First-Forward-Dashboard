@@ -589,7 +589,7 @@ FF.pages = FF.pages || {};
     let robot = false; try { const m = JSON.parse(localStorage.getItem('ff_mascot_v1') || '{}'); robot = m.on === true && m.offV486 === 1; } catch { /* ignore */ }
     const row = (key, on, label, hint) => `<label class="pref-row" style="display:flex;gap:10px;align-items:flex-start;padding:8px 0"><input type="checkbox" data-sr="${key}"${on ? ' checked' : ''} style="margin-top:3px"><span><b>${label}</b><br><small class="dim">${hint}</small></span></label>`;
     return section('⚡ Speed & Robot', `${row('fast', fast, '⚡ App fast mode', 'Bhaari effects band (3D, blur, card animations) + lambe page ka neeche wala hissa scroll par hi banta hai. Installed app / phone par apne aap ON.')}
-      ${A.isAdmin() ? row('robot', robot, '🤖 Robot dost', 'Site par ghoomne wala robot. Band rehne par uska ~300 KB code load hi nahi hota — app halka.') : ''}
+      ${A.isAdmin() ? row('robot', robot, '🤖 Robot dost', 'Site par ghoomne wala robot + uski khabrein phone par push. Band rehne par na robot ka ~300 KB code load hota hai, na push.') : ''}
       <p class="dim small" style="margin:4px 0 0">Badlav turant lagta hai; robot ON / OFF ke baad page ek baar reload hoga.</p>`);
   }
   function bindSpeedRobot(body) {
@@ -604,7 +604,8 @@ FF.pages = FF.pages || {};
     if (r) r.addEventListener('change', () => {
       try { const m = JSON.parse(localStorage.getItem('ff_mascot_v1') || '{}') || {}; m.on = !!r.checked; m.offV486 = 1; localStorage.setItem('ff_mascot_v1', JSON.stringify(m)); } catch { /* ignore */ }
       U.toast(r.checked ? '🤖 Robot ON — reload ho raha hai' : '🤖 Robot OFF — reload ho raha hai', 'ok');
-      setTimeout(() => location.reload(), 700);
+      // server ki robot push khabrein bhi isi ke saath ON / OFF
+      A.api('/api/settings', 'PUT', { settings: { features: { robotPush: !!r.checked } } }).catch(() => {}).finally(() => setTimeout(() => location.reload(), 500));
     });
   }
   function accountTab() {

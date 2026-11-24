@@ -346,6 +346,7 @@ const DEFAULT_SETTINGS = {
   // 🎛 Har feature ka admin toggle (Settings → 🎛 Features). UI features client par apply hote hain,
   //    alerts server-side scheduled checks me isi se gate hote hain. Modify numbers bhi yahin.
   features: {
+    robotPush: false,   // 🤖 v3.125.491 — robot ki khabrein phone par push: default BAND (Settings → Speed & Robot se ON)
     search: true,        // 🔍 global search (Ctrl/⌘ + K) + topbar button
     share: true,         // 📤 WhatsApp share buttons (Dashboard / Trend / Stock)
     targetBar: true,     // 🎯 Dashboard target progress bar
