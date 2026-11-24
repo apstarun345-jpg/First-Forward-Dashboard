@@ -758,6 +758,16 @@ window.FF = window.FF || {};
         if (age !== false) loadAgeing(v);
       };
       const resolveQ = (q) => (S.person && S.person.id && norm(q) === norm(S.person.name) ? S.person : matchList(S.list, q)[0]);
+      // 👥 v3.125.480 — same naam ke kai agents hon to report ke upar saaf chooser: kaunsa ID khula hai + baaki ek click me
+      const sameNameHtml = (person) => {
+        try {
+          const twins = S.list.filter((p) => p.kind === person.kind && norm(p.name) === norm(person.name));
+          if (twins.length < 2) return '';
+          return `<div class="card" style="margin:0 0 12px;border:2px solid #f59e0b;background:#fffbeb"><div class="card-body" style="padding:10px 14px">
+            <b>⚠️ “${esc(person.name)}” naam ke ${twins.length} alag agents hain</b> — abhi <b>ID ${esc(person.id || '—')}</b> khula hai. Dusra chahiye to ID par click karo:
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${twins.map((p) => `<button type="button" class="gs-chipbtn ag${String(p.id || '') === String(person.id || '') ? ' on' : ''}" style="${String(p.id || '') === String(person.id || '') ? 'outline:2px solid #16a34a' : ''}" data-gs-pick="${esc(`${p.kind}|${p.name}`)}" data-gs-pick-id="${esc(p.id || '')}"><b class="mono">${esc(p.id || '—')}</b> <small class="dim">· TL ${esc(p.tl || '—')} · ${fmt(p.cur)} mtd · ${fmt(p.stock)} stock</small></button>`).join('')}</div></div></div>`;
+        } catch { return ''; }
+      };
       let pickSeq = 0;
       // Browser ko ek frame do — spinner/selection turant dikhe, phir heavy report build ho (click "atakta" nahi).
       const nextFrame = () => new Promise((res) => { let done = false; const go = () => { if (!done) { done = true; res(); } }; try { requestAnimationFrame(() => setTimeout(go, 0)); } catch { /* no raf */ } setTimeout(go, 80); });
@@ -778,7 +788,7 @@ window.FF = window.FF || {};
             // ⚡ GV: jo abhi memory me hai usse TURANT report (stock + issuance last/current + today),
             // heavy datasets (master/report/stock*) background me load hote hain aur numbers sync kar dete hain.
             const spec = personSpec(person, 'gv');
-            const paintGv = (v, age) => { S.view = v; state.view = v; body.innerHTML = reportHtml(v); try { if (FF.newAgentTag) FF.newAgentTag.paint(body); } catch { /* ignore */ } paintExtras(v, age); };
+            const paintGv = (v, age) => { S.view = v; state.view = v; body.innerHTML = sameNameHtml(person) + reportHtml(v); try { if (FF.newAgentTag) FF.newAgentTag.paint(body); } catch { /* ignore */ } paintExtras(v, age); };
             const now = FF.gvTruth.person(spec);
             const hasNow = !!(now.ledger.rows.all.length || now.stock.total || (now.sheet && now.sheet.found));
             const heavy = ensureGv(person).catch(() => {});
@@ -805,7 +815,7 @@ window.FF = window.FF || {};
         }
         if (seq !== pickSeq || !body.isConnected) return;   // user ne beech me dusra naam khol diya — purana result na likho
         S.view = view; state.view = view;
-        body.innerHTML = reportHtml(view);
+        body.innerHTML = sameNameHtml(person) + reportHtml(view);
         try { if (FF.newAgentTag) FF.newAgentTag.paint(body); } catch { /* ignore */ }
         paintExtras(view, true);
       }
