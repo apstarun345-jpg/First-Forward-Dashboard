@@ -18154,7 +18154,7 @@ server.listen(PORT, '0.0.0.0', () => {
 
 // 👥 v3.125.485 — GV same-naam registry boot ke 20s baad + har 6 ghante
 {
-  const t0 = setTimeout(() => { gvDupLoad(true).catch(() => {}); }, 20e3);
+  const t0 = setTimeout(() => { gvDupLoad(true).catch(() => {}); }, 180e3);   // cold boot ke bojh ke baad
   const t1 = setInterval(() => { gvDupLoad(true).catch(() => {}); }, 6 * 3600e3);
   if (t0.unref) t0.unref(); if (t1.unref) t1.unref();
 }
