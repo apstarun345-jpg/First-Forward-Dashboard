@@ -833,11 +833,14 @@ window.FF = window.FF || {};
     idSet.forEach((id) => (ix.byId.get(id) || []).forEach((i) => cand.add(i)));
     if (wantName) (ix.byName.get(wantName) || []).forEach((i) => cand.add(i));
     const order = [...cand].sort((x, y) => x - y);   // sheet ka wahi order
+    // v3.125.478 — same naam ke kai alag-ID agents hon to naam se sirf bina-ID rows (dusre agent ki rows nahi judti)
+    const nameIds = new Set(); if (wantName) (ix.byName.get(wantName) || []).forEach((i) => { const r0 = ix.meta[i] && ix.meta[i].rid; if (r0) nameIds.add(r0); });
+    const strictName = idSet.size > 0 && [...nameIds].filter((x) => !idSet.has(x)).length > 0 && nameIds.size > 1;
     for (const i of order) {
       const row = daily[i];
       const { rid, rn, rtl, rtlId } = ix.meta[i];
       const idMatch = rid && idSet.has(rid);
-      const nameMatch = wantName && rn === wantName && (!wantTlId || !rtlId || rtlId === wantTlId) && (!wantTl || !rtl || rtl === wantTl);
+      const nameMatch = wantName && rn === wantName && !(strictName && rid) && (!wantTlId || !rtlId || rtlId === wantTlId) && (!wantTl || !rtl || rtl === wantTl);
       if (!idMatch && !nameMatch) continue;
       const d = row.date || row.d || row.dateKey;
       const ym = row.ym || (d ? U.ymKey(U.parseDate(d)) : '');
@@ -1750,7 +1753,8 @@ window.FF = window.FF || {};
         const mine = rows.filter((x) => {
           const xid = clean(x.agentId || x.id).replace(/\.0+$/, '').toUpperCase();
           const xn = norm(x.agentName || x.name);
-          return (wantId && xid && xid === wantId) || (wantName && xn === wantName);
+          // v3.125.478 — ID ho to sirf usi ID (ya bina-ID row) ki; same naam wale dusre agents ka stock nahi judta
+          return wantId ? ((xid && xid === wantId) || (!xid && wantName && xn === wantName)) : (wantName && xn === wantName);
         });
         if (mine.length) {
           total = U.sum(mine, (x) => num(x.n));

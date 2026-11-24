@@ -1027,7 +1027,15 @@ window.FF = window.FF || {};
       else if (e.key === 'Tab') close();
     };
     const onBlur = () => setTimeout(() => { if (!box.contains(document.activeElement)) close(); }, 0);
-    const onBoxMouseDown = (e) => { const it = e.target.closest('.suggest-item'); if (it) { e.preventDefault(); pick(Number(it.dataset.i)); } };
+    // 👻 v3.125.478 — mousedown par pick hote hi dropdown band → usi click ka 'click' neeche wale element (jaise dusre
+    //    same-naam agent ka chip) par girta tha aur galat person khul jata tha. Agla click (600 ms) nigal lo.
+    const swallowNextClick = () => {
+      const until = Date.now() + 600;
+      const eat = (ev) => { document.removeEventListener('click', eat, true); if (Date.now() <= until) { ev.preventDefault(); ev.stopPropagation(); if (ev.stopImmediatePropagation) ev.stopImmediatePropagation(); } };
+      document.addEventListener('click', eat, true);
+      setTimeout(() => document.removeEventListener('click', eat, true), 650);
+    };
+    const onBoxMouseDown = (e) => { const it = e.target.closest('.suggest-item'); if (it) { e.preventDefault(); swallowNextClick(); pick(Number(it.dataset.i)); } };
     const outsideClick = (e) => {
       if (!input.isConnected) { destroy(); return; }
       if (!box.contains(e.target) && e.target !== input) close();
