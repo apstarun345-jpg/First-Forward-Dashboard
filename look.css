@@ -102,3 +102,26 @@ html.ff-fast .card { box-shadow: 0 1px 2px rgba(15,23,42,.06) !important; }
 html.ff-fast body { background-image: none !important; }
 /* lambe page: screen ke bahar wale card tab tak render nahi hote jab tak scroll par paas na aayein (scroll smooth) */
 html.ff-fast #main .card:not(:first-child) { content-visibility: auto; contain-intrinsic-size: auto 420px; }
+
+/* v3.125.492 — 🎯 Aaj ka focus strip (Home) */
+.home-focus { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 10px 0 4px; padding: 8px 10px; border: 1px solid var(--line, #e5e7eb); border-radius: 14px; background: var(--card, #fff); }
+.home-focus .hf-title { font-weight: 800; font-size: 13px; margin-right: 4px; }
+.home-focus .hf-chip { appearance: none; font: inherit; font-size: 12.5px; font-weight: 700; padding: 5px 10px; border-radius: 999px; border: 1px solid transparent; cursor: pointer; background: #eef2ff; color: #3730a3; }
+.home-focus .hf-chip.bad { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+.home-focus .hf-chip.warn { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.home-focus .hf-chip.ok { background: #dcfce7; color: #166534; cursor: default; }
+[data-theme="dark"] .home-focus .hf-chip { filter: brightness(.9) saturate(1.1); }
+
+/* v3.125.492 — tables: zebra rows + hover, lambi table me header upar chipka rahe */
+.tbl tbody tr:nth-child(even) > td { background-color: color-mix(in srgb, var(--brand, #4f46e5) 3.5%, transparent); }
+.tbl tbody tr:hover > td { background-color: color-mix(in srgb, var(--brand, #4f46e5) 8%, transparent); }
+.table-wrap:has(> .tbl tbody tr:nth-child(30)) { max-height: 74vh; overflow: auto; }
+.table-wrap:has(> .tbl tbody tr:nth-child(30)) > .tbl thead th { position: sticky; top: 0; z-index: 2; background: var(--pk-head, #eef2ff); box-shadow: 0 1px 0 var(--line, #e5e7eb); }
+[data-theme="dark"] .table-wrap:has(> .tbl tbody tr:nth-child(30)) > .tbl thead th { background: #1e2540; }
+
+/* v3.125.492 — profile hero: naam ke initials wala bada avatar */
+.gs-hero-ava[data-ini] { position: relative; width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 0; background: rgba(255,255,255,.18); box-shadow: inset 0 0 0 3px rgba(255,255,255,.55); }
+.gs-hero-ava[data-ini]::before { content: attr(data-ini); font-size: 24px; font-weight: 900; letter-spacing: .02em; color: #fff; }
+.gs-hero-ava[data-ini] > i { position: absolute; right: -4px; bottom: -4px; font-style: normal; font-size: 16px; line-height: 1; background: #fff; border-radius: 50%; padding: 3px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+.gs-hero h2 { font-size: clamp(20px, 2.6vw, 28px); line-height: 1.15; }
+@media (max-width: 640px) { .gs-hero-ava[data-ini] { width: 52px; height: 52px; } .gs-hero-ava[data-ini]::before { font-size: 19px; } }

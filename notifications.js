@@ -1271,8 +1271,10 @@ window.FF = window.FF || {};
       bindPushWatchers();
     }
     idlePermission().then((st) => { if (st === 'granted' && FF.auth && FF.auth.user && FF.auth.user.role !== 'admin') idleStart(); });   // permission pehle mil chuki ho to chup-chaap shuru (popup dobara nahi)
-    // 💓 heartbeat: sharing ON to 10 s (taaki admin ko 'online / offline' 100% sahi dikhe), warna 45 s
-    state.presenceTimer = setInterval(() => { if (sharing() || Date.now() - (state.lastSent || 0) >= 44e3) sendPresence(); }, 10e3);
+    // 💓 heartbeat 45 s (v3.125.492: pehle sharing ON par har 10 s — har khule tab se 6 request/min, free server par bojh).
+    //    Sharing ON + tab saamne ho tab beech me 20 s par ek extra (online/offline phir bhi sahi rehta hai).
+    state.presenceTimer = setInterval(() => sendPresence(), 45e3);
+    state.presenceShareTimer = setInterval(() => { if (sharing() && document.visibilityState === 'visible' && Date.now() - (state.lastSent || 0) >= 19e3) sendPresence(); }, 20e3);
     // 👁 Admin live-view pointer/scroll share — sirf tab chalao jab share ON ho (warna 400ms ka
     //    timer din bhar CPU ko jagata rehta tha, chahe koi admin dekh hi na raha ho).
     const fastTick = () => {
@@ -1309,7 +1311,7 @@ window.FF = window.FF || {};
       ['keydown', 'wheel', 'touchstart'].forEach((type) => document.addEventListener(type, () => { state.lastInteraction = Date.now(); }, { passive: true }));
     }
   }
-  function stop() { clearInterval(state.timer); clearInterval(state.presenceTimer); clearInterval(state.fastTimer); clearInterval(state.shareWatchTimer); state.timer = null; state.presenceTimer = null; state.fastTimer = null; state.shareWatchTimer = null; state.started = false; }
+  function stop() { clearInterval(state.timer); clearInterval(state.presenceTimer); clearInterval(state.presenceShareTimer); clearInterval(state.fastTimer); clearInterval(state.shareWatchTimer); state.timer = null; state.presenceTimer = null; state.fastTimer = null; state.shareWatchTimer = null; state.started = false; }
   function activity(page) {
     if (!FF.auth || !FF.auth.user) return;
     state.page = String(page || 'dashboard');

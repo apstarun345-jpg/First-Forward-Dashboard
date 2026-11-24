@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 /* 🧓 v3.39 — Agent / TL Summary, Master Search aur drawers me stock "hamesha loading" par atakta tha.
    Server side: stock-ageing index ab page-by-page banta hai (memory lean), request ko latkata nahi (`pending`),
    fail hone par 10 min tak cache nahi hota, aur gviz proxy cache ki memory par hard cap hai.
@@ -46,7 +47,8 @@ function makeUpstream(cfg) {
     if (cfg.fail && cfg.fail[sheet] && cfg.fail[sheet](entry)) { res.statusCode = 500; return res.end('upstream boom'); }
     if (sheet === 'Big') {
       // gviz proxy cache test: har distinct query par ~`bytes` ka body
-      const pad = 'x'.repeat(cfg.bigBytes || 3 * 1024 * 1024);
+      // v3.125.492 — cache entries ab gzip me: random (incompressible) body, taaki byte-cap ka test sach me bada data jaanche
+      const pad = randomBytes(cfg.bigBytes || 3 * 1024 * 1024).toString('base64');   // gzip ke baad bhi ~bigBytes
       return res.end(gvizBody(['A'], [[`${tq}|${pad}`]]));
     }
     const src = sheet === 'StockDataa' ? cfg.ff() : sheet === 'Tag Assignment' ? cfg.gv() : [];

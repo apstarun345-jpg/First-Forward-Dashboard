@@ -1533,6 +1533,7 @@ FF.pages = FF.pages || {};
           <button class="btn" id="home-customize" title="Reorder or hide Home sections" aria-expanded="false">⚙ Customize</button>
         </div>
       </div>
+      <div id="home-focus" class="home-focus" hidden></div>
       <div id="home-stats"></div>
       <div id="home-summary"></div>
       <div id="home-gv-live">${U.spinner('GV aaj ka live data aaya ja raha hai…')}</div>
@@ -1593,6 +1594,25 @@ FF.pages = FF.pages || {};
     // ✅ v3.78 — "Today's work" card: pending Tag Requests + one-click shortcuts (cheap: one small API call).
     try { if (FF.targetAlerts) FF.targetAlerts.mount(U.$('#home-target-alerts', root)); } catch { /* ignore */ }
     try { mountAssignCard(U.$('#home-assign', root)); } catch { /* optional */ }
+    // 🎯 v3.125.492 — "Aaj ka focus": page ke upar ek line me jo abhi dhyaan maangta hai (warnings / pending kaam).
+    //    Naya data fetch nahi — jo sections pehle se ban chuke unhi ko padhta hai (3 baar, phir band).
+    const paintFocus = () => {
+      const host = U.$('#home-focus', root);
+      if (!host || !host.isConnected) return;
+      const chips = [];
+      const add = (el, icon, text, tone) => { if (el) chips.push({ el, icon, text, tone }); };
+      const filled = (id) => { const el = U.$('#' + id, root); return el && el.textContent.trim() ? el : null; };
+      add(filled('home-fresh-alert'), '⏰', 'Data purana hai', 'bad');
+      add(filled('home-stock-warn'), '📦', 'Stock warning', 'bad');
+      root.querySelectorAll('#home-todo .todo-item.warn').forEach((a) => add(a, '⏳', a.querySelector('.todo-tx') ? a.querySelector('.todo-tx').textContent.trim() : 'Pending', 'warn'));
+      const ta = U.$('#home-target-alerts', root);
+      if (ta && ta.querySelector('.card, .ta-item, li')) add(ta, '🎯', 'Target updates', 'info');
+      if (!chips.length) { host.innerHTML = '<span class="hf-title">🎯 Aaj ka focus</span><span class="hf-chip ok">✅ Sab theek — koi pending warning nahi</span>'; host.hidden = false; return; }
+      host.innerHTML = '<span class="hf-title">🎯 Aaj ka focus</span>' + chips.slice(0, 6).map((c, i) => `<button type="button" class="hf-chip ${c.tone}" data-hf="${i}">${c.icon} ${esc(c.text.slice(0, 60))}</button>`).join('');
+      host.hidden = false;
+      host.querySelectorAll('[data-hf]').forEach((b) => b.addEventListener('click', () => { const c = chips[+b.dataset.hf]; if (c && c.el.isConnected) c.el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }));
+    };
+    [3000, 9000, 20000].forEach((ms) => setTimeout(() => { if (!document.hidden) paintFocus(); }, ms));
     const todoMount = U.$('#home-todo', root);
     if (todoMount) {
       const canReq = FF.auth.can('tagRequest') || (u.role === 'admin');

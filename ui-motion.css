@@ -76,7 +76,7 @@ html.ff-no-anim .ux-fb, html.ff-no-anim input.ux-bad { animation: none !importan
 svg.spark rect.ux-g { transform-box: fill-box; transform-origin: bottom; animation: uxGrowY .5s cubic-bezier(.2,.8,.2,1) both; }
 html.ff-3d .tip { background: linear-gradient(160deg, #312e81, #1e1b4b); color: #fff; border: 1px solid rgba(165,180,252,.35); border-radius: 12px; box-shadow: 0 10px 24px rgba(30,27,75,.35), 0 28px 44px -14px rgba(79,70,229,.45), inset 0 1px 0 rgba(255,255,255,.18); transform: perspective(500px) rotateX(4deg); padding: 8px 12px; }
 html.ff-no-anim .ux-g { animation: none !important; }
-@media (prefers-reduced-motion: reduce) { .ux-g { animation: none !important; } }
+/* Settings → Animations off */ html.ff-no-anim .ux-g { animation: none !important; }
 
 /* v3.125.415 — Home "Aaj ka summary" strip + stock badge */
 .hs-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 10px 0 14px; }
@@ -103,7 +103,7 @@ html[data-theme="dark"].ff-scrolled .topbar, html.dark.ff-scrolled .topbar { bac
 @keyframes uxPt { from { opacity: 0; transform: translateX(18px) scale(.995); filter: blur(3px); } to { opacity: 1; transform: none; filter: none; } }
 .ux-pt { animation: uxPt .38s cubic-bezier(.2,.8,.2,1) both; }
 html.ff-no-anim .ux-pt { animation: none !important; }
-@media (prefers-reduced-motion: reduce) { .ux-pt { animation: none !important; } }
+/* Settings → Animations off */ html.ff-no-anim .ux-pt { animation: none !important; }
 .rank.medal, .hs-ag span.medal { background: transparent !important; font-size: 17px; width: auto !important; height: auto !important; filter: drop-shadow(0 2px 3px rgba(0,0,0,.25)); }
 .hs-rec { border-color: #fcd34d; background: linear-gradient(135deg, rgba(254,243,199,.8), rgba(255,255,255,0)); }
 .hs-rec > b { font-size: 16px; color: #b45309; }
@@ -122,7 +122,7 @@ html.ff-no-anim .ux-pt { animation: none !important; }
 .tbl tbody tr.clickable:hover { background: color-mix(in srgb, var(--brand, #6366f1) 9%, transparent); box-shadow: inset 3px 0 0 var(--brand, #6366f1), 0 6px 14px -8px rgba(30,27,75,.35); }
 .ux-ac { position: fixed; z-index: 9990; min-width: 190px; padding: 10px 14px; border-radius: 14px; background: linear-gradient(160deg, #312e81, #1e1b4b); color: #fff; box-shadow: 0 12px 28px rgba(30,27,75,.4), 0 30px 50px -16px rgba(79,70,229,.5), inset 0 1px 0 rgba(255,255,255,.18); display: grid; gap: 4px; pointer-events: none; animation: uxPt .18s ease both; }
 .ux-ac b { font-size: 14px; } .ux-ac div { display: flex; justify-content: space-between; gap: 16px; font-size: 12.5px; } .ux-ac span { opacity: .75; } .ux-ac strong { font-weight: 800; }
-@media (prefers-reduced-motion: reduce) { .home-hero[data-tod]::after { animation: none; } }
+/* Settings → Animations off */ html.ff-no-anim .home-hero[data-tod]::after { animation: none; }
 
 /* v3.125.419 — odometer roll, ripple, morph, scroll-reveal, micro, shared-element ghost, mini-bars */
 @keyframes uxRoll { from { transform: translateY(45%); opacity: .2; filter: blur(3px); } to { transform: none; opacity: 1; filter: none; } }
@@ -143,7 +143,7 @@ input[type=checkbox]:checked, input[type=radio]:checked { animation: uxPop .28s 
 html.ff-no-anim .ux-morph, html.ff-no-anim .ux-rv-in, html.ff-no-anim .kpi-value.ux-roll, html.ff-no-anim .kpi.ux-ripple { animation: none !important; }
 html.ff-no-anim .ux-rv { opacity: 1; transform: none; }
 @media print { .ux-rv, .ux-morph { opacity: 1 !important; transform: none !important; animation: none !important; filter: none !important; } }
-@media (prefers-reduced-motion: reduce) { .ux-rv { opacity: 1; transform: none; } .ux-morph, .ux-rv-in, .kpi-value.ux-roll, .kpi.ux-ripple { animation: none !important; } }
+/* Settings → Animations off */ html.ff-no-anim .ux-rv { opacity: 1; transform: none; } html.ff-no-anim .ux-morph, html.ff-no-anim .ux-rv-in, html.ff-no-anim .kpi-value.ux-roll, html.ff-no-anim .kpi.ux-ripple { animation: none !important; }
 
 /* v3.125.474 — freshness skeleton, stale pill pulse, card entry, KPI change flash (sab GPU-sasta: opacity/transform/box-shadow) */
 .fresh-skel { display: inline-block; vertical-align: middle; width: 54px; height: 10px; margin-right: 6px; border-radius: 6px; position: relative; overflow: hidden; background: color-mix(in srgb, var(--muted, #64748b) 18%, transparent); }

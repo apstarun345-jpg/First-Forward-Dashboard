@@ -9749,7 +9749,7 @@ async function handleApi(req, res, url) {
       name: String((m && m.name) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 80),
       id: String((m && m.id) || '').trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 40),
       source: m && m.source === 'gv' ? 'gv' : (m && m.source === 'ff' ? 'ff' : '')
-    })).filter((m) => { const k = `${m.source}|${m.name.toLowerCase()}`; if (!m.name || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 120);
+    })).filter((m) => { const k = `${m.source}|${m.name.toLowerCase()}|${m.id.toUpperCase()}`; if (!m.name || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 120);
   };
   const normPlAssigned = (arr) => {
     const seen = new Set();
@@ -15125,7 +15125,7 @@ async function comboSplit(link) {
     const memBySrc = { ff: [], gv: [] };
     memArr.forEach((m) => {
       const src = plMemberSrc(m, link);
-      if (m && m.name && !known[src].has(plNormName(m.name))) memBySrc[src].push({ name: String(m.name) });
+      if (m && m.name && !known[src].has(plNormName(m.name))) memBySrc[src].push({ name: String(m.name), id: String(m.id || '') });
     });
     const res = { tlParts, tlMaps, memBySrc };
     comboSplitMemo.set(key, { at: Date.now(), data: res });
@@ -15517,12 +15517,26 @@ function donutHtml(items, centerTop, centerSub) {
   return `<div class="pb-donut"><svg viewBox="0 0 160 160" width="170" height="170" role="img"><circle cx="80" cy="80" r="${R}" fill="none" stroke="#eef2f7" stroke-width="22"/>${arcs}<text x="80" y="78" text-anchor="middle" class="pb-dn-top">${escHtml(centerTop)}</text><text x="80" y="96" text-anchor="middle" class="pb-dn-sub">${escHtml(centerSub)}</text></svg><ul class="pb-dn-legend">${list.map((i) => `<li><i style="background:${i.color}"></i><span>${escHtml(i.label)}</span><b>${nf0(i.value)}</b><em>${Math.round((i.value / total) * 100)}%</em></li>`).join('')}</ul></div>`;
 }
 const isTeamLink = (l) => !!l && (l.kind === 'tl' || l.kind === 'group');
+/** v3.125.492 — group member → { name, id }. "Naam (APS123)" jaisa naam bhi ID de deta hai. */
+function personalMemberKeys(link) {
+  return (Array.isArray(link && link.members) ? link.members : []).map((m) => {
+    let name = String((m && m.name) || '').trim(), id = String((m && m.id) || '').trim().toUpperCase().replace(/\.0+$/, '');
+    const mm = /^(.*?)\s*\(([A-Z]{2,}[0-9]+)\)$/i.exec(name);
+    if (mm) { name = mm[1].trim(); if (!id) id = mm[2].toUpperCase(); }
+    return { name, id };
+  }).filter((m) => m.name || m.id).slice(0, 80);
+}
 function personalMemberNames(link) {
-  return (Array.isArray(link && link.members) ? link.members : []).map((m) => String((m && m.name) || '').trim()).filter(Boolean).slice(0, 80);
+  // v3.125.492 — GV member ke saath ID ho aur us naam ke GV me 2+ ID hon to "Naam (ID)" (stock index + issuance rows isi naam se aate hain)
+  return (Array.isArray(link && link.members) ? link.members : []).map((m) => {
+    const n = String((m && m.name) || '').trim();
+    const gv = (m && m.source === 'gv') || (!(m && m.source) && link && link.source === 'gv');
+    return gv && m && m.id ? gvAgentName(n, m.id) : n;
+  }).filter(Boolean).slice(0, 80);
 }
 function personalNameFilter(link, c) {
   if (link && link.kind === 'group') {
-    const names = personalMemberNames(link);
+    const names = [...new Set(personalMemberKeys(link).map((k) => k.name).filter(Boolean))];
     return names.length ? `(${names.map((n) => `${c.nameCol} = ${gvizLiteral(n)}`).join(' or ')})` : `${c.nameCol} = ''`;
   }
   return `${c.nameCol} = ${gvizLiteral(link.name)}`;
@@ -15607,7 +15621,7 @@ async function personalGvMasterRows(link, win) {
   const { start, today } = win || personalWindow();
   const low = (n) => gvizLiteral(String(n).toLowerCase());
   const pid = String(link.personId || '').trim().toUpperCase();
-  const memStr = (Array.isArray(link.members) ? link.members : []).map((x) => String((x && x.name) || '')).sort().join(',');
+  const memStr = (Array.isArray(link.members) ? link.members : []).map((x) => `${String((x && x.name) || '')}#${String((x && x.id) || '')}`).sort().join(',');
   const memoKey = `${link.kind}|${link.name}|${pid}|${win ? `${win.start}|${win.today}` : 'def'}|${memStr}|d${gvDup.at}`;
 
   const hit = plGvMemo.get(memoKey);
@@ -15618,7 +15632,7 @@ async function personalGvMasterRows(link, win) {
     try { await Promise.race([gvDupLoad(), new Promise((r) => setTimeout(r, 15000))]); } catch { /* optional */ }
     let who;
     if (link.kind === 'tl') who = `(lower(${col.tlName}) = ${low(link.name)}${pid ? ` or upper(${col.tlId}) = ${gvizLiteral(pid)}` : ''})`;
-    else if (link.kind === 'group') { const names = personalMemberNames(link); who = names.length ? `(${names.map((n) => `lower(${col.agent}) = ${low(n)}`).join(' or ')})` : `${col.agent} = ''`; }
+    else if (link.kind === 'group') { const ks = personalMemberKeys(link); who = ks.length ? `(${ks.map((k) => (k.id ? `upper(${col.uid}) = ${gvizLiteral(k.id)}` : `lower(${col.agent}) = ${low(k.name)}`)).join(' or ')})` : `${col.agent} = ''`; }   // v3.125.492 ID wale member sirf apni ID se
     else who = `(lower(${col.agent}) = ${low(link.name)}${pid ? ` or upper(${col.uid}) = ${gvizLiteral(pid)}` : ''})`;
     const selectUid = `select ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}, ${col.uid}, count(${col.tag})`;
     const groupUid = `group by ${col.agent}, ${col.date}, ${col.cch}, ${col.vcl}, ${col.uid}`;

@@ -1894,6 +1894,15 @@ FF.pages = FF.pages || {};
           const key = nk(p.name);
           const mobile = msMobiles.get(want + '|' + key) || '';
           const prev = have.get(key);
+          const pid = String(p.sub || '').toUpperCase();
+          // v3.125.492 — same naam, alag ID (agent): dono alag dikhein, ID ke saath (pehle doosra gayab ho jaata tha)
+          const twin = !want.endsWith('tl') && prev && prev.id && pid && String(prev.id).toUpperCase() !== pid && !have.has(key + '|' + pid);
+          if (twin) {
+            if (!prev._twin) { prev._twin = true; prev.sub = `ID ${prev.id}${prev.sub && !/^ID /.test(prev.sub) ? ` · ${prev.sub}` : ''}`; prev.keywords = `${prev.keywords || ''} ${prev.id}`; }
+            const tl0 = p.tlSet && p.tlSet.size ? [...p.tlSet][0] : '';
+            const it2 = { kind: 'agent', kindLabel: 'Agent', label: p.name, id: p.sub, mobile, sub: `ID ${p.sub}${tl0 ? ` · ${tl0}` : ''}`, keywords: p.sub, value: p.name, _twin: true };
+            have.set(key + '|' + pid, it2); out.push(it2); continue;
+          }
           if (prev) { if (!prev.id && p.sub) prev.id = p.sub; if (!prev.mobile && mobile) prev.mobile = mobile; continue; }
           const tl = p.tlSet && p.tlSet.size ? [...p.tlSet][0] : '';
           const it = want.endsWith('tl')
@@ -1950,7 +1959,7 @@ FF.pages = FF.pages || {};
     /** Shared picker: wires a TL box + an agent box to Maps and draws channel-tagged chips. */
     const teamPicker = (root, ids, init, scopeOf) => {
       const tls = new Map((init.tls || []).map((t) => [`${t.source || 'ff'}|${t.name}`, { name: t.name, id: t.id || '', source: t.source === 'gv' ? 'gv' : 'ff' }]));
-      const members = new Map((init.members || []).map((m) => { const src = m.source === 'gv' ? 'gv' : (m.source === 'ff' ? 'ff' : (init.baseSource === 'gv' ? 'gv' : 'ff')); return [`${src}|${m.name}`, { name: m.name, id: m.id || '', source: src }]; }));
+      const members = new Map((init.members || []).map((m) => { const src = m.source === 'gv' ? 'gv' : (m.source === 'ff' ? 'ff' : (init.baseSource === 'gv' ? 'gv' : 'ff')); return [`${src}|${m.name}|${String(m.id || '').toUpperCase()}`, { name: m.name, id: m.id || '', source: src }]; }));
       const chips = root.querySelector(ids.chips);
       const draw = () => {
         const one = (kind, map, key, x) => `<span class="chip on" style="display:inline-flex;gap:6px;align-items:center;${kind === 'tl' ? 'background:#ede9fe;border-color:#c4b5fd;color:#5b21b6' : ''}">${kind === 'tl' ? '👥' : '🧑‍💼'} ${esc(x.name)} <small>${chanTag(x.source)}</small>${x.id ? ` <small class="dim">${esc(x.id)}</small>` : ''}<button type="button" data-rm="${esc(kind)}:${esc(key)}" title="Remove" style="border:0;background:none;cursor:pointer">✕</button></span>`;
@@ -1961,7 +1970,7 @@ FF.pages = FF.pages || {};
       const bind = (sel, kind, map) => {
         const el = root.querySelector(sel);
         if (!el) return;
-        const add = (name, id, src) => { if (!name) return; map.set(`${src}|${name}`, { name, id: id || '', source: src }); draw(); };
+        const add = (name, id, src) => { if (!name) return; map.set(kind === 'agent' ? `${src}|${name}|${String(id || '').toUpperCase()}` : `${src}|${name}`, { name, id: id || '', source: src }); draw(); };   // v3.125.492 same naam, alag ID = alag agent
         U.suggest(el, {
           min: 1,
           items: () => itemsFor(scopeOf(), kind, el.value),

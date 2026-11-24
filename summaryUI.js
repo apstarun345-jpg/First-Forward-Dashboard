@@ -52,7 +52,7 @@ window.FF = window.FF || {};
   function heroHtml(v) {
     const isGv = v.ch === 'gv';
     return `<div class="gs-hero ${isGv ? 'gv' : 'ff'}">
-      <div class="gs-hero-ava">${v.kind === 'tl' ? '👥' : '🧑‍💼'}</div>
+      <div class="gs-hero-ava" data-ini="${esc(String(v.name || '').replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?')}"><i>${v.kind === 'tl' ? '👥' : '🧑‍💼'}</i></div>
       <div class="gs-hero-who">
         <div class="gs-hero-badges">
           <span class="gs-pill">${isGv ? '🟩 GV Partner' : '🟦 First Forward'}</span>

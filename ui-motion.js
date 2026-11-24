@@ -218,7 +218,7 @@ window.FF = window.FF || {};
     if (!adm && selMode) setMode(false);
   }
   // ✨ v3.125.415 — count-up (KPI numbers) + bars grow. Sirf naye aaye nodes par, ek baar; reduced-motion me skip.
-  const REDUCE = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const REDUCE = false;   // OS reduce-motion jaan-boojh kar ignore — sirf Settings (ff-no-anim) band karta hai
   const kpiPrev = new Map();
   function countUp(root) {
     if (REDUCE || document.documentElement.classList.contains('ff-no-anim')) return;
