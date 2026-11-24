@@ -46,7 +46,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8080);
 const DEFAULT_SHEET_ID = process.env.SHEET_ID || '1ZHzmu7xtXl7trZDOXUbFmclJGffy98U4kz2QBSKsfwc';
 const DEFAULT_CACHE_SECONDS = Math.max(0, Number(process.env.CACHE_SECONDS || 600));
-const MAX_CACHE_ENTRIES = 400;
+const MAX_CACHE_ENTRIES = 1200;   // v3.125.482 — entries ab gzip me (bytes cap alag se)
 const UPSTREAM_TIMEOUT_MS = 45_000;
 const GVIZ_BASE = process.env.GVIZ_BASE || 'https://docs.google.com'; // override only for local testing with a mock
 // 🚦 v3.72 — Google gviz rate limit ("Too Many Requests" HTML page) se bachne ka gate:
@@ -1504,10 +1504,28 @@ class HttpError extends Error { constructor(status, message) { super(message); t
 // bade bodies (StockDataa 25k-row pages, GV Master, EIR…) 512 MB wale instance ki heap bhar dete the (measured:
 // ek browsing session ke baad server RSS ~400 MB). Cap se upar jaane par sabse purani entries nikal jaati hain.
 const MAX_CACHE_BYTES = Math.max(8, Number(process.env.CACHE_MAX_MB) || 24) * 1024 * 1024;
+// ⚡ v3.125.482 — cache entry gzip me (memory me ~8-10x kam). `body` getter zarurat par hi unzip karta hai;
+// client ko gzip bytes seedhe jaate hain (dobara compress nahi). Isse 24 MB me pehle se kai guna zyada queries
+// cache me rehti hain → EIR / StockDataa ki 1-2 min wali Google queries baar-baar nahi chalti.
+class PackedEntry {
+  constructor(o) {
+    const raw = String(o.body);
+    this.at = o.at; this.status = o.status; this.ver = o.ver || '';
+    this.gz = zlib.gzipSync(raw, { level: 6 });
+    this.rawLen = Buffer.byteLength(raw);
+    this.etag = bodyEtag(raw);
+  }
+  get body() { return zlib.gunzipSync(this.gz).toString('utf8'); }
+}
 class GvizCache extends Map {
   constructor() { super(); this.bytes = 0; }
-  static sizeOf(entry) { return entry && typeof entry.body === 'string' ? entry.body.length : 0; }
+  static sizeOf(entry) { return !entry ? 0 : entry.gz ? entry.gz.length : (typeof entry.body === 'string' ? entry.body.length : 0); }
+  static pack(entry) {
+    if (!entry || entry.gz || typeof entry.body !== 'string' || entry.body.length < 2048) return entry;
+    try { return new PackedEntry(entry); } catch { return entry; }
+  }
   set(key, entry) {
+    entry = GvizCache.pack(entry);
     const old = super.get(key);
     if (old !== undefined) { this.bytes -= GvizCache.sizeOf(old); super.delete(key); }   // delete + set → insertion order = recency
     const size = GvizCache.sizeOf(entry);
@@ -7484,9 +7502,13 @@ function sendCached(req, res, entry, tag) {
     res.writeHead(304, headers({ ETag: etag, 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000)) }));
     return res.end();
   }
-  return sendMaybeCompressed(req, res, 200, 'text/plain; charset=utf-8', entry.body, {
-    'Cache-Control': 'private, no-cache', ETag: etag, 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000))
-  }, entry.enc);
+  const hdr = { 'Cache-Control': 'private, no-cache', ETag: etag, 'X-Cache': tag, 'X-FF-Source': 'proxy', 'X-FF-Age': String(Math.round((Date.now() - entry.at) / 1000)) };
+  // Packed entry + client gzip le sakta hai → stored gzip bytes seedhe (zero CPU)
+  if (entry.gz && accepts(req, 'gzip')) {
+    res.writeHead(200, headers({ 'Content-Type': 'text/plain; charset=utf-8', ...hdr, Vary: 'Accept-Encoding', 'Content-Encoding': 'gzip', 'Content-Length': entry.gz.length }));
+    return res.end(entry.gz);
+  }
+  return sendMaybeCompressed(req, res, 200, 'text/plain; charset=utf-8', entry.body, hdr, entry.gz ? null : entry.enc);
 }
 const HOT = new Map();                 // url → { hits, at } — jo queries sach me use hoti hain
 const HOT_LIMIT = 300;
@@ -7555,7 +7577,7 @@ function remember(url, body, status) {
   const entry = { at: Date.now(), body, status, ver: k ? dailySig(k) : '' };
   cache.set(url, entry);
   if (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
-  return entry;
+  return cache.get(url) || entry;
 }
 /** Background refresh — user ko kabhi Google ke intezaar me nahi rakhta. */
 async function refreshCache(url) {

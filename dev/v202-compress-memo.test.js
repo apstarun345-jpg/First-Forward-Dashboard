@@ -145,7 +145,9 @@ test('source wiring: memo passed to sendMaybeCompressed for static + gviz, async
   const src = await fs.readFile(path.join(ROOT, 'server.js'), 'utf8');
   assert.match(src, /sendMaybeCompressed\(req, res, 200, type, slot\.raw, extraHeaders, slot\.enc\)/);
   assert.match(src, /await warmEncoding\(req, slot\.raw, slot\.enc\)/);
-  assert.match(src, /'X-FF-Age': String\(Math\.round\(\(Date\.now\(\) - entry\.at\) \/ 1000\)\)\s*\n\s*\}, entry\.enc\)/);
+  // v3.125.482 — gviz entries gzip me packed: gzip client ko stored bytes seedhe, warna memo (unpacked entry par)
+  assert.match(src, /if \(entry\.gz && accepts\(req, 'gzip'\)\)/);
+  assert.match(src, /entry\.gz \? null : entry\.enc\)/);
   assert.match(src, /function entryEtag\(entry\)/);
   assert.doesNotMatch(src, /const key = `\$\{body\.length\}:\$\{body\.slice\(0, 64\)\}/, 'weak ETag key hata diya');
 });
