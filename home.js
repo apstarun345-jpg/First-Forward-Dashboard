@@ -915,9 +915,21 @@ FF.pages = FF.pages || {};
         // mila kar "content kab badla" yaad rakhta hai (file-level edit time GV Master ke saath shared hota hai, isliye wo galat padta).
         { key: 'gv-assign', source: 'gv', tab: tabOf('Tag Assignment'), keyCol: (gvc.assignment && gvc.assignment.tagId) || 'B', sigCols: [(gvc.assignment && gvc.assignment.status) || 'D', (gvc.assignment && gvc.assignment.agentId) || 'E'] }
       ];
-      const res = await fetch('/api/sheet-freshness', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ items }) });
-      let json = {}; try { json = await res.json(); } catch { /* ignore */ }
-      if (!res.ok || !json.ok) throw new Error(json.unavailable || json.error || `HTTP ${res.status}`);
+      // 🛡️ v3.125.463 — server dheema / cold ho to 3 baar try (30s timeout); tab bhi na mile to galat andaza nahi dikhate
+      let res = null, json = {}, lastErr = '';
+      for (let a = 0; a < 3; a++) {
+        try {
+          const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 30000);
+          res = await fetch('/api/sheet-freshness', { method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: ac.signal, headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'FF-Dashboard' }, body: JSON.stringify({ items }) });
+          clearTimeout(to);
+          json = {}; try { json = await res.json(); } catch { /* ignore */ }
+          if (res.ok && json.ok) break;
+          lastErr = json.unavailable || json.error || `HTTP ${res.status}`;
+          if (res.status === 401 || res.status === 403) break;
+        } catch (e) { lastErr = String((e && e.message) || e); }
+        await new Promise((r) => setTimeout(r, 1500 * (a + 1)));
+      }
+      if (!res || !res.ok || !json.ok) throw new Error(lastErr || 'sheet-freshness fail');
       const parseFile = (f) => { const x = f && f.updated ? parseText(f.updated) : null; return { updated: plausible(x) ? x : null, by: (f && f.by) || '', error: (f && (f.error || f.note)) || '', revisions: ((f && f.revisions) || []).map((r) => ({ at: parseText(r.time), by: r.by })).filter((r) => plausible(r.at)) }; };
       const meta = [['ff-eir', '🟦', 'First Forward', 'EIR', 'ff'], ['ff-stock', '🟦', 'First Forward', 'StockDataa', 'ff'], ['gv-master', '🟩', 'GV Partner', 'GV Master', 'gv'], ['gv-assign', '🟩', 'GV Partner', 'Tag Assignment', 'gv']];
       return meta.map(([key, icon, title, tabName, src]) => {
@@ -977,6 +989,11 @@ FF.pages = FF.pages || {};
       return res;
     }
     const KEYS = ['ff-eir', 'ff-stock', 'gv-master', 'gv-assign'];
+    // 🛡️ v3.125.463 — StockDataa / Tag Assignment ka asli time sirf import-log se aata hai. Server na mile to gviz ka allocation-date
+    // (purani date) dikhana galat hai → pichhla pakka time (last known) dikhao, wo bhi na ho to "checking".
+    const IMPORT_KEYS = ['ff-stock', 'gv-assign'], GOOD_KEY = 'ff_fresh_good';
+    const loadGood = () => { try { return JSON.parse(localStorage.getItem(GOOD_KEY) || '{}') || {}; } catch { return {}; } };
+    const saveGood = (list) => { try { const o = loadGood(); (list || []).forEach((r) => { if (IMPORT_KEYS.includes(r.key) && r.value && r.value.imported) o[r.key] = { t: r.value.d.getTime(), col: r.value.col || 'import log' }; }); localStorage.setItem(GOOD_KEY, JSON.stringify(o)); } catch { /* ignore */ } };
     /** Server (Apps Script last-row) + poore column ka MAX (gviz) — jo bhi LATER ho wahi "last update".
      *  Last row hamesha sabse naya nahi hoti (unsorted / backfilled rows), column max kabhi galat nahi hota. */
     function mergeList(server, g, svErr) {
@@ -989,6 +1006,11 @@ FF.pages = FF.pages || {};
         const fromCol = !!(best && gv && gv.value && best === gv.value);
         const out = { ...base, value, colMax: fromCol, approx: !sv, svErr: sv ? '' : svErr };
         if (gv) { out.tab = out.tab || gv.tab; out.note = out.note || gv.note; out.noCol = !value && !!gv.noCol; if (!out.err) out.err = gv.err || ''; }
+        if (!sv && IMPORT_KEYS.includes(key)) {
+          const gd = loadGood()[key];
+          out.value = gd ? { d: new Date(gd.t), hasTime: true, col: gd.col, imported: true, lastKnown: true } : null;
+          out.pending = !gd; out.noCol = false; out.colMax = false; out.approx = true;
+        }
         return out;
       });
     }
@@ -999,6 +1021,7 @@ FF.pages = FF.pages || {};
       // v220 — gviz ka andaza pehle nahi dikhate (galat ho sakta hai); pakka server data aate hi dikhate hain
       const s = await sP;
       const list = mergeList(s.list || null, g, s.err || '');
+      if (s.list) saveGood(s.list);
       // 🛣️ v3.125.355 — Toll Tags (daily mail import) ka asli import time — webhook se (/api/toll-import-info)
       try {
         const r = await FF.auth.api('/api/toll-import-info');
@@ -1031,13 +1054,13 @@ FF.pages = FF.pages || {};
     /** Time kahan se aaya — saaf English line (card par dikhta hai, tooltip me nahi chhupta). */
     function sourceLine(r) {
       const v = r.value; if (!v) return '';
-      const how = v.imported ? 'Import log time' : v.tracked ? 'Detected by change tracking (checked about every 15 min)' : v.col === 'new rows' ? 'Detected when new rows arrived' : v.col ? `From column: ${v.col}` : 'From the latest row';
+      const how = v.lastKnown ? 'Last known import time (live check is retrying)' : v.imported ? 'Import log time' : v.tracked ? 'Detected by change tracking (checked about every 15 min)' : v.col === 'new rows' ? 'Detected when new rows arrived' : v.col ? `From column: ${v.col}` : 'From the latest row';
       return `${how}${r.lastRow ? ` · last row #${U.fmt(r.lastRow)}` : ''}`;
     }
     function html(list, loading) {
       const rows = list.map((r) => {
         let val;
-        if (!r.value) val = r.tracking ? '<span class="dim">Change tracking started — exact time appears after the next update</span>' : r.noCol ? '<span class="dim">No date/time column in this sheet</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'checking…' : (r.err ? 'could not read' : '—')}</span>`;
+        if (!r.value) val = r.tracking ? '<span class="dim">Change tracking started — exact time appears after the next update</span>' : r.pending ? '<span class="dim">⏳ Checking the latest import time… (server busy — will retry)</span>' : r.noCol ? '<span class="dim">No date/time column in this sheet</span>' : `<span class="dim" title="${esc(r.err || '')}">${loading ? 'checking…' : (r.err ? 'could not read' : '—')}</span>`;
         else val = `<b>${esc(fmtDT(r.value))}</b>${r.value.hasTime ? '' : ' <small class="dim">(date only)</small>'}`;
         const pill = r.value ? `<span class="fresh-pill ${tone(r.value)}">${esc(ago(r.value))}</span>` : '';
         // 🟢 v228 — tech notes ki jagah ek saaf status line; poori detail row ke tooltip me
@@ -1047,7 +1070,7 @@ FF.pages = FF.pages || {};
         if (r.file && r.file.updated) tips.push(`Sheet file last edit: ${fmtDT(r.file.updated)}${r.file.by ? ` · ${r.file.by}` : ''}`);
         if (r.value && r.value.imported) tips.push('Source: import log');
         const tn = r.value ? tone(r.value) : '';
-        const status = !r.value ? (loading ? '' : ((r.noCol || r.tracking) ? '' : '<span class="fresh-status bad">✕ Could not read this sheet</span>'))
+        const status = !r.value ? (loading ? '' : ((r.noCol || r.tracking || r.pending) ? '' : '<span class="fresh-status bad">✕ Could not read this sheet</span>'))
           : tn === 'ok' ? `<span class="fresh-status ok">✓ Up to date — ${esc(ago(r.value))}</span>`
             : tn === 'warn' ? `<span class="fresh-status warn">⚠ A bit old — ${esc(ago(r.value))}</span>`
               : `<span class="fresh-status bad">⚠ Old data — ${esc(ago(r.value))}. Check the import.</span>`;

@@ -843,6 +843,7 @@ function normItemName(v) {
   const out = TAG_ITEM_NAMES.filter((n) => parts.some((x) => x.toLowerCase() === n.toLowerCase()));
   return out.length ? out.join(' + ') : 'FASTag';
 }
+const sheetFreshGood = new Map();    // v3.125.463 — last-good freshness (import-log wala) — fail par yahi dikhta hai
 const sheetFreshCache = new Map();   // v178 — /api/sheet-freshness 60s cache
 // 🕒 v209 — row-count tracker: sheet me nayi rows aayi (chahe purani date ki ho) to "changedMs" = tab badalne ka time.
 let sheetFreshLastItems = null;
@@ -952,8 +953,11 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
       out.files[src] = { error: /unknown action/i.test(m) ? 'Apps Script purana hai — google-apps-script/Code.gs (v3.73) dobara paste karke New version deploy karein.' : m.slice(0, 220) };
     }
   }));
-  await Promise.race([metaP, new Promise((r) => setTimeout(() => { out.slowAS = true; r(); }, 15000))]);
+  // 🛡️ v3.125.463 — pehle gviz + import-log (tez). Sab items ka exact import time mil gaya to Apps Script ka intezaar nahi (wo peeche chalta rahega)
   await counts;
+  const allExact = items.every((i) => i.importAt);
+  if (!allExact) await Promise.race([metaP, new Promise((r) => setTimeout(() => { out.slowAS = true; r(); }, 8000))]);
+  else { out.slowAS = false; metaP.catch(() => {}); }
   items.forEach((it) => {
     const t = out.tabs[it.key] || (out.tabs[it.key] = { tab: it.tab, gvizOnly: true });
     if (it.gvizMs && it.gvizMs > (t.changedMs || 0)) t.changedMs = it.gvizMs;
@@ -13843,7 +13847,18 @@ async function handleApi(req, res, url) {
     const hit = sheetFreshCache.get(cacheKey);
     if (hit && Date.now() - hit.at < 60e3 && !body.fresh) return sendJson(res, 200, { ...hit.out, cached: true });
     sheetFreshLastItems = items;
-    const out = await computeSheetFreshness(items, url0, secret0, idOf);
+    // 🛡️ v3.125.463 — fail ho ya import-log na mile to pichhla pakka (last-good) data do; kabhi khaali / galat andaza nahi
+    let out;
+    try { out = await computeSheetFreshness(items, url0, secret0, idOf); }
+    catch (err) {
+      const lg = sheetFreshGood.get(cacheKey);
+      if (lg) return sendJson(res, 200, { ...lg.out, stale: true, staleAt: lg.at });
+      throw err;
+    }
+    const goodNow = items.every((i) => out.tabs[i.key] && out.tabs[i.key].importAt);
+    const prev = sheetFreshGood.get(cacheKey);
+    if (prev && prev.out && prev.out.tabs) items.forEach((i) => { const t = out.tabs[i.key]; if (t && !t.importAt && prev.out.tabs[i.key] && prev.out.tabs[i.key].importAt) { t.importAt = prev.out.tabs[i.key].importAt; t.importFrom = prev.out.tabs[i.key].importFrom || 'IMPORT_LOG'; t.fromLastGood = true; } });
+    if (goodNow || !prev) sheetFreshGood.set(cacheKey, { at: Date.now(), out });
     sheetFreshCache.set(cacheKey, { at: Date.now(), out });
     return sendJson(res, 200, out);
   }

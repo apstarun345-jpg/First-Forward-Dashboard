@@ -30,7 +30,8 @@ test('mergeList: server last-row aur column MAX me se LATER value jeet-ti hai', 
   assert.equal(eir.colMax, true);
   assert.equal(eir.exact, true, 'server ka extra data (last row / file edit) bacha rehta hai');
   const stock = out.find((r) => r.key === 'ff-stock');
-  assert.ok(stock.value && stock.approx, 'server na ho to bhi gviz value dikhti hai');
+  // v3.125.463: StockDataa / Tag Assignment ka gviz allocation-date import time nahi hota → galat 'N days ago' nahi dikhate
+  assert.ok(!stock.value && stock.approx && stock.pending, 'server na ho to gviz andaza nahi — checking dikhta hai');
   assert.equal(out.length, 4);
   // server naya ho to server hi
   const newer = F.mergeList([{ ...server[0], rowTime: at(1) }], g, '').find((r) => r.key === 'ff-eir');
