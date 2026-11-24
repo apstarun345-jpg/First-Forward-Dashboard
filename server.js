@@ -4812,6 +4812,7 @@ function stockSnapLoad() {
     if (gvB.length) builder.addGv(gvB);
     if (stockAgeState.index) return true;   // beech me asli scan pura ho gaya
     stockAgeState.index = builder.finish();
+    gvDupApplyIndex();
     stockAgeState.key = stockAgeKey();
     stockAgeState.at = meta.at;
     stockAgeState.verSig = meta.ver || '';
@@ -4861,6 +4862,7 @@ function startStockAgeBuild(key) {
       else if (err.gv) index = { ...next, gv: prev.gv };
     }
     stockAgeState.index = index;
+    gvDupApplyIndex();
     stockAgeState.at = Date.now();
     setTimeout(() => { try { stockSerialIndex(stockAgeState.index); } catch { /* optional */ } }, 2000).unref?.();   // dispatch issued/stock pehle se taiyaar
     setImmediate(() => { try { if (typeof globalThis.gc === 'function') globalThis.gc(); } catch { /* ignore */ } });   // old index + parse garbage → turant free
@@ -15460,6 +15462,57 @@ function isFfPersonalRow(master) {
 }
 /** 🟩 GV personal fallback — EIR ke GV columns (AU–AZ) khaali hon to GV Master tab se TL / agent ki issuance padho.
     Col A = unique_id, B = agent_name, P = date, G = cch, F = vclass, I = tag_id_number, D = supervisor_name, C = supervisor_agent_id. */
+// 👥 v3.125.485 — GV me same NAAM ke alag-ID agents (Varsha Kanwar ki team: 2× "Arjun Singh", 2× "Pradeep Kumar"…)
+//    personal link me naam se jud kar EK ban jaate the (320 → 316, ID gayab). Ab aise naam ko "Naam (ID)" se alag rakhte hain —
+//    issuance (GV Master), stock (Tag Assignment index), IDs sab jagah ek hi naam.
+const gvDup = { names: new Map(), at: 0, promise: null };   // NAAMKEY → Set(ids)
+async function gvDupLoad(force) {
+  if (gvDup.promise) return gvDup.promise;
+  if (!force && gvDup.at && Date.now() - gvDup.at < 6 * 3600e3) return gvDup.names;
+  gvDup.promise = (async () => {
+    const sheetId = String((db.settings && db.settings.gvSheetId) || '').replace(/[^A-Za-z0-9_-]/g, '');
+    if (!sheetId) return gvDup.names;
+    const m = (db.settings.gv && db.settings.gv.master) || {}, a = (db.settings.gv && db.settings.gv.assignment) || {};
+    const qs = [
+      [m.tab || 'GV Master', `select ${m.uniqueId || 'A'}, ${m.agentName || 'B'}, count(${m.tagId || 'I'}) where ${m.uniqueId || 'A'} is not null group by ${m.uniqueId || 'A'}, ${m.agentName || 'B'}`],
+      [a.tab || 'Tag Assignment', `select ${a.agentId || 'E'}, ${a.agentName || 'F'}, count(${a.tagId || 'B'}) where ${a.agentId || 'E'} is not null group by ${a.agentId || 'E'}, ${a.agentName || 'F'}`]
+    ];
+    const next = new Map();
+    let ok = 0;
+    for (const [tab, tq] of qs) {
+      try {
+        const out = await fetchUpstreamCached(upstreamUrl(new URLSearchParams({ id: sheetId, sheet: tab, tq })), { staleMs: 12 * 3600e3 });
+        if (out.status < 200 || out.status >= 300) continue;
+        const t = parseGvizServer(out.body);
+        for (const row of t.rows || []) {
+          const id = String(serverCell(row, 0) || '').trim().toUpperCase().replace(/\.0+$/, ''), nk = plNormName(serverCell(row, 1));
+          if (!id || !nk) continue;
+          if (!next.has(nk)) next.set(nk, new Set());
+          next.get(nk).add(id);
+        }
+        ok++;
+      } catch { /* agli baar */ }
+    }
+    if (ok) { gvDup.names = next; gvDup.at = Date.now(); gvDupApplyIndex(); }
+    return gvDup.names;
+  })().finally(() => { gvDup.promise = null; });
+  return gvDup.promise;
+}
+/** Display naam: agar is naam ke GV me 1 se zyada ID hain to "Naam (ID)", warna naam hi. */
+function gvAgentName(name, id) {
+  const n = String(name || '').trim(), i = String(id || '').trim().toUpperCase().replace(/\.0+$/, '');
+  if (!n || !i || /\([A-Z0-9]+\)$/.test(n)) return n;
+  const set = gvDup.names.get(plNormName(n));
+  return set && set.size > 1 ? `${n} (${i})` : n;
+}
+/** Stock index ke GV agent nodes ka naam bhi wahi (index rebuild ke baad dobara). */
+function gvDupApplyIndex() {
+  try {
+    const gv = stockAgeState.index && stockAgeState.index.gv;
+    if (!gv || !gv.agents || !gvDup.names.size) return;
+    gv.agents.forEach((node) => { if (!node) return; const base = node.n0 || node.n; const nn = gvAgentName(base, node.id); if (nn !== base) { node.n0 = base; node.n = nn; } });
+  } catch { /* optional */ }
+}
 async function personalGvMasterRows(link, win) {
   const m = (db.settings.gv && db.settings.gv.master) || {};
   const col = { date: m.date || 'P', cch: m.cch || 'G', vcl: m.vClass || 'F', tag: m.tagId || 'I', agent: m.agentName || 'B', uid: m.uniqueId || 'A', tlId: m.tlId || 'C', tlName: m.tlName || 'D' };
@@ -15467,13 +15520,14 @@ async function personalGvMasterRows(link, win) {
   const low = (n) => gvizLiteral(String(n).toLowerCase());
   const pid = String(link.personId || '').trim().toUpperCase();
   const memStr = (Array.isArray(link.members) ? link.members : []).map((x) => String((x && x.name) || '')).sort().join(',');
-  const memoKey = `${link.kind}|${link.name}|${pid}|${win ? `${win.start}|${win.today}` : 'def'}|${memStr}`;
+  const memoKey = `${link.kind}|${link.name}|${pid}|${win ? `${win.start}|${win.today}` : 'def'}|${memStr}|d${gvDup.at}`;
 
   const hit = plGvMemo.get(memoKey);
   if (hit && Date.now() - hit.at < PL_GV_MEMO_MS && hit.rows) return hit.rows;
   if (plGvMemoInflight.has(memoKey)) return plGvMemoInflight.get(memoKey);
 
   const runner = (async () => {
+    try { await Promise.race([gvDupLoad(), new Promise((r) => setTimeout(r, 15000))]); } catch { /* optional */ }
     let who;
     if (link.kind === 'tl') who = `(lower(${col.tlName}) = ${low(link.name)}${pid ? ` or upper(${col.tlId}) = ${gvizLiteral(pid)}` : ''})`;
     else if (link.kind === 'group') { const names = personalMemberNames(link); who = names.length ? `(${names.map((n) => `lower(${col.agent}) = ${low(n)}`).join(' or ')})` : `${col.agent} = ''`; }
@@ -15506,7 +15560,7 @@ async function personalGvMasterRows(link, win) {
           const cls = classBucket(cch || (vcl ? (/^vc/i.test(vcl) ? vcl : `VC${vcl}`) : ''));
           const id = hasUid ? String(serverCell(row, 4) || '').trim().replace(/\.0+$/, '') : '';
           const countCell = serverCell(row, hasUid ? 5 : 4);
-          rows.push({ agent: serverCell(row, 0).trim(), date: dk, cls, id, n: serverNumber(countCell) });
+          rows.push({ agent: gvAgentName(serverCell(row, 0).trim(), id), date: dk, cls, id, n: serverNumber(countCell) });   // v3.125.485 same-naam → "Naam (ID)"
         }
         if (!rows.length && tq !== tries[tries.length - 1]) continue;   // empty ≠ no data: try the next date format
         plGvMemo.set(memoKey, { at: Date.now(), rows });
@@ -18098,6 +18152,12 @@ server.listen(PORT, '0.0.0.0', () => {
   if (eirColLoop.unref) eirColLoop.unref();
 }
 
+// 👥 v3.125.485 — GV same-naam registry boot ke 20s baad + har 6 ghante
+{
+  const t0 = setTimeout(() => { gvDupLoad(true).catch(() => {}); }, 20e3);
+  const t1 = setInterval(() => { gvDupLoad(true).catch(() => {}); }, 6 * 3600e3);
+  if (t0.unref) t0.unref(); if (t1.unref) t1.unref();
+}
 // 🟩 GV live today: server har ~40 sec me khud refresh rakhta hai — deploy/restart ke baad pehla visitor Google ka wait na kare.
 {
   const gvWarm = () => { try { if (db && db.settings) gvTodayFeed(false, { revalidate: true }).catch(() => {}); } catch { /* boot */ } };

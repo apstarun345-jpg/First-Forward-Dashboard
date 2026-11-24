@@ -603,7 +603,7 @@ function resolveKeys(chIndex, ch, kind, keyList) {
     const nk = `n:${normName(k)}`;
     if (map.has(nk)) { out.add(nk); continue; }
     const want = normName(k);
-    for (const [key, node] of map) if (normName(node.n) === want) { out.add(key); break; }
+    for (const [key, node] of map) if (normName(node.n) === want || (node.n0 && normName(node.n0) === want)) { out.add(key); break; }
   }
   return out;
 }
