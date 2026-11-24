@@ -747,7 +747,7 @@ window.FF = window.FF || {};
         })[0];
       }
     }
-    const list = index.byName.get(norm(name)) || [];
+    const list = (index.byName.get(norm(name)) || []).filter((r) => !wantId || !clean(r.agentId || r.id) || clean(r.agentId || r.id).replace(/\.0+$/, '').toUpperCase() === wantId);   // v3.125.475 — dusre ID wala same-naam agent nahi
     if (!list.length) return null;
     return list.slice().sort((a, b) => {
       const score = (x) => (x.curTotal != null ? 8 : 0) + (x.lastTotal != null ? 8 : 0) + (x.tlName ? 3 : 0) + (x.tlId ? 2 : 0) + (x.stockTotal != null ? 1 : 0);
@@ -759,7 +759,9 @@ window.FF = window.FF || {};
     const normWanted = clean(id).replace(/\.0+$/, '').toUpperCase();
     const idRows = normWanted ? index.byId.get(normWanted) : null;
     if (idRows && idRows.length) return idRows[0];
-    const same = index.byName.get(norm(name)) || [];
+    // 🆔 v3.125.475 — ID di gayi ho par index me na mile (jaise naya agent, abhi issuance nahi) to same-naam wale DUSRE ID ka agent mat do
+    //    (Sushil Kumar APS111 chunne par APS023113 khul jata tha). Sirf wahi same-naam jiska ID nahi hai ya wahi ID hai.
+    const same = (index.byName.get(norm(name)) || []).filter((r) => !normWanted || !clean(r.agentId || r.id) || clean(r.agentId || r.id).replace(/\.0+$/, '').toUpperCase() === normWanted);
     return same[0] || null;
   }
   function gvMobileFor(name, id) {
