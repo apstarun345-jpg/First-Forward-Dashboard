@@ -49,3 +49,11 @@ test('summary flow APS111', async () => {
   assert.equal(rep.p.totals.stockTotal, 10);
   assert.equal(rep.p.totals.curTotal, 0);
 });
+
+test('summaryUI pick chips carry the agent ID and resolve by ID first', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(path.join(ROOT, 'summaryUI.js'), 'utf8');
+  assert.match(src, /data-gs-pick-id=/);
+  assert.match(src, /dataset\.gsPickId/);
+  assert.doesNotMatch(src, /pick\(S\.list\.find\(\(p\) => p\.kind === kind && norm\(p\.name\) === norm\(name\)\) \|\| \{ kind, name \}\)/);
+});

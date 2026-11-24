@@ -725,7 +725,7 @@ window.FF = window.FF || {};
         const hits = suggestions(S.list, q);
         sug.innerHTML = hits.length ? hits.map((p) => {
           const tl = /tl$/.test(p.kind);
-          return `<button type="button" class="gs-chipbtn ${tl ? 'tl' : 'ag'}" data-gs-pick="${esc(`${p.kind}|${p.name}`)}">
+          return `<button type="button" class="gs-chipbtn ${tl ? 'tl' : 'ag'}" data-gs-pick="${esc(`${p.kind}|${p.name}`)}" data-gs-pick-id="${esc(p.id || '')}">
             <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''} <small class="dim">· ${fmt(p.cur)} mtd · ${fmt(p.stock)} stock${(p.today !== undefined) ? ` · ${fmt(p.today)} aaj` : ''}</small></button>`;
         }).join('') : '<span class="dim small">Koi matching naam/ID/mobile nahi mila</span>';
       };
@@ -746,7 +746,7 @@ window.FF = window.FF || {};
         const hits = matchList(S.list, q);
         drop.innerHTML = hits.length ? hits.slice(0, 40).map((p) => {
           const tl = /tl$/.test(p.kind);
-          return `<button type="button" class="gs-drop-opt" data-gs-pick="${esc(`${p.kind}|${p.name}`)}">
+          return `<button type="button" class="gs-drop-opt" data-gs-pick="${esc(`${p.kind}|${p.name}`)}" data-gs-pick-id="${esc(p.id || '')}">
             <span><span class="gs-tag ${tl ? 'tl' : 'ag'}">${tl ? 'TL' : 'Agent'}</span> <b>${esc(p.name)}</b>${p.id ? ` <small class="mono dim">${esc(p.id)}</small>` : ''}${!tl && p.tl ? ` <small class="dim">· TL ${esc(p.tl)}</small>` : ''}</span>
             <span class="dim small">last <b>${fmt(p.last)}</b> · mtd <b>${fmt(p.cur)}</b>${p.today !== undefined ? ` · aaj <b>${fmt(p.today)}</b>` : ''} · stock <b>${fmt(p.stock)}</b>${p.sheetCur !== null && p.sheetCur !== undefined ? ` · sheet ${fmt(p.sheetCur)}` : ''}</span></button>`;
         }).join('') : '<div class="gs-drop-empty dim">Kuch nahi mila</div>';
@@ -757,6 +757,7 @@ window.FF = window.FF || {};
         if (FF.app && FF.app.enhanceTables) { try { FF.app.enhanceTables(body); } catch { /* optional */ } }
         if (age !== false) loadAgeing(v);
       };
+      const resolveQ = (q) => (S.person && S.person.id && norm(q) === norm(S.person.name) ? S.person : matchList(S.list, q)[0]);
       let pickSeq = 0;
       // Browser ko ek frame do — spinner/selection turant dikhe, phir heavy report build ho (click "atakta" nahi).
       const nextFrame = () => new Promise((res) => { let done = false; const go = () => { if (!done) { done = true; res(); } }; try { requestAnimationFrame(() => setTimeout(go, 0)); } catch { /* no raf */ } setTimeout(go, 80); });
@@ -833,7 +834,7 @@ window.FF = window.FF || {};
         let timer = 0;
         qEl.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { showDrop(qEl.value); paintSug(qEl.value); }, 120); });
         qEl.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') { const hit = matchList(S.list, qEl.value)[0]; if (hit) pick(hit); }
+          if (e.key === 'Enter') { const hit = resolveQ(qEl.value); if (hit) pick(hit); }
           else if (e.key === 'Escape') drop.hidden = true;
         });
       }
@@ -841,8 +842,13 @@ window.FF = window.FF || {};
       root.__gsClick = async (e) => {
         if (e.target.closest('[data-gs-retry]')) { if (S.person) pick(S.person); else render(root, params); return; }
         const pickBtn = e.target.closest('[data-gs-pick]');
-        if (pickBtn) { const [kind, name] = pickBtn.dataset.gsPick.split('|'); pick(S.list.find((p) => p.kind === kind && norm(p.name) === norm(name)) || { kind, name }); return; }
-        if (e.target.closest('[data-gs-search]')) { const hit = matchList(S.list, qEl.value)[0]; if (hit) pick(hit); else U.toast('Koi matching Agent / TL nahi mila', 'warn'); return; }
+        if (pickBtn) {
+          // 🆔 v3.125.479 — same naam ke kai agents (Sushil Kumar × 3): pehle ID se, sirf ID na ho tab naam se
+          const [kind, ...nm] = pickBtn.dataset.gsPick.split('|'); const name = nm.join('|'); const pid = String(pickBtn.dataset.gsPickId || '').toUpperCase();
+          const byId = pid ? S.list.find((p) => p.kind === kind && String(p.id || '').toUpperCase() === pid) : null;
+          pick(byId || (pid ? { kind, name, id: pid } : S.list.find((p) => p.kind === kind && norm(p.name) === norm(name))) || { kind, name }); return;
+        }
+        if (e.target.closest('[data-gs-search]')) { const hit = resolveQ(qEl.value); if (hit) pick(hit); else U.toast('Koi matching Agent / TL nahi mila', 'warn'); return; }
         if (e.target.closest('[data-gs-refresh]')) { try { if (FF.gv && FF.gv.refresh) await FF.gv.refresh(); if (FF.agentSummary && FF.agentSummary.clearCaches) FF.agentSummary.clearCaches(); } catch { /* ignore */ } S.list = await loadList(ch).catch(() => S.list); paintSug(qEl ? qEl.value : ''); if (S.person) pick(S.person); return; }
         const sw = e.target.closest('[data-gs-switch]');
         if (sw && FF.app && FF.app.navigate) { FF.app.navigate(`${sw.dataset.gsSwitch}AgentSummary`, { name: S.person ? S.person.name : '' }); return; }
