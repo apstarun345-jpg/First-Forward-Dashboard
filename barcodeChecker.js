@@ -307,7 +307,10 @@ FF.pages = FF.pages || {};
             <button type="button" class="btn small" data-scan="torch" hidden>🔦 Torch</button>
             <button type="button" class="btn small" data-scan="sound" title="Beep ON/OFF">🔊</button>
             <button type="button" class="btn small" data-scan="clear">🗑 List saaf</button>
+            <label class="bcc-vm-pick" title="Class verify: class chuno, phir scan — sahi = hara + beep, galat = laal + vibrate">🎯 Class verify
+              <select class="input" data-scan-want><option value="">Off</option>${['VC4', 'VC5', 'VC6', 'VC7', 'VC8', 'VC9', 'VC10', 'VC11', 'VC12', 'VC13', 'VC14', 'VC15', 'VC16', 'VC20'].map((c) => `<option>${c}</option>`).join('')}</select></label>
             <span class="bcc-scan-count" data-scan-count></span>
+            <div class="bcc-vm-flash" data-vm-flash aria-live="assertive"></div>
           </div>
           <div class="bcc-cam" data-scan-cam hidden><video playsinline muted></video><div class="bcc-cam-aim"></div><div class="bcc-cam-msg" data-scan-msg></div><div class="bcc-cam-confirm" data-scan-confirm hidden><div class="bcc-cc-t">Ye barcode sahi hai?</div><div class="bcc-cc-code" data-scan-code></div><div class="bcc-cc-dup" data-scan-dupnote></div><div class="bcc-cc-b"><button type="button" class="btn" data-scan-no>🔁 Dobara</button><button type="button" class="btn primary" data-scan-yes>✅ Sahi hai — Save</button></div></div></div>
           <label class="field"><span class="dim small">Scanner gun / bluetooth scanner / haath se — barcode daalo + Enter (ek ke baad ek, list banti jayegi)</span>
@@ -458,9 +461,27 @@ FF.pages = FF.pages || {};
   // Camera: browser ka BarcodeDetector (phone / Chrome — fast, native); na ho to ZXing (vendor/zxing.min.js, sirf zarurat par load).
   // List localStorage me (ff_bcc_scan) — reload / app band hone par bhi bachi rehti hai.
   const SCAN_KEY = 'ff_bcc_scan';
-  const scan = { order: [], map: new Map(), queue: [], t: 0, paintRaf: 0, saveT: 0, sound: true, last: { k: '', at: 0 }, ctx: null };
+  const scan = { order: [], map: new Map(), queue: [], t: 0, paintRaf: 0, saveT: 0, sound: true, last: { k: '', at: 0 }, ctx: null, want: '', vmDone: new Map() };
   const scanCam = { on: false, stream: null, raf: 0, timer: 0, det: null, reader: null, busy: false, torch: false };
   const scanKey = (c) => strip0(bcDigits(c)) || String(c || '').toUpperCase();
+  // 🎯 v3.125.483 — Class verify mode: chuni hui class se har scan ka class match (sheet script jaisa, par turant)
+  const vmNorm = (v) => { const c = String(v || '').toUpperCase().replace(/\s+/g, ''); return !c ? '' : (/^VC/.test(c) ? c : (/^\d+$/.test(c) ? 'VC' + c : c)); };
+  function vmJudge(r) {
+    if (!scan.want || !r || r.pending) return;
+    const got = vmNorm(r.cls);
+    const v = !got ? 'nf' : got === scan.want ? 'ok' : 'bad';
+    if (r._vm === v && r._vmWant === scan.want) return;
+    r._vm = v; r._vmWant = scan.want;
+    r.note = (v === 'ok' ? `✅ Class sahi (${got})` : v === 'bad' ? `❌ Galat class: ${got} hai, ${scan.want} chahiye` : `⚠️ Class nahi mili — ${scan.want} verify nahi hua`) + (r.note ? ' · ' + String(r.note).replace(/^(✅|❌|⚠️) [^·]*· /, '') : '');
+    const key = scanKey(r.barcode);
+    if (scan.vmDone.get(key) !== scan.want) { scan.vmDone.set(key, scan.want); scanBeep(v === 'ok' ? 'ok' : 'dup'); vmFlash(v, r.barcode, got); }
+  }
+  function vmFlash(v, code, got) {
+    const host = state.root && state.root.querySelector('[data-vm-flash]'); if (!host) return;
+    host.className = `bcc-vm-flash on ${v}`;
+    host.innerHTML = v === 'ok' ? `✅ <b>${esc(code)}</b> · ${esc(got)} — sahi` : v === 'bad' ? `❌ <b>${esc(code)}</b> · ye <b>${esc(got)}</b> hai (${esc(scan.want)} nahi)` : `⚠️ <b>${esc(code)}</b> · class nahi mili`;
+    clearTimeout(host._t); host._t = setTimeout(() => { host.className = 'bcc-vm-flash'; }, v === 'ok' ? 1400 : 3500);
+  }
   const pendingRow = (label) => { const r = makeRow(label, null, '', false, null); r.note = '⏳ check ho raha hai…'; r.pending = true; r.dDate = r.dName = ''; r._new = Date.now(); return r; };
   function scanBeep(kind) {
     try { if (navigator.vibrate) navigator.vibrate(kind === 'ok' ? 35 : [30, 40, 30]); } catch { /* optional */ }
@@ -479,7 +500,8 @@ FF.pages = FF.pages || {};
   function scanCount() {
     const el = state.root && state.root.querySelector('[data-scan-count]'); if (!el) return;
     const rows = scan.order.map((k) => scan.map.get(k)), c = (k) => rows.filter((r) => r.k === k).length;
-    el.innerHTML = rows.length ? `<b>${U.fmt(rows.length)}</b> scan · ✅ ${U.fmt(c('iss'))} · 📦 ${U.fmt(c('st'))} · 🏢 ${U.fmt(c('bc'))} · ❓ ${U.fmt(c('nf'))}` : '<span class="dim">Abhi koi scan nahi</span>';
+    const vm = scan.want ? ` · 🎯 ${esc(scan.want)}: <b class="bcc-vm-ok">✔ ${U.fmt(rows.filter((r) => r._vm === 'ok').length)}</b> · <b class="bcc-vm-bad">✘ ${U.fmt(rows.filter((r) => r._vm === 'bad').length)}</b> · ⚠ ${U.fmt(rows.filter((r) => r._vm === 'nf').length)}` : '';
+    el.innerHTML = rows.length ? `<b>${U.fmt(rows.length)}</b> scan · ✅ ${U.fmt(c('iss'))} · 📦 ${U.fmt(c('st'))} · 🏢 ${U.fmt(c('bc'))} · ❓ ${U.fmt(c('nf'))}${vm}` : '<span class="dim">Abhi koi scan nahi</span>';
   }
   function scanPaint() {
     if (scan.paintRaf) return;
@@ -487,7 +509,7 @@ FF.pages = FF.pages || {};
       scan.paintRaf = 0;
       if (state.tab !== 'scan' || !state.root) return;
       const rows = scan.order.slice().reverse().map((k) => scan.map.get(k));
-      rows.forEach((r, i) => { r._i = i; });
+      rows.forEach((r, i) => { r._i = i; vmJudge(r); });
       state.rows = rows.length ? rows : null; state.title = 'scanned-list'; state.lastKey = 'scan'; state.dispMeta = state.dispMeta || null;
       if (rows.length) { if (state.q || state.agent || state.filter !== 'all') paintTable(); else paintResults(); }
       else { const out = state.root.querySelector('[data-bcc-out]'); if (out) out.innerHTML = '<div class="empty-state compact">📷 Scan karo — har barcode yahan jodta jayega</div>'; }
@@ -500,7 +522,7 @@ FF.pages = FF.pages || {};
     const k = scanKey(code), ex = scan.map.get(k);
     if (ex) { ex._dup = Date.now(); scanBeep('dup'); scanPaint(); return false; }
     scan.order.push(k); scan.map.set(k, pendingRow(code)); scan.queue.push(code);
-    scanBeep('ok'); scanSave(); scanPaint();
+    if (!scan.want) scanBeep('ok'); scanSave(); scanPaint();
     try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: 'ok', code } })); } catch { /* optional */ }
     if (!scan.t) scan.t = setTimeout(scanFlush, 220);
     return true;
@@ -535,7 +557,7 @@ FF.pages = FF.pages || {};
   }
   function scanClear() {
     if (scan.order.length > 3 && !window.confirm(`${scan.order.length} scanned barcodes ki list saaf karni hai?`)) return;
-    scan.order = []; scan.map.clear(); scan.queue = []; state.rows = null; try { localStorage.removeItem(SCAN_KEY); } catch { /* optional */ }
+    scan.order = []; scan.map.clear(); scan.queue = []; scan.vmDone.clear(); state.rows = null; try { localStorage.removeItem(SCAN_KEY); } catch { /* optional */ }
     scanPaint(); scanCount();
   }
   function scanEnter() {
@@ -615,10 +637,20 @@ FF.pages = FF.pages || {};
   }
   function scanInit(root) {
     try { scan.sound = localStorage.getItem('ff_bcc_scan_snd') !== '0'; } catch { /* optional */ }
+    try { scan.want = localStorage.getItem('ff_bcc_vm') || ''; } catch { /* optional */ }
+    const ws = root.querySelector('[data-scan-want]');
+    if (ws) {
+      ws.value = scan.want;
+      ws.addEventListener('change', () => {
+        scan.want = ws.value; try { localStorage.setItem('ff_bcc_vm', scan.want); } catch { /* optional */ }
+        scan.map.forEach((r, k) => { r._vm = ''; scan.vmDone.set(k, scan.want); });   // purani list ko naye class se dobara judge (bina beep)
+        scanPaint();
+      });
+    }
     const sb = root.querySelector('[data-scan="sound"]'); if (sb) sb.textContent = scan.sound ? '🔊' : '🔇';
     if (!scan.order.length) {
       let saved = []; try { saved = JSON.parse(localStorage.getItem(SCAN_KEY) || '[]'); } catch { /* optional */ }
-      (Array.isArray(saved) ? saved : []).slice(-MAX).forEach((c) => { const k = scanKey(c); if (!scan.map.has(k)) { scan.order.push(k); scan.map.set(k, pendingRow(String(c))); scan.queue.push(String(c)); } });
+      (Array.isArray(saved) ? saved : []).slice(-MAX).forEach((c) => { const k = scanKey(c); if (!scan.map.has(k)) { scan.order.push(k); scan.map.set(k, pendingRow(String(c))); scan.queue.push(String(c)); scan.vmDone.set(k, scan.want); } });
       if (scan.queue.length && !scan.t) scan.t = setTimeout(scanFlush, 300);
     }
     scanCount();

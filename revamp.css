@@ -133,3 +133,14 @@ html.mobile-ui #mobile-nav.mobile-nav, .mobile-nav { grid-auto-flow: column !imp
 .bcc-emp-card.blue{background:#eff6ff;border-color:#bfdbfe}.bcc-emp-card.green{background:#f0fdf4;border-color:#bbf7d0}.bcc-emp-card.amber{background:#fffbeb;border-color:#fde68a}.bcc-emp-card.red{background:#fef2f2;border-color:#fecaca}
 .bcc-emp-det{margin:6px 0}.bcc-emp-det summary{cursor:pointer;font-weight:700;padding:4px 0}
 .bcc-emp-hist td{background:#f8fafc}.bcc-emp-h ul{margin:6px 0 6px 18px;padding:0}
+/* 🎯 v3.125.483 — Barcode Checker class-verify mode */
+.bcc-vm-pick{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:12.5px;padding:4px 8px;border-radius:999px;background:#eef2ff;color:#3730a3}
+.bcc-vm-pick select{padding:3px 8px;min-height:0;font-weight:800}
+.bcc-vm-ok{color:#15803d}.bcc-vm-bad{color:#dc2626}
+.bcc-vm-flash{flex-basis:100%;max-height:0;overflow:hidden;opacity:0;border-radius:12px;font-size:16px;padding:0 14px;transition:max-height .2s,opacity .2s,padding .2s}
+.bcc-vm-flash.on{max-height:80px;opacity:1;padding:12px 14px}
+.bcc-vm-flash.ok{background:#dcfce7;color:#14532d;box-shadow:inset 0 0 0 2px #22c55e}
+.bcc-vm-flash.bad{background:#fee2e2;color:#7f1d1d;box-shadow:inset 0 0 0 3px #ef4444;animation:bccVmShake .35s}
+.bcc-vm-flash.nf{background:#fef3c7;color:#78350f;box-shadow:inset 0 0 0 2px #f59e0b}
+@keyframes bccVmShake{20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
+html[data-theme="dark"] .bcc-vm-pick{background:#1e1b4b;color:#c7d2fe}
