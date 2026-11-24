@@ -5549,10 +5549,10 @@ async function odSnapLoad() {
 // pehle 2-3 min har query Google par 45s+. Ab sabse garam queries ka gzip cache har 30 min Google Sheet (CACHE_GVIZ) me save
 // aur boot par wapas — restart ke baad bhi data turant (stale), naya peeche se (stale-while-revalidate).
 const clientHealth = { since: Date.now(), errors: [], pages: new Map() };
-const GVIZ_SNAP_TAB = 'CACHE_GVIZ', GVIZ_SNAP_MAX = 6.5 * 1048576, GVIZ_SNAP_AGE = 12 * 3600e3;
+const GVIZ_SNAP_TAB = 'CACHE_GVIZ', GVIZ_SNAP_MAX = 2.5 * 1048576, GVIZ_SNAP_AGE = 12 * 3600e3;
 const gvizSnap = { savedAt: 0, loadedAt: 0, loaded: 0, saved: 0, sig: '', err: '' };
 async function gvizSnapSave() {
-  if (!sheetsStore || typeof sheetsStore.call !== 'function') return false;
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') { console.log('💾 gviz snapshot: Sheet storage nahi'); return false; }
   const now = Date.now(), list = [];
   for (const [url, e] of cache.entries()) {
     if (!e || !e.gz || !(e.status >= 200 && e.status < 300) || now - e.at > 3 * 3600e3) continue;
@@ -5567,12 +5567,12 @@ async function gvizSnapSave() {
     bytes += e.gz.length;
     rows.push([url, e.at, e.status, e.ver || '', e.etag || '', e.rawLen || 0, e.gz.toString('base64')]);
   }
-  if (!rows.length) return false;
+  if (!rows.length) { console.log(`💾 gviz snapshot: save karne layak entry nahi (cache ${cache.size})`); return false; }
   const sig = rows.map((r) => `${r[0].length}:${r[1]}`).join('|');
   if (sig === gvizSnap.sig) return false;   // kuch naya nahi
   const ok = await durSave(GVIZ_SNAP_TAB, 'gviz', rows, { at: now });
   if (ok) { gvizSnap.sig = sig; gvizSnap.savedAt = now; gvizSnap.saved = rows.length; console.log(`💾 gviz snapshot sheet me: ${rows.length} queries · ${Math.round(bytes / 1024)} KB`); }
-  else gvizSnap.err = profilePack.err || 'save failed';
+  else { gvizSnap.err = profilePack.err || 'save failed'; console.warn(`💾 gviz snapshot save FAIL (${rows.length} queries, ${Math.round(bytes / 1024)} KB): ${gvizSnap.err}`); }
   return ok;
 }
 async function gvizSnapLoad() {
