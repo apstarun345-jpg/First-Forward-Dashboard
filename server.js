@@ -872,7 +872,10 @@ function trackSheetRows(sheetKey, t) {
 // ⚡ v3.125.464 — freshness ke gviz calls background-scan gate (bgScanGate) ke peeche line me lagte the aur 100 s × 3 timeout the → card hamesha "checking…".
 // Ab gate bypass + 12 s timeout + 1 koshish; poora compute bhi 14 s se zyada nahi rukta.
 async function gvizQuick(params, sheet) {
-  const out = await fetchUpstream(upstreamUrl(params), { timeoutMs: 12000 });
+  const url = upstreamUrl(params);
+  GVIZ_PRIORITY_URLS.add(url);   // chhoti query (count / import-log) — bade scan pages ke peeche line me na lage
+  let out;
+  try { out = await fetchUpstream(url, { timeoutMs: 12000 }); } finally { GVIZ_PRIORITY_URLS.delete(url); }
   if (out.rateLimited) throw new Error(gvizLimitMessage(out.retryAfterMs));
   if (out.status < 200 || out.status >= 300) throw new Error(`${sheet}: Google responded ${out.status}`);
   const table = parseGvizServer(out.body);
@@ -13868,7 +13871,7 @@ async function handleApi(req, res, url) {
     const prev = sheetFreshGood.get(cacheKey);
     if (prev && prev.out && prev.out.tabs) items.forEach((i) => { const t = out.tabs[i.key]; if (t && !t.importAt && prev.out.tabs[i.key] && prev.out.tabs[i.key].importAt) { t.importAt = prev.out.tabs[i.key].importAt; t.importFrom = prev.out.tabs[i.key].importFrom || 'IMPORT_LOG'; t.fromLastGood = true; } });
     if (goodNow || !prev) sheetFreshGood.set(cacheKey, { at: Date.now(), out });
-    sheetFreshCache.set(cacheKey, { at: Date.now(), out });
+    if (goodNow) sheetFreshCache.set(cacheKey, { at: Date.now(), out });   // adhoori (import time bina) jawab cache nahi hota
     return sendJson(res, 200, out);
   }
   if ((p === '/api/fastag-mapping/sheet/read' || p === '/api/fastag-mapping/sheet/mark') && method === 'POST') {
