@@ -1125,23 +1125,26 @@ FF.pages = FF.pages || {};
       personInput.setAttribute('aria-expanded', 'true');
     }
 
-    /** 🔴 v3.125.497 — header ke andar hi: aaj ka live VC4 / VC20 / VC5+ aur aaj ke top 3 agents (header ki height nahi badhti). */
+    /** 🔴 v3.125.500 — header ke andar hi (height nahi badhti): aaj ka live table (Total / VC4 / VC20 / VC5+ / Replacement) + Top 3 agents table. */
     function paintLive(rows) {
       const host = U.$('#ti-live', root); if (!host) return;
       const day = todayKey();
-      const sum = { vc4: 0, vc20: 0, vc5: 0 }; const ag = new Map();
+      const sum = { vc4: 0, vc20: 0, vc5: 0, repl: 0 }; const ag = new Map();
       const scan = (list) => { for (const r of list || []) {
         const k = r.key || (r.date ? U.dateKey(r.date) : ''); if (k !== day) continue;
-        const n = Number(r.n) || 0; if (!n || r.type === 'REPLACEMENT') continue;
+        const n = Number(r.n) || 0; if (!n) continue;
+        if (r.type === 'REPLACEMENT') { sum.repl += n; continue; }
         sum[r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5'] += n;
         const nm = String(r.agentName || '').trim(); if (nm && !/^(unknown|unassigned|direct|—)$/i.test(nm)) ag.set(nm, (ag.get(nm) || 0) + n);
       } };
       scan(rows.gvMasterRows); scan(rows.ffRows);
       const total = sum.vc4 + sum.vc20 + sum.vc5;
-      if (!total) { host.innerHTML = '<div class="tix-live-row"><b>🔴 Today live</b><span class="c0">abhi aaj ka koi tag issue nahi / data aa raha hai…</span></div>'; host.hidden = false; return; }
-      const top = [...ag.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
-      host.innerHTML = `<div class="tix-live-row"><b>🔴 Today live</b><span class="c4">VC4 <i>${U.fmt(sum.vc4)}</i></span><span class="c20">VC20 <i>${U.fmt(sum.vc20)}</i></span><span class="c5">VC5+ <i>${U.fmt(sum.vc5)}</i></span></div>`
-        + (top.length ? `<div class="tix-live-row top">${top.map(([nm, n], i) => `<span title="${esc(nm)}">${['🥇', '🥈', '🥉'][i]} ${esc(nm.length > 18 ? `${nm.slice(0, 17)}…` : nm)} <i>${U.fmt(n)}</i></span>`).join('')}</div>` : '');
+      if (!total && !sum.repl) { host.innerHTML = '<div class="tix-lt-empty">🔴 Today live — abhi aaj ka koi tag issue nahi / data aa raha hai…</div>'; host.hidden = false; return; }
+      const top = [...ag.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3);
+      const medal = ['🥇', '🥈', '🥉'];
+      host.innerHTML = `<table class="tix-lt"><thead><tr><th class="tot">Today Total <small>(live)</small></th><th class="v4">VC4</th><th class="v20">VC20</th><th class="v5">VC5+</th><th class="rp">Replacement</th></tr></thead>
+        <tbody><tr><td class="tot">${U.fmt(total)}</td><td class="v4">${U.fmt(sum.vc4)}</td><td class="v20">${U.fmt(sum.vc20)}</td><td class="v5">${U.fmt(sum.vc5)}</td><td class="rp">${U.fmt(sum.repl)}</td></tr></tbody></table>`
+        + (top.length ? `<table class="tix-lt top"><thead><tr><th colspan="3">🏆 Top 3 issued today</th></tr></thead><tbody><tr>${top.map(([nm, n], i) => `<td class="m${i}" title="${esc(nm)}">${medal[i]} <span>${esc(nm.length > 16 ? `${nm.slice(0, 15)}…` : nm)}</span> <b>${U.fmt(n)}</b></td>`).join('')}${'<td></td>'.repeat(3 - top.length)}</tr></tbody></table>` : '');
       host.hidden = false;
     }
 

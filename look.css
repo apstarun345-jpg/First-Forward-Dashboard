@@ -126,12 +126,21 @@ html.ff-fast #main .card:not(:first-child) { content-visibility: auto; contain-i
 .gs-hero h2 { font-size: clamp(20px, 2.6vw, 28px); line-height: 1.15; }
 @media (max-width: 640px) { .gs-hero-ava[data-ini] { width: 52px; height: 52px; } .gs-hero-ava[data-ini]::before { font-size: 19px; } }
 
-/* v3.125.497 — Tag Issued header: aaj ka live (VC4/VC20/VC5+ + top 3 agents) — header ke andar, height nahi badhti */
-.tix-live { flex: 1 1 260px; min-width: 0; align-self: center; display: flex; flex-direction: column; gap: 3px; font-size: 12px; line-height: 1.25; }
-.tix-live-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
-.tix-live-row b { font-weight: 800; letter-spacing: .02em; }
-.tix-live-row span { white-space: nowrap; font-weight: 700; }
-.tix-live-row span i { font-style: normal; font-weight: 900; margin-left: 2px; }
-.tix-live-row .c4 { color: #4f46e5; } .tix-live-row .c20 { color: #0d9488; } .tix-live-row .c5 { color: #ea580c; }
-.tix-live-row.top span { max-width: 190px; overflow: hidden; text-overflow: ellipsis; color: var(--muted, #475569); }
-@media (max-width: 640px) { .tix-live { order: 3; flex-basis: 100%; } }
+/* v3.125.500 — Tag Issued header: aaj ka live table + Top 3 table (header ke andar, height nahi badhti) */
+.tix-live { flex: 1 1 340px; min-width: 0; align-self: center; display: flex; flex-wrap: wrap; align-items: stretch; justify-content: center; gap: 8px 12px; }
+.tix-lt { border-collapse: separate; border-spacing: 4px 2px; font-size: 12px; line-height: 1.15; }
+.tix-lt th { font-size: 10.5px; font-weight: 800; letter-spacing: .02em; padding: 2px 9px; border-radius: 999px; white-space: nowrap; text-align: center; }
+.tix-lt td { text-align: center; font-weight: 900; font-size: 17px; padding: 1px 6px 0; font-variant-numeric: tabular-nums; }
+.tix-lt th.tot { background: #e0e7ff; color: #3730a3; } .tix-lt td.tot { color: #1d4ed8; }
+.tix-lt th.v4 { background: #ede9fe; color: #6d28d9; } .tix-lt td.v4 { color: #7c3aed; }
+.tix-lt th.v20 { background: #ccfbf1; color: #0f766e; } .tix-lt td.v20 { color: #0d9488; }
+.tix-lt th.v5 { background: #ffedd5; color: #c2410c; } .tix-lt td.v5 { color: #ea580c; }
+.tix-lt th.rp { background: #dbeafe; color: #1d4ed8; } .tix-lt td.rp { color: #2563eb; }
+.tix-lt.top th { background: linear-gradient(90deg, #fef3c7, #fde68a); color: #92400e; }
+.tix-lt.top td { font-size: 12px; font-weight: 700; text-align: left; white-space: nowrap; border-radius: 10px; padding: 3px 8px; }
+.tix-lt.top td span { display: inline-block; max-width: 110px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.tix-lt.top td b { font-size: 13px; margin-left: 3px; color: #b45309; }
+.tix-lt.top td.m0 { background: #fef9c3; } .tix-lt.top td.m1 { background: #f1f5f9; } .tix-lt.top td.m2 { background: #ffedd5; }
+.tix-lt-empty { font-size: 12px; color: var(--muted, #64748b); font-weight: 700; }
+[data-theme="dark"] .tix-lt th { filter: brightness(.85); } [data-theme="dark"] .tix-lt.top td { color: #0f172a; }
+@media (max-width: 640px) { .tix-live { order: 3; flex-basis: 100%; justify-content: flex-start; } }
