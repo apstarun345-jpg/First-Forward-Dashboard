@@ -8111,19 +8111,61 @@ async function dspStatusCached(ch, ranges) {
   const key = dspKey(ch, ranges);
   const hit = dspResCache.get(key);
   const cur = stockAgeState.index && stockAgeState.index.at;
-  if (hit && (hit.idxAt === cur || Date.now() - hit.t < 6 * 3600e3)) return hit.payload;
+  // valid: usi stock index ka bana ho; index abhi ban raha ho (cur nahi) to purana bhi chalega (pending se behtar)
+  if (hit && (!cur || hit.idxAt === cur)) return zlib.gunzipSync(hit.gz).toString('utf8');
   if (dspResInflight.has(key)) return dspResInflight.get(key);
   const job = (async () => {
     const out = await dspStatusCompute(ch, ranges);
     const payload = JSON.stringify(out);
     if (out && out.ok && !out.pending && Array.isArray(out.rows)) {
-      dspResCache.set(key, { t: Date.now(), idxAt: out.at || cur, payload });
-      if (dspResCache.size > 60) dspResCache.delete(dspResCache.keys().next().value);
+      dspResCache.delete(key);
+      dspResCache.set(key, { t: Date.now(), idxAt: out.at || cur, gz: zlib.gzipSync(payload) });
+      if (dspResCache.size > 3000) dspResCache.delete(dspResCache.keys().next().value);
     }
     return payload;
   })().finally(() => dspResInflight.delete(key));
   dspResInflight.set(key, job);
   return job;
+}
+/** v3.125.493 — SAB agents/TL ka last-dispatch barcode list pehle se (raat + subah 8 baje + stock index badalte hi + boot).
+ *  User ke click par sirf cache se aata hai. */
+const DSP_WARM = { running: false, day: '', idxAt: 0, done: 0, total: 0, ms: 0, last: 0 };
+async function dspWarmAll(reason) {
+  if (DSP_WARM.running) return;
+  const idx = stockAgeState.index;
+  if (!idx) return;
+  DSP_WARM.running = true;
+  const t0 = Date.now();
+  try {
+    const agg = ledgerAggState.data || await ledgerAggregate(false);
+    if (!agg || !agg.byCh) return;
+    const jobs = new Map();
+    for (const ch of ['gv', 'ff']) {
+      const m = agg.byCh[ch]; if (!m) continue;
+      for (const rec of new Set(m.values())) {
+        let best = null; for (const d of rec.dates.keys()) if (!best || String(d) > String(best)) best = d;
+        if (!best) continue;
+        const rg = (rec.dates.get(best).ranges || []).slice(0, 6).map((r) => ({ first: r.first, last: r.last })).filter((r) => r.first && r.last);
+        if (rg.length) jobs.set(dspKey(ch, rg), { ch, rg });
+      }
+    }
+    DSP_WARM.total = jobs.size; DSP_WARM.done = 0;
+    for (const { ch, rg } of jobs.values()) {
+      if (stockAgeState.index !== idx) break;   // beech me index badla → agla round naye index par
+      try { const r = JSON.parse(await dspStatusCached(ch, rg)); if (r && r.pending) break; } catch { /* next */ }
+      DSP_WARM.done++;
+      await new Promise((ok) => setTimeout(ok, 120));
+    }
+    DSP_WARM.idxAt = idx.at || 0; DSP_WARM.last = Date.now(); DSP_WARM.ms = Date.now() - t0;
+    console.log(`📦 dispatch barcode lists pehle se: ${DSP_WARM.done}/${DSP_WARM.total} · ${Math.round(DSP_WARM.ms / 1000)}s (${reason})`);
+  } catch (err) { console.warn('dspWarmAll:', String(err && err.message || err).slice(0, 120)); }
+  finally { DSP_WARM.running = false; }
+}
+function dspWarmTick() {
+  const idx = stockAgeState.index; if (!idx) return;
+  const ist = new Date(Date.now() + 5.5 * 3600e3), day = ist.toISOString().slice(0, 10), hr = ist.getUTCHours();
+  if ((idx.at || 0) !== DSP_WARM.idxAt) { dspWarmAll('stock index naya').then(() => { DSP_WARM.day = day; }); return; }
+  if (hr >= 8 && DSP_WARM.day !== day) { DSP_WARM.day = day; dspWarmAll('subah 8 baje'); }
 }
 /** Pehle se bana lo (fire-and-forget) — user click kare tab tak ready. */
 function dspPrewarm(ch, dates) {
@@ -18613,6 +18655,8 @@ async function start() {
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
     setTimeout(() => { officeDispatched(false).then(() => officeDispatchedNightly()).catch(() => {}); }, 150e3).unref?.();   // 🟧 snapshot sheet se turant; aaj ka nahi bana to raat wali rebuild
     setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar
+    setTimeout(() => dspWarmTick(), 150e3).unref?.();   // 📦 v3.125.493 sab last-dispatch barcode lists pehle se
+    setInterval(() => dspWarmTick(), 5 * 60e3).unref();
     setTimeout(() => { ledgerPackLoad().then((ok) => { if (!ok && !ledgerState.index) return ledgerPackNightly(); }).catch(() => {}); }, 120e3).unref?.();   // snapshot na ho to ek baar abhi bana lo
     setTimeout(() => { profilePackLoad().then((ok) => { if (!ok) return profilePackWarm(); profilePackNightly(); }).catch(() => {}); }, 45e3).unref?.();   // 🧑‍💼 snapshot sheet se; na ho to ek baar bana lo
     setInterval(() => { profilePackNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:45 ke baad ek baar   // 🔥 presave: boot ke 30 sec baad hot queries ek-ek karke
