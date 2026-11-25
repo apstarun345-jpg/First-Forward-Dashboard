@@ -40,7 +40,7 @@ test('server wiring: GV Master pehle, phir EIR; dispatch-status enrich; nightly'
   assert.match(src, /const got = await ibGvmByTags\(part\)/);
   assert.match(src, /const got = await ibEirByTags\(part\)/);
   assert.ok(src.indexOf('ibGvmByTags(part)') < src.indexOf('ibEirByTags(part)'), 'GV Master pehle');
-  assert.equal((src.match(/await issuedEnrichRows\(out, ranges\)/g) || []).length, 2, 'dono branch me enrich');
+  assert.equal((src.match(/await dspEnrichBounded\(out, ranges, onLate\)/g) || []).length, 2, "dono branch me enrich (v3.125.495: bounded)");
   assert.match(src, /getUTCHours\(\) >= 3 && issuedStore\.meta\(\)\.lastRunDay !== istTodayKey\(\)/);
   assert.match(src, /curN < prevN \* 0\.5/, 'adhoore stock list par snapshot nahi badalta');
 });

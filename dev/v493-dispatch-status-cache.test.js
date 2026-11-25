@@ -5,7 +5,7 @@ import fs from 'node:fs';
 const read = (f) => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
 test('server: dispatch-status result cache + prewarm from dispatch-by', () => {
   const s = read('server.js');
-  assert.match(s, /async function dspStatusCompute\(ch, ranges\)/);
+  assert.match(s, /async function dspStatusCompute\(ch, ranges, onLate\)/);
   assert.match(s, /async function dspStatusCached\(ch, ranges\)/);
   assert.match(s, /const payload = await dspStatusCached\(ch, ranges\);/);
   assert.match(s, /dspPrewarm\(ch, dates\);/);
@@ -19,7 +19,7 @@ test('server: sab agents ka last-dispatch list raat / subah 8 baje / naye stock 
   assert.match(s, /async function dspWarmAll\(reason\)/);
   assert.match(s, /hr >= 8 && DSP_WARM\.day !== day/);
   assert.match(s, /setInterval\(\(\) => dspWarmTick\(\), 5 \* 60e3\)/);
-  assert.match(s, /zlib\.gzipSync\(payload\)/);
+  assert.match(s, /zlib\.gzipSync\(JSON\.stringify\(o\)\)/);
 });
 
 test('v495: list 2.5 s me (Tag ID enrichment bounded) + client partial par save nahi', () => {
