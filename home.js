@@ -1712,6 +1712,21 @@ FF.pages = FF.pages || {};
       error: canGv ? 'GV aaj ka live data aa raha hai…' : '',
       source: 'feed', liveToday: false
     };
+    // v3.125.517 — har deploy/restart par server cache khaali hota hai aur live feed ~45-60 s tak 0/error deta tha ("GV live bigad gaya").
+    // Ab aakhri sahi aaj-ka snapshot browser me rakha jata hai; feed aane tak wahi (stale) dikhta hai, 0 nahi.
+    const LIVE_LAST_KEY = 'ff_gv_live_last';
+    const liveSaneNums = (x) => { const T = Number(x && x.total); return Number.isFinite(T) && T >= 0 && [x.vc4, x.vc20, x.vc5p, x.replacement, x.chassis].every((v) => (Number(v) || 0) <= T) && ((Number(x.vc4) || 0) + (Number(x.vc20) || 0) + (Number(x.vc5p) || 0)) <= T * 1.02 + 1; };
+    function liveSaveLast(s) {
+      try { if (s && Number(s.total) > 0 && liveSaneNums(s)) localStorage.setItem(LIVE_LAST_KEY, JSON.stringify({ day: todayK(), at: Date.now(), total: s.total, vc4: s.vc4, vc20: s.vc20, vc5p: s.vc5p, replacement: s.replacement, chassis: s.chassis, wrongVrn: s.wrongVrn || 0 })); } catch { /* storage optional */ }
+    }
+    if (canGv) {
+      try {
+        const L = JSON.parse(localStorage.getItem(LIVE_LAST_KEY) || 'null');
+        if (L && L.day === todayK() && liveSaneNums(L) && Number(L.total) > 0) {
+          liveState = { ...liveState, total: L.total, vc4: L.vc4, vc20: L.vc20, vc5p: L.vc5p, replacement: L.replacement, chassis: L.chassis, wrongVrn: L.wrongVrn || 0, stale: true, cached: true, error: '' };
+        }
+      } catch { /* ignore */ }
+    }
 
     let wdBars = null;
     const hoursGone = Math.max(1, (Date.now() - new Date().setHours(0, 0, 0, 0)) / 3600000);
@@ -2049,6 +2064,7 @@ FF.pages = FF.pages || {};
         error: '',
         source: 'feed', liveToday: true, highest: null
       };
+      liveSaveLast(liveState);
       paintLive();
       if (ui.ready) {
         const st2 = streams(ui.sf.rows, liveRows, true);
@@ -2115,6 +2131,7 @@ FF.pages = FF.pages || {};
         replacementBy: snap.replacementBy, chassisBy: snap.chassisBy, wrongVrnBy: snap.wrongVrnBy, highest: gvTodayHighest(snap.rows),
         error: '', stale: false, source: 'master', liveToday: true
       } : { ...liveState, error: '', liveToday: true };
+      if (useSnap) liveSaveLast(liveState);
       if (ui.ready) {
         // Rebase on the current stream: refreshes must not reuse the initial render snapshot.
         const st2 = streams(ui.sf.rows, liveRows, liveSourceReady);
