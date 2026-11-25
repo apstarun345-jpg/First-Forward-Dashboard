@@ -2125,15 +2125,17 @@ FF.pages = FF.pages || {};
     ui.ready = true; ui.daily = M.eirOnlyDaily(daily || []); ui.sf = sf; homeRows = { rows: sf.rows, at: Date.now(), get ctx() { return ui.ctx; } }; ui.ctx = ctx; ui.sc = sc; ui.liveToday = st.gvLiveAdded;
     // v3.125.506 — har bhaari paint alag task me: pehla card turant dikhe, click par poora ~0.2 s ek saath screen na ruke.
     const brk = () => new Promise((r) => setTimeout(r, 0));
+    const stageT = (name, fn) => { const t0 = performance.now(); try { fn(); } finally { try { (window.__homeStages = window.__homeStages || []).push([name, Math.round(performance.now() - t0)]); } catch { /* diag only */ } } };
     await brk(); if (!root.isConnected) return;
-    paintMonth();
+    stageT('paintMonth', paintMonth);
     await brk(); if (!root.isConnected) return;
-    paintLive();   // Expected Today ab EIR weekdays se
-    paintTargetAchievement();
+    stageT('paintLive', paintLive);   // Expected Today ab EIR weekdays se
     await brk(); if (!root.isConnected) return;
-    paintPulse();
+    stageT('paintTargetAchievement', paintTargetAchievement);
     await brk(); if (!root.isConnected) return;
-    paintCharts();
+    stageT('paintPulse', () => paintPulse());
+    await brk(); if (!root.isConnected) return;
+    stageT('paintCharts', paintCharts);
     await brk(); if (!root.isConnected) return;
     // ---- 📦 Stock (FF = StockDataa · GV = Tag Assignment) ----------------------------------------
     const [stockR, gvStockR] = await Promise.all([stockP, gvStockP]);
@@ -2156,11 +2158,13 @@ FF.pages = FF.pages || {};
       comm: sumN(gvStockRows.filter((r) => r.group !== 'VC4')),
       rows: []
     };
-    stockMount.innerHTML = stockHtml(ffStock, gvStock, sf);
-    ui.stock = { ff: ffStock, gv: gvStock }; try { paintSummary(); } catch { /* optional */ }
-    mountGvOnly(stockMount);
-    mountOffDisp(stockMount);
-    paintPulse({ total: ffStock.total + gvStock.total });
+    stageT('stockHtml', () => { stockMount.innerHTML = stockHtml(ffStock, gvStock, sf); });
+    ui.stock = { ff: ffStock, gv: gvStock }; await brk(); if (!root.isConnected) return;
+    stageT('paintSummary', () => { try { paintSummary(); } catch { /* optional */ } });
+    await brk(); if (!root.isConnected) return;
+    stageT('mountGvOnly+OffDisp', () => { mountGvOnly(stockMount); mountOffDisp(stockMount); });
+    await brk(); if (!root.isConnected) return;
+    stageT('paintPulse2', () => paintPulse({ total: ffStock.total + gvStock.total }));
     // GV agent-wise stock (agar permission/load ho to) — top holders
     const gvStockAgentP = canGv ? G.need('stockAgent', { only: true }).catch(() => null) : Promise.resolve(null);
     gvStockAgentP.then((rows) => {
