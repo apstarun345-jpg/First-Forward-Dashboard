@@ -13,7 +13,15 @@ test('server: banner gating (storageFailAt + 5 min)', () => {
 test('tagIssued: header ke andar today-live strip (alag card nahi)', () => {
   const t = read('tagIssued.js');
   assert.match(t, /<div class="tix-live" id="ti-live" hidden><\/div>\s*\n\s*<div class="head-actions">/);
-  assert.match(t, /function paintLive\(rows\)/);
-  assert.match(t, /try \{ paintLive\(rows\); \} catch \(e\)/);
+  assert.match(t, /function paintLive\(\) \{/);
+  assert.match(t, /try \{ paintLive\(\); startLive\(\); \} catch \(e\)/);
   assert.match(read('look.css'), /\.tix-live \{/);
+});
+
+test('v501: header live = Home wala source (G.gvToday + server feed), 20 s auto-refresh', () => {
+  const t = read('tagIssued.js');
+  assert.match(t, /G\.gvToday\(\)/);
+  assert.match(t, /FF\.data\.gvToday\(\)/);
+  assert.match(t, /G\.syncApiToday\(\)/);
+  assert.match(t, /setInterval\(\(\) => \{ if \(!root\.isConnected\)[^}]*\}[^}]*liveTick\(\); \}, 20000\)/);
 });

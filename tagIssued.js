@@ -1125,27 +1125,45 @@ FF.pages = FF.pages || {};
       personInput.setAttribute('aria-expanded', 'true');
     }
 
-    /** 🔴 v3.125.500 — header ke andar hi (height nahi badhti): aaj ka live table (Total / VC4 / VC20 / VC5+ / Replacement) + Top 3 agents table. */
-    function paintLive(rows) {
+    /** 🔴 v3.125.501 — header ka "Today live" HOME wale hi source se: GV Master snapshot (G.gvToday = Home jaisa) + server feed (jo bada ho wahi),
+     *  har 20 s auto-refresh (feed + GV direct API) — Home ke numbers aur yahan ke numbers ek jaise, turant. Total me replacement shamil (Home jaisa). */
+    let liveFeed = null, liveTimer = null, liveBusy = false;
+    function liveNow() {
+      const snap = (G && G.gvToday) ? (() => { try { const x = G.gvToday(); return x && x.loaded ? x : null; } catch { return null; } })() : null;
+      const f = liveFeed;
+      const useFeed = f && Number.isFinite(Number(f.total)) && (!snap || Number(f.total) > snap.total);
+      const src = useFeed ? f : snap;
+      if (!src) return null;
+      const top = (snap && snap.agents ? snap.agents : []).filter((a) => a && a.agentName && !/^(unknown|unassigned|direct|—)$/i.test(String(a.agentName).trim())).slice(0, 3).map((a) => [String(a.agentName).trim(), a.n]);
+      return { total: Number(src.total) || 0, vc4: Number(src.vc4) || 0, vc20: Number(src.vc20) || 0, vc5: Number(src.vc5p) || 0, repl: Number(src.replacement) || 0, top };
+    }
+    function paintLive() {
       const host = U.$('#ti-live', root); if (!host) return;
-      const day = todayKey();
-      const sum = { vc4: 0, vc20: 0, vc5: 0, repl: 0 }; const ag = new Map();
-      const scan = (list) => { for (const r of list || []) {
-        const k = r.key || (r.date ? U.dateKey(r.date) : ''); if (k !== day) continue;
-        const n = Number(r.n) || 0; if (!n) continue;
-        if (r.type === 'REPLACEMENT') { sum.repl += n; continue; }
-        sum[r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5'] += n;
-        const nm = String(r.agentName || '').trim(); if (nm && !/^(unknown|unassigned|direct|—)$/i.test(nm)) ag.set(nm, (ag.get(nm) || 0) + n);
-      } };
-      scan(rows.gvMasterRows); scan(rows.ffRows);
-      const total = sum.vc4 + sum.vc20 + sum.vc5;
-      if (!total && !sum.repl) { host.innerHTML = '<div class="tix-lt-empty">🔴 Today live — abhi aaj ka koi tag issue nahi / data aa raha hai…</div>'; host.hidden = false; return; }
-      const top = [...ag.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3);
+      const L = liveNow();
+      if (!L || (!L.total && !L.repl)) { host.innerHTML = '<div class="tix-lt-empty">🔴 Today live — abhi aaj ka koi tag issue nahi / data aa raha hai…</div>'; host.hidden = false; return; }
       const medal = ['🥇', '🥈', '🥉'];
-      host.innerHTML = `<table class="tix-lt"><thead><tr><th class="tot">Today Total <small>(live)</small></th><th class="v4">VC4</th><th class="v20">VC20</th><th class="v5">VC5+</th><th class="rp">Replacement</th></tr></thead>
-        <tbody><tr><td class="tot">${U.fmt(total)}</td><td class="v4">${U.fmt(sum.vc4)}</td><td class="v20">${U.fmt(sum.vc20)}</td><td class="v5">${U.fmt(sum.vc5)}</td><td class="rp">${U.fmt(sum.repl)}</td></tr></tbody></table>`
-        + (top.length ? `<table class="tix-lt top"><thead><tr><th colspan="3">🏆 Top 3 issued today</th></tr></thead><tbody><tr>${top.map(([nm, n], i) => `<td class="m${i}" title="${esc(nm)}">${medal[i]} <span>${esc(nm.length > 16 ? `${nm.slice(0, 15)}…` : nm)}</span> <b>${U.fmt(n)}</b></td>`).join('')}${'<td></td>'.repeat(3 - top.length)}</tr></tbody></table>` : '');
+      host.innerHTML = `<table class="tix-lt"><thead><tr><th class="tot">Today Total <small>(GV live)</small></th><th class="v4">VC4</th><th class="v20">VC20</th><th class="v5">VC5+</th><th class="rp">Replacement</th></tr></thead>
+        <tbody><tr><td class="tot">${U.fmt(L.total)}</td><td class="v4">${U.fmt(L.vc4)}</td><td class="v20">${U.fmt(L.vc20)}</td><td class="v5">${U.fmt(L.vc5)}</td><td class="rp">${U.fmt(L.repl)}</td></tr></tbody></table>`
+        + (L.top.length ? `<table class="tix-lt top"><thead><tr><th colspan="3">🏆 Top 3 issued today</th></tr></thead><tbody><tr>${L.top.map(([nm, n], i) => `<td class="m${i}" title="${esc(nm)}">${medal[i]} <span>${esc(nm.length > 16 ? `${nm.slice(0, 15)}…` : nm)}</span> <b>${U.fmt(n)}</b></td>`).join('')}${'<td></td>'.repeat(3 - L.top.length)}</tr></tbody></table>` : '');
       host.hidden = false;
+    }
+    async function liveTick() {
+      if (liveBusy) return; liveBusy = true;
+      try {
+        const [q] = await Promise.all([
+          (FF.data && FF.data.gvToday) ? FF.data.gvToday().catch(() => null) : null,
+          (G && G.syncApiToday) ? G.syncApiToday().catch(() => false) : null
+        ]);
+        if (q && q.gv && Number.isFinite(Number(q.gv.total))) liveFeed = q.gv;
+      } catch { /* optional */ }
+      liveBusy = false;
+      if (root.isConnected) paintLive();
+    }
+    function startLive() {
+      if (liveTimer) return;
+      setTimeout(liveTick, 300);
+      liveTimer = setInterval(() => { if (!root.isConnected) { clearInterval(liveTimer); return; } if (!document.hidden) liveTick(); }, 20000);
+      if (liveTimer.unref) liveTimer.unref();
     }
 
     function draw() {
@@ -1153,7 +1171,7 @@ FF.pages = FF.pages || {};
       fromInput.value = from; toInput.value = to;
       const rows = channelRows();
       lastDirRows = rows;
-      try { paintLive(rows); } catch (e) { const h = U.$('#ti-live', root); if (h) { h.innerHTML = '<div class="tix-live-row"><b>🔴 Today live</b><span>load nahi hua</span></div>'; h.hidden = false; } try { console.warn('ti-live', e && e.message); } catch { /* */ } }
+      try { paintLive(); startLive(); } catch (e) { const h = U.$('#ti-live', root); if (h) { h.innerHTML = '<div class="tix-live-row"><b>🔴 Today live</b><span>load nahi hua</span></div>'; h.hidden = false; } try { console.warn('ti-live', e && e.message); } catch { /* */ } }
       activePersonOptions = admin ? personDirectory({
         ffRows: rows.ffRows, gvMasterRows: rows.gvMasterRows, gvRows: rows.gvRows,
         ffAgents: (FF.pages.performance && FF.pages.performance.agents) ? (() => { try { return FF.pages.performance.agents() || []; } catch { return []; } })() : [],
