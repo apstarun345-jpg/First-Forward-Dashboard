@@ -36,7 +36,18 @@ window.FF = window.FF || {};
     if (!k) return true;
     return k <= ffReportedThrough();
   }
-  function dropLaggedFf(rows) { return !ffLagOn() ? (rows || []) : (rows || []).filter(ffVisible); }
+  // v3.125.505 — Home ek render me ~8 baar 50k+ rows filter karta tha (~17 ms each). Same array + same lag setting → reuse (copy do).
+  const lagMemo = new WeakMap();
+  function dropLaggedFf(rows) {
+    if (!ffLagOn()) return rows || [];
+    if (!rows) return [];
+    let sig; try { sig = String(ffReportedThrough()); } catch { return rows.filter(ffVisible); }
+    const hit = lagMemo.get(rows);
+    if (hit && hit.sig === sig && hit.len === rows.length) return hit.out.slice();
+    const out = rows.filter(ffVisible);
+    try { lagMemo.set(rows, { sig, len: rows.length, out }); } catch { /* non-object */ }
+    return out.slice();
+  }
   /** Kya ye date FF ke liye abhi reported nahi hai? */
   const isFfPending = (key) => ffLagOn() && !!key && String(key) > ffReportedThrough();
 

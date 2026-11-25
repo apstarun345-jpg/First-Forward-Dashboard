@@ -1116,9 +1116,18 @@ window.FF = window.FF || {};
       return changed;
     } catch { return false; }
   }
+  // v3.125.505 — masterTodayRows (~23 ms) was called many times per Home render; reuse while master / apiToday / day are unchanged.
+  let mtrMemo = null;
   function masterTodayRows() {
     if (!masterTodayReady()) return [];
     const tk = todayKey();
+    const mk = [state.data.master, lenOf(state.data.master), state.apiToday, (state.apiToday && state.apiToday.at) || 0, tk, FF.config && FF.config.vrnStatus];
+    if (mtrMemo && mtrMemo.k.every((v, i) => v === mk[i])) return mtrMemo.out.slice();
+    const out0 = masterTodayRowsBuild(tk);
+    mtrMemo = { k: mk, out: out0 };
+    return out0.slice();
+  }
+  function masterTodayRowsBuild(tk) {
     const out = [];
     for (const r of withApiToday(rows(), tk)) {
       if (!r.date || U.dateKey(r.date) !== tk) continue;
@@ -1169,14 +1178,16 @@ window.FF = window.FF || {};
   /** GV daily series: EIR history + AAJ ki rows GV Master se (master load hone par). */
   // ⚡ v177 — result memoized: har KPI / page-switch par poori EIR (10-50k rows) dobara filter + sort hoti thi.
   // Cache tab tak valid jab tak EIR array, GV Master array aur aaj ki date wahi hon.
-  let liveDailyMemo = null;
+  let liveDailyMemo = null, liveRestMemo = null;
   function liveDailyRows() {
     const eir = eirDailyRows();
     if (!masterTodayReady()) return eir;
     const tk = todayKey(), master = state.data.master;
     if (liveDailyMemo && liveDailyMemo.src === eirRowsMemo && liveDailyMemo.master === master && liveDailyMemo.tk === tk && liveDailyMemo.n === master.length && liveDailyMemo.api === ((state.apiToday && state.apiToday.at) || 0)) return liveDailyMemo.out.slice();
     const live = masterTodayRows();
-    const rest = eir.filter((r) => U.dateKey(r.date || r.d || new Date(0)) !== tk);
+    // v3.125.505 — "EIR minus aaj" (50k dateKey calls, ~300 ms) sirf EIR/din badalne par; live rows badalne par nahi.
+    if (!liveRestMemo || liveRestMemo.src !== eirRowsMemo || liveRestMemo.tk !== tk) liveRestMemo = { src: eirRowsMemo, tk, rest: eir.filter((r) => U.dateKey(r.date || r.d || new Date(0)) !== tk) };
+    const rest = liveRestMemo.rest;
     const out = rest.concat(live).sort((a, b) => (a.d && b.d ? a.d - b.d : 0));
     liveDailyMemo = { src: eirRowsMemo, master, tk, n: master.length, api: (state.apiToday && state.apiToday.at) || 0, out };
     return out.slice();
