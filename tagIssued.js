@@ -1130,12 +1130,15 @@ FF.pages = FF.pages || {};
     let liveFeed = null, liveTimer = null, liveBusy = false;
     function liveNow() {
       const snap = (G && G.gvToday) ? (() => { try { const x = G.gvToday(); return x && x.loaded ? x : null; } catch { return null; } })() : null;
-      const f = liveFeed;
-      const useFeed = f && Number.isFinite(Number(f.total)) && (!snap || Number(f.total) > snap.total);
-      const src = useFeed ? f : snap;
+      // v3.125.504 — sanity: aaj ke VC4/VC20/VC5+/Replacement kabhi aaj ke total se bade nahi ho sakte (galat/mahine ka feed → ignore).
+      const sane = (x) => { if (!x) return false; const T = Number(x.total); if (!Number.isFinite(T)) return false; const parts = [x.vc4, x.vc20, x.vc5p, x.replacement].map((v) => Number(v) || 0); return parts.every((v) => v <= T) && (parts[0] + parts[1] + parts[2]) <= T * 1.02 + 1; };
+      const f = sane(liveFeed) ? liveFeed : null;
+      const snapOk = sane(snap) ? snap : null;
+      const useFeed = f && (!snapOk || Number(f.total) > snapOk.total);
+      const src = useFeed ? f : snapOk;
       if (!src) return null;
       const top = (snap && snap.agents ? snap.agents : []).filter((a) => a && a.agentName && !/^(unknown|unassigned|direct|—)$/i.test(String(a.agentName).trim())).slice(0, 3).map((a) => [String(a.agentName).trim(), a.n]);
-      return { total: Number(src.total) || 0, vc4: Number(src.vc4) || 0, vc20: Number(src.vc20) || 0, vc5: Number(src.vc5p) || 0, repl: Number(src.replacement) || 0, top };
+      return { total: Number(src.total) || 0, vc4: Number(src.vc4) || 0, vc20: Number(src.vc20) || 0, vc5: Number(src.vc5p) || 0, repl: Number(src.replacement) || 0, top, from: useFeed ? 'feed' : 'snapshot' };
     }
     function paintLive() {
       const host = U.$('#ti-live', root); if (!host) return;
@@ -1145,7 +1148,7 @@ FF.pages = FF.pages || {};
       host.innerHTML = `<table class="tix-lt"><thead><tr><th class="tot">Today Total <small>(GV live)</small></th><th class="v4">VC4</th><th class="v20">VC20</th><th class="v5">VC5+</th><th class="rp">Replacement</th></tr></thead>
         <tbody><tr><td class="tot">${U.fmt(L.total)}</td><td class="v4">${U.fmt(L.vc4)}</td><td class="v20">${U.fmt(L.vc20)}</td><td class="v5">${U.fmt(L.vc5)}</td><td class="rp">${U.fmt(L.repl)}</td></tr></tbody></table>`
         + (L.top.length ? `<table class="tix-lt top"><thead><tr><th colspan="3">🏆 Top 3 issued today</th></tr></thead><tbody><tr>${L.top.map(([nm, n], i) => `<td class="m${i}" title="${esc(nm)}">${medal[i]} <span>${esc(nm.length > 16 ? `${nm.slice(0, 15)}…` : nm)}</span> <b>${U.fmt(n)}</b></td>`).join('')}${'<td></td>'.repeat(3 - L.top.length)}</tr></tbody></table>` : '');
-      host.hidden = false;
+      host.title = `Source: ${L.from} (GV Master aaj)`; host.hidden = false;
     }
     async function liveTick() {
       if (liveBusy) return; liveBusy = true;
