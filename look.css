@@ -169,3 +169,10 @@ html.ff-no-anim .sc-cmp-fold[open] > .sc-cmp-fold-in, html.ff-fast .sc-cmp-fold[
 #msp-out.msp-in > * { animation: mspFade .25s ease both; }
 @keyframes mspFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 html.ff-no-anim .msp-shell, html.ff-no-anim #msp-out.msp-in > *, html.ff-fast #msp-out.msp-in > * { animation: none; }
+
+/* v3.125.503 — Home "Aaj ke top 3": naam par click → Master Search; TL naam saath me */
+.hs-ag.hs-ag-open { cursor: pointer; border-radius: 8px; padding: 2px 4px; margin: 0 -4px; transition: background .15s; }
+.hs-ag.hs-ag-open:hover, .hs-ag.hs-ag-open:focus-visible { background: color-mix(in srgb, var(--accent, #6366f1) 10%, transparent); outline: none; }
+.hs-ag .hs-ag-n { width: auto; height: auto; border-radius: 0; background: none; color: inherit; font-size: inherit; display: inline; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hs-ag .hs-ag-tl { font-weight: 500; opacity: .65; }
+.hs-box > b[data-kpi] { cursor: pointer; }
