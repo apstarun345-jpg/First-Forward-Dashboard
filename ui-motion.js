@@ -224,10 +224,16 @@ window.FF = window.FF || {};
     if (REDUCE || document.documentElement.classList.contains('ff-no-anim')) return;
     const els = root.matches && root.matches('.kpi-value') ? [root] : Array.from(root.querySelectorAll ? root.querySelectorAll('.kpi-value') : []);
     els.slice(0, 60).forEach((el) => {
+      // Live totals, shares and splits must remain one exact snapshot (no interpolated counts).
+      if (el.closest('[data-countup="off"]')) return;
       if (el.dataset.cu || el.children.length) return; el.dataset.cu = '1';
       const t = el.textContent.trim(); const m = t.match(/^([^\d-]*)(-?[\d,]+(?:\.\d+)?)(.*)$/);
       if (!m) return; const raw = m[2]; const to = parseFloat(raw.replace(/,/g, '')); if (!isFinite(to)) return;
-      const card = el.closest('.kpi'); const tt = card && card.querySelector('.kpi-title'); const key = tt ? tt.textContent.trim() : '';
+      const card = el.closest('.kpi'); const tt = card && card.querySelector('.kpi-title');
+      // Same title can mean today, MTD, FF or GV. Never borrow another metric's history.
+      const spec = card && card.getAttribute('data-kpi');
+      const key = spec && tt ? JSON.stringify([location.hash, spec, tt.textContent.trim()]) : '';
+      if (kpiPrev.size > 500) kpiPrev.clear();
       const prev = key ? kpiPrev.get(key) : undefined; if (key) kpiPrev.set(key, to);
       if (prev !== undefined && prev === to) return;                 // wahi value dobara render — animate nahi
       const from = prev !== undefined ? prev : 0;
