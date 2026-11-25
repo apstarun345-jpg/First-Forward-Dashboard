@@ -505,7 +505,7 @@ FF.pages = FF.pages || {};
       ? `<p class="hm-warn">⚠️ Aaj ki rows abhi GV Master sheet me nahi aayi (ya sirf naye tags bank feed me pending hain) — sheet me aate hi ye number apne aap update ho jayega. ↻ Refresh bhi daba sakte ho.</p>`
       : '';
     return card(`🟩 GV · Aaj ka live <span class="dim">· ${esc(U.labelDate(TODAY(), true))} (${esc(U.weekday(TODAY()))}) · ${esc(sourceNote)}</span>`,
-      `<div class="kpi-grid mini gv-aaj-grid">${cards.join('')}</div>
+      `<div class="kpi-grid mini gv-aaj-grid" data-countup="off">${cards.join('')}</div>
        ${errorNote}${zeroNote}
        <p class="dim small" style="margin:10px 0 0">🎯 <b>Expected Today</b> = ${live.forecast ? `GV Master forecast: weekday pattern (8 hafte) × haal ka level (14 din) = base <b>${U.fmt(live.forecast.base)}</b>${live.forecast.intraday !== null ? `, aur aaj ka pace (pichhle dino me is waqt tak din ka ~${Math.round(live.forecast.frac * 100)}% ho jaata hai → <b>${U.fmt(live.forecast.intraday)}</b>)` : ''} — din badhne ke saath pace ka weight badhta hai. Accuracy = pichhle din yahi model isi waqt par kitna sahi tha` : `pichhle 4 same-weekday ka average (pichhla mahina bhi shaamil)${live.weekdayNote ? ` — ${esc(live.weekdayNote)}` : ''}. ⚡ Pace = ab tak ke tags ÷ ab tak ke ghante × 24`}. Har card par click → kis agent/TL ne lagaye, tag-level rows.</p>`,
       `<a class="btn small" href="#/gvDashboard">🚀 GV Dashboard →</a>`);
