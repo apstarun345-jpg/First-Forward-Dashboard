@@ -3202,6 +3202,8 @@ FF.pages = FF.pages || {};
         }
         if (!res || res.pending) throw new Error('Stock index abhi ban raha hai');
         const rows = (res.rows || []).map((x) => ({ ...x, k: x.status === 'stock' ? 'st' : 'iss' }));
+        // v3.125.495 — Tag IDs abhi peeche bhar rahe hain: list turant dikhao, par aaj ke liye save mat karo; 12 s baad dobara lena
+        if (res.partial) { setTimeout(() => dspStCache.delete(key), 12e3); return rows; }
         // 💾 din bhar ke liye yaad rakho (roz naya din = naya check). Purane din ki keys hata do.
         try {
           for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.startsWith('ff_dspst|') && !k.startsWith(`ff_dspst|${today}|`)) localStorage.removeItem(k); }

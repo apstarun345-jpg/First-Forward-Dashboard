@@ -21,3 +21,10 @@ test('server: sab agents ka last-dispatch list raat / subah 8 baje / naye stock 
   assert.match(s, /setInterval\(\(\) => dspWarmTick\(\), 5 \* 60e3\)/);
   assert.match(s, /zlib\.gzipSync\(payload\)/);
 });
+
+test('v495: list 2.5 s me (Tag ID enrichment bounded) + client partial par save nahi', () => {
+  const s = read('server.js');
+  assert.match(s, /async function dspEnrichBounded\(out, ranges, onLate\)/);
+  assert.match(s, /partial: !full2/);
+  assert.match(read('masterSearch.js'), /if \(res\.partial\) \{ setTimeout\(\(\) => dspStCache\.delete\(key\), 12e3\); return rows; \}/);
+});

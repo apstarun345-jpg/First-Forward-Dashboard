@@ -8045,7 +8045,14 @@ async function issuedDerive(miss) {
 const dspResCache = new Map();   // key → { at, idxAt, payload(JSON string) }
 const dspResInflight = new Map();
 const dspKey = (ch, ranges) => `${ch}|${(ranges || []).map((r) => `${String(r.first).replace(/\D/g, '')}-${String(r.last).replace(/\D/g, '')}`).join(',')}`;
-async function dspStatusCompute(ch, ranges) {
+/** v3.125.495 — Tag ID enrichment (GV Master / EIR search) dheemi hoti hai: list 2.5 s me bhej do, baaki peeche poora ho kar cache update kare. */
+async function dspEnrichBounded(out, ranges, onLate) {
+  const job = issuedEnrichRows(out, ranges).catch(() => {});
+  const done = await Promise.race([job.then(() => true), new Promise((ok) => setTimeout(() => ok(false), 2500))]);
+  if (!done) job.then(() => { try { onLate && onLate(); } catch { /* optional */ } });
+  return done;
+}
+async function dspStatusCompute(ch, ranges, onLate) {
     const index = await stockAgeIndexWithin(1500, false);
     const out = [];
     const fmtBc = (d) => (d.length === 16 ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : d);
@@ -8083,8 +8090,8 @@ async function dspStatusCompute(ch, ranges) {
             note: ch === 'gv' ? `Tag Assignment · ${f.status || ''}` : (f.agent ? 'StockDataa · agent ke paas' : 'StockDataa · office'), range: label });
         }
       }
-      await issuedEnrichRows(out, ranges).catch(() => {});
-      return { ok: true, ch, rows: out, src: 'sheet' };
+      const full1 = await dspEnrichBounded(out, ranges, onLate);
+      return { ok: true, ch, rows: out, src: 'sheet', partial: !full1 };
     }
     for (const rg of ranges) {
       const a = String((rg && rg.first) || '').replace(/\D/g, ''), b = String((rg && rg.last) || '').replace(/\D/g, '');
@@ -8104,8 +8111,8 @@ async function dspStatusCompute(ch, ranges) {
         if (out.length > 6000) break;
       }
     }
-    await issuedEnrichRows(out, ranges).catch(() => {});
-    return { ok: true, ch, rows: out, at: index.at };
+    const full2 = await dspEnrichBounded(out, ranges, onLate);
+    return { ok: true, ch, rows: out, at: index.at, partial: !full2 };
 }
 async function dspStatusCached(ch, ranges) {
   const key = dspKey(ch, ranges);
@@ -8115,13 +8122,17 @@ async function dspStatusCached(ch, ranges) {
   if (hit && (!cur || hit.idxAt === cur)) return zlib.gunzipSync(hit.gz).toString('utf8');
   if (dspResInflight.has(key)) return dspResInflight.get(key);
   const job = (async () => {
-    const out = await dspStatusCompute(ch, ranges);
-    const payload = JSON.stringify(out);
-    if (out && out.ok && !out.pending && Array.isArray(out.rows)) {
+    let outRef = null;
+    const store = (o) => {
+      if (!(o && o.ok && !o.pending && Array.isArray(o.rows))) return;
       dspResCache.delete(key);
-      dspResCache.set(key, { t: Date.now(), idxAt: out.at || cur, gz: zlib.gzipSync(payload) });
+      dspResCache.set(key, { t: Date.now(), idxAt: o.at || cur, gz: zlib.gzipSync(JSON.stringify(o)) });
       if (dspResCache.size > 3000) dspResCache.delete(dspResCache.keys().next().value);
-    }
+    };
+    const out = await dspStatusCompute(ch, ranges, () => { Promise.resolve().then(() => { if (outRef) { outRef.partial = false; store(outRef); } }); });
+    outRef = out;
+    const payload = JSON.stringify(out);
+    store(out);
     return payload;
   })().finally(() => dspResInflight.delete(key));
   dspResInflight.set(key, job);
