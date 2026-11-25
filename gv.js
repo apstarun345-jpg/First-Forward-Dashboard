@@ -1106,15 +1106,19 @@ window.FF = window.FF || {};
   }
   /** Server se aaj ke API rows lao (Home har 60 s me bulata hai). Naya data aaya to true. */
   async function syncApiToday() {
+    // A stalled detail request must not lock Home's non-overlapping refresh loop forever.
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), 15000) : null;
     try {
-      const res = await fetch('/api/gv-today-rows', { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' } });
+      const res = await fetch('/api/gv-today-rows', { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'FF-Dashboard' }, ...(ctl ? { signal: ctl.signal } : {}) });
       if (!res.ok) return false;
       const j = await res.json();
       if (!j || !j.ok || !Array.isArray(j.rows)) return false;
-      const changed = !state.apiToday || state.apiToday.at !== j.at;
+      const changed = !state.apiToday || state.apiToday.at !== j.at || state.apiToday.day !== j.day;
       state.apiToday = { day: j.day, at: j.at, rows: j.rows };
       return changed;
     } catch { return false; }
+    finally { if (timer) clearTimeout(timer); }
   }
   // v3.125.505 — masterTodayRows (~23 ms) was called many times per Home render; reuse while master / apiToday / day are unchanged.
   let mtrMemo = null;

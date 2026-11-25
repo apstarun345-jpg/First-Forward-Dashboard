@@ -2018,9 +2018,12 @@ FF.pages = FF.pages || {};
       }, wait);
       if (liveTimer && typeof liveTimer.unref === 'function') liveTimer.unref();
     }
-    function handleQuick(quick) {
+    function handleQuick(quick, refreshing = false) {
       if (!root.isConnected) return;
       if (!quick || !quick.gv) { retryLive(quick && (quick.requestError || quick.error)); return; }
+      // An older initial/stale feed must not replace the complete Master snapshot.
+      // Scheduled fresh responses, however, must keep updating after Master has loaded.
+      if (liveState.source === 'master' && (quick.gv.stale || (!refreshing && Number(quick.gv.total) < liveState.total))) return;
       // A service worker / config race may briefly give a snapshot from another CCH map. Retry twice;
       // after that paint it anyway (totals are right) — the GV Master snapshot below re-splits classes.
       if (!feedMatchesCurrentClassMap(quick.gv) && liveTry < 2) { retryLive('GV class mapping is updating'); return; }
@@ -2044,7 +2047,7 @@ FF.pages = FF.pages || {};
         cached: !!liveFromFeed.cached,
         stale: !!liveFromFeed.stale,
         error: '',
-        source: 'feed', liveToday: true
+        source: 'feed', liveToday: true, highest: null
       };
       paintLive();
       if (ui.ready) {
@@ -2058,18 +2061,26 @@ FF.pages = FF.pages || {};
     }
     liveP.then(handleQuick).catch((err) => retryLive(err && err.message ? err.message : 'GV today feed failed'));
     // Live numbers keep refreshing while Home is open (every 60s, visible tab only).
-    let liveLast = Date.now();
+    let liveLast = Date.now(), liveRefreshing = false;
+    const syncTodayDetails = () => FF.gv && FF.gv.syncApiToday ? FF.gv.syncApiToday() : Promise.resolve(false);
     const liveRefresh = setInterval(() => {
       if (!root.isConnected) { clearInterval(liveRefresh); clearTimeout(liveTimer); return; }
-      if (document.hidden || !canGv || !liveFromFeed) return;
+      if (document.hidden || !canGv || liveRefreshing) return;
       // ⏱ Settings → GV live refresh (1 / 2 / 5 / 10 / 15 / 30 min, default 1 min)
       const gap = ([60, 120, 300, 600, 900, 1800].includes(Number(FF.config && FF.config.gvLiveEverySec)) ? Number(FF.config.gvLiveEverySec) : 60) * 1000;
       if (Date.now() - liveLast < gap - 1000) return;
       liveLast = Date.now();
-      FF.data.gvToday().then((q) => { if (q && q.gv && feedMatchesCurrentClassMap(q.gv) && liveState.source !== 'master') { liveFromFeed = null; handleQuick(q); } }).catch(() => {});
-      if (FF.gv && FF.gv.syncApiToday) FF.gv.syncApiToday();
+      liveRefreshing = true;
+      Promise.allSettled([
+        FF.data.gvToday().then((q) => { if (q && q.gv && feedMatchesCurrentClassMap(q.gv)) handleQuick(q, true); }),
+        syncTodayDetails()
+      ]).then(() => { if (root.isConnected) applyMasterSnapshot(true); })
+        .catch(() => {})
+        .finally(() => { liveRefreshing = false; });
     }, 15000);
-    if (FF.gv && FF.gv.syncApiToday) setTimeout(() => FF.gv.syncApiToday(), 1500);
+    if (FF.gv && FF.gv.syncApiToday) setTimeout(() => {
+      if (root.isConnected) syncTodayDetails().then((changed) => { if (changed && root.isConnected) applyMasterSnapshot(true); }).catch(() => {});
+    }, 1500);
     if (liveRefresh && typeof liveRefresh.unref === 'function') liveRefresh.unref();
 
     // 30-day history is background only — it supplies Expected Today / same-weekday bars and
@@ -2077,7 +2088,8 @@ FF.pages = FF.pages || {};
     feedP.then(applyHistoryFeed).catch(() => {});
 
     // GV Master load hone par usi snapshot se aaj ka poora detail (replacement/chassis/agent-wise)
-    gvMasterP.then((ok) => {
+    function applyMasterSnapshot(ok) {
+      if (!root.isConnected) return;
       const masterError = (G.error && G.error('master')) || '';
       if (!ok || masterError || !G.gvToday) {
         if (!liveFromFeed && canGv) liveState = { ...liveState, error: masterError || 'GV Master sheet load failed.' };
@@ -2104,14 +2116,16 @@ FF.pages = FF.pages || {};
         error: '', stale: false, source: 'master', liveToday: true
       } : { ...liveState, error: '', liveToday: true };
       if (ui.ready) {
-        // `st` is the already-built stream object, so pass its rows (not the wrapper) back in.
-        const st2 = streams(st.rows, liveRows, liveSourceReady);
+        // Rebase on the current stream: refreshes must not reuse the initial render snapshot.
+        const st2 = streams(ui.sf.rows, liveRows, liveSourceReady);
         ui.sf = { rows: st2.rows, ff: st2.ff, gv: st2.gv }; homeRows = { rows: st2.rows, at: Date.now(), get ctx() { return ui.ctx; } };
         ui.sc = M.summary(st2.rows, ui.ctx.curKey);
         ui.liveToday = st2.gvLiveAdded;
         paintAll();
       } else paintLive();
-    }).catch((err) => {
+    }
+    gvMasterP.then(applyMasterSnapshot).catch((err) => {
+      if (!root.isConnected) return;
       if (!liveFromFeed && canGv) liveState = { ...liveState, error: err && err.message ? err.message : 'GV Master load failed.' };
       paintLive();
     });

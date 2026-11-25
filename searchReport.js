@@ -222,11 +222,17 @@ window.FF = window.FF || {};
   async function fillCombined(pane, g) {
     const chans = channelsOf(g);
     pane.innerHTML = loadingHtml(g.name);
-    const prs = { ff: null, gv: null };
-    const paint = () => { if (pane.isConnected !== false) pane.innerHTML = combinedHtml(g, prs); };
+    const prs = { ff: null, gv: null }, waiting = new Set(chans);
+    const paint = () => {
+      if (pane.isConnected !== false) pane.innerHTML =
+        (waiting.size ? '<div class="mp-partial dim small" role="status">⏳ Doosre channel ka data abhi load ho raha hai — combined totals abhi partial hain.</div>' : '') + combinedHtml(g, prs);
+    };
     try {
       await Promise.all(chans.map(async (c) => {
         prs[c] = await MP()._buildSoon(g[c], (late) => { prs[c] = late; paint(); });
+        // Paint each available channel; the slower channel must not hide the ready one.
+        waiting.delete(c);
+        paint();
       }));
       paint();
     } catch (err) {
