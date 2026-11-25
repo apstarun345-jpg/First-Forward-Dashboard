@@ -37,7 +37,7 @@ window.FF = window.FF || {};
   };
   FF.icons = { get, names: Object.keys(P) };
   // v3.125.509 — topbar: emoji (🌐🎨▦🌙♿🎯↻☆🔍⋯🔔) ki jagah ek jaise line-SVG icons. Emoji text se pehchan (app.js theme glyph ko bhi sambhalta hai).
-  const EMOJI_TO_ICON = { '🌐': 'globe', '🎨': 'palette', '▦': 'grid', '🌙': 'moon', '☀️': 'sun', '🌓': 'half', '♿': 'a11y', '🎯': 'target', '↻': 'refresh', '☆': 'star', '🔍': 'search', '⋯': 'dots', '🔔': 'bell' };
+  const EMOJI_TO_ICON = { '🌐': 'globe', '🎨': 'palette', '▦': 'grid', '≡': 'grid', '☰': 'grid', '🌙': 'moon', '☀️': 'sun', '🌓': 'half', '♿': 'a11y', '🎯': 'target', '↻': 'refresh', '☆': 'star', '🔍': 'search', '⋯': 'dots', '🔔': 'bell' };
   FF.icons.fromEmoji = (txt, size) => { const n = EMOJI_TO_ICON[String(txt || '').trim()]; return n ? get(n, size || 18) : ''; };
   function swapTopbar() {
     try {
