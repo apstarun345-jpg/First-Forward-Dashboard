@@ -424,6 +424,8 @@ const writeQueue = new Map();
 const personalLinkSessions = new Map();
 
 const storageFailures = new Map();
+const storageFailAt = new Map();   // v3.125.497 — kind → pehli baar kab fail hua (banner tabhi dikhao jab lagataar 5 min se fail ho)
+const STORAGE_BANNER_AFTER_MS = Number(process.env.STORAGE_BANNER_AFTER_MS || 5 * 60e3);
 const durableSnapshots = new Map();
 let persistentDiskMounted = false;
 // ⏪ v3.48: agar cloud store khaali mila aur is server par koi purana data bhi nahi tha to app ne
@@ -438,7 +440,8 @@ const storageStatus = () => ({
   lastSavedAt: sheetsStore?.lastSavedAt || null,
   persistentDiskMounted,
   dataDir: STORAGE_BACKEND === 'files' ? DATA_DIR : null,
-  error: [...storageFailures.values()].join(' ') || null,
+  // 'busy, retry' jaisi chhoti, apne-aap theek hone wali dikkat par banner nahi — server peeche retry karta rehta hai; 5 min lagataar fail ho tabhi dikhao
+  error: [...storageFailures.entries()].filter(([k]) => Date.now() - (storageFailAt.get(k) || 0) > STORAGE_BANNER_AFTER_MS).map(([, v]) => v).join(' ') || null,
   // ⏪ v3.48: sheet history me purani encrypted saves hain to yahan count dikhta hai (auto-restore nahi hota)
   recoverable: recoveryHintInfo || (CLOUD_BACKEND ? { available: null, pending: true } : null),
   seededFresh: storageSeededFresh,
@@ -576,6 +579,7 @@ function persist(kind, opts) {
       const storageError = sheetsStore
         ? `Could not save ${kind} to Google Sheets${STORAGE_BACKEND === 'appsscript' ? ' (Apps Script)' : ''}. Save not confirmed; check the Apps Script deployment / secret and retry.${cause ? ` Reason: ${cause}` : ''}`
         : `Could not save ${kind}. Check DATA_DIR disk permissions and free space.${cause ? ` Reason: ${cause}` : ''}`;
+      if (!storageFailures.has(kind)) storageFailAt.set(kind, Date.now());
       storageFailures.set(kind, storageError);
       if (JSON.stringify(db[kind], null, 2) === snapshot && durableSnapshots.has(kind)) db[kind] = JSON.parse(durableSnapshots.get(kind));
       console.error(storageError, err.message);

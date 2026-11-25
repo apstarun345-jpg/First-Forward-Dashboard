@@ -1057,6 +1057,7 @@ FF.pages = FF.pages || {};
     if (from > to) { const t = from; from = to; to = t; }
 
     root.innerHTML = `<div class="page-head"><div><h1>🏷️ GV & FF Tag Issued</h1><p class="sub">GV Partner (EIR master ID 5845036) vs First Forward — VC4 · VC20 · VC5+ · Commercial, share %, up/down and graphs</p></div>
+      <div class="tix-live" id="ti-live" hidden></div>
       <div class="head-actions"><button class="btn primary" data-action="refresh">↻ Refresh</button></div></div>
       <div class="card tix-toolbar">
         <div class="tix-presets" id="ti-presets" role="group" aria-label="Date shortcuts">${PRESETS.map(([id, label]) => `<button type="button" class="tix-chipbtn" data-preset="${id}">${label}</button>`).join('')}<button type="button" class="tix-chipbtn" data-preset="custom">Custom</button><span class="tix-chipsep" aria-hidden="true"></span>${admin ? Object.entries(REPORTS).map(([k, [label]]) => `<button type="button" class="tix-chipbtn tix-repchip ${k}" data-rep-view="${k}" title="Show this report on screen for the selected dates">${k === 'gv' ? '🟩' : k === 'ff' ? '🟦' : '⚖️'} ${label}</button>`).join('') : ''}</div>
@@ -1124,11 +1125,32 @@ FF.pages = FF.pages || {};
       personInput.setAttribute('aria-expanded', 'true');
     }
 
+    /** 🔴 v3.125.497 — header ke andar hi: aaj ka live VC4 / VC20 / VC5+ aur aaj ke top 3 agents (header ki height nahi badhti). */
+    function paintLive(rows) {
+      const host = U.$('#ti-live', root); if (!host) return;
+      const day = todayKey();
+      const sum = { vc4: 0, vc20: 0, vc5: 0 }; const ag = new Map();
+      const scan = (list) => { for (const r of list || []) {
+        const k = r.key || (r.date ? U.dateKey(r.date) : ''); if (k !== day) continue;
+        const n = Number(r.n) || 0; if (!n || r.type === 'REPLACEMENT') continue;
+        sum[r.group === 'VC4' ? 'vc4' : r.group === 'VC20' ? 'vc20' : 'vc5'] += n;
+        const nm = String(r.agentName || '').trim(); if (nm && !/^(unknown|unassigned|direct|—)$/i.test(nm)) ag.set(nm, (ag.get(nm) || 0) + n);
+      } };
+      scan(rows.gvMasterRows); scan(rows.ffRows);
+      const total = sum.vc4 + sum.vc20 + sum.vc5;
+      if (!total) { host.hidden = true; return; }
+      const top = [...ag.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      host.innerHTML = `<div class="tix-live-row"><b>🔴 Today live</b><span class="c4">VC4 <i>${U.fmt(sum.vc4)}</i></span><span class="c20">VC20 <i>${U.fmt(sum.vc20)}</i></span><span class="c5">VC5+ <i>${U.fmt(sum.vc5)}</i></span></div>`
+        + (top.length ? `<div class="tix-live-row top">${top.map(([nm, n], i) => `<span title="${esc(nm)}">${['🥇', '🥈', '🥉'][i]} ${esc(nm.length > 18 ? `${nm.slice(0, 17)}…` : nm)} <i>${U.fmt(n)}</i></span>`).join('')}</div>` : '');
+      host.hidden = false;
+    }
+
     function draw() {
       paintPresets();
       fromInput.value = from; toInput.value = to;
       const rows = channelRows();
       lastDirRows = rows;
+      try { paintLive(rows); } catch { /* optional */ }
       activePersonOptions = admin ? personDirectory({
         ffRows: rows.ffRows, gvMasterRows: rows.gvMasterRows, gvRows: rows.gvRows,
         ffAgents: (FF.pages.performance && FF.pages.performance.agents) ? (() => { try { return FF.pages.performance.agents() || []; } catch { return []; } })() : [],
