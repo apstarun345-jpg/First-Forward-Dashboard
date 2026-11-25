@@ -11586,7 +11586,10 @@ async function handleApi(req, res, url) {
     const rep = { byId: new Map(), byMob: new Map() };
     const idKey = (c, id) => `${c}|${String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, '')}`;
     try {
-      const [ff, gv] = await Promise.all([dispatchReportTable('ff').then((t) => loadFfDispatchRows(t, db.settings)).catch(() => []), dispatchReportTable('gv').then((t) => loadGvDispatchRows(t, db.settings)).catch(() => [])]);
+      // 🐢 v3.125.509 — REPORT sheets poori padhna slow hai (45s guard cross kar deta tha → "Server busy" par save fail).
+      //    Enrich sirf auto-fill hai, save ka hissa nahi — 10s se zyada lage to skip (data user ne diya hai, wahi kaafi).
+      const repP = Promise.all([dispatchReportTable('ff').then((t) => loadFfDispatchRows(t, db.settings)).catch(() => []), dispatchReportTable('gv').then((t) => loadGvDispatchRows(t, db.settings)).catch(() => [])]);
+      const [ff, gv] = await Promise.race([repP, new Promise((r) => setTimeout(() => r([[], []]), 10e3))]);
       [...ff, ...gv].forEach((r) => { if (!r || !r.agentId) return; const o = { id: r.agentId, name: r.name || r.agentName, channel: r.ch === 'gv' ? 'gv' : 'ff', tl: r.tlName || r.tl || '' }; rep.byId.set(idKey(o.channel, o.id), o); const m = last10(r.mobile); if (m) rep.byMob.set(m, o); });
     } catch { /* report optional */ }
     const placeholder = /^(direct|direct agent|aps|no tl|n\/?a|-+|none|null|not assigned)$/i;
@@ -11645,7 +11648,8 @@ async function handleApi(req, res, url) {
     rememberAddressBook(fresh);
     fresh.forEach((f) => { const t = mem[f.key]; if (t) { t.pendingSync = true; t.importedFrom = f.importedFrom; } });
     /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
-    try { await persist('notify'); } catch (err) { console.warn('address persist:', err && err.message); }
+    /* v3.125.509: persist background me — Apps Script busy ho to save turant return (data memory + backup me safe) */
+    persist('notify').catch((err) => console.warn('address persist:', err && err.message));
     tagBackupSchedule(2000);
     startAddressSheetSync(meta, entries).catch(() => {});
     return { ...stats, saved: fresh.length };
@@ -12701,12 +12705,16 @@ async function handleApi(req, res, url) {
         }
         rememberAddressBook([{ key, agentId: agentId || ex.id, agent: name, channel: channel || ex.channel, mobile, address, pincode, tl: tl || ex.tl, updatedAt: new Date().toISOString(), pendingSync: true, importedFrom: 'Manual edit' }]);
         /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
-        try { await persist('notify'); } catch (err) { console.warn('address persist:', err && err.message); }
+        /* v3.125.509: persist background me — Apps Script busy ho to save turant return (data memory + backup me safe) */
+        persist('notify').catch((err) => console.warn('address persist:', err && err.message));
         tagBackupSchedule(2000);
         startAddressSheetSync({ file: 'Manual edit', by }, []).catch(() => {});
         return sendJson(res, 200, { ok: true, mode: 'edit', sync: syncInfo() });
       }
-      const [entry] = await enrichAddressEntries([{ name, mobile, address, pincode, id: agentId, tl, channel }]);
+      // ⚡ v3.125.509 — ID + channel + TL already bhare hain to enrich skip (REPORT sheets padhna 45s guard cross karta tha → "Server busy").
+      const [entry] = (agentId && channel && tl)
+        ? [{ name, mobile, address, pincode, id: agentId, tl, channel, resolved: 'Manual' }]
+        : await enrichAddressEntries([{ name, mobile, address, pincode, id: agentId, tl, channel }]);
       if (entry.channel && !chans.includes(entry.channel)) throw new HttpError(403, `${entry.channel.toUpperCase()} channel ka address jodne ki permission nahi hai.`);
       const out = await commitAddressImport([entry], { file: 'Manual add', by, overwrite: false });
       return sendJson(res, 200, { ok: true, mode: 'add', ...out, matched: entry.resolved || '', channel: entry.channel || 'ff', id: entry.id || '', tl: entry.tl || '', sync: syncInfo() });
