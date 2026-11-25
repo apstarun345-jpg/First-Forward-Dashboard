@@ -1845,6 +1845,9 @@ FF.pages = FF.pages || {};
   //   Report component FF.searchReport.render() ka hai (numbers 100% masterProfile / GV truth se).
   // -------------------------------------------------------------------------------------------------
   function pageRender(root, params) {
+    // Reusing #main must not accumulate old click/index handlers and duplicate each open.
+    if (root.__mspCleanup) root.__mspCleanup();
+    const pageOffs = [];
     // v3.125.278 — topbar search ka dropdown mat todo (pehle har page render par wo bhi destroy ho jaata tha)
     try { if (U.destroyAllSuggestions) U.destroyAllSuggestions(suggestApi || undefined); } catch { /* stale suggestion portals */ }
     // v3.125.278 — page dobara render ho (data update / same-link click) to jo type kar rahe the wo na mite
@@ -1904,7 +1907,7 @@ FF.pages = FF.pages || {};
     const stateEl = U.$('#msp-state', root);
     const paintState = () => { if (stateEl) stateEl.innerHTML = (state.full && state.full.fullLoaded) ? '<span class="badge green">barcode register ready ✓</span>' : '<span class="badge green">⚡ Barcode live lookup</span>'; };
     paintState();
-    onIndexReady(paintState);
+    pageOffs.push(onIndexReady(paintState));
 
     const isTlP = (p) => /tl$/.test(String(p && p.kind));
     const chOfP = (p) => (String(p && p.kind).startsWith('gv') ? 'gv' : 'ff');
@@ -2553,12 +2556,14 @@ FF.pages = FF.pages || {};
       const chans = ['ff', 'gv'].filter((c) => g[c]);
       const html = {};
       const sourceKey = g && (g._sourceKey || g.key);
+      const active = () => host.isConnected !== false && root.isConnected !== false &&
+        host === U.$('#msp-kpis', out) && current &&
+        (current === g || (sourceKey && (current._sourceKey || current.key) === sourceKey));
       // A channel-filtered view is a derived object, while `current` deliberately remains the
       // original dual-channel group so the user can switch back to "Dono". Compare source keys,
       // not object identity, or async KPI upgrades remain stuck on the loading placeholder.
       const paint = () => {
-        const activeKey = current && (current._sourceKey || current.key);
-        if (host.isConnected !== false && current && (current === g || (sourceKey && activeKey === sourceKey))) {
+        if (active()) {
           host.innerHTML = chans.map((ch) => html[ch] || '').join('');
           fillAgeBoxes(host);
           fillDispBoxes(host);
@@ -2579,7 +2584,12 @@ FF.pages = FF.pages || {};
       paint();
       await Promise.all(chans.map(async (c) => {
         try {
-          const pr = await MP()._buildSoon(g[c], (late) => { REPORT_CTX.prs[c] = late; html[c] = kpiStripHtml(late); paint(); });
+          const pr = await MP()._buildSoon(g[c], (late) => {
+            if (!active()) return;
+            REPORT_CTX.prs[c] = late; html[c] = kpiStripHtml(late); paint();
+            paintRank(c, late); prefetchReport(c, late);
+          });
+          if (!active()) return;
           REPORT_CTX.prs[c] = pr;
           html[c] = kpiStripHtml(pr);
           paintRank(c, pr);
@@ -2871,6 +2881,7 @@ FF.pages = FF.pages || {};
           try { found = (search(q).people || []).some((p) => !chFilter || chOfP(p) === chFilter); } catch { /* ignore */ }
           if (done || found) { off(); run(query, { ...(opts || {}), final: done }); }
         });
+        stopTagWatch = off;
         return;
       }
       if (groups.length) {
@@ -2908,7 +2919,8 @@ FF.pages = FF.pages || {};
       if (!q) return;
       if (input) input.value = q;
       out.innerHTML = profileShell(q);
-      try { await buildLight(); } catch { /* profile fallback below */ }
+      // A picked suggestion already contains canonical identity; never wait for unrelated sheets.
+      if (!state.light) buildLight().catch(() => {});
       if (seq !== runSeq || !out.isConnected) return;
       await nextPaint();   // shell pehle screen par aa jaye, phir profile ka bhaari kaam
       if (seq !== runSeq || !out.isConnected) return;
@@ -2923,11 +2935,14 @@ FF.pages = FF.pages || {};
     }
 
     async function runMerged(m) {
-      ++runSeq;
+      const seq = ++runSeq;
+      if (stopTagWatch) { stopTagWatch(); stopTagWatch = null; }
       if (!m || !m.ff || !m.gv) return;
       if (input) input.value = clean(m.ff.name);
-      try { await buildLight(); } catch { /* ignore */ }
-      if (!out.isConnected) return;
+      out.innerHTML = profileShell(m.ff.name);
+      if (!state.light) buildLight().catch(() => {});
+      await nextPaint();
+      if (seq !== runSeq || !out.isConnected) return;
       const idx = state.full || state.light;
       const ff = canonicalPerson(m.ff, idx) || m.ff, gv = canonicalPerson(m.gv, idx) || m.gv;
       const sr = SR();
@@ -2972,12 +2987,13 @@ FF.pages = FF.pages || {};
       if (!sug) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(input.value); } });
       // Index / REPORT data aate hi khula dropdown refresh (warna "search ho raha hai…" atka rehta).
       let refreshT = 0;
-      onIndexReady(() => { clearTimeout(refreshT); refreshT = setTimeout(() => { try { if (sug && sug.refresh && input.isConnected && document.activeElement === input && clean(input.value).length >= 2) sug.refresh(); } catch { /* ignore */ } }, 150); });
+      pageOffs.push(onIndexReady(() => { clearTimeout(refreshT); refreshT = setTimeout(() => { try { if (sug && sug.refresh && input.isConnected && document.activeElement === input && clean(input.value).length >= 2) sug.refresh(); } catch { /* ignore */ } }, 150); }));
+      pageOffs.push(() => clearTimeout(refreshT));
       root.__mspSuggestDestroy = () => { if (stopTagWatch) { stopTagWatch(); stopTagWatch = null; } try { if (sug && sug.destroy) sug.destroy(); else if (sug && sug.close) sug.close(); } catch {} };
       // Khaali page par cursor seedha search me; URL me naam ho to focus nahi (warna dropdown report ke upar khul jaata).
       if (!asked) setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 60);
     }
-    root.addEventListener('click', (e) => {
+    const pageClick = (e) => {
       if (e.target.closest('[data-msp-go]')) { if (input) run(input.value); return; }
       if (e.target.closest('[data-msp-refresh]')) {
         invalidate(); out.innerHTML = U.spinner('Index dobara ban raha hai…');
@@ -3017,7 +3033,14 @@ FF.pages = FF.pages || {};
       if (tlOpen && FF.app && FF.app.navigate) { FF.app.navigate('masterSearch', { q: tlOpen.dataset.msTlName || '', id: tlOpen.dataset.msTlId || '', ch: tlOpen.dataset.msTlCh || '' }); return; }
       const tags = e.target.closest('[data-ms-tags]');
       if (tags && FF.app && FF.app.navigate) { FF.app.navigate('masterStock', { q: tags.dataset.msTags }); return; }
-    });
+    };
+    root.addEventListener('click', pageClick);
+    root.__mspCleanup = () => {
+      ++runSeq;
+      if (stopTagWatch) { stopTagWatch(); stopTagWatch = null; }
+      pageOffs.forEach((off) => off());
+      root.removeEventListener('click', pageClick);
+    };
     if (asked && wantMerged && state.mergedPick && normName(state.mergedPick.ff.name) === normName(asked)) { const m = state.mergedPick; state.mergedPick = null; runMerged(m); }
     else if (asked) run(asked);
     else { buildLight().then(() => { paintState(); paintQuick(); }).catch(() => {}); }
@@ -3615,19 +3638,21 @@ FF.pages = FF.pages || {};
   }
   async function downloadFullReport(btn, parts) {
     const want = (k) => !parts || parts.includes(k);   // parts: 'stock' | 'cur' | 'last' (undefined = everything)
-    const chans = ['ff', 'gv'].filter((c) => REPORT_CTX.prs[c]);
+    // Capture the clicked profile before any await; navigation must not change an export in flight.
+    const profiles = { ...REPORT_CTX.prs }, reportName = REPORT_CTX.name;
+    const chans = ['ff', 'gv'].filter((c) => profiles[c]);
     if (!chans.length) { U.toast('Profile abhi load ho raha hai — 2 sec baad try karo', 'warn'); return; }
     const old = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Ban raha hai…'; }
     try {
-      if (FF.lazy && FF.lazy.shellNeed) await FF.lazy.shellNeed(['kpiDetail', 'stockAge']);
       const needStock = !parts || parts.includes('stock');
-      const sets = await Promise.all(chans.map((c) => reportData(c, REPORT_CTX.prs[c], needStock).then((d) => ({ ch: c, pr: REPORT_CTX.prs[c], d }))));
+      if (FF.lazy && FF.lazy.shellNeed) await FF.lazy.shellNeed(needStock ? ['kpiDetail', 'stockAge'] : ['kpiDetail']);
+      const sets = await Promise.all(chans.map((c) => reportData(c, profiles[c], needStock).then((d) => ({ ch: c, pr: profiles[c], d }))));
       if (needStock && sets.some((x) => x.d.stock && x.d.stock.timedOut)) U.toast('Stock data server par abhi ban raha hai — report bina stock list ke; 2-3 min baad dobara lo', 'warn');
       const sheets = [];
       const two = sets.length > 1;
       const sfx = (ch) => (two ? (ch === 'gv' ? ' GV' : ' FF') : '');
-      const summary = [['Naam', REPORT_CTX.name], ['Report time', new Date().toLocaleString('en-IN')]];
+      const summary = [['Naam', reportName], ['Report time', new Date().toLocaleString('en-IN')]];
       sets.forEach(({ ch, pr, d }) => {
         const c = (pr.calc && pr.calc.total) || {}, t = pr.totals || {}, s = pr.stock || {};
         const ages = AGE_BUCKETS.map((b) => d.stock.filter((x) => bucketOfAge(x.age) === b).length);
@@ -3652,7 +3677,7 @@ FF.pages = FF.pages || {};
         });
       });
       sheets.unshift({ name: 'Summary', header: ['Field', 'Value'], rows: summary });
-      FF.xlsx.download(`${U.slug(REPORT_CTX.name)}-${!parts ? 'full-report' : parts.join('-')}-${U.stamp()}.xlsx`, sheets);
+      FF.xlsx.download(`${U.slug(reportName)}-${!parts ? 'full-report' : parts.join('-')}-${U.stamp()}.xlsx`, sheets);
       U.toast(parts ? '✅ Report download ho gayi' : '✅ Full report download ho gayi', 'ok');
     } catch (err) {
       U.toast('Report nahi bani: ' + ((err && err.message) || err), 'err');
@@ -3688,8 +3713,9 @@ FF.pages = FF.pages || {};
     const isTl = /tl$/.test(String(pr.kind || ''));
     FF.app.openDrawer({ kicker: 'Growth drivers', title: pr.name, body: U.spinner('Loading growth data…'), wide: true, loading: true, age: false });
     try {
-      if (FF.lazy && FF.lazy.shellNeed) await FF.lazy.shellNeed(['kpiDetail', 'stockAge']);
-      const d = await reportData(ch, pr);
+      // Growth uses issuance only; an unrelated stock/ageing query must not delay the drawer.
+      if (FF.lazy && FF.lazy.shellNeed) await FF.lazy.shellNeed(['kpiDetail']);
+      const d = await reportData(ch, pr, false);
       const g = growthBreakdown(d, pr);
       const pct = g.tot.last ? ((g.tot.cur - g.tot.last) / g.tot.last) * 100 : null;
       const L = (ym) => (U.labelYM ? U.labelYM(ym, true) : ym);
