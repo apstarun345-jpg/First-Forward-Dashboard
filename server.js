@@ -886,6 +886,15 @@ async function gvizQuick(params, sheet) {
   const table = parseGvizServer(out.body);
   return { rows: table.rows || [], ids: (table.cols || []).map((c) => String(c.id || '').toUpperCase()) };
 }
+/** v3.125.497 — gviz datetime cell "Date(2026,10,25,6,40,33)" (month 0-based) ko page padh nahi pata → formatted text `f` ("25 Nov 2026, 06:40:33") lo. */
+function gvCellTime(c) {
+  if (!c) return '';
+  if (c.f) return String(c.f);
+  const v = c.v == null ? '' : String(c.v);
+  const m = /^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?/.exec(v);
+  if (m) { const d = new Date(Date.UTC(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0))); return d.toISOString().slice(0, 19).replace('T', ' '); }
+  return v;
+}
 async function computeSheetFreshness(items, url0, secret0, idOf) {
   const out = { ok: true, at: Date.now(), files: {}, tabs: {} };
   // 📊 gviz row count — Apps Script ke bina bhi chalta hai (nayi rows aayi = sheet update hui)
@@ -910,9 +919,19 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
       (r.rows || []).forEach((row) => {
         const c = row.c || [];
         const tab = String((c[0] && c[0].v) || '').trim().toLowerCase();
-        const v = c[1] && (c[1].v != null ? String(c[1].v) : '');
+        const v = gvCellTime(c[1]);
         if (tab && v && !imports[`${src}|${tab}`]) imports[`${src}|${tab}`] = v;
       });
+      // v3.125.497 — latest 80 rows me jis tab ki entry nahi (EIR jaisa kam-baar import hone wala) uska akela chhota query
+      await Promise.all(items.filter((i) => i.source === src && !imports[`${src}|${i.tab.toLowerCase()}`]).slice(0, 6).map(async (i) => {
+        try {
+          const k = String(i.tab).toLowerCase().replace(/'/g, '');
+          const r2 = await gvizQuick(new URLSearchParams({ id, sheet: 'IMPORT_LOG', range: 'A1:C', tq: `select B where lower(A) = '${k}' order by B desc limit 1` }), 'IMPORT_LOG');
+          const c2 = r2.rows && r2.rows[0] && r2.rows[0].c && r2.rows[0].c[0];
+          const v2 = gvCellTime(c2);
+          if (v2) imports[`${src}|${k}`] = v2;
+        } catch { /* optional */ }
+      }));
     } catch (e) { (out.diag || (out.diag = {}))[`import-${src}`] = String((e && e.message) || e).slice(0, 160); }
   }));
   // 📥 v3.78 — DATA_ARRIVAL_LOG (markDataArrived(): Tab | Last data arrived) + SHEET_UPDATE_LOG (tracker: "Last change detected")
@@ -926,7 +945,7 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
       (r.rows || []).forEach((row) => {
         const c = row.c || [];
         const tab = String((c[0] && c[0].v) || '').trim().toLowerCase();
-        const v = c[1] && (c[1].v != null ? String(c[1].v) : '');
+        const v = gvCellTime(c[1]);
         if (tab && v && /\d{4}/.test(v)) arrivals[`${src}|${tab}`] = v;
       });
     } catch { /* tab nahi hai — optional */ }
@@ -935,7 +954,7 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
       (r.rows || []).forEach((row) => {
         const c = row.c || [];
         const tab = String((c[0] && c[0].v) || '').trim().toLowerCase();
-        const v = c[1] && (c[1].v != null ? String(c[1].v) : '');
+        const v = gvCellTime(c[1]);
         // "Tracking since ..." = abhi koi change nahi mila → skip
         if (tab && v && /\d{4}/.test(v) && !/^tracking/i.test(v)) trackerLog[tab] = v;
       });
@@ -988,6 +1007,14 @@ async function computeSheetFreshness(items, url0, secret0, idOf) {
     t.importAt = it.importAt || '';
     t.importFrom = it.importFrom || '';
   });
+  // v3.125.497 — kis tab ka time nahi mila aur kyun (Render logs me ek line, 10 min me ek baar)
+  try {
+    const miss = items.filter((i) => !i.importAt).map((i) => `${i.source}|${i.tab}${(out.tabs[i.key] && out.tabs[i.key].error) ? ` [as-err: ${String(out.tabs[i.key].error).slice(0, 80)}]` : ''}`);
+    if (miss.length && Date.now() - (computeSheetFreshness._lw || 0) > 600e3) {
+      computeSheetFreshness._lw = Date.now();
+      console.warn(`⏱ freshness: time nahi mila → ${miss.join(', ')} · keys imports=${Object.keys(imports).length} arrivals=${Object.keys(arrivals).length} tracker=${Object.keys(trackerLog).join('/')} · diag=${JSON.stringify(out.diag || {}).slice(0, 200)}`);
+    }
+  } catch { /* optional */ }
   return out;
 }
 // 👤 v177 — employee ka naam: form me likha hua (ya pichhli baar yaad rakha hua) + IP se pehchan.
