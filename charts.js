@@ -265,6 +265,25 @@ window.FF = window.FF || {};
       return `${areaS || area}<path d="${d.trim()}" fill="none" stroke="${s.color}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" ${s.dash ? 'stroke-dasharray="6 5"' : ''}></path>${dots}`;
     }).join('');
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="linesvg"><defs>${defs}</defs>${grid}${xlabels}${paths}</svg>${series.length > 1 ? legend(series) : ''}`;
+    drawIn(el);
+  }
+  /** v3.125.511 — line chart ki rekha left→right "draw" hoti hai (ek baar, ~0.9 s); dots/area baad me halke se aate hain. */
+  function drawIn(el) {
+    try {
+      const H = document.documentElement;
+      if (H.classList.contains('ff-no-anim') || el.__drawn) return;
+      el.__drawn = true;
+      el.querySelectorAll('.linesvg path[fill="none"]').forEach((p) => {
+        if (p.getAttribute('stroke-dasharray')) return;      // dashed series (forecast) jaisa hai waisa
+        const len = p.getTotalLength ? Math.ceil(p.getTotalLength()) : 0; if (!len) return;
+        p.style.strokeDasharray = `${len} ${len}`; p.style.strokeDashoffset = String(len);
+        p.getBoundingClientRect();
+        p.style.transition = 'stroke-dashoffset .9s cubic-bezier(.22,.8,.2,1)';
+        requestAnimationFrame(() => { p.style.strokeDashoffset = '0'; });
+        setTimeout(() => { p.style.strokeDasharray = ''; p.style.strokeDashoffset = ''; p.style.transition = ''; }, 1000);
+      });
+      el.querySelectorAll('.linesvg circle, .linesvg path:not([fill="none"])').forEach((n) => { n.classList.add('ln-pop'); });
+    } catch { /* cosmetic */ }
   }
   function mount(root) {
     U.$$('[data-chart]', root || document).forEach((el) => {

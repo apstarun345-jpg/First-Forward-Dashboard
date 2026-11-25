@@ -31,8 +31,8 @@ html.ff-side-light .nav-recent small { color: #334155; }
   html.ff-side-float .content { margin-left: calc(var(--sidebar-w) + 8px); }
 }
 /* ---- background ---- */
-html.ff-bg-mesh body { background-image: radial-gradient(900px 500px at 6% -5%, color-mix(in srgb, var(--brand, #6366f1) 15%, transparent), transparent 62%), radial-gradient(800px 500px at 100% 0%, color-mix(in srgb, var(--brand-2, #ec4899) 13%, transparent), transparent 62%), radial-gradient(700px 600px at 50% 112%, rgba(16,185,129,.09), transparent 62%); background-attachment: fixed; }
-html.ff-bg-dots body { background-image: radial-gradient(color-mix(in srgb, var(--ink, #0f172a) 14%, transparent) 1px, transparent 1.3px); background-size: 22px 22px; background-attachment: fixed; }
+html.ff-bg-mesh body { background-image: radial-gradient(900px 500px at 6% -5%, color-mix(in srgb, var(--brand, #6366f1) 15%, transparent), transparent 62%), radial-gradient(800px 500px at 100% 0%, color-mix(in srgb, var(--brand-2, #ec4899) 13%, transparent), transparent 62%), radial-gradient(700px 600px at 50% 112%, rgba(16,185,129,.09), transparent 62%); background-repeat: no-repeat; }
+html.ff-bg-dots body { background-image: radial-gradient(color-mix(in srgb, var(--ink, #0f172a) 14%, transparent) 1px, transparent 1.3px); background-size: 22px 22px; background-repeat: no-repeat; }
 /* ---- glass ---- */
 html.ff-glass .card, html.ff-glass .hs-box, html.ff-glass .pf, html.ff-glass .table-wrap { background-color: color-mix(in srgb, var(--card, #fff) 70%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); border-color: color-mix(in srgb, var(--line, #e2e8f0) 55%, rgba(255,255,255,.6)); }
 /* ---- gradient borders ---- */
@@ -176,3 +176,25 @@ html.ff-no-anim .msp-shell, html.ff-no-anim #msp-out.msp-in > *, html.ff-fast #m
 .hs-ag .hs-ag-n { width: auto; height: auto; border-radius: 0; background: none; color: inherit; font-size: inherit; display: inline; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hs-ag .hs-ag-tl { font-weight: 500; opacity: .65; }
 .hs-box > b[data-kpi] { cursor: pointer; }
+
+/* v3.125.509 — topbar SVG icons: ek jaisa size/rang, hover par halka lift */
+.icon-btn.ico-svg { display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 0; }
+.icon-btn.ico-svg .ff-ico { width: 18px; height: 18px; pointer-events: none; transition: transform .18s cubic-bezier(.2,.8,.2,1); }
+.icon-btn.ico-svg:hover .ff-ico { transform: translateY(-1px) scale(1.08); }
+.notification-btn.ico-svg { position: relative; }
+
+
+/* v3.125.509 — light mode: halka gradient-mesh background + soft glass-style cards (blur nahi — speed ke liye) */
+html[data-theme="light"]:not(.ff-no-anim):not(.ff-lite) body { background-image: radial-gradient(900px circle at 8% -10%, rgba(99,102,241,.10), transparent 60%), radial-gradient(800px circle at 100% 0%, rgba(16,185,129,.08), transparent 55%), radial-gradient(700px circle at 50% 110%, rgba(59,130,246,.07), transparent 60%); background-repeat: no-repeat; }
+html[data-theme="light"]:not(.ff-no-anim):not(.ff-lite) .card, html[data-theme="light"]:not(.ff-no-anim):not(.ff-lite) .hs-box { background-color: rgba(255,255,255,.86); border-color: rgba(148,163,184,.28); box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12); }
+
+/* v3.125.511 — chart animations: line draw-in (charts.js) + dots/area fade-in, donut sweep */
+@keyframes lnPop { from { opacity: 0; } to { opacity: 1; } }
+html:not(.ff-no-anim) .linesvg .ln-pop { animation: lnPop .5s ease .55s both; }
+@property --donut-a { syntax: '<angle>'; inherits: false; initial-value: 360deg; }
+@keyframes donutSweep { from { --donut-a: 0deg; } to { --donut-a: 360deg; } }
+html:not(.ff-no-anim) .donut-ring svg { -webkit-mask-image: conic-gradient(from 0deg, #000 var(--donut-a), transparent 0); mask-image: conic-gradient(from 0deg, #000 var(--donut-a), transparent 0); animation: donutSweep .9s cubic-bezier(.22,.8,.2,1) both; }
+/* button ripple (fx.js) */
+.fx-rip { position: absolute; border-radius: 50%; background: currentColor; opacity: .22; transform: scale(0); pointer-events: none; animation: fxRip .55s ease-out forwards; }
+@keyframes fxRip { to { transform: scale(1); opacity: 0; } }
+html.ff-no-anim .fx-rip { display: none; }
