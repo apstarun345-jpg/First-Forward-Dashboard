@@ -1861,6 +1861,13 @@ FF.pages = FF.pages || {};
     let current = null;
     let runSeq = 0, stopTagWatch = null;
 
+    /** ⚡ v3.125.502 — naam par click karte hi (data aane se pehle) profile ka dhancha + animation: koi blank/'loading' ruka hua nahi lagta. */
+    const profileShell = (nm) => `<div class="msp-shell" role="status" aria-live="polite">
+      <div class="msp-hero msp-shell-hero"><span class="ms-avatar ff">${esc(String(nm || '?').slice(0, 1).toUpperCase())}</span>
+        <div class="msp-hero-id"><b>${esc(nm || '')}</b><div class="msp-shell-sub">profile khul raha hai<span class="msp-dots"><i></i><i></i><i></i></span></div></div></div>
+      <div class="msp-shell-grid">${'<div class="skel skel-card"></div>'.repeat(4)}</div>
+      <div class="skel skel-line w80"></div><div class="skel skel-line w60"></div><div class="skel skel-block"></div></div>`;
+    const nextPaint = () => new Promise((ok) => { let d = false; const f = () => { if (!d) { d = true; ok(); } }; try { requestAnimationFrame(() => setTimeout(f, 0)); } catch { /* ignore */ } setTimeout(f, 80); });
     root.innerHTML = `<div class="page msp-page">
       <div class="page-head">
         <div><h1>🔎 Master Search</h1>
@@ -1883,7 +1890,7 @@ FF.pages = FF.pages || {};
         <div class="msp-chips" id="msp-quick"></div>
       </div></div>
       <div class="msp-bcr-link"><a class="btn small" href="#/barcodeChecker">🔢 Barcode Checker — range / multiple barcodes →</a></div>
-      <div id="msp-out"><div class="card"><div class="card-body empty">👆 <b>Naam ya ID type karo</b> — yahan us insaan ka poora FF + GV data aa jayega.</div></div></div>
+      <div id="msp-out">${asked && asked.length >= 2 && !/^\d{8,}$/.test(asked.replace(/\D/g, '')) ? profileShell(asked) : '<div class="card"><div class="card-body empty">👆 <b>Naam ya ID type karo</b> — yahan us insaan ka poora FF + GV data aa jayega.</div></div>'}</div>
       <div id="msp-trend"></div>
     </div>`;
 
@@ -2628,6 +2635,7 @@ FF.pages = FF.pages || {};
         const id = team.person.sub ? ` · TL ID ${esc(team.person.sub)}` : '';
         return `<section class="card msp-team-card"><div class="card-head"><div><h3>👥 ${esc(team.person.name)} · ${chLabel} TL team${id}</h3><p class="dim small">All agents ka stock + issuance; TL ka apna issuance aur stock alag row me.</p></div></div><div class="card-body"><div class="msp-report" data-msp-team="${team.channel}"></div></div></section>`;
       }).join('');
+      out.classList.remove('msp-in'); void out.offsetWidth; out.classList.add('msp-in');
       out.innerHTML = `${channelChoiceHtml(g, selected)}${chips}
         <div class="msp-hero">
           <span class="ms-avatar ${viewGroup.gv ? 'gv' : 'ff'}">${esc(String(g.name || '?').slice(0, 1).toUpperCase())}</span>
@@ -2811,8 +2819,10 @@ FF.pages = FF.pages || {};
         if (!state.light) buildLight().then(() => { if (seq === runSeq && out.isConnected) { paintState(); paintQuick(); } }).catch(() => {});
         return;
       }
-      out.innerHTML = U.spinner(`“${q}” dhoondha ja raha hai…`);
+      out.innerHTML = profileShell(q);
       try { await buildLight(); } catch { /* index fail — neeche message */ }
+      if (seq !== runSeq || !out.isConnected) return;
+      await nextPaint();
       if (seq !== runSeq || !out.isConnected) return;
       paintState(); paintQuick();
       if (!state.light) { out.innerHTML = '<div class="card"><div class="card-body empty">Search index load nahi hua — internet check karke “🔄 Index refresh” dabao.</div></div>'; return; }
@@ -2897,8 +2907,10 @@ FF.pages = FF.pages || {};
       const q = clean(person.name || person.sub || '');
       if (!q) return;
       if (input) input.value = q;
-      out.innerHTML = U.spinner(`“${q}” ka profile khola ja raha hai…`);
+      out.innerHTML = profileShell(q);
       try { await buildLight(); } catch { /* profile fallback below */ }
+      if (seq !== runSeq || !out.isConnected) return;
+      await nextPaint();   // shell pehle screen par aa jaye, phir profile ka bhaari kaam
       if (seq !== runSeq || !out.isConnected) return;
       const idx = state.full || state.light;
       const cp = canonicalPerson(person, idx) || person;

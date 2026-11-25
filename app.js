@@ -1159,7 +1159,7 @@ window.FF = window.FF || {};
     // aate hi wo skeleton overwrite kar deta hai (root me content aa chuka ho to loader lagta hi nahi).
     const loaderTimer = setTimeout(() => {
       if (token === current.token && !root.childNodes.length) root.innerHTML = pageLoaderHtml(page === 'sheet' ? params.name : (FF.pages[page] && FF.pages[page].title) || page);
-    }, 120);
+    }, 40);   // v3.125.502 — skeleton 120 ms ki jagah 40 ms me: click par turant kuch dikhe (fast page par bhi chalega, content aate hi overwrite)
     if (!allowed(page, params)) {
       root.innerHTML = `<div class="empty-state">🔒 Is page ka access aapke account me nahi hai.<br><small class="dim">Admin se "${esc(pagePerm(page, params) || page)}" permission maango (Settings → Access matrix).</small></div>`;
       main.setAttribute('aria-busy', 'false');
@@ -2784,6 +2784,22 @@ window.FF = window.FF || {};
     } catch { /* optional */ }
   }
   document.addEventListener('visibilitychange', () => { if (document.hidden) flush(true); });
+  // v3.125.502 — dheemi clicks (≥250 ms) bhi record: kis element par click ke baad screen ko update hone me kitna time laga (Diagnostics me "click:…" naam se)
+  try {
+    if (window.PerformanceObserver && PerformanceObserver.supportedEntryTypes && PerformanceObserver.supportedEntryTypes.includes('event')) {
+      const slowSeen = new Map();
+      new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          if (!/^(click|pointerup|keydown)$/.test(e.name) || e.duration < 250) continue;
+          const t = e.target; if (!t || !t.closest) continue;
+          const el = t.closest('a,button,[data-action],[data-page],[role=button],li,tr') || t;
+          const desc = `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${(el.getAttribute && (el.getAttribute('href') || el.getAttribute('data-page') || el.getAttribute('data-action'))) ? `:${String(el.getAttribute('href') || el.getAttribute('data-page') || el.getAttribute('data-action')).slice(0, 30)}` : ''}`;
+          const k = `${page()}|${desc}`; const n = (slowSeen.get(k) || 0) + 1; slowSeen.set(k, n); if (n > 5) continue;
+          push('p', { p: `click:${page()}>${desc}`.slice(0, 40), ms: Math.round(e.duration) });
+        }
+      }).observe({ type: 'event', durationThreshold: 250, buffered: true });
+    }
+  } catch { /* optional */ }
   FF.telemetry = { page: (p, ms) => { if (p && ms >= 0 && ms < 600000) push('p', { p: String(p).slice(0, 40), ms: Math.round(ms) }); }, flush };
   // boot: pehla paint + pehli page tak ka time
   try { window.addEventListener('load', () => setTimeout(() => { const n = performance.getEntriesByType('navigation')[0]; const fcp = (performance.getEntriesByName('first-contentful-paint')[0] || {}).startTime; if (n) push('p', { p: '__boot', ms: Math.round(fcp || n.domContentLoadedEventEnd) }); }, 3000)); } catch { /* optional */ }

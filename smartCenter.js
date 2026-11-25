@@ -238,6 +238,7 @@ window.FF = window.FF || {};
     const t = { sent: `✉️ Mail gayi · ${clock(m.at)}`, fail: '✉️ Mail fail — dobara try', queued: '✉️ Mail jaane wali hai', off: '✉️ Mail band (Settings)', norule: '✉️ Mail rule nahi' }[m.s] || '';
     return t ? `<span class="sc-mb ${m.s}" ${m.err ? `title="${esc(m.err)}"` : ''}>${t}</span>` : '';
   }
+  let cmpOpen = false, cmpToggleBound = false;
   function cmpHtml(d) {
     const st = d.stats || {}, ev = d.events || [];
     const pill = (cls, n, label) => `<span class="sc-cmp-p ${cls}"><b>${U.fmt(n)}</b> ${label}</span>`;
@@ -253,8 +254,10 @@ window.FF = window.FF || {};
         <div><b>${who}</b> <span class="sc-st ${stCls(e.status)}">${esc(e.status)}</span><p>${ch} · Case ${esc(e.caseNo)} · ${line}</p></div>
         <div class="rt"><time>${ago(e.at)} pehle</time>${mailBadge(e.mail)}</div></a>`;
     };
-    const shown = ev.slice(0, 6);
-    const body = shown.length ? `<div class="sc-cmp-l">${shown.map(row).join('')}${ev.length > shown.length ? `<a class="sc-cmp-more" href="#/complaints">+${ev.length - shown.length} aur · poori list ›</a>` : ''}</div>` : '<div class="sc-cmp-empty">Pichhle 48 ghante me koi nayi complaint ya bank deduction nahi.</div>';
+    // v3.125.502 — Home par sirf 2 complaints; baaki arrow (▾) dabane par khulti hain (khula/band yaad rehta hai)
+    const FIRST = 2, shown = ev.slice(0, FIRST), rest = ev.slice(FIRST, 12);
+    if (!cmpToggleBound) { cmpToggleBound = true; document.addEventListener('toggle', (e) => { const t = e.target; if (t && t.classList && t.classList.contains('sc-cmp-fold')) cmpOpen = !!t.open; }, true); }
+    const body = shown.length ? `<div class="sc-cmp-l">${shown.map(row).join('')}${rest.length ? `<details class="sc-cmp-fold"${cmpOpen ? ' open' : ''}><summary><span class="ar">▾</span> ${rest.length} aur complaints${ev.length > 12 ? ` (kul ${ev.length})` : ''}</summary><div class="sc-cmp-fold-in">${rest.map(row).join('')}<a class="sc-cmp-more" href="#/complaints">poori list ›</a></div></details>` : `<a class="sc-cmp-more" href="#/complaints">poori list ›</a>`}</div>` : '<div class="sc-cmp-empty">Pichhle 48 ghante me koi nayi complaint ya bank deduction nahi.</div>';
     return `<div class="sc-cmp"><div class="sc-cmp-h"><span class="t">📨 Complaints <small>${d.ready ? 'live' : 'Gmail se aa rahi hain…'}${d.error ? ' · ⚠️ ' + esc(String(d.error).slice(0, 60)) : ''}</small></span>${pills}</div>${body}</div>`;
   }
   function cmpAnnounce(d) {
