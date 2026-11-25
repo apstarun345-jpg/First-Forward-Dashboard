@@ -8042,6 +8042,12 @@ async function issuedDerive(miss) {
 /** dispatch-status rows (issued, data nahi) ko register + GV Master serial se bharo. */
 /** v3.125.493 — dispatch barcode list (issued / stock): result yaad rakha jaata hai taaki click par turant khule.
  *  Key = channel + ranges; valid jab tak stock index ka `at` wahi ho (ya 6 ghante). Prewarm: dispatch-by / nightly se. */
+const fuMemo = new Map();
+function followupMemo(index, source) {   // v3.125.496 — har click par poore agents ki ageing dobara nahi; index badla to naya
+  const hit = fuMemo.get(source);
+  if (hit && hit.at === index.at) return hit.rows;
+  const rows = followupAgeByAgent(index, source); fuMemo.set(source, { at: index.at, rows }); return rows;
+}
 const dspResCache = new Map();   // key → { at, idxAt, payload(JSON string) }
 const dspResInflight = new Map();
 const dspKey = (ch, ranges) => `${ch}|${(ranges || []).map((r) => `${String(r.first).replace(/\D/g, '')}-${String(r.last).replace(/\D/g, '')}`).join(',')}`;
@@ -9055,7 +9061,7 @@ async function handleApi(req, res, url) {
     const index = await stockAgeIndexWithin(STOCK_AGE_WAIT_MS, false);
     if (!index) return sendJson(res, 200, stockAgePending());
     if (index.errors && index.errors[source]) throw new HttpError(502, `Stock age unavailable: ${index.errors[source]}`);
-    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, at: new Date(index.at).toISOString(), source, rows: followupAgeByAgent(index, source) }), { 'Cache-Control': 'no-store' });
+    return sendMaybeCompressed(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, at: new Date(index.at).toISOString(), source, rows: followupMemo(index, source) }), { 'Cache-Control': 'no-store' });
   }
   // 🧓 v3.31 stock ageing — summary (agent / TL / network bucket counts, FF + GV) aur tag-level list.
   if (p === '/api/stock-age' && method === 'GET') {
