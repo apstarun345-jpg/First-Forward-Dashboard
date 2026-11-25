@@ -507,7 +507,19 @@ window.FF = window.FF || {};
   }
   /** Summary/profile ke ek channel ko hi ready karo. Pehle FF + GV dono datasets har click par
    *  wait hote the, jabki GV report ko FF stock/performance (aur ulta) ki zaroorat nahi hoti. */
+  // KPI strip, inline report and linked-team panels share the same channel request.
+  // Keep only in-flight work: later opens still consult the adapters' freshness policy.
+  const channelLoads = new Map();
   async function loadFor(person) {
+    const ch = /^gv/i.test(String(person && person.kind || '')) ? 'gv' : 'ff';
+    if (channelLoads.has(ch)) return channelLoads.get(ch);
+    const job = loadChannel(person);
+    channelLoads.set(ch, job);
+    const clear = () => { if (channelLoads.get(ch) === job) channelLoads.delete(ch); };
+    job.then(clear, clear);
+    return job;
+  }
+  async function loadChannel(person) {
     const isGv = /^gv/i.test(String(person && person.kind || ''));
     const jobs = [];
     if (isGv) {
@@ -2080,18 +2092,26 @@ window.FF = window.FF || {};
     await loadFor(person);
     return BUILDERS[person.kind](person, false);
   }
-  /** Drawer / inline ke liye: pehle SOFT ms tak data ka intezaar, phir jo hai usse profile (partial flag ke saath); baaki data aane par
-   *  `onLate(profile)` dobara bulaya jaata hai. Profile spinner ab kabhi "hamesha" nahi ghoomta. */
-  const LIMITS = { openSoftMs: 12000 };   // tests chhota karte hain
+  /** Paint memory data without a network wait; upgrade every subscriber when sheets finish.
+   * Share both snapshot and full build across KPI/report consumers for the same identity.
+   * Jobs are in-flight only, so a later open is never served an indefinitely stale profile. */
+  const LIMITS = { openSoftMs: 0 };   // tests can override the soft deadline
+  const profileJobs = new Map();
   async function buildSoon(person, onLate) {
     if (!supports(person)) throw new Error('Is type ka profile nahi banta');
-    const loading = loadFor(person);
-    const done = await U.within(loading.then(() => true), LIMITS.openSoftMs, false);
-    const pr = BUILDERS[person.kind](person, false);
-    if (done) return pr;
-    pr.partial = true;
-    loading.then(() => { try { if (onLate) onLate(BUILDERS[person.kind](person, false)); } catch { /* late rebuild best effort */ } }).catch(() => {});
-    return pr;
+    const key = JSON.stringify([U.dateKey(new Date()), person.kind, norm(person.name), normId(person.sub || person.id || '')]);
+    let job = profileJobs.get(key);
+    if (!job) {
+      job = { snapshot: null, ready: loadFor(person).then(() => buildNow(person)) };
+      profileJobs.set(key, job);
+      const clear = () => { if (profileJobs.get(key) === job) profileJobs.delete(key); };
+      job.ready.then(clear, clear);
+    }
+    const done = await U.within(job.ready.then(() => true), LIMITS.openSoftMs, false);
+    if (done) return job.ready;
+    if (!job.snapshot) job.snapshot = { ...buildNow(person), partial: true };
+    job.ready.then((profile) => { try { if (onLate) onLate(profile); } catch { /* closed view */ } }, () => {});
+    return job.snapshot;
   }
 
   // ------------------------------------------------------------------ html

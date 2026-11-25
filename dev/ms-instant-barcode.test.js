@@ -257,3 +257,28 @@ test('digits-only barcode still appears when suggestion label is formatted with 
   suggest.refresh();
   assert.match(suggest._box.innerHTML, /Ravi Kumar/); assert.doesNotMatch(suggest._box.innerHTML, /Koi match nahi/);
 });
+
+test('selected name opens without waiting for the cold people index', async (t) => {
+  const { FF, doc, El } = harness(t, { coldPeople: true });
+  let picker;
+  FF.util.suggest = (_input, opts) => { picker = opts; return { suspend() {}, destroy() {} }; };
+  const root = new El(); doc.body.appendChild(root);
+  FF.pages.masterSearch.render(root, {});
+  picker.onPick({ person: { kind: 'ff-agent', name: 'Instant Selected', sub: 'A101' } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const out = root.querySelector('#msp-out');
+  assert.match(out.innerHTML, /Instant Selected/);
+  assert.match(out.innerHTML, /msp-hero-act/, 'real profile actions, not just a loading shell');
+  assert.doesNotMatch(out.innerHTML, /msp-shell-hero/);
+  assert.equal(FF.masterSearch.ready, false, 'unrelated index is still pending');
+});
+
+test('rendering Master Search again removes old click handlers', async (t) => {
+  const { FF, doc, El, navigations } = harness(t);
+  const root = new El(); doc.body.appendChild(root);
+  for (let i = 0; i < 4; i++) FF.pages.masterSearch.render(root, {});
+  assert.equal(root.events.get('click').size, 1, 'one click must not dispatch multiple old page handlers');
+  root.fire('click', { target: { closest: (sel) => sel === '[data-ms-tags]' ? { dataset: { msTags: 'Selected Agent' } } : null } });
+  assert.equal(navigations.length, 1);
+  assert.equal(navigations[0][0], 'masterStock');
+});
