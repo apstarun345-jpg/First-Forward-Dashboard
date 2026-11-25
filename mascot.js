@@ -2775,7 +2775,11 @@
   }
   async function mountHome(box) {
     if (!box || !allowed()) return;
-    home.box = box; homeRender();
+    home.box = box;
+    // v3.125.503 — pehle page paint ho (Home turant khule), phir robot updates ban kar aaye (pehle ~200 ms screen jam karta tha).
+    if (!box.firstChild) box.innerHTML = '<section class="card rf-wrap"><div class="rf-head"><b>🤖 Robot ke updates</b><span class="dim small">load ho rahe hain…</span></div></section>';
+    await new Promise((res) => setTimeout(res, 120));
+    homeRender();
     await refreshSrv().catch(() => {}); homeRender();
     clearInterval(home.iv);
     home.iv = setInterval(async () => { if (!home.box || !home.box.isConnected) { clearInterval(home.iv); home.box = null; return; } if (document.hidden) return; await refreshSrv().catch(() => {}); homeRender(); }, 60e3);

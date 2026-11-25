@@ -1536,7 +1536,25 @@ window.FF = window.FF || {};
     latestMemo.key = key; latestMemo.value = value;
     return value;
   }
-  function summary(ym, upToDay) { return eirReady() ? eirSummary(ym, upToDay) : masterSummary(ym, upToDay); }
+  // v3.125.503 — summary/agent/TL/direct rollups were rebuilt (~150 ms each) on every call; GV Dashboard / Targets /
+  // Home call them 5-10x per page switch. Reuse while the inputs (inputsKey) are unchanged; callers get copies (never the cached objects).
+  const rollMemo = new Map();
+  function rollMemoed(name, ym, upToDay, build) {
+    let key;
+    try { key = [name, ym || '', upToDay || 0, ...inputsKey()]; } catch { return build(); }
+    const hit = rollMemo.get(name + '|' + (ym || '') + '|' + (upToDay || 0));
+    if (hit && sameKey(hit.key, key)) return cloneRoll(hit.value);
+    const value = build();
+    rollMemo.set(name + '|' + (ym || '') + '|' + (upToDay || 0), { key, value: cloneRoll(value) });
+    if (rollMemo.size > 40) rollMemo.delete(rollMemo.keys().next().value);
+    return value;
+  }
+  function cloneRoll(v) {
+    if (Array.isArray(v)) return v.map((x) => (x && typeof x === 'object' && !Array.isArray(x) && !(x instanceof Map) && !(x instanceof Set) ? { ...x } : x));
+    if (v && typeof v === 'object' && !(v instanceof Map) && !(v instanceof Set)) return { ...v };
+    return v;
+  }
+  function summary(ym, upToDay) { return rollMemoed('summary', ym, upToDay, () => (eirReady() ? eirSummary(ym, upToDay) : masterSummary(ym, upToDay))); }
   function dailySeries(ym, dimFn) { return eirReady() ? FF.model.dailySeries(liveDailyRows(), ym, dimFn) : masterDailySeries(ym, dimFn); }
   function byDim(ym, dimFn, upToDay) {
     if (!eirReady()) return masterByDim(ym, dimFn, upToDay);
@@ -1560,9 +1578,9 @@ window.FF = window.FF || {};
     }
     return map;
   }
-  function agentRollup(ym) { return eirReady() ? eirPeopleRollup(ym) : masterAgentRollup(ym); }
-  function tlRollup(ym) { return eirReady() ? eirTlRollup(ym) : masterTlRollup(ym); }
-  function directRollup(ym) { return eirReady() ? eirDirectRollup(ym) : masterDirectRollup(ym); }
+  function agentRollup(ym) { return rollMemoed('agent', ym, 0, () => (eirReady() ? eirPeopleRollup(ym) : masterAgentRollup(ym))); }
+  function tlRollup(ym) { return rollMemoed('tl', ym, 0, () => (eirReady() ? eirTlRollup(ym) : masterTlRollup(ym))); }
+  function directRollup(ym) { return rollMemoed('direct', ym, 0, () => (eirReady() ? eirDirectRollup(ym) : masterDirectRollup(ym))); }
   // GV issuance rows = EIR history + GV Master ka aaj (live). GV pages/sprint/tag-issued sab yahi use karte hain.
   function issuanceRows() { return eirReady() ? liveDailyRows() : rows(); }
   // Consumers that only read the rows (masterProfile builds one profile per TL / agent) may reuse the result

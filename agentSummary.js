@@ -151,6 +151,9 @@ FF.pages = FF.pages || {};
   async function loadPeople(channel) {
     const isGv = channel === 'gv';
     const kind = isGv ? 'gv-agent' : 'ff-agent';
+    // v3.125.503 — TL quick() 25-50 ms each; run in slices so the page switch never freezes (~0.3 s before).
+    let tlSliceT = Date.now();
+    const tlYield = async () => { if (Date.now() - tlSliceT > 20) { await new Promise((r) => setTimeout(r, 0)); tlSliceT = Date.now(); } };
     if (MP() && MP().loadFor) await MP().loadFor({ kind }).catch(() => {});
     else if (MP() && MP().load) await MP().load().catch(() => {});
     if (isGv && FF.gv) await Promise.all(['report', 'stockAgent', 'stockTl', 'stockTlClass', 'stockAgentClass', 'master'].map((k) => FF.gv.need(k, { only: true })).map((p) => p && p.catch ? p.catch(() => {}) : p));
@@ -206,6 +209,7 @@ FF.pages = FF.pages || {};
         }
       }
       for (const t of tlSum.values()) {
+        await tlYield();
         const quick = MP() && MP().quick ? MP().quick({ kind: 'gv-tl', name: t.name, sub: t.id || '', tlSet: new Set(), classMap: new Map(), bars: new Set() }) : null;
         const stock = quick && quick.stock ? quick.stock.total : Math.max(t.snapshotStock, t.reportStock);
         add('gv-tl', t.name, t.id, '', t.mobile, t.cur, stock, { tlId: t.id, last: t.last });
@@ -237,6 +241,7 @@ FF.pages = FF.pages || {};
         }
       }
       for (const t of tlSum.values()) {
+        await tlYield();
         const quick = MP() && MP().quick ? MP().quick({ kind: 'ff-tl', name: t.name, sub: t.id || '', tlSet: new Set(), classMap: new Map(), bars: new Set() }) : null;
         const stock = quick && quick.stock ? quick.stock.total : Math.max(t.snapshotStock, t.reportStock);
         add('ff-tl', t.name, t.id, '', t.mobile, t.cur, stock, { tlId: t.id, last: t.last });

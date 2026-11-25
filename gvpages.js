@@ -506,7 +506,18 @@ FF.pages = FF.pages || {};
   }
   const badge = (text) => { const t = U.clean(text); return t ? `<span class="badge ${tone(t)}">${esc(t.replace(/^[\p{Extended_Pictographic}\u{FE0F}\u{200D}\s]+/u, '') || t)}</span>` : '<span class="dim">—</span>'; };
 
+  // v3.125.503 — overlay indexes every EIR issuance row (~0.5 s); GV Dashboard, GV Performance, Targets and profile cards all
+  // call it with the same inputs on one page switch. Reuse while the report array + issuance inputs + day are unchanged (callers get copies).
+  let overlayMemo = null;
   function overlayGvReportWithEir(report) {
+    let key = null;
+    try { key = G.issuanceRows && G.issuanceRows.inputsKey ? [report, report && report.length, new Date().toDateString(), ...G.issuanceRows.inputsKey()] : null; } catch { key = null; }
+    if (key && overlayMemo && overlayMemo.key.length === key.length && overlayMemo.key.every((v, i) => v === key[i])) return overlayMemo.out.map((r) => ({ ...r }));
+    const out = overlayGvReportWithEirBuild(report);
+    if (key && Array.isArray(out)) overlayMemo = { key, out: out.map((r) => ({ ...r })) };
+    return out;
+  }
+  function overlayGvReportWithEirBuild(report) {
     const latest = G.latestDate && G.latestDate();
     if (!latest || !G.issuanceRows) return report;
     // Report totals must use the current calendar day, not the last date found in the sheet.
