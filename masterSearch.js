@@ -3224,6 +3224,8 @@ FF.pages = FF.pages || {};
       if (list[i].st) {
         box.__dspRows[i] = { lazy: true, r: list[i] };
         dtbFill(box, i, list[i].stCls || null, list[i].st);
+        // v3.125.493 — last dispatch ki barcode list peeche se pehle hi le lo (server cache + localStorage) → click par instant
+        if (i === 0) setTimeout(() => { if (box.isConnected) dspStatusOf(list[0]).then((rows) => { if (box.__dspRows && box.__dspRows[0]) box.__dspRows[0] = { rows, r: list[0] }; }).catch(() => {}); }, 1200);
         continue;
       }
       try {
