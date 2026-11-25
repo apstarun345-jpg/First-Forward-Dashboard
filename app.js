@@ -436,7 +436,9 @@ window.FF = window.FF || {};
     document.documentElement.dataset.theme = packMode || resolvedTheme();
     const b = U.$('#theme-toggle');
     if (b) {
-      b.textContent = mode === 'dark' ? '☀️' : mode === 'auto' ? '🌓' : '🌙';
+      const glyph = mode === 'dark' ? '☀️' : mode === 'auto' ? '🌓' : '🌙';
+      const svg = FF.icons && FF.icons.fromEmoji ? FF.icons.fromEmoji(glyph, 18) : '';
+      if (svg) { b.innerHTML = svg; b.classList.add('ico-svg'); } else b.textContent = glyph;
       b.title = mode === 'dark' ? 'Dark mode on — tap for Auto (system)' : mode === 'auto' ? 'Auto (system) — tap for Light' : 'Light mode — tap for Dark';
     }
     if (mode === 'auto' && !applyThemeMode.watching && window.matchMedia) {

@@ -176,3 +176,17 @@ html.ff-no-anim .msp-shell, html.ff-no-anim #msp-out.msp-in > *, html.ff-fast #m
 .hs-ag .hs-ag-n { width: auto; height: auto; border-radius: 0; background: none; color: inherit; font-size: inherit; display: inline; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hs-ag .hs-ag-tl { font-weight: 500; opacity: .65; }
 .hs-box > b[data-kpi] { cursor: pointer; }
+
+/* v3.125.509 — topbar SVG icons: ek jaisa size/rang, hover par halka lift */
+.icon-btn.ico-svg { display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 0; }
+.icon-btn.ico-svg .ff-ico { width: 18px; height: 18px; pointer-events: none; transition: transform .18s cubic-bezier(.2,.8,.2,1); }
+.icon-btn.ico-svg:hover .ff-ico { transform: translateY(-1px) scale(1.08); }
+.notification-btn.ico-svg { position: relative; }
+
+/* v3.125.509 — page badalne par naya page halka fade + slide-up (ff-no-anim / ff-fast / lite me band) */
+@keyframes ff-page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+html:not(.ff-no-anim):not(.ff-fast):not(.ff-lite) #main > .page { animation: ff-page-in .22s cubic-bezier(.2,.8,.2,1) both; }
+
+/* v3.125.509 — light mode: halka gradient-mesh background + soft glass-style cards (blur nahi — speed ke liye) */
+html[data-theme="light"]:not(.ff-no-anim):not(.ff-lite):not(.ff-fast) body { background-image: radial-gradient(900px circle at 8% -10%, rgba(99,102,241,.10), transparent 60%), radial-gradient(800px circle at 100% 0%, rgba(16,185,129,.08), transparent 55%), radial-gradient(700px circle at 50% 110%, rgba(59,130,246,.07), transparent 60%); background-attachment: fixed; }
+html[data-theme="light"]:not(.ff-no-anim):not(.ff-lite):not(.ff-fast) .card, html[data-theme="light"]:not(.ff-no-anim):not(.ff-lite):not(.ff-fast) .hs-box { background-color: rgba(255,255,255,.86); border-color: rgba(148,163,184,.28); box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12); }
