@@ -370,7 +370,17 @@ FF.pages = FF.pages || {};
       if (body.address.trim().length < 5) { hint('Address likho.', 'bad-t'); return; }
       const b = g('af-save'); b.disabled = true; b.textContent = 'Save ho raha hai…';
       try {
-        const out = await FF.auth.api('/api/address-book/save', 'POST', body);
+        let out;
+        try { out = await FF.auth.api('/api/address-book/save', 'POST', body); }
+        catch (err) {
+          // 🛡️ v3.125.509 — 503 "Server busy" par ek baar apne aap retry (save idempotent hai — same mobile+address dobara = unchanged, duplicate nahi banta)
+          if (Number(err && err.status) === 503) {
+            hint('⏳ Server abhi busy hai — 4 second me dobara try ho raha hai…', 'dim');
+            b.textContent = 'Dobara try ho raha hai…';
+            await new Promise((r) => setTimeout(r, 4000));
+            out = await FF.auth.api('/api/address-book/save', 'POST', body);
+          } else throw err;
+        }
         close();
         const msg = out.mode === 'edit' ? '✅ Address update ho gaya' : out.versions ? '⚠ Is mobile ka alag address pehle se tha — naya version save hua (search karke sahi chuno)' : out.unchanged ? 'ℹ Ye address pehle se saved tha' : '✅ Address save ho gaya';
         U.toast(`${msg}${out.sync && out.sync.running ? ' · Sheet sync chal raha hai…' : ''}`, 'ok');
