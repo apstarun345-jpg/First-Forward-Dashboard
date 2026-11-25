@@ -557,6 +557,7 @@ function persist(kind, opts) {
   const prev = writeQueue.get(kind) || Promise.resolve();
   // Apps Script store batches + orders writes itself, so don't serialise (each call would wait seconds).
   const chain = STORAGE_BACKEND === 'appsscript' ? Promise.resolve() : prev.catch(() => {});
+  const soft = { on: false };   // v3.125.515 — SOFT_SAVE_MS beet gaye to caller ko "queued" mil gaya; ab fail par rollback/503 nahi (store khud retry karta hai)
   const next = chain.then(async () => {
     // 🛡️ notify: save se PEHLE shrink guard — snapshot guard ke baad hi banta hai.
     if (kind === 'notify') await notifyShrinkGuard();
@@ -581,6 +582,7 @@ function persist(kind, opts) {
         : `Could not save ${kind}. Check DATA_DIR disk permissions and free space.${cause ? ` Reason: ${cause}` : ''}`;
       if (!storageFailures.has(kind)) storageFailAt.set(kind, Date.now());
       storageFailures.set(kind, storageError);
+      if (soft.on) { console.warn(`${kind} save abhi bhi pending (store background me retry karega, data memory me safe):`, err.message); return; }
       if (JSON.stringify(db[kind], null, 2) === snapshot && durableSnapshots.has(kind)) db[kind] = JSON.parse(durableSnapshots.get(kind));
       console.error(storageError, err.message);
       throw new HttpError(503, storageError);
@@ -589,8 +591,17 @@ function persist(kind, opts) {
   // Observe background notification writes too, without hiding failures from API callers.
   next.catch(() => {});
   writeQueue.set(kind, next);
+  // ⚡ v3.125.515 — address/tag-request/workspace (notify) save: Google Sheet dheema ho to user 8 s se zyada nahi rukta, aur save fail
+  // dikhane ki jagah queue ho jata hai (AppsScriptStore 60 baar tak backoff ke saath dobara bhejta hai; memory me data safe rehta hai).
+  if (kind === 'notify' && sheetsStore && !(opts && opts.strict)) {
+    return new Promise((resolve, reject) => {
+      const tm = setTimeout(() => { soft.on = true; resolve(); }, SOFT_SAVE_MS);
+      next.then(() => { clearTimeout(tm); resolve(); }, (e) => { clearTimeout(tm); reject(e); });
+    });
+  }
   return next;
 }
+const SOFT_SAVE_MS = Math.max(2000, Number(process.env.SOFT_SAVE_MS) || 8000);
 function deepMerge(base, patch) {
   if (Array.isArray(base) || Array.isArray(patch)) return patch === undefined ? base : patch;
   if (base && typeof base === 'object' && patch && typeof patch === 'object') {
