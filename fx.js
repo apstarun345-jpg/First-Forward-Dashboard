@@ -17,3 +17,26 @@
     } catch { /* cosmetic */ }
   }, { passive: true });
 })();
+
+/* v3.125.511 — KPI shine: har .kpi / .hs-box par halki chamak ki patti (har ~6 s). Pseudo-elements use nahi hote (wo pehle se bhare hain), isliye ek <i class="kpi-shine"> inject hota hai. */
+(function () {
+  'use strict';
+  const SEL = '.kpi, .hs-box, .gv-live-card';
+  let q = false;
+  function add() {
+    q = false;
+    try {
+      document.querySelectorAll(SEL).forEach((k, i) => {
+        if (k.__shine || k.querySelector(':scope > .kpi-shine')) { k.__shine = 1; return; }
+        k.__shine = 1;
+        const s = document.createElement('i'); s.className = 'kpi-shine'; s.setAttribute('aria-hidden', 'true');
+        s.style.animationDelay = `${(i % 6) * 0.7}s`;
+        if (getComputedStyle(k).position === 'static') k.style.position = 'relative';
+        k.appendChild(s);
+      });
+    } catch { /* cosmetic */ }
+  }
+  function sched() { if (q) return; q = true; (window.requestIdleCallback || ((f) => setTimeout(f, 150)))(add, { timeout: 600 }); }
+  const start = () => { sched(); new MutationObserver(sched).observe(document.body, { childList: true, subtree: true }); };
+  if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+})();

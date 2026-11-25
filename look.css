@@ -198,3 +198,10 @@ html:not(.ff-no-anim) .donut-ring svg { -webkit-mask-image: conic-gradient(from 
 .fx-rip { position: absolute; border-radius: 50%; background: currentColor; opacity: .22; transform: scale(0); pointer-events: none; animation: fxRip .55s ease-out forwards; }
 @keyframes fxRip { to { transform: scale(1); opacity: 0; } }
 html.ff-no-anim .fx-rip { display: none; }
+
+/* v3.125.511 — KPI shine (fx.js): ff-fast par bhi chalta hai, sirf Settings "animations off" me band */
+.kpi-shine { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; overflow: hidden; z-index: 1; }
+.kpi-shine::after { content: ""; position: absolute; top: -20%; bottom: -20%; left: 0; width: 38%; transform: translateX(-130%) skewX(-18deg); background: linear-gradient(100deg, transparent, rgba(255,255,255,.28), transparent); animation: kpiShine 6s ease-in-out infinite; animation-delay: inherit; }
+html[data-theme="light"] .kpi-shine::after { background: linear-gradient(100deg, transparent, rgba(255,255,255,.75), transparent); }
+@keyframes kpiShine { 0%, 62% { transform: translateX(-130%) skewX(-18deg); } 100% { transform: translateX(380%) skewX(-18deg); } }
+html.ff-no-anim .kpi-shine { display: none; }
