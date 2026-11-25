@@ -1785,7 +1785,19 @@ FF.pages = FF.pages || {};
       const fc = gvForecastNow(liveState.total);
       if (fc && fc.expected != null) expectedNow = fc.expected;
       const wdNote = bars ? `pichhle ${bars.labels.length} same-weekday (${bars.labels.map((l) => `${l} = ${U.fmt(bars.values[bars.labels.indexOf(l)])}`).join(' · ')}) ka average` : '';
-      gvLiveMount.innerHTML = gvLiveHtml({ ...liveState, expected: expectedNow, pace: fc ? fc.expected : pace, forecast: fc, weekdayNote: wdNote, weekdayBars: bars, weekdayKeys: wdKeys });
+      // v3.125.507 — aaj ka VC4/VC20/VC5+/Replacement/Chassis aaj ke Total se bada ho hi nahi sakta (mahine ke number mix ho gaye the).
+      // Aisa aaye to GV Master ke aaj ke rows (snapshot) se wahi fields lo; warna galat number dikhane ke bajay chhupa do.
+      let shown = liveState;
+      try {
+        const sane = (x) => { const T = Number(x && x.total); if (!Number.isFinite(T)) return false; const v4 = Number(x.vc4) || 0, v20 = Number(x.vc20) || 0, v5 = Number(x.vc5p) || 0; return v4 <= T && v20 <= T && v5 <= T && (v4 + v20 + v5) <= T * 1.02 + 1 && (Number(x.replacement) || 0) <= T && (Number(x.chassis) || 0) <= T; };
+        if (!sane(liveState)) {
+          console.warn('[gv-live] impossible numbers ignored', { total: liveState.total, vc4: liveState.vc4, vc20: liveState.vc20, vc5p: liveState.vc5p, replacement: liveState.replacement, chassis: liveState.chassis, source: liveState.source });
+          const snap = G && G.gvToday ? G.gvToday() : null;
+          if (snap && snap.loaded && sane(snap)) shown = { ...liveState, total: snap.total, vc4: snap.vc4, vc20: snap.vc20, vc5p: snap.vc5p, replacement: snap.replacement, chassis: snap.chassis, wrongVrn: snap.wrongVrn || 0, replacementBy: snap.replacementBy, chassisBy: snap.chassisBy, wrongVrnBy: snap.wrongVrnBy, source: 'master' };
+          else { const T = Number(liveState.total) || 0, cl = (v) => (Number(v) <= T ? v : 0); shown = { ...liveState, vc4: cl(liveState.vc4), vc20: cl(liveState.vc20), vc5p: cl(liveState.vc5p), replacement: cl(liveState.replacement), chassis: cl(liveState.chassis) }; }
+        }
+      } catch { shown = liveState; }
+      gvLiveMount.innerHTML = gvLiveHtml({ ...shown, expected: expectedNow, pace: fc ? fc.expected : pace, forecast: fc, weekdayNote: wdNote, weekdayBars: bars, weekdayKeys: wdKeys });
     }
     // 🧩 Merge fix: yeh teen painter main me call hote the par define nahi the (Home render
     //    ReferenceError: paintMonth is not defined → poore KPI cards gayab). Base v3.47 se wapas.
@@ -2111,11 +2123,18 @@ FF.pages = FF.pages || {};
     const sf = { rows: st.rows, ff: st.ff, gv: st.gv };
     const sc = M.summary(st.rows, ctx.curKey);
     ui.ready = true; ui.daily = M.eirOnlyDaily(daily || []); ui.sf = sf; homeRows = { rows: sf.rows, at: Date.now(), get ctx() { return ui.ctx; } }; ui.ctx = ctx; ui.sc = sc; ui.liveToday = st.gvLiveAdded;
+    // v3.125.506 — har bhaari paint alag task me: pehla card turant dikhe, click par poora ~0.2 s ek saath screen na ruke.
+    const brk = () => new Promise((r) => setTimeout(r, 0));
+    await brk(); if (!root.isConnected) return;
     paintMonth();
+    await brk(); if (!root.isConnected) return;
     paintLive();   // Expected Today ab EIR weekdays se
     paintTargetAchievement();
+    await brk(); if (!root.isConnected) return;
     paintPulse();
+    await brk(); if (!root.isConnected) return;
     paintCharts();
+    await brk(); if (!root.isConnected) return;
     // ---- 📦 Stock (FF = StockDataa · GV = Tag Assignment) ----------------------------------------
     const [stockR, gvStockR] = await Promise.all([stockP, gvStockP]);
     if (!root.isConnected || !stockMount) return;

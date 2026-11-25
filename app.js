@@ -1180,7 +1180,7 @@ window.FF = window.FF || {};
       const mod = FF.pages[page];
       // v3.125.503 — click ka jawab pehle: sidebar highlight + page shell/skeleton screen par aaye, uske BAAD bhaari render shuru ho
       // (bhaari pages 0.3-0.5 s main thread rokte the → click "atka hua" lagta tha). Hidden tab me rAF nahi chalta → 50 ms race.
-      if (typeof requestAnimationFrame === 'function') await Promise.race([new Promise((r) => requestAnimationFrame(() => r())), new Promise((r) => setTimeout(r, 50))]);
+      if (typeof requestAnimationFrame === 'function') await Promise.race([new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))), new Promise((r) => setTimeout(r, 80))]);
       if (token !== current.token) return;
       if (typeof mod.render === 'function') await mod.render(root, params, ctx || {});
       else if (typeof mod === 'function') await mod(root, params, ctx || {});

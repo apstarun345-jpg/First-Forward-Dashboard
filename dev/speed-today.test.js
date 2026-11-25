@@ -49,7 +49,7 @@ test('gv.js: GV aaj ka number GV Master se (aaj ki EIR rows replace hoti hain, a
   const src = await read('gv.js');
   assert.match(src, /function gvToday\(\)/, 'gvToday() API hai');
   assert.match(src, /function liveDailyRows\(\)/, 'liveDailyRows() API hai');
-  assert.match(src, /const rest = eir\.filter/, 'aaj ki EIR GV rows hatai jaati hain');
+  assert.match(src, /rest: eir\.filter\(\(r\) => U\.dateKey\(r\.date \|\| r\.d \|\| new Date\(0\)\) !== tk\)/, 'aaj ki EIR GV rows hatai jaati hain');
   assert.match(src, /issuanceRows\(\) \{ return eirReady\(\) \? liveDailyRows\(\) : rows\(\); \}/,
     'GV issuance rows live series se aati hain (GV Master ka aaj included)');
   const model = await read('model.js');
