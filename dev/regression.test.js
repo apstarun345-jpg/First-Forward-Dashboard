@@ -15,7 +15,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; }
 
 async function startServer(dir, upstream) {
-  const child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, STORAGE_BACKEND: 'files', PORT: '0', DATA_DIR: dir, ADMIN_USER: 'owner', ADMIN_PASSWORD: 'initial-password', GVIZ_BASE: upstream, RENDER: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, STORAGE_BACKEND: 'files', PORT: '0', DATA_DIR: dir, ADMIN_USER: 'owner', ADMIN_PASSWORD: 'initial-password', GVIZ_BASE: upstream, RENDER: '', STORAGE_BANNER_AFTER_MS: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
   child.stderr.on('data', data => { logs += data; });
   const ready = new Promise((resolve, reject) => {
@@ -59,8 +59,10 @@ test('durable sessions, settings, users and changed admin credentials survive re
     const sheetUrl = '/api/gviz?sheet=EIR&tq=select%20count(A)';
     assert.equal((await fetch(server.base + sheetUrl, { headers: { cookie } })).headers.get('x-cache'), 'MISS');
     assert.equal((await fetch(server.base + sheetUrl, { headers: { cookie } })).headers.get('x-cache'), 'HIT');
-    assert.equal(urls.length, 1);
-    assert.equal(urls[0].searchParams.has('range'), false, 'unbounded EIR must NOT be restricted to A1');
+    // Background warm-ups (GV today, ledgers…) may also hit the mock upstream — count only this query.
+    const mine = urls.filter((u) => /count\(A\)/i.test(u.searchParams.get('tq') || ''));
+    assert.equal(mine.length, 1);
+    assert.equal(mine[0].searchParams.has('range'), false, 'unbounded EIR must NOT be restricted to A1');
 
     await server.stop();
     server = await startServer(dir, `http://127.0.0.1:${upstream.address().port}`);

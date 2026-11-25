@@ -11,7 +11,7 @@ test('home complaints: sirf 2 dikhte, baaki <details> arrow me', () => {
 test('master search: profile shell turant + next paint', () => {
   const s = read('masterSearch.js');
   assert.match(s, /const profileShell = \(nm\) =>/);
-  assert.match(s, /out\.innerHTML = profileShell\(q\);\s*\n\s*try \{ await buildLight\(\); \} catch \{ \/\* profile fallback below \*\/ \}/);
+  assert.match(s, /out\.innerHTML = profileShell\(q\);\s*\n\s*(?:try \{ await buildLight\(\); \} catch \{[^}]*\}|\/\/[^\n]*\n\s*if \(!state\.light\) buildLight\(\)\.catch\(\(\) => \{\}\);)/);   // v515: selected suggestion no longer waits for buildLight
   assert.match(s, /await nextPaint\(\);/);
 });
 test('app: skeleton 40 ms + slow click telemetry', () => {

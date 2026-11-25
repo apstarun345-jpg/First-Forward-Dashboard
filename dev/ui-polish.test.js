@@ -22,9 +22,12 @@ function contrast(a, b) {
 test('polish is opt-in on the shell and loads after themes and mobile/native repairs', () => {
   assert.match(html, /<html[^>]*data-ui-polish="clean"/);
   const links = [...html.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
-  assert.match(links.at(-1), /^ui-polish\.css\?v=/);
+  // Later add-on sheets (ux2/ux4/look…) may follow; polish just has to come after the base/theme/mobile repairs.
+  const pi = links.findIndex((l) => /^ui-polish\.css\?v=/.test(l));
+  assert.ok(pi >= 0, 'ui-polish.css linked');
   for (const name of ['styles.css', 'mobile-fix.css', 'native-shell.css', 'themes.css']) {
-    assert.ok(links.findIndex((l) => l.startsWith(name + '?')) < links.length - 1);
+    const i = links.findIndex((l) => l.startsWith(name + '?'));
+    assert.ok(i >= 0 && i < pi, name + ' before ui-polish');
   }
   assert.match(read('sw.js'), /async function shellAssets\(/, 'service worker discovers the new CSS from the shell');
 });

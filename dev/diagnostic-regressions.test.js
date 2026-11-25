@@ -82,7 +82,7 @@ test('fresh GV response upgrades Master totals; late initial or stale feeds do n
     root: { isConnected: true }, liveState: { source: 'master', total: 10, highest: { VC4: { n: 10 } } },
     liveFromFeed: null, feedLiveRows: [], liveRows: [], liveSourceReady: false, liveTry: 0,
     ui: { ready: false }, feedMatchesCurrentClassMap: () => true, liveRowsFromFeed: () => [],
-    paintLive() {}, retryLive() {}, expectedFromWeekdaySeries: () => null, todayK: () => '2026-11-25'
+    paintLive() {}, liveSaveLast() {}, retryLive() {}, expectedFromWeekdaySeries: () => null, todayK: () => '2026-11-25'
   });
   const src = read('home');
   vm.runInContext(src.slice(src.indexOf('    function handleQuick('), src.indexOf('    liveP.then(handleQuick)')) + '\nthis.handle = handleQuick;', ctx);

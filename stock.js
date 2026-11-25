@@ -402,7 +402,11 @@ FF.pages = FF.pages || {};
     const body = U.$('#st-body', root);
     try { await S.need('stock'); await Promise.allSettled([S.need('stockAgents'), S.need('stockTypes'), S.need('daily'), S.need('agents'), S.need('agentClass')]); } catch (err) { body.innerHTML = U.errorBox(err, 'data-action="refresh"'); return; }
     if (!root.isConnected) return;
+    // v3.125.519 — prep → overview → charts alag-alag frame me (ek lamba ~120 ms freeze nahi): spinner pehle paint ho jaata hai.
+    const brk = () => new Promise((r) => setTimeout(r, 0));
+    await brk(); if (!root.isConnected) return;
     const P = prep();
+    await brk(); if (!root.isConnected) return;
     const waSt = U.$('#st-wa', root);
     if (waSt) waSt.addEventListener('click', () => {
       const perDayVc4 = P.elapsed ? (P.curS ? P.curS.vc4 : 0) / P.elapsed : 0;
@@ -415,7 +419,9 @@ FF.pages = FF.pages || {};
 
     let pivot = null;
     if (view.scope) pivot = selectionView(P, body); else overview(P, body);
+    await brk(); if (!root.isConnected) return;
     C.mount(body);
+    await brk(); if (!root.isConnected) return;
     if (!view.scope) loadStockExtras(body); // overview par trend chart + in-vs-issued (ek fetch)
     if (FF.stockAge) FF.stockAge.decorate(root); // 🧓 agent table ka 'purana stock' column (index ready hone par bhar jaata hai)
 
