@@ -187,3 +187,14 @@ html.ff-no-anim .msp-shell, html.ff-no-anim #msp-out.msp-in > *, html.ff-fast #m
 /* v3.125.509 — light mode: halka gradient-mesh background + soft glass-style cards (blur nahi — speed ke liye) */
 html[data-theme="light"]:not(.ff-no-anim):not(.ff-lite) body { background-image: radial-gradient(900px circle at 8% -10%, rgba(99,102,241,.10), transparent 60%), radial-gradient(800px circle at 100% 0%, rgba(16,185,129,.08), transparent 55%), radial-gradient(700px circle at 50% 110%, rgba(59,130,246,.07), transparent 60%); background-repeat: no-repeat; }
 html[data-theme="light"]:not(.ff-no-anim):not(.ff-lite) .card, html[data-theme="light"]:not(.ff-no-anim):not(.ff-lite) .hs-box { background-color: rgba(255,255,255,.86); border-color: rgba(148,163,184,.28); box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12); }
+
+/* v3.125.511 — chart animations: line draw-in (charts.js) + dots/area fade-in, donut sweep */
+@keyframes lnPop { from { opacity: 0; } to { opacity: 1; } }
+html:not(.ff-no-anim) .linesvg .ln-pop { animation: lnPop .5s ease .55s both; }
+@property --donut-a { syntax: '<angle>'; inherits: false; initial-value: 360deg; }
+@keyframes donutSweep { from { --donut-a: 0deg; } to { --donut-a: 360deg; } }
+html:not(.ff-no-anim) .donut-ring svg { -webkit-mask-image: conic-gradient(from 0deg, #000 var(--donut-a), transparent 0); mask-image: conic-gradient(from 0deg, #000 var(--donut-a), transparent 0); animation: donutSweep .9s cubic-bezier(.22,.8,.2,1) both; }
+/* button ripple (fx.js) */
+.fx-rip { position: absolute; border-radius: 50%; background: currentColor; opacity: .22; transform: scale(0); pointer-events: none; animation: fxRip .55s ease-out forwards; }
+@keyframes fxRip { to { transform: scale(1); opacity: 0; } }
+html.ff-no-anim .fx-rip { display: none; }
