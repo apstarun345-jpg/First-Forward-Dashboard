@@ -14,6 +14,6 @@ test('tagIssued: header ke andar today-live strip (alag card nahi)', () => {
   const t = read('tagIssued.js');
   assert.match(t, /<div class="tix-live" id="ti-live" hidden><\/div>\s*\n\s*<div class="head-actions">/);
   assert.match(t, /function paintLive\(rows\)/);
-  assert.match(t, /try \{ paintLive\(rows\); \} catch/);
+  assert.match(t, /try \{ paintLive\(rows\); \} catch \(e\)/);
   assert.match(read('look.css'), /\.tix-live \{/);
 });

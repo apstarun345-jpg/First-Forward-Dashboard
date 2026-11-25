@@ -1138,7 +1138,7 @@ FF.pages = FF.pages || {};
       } };
       scan(rows.gvMasterRows); scan(rows.ffRows);
       const total = sum.vc4 + sum.vc20 + sum.vc5;
-      if (!total) { host.hidden = true; return; }
+      if (!total) { host.innerHTML = '<div class="tix-live-row"><b>🔴 Today live</b><span class="c0">abhi aaj ka koi tag issue nahi / data aa raha hai…</span></div>'; host.hidden = false; return; }
       const top = [...ag.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
       host.innerHTML = `<div class="tix-live-row"><b>🔴 Today live</b><span class="c4">VC4 <i>${U.fmt(sum.vc4)}</i></span><span class="c20">VC20 <i>${U.fmt(sum.vc20)}</i></span><span class="c5">VC5+ <i>${U.fmt(sum.vc5)}</i></span></div>`
         + (top.length ? `<div class="tix-live-row top">${top.map(([nm, n], i) => `<span title="${esc(nm)}">${['🥇', '🥈', '🥉'][i]} ${esc(nm.length > 18 ? `${nm.slice(0, 17)}…` : nm)} <i>${U.fmt(n)}</i></span>`).join('')}</div>` : '');
@@ -1150,7 +1150,7 @@ FF.pages = FF.pages || {};
       fromInput.value = from; toInput.value = to;
       const rows = channelRows();
       lastDirRows = rows;
-      try { paintLive(rows); } catch { /* optional */ }
+      try { paintLive(rows); } catch (e) { const h = U.$('#ti-live', root); if (h) { h.innerHTML = '<div class="tix-live-row"><b>🔴 Today live</b><span>load nahi hua</span></div>'; h.hidden = false; } try { console.warn('ti-live', e && e.message); } catch { /* */ } }
       activePersonOptions = admin ? personDirectory({
         ffRows: rows.ffRows, gvMasterRows: rows.gvMasterRows, gvRows: rows.gvRows,
         ffAgents: (FF.pages.performance && FF.pages.performance.agents) ? (() => { try { return FF.pages.performance.agents() || []; } catch { return []; } })() : [],
