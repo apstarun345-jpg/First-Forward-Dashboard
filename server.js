@@ -1589,7 +1589,7 @@ const cache = new GvizCache();   // url → { at, body, status }
 // gzip NDJSON file me likha jata hai (stream — memory nahi badhti) aur boot par wapas padha jata hai. Purani
 // entries "stale" maani jati hain: user ko turant milti hain aur peeche se taaza hoti hain (stale-while-revalidate).
 const CACHE_FILE = path.join(DATA_DIR, 'gviz-cache.ndjson.gz');
-const CACHE_DISK_MAX_AGE_MS = 3 * 3600e3;   // 3 ghante se purani entry wapas nahi laate
+const CACHE_DISK_MAX_AGE_MS = 26 * 3600e3;  // 🌙 v3.125.528 — 26 ghante (daily window): raat ka save subah/din bhar chale; stale-while-revalidate neeche sambhalta hai
 let cacheDiskBusy = false;
 async function cacheSaveDisk() {
   if (cacheDiskBusy || !cache.size || process.env.CACHE_DISK === '0') return 0;
@@ -5594,13 +5594,13 @@ async function odSnapLoad() {
 // pehle 2-3 min har query Google par 45s+. Ab sabse garam queries ka gzip cache har 30 min Google Sheet (CACHE_GVIZ) me save
 // aur boot par wapas — restart ke baad bhi data turant (stale), naya peeche se (stale-while-revalidate).
 const clientHealth = { since: Date.now(), errors: [], pages: new Map() };
-const GVIZ_SNAP_TAB = 'CACHE_GVIZ', GVIZ_SNAP_MAX = 2.5 * 1048576, GVIZ_SNAP_AGE = 12 * 3600e3;
+const GVIZ_SNAP_TAB = 'CACHE_GVIZ', GVIZ_SNAP_MAX = 2.5 * 1048576, GVIZ_SNAP_AGE = 26 * 3600e3;   // 🌙 v3.125.528 — 12h → 26h: raat ka snapshot subah/din bhar restore ho
 const gvizSnap = { savedAt: 0, loadedAt: 0, loaded: 0, saved: 0, sig: '', err: '' };
 async function gvizSnapSave() {
   if (!sheetsStore || typeof sheetsStore.call !== 'function') { console.log('💾 gviz snapshot: Sheet storage nahi'); return false; }
   const now = Date.now(), list = [];
   for (const [url, e] of cache.entries()) {
-    if (!e || !e.gz || !(e.status >= 200 && e.status < 300) || now - e.at > 3 * 3600e3) continue;
+    if (!e || !e.gz || !(e.status >= 200 && e.status < 300) || now - e.at > GVIZ_SNAP_AGE) continue;   // 🌙 3h → GVIZ_SNAP_AGE (26h): warna raat ki entries save hi nahi hoti
     if (/gv-today|today/i.test(url) && !/sheet=/i.test(url)) continue;
     const h = HOT.get(url);
     list.push({ url, e, score: (h ? h.hits : 0) * 1e6 + e.at / 1e6 });
@@ -7645,7 +7645,7 @@ function hotSaveMaybe(force) {
     return true;
   } catch { return false; }
 }
-async function hotWarm(reason) {
+async function hotWarm(reason, force) {
   if (hotState.running) return hotState;
   let urls = [];
   try { const b = db.settings && db.settings.hotUrls && db.settings.hotUrls.blob; if (b) urls = JSON.parse(zlib.gunzipSync(Buffer.from(b, 'base64')).toString('utf8')); } catch { urls = []; }
@@ -7655,7 +7655,9 @@ async function hotWarm(reason) {
     for (const u of urls) {
       if (typeof u !== 'string' || !/^https:\/\/docs\.google\.com\//.test(u)) { hotState.skipped++; continue; }
       const hit = cache.get(u);
-      if (hit && cacheFresh(u, hit)) { hotState.skipped++; continue; }
+      // 🌙 force=true (raat ka save): freshness bypass — signature same ho ya na ho, raat ko ek baar taaza
+      //    karke snapshot/disk par save. cooldown (429) dono me chalta hai.
+      if (!force && hit && cacheFresh(u, hit)) { hotState.skipped++; continue; }
       if (gvizCooldownActive()) { await new Promise((r) => setTimeout(r, 15e3)); if (gvizCooldownActive()) { hotState.failed++; continue; } }
       const r = await refreshCache(u);
       if (r) hotState.warmed++; else hotState.failed++;
@@ -7665,6 +7667,37 @@ async function hotWarm(reason) {
   try { if (typeof global.gc === 'function') global.gc(); } catch { /* optional */ }   // warm ke baad memory wapas
   console.log(`🔥 presave warm (${reason}): ${hotState.warmed} bhari · ${hotState.skipped} pehle se garam · ${hotState.failed} fail / ${hotState.total}`);
   return hotState;
+}
+// 🌙 v3.125.528 — RAAT KA SAVE: roz IST 01:05 ke baad ek baar saari hot queries taaza (force) karke
+//    gviz Sheet snapshot + disk cache me save. Subah / deploy / Render-sleep ke baad pehla click Google
+//    na dekhe: cache turant serve hota hai (stale-while-revalidate) aur baaki background me aata hai.
+//    Roz ek hi baar (istDay gate); memory ooncha ho to 10-min tick baad dobara.
+const nightlyState = { day: '', at: 0, warmed: 0, saved: false, err: '' };
+async function nightlyGvizSave(reason) {
+  try {
+    if (nightlyState.day === istDay()) return nightlyState;                 // aaj ka save ho chuka
+    const h = new Date(Date.now() + 5.5 * 3600e3), mins = h.getUTCHours() * 60 + h.getUTCMinutes();
+    if (mins < 65) return nightlyState;                                     // 01:05 IST se pehle nahi — raat ka data aane do
+    if (rssMB() > 360) return nightlyState;                                 // memory high → agli10-min tick
+    if (hotState.running) return nightlyState;                              // boot warm chal raha → ruk ke dobara
+    nightlyState.day = istDay();                                            // pehle mark (double-run band)
+    nightlyState.at = Date.now(); nightlyState.err = '';
+    try {
+      hotSaveMaybe(true);                                                   // aaj ki hot list durable settings me
+      const w = await hotWarm('night', true);                               // force: freshness bypass, cooldown on
+      nightlyState.warmed = w.warmed || 0;
+      const ok = await gvizSnapSave();                                      // Sheet snapshot (free plan: deploy ke baad wapas)
+      await cacheSaveDisk();                                                // disk copy (jahan DATA_DIR ho)
+      nightlyState.saved = !!ok;
+      console.log(`🌙 raat ka save (${nightlyState.day}): ${nightlyState.warmed} query taaza · snapshot ${ok ? 'ok' : 'skip'} (${reason || 'tick'})`);
+    } catch (err) {
+      // day marked rehta hai: snapshot fail ho to bhi force-warm har 10 min dobara nahi
+      // (periodic gvizSnapSave 30-min + cacheSaveDisk 10-min waise bhi fresh entries ko dobara save karte hain)
+      nightlyState.err = String((err && err.message) || err).slice(0, 160);
+      console.warn('🌙 raat ka save nahi hua:', nightlyState.err);
+    }
+  } catch (err) { nightlyState.err = String((err && err.message) || err).slice(0, 160); }
+  return nightlyState;
 }
 const goodGvizBody = (body) => typeof body === 'string' && body.includes('setResponse') && !/"status"\s*:\s*"error"/.test(body);
 async function upstreamOnce(url) {
@@ -18769,6 +18802,8 @@ async function start() {
     setInterval(() => { cacheSaveDisk().catch(() => {}); }, 10 * 60e3).unref();
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
+    setTimeout(() => { nightlyGvizSave('boot').catch(() => {}); }, 4 * 60e3).unref?.();   // 🌙 v3.125.528 agar 01:05+ ho chuka hai to boot par abhi save
+    setInterval(() => { nightlyGvizSave('tick').catch(() => {}); }, 10 * 60e3).unref();   // 🌙 roz IST 01:05 ke baad ek baar
     setTimeout(() => { officeDispatched(false).then(() => officeDispatchedNightly()).catch(() => {}); }, 150e3).unref?.();   // 🟧 snapshot sheet se turant; aaj ka nahi bana to raat wali rebuild
     setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar
     setTimeout(() => dspWarmTick(), 150e3).unref?.();   // 📦 v3.125.493 sab last-dispatch barcode lists pehle se

@@ -1999,12 +1999,34 @@ window.FF = window.FF || {};
     // ⚡ Panel links instant: hover/tap karte hi us page ka lazy module prefetch ho jaata hai
     //    (pehla click bina ruke khulta hai), aur ACTIVE link dobara click karne par page refresh
     //    hota hai — pehle hash same hone par kuch nahi hota tha ("click par khulta hi nahi").
+    // 🌙 v3.125.528 — saath me us page ka STORE DATA bhi warm: hover/tap par hi rows load hone
+    //    lagti hain, to click karte hi Stock / Issuance / profile ka data turant dikhta hai.
+    //    (store.loadKey job-dedupe karta hai — dobara hover par duplicate Google query nahi jaati.)
+    const DATA_WARM = {
+      stock: ['stock', 'stockAgents', 'stockTypes', 'daily', 'agents', 'agentClass'],
+      tagIssued: ['daily'],
+      performance: ['report', 'daily', 'agentClass', 'agentDailyClass'],
+      masterSearch: ['agents', 'stockAgents', 'daily', 'agentClass'],
+      home: ['daily', 'stock', 'agentClass'],
+      dashboard: ['daily', 'agents', 'status', 'stock', 'stockAgents', 'report'],
+      trend: ['daily', 'agents'],
+      directAgents: ['daily']
+    };
+    const warmPageData = (id) => {
+      try {
+        if (!id || !FF.auth || !FF.auth.user || !FF.store || !FF.store.need) return;   // login se pehle nahi
+        const keys = DATA_WARM[id];
+        if (!keys) return;
+        for (const k of keys) Promise.resolve(FF.store.need(k, { only: true })).catch(() => {});
+      } catch { /* warm best-effort — normal render apne aap load karta hai */ }
+    };
     const prefetchFrom = (el) => {
       const a = el && el.closest && el.closest('a[href^="#/"]');
       if (!a || !FF.lazy || !FF.lazy.ensure) return;
       const id = decodeURIComponent((a.getAttribute('href') || '').replace(/^#\/?/, '').split('?')[0].split('/')[0] || '');
-      if (id && id !== 'sheet') FF.lazy.ensure(id).catch(() => {});
+      if (id && id !== 'sheet') { FF.lazy.ensure(id).catch(() => {}); warmPageData(id); }
     };
+    FF.warmPageData = warmPageData;   // lazy.js intent prefetch (focusin) se bhi data warm ho sake
     document.addEventListener('mouseover', (e) => prefetchFrom(e.target), { passive: true });
     document.addEventListener('pointerdown', (e) => prefetchFrom(e.target), { passive: true, capture: true });
     // 📱 Mobile: chhote screen par topbar ek line me fit ho — kam zaroori buttons "⋯" me chhup jaate hain.
