@@ -1392,6 +1392,23 @@ FF.pages = FF.pages || {};
 
   /* 📒 Dispatch date / naam — IDFC Stock Sheet + GV Stock Sheet ranges (server expand). Async fill, cache per barcode. */
   const dispCache = new Map();
+  // 💾 v3.125.529 — dispatch date/naam browser me SAVE (localStorage, user-wise): khulte hi turant, naya peeche se (pehle har baar "searching…")
+  const dsUser = () => { try { return (FF.auth && FF.auth.user && FF.auth.user.username) || ''; } catch { return ''; } };
+  const DS_BC_KEY = () => `ff_disp_bc_v1|${dsUser()}`, DS_BY_KEY = () => `ff_disp_by_v1|${dsUser()}`;
+  const dispVerified = new Set();   // is session me server se confirm hue barcode
+  let dsHydrated = '';
+  function dsHydrate() {
+    const u = dsUser(); if (!u || dsHydrated === u) return; dsHydrated = u;
+    try { const o = JSON.parse(localStorage.getItem(DS_BC_KEY()) || 'null'); if (o && o.m) Object.keys(o.m).forEach((k) => { if (!dispCache.has(k)) dispCache.set(k, o.m[k]); }); } catch { /* optional */ }
+  }
+  function dsPersist() {
+    try {
+      const m = {}; let n = 0;
+      for (const [k, v] of dispCache) { if (v && ((v.ff && v.ff.length) || (v.gv && v.gv.length))) { m[k] = v; n++; } }
+      const keys = Object.keys(m); if (keys.length > 1500) keys.slice(0, keys.length - 1500).forEach((k) => delete m[k]);
+      localStorage.setItem(DS_BC_KEY(), JSON.stringify({ at: Date.now(), m }));
+    } catch { /* storage full / optional */ }
+  }
   const bcKey = (b) => String(b || '').replace(/\D/g, '').replace(/^0+/, '');
   function dispText(hit) {
     if (!hit) return { date: '—', name: '—', title: '' };
@@ -1407,19 +1424,24 @@ FF.pages = FF.pages || {};
     };
   }
   function dispCellsHtml(key) {
+    dsHydrate();
     const k = bcKey(key), d = dispCache.has(k) ? dispText(dispCache.get(k)) : null;
     return `<td data-ms-disp="${esc(k)}" data-f="date" style="white-space:nowrap"${d && d.title ? ` title="${esc(d.title)}"` : ''}>${d ? esc(d.date) : '<span class="dim">🔎 searching…</span>'}</td><td data-ms-disp="${esc(k)}" data-f="name"${d && d.title ? ` title="${esc(d.title)}"` : ''}>${d ? esc(d.name) : '<span class="dim">🔎 searching…</span>'}</td>`;
   }
   async function loadDispatch(keys) {
-    const need = [...new Set((keys || []).map(bcKey).filter((k) => k && !dispCache.has(k)))];
+    dsHydrate();
+    const need = [...new Set((keys || []).map(bcKey).filter((k) => k && !dispVerified.has(k)))];
     if (!need.length || !FF.data || !FF.data.dispatchLookup) return null;
     const { map, meta } = await FF.data.dispatchLookup(need);
-    need.forEach((k) => dispCache.set(k, map.get(k) || null));
+    need.forEach((k) => { const got = map.get(k) || null; dispVerified.add(k); if (got || !dispCache.get(k)) dispCache.set(k, got); });   // saved hit ko khaali jawab se mat mitao
+    dsPersist();
     return meta;
   }
   async function fillDispatch(root, res) {
     if (!root || !res || !(res.tags || []).length) return;
     try {
+      dsHydrate();
+      root.querySelectorAll('td[data-ms-disp]').forEach((td) => { const c = dispCache.get(td.dataset.msDisp); if (!c) return; const d = dispText(c); td.textContent = td.dataset.f === 'date' ? d.date : d.name; if (d.title) td.title = d.title; });
       const meta = await loadDispatch(res.tags.slice(0, 60).map((t) => t.key));
       const first = root.querySelector('td[data-ms-disp]');
       const wrapEl = first && first.closest('.table-wrap');
@@ -3145,6 +3167,15 @@ FF.pages = FF.pages || {};
     const sc = dispSpecOf(pr, isTl, ch);
     return `<div class="mp-kpi msp-kpi k12 msp-disp-box kpi-clickable" data-msp-disp-box="${esc(JSON.stringify(sc))}" role="button" tabindex="0" title="Click for all recent dispatches"><small>🚚 Last dispatch</small><b class="msp-disp-main">…</b><em class="msp-disp-sub">${esc(ch === 'gv' ? 'GV Stock Sheet' : 'IDFC Stock Sheet')} · searching…</em></div>`;
   }
+  function dsBySaved(sc) { try { const o = JSON.parse(localStorage.getItem(DS_BY_KEY()) || 'null'); const e = o && o.m && o.m[JSON.stringify(sc)]; return e && e.d && e.d.ok ? e.d : null; } catch { return null; } }
+  function dsBySave(sc, d) {
+    try {
+      const o = JSON.parse(localStorage.getItem(DS_BY_KEY()) || 'null') || { m: {} }; o.m = o.m || {};
+      o.m[JSON.stringify(sc)] = { at: Date.now(), d };
+      const ks = Object.keys(o.m).sort((x, y) => o.m[x].at - o.m[y].at); while (ks.length > 40) delete o.m[ks.shift()];
+      localStorage.setItem(DS_BY_KEY(), JSON.stringify(o));
+    } catch { /* optional */ }
+  }
   async function dispFetch(sc) {
     const key = JSON.stringify(sc);
     if (!dispByCache.has(key)) {
@@ -3156,6 +3187,7 @@ FF.pages = FF.pages || {};
           await new Promise((r) => setTimeout(r, 2500));
         }
         if (!data || !data.ok || data.pending) throw new Error('Dispatch ledger is not ready yet');
+        dsBySave(sc, data);
         return data;
       })();
       dispByCache.set(key, pr);
@@ -3336,8 +3368,11 @@ FF.pages = FF.pages || {};
     boxes.forEach((box) => {
       if (box.__dispDone) return; box.__dispDone = true;
       let sc; try { sc = JSON.parse(box.dataset.mspDispBox); } catch { return; }
+      const saved = dsBySaved(sc);
+      if (saved) { box.__disp = saved; try { dispPaint(box, saved); } catch { /* fresh aane par */ } }   // turant saved dikhao
       dispFetch(sc).then((d) => { if (box.isConnected) { box.__disp = d; dispPaint(box, d); fillDispStatus(box, d).catch(() => {}); } }).catch((err) => {
         if (!box.isConnected) return;
+        if (saved) return;   // saved dikh raha hai — error se mat bigaado
         const sub = box.querySelector('.msp-disp-sub'), main = box.querySelector('.msp-disp-main');
         box.__dispDone = false;
         if (autoRetryBox(box, '__dispDone', fillDispBoxes, host)) { if (sub) sub.textContent = 'Thoda busy hai — khud dobara load ho raha hai…'; return; }
