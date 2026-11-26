@@ -1589,7 +1589,7 @@ const cache = new GvizCache();   // url → { at, body, status }
 // gzip NDJSON file me likha jata hai (stream — memory nahi badhti) aur boot par wapas padha jata hai. Purani
 // entries "stale" maani jati hain: user ko turant milti hain aur peeche se taaza hoti hain (stale-while-revalidate).
 const CACHE_FILE = path.join(DATA_DIR, 'gviz-cache.ndjson.gz');
-const CACHE_DISK_MAX_AGE_MS = 26 * 3600e3;  // 🌙 v3.125.536 — 26 ghante (daily window): raat ka save subah/din bhar chale; stale-while-revalidate neeche sambhalta hai
+const CACHE_DISK_MAX_AGE_MS = 26 * 3600e3;  // 🌙 v3.125.537 — 26 ghante (daily window): raat ka save subah/din bhar chale; stale-while-revalidate neeche sambhalta hai
 let cacheDiskBusy = false;
 async function cacheSaveDisk() {
   if (cacheDiskBusy || !cache.size || process.env.CACHE_DISK === '0') return 0;
@@ -5620,7 +5620,7 @@ async function odSnapLoad() {
 // pehle 2-3 min har query Google par 45s+. Ab sabse garam queries ka gzip cache har 30 min Google Sheet (CACHE_GVIZ) me save
 // aur boot par wapas — restart ke baad bhi data turant (stale), naya peeche se (stale-while-revalidate).
 const clientHealth = { since: Date.now(), errors: [], pages: new Map() };
-const GVIZ_SNAP_TAB = 'CACHE_GVIZ', GVIZ_SNAP_MAX = 2.5 * 1048576, GVIZ_SNAP_AGE = 26 * 3600e3;   // 🌙 v3.125.536 — 12h → 26h: raat ka snapshot subah/din bhar restore ho
+const GVIZ_SNAP_TAB = 'CACHE_GVIZ', GVIZ_SNAP_MAX = 2.5 * 1048576, GVIZ_SNAP_AGE = 26 * 3600e3;   // 🌙 v3.125.537 — 12h → 26h: raat ka snapshot subah/din bhar restore ho
 const gvizSnap = { savedAt: 0, loadedAt: 0, loaded: 0, saved: 0, sig: '', err: '' };
 async function gvizSnapSave() {
   if (!sheetsStore || typeof sheetsStore.call !== 'function') { console.log('💾 gviz snapshot: Sheet storage nahi'); return false; }
@@ -7694,7 +7694,7 @@ async function hotWarm(reason, force) {
   console.log(`🔥 presave warm (${reason}): ${hotState.warmed} bhari · ${hotState.skipped} pehle se garam · ${hotState.failed} fail / ${hotState.total}`);
   return hotState;
 }
-// 🌙 v3.125.536 — RAAT KA SAVE: roz IST 01:05 ke baad ek baar saari hot queries taaza (force) karke
+// 🌙 v3.125.537 — RAAT KA SAVE: roz IST 01:05 ke baad ek baar saari hot queries taaza (force) karke
 //    gviz Sheet snapshot + disk cache me save. Subah / deploy / Render-sleep ke baad pehla click Google
 //    na dekhe: cache turant serve hota hai (stale-while-revalidate) aur baaki background me aata hai.
 //    Roz ek hi baar (istDay gate); memory ooncha ho to 10-min tick baad dobara.
@@ -12703,6 +12703,12 @@ async function handleApi(req, res, url) {
     if (url.searchParams.get('t') !== profilePack.token) throw new HttpError(403, 'forbidden');
     await profilePackBuild(addressBookView);
     return sendJson(res, 200, { ok: true, n: (profilePack.addr || []).length });
+  }
+  // ⚡ v3.125.536 — Agents Address pehle se garam: boot par + har 20 min + roz raat Sheet se force refresh (user ko kabhi 13 s ka intezaar nahi).
+  if (p === '/api/addr-warm' && method === 'GET') {
+    if (url.searchParams.get('t') !== profilePack.token) throw new HttpError(403, 'forbidden');
+    if (url.searchParams.get('force') === '1') await addressBookMap(true);
+    return sendJson(res, 200, { ok: true, n: (await addressBookView()).length });
   }
   if (p === '/api/profile-pack' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required.');
@@ -18844,7 +18850,7 @@ async function start() {
     setInterval(() => { cacheSaveDisk().catch(() => {}); }, 10 * 60e3).unref();
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
-    setTimeout(() => { nightlyGvizSave('boot').catch(() => {}); }, 4 * 60e3).unref?.();   // 🌙 v3.125.536 agar 01:05+ ho chuka hai to boot par abhi save
+    setTimeout(() => { nightlyGvizSave('boot').catch(() => {}); }, 4 * 60e3).unref?.();   // 🌙 v3.125.537 agar 01:05+ ho chuka hai to boot par abhi save
     setInterval(() => { nightlyGvizSave('tick').catch(() => {}); }, 10 * 60e3).unref();   // 🌙 roz IST 01:05 ke baad ek baar
     setTimeout(() => { officeDispatched(false).then(() => officeDispatchedNightly()).catch(() => {}); }, 150e3).unref?.();   // 🟧 snapshot sheet se turant; aaj ka nahi bana to raat wali rebuild
     setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar
@@ -18858,6 +18864,14 @@ async function start() {
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
     setTimeout(() => { try { if (ledgerSources().length) ledgerDirect(['608116-039-0000001']).catch(() => {}); } catch { /* optional */ } }, 180e3).unref?.();   // ⚡ v425 — dispatch ledger ka pehla (cold) query boot par hi
+    {   // 📍 v3.125.536 — Agents Address: boot par garam, har 20 min tazaa, roz IST 02:20 ke baad Sheet se force refresh
+      let addrNightDay = '';
+      const addrWarm = (force) => fetch(`http://127.0.0.1:${PORT}/api/addr-warm?t=${profilePack.token}${force ? '&force=1' : ''}`, { signal: AbortSignal.timeout(120e3) }).then((r) => r.ok).catch(() => false);
+      setTimeout(() => { addrWarm(false); }, 35e3).unref?.();
+      setInterval(() => {
+        try { const ist = new Date(Date.now() + 5.5 * 3600e3), day = istTodayKey(); const nightly = ist.getUTCHours() >= 2 && ist.getUTCMinutes() >= 0 && addrNightDay !== day && (ist.getUTCHours() > 2 || ist.getUTCMinutes() >= 20); if (nightly) { addrNightDay = day; addrWarm(true); } else addrWarm(false); } catch { /* optional */ }
+      }, 20 * 60e3).unref();
+    }
     setTimeout(() => { eirRawSnapLoad().catch(() => {}); }, 20e3).unref?.();   // 💾 v3.125.527 — deploy ke baad EIR raw din Sheet snapshot se turant
     setTimeout(() => eirRawPrewarm('boot'), 240e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
     setInterval(() => eirRawPrewarm('30 min'), 30 * 60e3).unref();   // jo din fail / missing hain wahi dobara (baaki disk se)

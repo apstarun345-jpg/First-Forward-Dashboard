@@ -1,4 +1,4 @@
-# v3.125.536 — Raat ka save + click-turant rows
-- Server: roz IST 01:05 ke baad hot stock/issuance queries ek baar taaza (force) karke gviz Sheet snapshot + disk cache me save — subah/restart ke baad pehla click Google na dekhe.
-- Cache restore window 3h/12h → 26h (daily window ke saath): raat ka save din bhar chalta hai, stale-while-revalidate background me taaza karta hai.
-- Nav hover/tap par sirf module nahi, us page ka store data bhi warm: Stock · Issuance · Performance · Master Search ke rows click se pehle load hone lagte hain.
+# v3.125.536
+- Agents Address: pichla data turant dikhta hai (saved snapshot), 429 par chupchap retry, server boot/raat ko pre-warm. Naya teal theme.
+- Barcode Checker: poora colourful table, alag "Office stock" column.
+- Poori site: har table ka header dark colourful, border halka colourful (tables-theme.css).
