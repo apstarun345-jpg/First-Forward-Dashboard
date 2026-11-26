@@ -1381,8 +1381,10 @@ body.colorful .from-hdr { color: #166534; }
       const j = await scApi('POST', '/api/public/scan-info', { codes: list });
       const inf = (j && j.info) || {}; let pick = x.code;
       if (x.how === 'text' && inf[x.code] && inf[x.code].k === 'nf') { const alt = list.find((c2) => inf[c2] && inf[c2].k !== 'nf'); if (alt) pick = alt; }   // OCR ne ek digit galat padha ho to sahi wala chuno
-      x.code = pick; x.info = inf[pick] || null; x.err = x.info ? '' : 'Data nahi mila';
-      if (x.info && x.info.recheck) setTimeout(() => { x.info = null; scRvCheck(card, x); }, 2000);
+      x.code = pick; const nInfo = inf[pick] || null;
+      if (nInfo) { x.info = nInfo; x.err = ''; } else if (!x.info) x.err = 'Data nahi mila';   // v551: purana status kabhi wapas "check ho raha hai" nahi hota
+      x.rc = (x.rc || 0) + 1;
+      if (nInfo && nInfo.recheck && x.rc < 8 && card && SC.rv.includes(card)) setTimeout(() => scRvCheck(card, x), 2500 + 500 * x.rc);
     } catch (e) {
       x.tries = (x.tries || 0) + 1; x.err = '';
       if (x.tries <= 30 && card && SC.rv.includes(card)) { setTimeout(() => scRvCheck(card, x), Math.min(9000, 1200 + 600 * x.tries)); }
