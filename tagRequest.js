@@ -1346,7 +1346,11 @@ body.colorful .from-hdr { color: #166534; }
     }).join('');
   };
   async function scRvCheck(card, x) {
-    const list = [x.code, ...(x.alts || [])].filter((v, i, a) => scValid(v) && a.indexOf(v) === i).slice(0, 6);
+    // ek photo ke tags ka beech ka group (jaise 039) lagbhag same hota hai — OCR ne alag padha ho to majority wala bhi try karo
+    const mid = (() => { const cnt = {}; (card.cands || []).forEach((y) => { const g = String(y.code || '').replace(/\D/g, '').slice(6, 9); if (g.length === 3) cnt[g] = (cnt[g] || 0) + 1; }); const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0]; return top && top[1] >= 3 ? top[0] : ''; })();
+    const dg = String(x.code || '').replace(/\D/g, '');
+    const majAlt = mid && dg.length === 16 && dg.slice(6, 9) !== mid ? `${dg.slice(0, 6)}-${mid}-${dg.slice(9)}` : '';
+    const list = [x.code, ...(x.alts || []), majAlt].filter((v, i, a) => v && scValid(v) && a.indexOf(v) === i).slice(0, 6);
     try {
       const j = await scApi('POST', '/api/public/scan-info', { codes: list });
       const inf = (j && j.info) || {}; let pick = x.code;
