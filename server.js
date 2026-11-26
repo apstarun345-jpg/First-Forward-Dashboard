@@ -18869,6 +18869,23 @@ async function start() {
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
     setTimeout(() => { try { if (ledgerSources().length) ledgerDirect(['608116-039-0000001']).catch(() => {}); } catch { /* optional */ } }, 180e3).unref?.();   // ⚡ v425 — dispatch ledger ka pehla (cold) query boot par hi
+    {   // 🔥 v3.125.543 — bhaari pages (Tag In Hand / Multiple Customer ID / New IDs / GV API / Today) deploy ke baad pehle se garam — ek-ek karke (free plan CPU na dabe)
+      let warmBusy = false;
+      const warmHeavy = async (tag) => {
+        if (warmBusy) return; warmBusy = true;
+        const step = async (name, fn) => { try { await Promise.race([Promise.resolve().then(fn), new Promise((r) => setTimeout(r, 90e3))]); } catch (err) { console.warn(`warm ${name}:`, String((err && err.message) || err).slice(0, 100)); } await new Promise((r) => setTimeout(r, 4000)); };
+        try {
+          await step('today', () => todayFeed(false));
+          if (ledgerSources().length) await step('ledger', () => ledgerIndex(false));
+          await step('multi-customer', () => multiCustomerData(false));
+          await step('new-ids', () => newIdsData(false));
+          const d = dateKeyNow();
+          await step('gv-api', () => gvApiReport(d, d, db.settings || {}, []));
+        } finally { warmBusy = false; }
+      };
+      setTimeout(() => { warmHeavy('boot'); }, 50e3).unref?.();
+      setInterval(() => { warmHeavy('tick'); }, 25 * 60e3).unref();
+    }
     {   // 📍 v3.125.536 — Agents Address: boot par garam, har 20 min tazaa, roz IST 02:20 ke baad Sheet se force refresh
       let addrNightDay = '';
       const addrWarm = (force) => fetch(`http://127.0.0.1:${PORT}/api/addr-warm?t=${profilePack.token}${force ? '&force=1' : ''}`, { signal: AbortSignal.timeout(120e3) }).then((r) => r.ok).catch(() => false);
