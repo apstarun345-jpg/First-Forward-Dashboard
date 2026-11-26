@@ -233,13 +233,17 @@ export function createTihService({ getStore, load, save, lookupGv, lookupTl, get
   const fresh = () => ({ v: 1, threads: {}, rows: [], gv: {}, remarks: {}, tlMails: {}, sent: {} });
   let saveTimer = null;
 
+  let ensureP = null;   // v3.125.545 — ek hi load chale (pehle har request alag Sheet-read karti thi → pile-up)
   async function ensure() {
     if (data) return data;
-    let obj = null;
-    try { obj = await load(); } catch (e) { st.error = `load: ${String((e && e.message) || e).slice(0, 100)}`; }
-    data = obj && typeof obj === 'object' && Array.isArray(obj.rows) ? { ...fresh(), ...obj } : fresh();
-    st.loaded = true;
-    return data;
+    if (!ensureP) ensureP = (async () => {
+      let obj = null;
+      try { obj = await load(); } catch (e) { st.error = `load: ${String((e && e.message) || e).slice(0, 100)}`; }
+      data = obj && typeof obj === 'object' && Array.isArray(obj.rows) ? { ...fresh(), ...obj } : fresh();
+      st.loaded = true;
+      return data;
+    })().finally(() => { ensureP = null; });
+    return ensureP;
   }
   async function flush() {
     if (!data) return false;
