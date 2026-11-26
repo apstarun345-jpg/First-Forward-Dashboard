@@ -44,6 +44,22 @@ window.FF = window.FF || {};
         db.transaction('q', 'readwrite').objectStore('q').put({ t: Date.now(), table: plain }, k);
       } catch { /* quota / private mode — ignore */ }
     },
+    /** v3.125.525 — same sheet/tab ka sabse naya saved result (kisi bhi range/tq ka) — 429 par yahi dikhta hai. */
+    async findAny(prefix) {
+      try {
+        if (!prefix) return null;
+        const db = await PSNAP.open(); if (!db) return null;
+        return await new Promise((resolve) => {
+          try {
+            const st = db.transaction('q', 'readonly').objectStore('q');
+            const rq = st.openCursor(IDBKeyRange.bound(prefix, prefix + '\uffff'));
+            let best = null;
+            rq.onsuccess = () => { const c = rq.result; if (!c) return resolve(best); const v = c.value; if (v && v.table && (!best || v.t > best.t)) best = v; c.continue(); };
+            rq.onerror = () => resolve(best);
+          } catch { resolve(null); }
+        });
+      } catch { return null; }
+    },
     track(p) {
       PSNAP.outstanding++; PSNAP.served++;
       p.catch(() => {}).finally(() => {
@@ -393,6 +409,15 @@ window.FF = window.FF || {};
     } else {
       promise = netStart().then((tbl) => { if (pk && !o.noPersist) PSNAP.put(pk, tbl); return tbl; });
     }
+    // v3.125.525 — Google 429 par error screen par na dikhao: is sheet ka saved result (koi bhi range) turant do.
+    promise = promise.catch(async (err) => {
+      const rl = err && (err.name === 'RateLimitError' || err.rateLimited || /429|rate limit|too many requests/i.test(String(err.message || '')));
+      if (!rl) throw err;
+      const u = PSNAP.user();
+      const alt = u && sourceId !== undefined ? await PSNAP.findAny(`${u}|${sourceId}|${sheetName}|`) : null;
+      if (alt && alt.table && Array.isArray(alt.table.rows)) { const tb = alt.table; tb.stale = true; tb.snapAt = alt.t; return tb; }
+      throw err;
+    });
     const entry = { t: now, promise, pending: true };
     cache.set(key, entry);
     promise.then(() => { entry.pending = false; }, () => { entry.pending = false; });
