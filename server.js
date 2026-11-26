@@ -1692,7 +1692,9 @@ const memTimer = setInterval(() => {
 }, 10000);
 if (memTimer.unref) memTimer.unref();
 const inflight = new Map(); // url → Promise
-const cacheMs = () => Math.max(0, Number(db.settings.cacheSeconds ?? DEFAULT_CACHE_SECONDS)) * 1000;
+// v3.125.520 — CACHE_SECONDS env set ho to wahi jeetega (saved DB setting ke aage). Pehle saved 600 env ko daba deta tha.
+const CACHE_SECONDS_ENV = process.env.CACHE_SECONDS !== undefined && process.env.CACHE_SECONDS !== '' && Number.isFinite(Number(process.env.CACHE_SECONDS)) ? Math.max(0, Number(process.env.CACHE_SECONDS)) : null;
+const cacheMs = () => (CACHE_SECONDS_ENV !== null ? CACHE_SECONDS_ENV : Math.max(0, Number(db.settings.cacheSeconds ?? DEFAULT_CACHE_SECONDS))) * 1000;
 
 /** gviz "COLUMN_ONLY_ONCE": ek hi column select/group by me do baar nahi ho sakta. Jab do settings (jaise tlName aur
  *  gvId) ek hi letter par aa jaayein to repeat hue column ko `max(X)` bana do aur group by me ek hi baar rakho —
