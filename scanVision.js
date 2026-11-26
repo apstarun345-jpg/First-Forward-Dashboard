@@ -34,6 +34,22 @@
     return out;
   }
 
+  const ham = (a, b) => { let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n; };
+  /** OCR text (kachra / spaces / aadhe digit) se lenient (g1-g2-g3) — g3 pehle 7 digit, g1 aakhri 6 */
+  function lenientCodes(text) {
+    const out = [];
+    String(text || '').split(/\n/).forEach((line) => {
+      const l = line.replace(/\s+/g, '').replace(/[–—_.]/g, '-'); const re = /(\d{2,9})-(\d{3})-(\d{6,9})/g; let m;
+      while ((m = re.exec(l))) { const g3 = m[3].slice(0, 7); if (g3.length < 7) continue; out.push({ g1: m[1].slice(-6), g2: m[2], g3 }); re.lastIndex = m.index + 1; }
+    });
+    return out;
+  }
+  function fixPrefix(g1, known) {
+    if (g1.length === 6 && known.includes(g1)) return g1;
+    for (const p of known) { if (g1.length === 6 && ham(g1, p) <= 2) return p; if (g1.length < 6 && p.endsWith(g1) && g1.length >= 3) return p; }
+    return g1.length === 6 ? g1 : '';
+  }
+
   // ---------- libraries (lazy) ----------
   const loadScript = (src) => new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => no(new Error('lib ' + src)); document.head.appendChild(s); });
   const baseUrl = () => env.base || new URL('vendor/', document.baseURI).href;
@@ -136,18 +152,19 @@
     }).sort((a, b) => b.n - a.n);
   }
   /** region ko seedha (bars khade) karke crop. part: 'bars' | 'text' (neeche likha number ki patti) */
-  function cropRegion(work, comp, dAng, sc, part) {
-    const a = -(comp.ang + dAng), cos = Math.cos(a), sin = Math.sin(a);
+  function cropRegion(work, comp, dAng, sc, part, flip) {
+    const a = -(comp.ang + dAng) + (flip ? Math.PI : 0), cos = Math.cos(a), sin = Math.sin(a);
     const P = comp.pts.map(([px, py]) => { const dx = px - comp.cx, dy = py - comp.cy; return [dx * cos - dy * sin, dx * sin + dy * cos]; });
     const minx0 = Math.min(...P.map((p) => p[0])), maxx0 = Math.max(...P.map((p) => p[0])), miny0 = Math.min(...P.map((p) => p[1])), maxy0 = Math.max(...P.map((p) => p[1])), hh = Math.max(20, maxy0 - miny0);
     let minx, maxx, miny, maxy;
-    if (part === 'text') { minx = minx0 - 24; maxx = maxx0 + 24; miny = maxy0 - hh * 0.1; maxy = maxy0 + hh * 0.75; } else { minx = minx0 - 34; maxx = maxx0 + 34; miny = miny0 - 24; maxy = maxy0 + 24; }
+    if (part === 'wide') { minx = minx0 - 40; maxx = maxx0 + 40; miny = miny0 - hh * 0.35; maxy = maxy0 + hh * 0.95; } else if (part === 'text') { minx = minx0 - 24; maxx = maxx0 + 24; miny = maxy0 - hh * 0.1; maxy = maxy0 + hh * 0.75; } else { minx = minx0 - 34; maxx = maxx0 + 34; miny = miny0 - 24; maxy = maxy0 + 24; }
     const s = Math.min(sc, 1900 / Math.max(1, maxx - minx), 1500 / Math.max(1, maxy - miny));
     const c = mk((maxx - minx) * s, (maxy - miny) * s), x = ctx2(c);
     x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.scale(s, s); x.translate(-minx, -miny); x.rotate(a); x.translate(-comp.cx, -comp.cy); x.drawImage(work, 0, 0);
     return c;
   }
 
+  function thumbOf(work, r) { try { return cropRegion(work, r, 0, 0.8, 'wide').toDataURL('image/jpeg', 0.55); } catch { return ''; } }
   async function zbarScan(c) {
     const z = await zbarLib(); const id = ctx2(c).getImageData(0, 0, c.width, c.height);
     const res = await z.scanImageData(id), out = [];
@@ -187,25 +204,53 @@
       let hit = false;
       for (const [da, sc, md] of [[0, 1, ''], [0, 1.7, 'e'], [0.05, 1.3, ''], [-0.05, 1.3, '']]) {
         let c = cropRegion(work, r, da, sc, 'bars'); if (md) c = enhance(c, md);
-        try { const rs = await zbarScan(c); if (rs.length) { rs.forEach((q) => add(q.code, 'barcode', null)); hit = true; break; } } catch { break; }
+        try { const rs = await zbarScan(c); if (rs.length) { rs.forEach((q) => { add(q.code, 'barcode', null); const f2 = found.get(q.code); if (f2 && !f2.thumb) f2.thumb = thumbOf(work, r); }); hit = true; break; } } catch { break; }
       }
       if (!hit) ocrJobs.push(r);
       await tick();
     }
     if (opt.ocr !== false && ocrJobs.length && left() > 1500) {
       let ocr = null; try { ocr = await ocrLib(); } catch { ocr = null; }
+      const known = (opt.prefixes && opt.prefixes.length ? opt.prefixes : ['608116']).slice();
+      for (const f of found.values()) { const p = f.code.slice(0, 6); if (!known.includes(p)) known.push(p); }
+      const reads = [];   // { reg, g1, g2, g3 }
+      const VARS = [[7, 2, 0], [7, 3, 0], [6, 2, 0], [7, 2, 0.06], [7, 4, 0], [6, 3, -0.06], [7, 3, 0.06], [7, 2, -0.06]];
       if (ocr) for (const r of ocrJobs) {
         if (left() < 600) break;
-        const votes = new Map();
-        for (const da of [0, 0.12, -0.12]) {
-          const c = cropRegion(work, r, da, 2, 'text');
-          try { textCodes(await ocr.recognize(c, 6)).forEach((k) => votes.set(k, (votes.get(k) || 0) + 1)); } catch { /* */ }
+        const votes = new Map(); let flip = false, tried = 0;
+        const run = async (cfg, fl) => {
+          const c = cropRegion(work, r, cfg[2], cfg[1], 'text', fl); let txt = '';
+          try { txt = await ocr.recognize(c, cfg[0]); } catch { return; }
+          lenientCodes(txt).forEach((x) => { const g1 = fixPrefix(x.g1, known); if (!g1) return; const k = `${g1}-${x.g2}-${x.g3}`; votes.set(k, (votes.get(k) || 0) + 1); reads.push({ reg: r, g1, g2: x.g2, g3: x.g3 }); });
+        };
+        for (const cfg of VARS) {
+          if (left() < 400) break;
+          await run(cfg, flip); tried++;
           if ([...votes.values()].some((v) => v >= 2)) break;
+          if (tried === 2 && !votes.size && !flip) { flip = true; }   // ulta (180°) photo — dusri taraf ki patti
           await tick();
         }
-        const ranked = [...votes.entries()].sort((a, b) => b[1] - a[1]);
-        if (ranked[0]) { add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) f.alts = ranked.slice(1).map((x) => x[0]); }
+        if (Math.max(0, ...votes.values()) < 2 && left() > 800) {   // kuch nahi mila — poore region (upar-neeche-tedha) par, dono disha me
+          for (const [fl, da] of [[false, 0], [true, 0], [false, 0.15], [false, -0.15], [true, 0.15], [true, -0.15]]) {
+            if (left() < 400) break;
+            let txt = ''; try { txt = await ocr.recognize(cropRegion(work, r, da, 1.6, 'wide', fl), 11); } catch { break; }
+            lenientCodes(txt).forEach((x) => { const g1 = fixPrefix(x.g1, known); if (!g1) return; const k = `${g1}-${x.g2}-${x.g3}`; votes.set(k, (votes.get(k) || 0) + 1); reads.push({ reg: r, g1, g2: x.g2, g3: x.g3 }); });
+            if ([...votes.values()].some((v) => v >= 2)) break;
+            await tick();
+          }
+        }
+        let ranked = [...votes.entries()].sort((a, b) => b[1] - a[1]);
+        if (ranked.length >= 2 && ranked[0][1] < 2) {   // pakki jodi nahi — har digit par bahumat (character-level)
+          const mine = reads.filter((x) => x.reg === r), pos = (fn, len) => { let s = ''; for (let i = 0; i < len; i++) { const c = {}; mine.forEach((x) => { const d = fn(x)[i]; if (d) c[d] = (c[d] || 0) + 1; }); const b2 = Object.entries(c).sort((p, q) => q[1] - p[1])[0]; s += b2 ? b2[0] : '0'; } return s; };
+          const g1 = ranked[0][0].slice(0, 6), mix = `${g1}-${pos((x) => x.g2, 3)}-${pos((x) => x.g3, 7)}`;
+          if (!ranked.some((x) => x[0] === mix)) ranked.unshift([mix, 1]); else ranked.sort((a, b) => (a[0] === mix ? -1 : b[0] === mix ? 1 : b[1] - a[1]));
+        }
+        if (ranked[0]) { add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) { f.alts = ranked.slice(1).map((x) => x[0]); f.thumb = thumbOf(work, r); } }
       }
+      // photo ke andar sabka common middle group (jaise 039): ek-do digit ka farak ho to sahi wala alt me daalo
+      const tx = [...found.values()].filter((f) => f.how === 'text'); const g2c = new Map(); tx.forEach((f) => { const g = f.code.slice(7, 10); g2c.set(g, (g2c.get(g) || 0) + 1); });
+      const topG2 = [...g2c.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (topG2 && tx.length >= 2) tx.forEach((f) => { const g = f.code.slice(7, 10); if (g !== topG2[0] && ham(g, topG2[0]) <= 1) { const alt = `${f.code.slice(0, 7)}${topG2[0]}${f.code.slice(10)}`; f.alts = [alt, ...(f.alts || []).filter((x) => x !== alt)]; } });
     }
     // 5) kuch bhi na mila — poori photo par OCR (sirf number likha ho / barcode kata ho)
     if (!found.size && opt.ocr !== false && left() > 2500) {
@@ -214,6 +259,6 @@
     return [...found.values()];
   }
 
-  FF.scanVision = { read, parse16, textCodes, locate, cropRegion, _env: env, warm: () => { zbarLib().catch(() => {}); } };
+  FF.scanVision = { read, parse16, textCodes, lenientCodes, fixPrefix, locate, cropRegion, _env: env, warm: () => { zbarLib().catch(() => {}); } };
   if (typeof module !== 'undefined' && module.exports) module.exports = FF.scanVision;
 })(typeof window !== 'undefined' ? window : globalThis);

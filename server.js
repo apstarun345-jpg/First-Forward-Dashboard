@@ -14129,7 +14129,7 @@ async function handleApi(req, res, url) {
     const slim = (x) => ({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, tagType: x.tagType, inventory: x.inventoryName, bcAt: x.barcodeAllocatedAt, agentId: x.stockAgentId, agent: x.stockAgentName, agentAt: x.agentAllocatedAt, tl: x.tlName, ...gvMapInfo({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, agent: x.stockAgentName, agentId: x.stockAgentId, tl: x.tlName }) });
     try {
       const out = await mappingStock.lookup(list.map((b) => ({ type: 'barcode', barcode: b })), { fresh: !!(body && body.fresh) });
-      const results = list.map((b, i) => ({ barcode: b, rows: ((out.results[i] || {}).rows || []).map(slim) }));
+      const results = list.map((b, i) => ({ barcode: b, rows: ((out.results[i] || {}).rows || []).map(slim), reg: (() => { try { return issuedStore.get(b) || null; } catch { return null; } })() }));   // v3.125.532 — raat ka Issued register (turant)
       const miss = results.filter((r) => !r.rows.length && /^\d{4,}$/.test(r.barcode.replace(/\D/g, '')));
       if (miss.length) {
         const near = await mappingStock.lookup(miss.map((r) => { const d = r.barcode.replace(/\D/g, ''); const n = BigInt(d); const w = d.length; const f = (v) => (v < 0n ? 0n : v).toString().padStart(w, '0'); return { type: 'range', first: f(n - 40n), last: f(n + 40n) }; }), {});

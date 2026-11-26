@@ -8,3 +8,16 @@
 .bcc-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .bcc-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 .bcc-agents { margin: 4px 0 10px; }
+
+/* 🖼️ v3.125.532 — Photo upload tab */
+.bcc-ph-drop { margin: 10px 0; padding: 18px; border: 2px dashed var(--line, #cbd5e1); border-radius: 14px; text-align: center; color: #64748b; background: rgba(99, 102, 241, .04); outline: none; }
+.bcc-ph-drop.on, .bcc-ph-drop:focus { border-color: #6366f1; background: rgba(99, 102, 241, .1); }
+.bcc-ph-list { display: grid; gap: 10px; }
+.bcc-ph-card { border: 1px solid var(--line, #e2e8f0); border-radius: 14px; padding: 10px; background: var(--card, #fff); }
+.bcc-ph-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.bcc-ph-head > div { flex: 1; min-width: 0; }
+.bcc-ph-img { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; }
+.bcc-ph-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px dashed var(--line, #e2e8f0); }
+.bcc-ph-row .input { width: 190px; padding: 6px 8px; }
+.bcc-ph-row .input.bad { border-color: #dc2626; }
+.bcc-ph-thumb { height: 34px; border-radius: 6px; border: 1px solid var(--line, #e2e8f0); }

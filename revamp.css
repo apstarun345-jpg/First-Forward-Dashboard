@@ -158,3 +158,4 @@ html[data-theme="dark"] .bcc-vm-pick{background:#1e1b4b;color:#c7d2fe}
 .trs-rvrow input[type=checkbox] { width: 20px; height: 20px; }
 .trs-rvinfo { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 @media (max-width: 640px) { .trs-rvrow { grid-template-columns: auto 1fr; } .trs-rvrow small.dim, .trs-rvinfo { grid-column: 2; } }
+.trs-thumb { height: 34px; border-radius: 6px; border: 1px solid var(--line, #e2e8f0); grid-column: 2 / -1; justify-self: start; }

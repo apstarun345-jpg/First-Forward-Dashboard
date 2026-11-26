@@ -178,9 +178,14 @@ FF.pages = FF.pages || {};
       }
       return { label: r.barcode, st, tag, inf };
     });
+    // ⚡ v3.125.532 — raat ka Issued register (server) pehle: issued turant; live EIR sirf register me na milne waale tags ke liye, peeche se
+    const regEir = new Map();
+    (res.results || []).forEach((r, i) => { const g = r.reg, x = items[i]; if (g && x && x.tag) regEir.set(x.tag, { date: g.d || '', vrn: g.v || '', cls: g.c || '', agent: g.a || '', agentId: g.ai || '', tl: g.tl || '', status: '', type: '', ch: g.s === 'gv' ? 'GV Partner' : 'First Forward' }); });
     const build = (eir) => items.map((x) => makeRow(x.label, x.st, x.tag, x.inf, x.tag ? eir.get(x.tag) : null));
-    if (early && items.some((x) => x.tag)) early(build(new Map()));   // ⚡ stock turant, EIR peeche se
-    const eir = await eirByTags([...new Set(items.map((x) => x.tag).filter(Boolean))]);
+    if (early && items.some((x) => x.tag)) early(build(regEir));   // ⚡ stock + register turant, live EIR peeche se
+    const need = [...new Set(items.map((x) => x.tag).filter((tg) => tg && !regEir.has(tg)))];
+    const eir = need.length ? await eirByTags(need) : new Map();
+    regEir.forEach((v, k) => { if (!eir.has(k)) eir.set(k, v); });
     return build(eir);
   }
 
@@ -220,6 +225,7 @@ FF.pages = FF.pages || {};
     return `<div class="bcc-chips">${chip('all', '🔢 Sab', rows.length, '')}${Object.entries(STATUS).map(([k, v]) => chip(k, v.label, cnt(k), v.tone)).join('')}</div>
       <div class="bcc-tools"><input class="input" data-bcc-q placeholder="🔎 Barcode / tag / agent / TL / VRN…" value="${esc(state.q)}">
         ${state.agent ? `<button type="button" class="chip on" data-bcc-agent="">🧑‍💼 ${esc(state.agent)} ✕</button>` : ''}
+        <button type="button" class="btn small" data-bcc-copy="bc" title="Sirf barcode numbers">📋 Barcodes</button><button type="button" class="btn small" data-bcc-copy="tag" title="Sirf Tag IDs">📋 Tag IDs</button><button type="button" class="btn small" data-bcc-csv="vis" title="CSV download">⬇ CSV</button>
         <button type="button" class="btn small primary" data-bcc-copy="both" title="Barcode + Tag ID + Status (tab-separated — Sheets/Excel me seedha paste)">📋 Copy Barcode + Tag ID + Status (<span data-bcc-n>${U.fmt(vis.length)}</span>)</button><button type="button" class="btn small" data-bcc-copy="bc">📋 Barcodes</button><button type="button" class="btn small" data-bcc-copy="tag">📋 Tag IDs</button>
         ${canX ? `<button type="button" class="btn small" data-bcc-xlsx="vis">⬇ Excel (filtered <span data-bcc-n>${U.fmt(vis.length)}</span>)</button><button type="button" class="btn small" data-bcc-xlsx="all">⬇ Excel (sab)</button>` : ''}</div>
       ${agents.length ? `<details class="bcc-agents" ${agents.length <= 12 ? 'open' : ''}><summary><b>🧑‍💼 Agent-wise · ${U.fmt(agents.length)}</b> <span class="dim small">(naam par click = filter)</span></summary>
@@ -289,7 +295,7 @@ FF.pages = FF.pages || {};
       <div class="page-head"><div><h1>🔢 Barcode Checker</h1>
         <p class="sub">Barcode range or many barcodes → status of every tag: <b>✅ issued</b> (when, on which VRN) · <b>📦 in which agent's stock</b> · <b>🏢 master/BC</b> · <b>❓ missing</b>. Stock = StockDataa · Issued = EIR.</p></div></div>
       <div class="card"><div class="card-body">
-        <div class="seg bcc-tabs"><button type="button" class="seg-btn${state.tab === 'range' ? ' on' : ''}" data-bcc-tab="range">↔️ Range (first → last)</button><button type="button" class="seg-btn${state.tab === 'multi' ? ' on' : ''}" data-bcc-tab="multi">📋 Multiple barcodes</button><button type="button" class="seg-btn${state.tab === 'scan' ? ' on' : ''}" data-bcc-tab="scan">📷 Scan</button><button type="button" class="seg-btn${state.tab === 'emp' ? ' on' : ''}" data-bcc-tab="emp">👥 Employee scans <span class="badge" data-emp-badge hidden></span></button></div>
+        <div class="seg bcc-tabs"><button type="button" class="seg-btn${state.tab === 'range' ? ' on' : ''}" data-bcc-tab="range">↔️ Range (first → last)</button><button type="button" class="seg-btn${state.tab === 'multi' ? ' on' : ''}" data-bcc-tab="multi">📋 Multiple barcodes</button><button type="button" class="seg-btn${state.tab === 'photo' ? ' on' : ''}" data-bcc-tab="photo">🖼️ Photo upload</button><button type="button" class="seg-btn${state.tab === 'scan' ? ' on' : ''}" data-bcc-tab="scan">📷 Scan</button><button type="button" class="seg-btn${state.tab === 'emp' ? ' on' : ''}" data-bcc-tab="emp">👥 Employee scans <span class="badge" data-emp-badge hidden></span></button></div>
         <form class="bcc-form" data-bcc-form="range" ${state.tab === 'range' ? '' : 'hidden'}>
           <label class="field"><span class="dim small">First barcode</span><input class="input mono" name="first" value="${esc(p.first || '')}" placeholder="608116-011-0558283" autocomplete="off" inputmode="numeric"></label>
           <label class="field"><span class="dim small">Last barcode</span><input class="input mono" name="last" value="${esc(p.last || '')}" placeholder="608116-011-0558331" autocomplete="off" inputmode="numeric"></label>
@@ -301,6 +307,11 @@ FF.pages = FF.pages || {};
             <textarea class="input mono" name="list" rows="6" placeholder="608116-011-0558283&#10;608116-011-0558290&#10;6081160110558301">${esc(p.list || '')}</textarea></label>
           <div class="btn-row"><button class="btn primary" type="submit">🔎 Check</button><span class="dim small" data-bcc-count></span></div>
         </form>
+        <div class="bcc-photo" data-bcc-form="photo" ${state.tab === 'photo' ? '' : 'hidden'}>
+          <div class="btn-row"><button type="button" class="btn primary" data-ph="pick">🖼️ Photos chuno (kai ek saath)</button><button type="button" class="btn small" data-ph="clear">🗑 Saaf</button><span class="dim small" data-ph-note>Photo yahan drag-drop karo ya Ctrl+V paste karo — ek photo ke saare barcode nikalenge</span><input type="file" accept="image/*" multiple hidden data-ph-file></div>
+          <div class="bcc-ph-drop" data-ph-drop tabindex="0">⬇ Photos yahan chhodo / paste (Ctrl+V)</div>
+          <div class="bcc-ph-list" data-ph-list></div>
+        </div>
         <div class="bcc-scan" data-bcc-form="scan" ${state.tab === 'scan' ? '' : 'hidden'}>
           <div class="bcc-scan-bar">
             <button type="button" class="btn primary" data-scan="cam">📷 Camera scan shuru</button>
@@ -330,6 +341,7 @@ FF.pages = FF.pages || {};
     dup.data = null; dup.seq++; dupPaint(root);
     camStop();
     bind(root);
+    phBind(root);
     scanInit(root);
     empStop(); if (state.tab === 'emp') empStart();
     if (p.first && p.last) run('range');
@@ -447,6 +459,8 @@ FF.pages = FF.pages || {};
         if (r && cell) { copyOut(copyText([r], cell.dataset.bccCell), cell.dataset.bccCell === 'bc' ? r.barcode : (r.tagId || 'Tag ID')); return; }
         if (r && e.target.closest('[data-bcc-row]')) { copyOut(copyText([r], 'both'), 'Barcode + Tag ID + Status'); return; }
       }
+      const cv = e.target.closest('[data-bcc-csv]');
+      if (cv && state.rows) { const rows = visible(); U.downloadCsv(`barcode-check-${U.slug(state.title || 'photo')}-${U.stamp()}.csv`, HEAD, rows.map(cells)); return; }
       const x = e.target.closest('[data-bcc-xlsx]');
       if (x && state.rows) {
         const rows = x.dataset.bccXlsx === 'all' ? state.rows : visible();
@@ -456,6 +470,73 @@ FF.pages = FF.pages || {};
     });
   }
 
+
+  // ---- 🖼️ Photo upload (v3.125.532) — photo(s) → saare barcode (barcode + neeche likha number OCR) → ek saath check:
+  //      Tag ID / status / class / agent / TL / kisme map / dispatch (kisko, kab). Copy (barcode / tag ID / sab) + CSV + Excel.
+  const ph = { items: [], seq: 0, timer: 0 };
+  const phVision = () => (FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=532'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const phValid = (v) => { const d = bcDigits(v); return d.length === 16 ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : ''; };
+  function phPaint() {
+    const root = state.root, host = root && root.querySelector('[data-ph-list]'); if (!host) return;
+    const all = ph.items.flatMap((it) => it.cands.filter((c) => c.on && phValid(c.code)));
+    const uniq = new Set(all.map((c) => phValid(c.code)));
+    host.innerHTML = ph.items.map((it) => `<div class="bcc-ph-card" data-ph-id="${it.id}"><div class="bcc-ph-head"><img src="${esc(it.url)}" alt="" class="bcc-ph-img"><div><b>${esc(it.name)}</b><div class="dim small">${it.busy ? '🔎 Padh raha hu… ' + esc(it.step || '') : it.cands.length ? `${it.cands.length} barcode mile` : '❌ barcode nahi mila — photo paas / seedhi lo ya neeche number type karo'}</div></div><button type="button" class="btn small" data-ph-del="${it.id}">✖</button></div>${it.cands.map((c, k) => `<div class="bcc-ph-row"><input type="checkbox" data-ph-ck="${it.id}|${k}"${c.on ? ' checked' : ''}><input class="input mono" data-ph-code="${it.id}|${k}" value="${esc(c.code)}" inputmode="numeric" autocomplete="off"><small class="dim">${c.how === 'text' ? '🔤 number padha' : '▮▮ barcode'}</small>${c.thumb ? `<img class="bcc-ph-thumb" src="${c.thumb}" alt="">` : ''}</div>`).join('')}</div>`).join('') + (ph.items.length ? `<div class="btn-row"><button type="button" class="btn primary" data-ph="check">🔎 ${uniq.size} barcode check karo</button><button type="button" class="btn small" data-ph="addtxt" title="Photo me jo na mile wo number yahan jodo">➕ Number jodo</button><span class="dim small">Galat padha ho to number badlo / untick karo — phir "check karo"</span></div>` : '');
+  }
+  async function phResolve(it, c) {   // OCR ne ek digit galat padha ho to alt me se jo stock / register me mile wo chuno
+    const list = [c.code, ...(c.alts || [])].map(phValid).filter((v, i, a) => v && a.indexOf(v) === i); if (list.length < 2) return;
+    try {
+      const res = await FF.auth.api('/api/barcode-lookup', 'POST', { barcodes: list });
+      const ok = (res.results || []).find((r) => (r.rows && r.rows.length) || r.reg);
+      if (ok && ok.barcode !== c.code) { c.code = ok.barcode; }
+    } catch { /* check me dikhega */ }
+  }
+  async function phAdd(files) {
+    const list = Array.from(files || []).filter((f) => f && /^image\//.test(f.type || 'image/'));
+    for (const file of list) {
+      const it = { id: ++ph.seq, name: file.name || 'Photo', url: URL.createObjectURL(file), busy: true, step: '', cands: [] };
+      ph.items.unshift(it); phPaint();
+      try {
+        const V = await phVision();
+        let bmp = null; try { bmp = await createImageBitmap(file); } catch { /* */ }
+        if (!bmp) bmp = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error('img')); im.src = it.url; });
+        const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
+        const res = await V.read(bmp, w, h, { budgetMs: 25000, onFound: (code, how) => { if (!it.cands.some((c) => c.code === code)) { it.cands.push({ code, how, on: true, alts: [], thumb: '' }); phPaint(); } } });
+        for (const r of res) { const c = it.cands.find((x) => x.code === r.code); if (c) { c.alts = r.alts || []; c.thumb = r.thumb || ''; } }
+        for (const c of it.cands) if (c.how === 'text' && c.alts.length) await phResolve(it, c);
+      } catch (e) { it.err = String((e && e.message) || e); }
+      it.busy = false; phPaint(); phCheckSoon(400);
+    }
+  }
+  function phCheckSoon(ms) { clearTimeout(ph.timer); ph.timer = setTimeout(phCheck, ms || 300); }
+  function phCheck() {
+    const root = state.root; if (!root) return;
+    const list = [...new Set(ph.items.flatMap((it) => it.cands.filter((c) => c.on).map((c) => phValid(c.code))).filter(Boolean))];
+    if (!list.length) return;
+    const f = root.querySelector('[data-bcc-form="multi"]'); if (f && f.list) f.list.value = list.join('\n');
+    state.lastKey = ''; run('multi');
+  }
+  function phBind(root) {
+    const file = root.querySelector('[data-ph-file]'), drop = root.querySelector('[data-ph-drop]'); if (!file) return;
+    root.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-ph]'); if (b) {
+        const a = b.dataset.ph;
+        if (a === 'pick') file.click(); else if (a === 'clear') { ph.items = []; phPaint(); } else if (a === 'check') phCheck();
+        else if (a === 'addtxt') { const v = prompt('Barcode number (16 digit):'); const k = phValid(v || ''); if (k) { let it = ph.items.find((x) => x.name === 'Manual'); if (!it) { it = { id: ++ph.seq, name: 'Manual', url: '', busy: false, cands: [] }; ph.items.push(it); } it.cands.push({ code: k, how: 'barcode', on: true, alts: [] }); phPaint(); phCheckSoon(100); } }
+        return;
+      }
+      const d = e.target.closest('[data-ph-del]'); if (d) { ph.items = ph.items.filter((x) => String(x.id) !== d.dataset.phDel); phPaint(); phCheckSoon(200); }
+    });
+    file.addEventListener('change', () => { const fl = Array.from(file.files || []); file.value = ''; phAdd(fl); });
+    root.addEventListener('change', (e) => {
+      const ck = e.target.closest('[data-ph-ck]'); if (ck) { const [id, k] = ck.dataset.phCk.split('|'); const it = ph.items.find((x) => String(x.id) === id); if (it && it.cands[k]) { it.cands[k].on = ck.checked; phPaint(); } return; }
+      const ci = e.target.closest('[data-ph-code]'); if (ci) { const [id, k] = ci.dataset.phCode.split('|'); const it = ph.items.find((x) => String(x.id) === id), c = it && it.cands[k]; const v = phValid(ci.value); if (c && v) { c.code = v; c.alts = []; c.on = true; phPaint(); phCheckSoon(200); } else if (c) { ci.classList.add('bad'); } }
+    });
+    ['dragover', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { if (!e.dataTransfer || ![...(e.dataTransfer.types || [])].includes('Files')) return; e.preventDefault(); drop.classList.toggle('on', ev === 'dragover'); if (ev === 'drop') phAdd(Array.from(e.dataTransfer.files)); }));
+    drop.addEventListener('dragleave', () => drop.classList.remove('on'));
+    if (!ph.pasteBound) ph.pasteBound = 1; else return phPaint();
+    document.addEventListener('paste', (e) => { if (state.tab !== 'photo' || !state.root || !state.root.isConnected) return; const fl = Array.from((e.clipboardData && e.clipboardData.files) || []).filter((f) => /^image\//.test(f.type)); if (fl.length) { e.preventDefault(); phAdd(fl); } });
+    phPaint();
+  }
 
   // ---- 📷 Scan (v3.125.436) — camera + scanner-gun: har scan turant list me, status peeche se bharta hai ------------------
   // Camera: browser ka BarcodeDetector (phone / Chrome — fast, native); na ho to ZXing (libs/zxing.min.js, sirf zarurat par load).

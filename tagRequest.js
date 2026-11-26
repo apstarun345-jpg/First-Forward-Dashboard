@@ -1306,7 +1306,7 @@ body.colorful .from-hdr { color: #166534; }
   }
   // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
   //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
-  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=531'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=532'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
   SC.rv = []; SC.rvId = 0;
   const scRvPaint = () => {
     const host = scQ('[data-sc-review]'); if (!host) return;
@@ -1314,7 +1314,7 @@ body.colorful .from-hdr { color: #166534; }
       const rows = c.cands.map((x, k) => {
         const i = x.info, tone = i ? scTone[i.k] || '#64748b' : '#94a3b8';
         const chip = i ? `<span class="trs-badge" style="background:${tone}">${esc(i.label || '')}</span>${i.cls ? `<small> ${esc(i.cls)}</small>` : ''}${i.agent ? `<small> · ${esc(i.agent)}</small>` : ''}` : (x.err ? `<span class="trs-note bad">${esc(x.err)}</span>` : '<small class="dim">🔎 check ho raha hai…</small>');
-        return `<div class="trs-rvrow${i && (i.k === 'iss' || i.k === 'nf') ? ' bad' : ''}"><input type="checkbox" data-rv-ck="${c.id}|${k}"${x.on ? ' checked' : ''}><input class="input mono" data-rv-code="${c.id}|${k}" value="${esc(x.code)}" inputmode="numeric" autocomplete="off" aria-label="Barcode number"><small class="dim">${x.how === 'text' ? '🔤 number padha' : '▮▮ barcode'}</small><div class="trs-rvinfo">${chip}</div></div>`;
+        return `<div class="trs-rvrow${i && (i.k === 'iss' || i.k === 'nf') ? ' bad' : ''}"><input type="checkbox" data-rv-ck="${c.id}|${k}"${x.on ? ' checked' : ''}><input class="input mono" data-rv-code="${c.id}|${k}" value="${esc(x.code)}" inputmode="numeric" autocomplete="off" aria-label="Barcode number"><small class="dim">${x.how === 'text' ? '🔤 number padha' : '▮▮ barcode'}</small>${x.thumb ? `<img class="trs-thumb" src="${x.thumb}" alt="">` : ''}<div class="trs-rvinfo">${chip}</div></div>`;
       }).join('');
       const n = c.cands.filter((x) => x.on && scValid(x.code)).length;
       return `<div class="trs-rv" data-rv="${c.id}"><div class="trs-rvhead"><img src="${esc(c.url)}" alt="" class="trs-rvimg"><div><b>${esc(c.name)}</b><div class="dim small">${c.busy ? '🔎 Photo padh raha hu… ' + esc(c.step || '') : c.cands.length ? `${c.cands.length} barcode mile` : '❌ Is photo me barcode nahi mila — photo paas / seedhi lo, ya 16 digit type karo'}</div></div><button class="btn small" data-rv-del="${c.id}" title="Hatao">✖</button></div>${rows}${c.cands.length && !c.busy ? `<div class="btn-row"><button class="btn primary" data-rv-ok="${c.id}"${n ? '' : ' disabled'}>✅ Confirm · ${n} add karo</button></div>` : ''}</div>`;
@@ -1343,7 +1343,7 @@ body.colorful .from-hdr { color: #166534; }
         if (card.cands.some((x) => x.code === code)) return;
         const x = { code, how, on: true, info: null, err: '', alts: [] }; card.cands.push(x); scBeep('ok'); try { navigator.vibrate && navigator.vibrate(30); } catch { /* */ }
         scRvPaint(); setTimeout(() => scRvCheck(card, x), 0);
-      } }).then((res) => { res.forEach((r) => { const x = card.cands.find((c2) => c2.code === r.code); if (x && r.alts && r.alts.length) { x.alts = r.alts; if (x.info && x.info.k === 'nf') { x.info = null; scRvCheck(card, x); } } }); });
+      } }).then((res) => { res.forEach((r) => { const x = card.cands.find((c2) => c2.code === r.code); if (x && r.thumb) { x.thumb = r.thumb; scRvPaint(); } if (x && r.alts && r.alts.length) { x.alts = r.alts; if (x.info && x.info.k === 'nf') { x.info = null; scRvCheck(card, x); } } }); });
     } catch (e) { card.err = String((e && e.message) || e); }
     card.busy = false; scRvPaint();
     if (!card.cands.length) scBeep('bad');
