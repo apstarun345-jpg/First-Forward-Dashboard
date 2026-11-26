@@ -56,6 +56,11 @@ export function createMappingJobs(deps) {
           gate.good();
           return { success: true, httpCode: response.status, status: 'Success', message: 'Pehle se mapped (retry me confirm hua) — ' + message.slice(0, 120) };
         }
+        // v3.125.548 — bank bolta hai "Tag already exists with this tag ID and serial number" (404/409): tag pehle se mapped hai — ye failure nahi, dobara map ki zaroorat nahi.
+        if (/already\s+exist|already\s+mapped|duplicate/i.test(message)) {
+          gate.good();
+          return { success: true, httpCode: response.status, status: 'Already mapped', alreadyMapped: true, message: 'Ye tag pehle se mapped hai (bank: ' + message.slice(0, 100) + ') — dobara map karne ki zaroorat nahi. Agent badalna ho to bank se hi hoga.' };
+        }
         lastMessage = message;
         const transient = TRANSIENT.includes(response.status);
         if (!transient) { gate.release(); return { success: false, httpCode: response.status, status: response.status === 409 ? 'Conflict' : 'Failed (HTTP ' + response.status + ')', message, retryable: false }; }

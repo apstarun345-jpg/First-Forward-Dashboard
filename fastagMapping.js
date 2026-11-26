@@ -1232,7 +1232,7 @@ window.FF = window.FF || {};
     let touched = false;
     (s.events || []).forEach((e) => {
       const r = track.byTag.get(String(e.k)); if (!r) return;
-      r.mapped = !!e.s; r.apiStatus = e.s ? 'Success' : (e.st || 'Failed'); r.message = e.m || ''; r.retryable = !e.s && !!e.rt;
+      r.mapped = !!e.s; r.apiStatus = e.s ? (/already/i.test(e.st || '') ? 'Already mapped' : 'Success') : (e.st || 'Failed'); r.message = e.m || ''; r.retryable = !e.s && !!e.rt;
       r.status = e.s ? 'Mapped successfully' : 'Mapping failed'; touched = true;
     });
     track.next = s.next != null ? s.next : track.next;

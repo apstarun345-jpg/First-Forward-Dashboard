@@ -84,3 +84,12 @@ test('snapshot events cursor only returns new events', async () => {
   const again = jobs.snapshot(job, snap.next);
   assert.equal(again.events.length, 0);
 });
+
+test('v548: bank "Tag already exists" (404) = Already mapped, not a failure', async () => {
+  const { jobs, seen } = make((sno) => res(404, { message: 'Tag already exists with this tag ID and serial number.' }));
+  const job = jobs.create({ owner: 'o2', rows: [row(9)] });
+  const snap = await finish(jobs, job);
+  assert.equal(snap.okCount, 1); assert.equal(snap.failed, 0);
+  assert.equal(seen.get(key(9)), 1, 'not retried');
+  assert.ok(snap.events.some((e) => e.s === 1 && /Already mapped/.test(e.st)));
+});
