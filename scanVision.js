@@ -1,9 +1,9 @@
-/* 📷 v3.125.531 — scanVision: photo / screenshot / camera-frame se FASTag barcode nikalo (ek photo me kai tag bhi).
+/* 📷 v3.125.533 — scanVision: photo / screenshot / camera-frame se FASTag barcode nikalo (ek photo me kai tag bhi).
  *
  * Seedhe barcode decoder halke, tedhe, dhundhle (WhatsApp photo, screen par photo) barcode par fail hota tha. Ab 4 tareeke, tez se dheere:
  *   1. Browser ka native BarcodeDetector (saare barcode ek saath)          2. zbar-wasm poori photo par
  *   3. Barcode ki JAGAH dhoondh kar (gradient coherence) seedha ghuma ke crop → zbar            4. Barcode ke NEECHE likha number (OCR, Tesseract) —
- *      jab patti dhundhli ho par number saaf dikhta ho (608116-035-0611445). Sab libraries sirf zarurat par load hoti hain (vendor/).
+ *      jab patti dhundhli ho par number saaf dikhta ho (608116-035-0611445). Sab libraries sirf zarurat par load hoti hain (libs/).
  * Kisi bhi tareeke se mila number server se check hoga + user confirm karega, isliye galat OCR chupchap add nahi hota.
  */
 (function (root) {
@@ -40,19 +40,22 @@
     const out = [];
     String(text || '').split(/\n/).forEach((line) => {
       const l = line.replace(/\s+/g, '').replace(/[–—_.]/g, '-'); const re = /(\d{2,9})-(\d{3})-(\d{6,9})/g; let m;
-      while ((m = re.exec(l))) { const g3 = m[3].slice(0, 7); if (g3.length < 7) continue; out.push({ g1: m[1].slice(-6), g2: m[2], g3 }); re.lastIndex = m.index + 1; }
+      while ((m = re.exec(l))) { const g3 = m[3].slice(0, 7); if (g3.length < 7) continue; out.push({ g1: m[1], g2: m[2], g3 }); re.lastIndex = m.index + 1; }
     });
     return out;
   }
-  function fixPrefix(g1, known) {
-    if (g1.length === 6 && known.includes(g1)) return g1;
-    for (const p of known) { if (g1.length === 6 && ham(g1, p) <= 2) return p; if (g1.length < 6 && p.endsWith(g1) && g1.length >= 3) return p; }
-    return g1.length === 6 ? g1 : '';
+  function fixPrefix(d, known) {
+    if (d.length === 6 && known.includes(d)) return d;
+    let best = '', bh = 9;
+    for (const p of known) for (let i = 0; i + 6 <= d.length; i++) { const h = ham(d.slice(i, i + 6), p); if (h < bh) { bh = h; best = p; } }
+    if (bh <= 2) return best;
+    if (d.length >= 3 && d.length < 6) for (const p of known) if (p.endsWith(d)) return p;
+    return d.length >= 6 ? d.slice(-6) : '';
   }
 
   // ---------- libraries (lazy) ----------
   const loadScript = (src) => new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => no(new Error('lib ' + src)); document.head.appendChild(s); });
-  const baseUrl = () => env.base || new URL('vendor/', document.baseURI).href;
+  const baseUrl = () => env.base || new URL('libs/', document.baseURI).href;
   let zP = null, oP = null, ocrWorker = null;
   async function zbarLib() {
     if (env.zbar) return env.zbar;
@@ -164,7 +167,55 @@
     return c;
   }
 
-  function thumbOf(work, r) { try { return cropRegion(work, r, 0, 0.8, 'wide').toDataURL('image/jpeg', 0.55); } catch { return ''; } }
+
+  // ---------- v3.125.533: tedhe / ulte photo me barcode + neeche ka number SAHI ghuma kar seedha karna ----------
+  const grayOf = (c) => { const w = c.width, h = c.height, d = ctx2(c).getImageData(0, 0, w, h).data, g = new Float32Array(w * h); for (let i = 0; i < w * h; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) / 256; return { g, w, h }; };
+  /** region ka angle theek karo: jis ghumav par lakeeren sabse "tez" (column-profile ka variation sabse zyada) wahi seedha */
+  function refineAngle(work, r) {
+    const score = (da) => {
+      const { g, w, h } = grayOf(cropRegion(work, r, da, 0.9, 'wide')); const col = new Float32Array(w);
+      for (let x = 0; x < w; x++) { let s = 0; for (let y = 0; y < h; y++) s += g[y * w + x]; col[x] = s / h; }
+      let e = 0; for (let x = 1; x < w; x++) { const d = col[x] - col[x - 1]; e += d * d; } return e;
+    };
+    let best = 0, bs = -1;
+    for (let da = -0.3; da <= 0.3001; da += 0.03) { const sc = score(da); if (sc > bs) { bs = sc; best = da; } }
+    const c0 = best; for (let da = c0 - 0.028; da <= c0 + 0.0281; da += 0.007) { const sc = score(da); if (sc > bs) { bs = sc; best = da; } }
+    return best;
+  }
+  /** seedha kiye gaye crop (bars khade) me barcode ka dibba + neeche likhe number ki patti dhoondho. Return { bars:{x0,x1,y0,y1}, text:{y0,y1} } */
+  function layoutOf(c) {
+    const { g, w, h } = grayOf(c); const e = new Float32Array(h);
+    for (let y = 0; y < h; y++) { let s = 0; for (let x = Math.floor(w * 0.2); x < w * 0.8; x++) s += Math.abs(g[y * w + x] - g[y * w + x - 1]); e[y] = s; }
+    const es = e.map((_, y) => { let s = 0, n = 0; for (let k = -3; k <= 3; k++) if (e[y + k] !== undefined) { s += e[y + k]; n++; } return s / n; });
+    let am = 0; for (let y = 1; y < h; y++) if (es[y] > es[am]) am = y;
+    let y0 = am, y1 = am; while (y0 > 0 && es[y0 - 1] > 0.5 * es[am]) y0--; while (y1 < h - 1 && es[y1 + 1] > 0.5 * es[am]) y1++;
+    const H = y1 - y0 + 1;
+    // bars ka x-range: in rows ki column-energy
+    const ce = new Float32Array(w); for (let x = 1; x < w; x++) { let s = 0; for (let y = y0; y <= y1; y++) s += Math.abs(g[y * w + x] - g[y * w + x - 1]); ce[x] = s / H; }
+    const cs = Array.from(ce).sort((a, b) => a - b), thr = Math.max(4, cs[Math.floor(w * 0.9)] * 0.35); let xa = -1, xb = -1;
+    for (let x = 0; x < w; x++) if (ce[x] > thr) { if (xa < 0) xa = x; xb = x; }
+    if (xa < 0) { xa = 0; xb = w - 1; }
+    // number ki patti: bars ke turant neeche, jahan upar-neeche (akshar) ka "tez" badlav ho
+    let t0 = y1 + 2, t1 = y1 + Math.round(H * 0.4);
+    const lim = Math.min(h - 1, y1 + Math.round(H * 0.75)), te = [];
+    for (let y = y1 + 1; y <= lim; y++) { let s = 0; for (let x = xa + 1; x <= xb; x++) s += Math.abs(g[y * w + x] - g[y * w + x - 1]); te.push(s); }
+    if (te.length > 6) {
+      const sm = te.map((_, i) => { let s = 0, n = 0; for (let k = -2; k <= 2; k++) if (te[i + k] !== undefined) { s += te[i + k]; n++; } return s / n; });
+      let bi = 0; for (let i = 1; i < sm.length; i++) if (sm[i] > sm[bi]) bi = i;
+      if (sm[bi] > 0) { let a2 = bi, b2 = bi; while (a2 > 0 && sm[a2 - 1] > 0.4 * sm[bi]) a2--; while (b2 < sm.length - 1 && sm[b2 + 1] > 0.4 * sm[bi]) b2++; t0 = y1 + 1 + a2; t1 = y1 + 1 + b2; }
+    }
+    return { bars: { x0: xa, x1: xb, y0, y1 }, text: { y0: t0, y1: t1 }, w, h };
+  }
+  /** number ki patti ka saaf, bada, kaala-safed crop (OCR ke liye) — r region, da angle, flip = 180° ulta */
+  function textStrip(work, r, da, flip, th0) {
+    const c = cropRegion(work, r, da, 3, 'wide', flip), L = layoutOf(c), pad = Math.max(6, Math.round((L.text.y1 - L.text.y0) * 0.35));
+    const x0 = Math.max(0, L.bars.x0 - 12), x1 = Math.min(c.width, L.bars.x1 + 12), y0 = Math.max(0, L.text.y0 - pad), y1 = Math.min(c.height, L.text.y1 + pad);
+    const w = Math.max(10, x1 - x0), h = Math.max(10, y1 - y0), th = th0 || 56, s = th / Math.max(12, h), o = mk(Math.max(10, w * s), th), x = ctx2(o);
+    x.fillStyle = '#fff'; x.fillRect(0, 0, o.width, o.height); x.drawImage(c, x0, y0, w, h, 0, 0, o.width, o.height);
+    return { canvas: o, layout: L };
+  }
+
+  function thumbOf(work, r, da) { try { return cropRegion(work, r, da || 0, 0.8, 'wide').toDataURL('image/jpeg', 0.55); } catch { return ''; } }
   async function zbarScan(c) {
     const z = await zbarLib(); const id = ctx2(c).getImageData(0, 0, c.width, c.height);
     const res = await z.scanImageData(id), out = [];
@@ -197,13 +248,13 @@
     // 3) jagah dhoondh kar seedha crop + zbar ; 4) number ka OCR
     let regions = []; try { regions = locate(work); } catch { regions = []; }
     const inBox = (r) => boxes.some((b) => { const xs = b.map((p) => p[0]), ys = b.map((p) => p[1]); return r.cx >= Math.min(...xs) - 40 && r.cx <= Math.max(...xs) + 40 && r.cy >= Math.min(...ys) - 60 && r.cy <= Math.max(...ys) + 60; });
-    const cand = regions.filter((r) => r.w > 60 && r.w / Math.max(1, r.h) >= 1.3 && r.w / Math.max(1, r.h) <= 9 && !inBox(r)).slice(0, 10);
+    const cand = regions.filter((r) => r.w > 60 && r.w / Math.max(1, r.h) >= 0.9 && r.w / Math.max(1, r.h) <= 9 && !inBox(r)).slice(0, 10);
     const ocrJobs = [];
     for (const r of cand) {
       if (left() < 0) break;
-      let hit = false;
+      let hit = false; try { r.da = refineAngle(work, r); } catch { r.da = 0; }
       for (const [da, sc, md] of [[0, 1, ''], [0, 1.7, 'e'], [0.05, 1.3, ''], [-0.05, 1.3, '']]) {
-        let c = cropRegion(work, r, da, sc, 'bars'); if (md) c = enhance(c, md);
+        let c = cropRegion(work, r, (r.da || 0) + da, sc, 'bars'); if (md) c = enhance(c, md);
         try { const rs = await zbarScan(c); if (rs.length) { rs.forEach((q) => { add(q.code, 'barcode', null); const f2 = found.get(q.code); if (f2 && !f2.thumb) f2.thumb = thumbOf(work, r); }); hit = true; break; } } catch { break; }
       }
       if (!hit) ocrJobs.push(r);
@@ -217,20 +268,33 @@
       const VARS = [[7, 2, 0], [7, 3, 0], [6, 2, 0], [7, 2, 0.06], [7, 4, 0], [6, 3, -0.06], [7, 3, 0.06], [7, 2, -0.06]];
       if (ocr) for (const r of ocrJobs) {
         if (left() < 600) break;
-        const votes = new Map(); let flip = false, tried = 0;
+        const votes = new Map(); let flip = false, tried = 0, da0 = 0;
+        // v3.125.533 — pehle angle theek karo, number ki patti alag kaato (seedhi + ulti), OCR line mode
+        da0 = r.da || 0;
+        for (const fl of [false, true]) {
+          if (left() < 500) break;
+          for (const [th, dd] of [[56, 0], [72, 0.012], [48, -0.012]]) {
+            if (left() < 400) break;
+            let txt = ''; try { const st = textStrip(work, r, da0 + dd, fl, th); if (st.canvas.width < 80) break; txt = await ocr.recognize(st.canvas, 7); } catch { break; }
+            lenientCodes(txt).forEach((x) => { const g1 = fixPrefix(x.g1, known); if (!g1) return; const k = `${g1}-${x.g2}-${x.g3}`; votes.set(k, (votes.get(k) || 0) + 1); reads.push({ reg: r, g1, g2: x.g2, g3: x.g3 }); });
+            if (!votes.size) break;   // is disha me number hi nahi — ulti taraf dekho
+            if ([...votes.values()].some((v) => v >= 2)) break;
+          }
+          if (votes.size) break;
+        }
         const run = async (cfg, fl) => {
           const c = cropRegion(work, r, cfg[2], cfg[1], 'text', fl); let txt = '';
           try { txt = await ocr.recognize(c, cfg[0]); } catch { return; }
           lenientCodes(txt).forEach((x) => { const g1 = fixPrefix(x.g1, known); if (!g1) return; const k = `${g1}-${x.g2}-${x.g3}`; votes.set(k, (votes.get(k) || 0) + 1); reads.push({ reg: r, g1, g2: x.g2, g3: x.g3 }); });
         };
-        for (const cfg of VARS) {
+        if (!votes.size) for (const cfg of VARS) {
           if (left() < 400) break;
           await run(cfg, flip); tried++;
           if ([...votes.values()].some((v) => v >= 2)) break;
           if (tried === 2 && !votes.size && !flip) { flip = true; }   // ulta (180°) photo — dusri taraf ki patti
           await tick();
         }
-        if (Math.max(0, ...votes.values()) < 2 && left() > 800) {   // kuch nahi mila — poore region (upar-neeche-tedha) par, dono disha me
+        if (!votes.size && left() > 800) {   // kuch nahi mila — poore region (upar-neeche-tedha) par, dono disha me
           for (const [fl, da] of [[false, 0], [true, 0], [false, 0.15], [false, -0.15], [true, 0.15], [true, -0.15]]) {
             if (left() < 400) break;
             let txt = ''; try { txt = await ocr.recognize(cropRegion(work, r, da, 1.6, 'wide', fl), 11); } catch { break; }
@@ -245,12 +309,13 @@
           const g1 = ranked[0][0].slice(0, 6), mix = `${g1}-${pos((x) => x.g2, 3)}-${pos((x) => x.g3, 7)}`;
           if (!ranked.some((x) => x[0] === mix)) ranked.unshift([mix, 1]); else ranked.sort((a, b) => (a[0] === mix ? -1 : b[0] === mix ? 1 : b[1] - a[1]));
         }
-        if (ranked[0]) { add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) { f.alts = ranked.slice(1).map((x) => x[0]); f.thumb = thumbOf(work, r); } }
+        if (ranked[0]) { add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) { f.alts = ranked.slice(1).map((x) => x[0]).filter((c) => known.includes(c.slice(0, 6))); f.thumb = thumbOf(work, r, r.da); } }
       }
       // photo ke andar sabka common middle group (jaise 039): ek-do digit ka farak ho to sahi wala alt me daalo
       const tx = [...found.values()].filter((f) => f.how === 'text'); const g2c = new Map(); tx.forEach((f) => { const g = f.code.slice(7, 10); g2c.set(g, (g2c.get(g) || 0) + 1); });
       const topG2 = [...g2c.entries()].sort((a, b) => b[1] - a[1])[0];
-      if (topG2 && tx.length >= 2) tx.forEach((f) => { const g = f.code.slice(7, 10); if (g !== topG2[0] && ham(g, topG2[0]) <= 1) { const alt = `${f.code.slice(0, 7)}${topG2[0]}${f.code.slice(10)}`; f.alts = [alt, ...(f.alts || []).filter((x) => x !== alt)]; } });
+      if (topG2 && tx.length >= 2) tx.forEach((f) => { const g = f.code.slice(7, 10); if (g !== topG2[0] && ham(g, topG2[0]) <= 1) { const alt = `${f.code.slice(0, 7)}${topG2[0]}${f.code.slice(10)}`; f.alts = [f.code, ...(f.alts || []).filter((x) => x !== alt && x !== f.code)]; if (topG2[1] >= 3) { found.delete(f.code); f.code = alt; found.set(alt, f); } else f.alts = [alt, ...f.alts.filter((x) => x !== f.code)]; } });
+      // photo ke tag aksar ek series me hote hain — aakhri 7 digit ke pehle 4 digit sabke same; ek-do digit ka farak ho to majority wala
     }
     // 5) kuch bhi na mila — poori photo par OCR (sirf number likha ho / barcode kata ho)
     if (!found.size && opt.ocr !== false && left() > 2500) {
@@ -259,6 +324,6 @@
     return [...found.values()];
   }
 
-  FF.scanVision = { read, parse16, textCodes, lenientCodes, fixPrefix, locate, cropRegion, _env: env, warm: () => { zbarLib().catch(() => {}); } };
+  FF.scanVision = { read, parse16, textCodes, lenientCodes, fixPrefix, locate, cropRegion, refineAngle, layoutOf, textStrip, _env: env, warm: () => { zbarLib().catch(() => {}); } };
   if (typeof module !== 'undefined' && module.exports) module.exports = FF.scanVision;
 })(typeof window !== 'undefined' ? window : globalThis);

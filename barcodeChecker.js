@@ -474,7 +474,7 @@ FF.pages = FF.pages || {};
   // ---- 🖼️ Photo upload (v3.125.532) — photo(s) → saare barcode (barcode + neeche likha number OCR) → ek saath check:
   //      Tag ID / status / class / agent / TL / kisme map / dispatch (kisko, kab). Copy (barcode / tag ID / sab) + CSV + Excel.
   const ph = { items: [], seq: 0, timer: 0 };
-  const phVision = () => (FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=532'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const phVision = () => (FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=533'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
   const phValid = (v) => { const d = bcDigits(v); return d.length === 16 ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : ''; };
   function phPaint() {
     const root = state.root, host = root && root.querySelector('[data-ph-list]'); if (!host) return;
