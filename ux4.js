@@ -67,6 +67,8 @@
     el = D.createElement('div'); el.id = 'ux4-tick'; el.setAttribute('role', 'marquee'); el.setAttribute('aria-label', 'Live khabrein');
     el.innerHTML = '<div class="lv"><i></i><span>LIVE</span></div><div class="vp"><span class="it">Live khabrein aa rahi hain…</span></div><button class="x" type="button" title="Aaj ke liye band">✕</button>';
     bar.after(el); setTop(); W.addEventListener('resize', setTop);
+    // v3.125.522 — topbar ki height load/font/icon ke baad badalti hai; ticker ka top hamesha live topbar ke neeche rahe.
+    try { if (W.ResizeObserver && !el.__ro) { el.__ro = new W.ResizeObserver(setTop); el.__ro.observe(bar); } } catch { /* ok */ }
     el.querySelector('.x').addEventListener('click', () => { try { localStorage.setItem(KEY, today()); } catch { /* */ } stop(); });
     pull(); timer = setInterval(pull, 90e3);
     rot = setInterval(() => { if (H.classList.contains("ff-no-anim")) { rotN++; lastKey = ""; paint(); } }, 5000);

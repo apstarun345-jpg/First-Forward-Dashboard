@@ -40,3 +40,21 @@
   const start = () => { sched(); new MutationObserver(sched).observe(document.body, { childList: true, subtree: true }); };
   if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
 })();
+
+/* v3.125.522 — click se pehle hi page ka code prefetch: nav/link par pointer aate hi FF.lazy.ensure(page). Click par page turant ready. */
+(function () {
+  'use strict';
+  const seen = new Set();
+  function prefetch(e) {
+    try {
+      const a = e.target && e.target.closest && e.target.closest('a[href^="#/"], [data-page]');
+      if (!a || !window.FF || !FF.lazy || typeof FF.lazy.ensure !== 'function') return;
+      const raw = a.getAttribute('data-page') || (a.getAttribute('href') || '').replace(/^#\//, '').split(/[/?]/)[0];
+      if (!raw || seen.has(raw)) return;
+      seen.add(raw);
+      Promise.resolve(FF.lazy.ensure(raw)).catch(() => { seen.delete(raw); });
+    } catch { /* prefetch optional */ }
+  }
+  document.addEventListener('pointerover', prefetch, { passive: true, capture: true });
+  document.addEventListener('touchstart', prefetch, { passive: true, capture: true });
+})();

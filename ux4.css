@@ -1,5 +1,5 @@
 /* v3.125.453 — ux4: live ticker (admin) — robot ki khabrein + employee scans, topbar ke neeche chalti patti. */
-#ux4-tick { position: sticky; top: var(--ux4-top, 52px); z-index: 19; display: flex; align-items: center; height: 28px; overflow: hidden; font-size: 12px; font-weight: 600;
+#ux4-tick { position: sticky; top: var(--ux4-top, 52px); z-index: 60; isolation: isolate; display: flex; align-items: center; height: 28px; overflow: hidden; font-size: 12px; font-weight: 600;
   background: linear-gradient(90deg, #1e1b4b, #312e81 40%, #134e4a); color: #e0e7ff; border-bottom: 1px solid rgba(255, 255, 255, .12); }
 #ux4-tick .lv { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 100%; background: rgba(0, 0, 0, .28); font-weight: 800; letter-spacing: .5px; font-size: 11px; }
 #ux4-tick .lv i { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 0 rgba(34, 197, 94, .7); animation: ux4-pulse 1.6s infinite; }
