@@ -458,7 +458,7 @@ FF.pages = FF.pages || {};
 
 
   // ---- 📷 Scan (v3.125.436) — camera + scanner-gun: har scan turant list me, status peeche se bharta hai ------------------
-  // Camera: browser ka BarcodeDetector (phone / Chrome — fast, native); na ho to ZXing (vendor/zxing.min.js, sirf zarurat par load).
+  // Camera: browser ka BarcodeDetector (phone / Chrome — fast, native); na ho to ZXing (libs/zxing.min.js, sirf zarurat par load).
   // List localStorage me (ff_bcc_scan) — reload / app band hone par bhi bachi rehti hai.
   const SCAN_KEY = 'ff_bcc_scan';
   const scan = { order: [], map: new Map(), queue: [], t: 0, paintRaf: 0, saveT: 0, sound: true, last: { k: '', at: 0 }, ctx: null, want: '', vmDone: new Map() };
@@ -665,7 +665,7 @@ FF.pages = FF.pages || {};
   }
   function loadZxing() {
     if (window.ZXing) return Promise.resolve(window.ZXing);
-    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'vendor/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('ZXing load nahi hua'))); s.onerror = () => no(new Error('Scanner library load nahi hui')); document.head.appendChild(s); });
+    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'libs/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('ZXing load nahi hua'))); s.onerror = () => no(new Error('Scanner library load nahi hui')); document.head.appendChild(s); });
   }
   // Camera sirf poora 16-digit FASTag barcode (608116-039-0598684) maanta hai; QR / adhura / galat padha hua ignore.
   // Padhne ke baad confirm popup: sahi hai to Save (Enter / Space), warna Dobara.

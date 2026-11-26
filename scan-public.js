@@ -92,7 +92,7 @@
   /* ---- camera ---- */
   function loadZ() {
     if (window.ZXing) return Promise.resolve(window.ZXing);
-    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'vendor/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('lib'))); s.onerror = () => no(new Error('Scanner library load nahi hui')); document.head.appendChild(s); });
+    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'libs/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('lib'))); s.onerror = () => no(new Error('Scanner library load nahi hui')); document.head.appendChild(s); });
   }
   async function camStart() {
     if (st.cam.on) return;

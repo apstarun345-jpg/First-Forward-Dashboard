@@ -1302,102 +1302,69 @@ body.colorful .from-hdr { color: #166534; }
   }
   function scLoadZ() {
     if (window.ZXing) return Promise.resolve(window.ZXing);
-    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'vendor/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('lib'))); s.onerror = () => no(new Error('lib')); document.head.appendChild(s); });
+    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'libs/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('lib'))); s.onerror = () => no(new Error('lib')); document.head.appendChild(s); });
   }
-  // 🖼️ v3.125.530 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): kai tareeqe se try — original, bada, contrast-stretch,
-  //    black-white, ulta (inverted), 90° ghuma ke, patti-patti (tiles) — halka / chhota / tedha barcode bhi pakdo.
-  let scNativeDet = null;
-  async function scDetector() {
-    if (scNativeDet !== null) return scNativeDet;
-    scNativeDet = false;
-    if ('BarcodeDetector' in window) { try { const sup = await window.BarcodeDetector.getSupportedFormats(); const fm = ['code_128', 'code_39', 'code_93', 'itf', 'codabar', 'ean_13', 'upc_a'].filter((f) => sup.includes(f)); if (fm.length) scNativeDet = new window.BarcodeDetector({ formats: fm }); } catch { /* */ } }
-    return scNativeDet;
-  }
-  const scCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; };
-  function scDraw(src, sw, sh, sx, sy, cw, ch, scale, rot) {
-    const w = cw * scale, h = ch * scale, rc = rot % 180 !== 0;
-    const c = scCanvas(rc ? h : w, rc ? w : h), x = c.getContext('2d', { willReadFrequently: true });
-    x.imageSmoothingQuality = 'high'; x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-    x.translate(c.width / 2, c.height / 2); x.rotate((rot * Math.PI) / 180); x.drawImage(src, sx, sy, cw, ch, -w / 2, -h / 2, w, h);
-    return c;
-  }
-  function scEnhance(c, mode) {   // mode: 'stretch' (contrast) | 'bw' (adaptive-ish threshold) | 'inv'
-    const x = c.getContext('2d', { willReadFrequently: true }), im = x.getImageData(0, 0, c.width, c.height), d = im.data, n = c.width * c.height;
-    const g = new Uint8Array(n), hist = new Uint32Array(256);
-    for (let i = 0, j = 0; i < n; i++, j += 4) { const v = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8; g[i] = v; hist[v]++; }
-    let lo = 0, hi = 255, acc = 0; const cut = n * 0.01;
-    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= cut) { lo = v; break; } }
-    acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= cut) { hi = v; break; } }
-    const span = Math.max(20, hi - lo);
-    let thr = 128; if (mode === 'bw') { let sum = 0; for (let v = 0; v < 256; v++) sum += v * hist[v]; let sB = 0, wB = 0, best = 0; for (let v = 0; v < 256; v++) { wB += hist[v]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += v * hist[v]; const mB = sB / wB, mF = (sum - sB) / wF, bt = wB * wF * (mB - mF) * (mB - mF); if (bt > best) { best = bt; thr = v; } } }
-    for (let i = 0, j = 0; i < n; i++, j += 4) {
-      let v = Math.max(0, Math.min(255, ((g[i] - lo) * 255) / span));
-      if (mode === 'bw') v = g[i] > thr ? 255 : 0; else if (mode === 'inv') v = 255 - v;
-      d[j] = d[j + 1] = d[j + 2] = v; d[j + 3] = 255;
-    }
-    x.putImageData(im, 0, 0); return c;
-  }
-  let scZ = null;
-  async function scZReader() {
-    if (scZ) return scZ;
-    const Z = await scLoadZ(); const h = new Map();
-    h.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODABAR]); h.set(Z.DecodeHintType.TRY_HARDER, true);
-    const r = new Z.MultiFormatReader(); r.setHints(h); scZ = { Z, r }; return scZ;
-  }
-  async function scTryCanvas(c) {
-    const det = await scDetector();
-    if (det) { try { for (const f of await det.detect(c)) { const k = scValidLoose(f.rawValue); if (k) return k; } } catch { /* */ } }
+  // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
+  //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
+  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=531'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  SC.rv = []; SC.rvId = 0;
+  const scRvPaint = () => {
+    const host = scQ('[data-sc-review]'); if (!host) return;
+    host.innerHTML = SC.rv.map((c) => {
+      const rows = c.cands.map((x, k) => {
+        const i = x.info, tone = i ? scTone[i.k] || '#64748b' : '#94a3b8';
+        const chip = i ? `<span class="trs-badge" style="background:${tone}">${esc(i.label || '')}</span>${i.cls ? `<small> ${esc(i.cls)}</small>` : ''}${i.agent ? `<small> · ${esc(i.agent)}</small>` : ''}` : (x.err ? `<span class="trs-note bad">${esc(x.err)}</span>` : '<small class="dim">🔎 check ho raha hai…</small>');
+        return `<div class="trs-rvrow${i && (i.k === 'iss' || i.k === 'nf') ? ' bad' : ''}"><input type="checkbox" data-rv-ck="${c.id}|${k}"${x.on ? ' checked' : ''}><input class="input mono" data-rv-code="${c.id}|${k}" value="${esc(x.code)}" inputmode="numeric" autocomplete="off" aria-label="Barcode number"><small class="dim">${x.how === 'text' ? '🔤 number padha' : '▮▮ barcode'}</small><div class="trs-rvinfo">${chip}</div></div>`;
+      }).join('');
+      const n = c.cands.filter((x) => x.on && scValid(x.code)).length;
+      return `<div class="trs-rv" data-rv="${c.id}"><div class="trs-rvhead"><img src="${esc(c.url)}" alt="" class="trs-rvimg"><div><b>${esc(c.name)}</b><div class="dim small">${c.busy ? '🔎 Photo padh raha hu… ' + esc(c.step || '') : c.cands.length ? `${c.cands.length} barcode mile` : '❌ Is photo me barcode nahi mila — photo paas / seedhi lo, ya 16 digit type karo'}</div></div><button class="btn small" data-rv-del="${c.id}" title="Hatao">✖</button></div>${rows}${c.cands.length && !c.busy ? `<div class="btn-row"><button class="btn primary" data-rv-ok="${c.id}"${n ? '' : ' disabled'}>✅ Confirm · ${n} add karo</button></div>` : ''}</div>`;
+    }).join('');
+  };
+  async function scRvCheck(card, x) {
+    const list = [x.code, ...(x.alts || [])].filter((v, i, a) => scValid(v) && a.indexOf(v) === i).slice(0, 6);
     try {
-      const { Z, r } = await scZReader();
-      for (const Bin of [Z.HybridBinarizer, Z.GlobalHistogramBinarizer]) { try { const res = r.decode(new Z.BinaryBitmap(new Bin(new Z.HTMLCanvasElementLuminanceSource(c)))); const k = scValidLoose(res && res.getText()); if (k) return k; } catch { /* nahi mila */ } }
-    } catch { /* lib nahi */ }
-    return '';
+      const j = await scApi('POST', '/api/public/scan-info', { codes: list });
+      const inf = (j && j.info) || {}; let pick = x.code;
+      if (x.how === 'text' && inf[x.code] && inf[x.code].k === 'nf') { const alt = list.find((c2) => inf[c2] && inf[c2].k !== 'nf'); if (alt) pick = alt; }   // OCR ne ek digit galat padha ho to sahi wala chuno
+      x.code = pick; x.info = inf[pick] || null; x.err = x.info ? '' : 'Data nahi mila';
+      if (x.info && x.info.recheck) setTimeout(() => { x.info = null; scRvCheck(card, x); }, 2000);
+    } catch { x.err = '📴 Check nahi ho paya — confirm karke add kar sakte ho'; }
+    scRvPaint();
   }
-  /** blob / canvas / video → pehla sahi 16-digit barcode (ya ''). onStep: progress text. */
-  async function scDecodeSource(src, sw, sh, opt = {}) {
-    const maxSide = 2600, base = Math.min(1, maxSide / Math.max(sw, sh));
-    const fullW = sw, fullH = sh;
-    const small = Math.max(sw, sh) < 1200;
-    const scales = small ? [2, 1] : [base];
-    const plans = [];
-    for (const sc of scales) {
-      plans.push({ rot: 0, mode: '', sc }, { rot: 0, mode: 'stretch', sc }, { rot: 0, mode: 'bw', sc }, { rot: 90, mode: 'stretch', sc }, { rot: 0, mode: 'inv', sc });
-    }
-    const rects = [[0, 0, fullW, fullH]];
-    if (!opt.quick) {   // lambi image me chhota barcode: upar / beech / neeche ki patti
-      const bh = fullH / 2.2; [[0, 0], [0, (fullH - bh) / 2], [0, fullH - bh]].forEach(([, y]) => rects.push([0, y, fullW, bh]));
-      const bw = fullW / 2.2; [[0, 0], [(fullW - bw) / 2, 0], [fullW - bw, 0]].forEach(([x]) => rects.push([x, 0, bw, fullH]));
-    }
-    for (const rc of rects) {
-      for (const pl of plans) {
-        if (opt.quick && (pl.rot || pl.mode === 'inv')) continue;
-        let c = scDraw(src, sw, sh, rc[0], rc[1], rc[2], rc[3], pl.sc, pl.rot);
-        if (pl.mode) c = scEnhance(c, pl.mode);
-        const k = await scTryCanvas(c); if (k) return k;
-        await new Promise((r) => setTimeout(r, 0));
-      }
-    }
-    return '';
-  }
-  async function scDecodeFile(file) {
-    let bmp = null;
-    try { bmp = await createImageBitmap(file); } catch { /* Image se */ }
-    if (!bmp) { bmp = await new Promise((ok, no) => { const im = new Image(), u = URL.createObjectURL(file); im.onload = () => { ok(im); }; im.onerror = () => no(new Error('img')); im.src = u; }).catch(() => null); }
-    if (!bmp) return '';
-    const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
-    return scDecodeSource(bmp, w, h, {});
+  async function scReadPhoto(file) {
+    const card = { id: ++SC.rvId, name: file.name || 'Photo', url: URL.createObjectURL(file), cands: [], busy: true, step: '' };
+    SC.rv.unshift(card); scRvPaint();
+    try {
+      const V = await scLoadVision();
+      let bmp = null; try { bmp = await createImageBitmap(file); } catch { /* Image se */ }
+      if (!bmp) bmp = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error('img')); im.src = card.url; });
+      const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
+      await V.read(bmp, w, h, { budgetMs: 20000, onFound: (code, how) => {
+        if (card.cands.some((x) => x.code === code)) return;
+        const x = { code, how, on: true, info: null, err: '', alts: [] }; card.cands.push(x); scBeep('ok'); try { navigator.vibrate && navigator.vibrate(30); } catch { /* */ }
+        scRvPaint(); setTimeout(() => scRvCheck(card, x), 0);
+      } }).then((res) => { res.forEach((r) => { const x = card.cands.find((c2) => c2.code === r.code); if (x && r.alts && r.alts.length) { x.alts = r.alts; if (x.info && x.info.k === 'nf') { x.info = null; scRvCheck(card, x); } } }); });
+    } catch (e) { card.err = String((e && e.message) || e); }
+    card.busy = false; scRvPaint();
+    if (!card.cands.length) scBeep('bad');
   }
   async function scImages(files) {
     const list = Array.from(files || []).filter((f) => f && /^image\//.test(f.type || 'image/'));
-    if (!list.length) return;
-    const msg = scQ('[data-sc-note]'); let ok = 0, bad = 0;
-    for (let i = 0; i < list.length; i++) {
-      scNote(`🔎 Photo ${i + 1} / ${list.length} padh raha hu…`, false);
-      let code = ''; try { code = await scDecodeFile(list[i]); } catch { code = ''; }
-      if (code) { ok++; scAdd(code); } else { bad++; scBeep('bad'); }
-    }
-    scNote(bad ? `${ok ? '✅ ' + ok + ' scan hue · ' : ''}❌ ${bad} photo me barcode nahi mila — photo seedhi / paas se lo ya neeche 16 digit type karo` : `✅ ${ok} barcode photo se scan hue`, !!bad && !ok);
-    if (msg) { /* note updated */ }
+    for (const f of list) await scReadPhoto(f);
+  }
+  function scRvEvents(root) {
+    const host = root.querySelector('[data-sc-review]'); if (!host) return;
+    const find = (id) => SC.rv.find((c) => String(c.id) === String(id));
+    host.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-rv-del]'); if (del) { SC.rv = SC.rv.filter((c) => String(c.id) !== del.dataset.rvDel); scRvPaint(); return; }
+      const ok = e.target.closest('[data-rv-ok]'); if (!ok) return; const c = find(ok.dataset.rvOk); if (!c) return;
+      let n = 0; c.cands.forEach((x) => { if (x.on) { const k = scValid(x.code); if (k && scAdd(k)) n++; } });
+      SC.rv = SC.rv.filter((c2) => c2 !== c); scRvPaint(); scNote(`✅ ${n} barcode add hue`, false);
+    });
+    host.addEventListener('change', (e) => {
+      const ck = e.target.closest('[data-rv-ck]'); if (ck) { const [id, k] = ck.dataset.rvCk.split('|'); const c = find(id); if (c && c.cands[k]) { c.cands[k].on = ck.checked; scRvPaint(); } return; }
+      const ci = e.target.closest('[data-rv-code]'); if (ci) { const [id, k] = ci.dataset.rvCode.split('|'); const c = find(id), x = c && c.cands[k]; if (!x) return; const v = scValid(ci.value); if (!v) { x.err = '16 digit ka barcode chahiye'; x.info = null; x.on = false; scRvPaint(); return; } x.code = v; x.info = null; x.err = ''; x.alts = []; x.how = 'text'; x.on = true; scRvPaint(); scRvCheck(c, x); }
+    });
   }
   async function scCamStart() {
     if (SC.on) return;
@@ -1417,7 +1384,7 @@ body.colorful .from-hdr { color: #166534; }
     let native = false;
     if ('BarcodeDetector' in window) { try { const sup = await window.BarcodeDetector.getSupportedFormats(); const fm = ['code_128', 'code_39', 'code_93', 'itf', 'codabar'].filter((f) => sup.includes(f)); if (fm.length) { SC.det = new window.BarcodeDetector({ formats: fm }); native = true; } } catch { /* */ } }
     if (native) {
-      const tick = async () => { if (!SC.on) return; if (!SC.busy && !SC.hold && v.readyState >= 2 && !document.hidden) { SC.busy = true; try { const fs = await SC.det.detect(v); fs.forEach((f) => scOnRaw(f.rawValue)); SC.miss = fs.length ? 0 : (SC.miss || 0) + 1; if (SC.miss > 25 && SC.miss % 12 === 0 && v.videoWidth) { const k = await scDecodeSource(v, v.videoWidth, v.videoHeight, { quick: true }); if (k) scOnRaw(k); } } catch { /* */ } SC.busy = false; } SC.timer = setTimeout(tick, 30); };
+      const tick = async () => { if (!SC.on) return; if (!SC.busy && !SC.hold && v.readyState >= 2 && !document.hidden) { SC.busy = true; try { const fs = await SC.det.detect(v); fs.forEach((f) => scOnRaw(f.rawValue)); SC.miss = fs.length ? 0 : (SC.miss || 0) + 1; if (SC.miss > 30 && SC.miss % 45 === 0 && v.videoWidth && !SC.vbusy) { SC.vbusy = true; scLoadVision().then((V) => V.read(v, v.videoWidth, v.videoHeight, { budgetMs: 6000, onFound: (code) => scOnRaw(code) })).catch(() => {}).finally(() => { SC.vbusy = false; }); } } catch { /* */ } SC.busy = false; } SC.timer = setTimeout(tick, 30); };
       tick();
     } else {
       try { const Z = await scLoadZ(); const h = new Map(); h.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODABAR]); h.set(Z.DecodeHintType.TRY_HARDER, true); SC.reader = new Z.BrowserMultiFormatReader(h, 60); SC.reader.decodeFromStream(SC.stream, v, (r) => { if (r && SC.on) scOnRaw(r.getText()); }); }
@@ -1454,6 +1421,7 @@ body.colorful .from-hdr { color: #166534; }
       <div class="trs-bar"><button class="btn primary trs-cam-btn" data-sc-act="cam">📷 Camera scan shuru</button><button class="btn" data-sc-act="sound" title="Beep">${SC.sound ? '🔊' : '🔇'}</button><button class="btn" data-sc-act="torch" hidden>🔦</button><button class="btn" data-sc-act="zoom" hidden>🔍 1x</button><button class="btn" data-sc-act="photo" title="WhatsApp / gallery photo se scan">🖼️ Photo se scan</button><input type="file" accept="image/*" multiple hidden data-sc-file><span class="dim small">👤 ${esc(nm)}</span></div>
       <div class="trs-camwrap" data-sc-cam hidden><video playsinline muted data-sc-video></video><div class="trs-aim"></div><div class="trs-msg" data-sc-msg></div>
         <div class="trs-conf" data-sc-conf hidden><div class="trs-ct">Ye barcode sahi hai?</div><div class="trs-cc" data-sc-ccode></div><div class="trs-cd" data-sc-cdup></div><div class="trs-cb"><button class="btn" data-sc-no>🔁 Dobara</button><button class="btn primary" data-sc-yes>✅ Sahi hai — Save</button></div></div></div>
+      <div class="trs-review" data-sc-review></div>
       <input class="input mono" data-sc-in inputmode="numeric" autocomplete="off" placeholder="⌨️ Scanner gun / type karke Enter · ya photo yahan paste (Ctrl+V) / drop karo" style="margin-top:10px">
       <div class="trs-note2" data-sc-note></div>
       <div class="trs-count" data-sc-count></div>
@@ -1466,6 +1434,7 @@ body.colorful .from-hdr { color: #166534; }
       root.addEventListener('paste', (e) => { const fl = Array.from((e.clipboardData && e.clipboardData.files) || []).filter((f) => /^image\//.test(f.type)); if (fl.length) { e.preventDefault(); scImages(fl); } });
       if (!window.__scPaste) { window.__scPaste = 1; document.addEventListener('paste', (e) => { if (!document.querySelector('[data-sc-file]')) return; const fl = Array.from((e.clipboardData && e.clipboardData.files) || []).filter((f) => /^image\//.test(f.type)); if (fl.length) { e.preventDefault(); scImages(fl); } }); }
       ['dragover', 'drop'].forEach((ev) => root.addEventListener(ev, (e) => { if (!e.dataTransfer || !e.dataTransfer.types || ![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); if (ev === 'drop') scImages(Array.from(e.dataTransfer.files)); })); }
+    scRvEvents(root); scRvPaint();
     root.querySelector('[data-sc-act="sound"]').onclick = (e) => { SC.sound = !SC.sound; e.currentTarget.textContent = SC.sound ? '🔊' : '🔇'; try { localStorage.setItem('ff_tr_scan_snd', SC.sound ? '1' : '0'); } catch { /* */ } };
     root.querySelector('[data-sc-act="zoom"]').onclick = async (e) => { try { const steps = [1, 2, 3, 4].filter((z) => z <= SC.zmax); const i = steps.indexOf(SC.zoom); SC.zoom = steps[(i + 1) % steps.length] || 1; await SC.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ zoom: SC.zoom }] }); e.currentTarget.textContent = '🔍 ' + SC.zoom + 'x'; } catch { U.toast('Zoom is device par nahi chala', 'warn'); } };
     root.querySelector('[data-sc-act="torch"]').onclick = async () => { try { SC.torch = !SC.torch; await SC.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: SC.torch }] }); } catch { U.toast('Torch nahi chala', 'warn'); } };
