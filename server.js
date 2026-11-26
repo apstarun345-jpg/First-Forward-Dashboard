@@ -18895,7 +18895,8 @@ async function start() {
         } finally { warmBusy = false; }
       };
       setTimeout(() => { mcPackLoad().catch(() => {}); }, 20e3).unref?.();
-      setTimeout(() => { tihSvc.view().catch(() => {}); }, 25e3).unref?.();   // Tag In Hand data boot par memory me
+      setTimeout(() => { tihSvc.view().catch(() => {}); }, 25e3).unref?.();
+      setTimeout(() => { try { mappingStock.ensure({}).catch(() => {}); } catch { /* optional */ } }, 15e3).unref?.();   // scan-info / Barcode Checker: StockDataa index boot par ready   // Tag In Hand data boot par memory me
       setTimeout(() => { warmHeavy('boot'); }, 50e3).unref?.();
       setInterval(() => { warmHeavy('tick'); }, 25 * 60e3).unref();
     }

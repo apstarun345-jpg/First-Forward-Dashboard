@@ -1243,8 +1243,8 @@ body.colorful .from-hdr { color: #166534; }
         part.forEach((c) => { const it = SC.map.get(c); if (it) { const had = !!it.info; it.info = (j.info || {})[c] || null; if (it.info && it.info.recheck && (SC.tries.get('rc' + c) || 0) < 4) { SC.tries.set('rc' + c, (SC.tries.get('rc' + c) || 0) + 1); setTimeout(() => scQueue(c), 2000); } it.err = it.info ? '' : 'Data nahi mila'; if (it.info && !had && (Date.now() - Date.parse(it.at)) < 60e3) { scAlert(it); try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: it.info.k, code: it.code, agent: it.info.agent, dispatch: !!it.info.dispatch } })); } catch { /* */ } } } });
       } catch (e) {
         const off = !navigator.onLine || (!e.status && !e.pending);
-        part.forEach((c) => { const it = SC.map.get(c); if (!it) return; if (off) { it.err = '📴 Offline — net aate hi data aa jayega'; SC.q.push(c); return; } const n = (SC.tries.get(c) || 0) + 1; SC.tries.set(c, n); if (n <= 6 && (e.pending || e.status === 429 || e.status >= 500 || !e.status)) { it.err = '⏳ Server busy — dobara try…'; SC.q.push(c); } else it.err = e.message; });
-        if (SC.q.length && !SC.t && !off) SC.t = setTimeout(scFlush, 2500);
+        part.forEach((c) => { const it = SC.map.get(c); if (!it) return; if (off) { it.err = '📴 Offline — net aate hi data aa jayega'; SC.q.push(c); return; } const n = (SC.tries.get(c) || 0) + 1; SC.tries.set(c, n); if (n <= 40 && (e.pending || e.status === 429 || e.status >= 500 || !e.status || e.status === 400)) { it.err = ''; SC.q.push(c); } else it.err = 'Dobara scan karo'; });
+        if (SC.q.length && !SC.t && !off) SC.t = setTimeout(scFlush, Math.min(9000, 1500 + 700 * Math.max(...part.map((c) => SC.tries.get(c) || 0))));
       }
       scPaint();
     }
@@ -1307,17 +1307,42 @@ body.colorful .from-hdr { color: #166534; }
   // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
   //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
   const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=535'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+
+  (function trRvStyle() {
+    if (document.getElementById('trs-rv-style')) return;
+    const st = document.createElement('style'); st.id = 'trs-rv-style';
+    st.textContent = `.trs-rvwrap{overflow:auto;border:1px solid #c7d2fe;border-radius:14px;box-shadow:0 6px 18px rgba(79,70,229,.10);margin:8px 0}
+.trs-rvtbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.trs-rvtbl thead th{background:linear-gradient(135deg,#312e81,#4f46e5 45%,#0ea5e9);color:#fff;font-weight:800;text-align:center;padding:9px 8px;letter-spacing:.02em;border-right:1px solid rgba(255,255,255,.18);white-space:nowrap}
+.trs-rvtbl thead th:last-child{border-right:0}
+.trs-rvtbl td{padding:7px 8px;border-bottom:1px solid #e0e7ff;border-right:1px solid rgba(199,210,254,.45);vertical-align:middle}
+.trs-rvtbl td:last-child{border-right:0}
+.trs-rvtbl td.c{text-align:center}
+.trs-rvtbl tbody tr:nth-child(even) td{background:rgba(224,231,255,.40)}
+.trs-rvtbl tbody tr.ok td{background:rgba(220,252,231,.55)}
+.trs-rvtbl tbody tr.bad td{background:rgba(254,226,226,.65)}
+.trs-rvtbl tbody tr:hover td{background:rgba(165,180,252,.30)}
+.trs-rvtbl .input{width:100%;min-width:170px;text-align:center;font-weight:800;letter-spacing:.03em;color:#3730a3;padding:6px 8px;font-size:14px}
+.trs-rvtbl input[type=checkbox]{width:20px;height:20px;accent-color:#4f46e5}
+.trs-rvtbl .trs-badge{display:inline-block;padding:3px 11px;border-radius:999px;color:#fff;font-weight:800;font-size:12px;white-space:nowrap}
+.trs-cls{display:inline-block;padding:2px 10px;border-radius:8px;background:linear-gradient(135deg,#6d28d9,#8b5cf6);color:#fff;font-weight:800;font-size:12px}
+.trs-rvtbl .trs-thumb{height:34px;border-radius:6px;border:1px solid #c7d2fe;grid-column:auto;justify-self:auto}
+.trs-chk{display:inline-flex;align-items:center;gap:6px;color:#6366f1;font-weight:700;font-size:12px}
+.trs-spin{width:12px;height:12px;border:2px solid #c7d2fe;border-top-color:#4f46e5;border-radius:50%;animation:trsSpin .8s linear infinite}
+@keyframes trsSpin{to{transform:rotate(360deg)}}`;
+    document.head.appendChild(st);
+  })();
   SC.rv = []; SC.rvId = 0;
   const scRvPaint = () => {
     const host = scQ('[data-sc-review]'); if (!host) return;
     host.innerHTML = SC.rv.map((c) => {
       const rows = c.cands.map((x, k) => {
         const i = x.info, tone = i ? scTone[i.k] || '#64748b' : '#94a3b8';
-        const chip = i ? `<span class="trs-badge" style="background:${tone}">${esc(i.label || '')}</span>${i.cls ? `<small> ${esc(i.cls)}</small>` : ''}${i.agent ? `<small> · ${esc(i.agent)}</small>` : ''}` : (x.err ? `<span class="trs-note bad">${esc(x.err)}</span>` : '<small class="dim">🔎 check ho raha hai…</small>');
-        return `<div class="trs-rvrow${i && (i.k === 'iss' || i.k === 'nf') ? ' bad' : ''}"><input type="checkbox" data-rv-ck="${c.id}|${k}"${x.on ? ' checked' : ''}><input class="input mono" data-rv-code="${c.id}|${k}" value="${esc(x.code)}" inputmode="numeric" autocomplete="off" aria-label="Barcode number"><small class="dim">${x.how === 'text' ? '🔤 number padha' : '▮▮ barcode'}</small>${x.thumb ? `<img class="trs-thumb" src="${x.thumb}" alt="">` : ''}<div class="trs-rvinfo">${chip}</div></div>`;
+        const st = i ? `<span class="trs-badge" style="background:${tone}">${esc(i.label || '')}</span>` : (x.err ? `<span class="trs-note bad">${esc(x.err)}</span>` : '<span class="trs-chk"><span class="trs-spin"></span> check ho raha hai</span>');
+        return `<tr class="${i && (i.k === 'iss' || i.k === 'nf') ? 'bad' : i ? 'ok' : ''}"><td class="c"><input type="checkbox" data-rv-ck="${c.id}|${k}"${x.on ? ' checked' : ''}></td><td class="c">${k + 1}</td><td><input class="input mono" data-rv-code="${c.id}|${k}" value="${esc(x.code)}" inputmode="numeric" autocomplete="off" aria-label="Barcode number"></td><td class="c">${x.how === 'text' ? '🔤 number' : '▮▮ barcode'}</td><td class="c">${st}</td><td class="c">${i && i.cls ? `<span class="trs-cls">${esc(i.cls)}</span>` : '—'}</td><td class="c">${i && i.agent ? esc(i.agent) : '—'}</td><td class="c">${x.thumb ? `<img class="trs-thumb" src="${x.thumb}" alt="">` : '—'}</td></tr>`;
       }).join('');
       const n = c.cands.filter((x) => x.on && scValid(x.code)).length;
-      return `<div class="trs-rv" data-rv="${c.id}"><div class="trs-rvhead"><img src="${esc(c.url)}" alt="" class="trs-rvimg"><div><b>${esc(c.name)}</b><div class="dim small">${c.busy ? '🔎 Photo padh raha hu… ' + esc(c.step || '') : c.cands.length ? `${c.cands.length} barcode mile` : '❌ Is photo me barcode nahi mila — photo paas / seedhi lo, ya 16 digit type karo'}</div></div><button class="btn small" data-rv-del="${c.id}" title="Hatao">✖</button></div>${rows}${c.cands.length && !c.busy ? `<div class="btn-row"><button class="btn primary" data-rv-ok="${c.id}"${n ? '' : ' disabled'}>✅ Confirm · ${n} add karo</button></div>` : ''}</div>`;
+      return `<div class="trs-rv" data-rv="${c.id}"><div class="trs-rvhead"><img src="${esc(c.url)}" alt="" class="trs-rvimg"><div><b>${esc(c.name)}</b><div class="dim small">${c.busy ? '🔎 Photo padh raha hu… ' + esc(c.step || '') : c.cands.length ? `${c.cands.length} barcode mile` : '❌ Is photo me barcode nahi mila — photo paas / seedhi lo, ya 16 digit type karo'}</div></div><button class="btn small" data-rv-del="${c.id}" title="Hatao">✖</button></div>${c.cands.length ? `<div class="trs-rvwrap"><table class="trs-rvtbl"><thead><tr><th>✔</th><th>#</th><th>Barcode</th><th>Padha</th><th>Status</th><th>Class</th><th>Agent</th><th>Photo</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}${c.cands.length && !c.busy ? `<div class="btn-row"><button class="btn primary" data-rv-ok="${c.id}"${n ? '' : ' disabled'}>✅ Confirm · ${n} add karo</button></div>` : ''}</div>`;
     }).join('');
   };
   async function scRvCheck(card, x) {
@@ -1328,7 +1353,11 @@ body.colorful .from-hdr { color: #166534; }
       if (x.how === 'text' && inf[x.code] && inf[x.code].k === 'nf') { const alt = list.find((c2) => inf[c2] && inf[c2].k !== 'nf'); if (alt) pick = alt; }   // OCR ne ek digit galat padha ho to sahi wala chuno
       x.code = pick; x.info = inf[pick] || null; x.err = x.info ? '' : 'Data nahi mila';
       if (x.info && x.info.recheck) setTimeout(() => { x.info = null; scRvCheck(card, x); }, 2000);
-    } catch { x.err = '📴 Check nahi ho paya — confirm karke add kar sakte ho'; }
+    } catch (e) {
+      x.tries = (x.tries || 0) + 1; x.err = '';
+      if (x.tries <= 30 && card && SC.rv.includes(card)) { setTimeout(() => scRvCheck(card, x), Math.min(9000, 1200 + 600 * x.tries)); }
+      else x.err = 'Check nahi ho paya — add karke dekh sakte ho';
+    }
     scRvPaint();
   }
   async function scReadPhoto(file) {
