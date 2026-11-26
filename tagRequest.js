@@ -1335,15 +1335,41 @@ body.colorful .from-hdr { color: #166534; }
   SC.rv = []; SC.rvId = 0;
   const scRvPaint = () => {
     const host = scQ('[data-sc-review]'); if (!host) return;
-    host.innerHTML = SC.rv.map((c) => {
+    const parts = SC.rv.map((c) => {
       const rows = c.cands.map((x, k) => {
         const i = x.info, tone = i ? scTone[i.k] || '#64748b' : '#94a3b8';
         const st = i ? `<span class="trs-badge" style="background:${tone}">${esc(i.label || '')}</span>` : (x.err ? `<span class="trs-note bad">${esc(x.err)}</span>` : '<span class="trs-chk"><span class="trs-spin"></span> check ho raha hai</span>');
         return `<tr class="${i && (i.k === 'iss' || i.k === 'nf') ? 'bad' : i ? 'ok' : ''}"><td class="c"><input type="checkbox" data-rv-ck="${c.id}|${k}"${x.on ? ' checked' : ''}></td><td class="c">${k + 1}</td><td><input class="input mono" data-rv-code="${c.id}|${k}" value="${esc(x.code)}" inputmode="numeric" autocomplete="off" aria-label="Barcode number"></td><td class="c">${x.how === 'text' ? '🔤 number' : '▮▮ barcode'}</td><td class="c">${st}</td><td class="c">${i && i.cls ? `<span class="trs-cls">${esc(i.cls)}</span>` : '—'}</td><td class="c">${i && i.agent ? esc(i.agent) : '—'}</td><td class="c">${x.thumb ? `<img class="trs-thumb" src="${x.thumb}" alt="">` : '—'}</td></tr>`;
       }).join('');
       const n = c.cands.filter((x) => x.on && scValid(x.code)).length;
-      return `<div class="trs-rv" data-rv="${c.id}"><div class="trs-rvhead"><img src="${esc(c.url)}" alt="" class="trs-rvimg"><div><b>${esc(c.name)}</b><div class="dim small">${c.busy ? '🔎 Photo padh raha hu… ' + esc(c.step || '') : c.cands.length ? `${c.cands.length} barcode mile` : '❌ Is photo me barcode nahi mila — photo paas / seedhi lo, ya 16 digit type karo'}</div></div><button class="btn small" data-rv-del="${c.id}" title="Hatao">✖</button></div>${c.cands.length ? `<div class="trs-rvwrap"><table class="trs-rvtbl"><thead><tr><th>✔</th><th>#</th><th>Barcode</th><th>Padha</th><th>Status</th><th>Class</th><th>Agent</th><th>Photo</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}${c.cands.length && !c.busy ? `<div class="btn-row"><button class="btn primary" data-rv-ok="${c.id}"${n ? '' : ' disabled'}>✅ Confirm · ${n} add karo</button></div>` : ''}</div>`;
-    }).join('');
+      return { id: c.id, n: c.cands.length, busy: !!c.busy, html: `<div class="trs-rv" data-rv="${c.id}"><div class="trs-rvhead"><img src="${esc(c.url)}" alt="" class="trs-rvimg"><div><b>${esc(c.name)}</b><div class="dim small">${c.busy ? '🔎 Photo padh raha hu… ' + esc(c.step || '') : c.cands.length ? `${c.cands.length} barcode mile` : '❌ Is photo me barcode nahi mila — photo paas / seedhi lo, ya 16 digit type karo'}</div></div><button class="btn small" data-rv-del="${c.id}" title="Hatao">✖</button></div>${c.cands.length ? `<div class="trs-rvwrap"><table class="trs-rvtbl"><thead><tr><th>✔</th><th>#</th><th>Barcode</th><th>Padha</th><th>Status</th><th>Class</th><th>Agent</th><th>Photo</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}${c.cands.length && !c.busy ? `<div class="btn-row"><button class="btn primary" data-rv-ok="${c.id}"${n ? '' : ' disabled'}>✅ Confirm · ${n} add karo</button></div>` : ''}</div>` };
+    });
+    // v3.125.549 — flicker band: poora innerHTML dobara nahi; sirf jo cell badli wahi update (thumb / input / focus bachte hain)
+    const sig = parts.map((q) => q.id + ':' + q.n + ':' + q.busy).join(',');
+    if (host._sig === sig && host.children.length === parts.length) {
+      parts.forEach((q, ix) => {
+        const el = host.children[ix]; if (!el || el._html === q.html) return;
+        const t = document.createElement('div'); t.innerHTML = q.html; const nu = t.firstElementChild; if (!nu) return;
+        const oR = el.querySelectorAll('tbody tr'), nR = nu.querySelectorAll('tbody tr');
+        oR.forEach((r, ri) => {
+          const nr = nR[ri]; if (!nr) return;
+          if (r.className !== nr.className) r.className = nr.className;
+          const oc = r.children, nc = nr.children;
+          for (let ci = 0; ci < nc.length && ci < oc.length; ci++) {
+            if (ci === 0 || ci === 2) { const o = oc[ci].querySelector('input'), nn = nc[ci].querySelector('input'); if (o && nn && document.activeElement !== o) { if (o.type === 'checkbox') o.checked = nn.checked; else if (o.value !== nn.value) o.value = nn.value; } continue; }
+            if (ci === 7) { if (oc[ci].innerHTML !== nc[ci].innerHTML && !oc[ci].querySelector('img')) oc[ci].innerHTML = nc[ci].innerHTML; continue; }
+            if (oc[ci].innerHTML !== nc[ci].innerHTML) oc[ci].innerHTML = nc[ci].innerHTML;
+          }
+        });
+        const oh = el.querySelector('.trs-rvhead > div'), nh = nu.querySelector('.trs-rvhead > div'); if (oh && nh && oh.innerHTML !== nh.innerHTML) oh.innerHTML = nh.innerHTML;
+        const ob = el.querySelector('.btn-row'), nb = nu.querySelector('.btn-row');
+        if (ob && nb) { if (ob.innerHTML !== nb.innerHTML) ob.innerHTML = nb.innerHTML; } else if (!ob && nb) el.appendChild(nb); else if (ob && !nb) ob.remove();
+        el._html = q.html;
+      });
+    } else {
+      host.innerHTML = parts.map((q) => q.html).join(''); host._sig = sig;
+      [...host.children].forEach((el, ix) => { el._html = parts[ix] && parts[ix].html; });
+    }
   };
   async function scRvCheck(card, x) {
     // ek photo ke tags ka beech ka group (jaise 039) lagbhag same hota hai — OCR ne alag padha ho to majority wala bhi try karo
