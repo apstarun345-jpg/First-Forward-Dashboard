@@ -3931,15 +3931,26 @@ async function buildMultiCustomer() {
   return { at: new Date().toISOString(), months, rows, gvError: gvErr, cols: C,
     summary: { customers: rows.length, tags: rows.reduce((t, r) => t + r.total, 0), gvResolved: rows.filter((r) => r.source === 'GV Master').length, blankLeft: rows.filter((r) => !r.agentName).length } };
 }
+async function mcPackLoad() {
+  try {
+    if (mcState.data) return true;
+    const r = await durLoad('CACHE_MULTICUST', 'mc');
+    const s = db.settings || {}; const key = JSON.stringify([s.sheetId, s.eirSheet, s.gvSheetId, mcCols()]);
+    if (!r || !r.obj || r.head.key !== key || mcState.data) return false;
+    mcState.data = r.obj; mcState.at = Number(r.head.at) || Date.now(); mcState.key = key;
+    console.log('multi-customer: Sheet snapshot se turant load');
+    return true;
+  } catch { return false; }
+}
 function multiCustomerData(fresh) {
   const s = db.settings || {};
   const key = JSON.stringify([s.sheetId, s.eirSheet, s.gvSheetId, mcCols()]);
   const have = mcState.data && mcState.key === key ? mcState.data : null;
-  const stale = have && Date.now() - mcState.at > 30 * 60e3;
+  const stale = have && Date.now() - mcState.at > 6 * 3600e3;   // v3.125.544 — build ~6 min leta hai: purana turant, naya 6 h baad peeche
   if (have && !fresh && !stale) return Promise.resolve(have);
   if (!mcState.promise) {
     mcState.error = ''; mcState.progress = 'start';
-    mcState.promise = buildMultiCustomer().then((d) => { mcState.data = d; mcState.at = Date.now(); mcState.key = key; mcState.progress = ''; console.log(`multi-customer ready: ${d.rows.length} rows`); return d; })
+    mcState.promise = buildMultiCustomer().then((d) => { mcState.data = d; mcState.at = Date.now(); mcState.key = key; mcState.progress = ''; console.log(`multi-customer ready: ${d.rows.length} rows`); durSave('CACHE_MULTICUST', 'mc', d, { at: mcState.at, key }).catch(() => {}); return d; })
       .catch((err) => { mcState.error = String((err && err.message) || err).slice(0, 300); mcState.errorAt = Date.now(); console.warn('multi-customer build failed:', mcState.error); throw err; })
       .finally(() => { mcState.promise = null; });
     mcState.promise.catch(() => {});
@@ -18883,6 +18894,7 @@ async function start() {
           await step('gv-api', () => gvApiReport(d, d, db.settings || {}, []));
         } finally { warmBusy = false; }
       };
+      setTimeout(() => { mcPackLoad().catch(() => {}); }, 20e3).unref?.();
       setTimeout(() => { warmHeavy('boot'); }, 50e3).unref?.();
       setInterval(() => { warmHeavy('tick'); }, 25 * 60e3).unref();
     }
