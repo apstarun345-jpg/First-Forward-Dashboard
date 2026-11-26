@@ -2903,6 +2903,16 @@ body.colorful .from-hdr { color: #166534; }
     ov.querySelector('[data-trp="close"]').onclick = () => ov.remove();
     ov.querySelector('[data-trp="retry"]').onclick = () => { ov.remove(); if (retry) retry(); };
   }
+  // v3.125.542 — error ka matlab saaf bhasha me
+  function isTransientErr(e) { const m = String((e && (e.message || e.error)) || e || ''); const st = Number(e && (e.status || e.code)) || 0; return st === 429 || st >= 500 || /429|50\d|busy|timeout|timed out|fetch|network|failed to|abort|offline|load failed/i.test(m); }
+  function friendlyErr(e) {
+    const m = String((e && (e.message || e.error)) || e || '').trim(); const st = Number(e && (e.status || e.code)) || 0;
+    if (st === 429 || /429/.test(m)) return 'Server abhi busy hai — 10 second baad "Dobara koshish" dabao. (Aapki details safe hain)';
+    if (st === 401 || st === 403 || /unauthor|forbidden|login|session/i.test(m)) return 'Login / permission ka issue — page refresh karke dobara login karo, phir bhejo.';
+    if (st >= 500 || /50\d/.test(m)) return 'Server me temporary dikkat — thodi der baad dobara koshish karo. (Details safe hain)';
+    if (/fetch|network|offline|failed to|load failed|abort|timeout|timed out/i.test(m) || !m) return 'Internet / network problem — connection check karke dobara koshish karo. (Details safe hain)';
+    return m;
+  }
   async function submit() {
     if (state.busy) return;
     if (!isPublic() && !(FF.auth && FF.auth.can && FF.auth.can('tagRequest'))) { U.toast('Is page ka access nahi hai', 'err'); return; }
@@ -2952,7 +2962,13 @@ body.colorful .from-hdr { color: #166534; }
       state.dup = { list: [], force: false, busy: false };
       setBtn('📤 Sending…');
       const path = isPublic() ? '/api/public/tag-request' : '/api/tag-requests';
-      const out = await api(path, 'POST', payload);
+      // v3.125.542 — temporary errors (429 / 5xx / network / timeout) par khud dobara bhejo (submissionId same → duplicate nahi banta); employee ko error dikhta nahi.
+      let out, lastE = null;
+      for (let at = 0; at < 5; at++) {
+        try { out = await api(path, 'POST', payload); lastE = null; break; }
+        catch (e) { lastE = e; if (!isTransientErr(e) || at === 4) break; setBtn(`📤 Sending… (dobara koshish ${at + 1}/4)`); await new Promise((r) => setTimeout(r, 1200 * (at + 1))); }
+      }
+      if (lastE) throw lastE;
       state.submitKey = ''; // success means the next intentional request gets a fresh key
       rememberAgents(payload.agents);
       saveEmployee();
@@ -2981,8 +2997,9 @@ body.colorful .from-hdr { color: #166534; }
       popSuccess(payload, out);
     } catch (err) {
       state.busy = '';
-      U.toast('Request nahi gayi: ' + ((err && err.message) || ''), 'err');
-      popError((err && err.message) || 'Network problem — please try again', () => submit());
+      const why = friendlyErr(err);
+      U.toast('Request nahi gayi: ' + why, 'err');
+      popError(why, () => submit());
       const b = rootEl.querySelector('[data-tr-act="send"]');
       if (b) { b.disabled = false; b.textContent = '📤 Request submit karo'; }
     }
