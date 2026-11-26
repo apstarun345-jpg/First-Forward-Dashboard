@@ -3061,6 +3061,18 @@ function publicWorkspaceUser(username) {
 // (kabhi delete nahi) aur ⏪ sheet-history se recovery — taaki gayab requests wapas layi ja sakein.
 const TAG_REQUEST_CAP = 500; // per-agent requests chhoti hoti hain — notify blob ab bhi halka rehta hai
 const tagReqKeyOf = (r) => String((r && r.id) || '').trim();
+/** 🔢 v3.125.533 — Tag Request ka SERIES number (1, 2, 3 …): purani requests ko banne ke order me 1 se, nayi ko agla number. `id` (internal key) nahi badalta. */
+function ensureTagReqNos() {
+  const w = workspaceStore(), list = w.tagRequests || [];
+  const miss = list.filter((r) => r && typeof r === 'object' && !Number.isInteger(r.no));
+  if (!miss.length) return false;
+  let seq = Number(w.tagReqNoSeq) || 0;
+  list.forEach((r) => { if (r && Number.isInteger(r.no) && r.no > seq) seq = r.no; });
+  const idx = new Map(list.map((r, i) => [r, i]));
+  miss.sort((a, b) => ((Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0)) || idx.get(a) - idx.get(b));
+  miss.forEach((r) => { r.no = ++seq; });
+  w.tagReqNoSeq = seq; return true;
+}
 /** Valid request = numeric-ish ID + rows array — recovery bakiyon ko ignore karti hai. */
 const tagReqValid = (r) => !!r && typeof r === 'object' && /^[A-Za-z0-9_:-]{1,60}$/.test(tagReqKeyOf(r)) && Array.isArray(r.rows);
 const tagReqCount = () => (workspaceStore().tagRequests || []).length;
@@ -3091,6 +3103,7 @@ function mergeMissingTagRequests(incoming, { addressBook = null } = {}) {
   if (added.length) {
     // list ka tail = newest; recovery ke baad bhi wahi order rahe (same time par original order).
     w.tagRequests.sort((a, b) => (Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0));
+    ensureTagReqNos();
     capTagRequests();
   }
   let addresses = 0;
@@ -10650,6 +10663,7 @@ async function handleApi(req, res, url) {
     return safe;
   };
   const visibleTagRequests = (user) => {
+    if (ensureTagReqNos()) setTimeout(() => { try { persistBackground('notify'); } catch { /* */ } }, 0);
     const all = workspaceStore().tagRequests || [];
     const list = user.role === 'admin' ? all : all.filter((r) => r.by === user.username);
     return list.slice(-TAG_REQUEST_CAP).reverse().map(tagRequestClientView);
@@ -10725,6 +10739,7 @@ async function handleApi(req, res, url) {
   function storeTagRequests(list) {
     const w = workspaceStore();
     w.tagRequests.push(...list);
+    ensureTagReqNos();
     capTagRequests();
     tagReqBaselineSync();
     tagReqForceVerify = true; // 💾 save se pehle storage verify — kisi doosre process ki requests safe rahein
@@ -10791,7 +10806,7 @@ async function handleApi(req, res, url) {
     const rows = r.rows || [];
     const names = [...new Set(rows.map((x) => x.agentName).filter(Boolean))];
     return {
-      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '', itemName: normItemName(r.itemName), serialNumber: r.serialNumber || '', deviceName: r.deviceName || '', materialDescription: r.materialDescription || '',
+      id: r.id, no: r.no || null, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '', itemName: normItemName(r.itemName), serialNumber: r.serialNumber || '', deviceName: r.deviceName || '', materialDescription: r.materialDescription || '',
       agentName: (r.agent && r.agent.name) || names[0] || '', agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
       rows: rows.length, agents: Math.max(1, names.length),
       classes: rows.map((x) => ({ cls: x.cls, requested: x.requested === undefined ? Number(x.approved) || 0 : Number(x.requested) || 0, approved: Number(x.approved) || 0, ...(names.length > 1 ? { agent: x.agentName || '' } : {}) })),
@@ -13038,7 +13053,9 @@ async function handleApi(req, res, url) {
   // v3.30 — naye format (agent block wali) requests bhi ID se mil jaati hain, chahe login form se bani hon.
   const publicTagFind = (id) => {
     const cleanId = String(id || '').replace(/^#/, '').trim();
-    return (workspaceStore().tagRequests || []).find((r) => String(r.id || '') === cleanId && (r.source === 'public-link' || (r.agent && typeof r.agent === 'object')));
+    const okRow = (r) => r.source === 'public-link' || (r.agent && typeof r.agent === 'object');
+    const all = workspaceStore().tagRequests || [];
+    return (/^\d{1,7}$/.test(cleanId) && all.find((r) => String(r.no || '') === cleanId && okRow(r))) || all.find((r) => String(r.id || '') === cleanId && okRow(r));
   };
   // 🔁 Duplicate detector (v3.27.1) — employee ke naam se 30 din ke andar ki active requests dhoondta hai
   // jisme koi same agent × class row ho. Employee ko submit se pehle warning dikhti hai ("already pending"),
@@ -13578,7 +13595,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, {
       ok: true,
       request: {
-        id: row.id, at: row.at, status: row.status, total: row.total, byName: row.byName,
+        id: row.id, no: row.no || null, at: row.at, status: row.status, total: row.total, byName: row.byName,
         rows: (row.rows || []).length, agents: new Set((row.rows || []).map((x) => x.agentName)).size,
         adminNote: row.adminNote || '', note: row.note || '',
         employee: row.employee ? { name: row.employee.name || '', mobile: row.employee.mobile || '', address: row.employee.address || '', pincode: row.employee.pincode || '' } : null,

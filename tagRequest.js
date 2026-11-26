@@ -2797,7 +2797,7 @@ body.colorful .from-hdr { color: #166534; }
       const cls = (a.rows || []).map((x) => `${esc(x.cls)} × ${esc(fmt(x.approved))}`).join(' · ') || '—';
       const tot = (a.rows || []).reduce((s, x) => s + (x.approved || 0), 0);
       const rows = [
-        ['Request ID', r.id ? `<span class="trp-id">#${esc(r.id)}</span>` : '—'],
+        ['Request No.', (r.no || r.id) ? `<span class="trp-id">#${esc(r.no || r.id)}</span>` : '—'],
         [a.kind === 'tl' ? 'TL' : 'Agent', `<b>${esc(a.agentName || a.agentId || '—')}</b>${a.agentId ? ` <small>#${esc(a.agentId)}</small>` : ''}`],
         ...(a.mapName || a.mapId ? [['FASTag mapping', `${esc(a.mapName || '')}${a.mapId ? ` <small>#${esc(a.mapId)}</small>` : ''}`]] : []),
         ...(a.dispatchName ? [['Dispatch name', esc(a.dispatchName)]] : []),
@@ -3000,7 +3000,7 @@ body.colorful .from-hdr { color: #166534; }
       <p class="dim" style="margin:0 0 12px">${esc(d.employee || state.employee.name || '')} — <b>${fmt(reqs.length || batch.agents || 0)} agent</b> ki request (${fmt(batch.total || 0)} tags) admin ke paas pahunch gayi. Apni saari requests <b>📝 Form</b> par <b>👤 Meri requests</b> me dikh jaayengi (All / Pending / Approved / Dispatched / Rejected) — ya <b>🔎 Status</b> tab me <b>agent ke mobile number</b> se dekho.</p>
       ${reqs.length ? `<div class="table-wrap"><table class="tbl tr-done-tbl"><thead><tr><th>Agent</th><th>Mobile</th><th>Classes</th><th class="num">Tags</th><th>Request ID</th></tr></thead><tbody>
         ${reqs.map((r) => `<tr><td><b>${esc(r.agentName || '—')}</b></td><td>${esc(r.mobile || '—')}</td><td class="small">${esc((r.classes || []).map((c) => `${c.cls}×${c.qty}`).join(' · '))}</td><td class="num"><b>${fmt(r.total)}</b></td>
-          <td><span class="mono small">${esc(r.id)}</span> <button class="btn small" data-tr-copy-id="${esc(r.id)}" title="Request ID copy">📋</button></td></tr>`).join('')}
+          <td><span class="mono small">${esc(r.no || r.id)}</span> <button class="btn small" data-tr-copy-id="${esc(r.no || r.id)}" title="Request number copy">📋</button></td></tr>`).join('')}
       </tbody></table></div>` : ''}
       <div class="btn-row" style="margin-top:12px;justify-content:center">
         <button class="btn primary" data-tr-act="again">➕ Naya request banao</button>
@@ -3320,8 +3320,8 @@ body.colorful .from-hdr { color: #166534; }
       const cleanId = q.replace(/^#/, '').trim();
       let path = '';
       if (d.length >= 10 && d.length <= 13 && /^[\d+\s-]+$/.test(q)) path = `/api/public/tag-request/status?mobile=${encodeURIComponent(d)}`;
-      else if (/^\d{4}$/.test(d) || /^tagreq/i.test(cleanId) || cleanId.length >= 4) path = `/api/public/tag-request/status?id=${encodeURIComponent(cleanId)}`;
-      if (!path) { st.err = 'Agent ka 10 digit mobile number ya 4-digit Request ID daalo.'; st.list = null; renderStatus(); return; }
+      else if (/^\d{1,7}$/.test(cleanId) || /^tagreq/i.test(cleanId) || cleanId.length >= 4) path = `/api/public/tag-request/status?id=${encodeURIComponent(cleanId)}`;
+      if (!path) { st.err = 'Agent ka 10 digit mobile number ya Request number daalo.'; st.list = null; renderStatus(); return; }
       st.busy = true; st.err = ''; renderStatus();
       publicApi(path).then((out) => {
         st.list = out && Array.isArray(out.requests) ? out.requests : (out && out.request ? [out.request] : []);
@@ -3634,7 +3634,7 @@ body.colorful .from-hdr { color: #166534; }
     const entryBy = r.byName && r.byName !== empName ? `<small class="dim">entry: ${esc(r.byName)}</small>` : '';
     return `<tr class="tr-req-row st-${esc(status)}${sel ? ' tr-sel' : ''}${editing ? ' tr-editing' : ''}" data-tr-key="${esc(dr.key)}">
       <td class="tr-c-sel"><input type="checkbox" data-tr-sel="${esc(dr.key)}" ${sel ? 'checked' : ''} aria-label="Select"></td>
-      <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="${esc(r.id)}">#${esc(String(r.id || '').slice(-6))}</small></td>
+      <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="Request No. ${esc(r.no || r.id)}">#${esc(r.no || String(r.id || '').slice(-6))}</small></td>
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
       <td class="tr-c-agent"><b>${agentNameHtml(dr.agent)}</b>${agentActsHtml(dr.agent)}${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}${dr.agent.mapName || dr.agent.mapId ? `<small class="dim" title="FASTag Mapping — sheet me yahi naam/ID jata hai"> 🔗 ${esc(dr.agent.mapName || '')}${dr.agent.mapId ? ` #${esc(dr.agent.mapId)}` : ''}</small>` : ''}${agentIdLineHtml(dr.agent)}
         <span class="tr-tags"><span class="badge ${statusOf(r).tone} tr-st-inline" title="Status">${statusOf(r).label}</span><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>
