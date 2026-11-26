@@ -985,9 +985,19 @@ window.FF = window.FF || {};
         const ac = new AbortController(); const tmo = setTimeout(() => ac.abort(), 180000);
         let j;
         try {
+          // v3.125.527 — pehle sirf saved din (turant); poora ho to wahi, nahi to neeche poora load
+          try {
+            const ac0 = new AbortController(); const t0m = setTimeout(() => ac0.abort(), 12000);
+            const r0 = await fetch(`/api/eir-raw?fast=1&from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`, { credentials: 'same-origin', cache: 'no-store', signal: ac0.signal });
+            clearTimeout(t0m);
+            const j0 = r0.ok ? await r0.json().catch(() => null) : null;
+            if (j0 && Array.isArray(j0.rows) && !j0.partial) j = j0;
+          } catch { /* poora load neeche */ }
+          if (!j) {
           const res = await fetch(`/api/eir-raw?from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`, { credentials: 'same-origin', cache: 'no-store', signal: ac.signal });
           j = await res.json().catch(() => null);
           if (!res.ok) throw new Error((j && j.error) || `HTTP ${res.status}`);
+          }
         } finally { clearInterval(tick); clearTimeout(tmo); }
         if (j && Array.isArray(j.rows)) { t = { rows: j.rows }; state.rawCache = { cached: j.cachedDays, fetched: j.fetchedDays, ms: j.ms, errors: (j.errors || []).length }; }
       } catch { t = null; }

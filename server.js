@@ -7896,6 +7896,10 @@ async function eirRawRows(from, to, opts = {}) {
   const cfg = eirRawCfg();
   const out = new Map(); const missing = [];
   for (let d = from; d <= to; d = addDayKey(d, 1)) { const ent = eirRawRead(d, cfg); if (ent) { if (!opts.noCollect) out.set(d, ent.rows); } else missing.push(d); }
+  if (opts.cacheOnly) {   // v3.125.527 — sirf saved din (network nahi): turant jawab, missing din background me
+    const rows = []; for (let d = to; d >= from; d = addDayKey(d, -1)) { const r = out.get(d); if (r) for (let i = 0; i < r.length; i++) rows.push(r[i]); }
+    return { rows, cachedDays: out.size, fetchedDays: 0, missingDays: missing.length, errors: [] };
+  }
   const spans = [];
   for (const d of missing) { const last = spans[spans.length - 1]; if (last && addDayKey(last[1], 1) === d && last[2] < (opts.spanDays || 8)) { last[1] = d; last[2]++; } else spans.push([d, d, 1]); }
   let next = 0; const errors = [];
@@ -7906,6 +7910,43 @@ async function eirRawRows(from, to, opts = {}) {
   return { rows, cachedDays: missingCount(from, to) - missing.length, fetchedDays: missing.length, errors };
   function missingCount(a, b) { let n = 0; for (let d = a; d <= b; d = addDayKey(d, 1)) n++; return n; }
 }
+// 💾 v3.125.527 — EIR raw din-wise cache ka DURABLE snapshot (Google Sheet tab CACHE_EIRRAW). Render free plan ki disk har deploy par
+// mit jaati hai → pehle har deploy ke baad har agent ki "Full data" list 90 s+ Google se aati thi. Ab boot par sheet se wapas.
+const EIR_SNAP_TAB = 'CACHE_EIRRAW';
+const eirSnap = { savedAt: 0, loadedAt: 0, sig: '', loaded: 0, days: 0, err: '' };
+async function eirRawSnapSave() {
+  if (!sheetsStore || typeof sheetsStore.call !== 'function') return false;
+  try {
+    const cfg = eirRawCfg(), today = istTodayKey();
+    const from = `${addDayKey(`${today.slice(0, 7)}-01`, -1).slice(0, 7)}-01`, to = addDayKey(today, -1);
+    const build = (f) => { const days = {}; let n = 0, rows = 0; for (let d = f; d <= to; d = addDayKey(d, 1)) { const e = eirRawRead(d, cfg); if (e && Array.isArray(e.rows)) { days[d] = e.rows; n++; rows += e.rows.length; } } return { days, n, rows }; };
+    let b = build(from);
+    if (!b.n) return false;
+    const sig = `${cfg.colSig}|${b.n}|${b.rows}`;
+    if (sig === eirSnap.sig) return false;
+    let ok = await durSave(EIR_SNAP_TAB, 'eirraw', { colSig: cfg.colSig, days: b.days }, { at: Date.now(), n: b.n });
+    if (!ok) { b = build(`${today.slice(0, 7)}-01`); if (b.n) ok = await durSave(EIR_SNAP_TAB, 'eirraw', { colSig: cfg.colSig, days: b.days }, { at: Date.now(), n: b.n }); }   // bada ho to sirf is mahine ka
+    if (ok) { eirSnap.sig = sig; eirSnap.savedAt = Date.now(); eirSnap.days = b.n; eirSnap.err = ''; console.log(`💾 EIR raw snapshot sheet me: ${b.n} din · ${b.rows} rows`); }
+    else { eirSnap.err = profilePack.err || 'save failed'; console.warn('💾 EIR raw snapshot save FAIL:', eirSnap.err); }
+    return ok;
+  } catch (err) { eirSnap.err = String((err && err.message) || err).slice(0, 120); return false; }
+}
+async function eirRawSnapLoad() {
+  const r = await durLoad(EIR_SNAP_TAB, 'eirraw');
+  if (!r || !r.obj || !r.obj.days) return 0;
+  const cfg = eirRawCfg(); if (r.obj.colSig !== cfg.colSig) return 0;
+  const at = Number(r.head && r.head.at) || Date.now(), today = istTodayKey(); let n = 0;
+  try { mkdirSync(EIR_RAW_DIR, { recursive: true }); } catch { /* optional */ }
+  for (const [day, rows] of Object.entries(r.obj.days)) {
+    if (day >= today || !Array.isArray(rows) || eirRawRead(day, cfg)) continue;
+    const ent = { day, rows, sig: '', at, colSig: cfg.colSig };
+    try { writeFileSync(path.join(EIR_RAW_DIR, `${day}.json.gz`), zlib.gzipSync(Buffer.from(JSON.stringify(ent)))); n++; } catch { /* disk optional */ }
+    await new Promise((res) => setImmediate(res));
+  }
+  eirSnap.loadedAt = Date.now(); eirSnap.loaded = n;
+  if (n) console.log(`💾 EIR raw: ${n} din Google Sheet snapshot se wapas (restart ke baad turant)`);
+  return n;
+}
 /** Subah / naya EIR data aane par: is mahine + pichhle mahine ke din pehle se cache me (dheere, 2 ek saath). */
 function eirRawPrewarm(reason) {
   if (eirRawPrewarming) return eirRawPrewarming;
@@ -7913,6 +7954,7 @@ function eirRawPrewarm(reason) {
   const from = `${addDayKey(`${today.slice(0, 7)}-01`, -1).slice(0, 7)}-01`;
   eirRawPrewarming = eirRawRows(from, to, { parallel: 1, noCollect: true, spanDays: 8 })
     .then((r) => { if (r.fetchedDays) console.log(`🗂️ EIR raw cache (${reason}): ${r.fetchedDays} din missing the${r.errors.length ? ` · ${r.errors.length} span fail: ${r.errors[0].slice(0, 200)}` : ' · sab saved'}`); })
+    .then(() => eirRawSnapSave().catch(() => {}))
     .catch(() => {}).finally(() => { eirRawPrewarming = null; });
   return eirRawPrewarming;
 }
@@ -12526,6 +12568,11 @@ async function handleApi(req, res, url) {
     const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1;
     if (days > 124) throw new HttpError(400, 'Ek baar me 4 mahine tak.');
     const t0 = Date.now();
+    if (url.searchParams.get('fast') === '1') {
+      const f = await eirRawRows(from, to, { cacheOnly: true });
+      if (f.missingDays && !gvizCooldownActive()) eirRawRows(from, to, { noCollect: true, parallel: 1, spanDays: 8 }).then(() => eirRawSnapSave().catch(() => {})).catch(() => {});   // baaki din peeche se bharo
+      return sendJson(res, 200, { ok: true, rows: f.rows, cachedDays: f.cachedDays, fetchedDays: 0, missingDays: f.missingDays, partial: f.missingDays > 0, errors: [], ms: Date.now() - t0 });
+    }
     const r = await eirRawRows(from, to);
     if (r.errors.length && !r.rows.length) throw new HttpError(502, `Google Sheet se rows nahi aayi: ${r.errors[0]}`);
     return sendJson(res, 200, { ok: true, rows: r.rows, cachedDays: r.cachedDays, fetchedDays: r.fetchedDays, errors: r.errors, ms: Date.now() - t0 });
@@ -18734,6 +18781,7 @@ async function start() {
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
     setTimeout(() => { try { if (ledgerSources().length) ledgerDirect(['608116-039-0000001']).catch(() => {}); } catch { /* optional */ } }, 180e3).unref?.();   // ⚡ v425 — dispatch ledger ka pehla (cold) query boot par hi
+    setTimeout(() => { eirRawSnapLoad().catch(() => {}); }, 20e3).unref?.();   // 💾 v3.125.527 — deploy ke baad EIR raw din Sheet snapshot se turant
     setTimeout(() => eirRawPrewarm('boot'), 240e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
     setInterval(() => eirRawPrewarm('30 min'), 30 * 60e3).unref();   // jo din fail / missing hain wahi dobara (baaki disk se)
     setInterval(() => checkDailyVersions('10 min').catch(() => {}), 10 * 60e3).unref();
