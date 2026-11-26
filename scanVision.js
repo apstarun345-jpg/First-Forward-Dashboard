@@ -324,6 +324,57 @@
     return [...found.values()];
   }
 
-  FF.scanVision = { read, parse16, textCodes, lenientCodes, fixPrefix, locate, cropRegion, refineAngle, layoutOf, textStrip, _env: env, warm: () => { zbarLib().catch(() => {}); } };
+
+  /**
+   * 🎥 LIVE camera: video par barcode / number ko TURANT pakadna.
+   *  har cycle: native BarcodeDetector → zbar (frame) → agar kuch nahi: number ki patti (locate → angle → strip → OCR line) — OCR worker pehle se garam (warm).
+   *  barcode (checksum wala) = turant onFound; number (OCR) = 2 baar ek jaisa padha jaye to (≈0.4 s) — ya known prefix + server-valid ho to.
+   * opt: { isActive(), hold(), onFound(code, how), onStatus(msg), prefixes }  → return stop()
+   */
+  function live(video, opt) {
+    let stop = false, busy = false, misses = 0; const seen = new Map(), cv = mk(2, 2);
+    warmAll();
+    function warmAll() { zbarLib().catch(() => {}); ocrLib().catch(() => {}); }
+    const known = (opt.prefixes && opt.prefixes.length ? opt.prefixes : ['608116']).slice();
+    const frame = () => {
+      const vw = video.videoWidth, vh = video.videoHeight; if (!vw || !vh) return null;
+      const S = Math.min(1, 1400 / Math.max(vw, vh)), c = mk(vw * S, vh * S), x = ctx2(c); x.drawImage(video, 0, 0, c.width, c.height); return c;
+    };
+    async function cycle() {
+      const c = frame(); if (!c) return;
+      let hit = false;
+      try { const det = opt.skipNative ? null : await nativeDet(); if (det) for (const f of await det.detect(c)) { const k = parse16(f.rawValue); if (k) { hit = true; opt.onFound(k, 'barcode'); } } } catch { /* */ }
+      if (hit) { misses = 0; return; }
+      try { const z = env.zbar || (zP ? null : await zbarLib()); if (z) for (const r of await zbarScan(c)) { hit = true; opt.onFound(r.code, 'barcode'); } } catch { /* */ }
+      if (hit) { misses = 0; return; }
+      misses++;
+      if (!env.ocr) { opt.onStatus && opt.onStatus('🔤 Number padhne wala tayyar ho raha hai…'); return; }
+      let regs = []; try { regs = locate(c); } catch { regs = []; }
+      const cx = c.width / 2, cy = c.height / 2;
+      regs = regs.filter((r) => r.w > 40 && r.w / Math.max(1, r.h) >= 0.9 && r.w / Math.max(1, r.h) <= 9).sort((a, b) => Math.hypot(a.cx - cx, a.cy - cy) - Math.hypot(b.cx - cx, b.cy - cy)).slice(0, 2);
+      for (const r of regs) {
+        if (stop) return;
+        let da = 0; try { da = refineAngle(c, r); } catch { da = 0; }
+        for (const fl of [false, true]) {
+          let txt = ''; try { const st = textStrip(c, r, da, fl, 56); if (st.canvas.width < 80) break; txt = await env.ocr.recognize(st.canvas, 7); } catch { break; }
+          const got = [...new Set(lenientCodes(txt).map((x) => { const g1 = fixPrefix(x.g1, known); return g1 ? `${g1}-${x.g2}-${x.g3}` : ''; }).filter(Boolean))];
+          if (!got.length) { if (!fl) continue; else break; }
+          for (const k of got) { const n = (seen.get(k) || 0) + 1; seen.set(k, n); opt.onStatus && opt.onStatus('🔎 ' + k); if (n >= 2) { seen.clear(); hit = true; opt.onFound(k, 'text'); } }
+          break;
+        }
+        if (hit) break;
+      }
+      if (seen.size > 40) seen.clear();
+    }
+    (async function loop() {
+      while (!stop && !(opt.isActive && !opt.isActive())) {
+        if (!busy && !(opt.hold && opt.hold()) && video.readyState >= 2 && !(typeof document !== 'undefined' && document.hidden)) { busy = true; try { await cycle(); } catch { /* frame skip */ } busy = false; }
+        await new Promise((r) => setTimeout(r, 60));
+      }
+    })();
+    return () => { stop = true; };
+  }
+
+  FF.scanVision = { read, parse16, textCodes, lenientCodes, fixPrefix, locate, cropRegion, refineAngle, layoutOf, textStrip, _env: env, warm: () => { zbarLib().catch(() => {}); ocrLib().catch(() => {}); }, live };
   if (typeof module !== 'undefined' && module.exports) module.exports = FF.scanVision;
 })(typeof window !== 'undefined' ? window : globalThis);

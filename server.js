@@ -3967,9 +3967,9 @@ async function scanEirByTags(tags) {
   const s = db.settings || {}, e = s.eir || {};
   const sheetId = String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
   const sheet = s.eirSheet || e.sheet || 'EIR';
-  const L = { tag: colLetter(e.tagId, 'A'), date: colLetter(e.date, 'AA'), cls: colLetter(e.cls, 'D'), aid: colLetter(e.agentId, 'J'), an: colLetter(e.agentName, 'L'), tl: colLetter(e.tlName, 'BA'), type: colLetter(e.type, 'P'), status: colLetter(e.status, 'Z'), master: colLetter(e.masterId, 'AU'), gvn: colLetter(e.gvName, 'AX') };
-  const cols = [L.tag, L.date, L.cls, L.aid, L.an, L.tl, L.type, L.status, L.master, L.gvn];
-  const q = new URLSearchParams({ id: sheetId, sheet, tq: `select ${cols.join(', ')} where ${need.map((t) => `${L.tag} = '${t.replace(/'/g, '')}'`).join(' or ')} limit 100` });
+  const L = { tag: colLetter(e.tagId, 'A'), date: colLetter(e.date, 'AA'), cls: colLetter(e.cls, 'D'), aid: colLetter(e.agentId, 'J'), an: colLetter(e.agentName, 'L'), tl: colLetter(e.tlName, 'BA'), type: colLetter(e.type, 'P'), status: colLetter(e.status, 'Z'), master: colLetter(e.masterId, 'AU'), gvn: colLetter(e.gvName, 'AX'), vrn: colLetter(e.vrn, 'B') };
+  const cols = [L.tag, L.date, L.cls, L.aid, L.an, L.tl, L.type, L.status, L.master, L.gvn, L.vrn];
+  const q = new URLSearchParams({ id: sheetId, sheet, tq: `select ${cols.join(', ')} where ${need.map((t) => `${L.tag} = '${t.replace(/'/g, '')}'`).join(' or ')} limit 300` });
   const res = await gvizPageServer(q, sheet);
   const at = (c) => res.ids.indexOf(c);
   const gvMasterId = String(e.gvMasterId || '5845036');
@@ -3979,7 +3979,7 @@ async function scanEirByTags(tags) {
     const iso = dc ? (serverDate(dc.v) || serverDate(dc.f) || '') : '';
     const gv = idNorm(g(L.master)) === idNorm(gvMasterId);
     const tl = g(L.tl);
-    out.set(g(L.tag).toUpperCase(), { date: iso, cls: g(L.cls), agent: (gv ? g(L.gvn) : '') || g(L.an), agentId: g(L.aid), tl: /^(NA|N\/A|#N\/A|-|0)$/i.test(tl) ? '' : tl, type: g(L.type), status: g(L.status), ch: gv ? 'GV' : 'FF' });
+    out.set(g(L.tag).toUpperCase(), { date: iso, cls: g(L.cls), agent: (gv ? g(L.gvn) : '') || g(L.an), agentId: g(L.aid), tl: /^(NA|N\/A|#N\/A|-|0)$/i.test(tl) ? '' : tl, type: g(L.type), status: g(L.status), vrn: g(L.vrn), ch: gv ? 'GV' : 'FF' });
   }
   need.forEach((t) => scanEirCache.set(t, { at: Date.now(), row: out.get(t) || null }));
   if (scanEirCache.size > 5000) scanEirCache.clear();
@@ -14157,6 +14157,18 @@ async function handleApi(req, res, url) {
       throw new HttpError(502, 'StockDataa index nahi ban paya: ' + String((err && err.message) || err).slice(0, 240));
     }
   }
+  // ⚡ v3.125.535 — Barcode Checker: Issued (EIR) check SERVER se (cache + Google busy handle) — browser seedha Google ko nahi marta, isliye 429 nahi.
+  if (p === '/api/barcode-eir' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const tags = [...new Set((Array.isArray(body && body.tags) ? body.tags : []).map((t) => String(t || '').toUpperCase().replace(/[^0-9A-Z]/g, '')).filter((t) => /^[0-9A-F]{16,32}$/.test(t)))].slice(0, 3000);
+    const eir = {}, pending = [];
+    for (let i = 0; i < tags.length; i += 90) {
+      const part = tags.slice(i, i + 90);
+      try { (await scanEirByTags(part)).forEach((v, k) => { eir[k] = v; }); } catch { pending.push(...part); }
+    }
+    return sendJson(res, 200, { ok: true, eir, pending }, { 'Cache-Control': 'no-store' });
+  }
   // 🔢 v215 — Barcode range checker (Master Search): range ke StockDataa rows (login wale sab users, read-only).
   if (p === '/api/barcode-range' && method === 'POST') {
     if (!user) throw new HttpError(401, 'Login required');
@@ -15255,7 +15267,7 @@ async function serveStatic(req, res, pathname, search) {
       }
       // `?v=45` wala asset immutable ho gaya (index.html har deploy par bump karta hai) → repeat visits
       // par scripts ek baar hi download hote hain, phir 0 requests. HTML/manifest no-cache rehta hai.
-      const cache = isShell ? 'no-cache' : versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=600';
+      const cache = isShell ? 'no-cache' : (versioned || top === 'libs') ? 'public, max-age=31536000, immutable' : 'public, max-age=600';   // libs/ (OCR wasm + traineddata ~7 MB) ek baar download, phir hamesha cache
       // 🏷️ ETag: HTML/no-cache assets har baar revalidate hote hain — 304 me sirf headers jaate hain
       // (poore page ka HTML dobara transfer nahi hota), isliye repeat load noticeable fast ho jata hai.
       const etag = `W/"${stat.size.toString(36)}-${Math.round(Number(stat.mtimeMs)).toString(36)}"`;
@@ -15264,7 +15276,7 @@ async function serveStatic(req, res, pathname, search) {
         return res.end();
       }
       const type = MIME[ext] || 'application/octet-stream';
-      const extraHeaders = { 'Cache-Control': cache, ETag: etag, 'X-FF-Cache': versioned && !isShell ? 'immutable' : 'revalidate' };
+      const extraHeaders = { 'Cache-Control': cache, ETag: etag, 'X-FF-Cache': (versioned || top === 'libs') && !isShell ? 'immutable' : 'revalidate' };
       // ⚡ Compressible files (js/css/svg…): disk read + brotli/gzip ek baar, phir memory se (etag = size+mtime,
       // isliye file badalte hi naya slot). 100+ file wali first-visit burst me CPU/disk dobara nahi lagta.
       if (COMPRESSIBLE.test(type)) {

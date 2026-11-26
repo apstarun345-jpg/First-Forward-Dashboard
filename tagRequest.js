@@ -1306,7 +1306,7 @@ body.colorful .from-hdr { color: #166534; }
   }
   // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
   //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
-  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=533'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=535'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
   SC.rv = []; SC.rvId = 0;
   const scRvPaint = () => {
     const host = scQ('[data-sc-review]'); if (!host) return;
@@ -1382,9 +1382,11 @@ body.colorful .from-hdr { color: #166534; }
     } catch { /* */ }
     if (msg) msg.textContent = 'Barcode ko frame ke beech me rakho';
     let native = false;
+    // ⚡ v3.125.535 — live: native/ZXing ke saath-saath zbar + number (OCR) bhi turant; OCR worker camera khulte hi garam hota hai
+    scLoadVision().then((V) => { if (!SC.on) return; if (SC.stopLive) SC.stopLive(); SC.stopLive = V.live(v, { skipNative: 'BarcodeDetector' in window, isActive: () => SC.on, hold: () => SC.hold, onFound: (code) => scOnRaw(code), onStatus: (m) => { const mm = scQ('[data-sc-msg]'); if (mm && SC.on && !SC.hold) mm.textContent = m; } }); }).catch(() => {});
     if ('BarcodeDetector' in window) { try { const sup = await window.BarcodeDetector.getSupportedFormats(); const fm = ['code_128', 'code_39', 'code_93', 'itf', 'codabar'].filter((f) => sup.includes(f)); if (fm.length) { SC.det = new window.BarcodeDetector({ formats: fm }); native = true; } } catch { /* */ } }
     if (native) {
-      const tick = async () => { if (!SC.on) return; if (!SC.busy && !SC.hold && v.readyState >= 2 && !document.hidden) { SC.busy = true; try { const fs = await SC.det.detect(v); fs.forEach((f) => scOnRaw(f.rawValue)); SC.miss = fs.length ? 0 : (SC.miss || 0) + 1; if (SC.miss > 30 && SC.miss % 45 === 0 && v.videoWidth && !SC.vbusy) { SC.vbusy = true; scLoadVision().then((V) => V.read(v, v.videoWidth, v.videoHeight, { budgetMs: 6000, onFound: (code) => scOnRaw(code) })).catch(() => {}).finally(() => { SC.vbusy = false; }); } } catch { /* */ } SC.busy = false; } SC.timer = setTimeout(tick, 30); };
+      const tick = async () => { if (!SC.on) return; if (!SC.busy && !SC.hold && v.readyState >= 2 && !document.hidden) { SC.busy = true; try { const fs = await SC.det.detect(v); fs.forEach((f) => scOnRaw(f.rawValue)); SC.miss = fs.length ? 0 : (SC.miss || 0) + 1;  } catch { /* */ } SC.busy = false; } SC.timer = setTimeout(tick, 30); };
       tick();
     } else {
       try { const Z = await scLoadZ(); const h = new Map(); h.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODABAR]); h.set(Z.DecodeHintType.TRY_HARDER, true); SC.reader = new Z.BrowserMultiFormatReader(h, 60); SC.reader.decodeFromStream(SC.stream, v, (r) => { if (r && SC.on) scOnRaw(r.getText()); }); }
@@ -1392,7 +1394,7 @@ body.colorful .from-hdr { color: #166534; }
     }
   }
   function scCamStop() {
-    SC.on = false; clearTimeout(SC.timer); try { if (SC.reader) SC.reader.reset(); } catch { /* */ }
+    SC.on = false; clearTimeout(SC.timer); try { if (SC.stopLive) SC.stopLive(); } catch { /* */ } SC.stopLive = null; try { if (SC.reader) SC.reader.reset(); } catch { /* */ }
     try { if (SC.stream) SC.stream.getTracks().forEach((t) => t.stop()); } catch { /* */ }
     SC.stream = null; SC.reader = null; SC.det = null; SC.hold = false; SC.torch = false;
     const box = scQ('[data-sc-cam]'); if (box) box.hidden = true; const cf = scQ('[data-sc-conf]'); if (cf) cf.hidden = true;
@@ -1434,7 +1436,7 @@ body.colorful .from-hdr { color: #166534; }
       root.addEventListener('paste', (e) => { const fl = Array.from((e.clipboardData && e.clipboardData.files) || []).filter((f) => /^image\//.test(f.type)); if (fl.length) { e.preventDefault(); scImages(fl); } });
       if (!window.__scPaste) { window.__scPaste = 1; document.addEventListener('paste', (e) => { if (!document.querySelector('[data-sc-file]')) return; const fl = Array.from((e.clipboardData && e.clipboardData.files) || []).filter((f) => /^image\//.test(f.type)); if (fl.length) { e.preventDefault(); scImages(fl); } }); }
       ['dragover', 'drop'].forEach((ev) => root.addEventListener(ev, (e) => { if (!e.dataTransfer || !e.dataTransfer.types || ![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); if (ev === 'drop') scImages(Array.from(e.dataTransfer.files)); })); }
-    scRvEvents(root); scRvPaint();
+    scRvEvents(root); scRvPaint(); try { scLoadVision().then((V) => V.warm()).catch(() => {}); } catch { /* */ }
     root.querySelector('[data-sc-act="sound"]').onclick = (e) => { SC.sound = !SC.sound; e.currentTarget.textContent = SC.sound ? '🔊' : '🔇'; try { localStorage.setItem('ff_tr_scan_snd', SC.sound ? '1' : '0'); } catch { /* */ } };
     root.querySelector('[data-sc-act="zoom"]').onclick = async (e) => { try { const steps = [1, 2, 3, 4].filter((z) => z <= SC.zmax); const i = steps.indexOf(SC.zoom); SC.zoom = steps[(i + 1) % steps.length] || 1; await SC.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ zoom: SC.zoom }] }); e.currentTarget.textContent = '🔍 ' + SC.zoom + 'x'; } catch { U.toast('Zoom is device par nahi chala', 'warn'); } };
     root.querySelector('[data-sc-act="torch"]').onclick = async () => { try { SC.torch = !SC.torch; await SC.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: SC.torch }] }); } catch { U.toast('Torch nahi chala', 'warn'); } };

@@ -50,6 +50,21 @@ FF.pages = FF.pages || {};
     };
   }
   const EIR_CACHE = new Map();   // ⚡ v424 — tag → EIR row (dobara check instant)
+  /** ⚡ v3.125.535 — Issued (EIR) check: server se (cache + Google busy handle); kabhi throw nahi karta. Fail ho to {pending} wapas — rows phir bhi dikhte hain, peeche se dobara try. */
+  async function eirSafe(tags) {
+    const map = new Map(), pending = [];
+    for (let i = 0; i < tags.length; i += 600) {
+      const part = tags.slice(i, i + 600);
+      try {
+        const j = await FF.auth.api('/api/barcode-eir', 'POST', { tags: part });
+        Object.entries((j && j.eir) || {}).forEach(([t, v]) => map.set(t, { date: v.date || '', vrn: v.vrn || '', cls: v.cls || '', agent: v.agent || '', agentId: v.agentId || '', tl: v.tl || '', status: v.status || '', type: v.type || '', ch: v.ch === 'GV' ? 'GV Partner' : 'First Forward' }));
+        ((j && j.pending) || []).forEach((t) => pending.push(t));
+      } catch (e1) {
+        try { (await eirByTags(part)).forEach((v, k) => map.set(k, v)); } catch (e2) { pending.push(...part); }
+      }
+    }
+    return { map, pending };
+  }
   async function eirByTags(tagsAll) {
     const e = FF.config.eir, D = FF.data;
     const out = new Map();
@@ -137,7 +152,7 @@ FF.pages = FF.pages || {};
     list.forEach((b) => { const r = byKey.get(b.key); let t = r && r.tagId ? String(r.tagId).toUpperCase() : ''; if (!t && infer) { t = infer(b.n); if (t) inferred.add(b.key); } if (t) tagOf.set(b.key, t); });
     const build = (eir) => list.map((b) => { const t = tagOf.get(b.key) || ''; return makeRow(b.label, byKey.get(b.key), t, inferred.has(b.key), t ? eir.get(t) : null); });
     if (early && tagOf.size) early(build(new Map()));   // ⚡ stock turant dikhao, EIR (issued) peeche se
-    const eir = tagOf.size ? await eirByTags([...new Set(tagOf.values())]) : new Map();
+    const eir = tagOf.size ? (await eirSafe([...new Set(tagOf.values())])).map : new Map();
     return build(eir);
   }
   /** v3.125.42 — List me "A to B" / "A se B" / "A - B" / "A → B" = range: first se last tak saare barcodes.
@@ -166,6 +181,17 @@ FF.pages = FF.pages || {};
     out.errors = errors;
     return out;
   }
+  /** pending EIR tags ko peeche se dobara try (3 s, 6 s, 10 s, 15 s) — mil jaye to row badal kar dobara paint */
+  function eirRetry(rows, pend, n) {
+    if (n >= 4 || !pend.length) return;
+    setTimeout(async () => {
+      const fe = await eirSafe(pend);
+      let changed = false;
+      rows.forEach((r) => { const x = r._x; if (!x || !x.tag || !r.eirPending) return; const is = fe.map.get(x.tag); if (!fe.pending.includes(x.tag)) { const keep = { _i: r._i, dDate: r.dDate, dName: r.dName, _x: x }; Object.keys(r).forEach((k) => delete r[k]); Object.assign(r, makeRow(x.label, x.st, x.tag, x.inf, is || null), keep); changed = true; } });
+      if (changed && state.root && state.rows && rows.some((r) => state.rows.includes(r))) { try { paintResults(); } catch { /* */ } }
+      if (fe.pending.length) eirRetry(rows, fe.pending, n + 1);
+    }, [3000, 3000, 4000, 5000][n] || 5000);
+  }
   async function checkMulti(list, early) {
     if (list.length > MAX) throw new Error(`Ek baar me max ${MAX.toLocaleString('en-IN')} barcodes`);
     const res = await FF.auth.api('/api/barcode-lookup', 'POST', { barcodes: list });
@@ -181,12 +207,15 @@ FF.pages = FF.pages || {};
     // ⚡ v3.125.532 — raat ka Issued register (server) pehle: issued turant; live EIR sirf register me na milne waale tags ke liye, peeche se
     const regEir = new Map();
     (res.results || []).forEach((r, i) => { const g = r.reg, x = items[i]; if (g && x && x.tag) regEir.set(x.tag, { date: g.d || '', vrn: g.v || '', cls: g.c || '', agent: g.a || '', agentId: g.ai || '', tl: g.tl || '', status: '', type: '', ch: g.s === 'gv' ? 'GV Partner' : 'First Forward' }); });
-    const build = (eir) => items.map((x) => makeRow(x.label, x.st, x.tag, x.inf, x.tag ? eir.get(x.tag) : null));
+    const build = (eir) => items.map((x) => { const r = makeRow(x.label, x.st, x.tag, x.inf, x.tag ? eir.get(x.tag) : null); r._x = x; return r; });
     if (early && items.some((x) => x.tag)) early(build(regEir));   // ⚡ stock + register turant, live EIR peeche se
     const need = [...new Set(items.map((x) => x.tag).filter((tg) => tg && !regEir.has(tg)))];
-    const eir = need.length ? await eirByTags(need) : new Map();
+    const fe = need.length ? await eirSafe(need) : { map: new Map(), pending: [] };
+    const eir = fe.map;
     regEir.forEach((v, k) => { if (!eir.has(k)) eir.set(k, v); });
-    return build(eir);
+    const rows = build(eir);
+    if (fe.pending.length) { const pset = new Set(fe.pending); rows.forEach((r) => { if (r._x && r._x.tag && pset.has(r._x.tag) && r.k !== 'iss') { r.eirPending = true; r.note = (r.note || '') + ' · ⏳ Issued-check baaki (apne aap dobara try hoga)'; } }); eirRetry(rows, fe.pending, 0); }
+    return rows;
   }
 
   // ---- 🖼️ render ----------------------------------------------------------------------------------------
@@ -474,7 +503,7 @@ FF.pages = FF.pages || {};
   // ---- 🖼️ Photo upload (v3.125.532) — photo(s) → saare barcode (barcode + neeche likha number OCR) → ek saath check:
   //      Tag ID / status / class / agent / TL / kisme map / dispatch (kisko, kab). Copy (barcode / tag ID / sab) + CSV + Excel.
   const ph = { items: [], seq: 0, timer: 0 };
-  const phVision = () => (FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=533'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const phVision = () => (FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=535'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
   const phValid = (v) => { const d = bcDigits(v); return d.length === 16 ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : ''; };
   function phPaint() {
     const root = state.root, host = root && root.querySelector('[data-ph-list]'); if (!host) return;
@@ -786,6 +815,8 @@ FF.pages = FF.pages || {};
     try { const tr = scanCam.stream.getVideoTracks()[0]; const caps = tr && tr.getCapabilities ? tr.getCapabilities() : {}; const tb = state.root.querySelector('[data-scan="torch"]'); if (tb) tb.hidden = !caps.torch; } catch { /* optional */ }
     camMsg('Barcode ko frame ke beech me rakho');
     let useNative = false;
+    // ⚡ v3.125.535 — live: zbar + number (OCR) bhi turant (native/ZXing ke saath); OCR worker camera khulte hi garam
+    phVision().then((V) => { if (!scanCam.on) return; if (scanCam.stopLive) scanCam.stopLive(); scanCam.stopLive = V.live(video, { skipNative: 'BarcodeDetector' in window, isActive: () => scanCam.on, hold: () => !!scanPend.open, onFound: (code) => camOnRaw(code), onStatus: (m) => camMsg(m) }); }).catch(() => {});
     if ('BarcodeDetector' in window) {
       try {
         const want = ['code_128', 'code_39', 'code_93', 'itf', 'codabar'];
@@ -817,7 +848,7 @@ FF.pages = FF.pages || {};
   function camStop() {
     const was = scanCam.on || scanCam.stream;
     scanPend.code = ''; scanPend.open = false; try { const cb = state.root && state.root.querySelector('[data-scan-confirm]'); if (cb) cb.hidden = true; } catch { /* optional */ }
-    scanCam.on = false; cancelAnimationFrame(scanCam.raf); clearTimeout(scanCam.timer);
+    scanCam.on = false; cancelAnimationFrame(scanCam.raf); clearTimeout(scanCam.timer); try { if (scanCam.stopLive) scanCam.stopLive(); } catch { /* */ } scanCam.stopLive = null;
     try { if (scanCam.reader) scanCam.reader.reset(); } catch { /* optional */ }
     scanCam.reader = null; scanCam.det = null;
     try { if (scanCam.stream) scanCam.stream.getTracks().forEach((t) => t.stop()); } catch { /* optional */ }

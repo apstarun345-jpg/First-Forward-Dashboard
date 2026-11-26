@@ -27,3 +27,9 @@ test('v533: libs base path is libs/ (vendor/ blocked by server)', () => {
 test('fixPrefix: 7 digit / ek digit galat', () => {
   assert.equal(V.fixPrefix('6081156', ['608116']), '608116'); assert.equal(V.fixPrefix('508116', ['608116']), '608116'); assert.equal(V.fixPrefix('8116', ['608116']), '608116');
 });
+test('v535: live() exported; libs cached immutable; eir via server', () => {
+  assert.equal(typeof V.live, 'function');
+  const srv = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(srv, /top === 'libs'/); assert.match(srv, /\/api\/barcode-eir/);
+  assert.match(fs.readFileSync(new URL('../barcodeChecker.js', import.meta.url), 'utf8'), /async function eirSafe/);
+});
