@@ -12,9 +12,9 @@ test('parse16: 16 digit barcode, extra digit tolerance', () => {
   assert.equal(V.parse16('06081160350611445'), '608116-035-0611445');
 });
 test('textCodes: OCR text (space / kachra) se number', () => {
-  assert.deepEqual(V.textCodes('-\n608116-035-0611 445\n'), ['608116-035-0611445']);
-  assert.deepEqual(V.textCodes('1116-0290465177'), []);
-  assert.deepEqual(V.textCodes('608116-029-0465177 x 608116-021-0355380'), ['608116-029-0465177', '608116-021-0355380']);
+  assert.deepEqual([...V.textCodes('-\n608116-035-0611 445\n')], ['608116-035-0611445']);
+  assert.deepEqual([...V.textCodes('1116-0290465177')], []);
+  assert.deepEqual([...V.textCodes('608116-029-0465177 x 608116-021-0355380')], ['608116-029-0465177', '608116-021-0355380']);
 });
 test('libs shipped + CSP allows wasm', () => {
   for (const f of ['zbar-wasm.js', 'tesseract.min.js', 'ocr-worker.min.js', 'tesseract-core-simd-lstm.wasm.js', 'eng.traineddata.gz', 'zxing.min.js']) assert.ok(fs.statSync(new URL('../libs/' + f, import.meta.url)).size > 50000, f);
