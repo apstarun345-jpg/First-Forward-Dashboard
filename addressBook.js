@@ -42,13 +42,13 @@ FF.pages = FF.pages || {};
     const tabs = U.$('#ab-tabs', root);
     const hs = U.$('#ab-herostats', root), k0 = d.kpi || {};
     if (hs) { const pc = k0.total ? Math.round((k0.complete || 0) * 100 / k0.total) : 0; hs.innerHTML = `<span class="abx-hs"><b>${U.fmt(k0.total || 0)}</b><i>Total</i></span><span class="abx-hs ff"><b>${U.fmt((d.counts || {}).ff || 0)}</b><i>🟦 FF</i></span><span class="abx-hs gv"><b>${U.fmt((d.counts || {}).gv || 0)}</b><i>🟩 GV</i></span><span class="abx-hs ring" style="--p:${pc}"><b>${pc}%</b><i>complete</i></span>`; }
+    const newCount = (d.rows || []).filter(isNew).length;
     const allowed = d.channels || [];
     tabs.innerHTML = [['all', `Sab (${U.fmt((d.counts.ff || 0) + (d.counts.gv || 0))})`], ...allowed.map((c) => [c, `${chLabel(c)} (${U.fmt(d.counts[c] || 0)})`])]
       .filter(([c]) => c !== 'all' || allowed.length > 1)
       .map(([c, l]) => `<button type="button" class="abx-tab t-${c}${st.channel === c ? ' on' : ''}" data-ch="${c}">${l}</button>`).join(' ')
     tabs.innerHTML += ` <button type="button" class="abx-tab ab-newtab${st.newOnly ? ' on' : ''}" data-newonly="1" title="Pichle 3 din me naye / update hue address">🆕 Naye (${U.fmt(newCount)})</button>`;
     const box = U.$('#ab-results', root);
-    const newCount = (d.rows || []).filter(isNew).length;
     const rows = st.view === 'map' ? (d.rows || []).slice(0, 300) : (st.newOnly ? (d.rows || []).filter(isNew) : (d.rows || []));   // map me poori list pin banti hai, table sirf pehli 300
     const sync = d.sync || {};
     const fillOn = d.canUpload && ['nomobile', 'nopin', 'noaddr'].includes(st.kf) && st.view === 'list';
