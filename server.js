@@ -18511,7 +18511,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/p/')) {
       try { return await servePersonalPage(req, res, url.pathname.slice(3)); } catch (err) { console.error(err); return sendText(res, 500, 'Server error'); }
     }
-    if (req.method !== 'GET' && req.method !== 'HEAD') return sendText(res, 405, 'Method not allowed');
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      // v3.125.538 — browser ne page par POST navigate kiya (stray form/share) to "Method not allowed" dikhane ke bajay wahi page GET se khol do.
+      const nav = String(req.headers['sec-fetch-mode'] || '') === 'navigate' || /text\/html/i.test(String(req.headers.accept || ''));
+      if (nav && !url.pathname.startsWith('/api/')) { try { req.resume(); } catch (_) {} res.writeHead(303, { Location: url.pathname + url.search, 'Cache-Control': 'no-store' }); return res.end(); }
+      return sendText(res, 405, 'Method not allowed');
+    }
     if (url.pathname === '/scan' || url.pathname === '/scan/') return await serveStatic(req, res, '/scan.html', '');
     return await serveStatic(req, res, url.pathname, url.search);
   } catch (error) {
