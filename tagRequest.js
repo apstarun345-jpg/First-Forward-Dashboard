@@ -1205,6 +1205,8 @@ body.colorful .from-hdr { color: #166534; }
   try { SC.outbox = JSON.parse(localStorage.getItem(SC_OUT_KEY) || '[]').filter((x) => x && x.code); } catch { SC.outbox = []; }
   const scFmt = (d) => d.slice(0, 6) + '-' + d.slice(6, 9) + '-' + d.slice(9);
   const scValid = (raw) => { const r = String(raw || '').trim(); if (!/^[\d-]+$/.test(r)) return ''; const d = r.replace(/\D/g, ''); return /^\d{16}$/.test(d) ? scFmt(d) : ''; };
+  // v3.125.530 — photo / halka scan me aage-peeche extra digit (check char) aa jaye to bhi 16-digit barcode nikalo
+  const scValidLoose = (raw) => { const s = String(raw || ''); const v = scValid(s); if (v) return v; const d = s.replace(/[^\d]/g, ''); if (d.length >= 16 && d.length <= 20) { for (let i = 0; i + 16 <= d.length; i++) { const c = d.slice(i, i + 16); if (/^608\d{13}$|^\d{16}$/.test(c) && /^6\d{5}/.test(c)) return scFmt(c); } } return ''; };
   const scTone = { iss: '#16a34a', st: '#7c3aed', bc: '#64748b', nf: '#dc2626' };
   const scTime = (iso) => { try { return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
   function scBeep(kind) {
@@ -1238,7 +1240,7 @@ body.colorful .from-hdr { color: #166534; }
       const part = batch.slice(i, i + 12);
       try {
         const j = await scApi('POST', '/api/public/scan-info', { codes: part });
-        part.forEach((c) => { const it = SC.map.get(c); if (it) { const had = !!it.info; it.info = (j.info || {})[c] || null; it.err = it.info ? '' : 'Data nahi mila'; if (it.info && !had && (Date.now() - Date.parse(it.at)) < 60e3) { scAlert(it); try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: it.info.k, code: it.code, agent: it.info.agent, dispatch: !!it.info.dispatch } })); } catch { /* */ } } } });
+        part.forEach((c) => { const it = SC.map.get(c); if (it) { const had = !!it.info; it.info = (j.info || {})[c] || null; if (it.info && it.info.recheck && (SC.tries.get('rc' + c) || 0) < 4) { SC.tries.set('rc' + c, (SC.tries.get('rc' + c) || 0) + 1); setTimeout(() => scQueue(c), 2000); } it.err = it.info ? '' : 'Data nahi mila'; if (it.info && !had && (Date.now() - Date.parse(it.at)) < 60e3) { scAlert(it); try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: it.info.k, code: it.code, agent: it.info.agent, dispatch: !!it.info.dispatch } })); } catch { /* */ } } } });
       } catch (e) {
         const off = !navigator.onLine || (!e.status && !e.pending);
         part.forEach((c) => { const it = SC.map.get(c); if (!it) return; if (off) { it.err = '📴 Offline — net aate hi data aa jayega'; SC.q.push(c); return; } const n = (SC.tries.get(c) || 0) + 1; SC.tries.set(c, n); if (n <= 6 && (e.pending || e.status === 429 || e.status >= 500 || !e.status)) { it.err = '⏳ Server busy — dobara try…'; SC.q.push(c); } else it.err = e.message; });
@@ -1302,6 +1304,101 @@ body.colorful .from-hdr { color: #166534; }
     if (window.ZXing) return Promise.resolve(window.ZXing);
     return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'vendor/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('lib'))); s.onerror = () => no(new Error('lib')); document.head.appendChild(s); });
   }
+  // 🖼️ v3.125.530 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): kai tareeqe se try — original, bada, contrast-stretch,
+  //    black-white, ulta (inverted), 90° ghuma ke, patti-patti (tiles) — halka / chhota / tedha barcode bhi pakdo.
+  let scNativeDet = null;
+  async function scDetector() {
+    if (scNativeDet !== null) return scNativeDet;
+    scNativeDet = false;
+    if ('BarcodeDetector' in window) { try { const sup = await window.BarcodeDetector.getSupportedFormats(); const fm = ['code_128', 'code_39', 'code_93', 'itf', 'codabar', 'ean_13', 'upc_a'].filter((f) => sup.includes(f)); if (fm.length) scNativeDet = new window.BarcodeDetector({ formats: fm }); } catch { /* */ } }
+    return scNativeDet;
+  }
+  const scCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; };
+  function scDraw(src, sw, sh, sx, sy, cw, ch, scale, rot) {
+    const w = cw * scale, h = ch * scale, rc = rot % 180 !== 0;
+    const c = scCanvas(rc ? h : w, rc ? w : h), x = c.getContext('2d', { willReadFrequently: true });
+    x.imageSmoothingQuality = 'high'; x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+    x.translate(c.width / 2, c.height / 2); x.rotate((rot * Math.PI) / 180); x.drawImage(src, sx, sy, cw, ch, -w / 2, -h / 2, w, h);
+    return c;
+  }
+  function scEnhance(c, mode) {   // mode: 'stretch' (contrast) | 'bw' (adaptive-ish threshold) | 'inv'
+    const x = c.getContext('2d', { willReadFrequently: true }), im = x.getImageData(0, 0, c.width, c.height), d = im.data, n = c.width * c.height;
+    const g = new Uint8Array(n), hist = new Uint32Array(256);
+    for (let i = 0, j = 0; i < n; i++, j += 4) { const v = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8; g[i] = v; hist[v]++; }
+    let lo = 0, hi = 255, acc = 0; const cut = n * 0.01;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= cut) { lo = v; break; } }
+    acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= cut) { hi = v; break; } }
+    const span = Math.max(20, hi - lo);
+    let thr = 128; if (mode === 'bw') { let sum = 0; for (let v = 0; v < 256; v++) sum += v * hist[v]; let sB = 0, wB = 0, best = 0; for (let v = 0; v < 256; v++) { wB += hist[v]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += v * hist[v]; const mB = sB / wB, mF = (sum - sB) / wF, bt = wB * wF * (mB - mF) * (mB - mF); if (bt > best) { best = bt; thr = v; } } }
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+      let v = Math.max(0, Math.min(255, ((g[i] - lo) * 255) / span));
+      if (mode === 'bw') v = g[i] > thr ? 255 : 0; else if (mode === 'inv') v = 255 - v;
+      d[j] = d[j + 1] = d[j + 2] = v; d[j + 3] = 255;
+    }
+    x.putImageData(im, 0, 0); return c;
+  }
+  let scZ = null;
+  async function scZReader() {
+    if (scZ) return scZ;
+    const Z = await scLoadZ(); const h = new Map();
+    h.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODABAR]); h.set(Z.DecodeHintType.TRY_HARDER, true);
+    const r = new Z.MultiFormatReader(); r.setHints(h); scZ = { Z, r }; return scZ;
+  }
+  async function scTryCanvas(c) {
+    const det = await scDetector();
+    if (det) { try { for (const f of await det.detect(c)) { const k = scValidLoose(f.rawValue); if (k) return k; } } catch { /* */ } }
+    try {
+      const { Z, r } = await scZReader();
+      for (const Bin of [Z.HybridBinarizer, Z.GlobalHistogramBinarizer]) { try { const res = r.decode(new Z.BinaryBitmap(new Bin(new Z.HTMLCanvasElementLuminanceSource(c)))); const k = scValidLoose(res && res.getText()); if (k) return k; } catch { /* nahi mila */ } }
+    } catch { /* lib nahi */ }
+    return '';
+  }
+  /** blob / canvas / video → pehla sahi 16-digit barcode (ya ''). onStep: progress text. */
+  async function scDecodeSource(src, sw, sh, opt = {}) {
+    const maxSide = 2600, base = Math.min(1, maxSide / Math.max(sw, sh));
+    const fullW = sw, fullH = sh;
+    const small = Math.max(sw, sh) < 1200;
+    const scales = small ? [2, 1] : [base];
+    const plans = [];
+    for (const sc of scales) {
+      plans.push({ rot: 0, mode: '', sc }, { rot: 0, mode: 'stretch', sc }, { rot: 0, mode: 'bw', sc }, { rot: 90, mode: 'stretch', sc }, { rot: 0, mode: 'inv', sc });
+    }
+    const rects = [[0, 0, fullW, fullH]];
+    if (!opt.quick) {   // lambi image me chhota barcode: upar / beech / neeche ki patti
+      const bh = fullH / 2.2; [[0, 0], [0, (fullH - bh) / 2], [0, fullH - bh]].forEach(([, y]) => rects.push([0, y, fullW, bh]));
+      const bw = fullW / 2.2; [[0, 0], [(fullW - bw) / 2, 0], [fullW - bw, 0]].forEach(([x]) => rects.push([x, 0, bw, fullH]));
+    }
+    for (const rc of rects) {
+      for (const pl of plans) {
+        if (opt.quick && (pl.rot || pl.mode === 'inv')) continue;
+        let c = scDraw(src, sw, sh, rc[0], rc[1], rc[2], rc[3], pl.sc, pl.rot);
+        if (pl.mode) c = scEnhance(c, pl.mode);
+        const k = await scTryCanvas(c); if (k) return k;
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+    return '';
+  }
+  async function scDecodeFile(file) {
+    let bmp = null;
+    try { bmp = await createImageBitmap(file); } catch { /* Image se */ }
+    if (!bmp) { bmp = await new Promise((ok, no) => { const im = new Image(), u = URL.createObjectURL(file); im.onload = () => { ok(im); }; im.onerror = () => no(new Error('img')); im.src = u; }).catch(() => null); }
+    if (!bmp) return '';
+    const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
+    return scDecodeSource(bmp, w, h, {});
+  }
+  async function scImages(files) {
+    const list = Array.from(files || []).filter((f) => f && /^image\//.test(f.type || 'image/'));
+    if (!list.length) return;
+    const msg = scQ('[data-sc-note]'); let ok = 0, bad = 0;
+    for (let i = 0; i < list.length; i++) {
+      scNote(`🔎 Photo ${i + 1} / ${list.length} padh raha hu…`, false);
+      let code = ''; try { code = await scDecodeFile(list[i]); } catch { code = ''; }
+      if (code) { ok++; scAdd(code); } else { bad++; scBeep('bad'); }
+    }
+    scNote(bad ? `${ok ? '✅ ' + ok + ' scan hue · ' : ''}❌ ${bad} photo me barcode nahi mila — photo seedhi / paas se lo ya neeche 16 digit type karo` : `✅ ${ok} barcode photo se scan hue`, !!bad && !ok);
+    if (msg) { /* note updated */ }
+  }
   async function scCamStart() {
     if (SC.on) return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { U.toast('Is browser me camera nahi (HTTPS chahiye)', 'warn'); return; }
@@ -1320,7 +1417,7 @@ body.colorful .from-hdr { color: #166534; }
     let native = false;
     if ('BarcodeDetector' in window) { try { const sup = await window.BarcodeDetector.getSupportedFormats(); const fm = ['code_128', 'code_39', 'code_93', 'itf', 'codabar'].filter((f) => sup.includes(f)); if (fm.length) { SC.det = new window.BarcodeDetector({ formats: fm }); native = true; } } catch { /* */ } }
     if (native) {
-      const tick = async () => { if (!SC.on) return; if (!SC.busy && !SC.hold && v.readyState >= 2 && !document.hidden) { SC.busy = true; try { (await SC.det.detect(v)).forEach((f) => scOnRaw(f.rawValue)); } catch { /* */ } SC.busy = false; } SC.timer = setTimeout(tick, 30); };
+      const tick = async () => { if (!SC.on) return; if (!SC.busy && !SC.hold && v.readyState >= 2 && !document.hidden) { SC.busy = true; try { const fs = await SC.det.detect(v); fs.forEach((f) => scOnRaw(f.rawValue)); SC.miss = fs.length ? 0 : (SC.miss || 0) + 1; if (SC.miss > 25 && SC.miss % 12 === 0 && v.videoWidth) { const k = await scDecodeSource(v, v.videoWidth, v.videoHeight, { quick: true }); if (k) scOnRaw(k); } } catch { /* */ } SC.busy = false; } SC.timer = setTimeout(tick, 30); };
       tick();
     } else {
       try { const Z = await scLoadZ(); const h = new Map(); h.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODABAR]); h.set(Z.DecodeHintType.TRY_HARDER, true); SC.reader = new Z.BrowserMultiFormatReader(h, 60); SC.reader.decodeFromStream(SC.stream, v, (r) => { if (r && SC.on) scOnRaw(r.getText()); }); }
@@ -1354,22 +1451,28 @@ body.colorful .from-hdr { color: #166534; }
     }
     try { SC.sound = localStorage.getItem('ff_tr_scan_snd') !== '0'; } catch { /* */ }
     body.innerHTML = `<section class="card trs"><div class="card-body">
-      <div class="trs-bar"><button class="btn primary trs-cam-btn" data-sc-act="cam">📷 Camera scan shuru</button><button class="btn" data-sc-act="sound" title="Beep">${SC.sound ? '🔊' : '🔇'}</button><button class="btn" data-sc-act="torch" hidden>🔦</button><button class="btn" data-sc-act="zoom" hidden>🔍 1x</button><span class="dim small">👤 ${esc(nm)}</span></div>
+      <div class="trs-bar"><button class="btn primary trs-cam-btn" data-sc-act="cam">📷 Camera scan shuru</button><button class="btn" data-sc-act="sound" title="Beep">${SC.sound ? '🔊' : '🔇'}</button><button class="btn" data-sc-act="torch" hidden>🔦</button><button class="btn" data-sc-act="zoom" hidden>🔍 1x</button><button class="btn" data-sc-act="photo" title="WhatsApp / gallery photo se scan">🖼️ Photo se scan</button><input type="file" accept="image/*" multiple hidden data-sc-file><span class="dim small">👤 ${esc(nm)}</span></div>
       <div class="trs-camwrap" data-sc-cam hidden><video playsinline muted data-sc-video></video><div class="trs-aim"></div><div class="trs-msg" data-sc-msg></div>
         <div class="trs-conf" data-sc-conf hidden><div class="trs-ct">Ye barcode sahi hai?</div><div class="trs-cc" data-sc-ccode></div><div class="trs-cd" data-sc-cdup></div><div class="trs-cb"><button class="btn" data-sc-no>🔁 Dobara</button><button class="btn primary" data-sc-yes>✅ Sahi hai — Save</button></div></div></div>
-      <input class="input mono" data-sc-in inputmode="numeric" autocomplete="off" placeholder="⌨️ Scanner gun / type karke Enter" style="margin-top:10px">
+      <input class="input mono" data-sc-in inputmode="numeric" autocomplete="off" placeholder="⌨️ Scanner gun / type karke Enter · ya photo yahan paste (Ctrl+V) / drop karo" style="margin-top:10px">
       <div class="trs-note2" data-sc-note></div>
       <div class="trs-count" data-sc-count></div>
       <div class="trs-list" data-sc-list></div></div></section>`;
     const root = body;
     root.querySelector('[data-sc-act="cam"]').onclick = () => (SC.on ? scCamStop() : scCamStart());
+    { const fi = root.querySelector('[data-sc-file]'), pb = root.querySelector('[data-sc-act="photo"]');
+      pb.onclick = () => fi.click(); fi.onchange = () => { const fl = Array.from(fi.files || []); fi.value = ''; scImages(fl); };
+      // laptop: Ctrl+V (WhatsApp Web se copy ki image) aur drag-drop
+      root.addEventListener('paste', (e) => { const fl = Array.from((e.clipboardData && e.clipboardData.files) || []).filter((f) => /^image\//.test(f.type)); if (fl.length) { e.preventDefault(); scImages(fl); } });
+      if (!window.__scPaste) { window.__scPaste = 1; document.addEventListener('paste', (e) => { if (!document.querySelector('[data-sc-file]')) return; const fl = Array.from((e.clipboardData && e.clipboardData.files) || []).filter((f) => /^image\//.test(f.type)); if (fl.length) { e.preventDefault(); scImages(fl); } }); }
+      ['dragover', 'drop'].forEach((ev) => root.addEventListener(ev, (e) => { if (!e.dataTransfer || !e.dataTransfer.types || ![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); if (ev === 'drop') scImages(Array.from(e.dataTransfer.files)); })); }
     root.querySelector('[data-sc-act="sound"]').onclick = (e) => { SC.sound = !SC.sound; e.currentTarget.textContent = SC.sound ? '🔊' : '🔇'; try { localStorage.setItem('ff_tr_scan_snd', SC.sound ? '1' : '0'); } catch { /* */ } };
     root.querySelector('[data-sc-act="zoom"]').onclick = async (e) => { try { const steps = [1, 2, 3, 4].filter((z) => z <= SC.zmax); const i = steps.indexOf(SC.zoom); SC.zoom = steps[(i + 1) % steps.length] || 1; await SC.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ zoom: SC.zoom }] }); e.currentTarget.textContent = '🔍 ' + SC.zoom + 'x'; } catch { U.toast('Zoom is device par nahi chala', 'warn'); } };
     root.querySelector('[data-sc-act="torch"]').onclick = async () => { try { SC.torch = !SC.torch; await SC.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: SC.torch }] }); } catch { U.toast('Torch nahi chala', 'warn'); } };
     root.querySelector('[data-sc-yes]').onclick = () => scConfirmClose(true); root.querySelector('[data-sc-no]').onclick = () => scConfirmClose(false);
     root.querySelector('[data-sc-in]').addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return; e.preventDefault(); const el = e.currentTarget, raw = el.value; el.value = ''; if (!raw.trim()) return;
-      raw.split(/[\n,;\s]+/).filter(Boolean).forEach((x) => { const c = scValid(x); if (c) scAdd(c); else { scNote('Ye 16-digit FASTag barcode nahi hai', true); scBeep('bad'); } });
+      raw.split(/[\n,;\s]+/).filter(Boolean).forEach((x) => { const c = scValidLoose(x); if (c) scAdd(c); else { scNote('Ye 16-digit FASTag barcode nahi hai', true); scBeep('bad'); } });
     });
     root.querySelector('[data-sc-list]').addEventListener('click', async (e) => {
       const b = e.target.closest('[data-sc-del]'); if (!b) return; const c = b.dataset.scDel;

@@ -3991,8 +3991,20 @@ async function scanInfoServer(codes) {
       const f = scanTagInfer(pts); if (f) { const t = f(BigInt(todo[i].replace(/\D/g, ''))); if (t) { tagOf[i] = t; inferred[i] = true; } }
     });
   }
-  let eir = new Map();
-  try { eir = await Promise.race([scanEirByTags([...new Set(tagOf.filter(Boolean))]), timeout(10000)]); } catch { /* issued check agli baar */ }
+  let eir = new Map(), eirLate = false;
+  // ⚡ v3.125.530 — pehle raat ka saved Issued register (turant), live EIR query sirf 1.2 s tak; der ho to stock wala jawab abhi, issued-check peeche se (client dobara poochhta hai)
+  try {
+    todo.forEach((b, i) => {
+      const rg = issuedStore.get(b); if (!rg) return;
+      if (rg.t && !tagOf[i]) tagOf[i] = String(rg.t).toUpperCase();
+      if (tagOf[i]) eir.set(tagOf[i], { date: rg.d || '', cls: rg.c || '', agent: rg.a || '', agentId: rg.ai || '', tl: rg.tl || '', type: '', status: '', ch: rg.s === 'gv' ? 'GV' : 'FF' });
+    });
+  } catch { /* register optional */ }
+  const needLive = [...new Set(tagOf.filter((x) => x && !eir.has(x)))];
+  if (needLive.length) {
+    const live = scanEirByTags(needLive); live.catch(() => {});
+    try { const m = await Promise.race([live, timeout(1200)]); m.forEach((v, k) => eir.set(k, v)); } catch { eirLate = true; }
+  }
   let disp = null;
   try { if (ledgerState.index) { const ix = ledgerState.index; disp = todo.map((b) => dispatchFor(ix, b)); } } catch { disp = null; }
   todo.forEach((b, i) => {
@@ -4008,6 +4020,7 @@ async function scanInfoServer(codes) {
     info.tagId = tagOf[i] || '';
     const d = disp && disp[i];
     if (d) { const parts = []; ['ff', 'gv'].forEach((ch) => (d[ch] || []).slice(0, 1).forEach((e) => parts.push(`${parts.length || (d.ff && d.ff.length && d.gv && d.gv.length) ? ch.toUpperCase() + ' · ' : ''}${e.date ? String(e.date).slice(0, 10) : ''} ${e.agent || ''}${e.agentId ? ' (' + e.agentId + ')' : ''}`.trim()))); info.dispatch = parts.join(' | '); } else info.dispatch = '';
+    if (eirLate && !is) { info.recheck = true; out[b] = info; return; }   // issued-check baaki — cache mat karo, client 2 s me dobara poochhega
     scanInfoCache.set(b, { at: Date.now(), info }); out[b] = info;
   });
   if (scanInfoCache.size > 3000) scanInfoCache.clear();
