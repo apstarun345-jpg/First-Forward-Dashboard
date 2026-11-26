@@ -319,7 +319,7 @@ FF.pages = FF.pages || {};
   function render(root, params) {
     state.root = root;
     const p = params || {};
-    if (p.tab === 'multi') state.tab = 'multi';
+    if (p.tab === 'multi') state.tab = 'multi'; else if (p.tab === 'emp') state.tab = 'emp';
     root.innerHTML = `<div class="page bcc-page">
       <div class="page-head"><div><h1>🔢 Barcode Checker</h1>
         <p class="sub">Barcode range or many barcodes → status of every tag: <b>✅ issued</b> (when, on which VRN) · <b>📦 in which agent's stock</b> · <b>🏢 master/BC</b> · <b>❓ missing</b>. Stock = StockDataa · Issued = EIR.</p></div></div>

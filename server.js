@@ -13246,6 +13246,24 @@ async function handleApi(req, res, url) {
   const scanCodeOf = (v) => { const raw = String(v == null ? '' : v).trim(); if (!/^[\d-]+$/.test(raw)) return ''; const d = raw.replace(/\D/g, ''); return /^\d{16}$/.test(d) ? `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}` : ''; };
   const scanLogStore = () => { const w = workspaceStore(); if (!Array.isArray(w.scanLog)) w.scanLog = []; return w.scanLog; };
   const scanNameKey = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  // v3.125.553 — employee scans sirf 5 din rehte hain, phir khud expire
+  const SCAN_TTL_MS = 5 * 86400e3;
+  const scanPrune = () => { const log = scanLogStore(); const cut = Date.now() - SCAN_TTL_MS; let n = 0; for (let i = log.length - 1; i >= 0; i--) { const t = Date.parse(log[i].at) || 0; if (t && t < cut) { log.splice(i, 1); n++; } } if (n) scanPersistSoon(); return n; };
+  // v3.125.553 — admin ko notification (app + web push + robot): har employee ke scan 20s me jodkar ek baar
+  const scanNotifyAcc = (globalThis.__scanNotifyAcc = globalThis.__scanNotifyAcc || new Map());
+  const scanNotifyAdd = (name, code, atIso) => {
+    let a = scanNotifyAcc.get(name); if (!a) { a = { n: 0, codes: [], t: null }; scanNotifyAcc.set(name, a); }
+    a.n++; if (a.codes.length < 3) a.codes.push(code);
+    clearTimeout(a.t);
+    a.t = setTimeout(() => {
+      scanNotifyAcc.delete(name);
+      try {
+        const body = `${a.n} barcode scan hue (${a.codes.join(', ')}${a.n > a.codes.length ? ' …' : ''}). Barcode Checker → 👥 Employee scans me poori list dekho (5 din tak rehti hai).`;
+        recordNotification({ type: 'activity', title: `📷 ${name} ne ${a.n} barcode scan kiye`, body, target: 'admin', routeKey: 'tagRequest', meta: { employeeName: name, count: a.n, link: '#/barcodeChecker?tab=emp' } });
+        if (typeof robotBrain !== 'undefined') robotBrain.queue.unshift({ prio: true, key: `srv:empscan:${name}:${Date.now()}`, title: `🤖 📷 ${name} ne ${a.n} barcode scan kiye`, body, link: '#/barcodeChecker?tab=emp' });
+      } catch { /* notification scan ko kabhi nahi rokta */ }
+    }, 20000);
+  };
   let scanPersistT = null;
   const scanPersistSoon = () => { if (scanPersistT) return; scanPersistT = setTimeout(() => { scanPersistT = null; persist('notify').catch(() => {}); }, 4000); };
   if (p === '/api/public/scan' && method === 'POST') {
@@ -13260,7 +13278,7 @@ async function handleApi(req, res, url) {
     const key = code.replace(/\D/g, '');
     // 📴 offline queue se aaya scan apne asli time ke saath (max 7 din purana, future nahi)
     const given = Date.parse(body.at); const nowMs = Date.now();
-    const atIso = Number.isFinite(given) && given <= nowMs + 60e3 && given >= nowMs - 7 * 86400e3 ? new Date(given).toISOString() : new Date(nowMs).toISOString();
+    const atIso = Number.isFinite(given) && given <= nowMs + 60e3 && given >= nowMs - 5 * 86400e3 ? new Date(given).toISOString() : new Date(nowMs).toISOString();
     const hit = log.find((r) => r.k === key);
     if (hit) {
       const mine = scanNameKey(hit.name) === scanNameKey(name);
@@ -13270,6 +13288,7 @@ async function handleApi(req, res, url) {
     const row = { k: key, code, name, at: atIso, ip: String(ip || '').slice(0, 45) };
     log.push(row);
     if (log.length > 30000) log.splice(0, log.length - 30000);
+    scanPrune(); scanNotifyAdd(name, code, atIso);
     scanPersistSoon();
     return sendJson(res, 200, { ok: true, dup: false, at: row.at });
   }
@@ -13300,7 +13319,7 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/scan-log' && method === 'GET') {
     if (!user || (user.role !== 'admin' && !(user.permissions || []).includes('barcodeChecker'))) throw new HttpError(403, 'Access nahi hai.');
-    const all = scanLogStore();
+    scanPrune(); const all = scanLogStore();
     const nowMs = Date.now(), dayStart = Math.floor((nowMs + 19800e3) / 86400e3) * 86400e3 - 19800e3;   // IST din ki shuruaat
     const lim = Math.min(3000, Math.max(1, Number(new URL(req.url, 'http://x').searchParams.get('limit')) || 3000));   // v3.125.453 — ticker sirf 12 rows maangta hai
     const rows = all.slice(-lim).reverse().map((r) => ({ code: r.code, name: r.name, at: r.at, dups: r.dups || 0, hits: (r.hits || []).slice(-10) }));
