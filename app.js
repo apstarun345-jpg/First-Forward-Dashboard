@@ -1999,7 +1999,7 @@ window.FF = window.FF || {};
     // ⚡ Panel links instant: hover/tap karte hi us page ka lazy module prefetch ho jaata hai
     //    (pehla click bina ruke khulta hai), aur ACTIVE link dobara click karne par page refresh
     //    hota hai — pehle hash same hone par kuch nahi hota tha ("click par khulta hi nahi").
-    // 🌙 v3.125.528 — saath me us page ka STORE DATA bhi warm: hover/tap par hi rows load hone
+    // 🌙 v3.125.536 — saath me us page ka STORE DATA bhi warm: hover/tap par hi rows load hone
     //    lagti hain, to click karte hi Stock / Issuance / profile ka data turant dikhta hai.
     //    (store.loadKey job-dedupe karta hai — dobara hover par duplicate Google query nahi jaati.)
     const DATA_WARM = {

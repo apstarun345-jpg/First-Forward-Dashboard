@@ -1205,6 +1205,8 @@ body.colorful .from-hdr { color: #166534; }
   try { SC.outbox = JSON.parse(localStorage.getItem(SC_OUT_KEY) || '[]').filter((x) => x && x.code); } catch { SC.outbox = []; }
   const scFmt = (d) => d.slice(0, 6) + '-' + d.slice(6, 9) + '-' + d.slice(9);
   const scValid = (raw) => { const r = String(raw || '').trim(); if (!/^[\d-]+$/.test(r)) return ''; const d = r.replace(/\D/g, ''); return /^\d{16}$/.test(d) ? scFmt(d) : ''; };
+  // v3.125.530 — photo / halka scan me aage-peeche extra digit (check char) aa jaye to bhi 16-digit barcode nikalo
+  const scValidLoose = (raw) => { const s = String(raw || ''); const v = scValid(s); if (v) return v; const d = s.replace(/[^\d]/g, ''); if (d.length >= 16 && d.length <= 20) { for (let i = 0; i + 16 <= d.length; i++) { const c = d.slice(i, i + 16); if (/^608\d{13}$|^\d{16}$/.test(c) && /^6\d{5}/.test(c)) return scFmt(c); } } return ''; };
   const scTone = { iss: '#16a34a', st: '#7c3aed', bc: '#64748b', nf: '#dc2626' };
   const scTime = (iso) => { try { return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
   function scBeep(kind) {
@@ -1238,7 +1240,7 @@ body.colorful .from-hdr { color: #166534; }
       const part = batch.slice(i, i + 12);
       try {
         const j = await scApi('POST', '/api/public/scan-info', { codes: part });
-        part.forEach((c) => { const it = SC.map.get(c); if (it) { const had = !!it.info; it.info = (j.info || {})[c] || null; it.err = it.info ? '' : 'Data nahi mila'; if (it.info && !had && (Date.now() - Date.parse(it.at)) < 60e3) { scAlert(it); try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: it.info.k, code: it.code, agent: it.info.agent, dispatch: !!it.info.dispatch } })); } catch { /* */ } } } });
+        part.forEach((c) => { const it = SC.map.get(c); if (it) { const had = !!it.info; it.info = (j.info || {})[c] || null; if (it.info && it.info.recheck && (SC.tries.get('rc' + c) || 0) < 4) { SC.tries.set('rc' + c, (SC.tries.get('rc' + c) || 0) + 1); setTimeout(() => scQueue(c), 2000); } it.err = it.info ? '' : 'Data nahi mila'; if (it.info && !had && (Date.now() - Date.parse(it.at)) < 60e3) { scAlert(it); try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: it.info.k, code: it.code, agent: it.info.agent, dispatch: !!it.info.dispatch } })); } catch { /* */ } } } });
       } catch (e) {
         const off = !navigator.onLine || (!e.status && !e.pending);
         part.forEach((c) => { const it = SC.map.get(c); if (!it) return; if (off) { it.err = '📴 Offline — net aate hi data aa jayega'; SC.q.push(c); return; } const n = (SC.tries.get(c) || 0) + 1; SC.tries.set(c, n); if (n <= 6 && (e.pending || e.status === 429 || e.status >= 500 || !e.status)) { it.err = '⏳ Server busy — dobara try…'; SC.q.push(c); } else it.err = e.message; });
@@ -1300,7 +1302,69 @@ body.colorful .from-hdr { color: #166534; }
   }
   function scLoadZ() {
     if (window.ZXing) return Promise.resolve(window.ZXing);
-    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'vendor/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('lib'))); s.onerror = () => no(new Error('lib')); document.head.appendChild(s); });
+    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'libs/zxing.min.js?v=1'; s.onload = () => (window.ZXing ? ok(window.ZXing) : no(new Error('lib'))); s.onerror = () => no(new Error('lib')); document.head.appendChild(s); });
+  }
+  // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
+  //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
+  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=535'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  SC.rv = []; SC.rvId = 0;
+  const scRvPaint = () => {
+    const host = scQ('[data-sc-review]'); if (!host) return;
+    host.innerHTML = SC.rv.map((c) => {
+      const rows = c.cands.map((x, k) => {
+        const i = x.info, tone = i ? scTone[i.k] || '#64748b' : '#94a3b8';
+        const chip = i ? `<span class="trs-badge" style="background:${tone}">${esc(i.label || '')}</span>${i.cls ? `<small> ${esc(i.cls)}</small>` : ''}${i.agent ? `<small> · ${esc(i.agent)}</small>` : ''}` : (x.err ? `<span class="trs-note bad">${esc(x.err)}</span>` : '<small class="dim">🔎 check ho raha hai…</small>');
+        return `<div class="trs-rvrow${i && (i.k === 'iss' || i.k === 'nf') ? ' bad' : ''}"><input type="checkbox" data-rv-ck="${c.id}|${k}"${x.on ? ' checked' : ''}><input class="input mono" data-rv-code="${c.id}|${k}" value="${esc(x.code)}" inputmode="numeric" autocomplete="off" aria-label="Barcode number"><small class="dim">${x.how === 'text' ? '🔤 number padha' : '▮▮ barcode'}</small>${x.thumb ? `<img class="trs-thumb" src="${x.thumb}" alt="">` : ''}<div class="trs-rvinfo">${chip}</div></div>`;
+      }).join('');
+      const n = c.cands.filter((x) => x.on && scValid(x.code)).length;
+      return `<div class="trs-rv" data-rv="${c.id}"><div class="trs-rvhead"><img src="${esc(c.url)}" alt="" class="trs-rvimg"><div><b>${esc(c.name)}</b><div class="dim small">${c.busy ? '🔎 Photo padh raha hu… ' + esc(c.step || '') : c.cands.length ? `${c.cands.length} barcode mile` : '❌ Is photo me barcode nahi mila — photo paas / seedhi lo, ya 16 digit type karo'}</div></div><button class="btn small" data-rv-del="${c.id}" title="Hatao">✖</button></div>${rows}${c.cands.length && !c.busy ? `<div class="btn-row"><button class="btn primary" data-rv-ok="${c.id}"${n ? '' : ' disabled'}>✅ Confirm · ${n} add karo</button></div>` : ''}</div>`;
+    }).join('');
+  };
+  async function scRvCheck(card, x) {
+    const list = [x.code, ...(x.alts || [])].filter((v, i, a) => scValid(v) && a.indexOf(v) === i).slice(0, 6);
+    try {
+      const j = await scApi('POST', '/api/public/scan-info', { codes: list });
+      const inf = (j && j.info) || {}; let pick = x.code;
+      if (x.how === 'text' && inf[x.code] && inf[x.code].k === 'nf') { const alt = list.find((c2) => inf[c2] && inf[c2].k !== 'nf'); if (alt) pick = alt; }   // OCR ne ek digit galat padha ho to sahi wala chuno
+      x.code = pick; x.info = inf[pick] || null; x.err = x.info ? '' : 'Data nahi mila';
+      if (x.info && x.info.recheck) setTimeout(() => { x.info = null; scRvCheck(card, x); }, 2000);
+    } catch { x.err = '📴 Check nahi ho paya — confirm karke add kar sakte ho'; }
+    scRvPaint();
+  }
+  async function scReadPhoto(file) {
+    const card = { id: ++SC.rvId, name: file.name || 'Photo', url: URL.createObjectURL(file), cands: [], busy: true, step: '' };
+    SC.rv.unshift(card); scRvPaint();
+    try {
+      const V = await scLoadVision();
+      let bmp = null; try { bmp = await createImageBitmap(file); } catch { /* Image se */ }
+      if (!bmp) bmp = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error('img')); im.src = card.url; });
+      const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
+      await V.read(bmp, w, h, { budgetMs: 20000, onFound: (code, how) => {
+        if (card.cands.some((x) => x.code === code)) return;
+        const x = { code, how, on: true, info: null, err: '', alts: [] }; card.cands.push(x); scBeep('ok'); try { navigator.vibrate && navigator.vibrate(30); } catch { /* */ }
+        scRvPaint(); setTimeout(() => scRvCheck(card, x), 0);
+      } }).then((res) => { res.forEach((r) => { const x = card.cands.find((c2) => c2.code === r.code); if (x && r.thumb) { x.thumb = r.thumb; scRvPaint(); } if (x && r.alts && r.alts.length) { x.alts = r.alts; if (x.info && x.info.k === 'nf') { x.info = null; scRvCheck(card, x); } } }); });
+    } catch (e) { card.err = String((e && e.message) || e); }
+    card.busy = false; scRvPaint();
+    if (!card.cands.length) scBeep('bad');
+  }
+  async function scImages(files) {
+    const list = Array.from(files || []).filter((f) => f && /^image\//.test(f.type || 'image/'));
+    for (const f of list) await scReadPhoto(f);
+  }
+  function scRvEvents(root) {
+    const host = root.querySelector('[data-sc-review]'); if (!host) return;
+    const find = (id) => SC.rv.find((c) => String(c.id) === String(id));
+    host.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-rv-del]'); if (del) { SC.rv = SC.rv.filter((c) => String(c.id) !== del.dataset.rvDel); scRvPaint(); return; }
+      const ok = e.target.closest('[data-rv-ok]'); if (!ok) return; const c = find(ok.dataset.rvOk); if (!c) return;
+      let n = 0; c.cands.forEach((x) => { if (x.on) { const k = scValid(x.code); if (k && scAdd(k)) n++; } });
+      SC.rv = SC.rv.filter((c2) => c2 !== c); scRvPaint(); scNote(`✅ ${n} barcode add hue`, false);
+    });
+    host.addEventListener('change', (e) => {
+      const ck = e.target.closest('[data-rv-ck]'); if (ck) { const [id, k] = ck.dataset.rvCk.split('|'); const c = find(id); if (c && c.cands[k]) { c.cands[k].on = ck.checked; scRvPaint(); } return; }
+      const ci = e.target.closest('[data-rv-code]'); if (ci) { const [id, k] = ci.dataset.rvCode.split('|'); const c = find(id), x = c && c.cands[k]; if (!x) return; const v = scValid(ci.value); if (!v) { x.err = '16 digit ka barcode chahiye'; x.info = null; x.on = false; scRvPaint(); return; } x.code = v; x.info = null; x.err = ''; x.alts = []; x.how = 'text'; x.on = true; scRvPaint(); scRvCheck(c, x); }
+    });
   }
   async function scCamStart() {
     if (SC.on) return;
@@ -1318,9 +1382,11 @@ body.colorful .from-hdr { color: #166534; }
     } catch { /* */ }
     if (msg) msg.textContent = 'Barcode ko frame ke beech me rakho';
     let native = false;
+    // ⚡ v3.125.535 — live: native/ZXing ke saath-saath zbar + number (OCR) bhi turant; OCR worker camera khulte hi garam hota hai
+    scLoadVision().then((V) => { if (!SC.on) return; if (SC.stopLive) SC.stopLive(); SC.stopLive = V.live(v, { skipNative: 'BarcodeDetector' in window, isActive: () => SC.on, hold: () => SC.hold, onFound: (code) => scOnRaw(code), onStatus: (m) => { const mm = scQ('[data-sc-msg]'); if (mm && SC.on && !SC.hold) mm.textContent = m; } }); }).catch(() => {});
     if ('BarcodeDetector' in window) { try { const sup = await window.BarcodeDetector.getSupportedFormats(); const fm = ['code_128', 'code_39', 'code_93', 'itf', 'codabar'].filter((f) => sup.includes(f)); if (fm.length) { SC.det = new window.BarcodeDetector({ formats: fm }); native = true; } } catch { /* */ } }
     if (native) {
-      const tick = async () => { if (!SC.on) return; if (!SC.busy && !SC.hold && v.readyState >= 2 && !document.hidden) { SC.busy = true; try { (await SC.det.detect(v)).forEach((f) => scOnRaw(f.rawValue)); } catch { /* */ } SC.busy = false; } SC.timer = setTimeout(tick, 30); };
+      const tick = async () => { if (!SC.on) return; if (!SC.busy && !SC.hold && v.readyState >= 2 && !document.hidden) { SC.busy = true; try { const fs = await SC.det.detect(v); fs.forEach((f) => scOnRaw(f.rawValue)); SC.miss = fs.length ? 0 : (SC.miss || 0) + 1;  } catch { /* */ } SC.busy = false; } SC.timer = setTimeout(tick, 30); };
       tick();
     } else {
       try { const Z = await scLoadZ(); const h = new Map(); h.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODABAR]); h.set(Z.DecodeHintType.TRY_HARDER, true); SC.reader = new Z.BrowserMultiFormatReader(h, 60); SC.reader.decodeFromStream(SC.stream, v, (r) => { if (r && SC.on) scOnRaw(r.getText()); }); }
@@ -1328,7 +1394,7 @@ body.colorful .from-hdr { color: #166534; }
     }
   }
   function scCamStop() {
-    SC.on = false; clearTimeout(SC.timer); try { if (SC.reader) SC.reader.reset(); } catch { /* */ }
+    SC.on = false; clearTimeout(SC.timer); try { if (SC.stopLive) SC.stopLive(); } catch { /* */ } SC.stopLive = null; try { if (SC.reader) SC.reader.reset(); } catch { /* */ }
     try { if (SC.stream) SC.stream.getTracks().forEach((t) => t.stop()); } catch { /* */ }
     SC.stream = null; SC.reader = null; SC.det = null; SC.hold = false; SC.torch = false;
     const box = scQ('[data-sc-cam]'); if (box) box.hidden = true; const cf = scQ('[data-sc-conf]'); if (cf) cf.hidden = true;
@@ -1354,22 +1420,30 @@ body.colorful .from-hdr { color: #166534; }
     }
     try { SC.sound = localStorage.getItem('ff_tr_scan_snd') !== '0'; } catch { /* */ }
     body.innerHTML = `<section class="card trs"><div class="card-body">
-      <div class="trs-bar"><button class="btn primary trs-cam-btn" data-sc-act="cam">📷 Camera scan shuru</button><button class="btn" data-sc-act="sound" title="Beep">${SC.sound ? '🔊' : '🔇'}</button><button class="btn" data-sc-act="torch" hidden>🔦</button><button class="btn" data-sc-act="zoom" hidden>🔍 1x</button><span class="dim small">👤 ${esc(nm)}</span></div>
+      <div class="trs-bar"><button class="btn primary trs-cam-btn" data-sc-act="cam">📷 Camera scan shuru</button><button class="btn" data-sc-act="sound" title="Beep">${SC.sound ? '🔊' : '🔇'}</button><button class="btn" data-sc-act="torch" hidden>🔦</button><button class="btn" data-sc-act="zoom" hidden>🔍 1x</button><button class="btn" data-sc-act="photo" title="WhatsApp / gallery photo se scan">🖼️ Photo se scan</button><input type="file" accept="image/*" multiple hidden data-sc-file><span class="dim small">👤 ${esc(nm)}</span></div>
       <div class="trs-camwrap" data-sc-cam hidden><video playsinline muted data-sc-video></video><div class="trs-aim"></div><div class="trs-msg" data-sc-msg></div>
         <div class="trs-conf" data-sc-conf hidden><div class="trs-ct">Ye barcode sahi hai?</div><div class="trs-cc" data-sc-ccode></div><div class="trs-cd" data-sc-cdup></div><div class="trs-cb"><button class="btn" data-sc-no>🔁 Dobara</button><button class="btn primary" data-sc-yes>✅ Sahi hai — Save</button></div></div></div>
-      <input class="input mono" data-sc-in inputmode="numeric" autocomplete="off" placeholder="⌨️ Scanner gun / type karke Enter" style="margin-top:10px">
+      <div class="trs-review" data-sc-review></div>
+      <input class="input mono" data-sc-in inputmode="numeric" autocomplete="off" placeholder="⌨️ Scanner gun / type karke Enter · ya photo yahan paste (Ctrl+V) / drop karo" style="margin-top:10px">
       <div class="trs-note2" data-sc-note></div>
       <div class="trs-count" data-sc-count></div>
       <div class="trs-list" data-sc-list></div></div></section>`;
     const root = body;
     root.querySelector('[data-sc-act="cam"]').onclick = () => (SC.on ? scCamStop() : scCamStart());
+    { const fi = root.querySelector('[data-sc-file]'), pb = root.querySelector('[data-sc-act="photo"]');
+      pb.onclick = () => fi.click(); fi.onchange = () => { const fl = Array.from(fi.files || []); fi.value = ''; scImages(fl); };
+      // laptop: Ctrl+V (WhatsApp Web se copy ki image) aur drag-drop
+      root.addEventListener('paste', (e) => { const fl = Array.from((e.clipboardData && e.clipboardData.files) || []).filter((f) => /^image\//.test(f.type)); if (fl.length) { e.preventDefault(); scImages(fl); } });
+      if (!window.__scPaste) { window.__scPaste = 1; document.addEventListener('paste', (e) => { if (!document.querySelector('[data-sc-file]')) return; const fl = Array.from((e.clipboardData && e.clipboardData.files) || []).filter((f) => /^image\//.test(f.type)); if (fl.length) { e.preventDefault(); scImages(fl); } }); }
+      ['dragover', 'drop'].forEach((ev) => root.addEventListener(ev, (e) => { if (!e.dataTransfer || !e.dataTransfer.types || ![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); if (ev === 'drop') scImages(Array.from(e.dataTransfer.files)); })); }
+    scRvEvents(root); scRvPaint(); try { scLoadVision().then((V) => V.warm()).catch(() => {}); } catch { /* */ }
     root.querySelector('[data-sc-act="sound"]').onclick = (e) => { SC.sound = !SC.sound; e.currentTarget.textContent = SC.sound ? '🔊' : '🔇'; try { localStorage.setItem('ff_tr_scan_snd', SC.sound ? '1' : '0'); } catch { /* */ } };
     root.querySelector('[data-sc-act="zoom"]').onclick = async (e) => { try { const steps = [1, 2, 3, 4].filter((z) => z <= SC.zmax); const i = steps.indexOf(SC.zoom); SC.zoom = steps[(i + 1) % steps.length] || 1; await SC.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ zoom: SC.zoom }] }); e.currentTarget.textContent = '🔍 ' + SC.zoom + 'x'; } catch { U.toast('Zoom is device par nahi chala', 'warn'); } };
     root.querySelector('[data-sc-act="torch"]').onclick = async () => { try { SC.torch = !SC.torch; await SC.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: SC.torch }] }); } catch { U.toast('Torch nahi chala', 'warn'); } };
     root.querySelector('[data-sc-yes]').onclick = () => scConfirmClose(true); root.querySelector('[data-sc-no]').onclick = () => scConfirmClose(false);
     root.querySelector('[data-sc-in]').addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return; e.preventDefault(); const el = e.currentTarget, raw = el.value; el.value = ''; if (!raw.trim()) return;
-      raw.split(/[\n,;\s]+/).filter(Boolean).forEach((x) => { const c = scValid(x); if (c) scAdd(c); else { scNote('Ye 16-digit FASTag barcode nahi hai', true); scBeep('bad'); } });
+      raw.split(/[\n,;\s]+/).filter(Boolean).forEach((x) => { const c = scValidLoose(x); if (c) scAdd(c); else { scNote('Ye 16-digit FASTag barcode nahi hai', true); scBeep('bad'); } });
     });
     root.querySelector('[data-sc-list]').addEventListener('click', async (e) => {
       const b = e.target.closest('[data-sc-del]'); if (!b) return; const c = b.dataset.scDel;
@@ -2725,7 +2799,7 @@ body.colorful .from-hdr { color: #166534; }
       const cls = (a.rows || []).map((x) => `${esc(x.cls)} × ${esc(fmt(x.approved))}`).join(' · ') || '—';
       const tot = (a.rows || []).reduce((s, x) => s + (x.approved || 0), 0);
       const rows = [
-        ['Request ID', r.id ? `<span class="trp-id">#${esc(r.id)}</span>` : '—'],
+        ['Request No.', (r.no || r.id) ? `<span class="trp-id">#${esc(r.no || r.id)}</span>` : '—'],
         [a.kind === 'tl' ? 'TL' : 'Agent', `<b>${esc(a.agentName || a.agentId || '—')}</b>${a.agentId ? ` <small>#${esc(a.agentId)}</small>` : ''}`],
         ...(a.mapName || a.mapId ? [['FASTag mapping', `${esc(a.mapName || '')}${a.mapId ? ` <small>#${esc(a.mapId)}</small>` : ''}`]] : []),
         ...(a.dispatchName ? [['Dispatch name', esc(a.dispatchName)]] : []),
@@ -2928,7 +3002,7 @@ body.colorful .from-hdr { color: #166534; }
       <p class="dim" style="margin:0 0 12px">${esc(d.employee || state.employee.name || '')} — <b>${fmt(reqs.length || batch.agents || 0)} agent</b> ki request (${fmt(batch.total || 0)} tags) admin ke paas pahunch gayi. Apni saari requests <b>📝 Form</b> par <b>👤 Meri requests</b> me dikh jaayengi (All / Pending / Approved / Dispatched / Rejected) — ya <b>🔎 Status</b> tab me <b>agent ke mobile number</b> se dekho.</p>
       ${reqs.length ? `<div class="table-wrap"><table class="tbl tr-done-tbl"><thead><tr><th>Agent</th><th>Mobile</th><th>Classes</th><th class="num">Tags</th><th>Request ID</th></tr></thead><tbody>
         ${reqs.map((r) => `<tr><td><b>${esc(r.agentName || '—')}</b></td><td>${esc(r.mobile || '—')}</td><td class="small">${esc((r.classes || []).map((c) => `${c.cls}×${c.qty}`).join(' · '))}</td><td class="num"><b>${fmt(r.total)}</b></td>
-          <td><span class="mono small">${esc(r.id)}</span> <button class="btn small" data-tr-copy-id="${esc(r.id)}" title="Request ID copy">📋</button></td></tr>`).join('')}
+          <td><span class="mono small">${esc(r.no || r.id)}</span> <button class="btn small" data-tr-copy-id="${esc(r.no || r.id)}" title="Request number copy">📋</button></td></tr>`).join('')}
       </tbody></table></div>` : ''}
       <div class="btn-row" style="margin-top:12px;justify-content:center">
         <button class="btn primary" data-tr-act="again">➕ Naya request banao</button>
@@ -3248,8 +3322,8 @@ body.colorful .from-hdr { color: #166534; }
       const cleanId = q.replace(/^#/, '').trim();
       let path = '';
       if (d.length >= 10 && d.length <= 13 && /^[\d+\s-]+$/.test(q)) path = `/api/public/tag-request/status?mobile=${encodeURIComponent(d)}`;
-      else if (/^\d{4}$/.test(d) || /^tagreq/i.test(cleanId) || cleanId.length >= 4) path = `/api/public/tag-request/status?id=${encodeURIComponent(cleanId)}`;
-      if (!path) { st.err = 'Agent ka 10 digit mobile number ya 4-digit Request ID daalo.'; st.list = null; renderStatus(); return; }
+      else if (/^\d{1,7}$/.test(cleanId) || /^tagreq/i.test(cleanId) || cleanId.length >= 4) path = `/api/public/tag-request/status?id=${encodeURIComponent(cleanId)}`;
+      if (!path) { st.err = 'Agent ka 10 digit mobile number ya Request number daalo.'; st.list = null; renderStatus(); return; }
       st.busy = true; st.err = ''; renderStatus();
       publicApi(path).then((out) => {
         st.list = out && Array.isArray(out.requests) ? out.requests : (out && out.request ? [out.request] : []);
@@ -3562,7 +3636,7 @@ body.colorful .from-hdr { color: #166534; }
     const entryBy = r.byName && r.byName !== empName ? `<small class="dim">entry: ${esc(r.byName)}</small>` : '';
     return `<tr class="tr-req-row st-${esc(status)}${sel ? ' tr-sel' : ''}${editing ? ' tr-editing' : ''}" data-tr-key="${esc(dr.key)}">
       <td class="tr-c-sel"><input type="checkbox" data-tr-sel="${esc(dr.key)}" ${sel ? 'checked' : ''} aria-label="Select"></td>
-      <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="${esc(r.id)}">#${esc(String(r.id || '').slice(-6))}</small></td>
+      <td class="tr-c-date"><b>${esc(dateLabel(r.at))}</b><small class="dim">${esc(timeLabelShort(r.at))}</small><small class="mono dim" title="Request No. ${esc(r.no || r.id)}">#${esc(r.no || String(r.id || '').slice(-6))}</small></td>
       <td class="tr-c-emp"><b>${esc(empName)}</b>${e.office ? `<small class="dim">${esc(e.office)}</small>` : ''}${entryBy}${r.source === 'public-link' ? '<span class="badge" title="Employee link se aayi (bina login)">🌐 link</span>' : ''}</td>
       <td class="tr-c-agent"><b>${agentNameHtml(dr.agent)}</b>${agentActsHtml(dr.agent)}${dr.agent.kind === 'tl' ? ' <span class="badge purple">TL</span>' : ''}${dr.agent.dispatchName ? `<small class="dim"> 🚚 ${esc(dr.agent.dispatchName)}</small>` : ''}${dr.agent.mapName || dr.agent.mapId ? `<small class="dim" title="FASTag Mapping — sheet me yahi naam/ID jata hai"> 🔗 ${esc(dr.agent.mapName || '')}${dr.agent.mapId ? ` #${esc(dr.agent.mapId)}` : ''}</small>` : ''}${agentIdLineHtml(dr.agent)}
         <span class="tr-tags"><span class="badge ${statusOf(r).tone} tr-st-inline" title="Status">${statusOf(r).label}</span><span class="badge ${dr.agent.channel === 'gv' ? 'green' : 'blue'}">${dr.agent.channel === 'gv' ? '🟩 GV' : '🟦 FF'}</span>${dr.agent.unmatched ? '<span class="badge amber" title="Sheet data me nahi mila — naya agent?">🆕 verify</span>' : ''}${dr.siblings > 1 ? `<span class="badge gray" title="Purani request — ek request me ${dr.siblings} agents">🔗 ${dr.siblings} agents</span>` : ''}</span></td>

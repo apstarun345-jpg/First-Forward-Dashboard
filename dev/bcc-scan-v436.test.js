@@ -7,12 +7,12 @@ test('scan tab wiring', () => {
   assert.match(bc, /data-bcc-tab="scan"/);
   assert.match(bc, /data-scan="cam"/);
   assert.match(bc, /BarcodeDetector/);
-  assert.match(bc, /vendor\/zxing\.min\.js/);
+  assert.match(bc, /libs\/zxing\.min\.js/);
   assert.match(bc, /ff_bcc_scan/);
   assert.match(bc, /hashchange/);   // camera doosre page par band
 });
 test('vendor zxing present and janitor knows scan keys', () => {
-  assert.ok(fs.statSync(new URL('../vendor/zxing.min.js', import.meta.url)).size > 100000);
+  assert.ok(fs.statSync(new URL('../libs/zxing.min.js', import.meta.url)).size > 100000);
   const j = fs.readFileSync(new URL('../janitor.js', import.meta.url), 'utf8');
   assert.match(j, /"ff_bcc_scan"/); assert.match(j, /"ff_bcc_scan_snd"/);
 });

@@ -277,7 +277,7 @@ window.FF = window.FF || {};
         if (!id || seen.has(id) || !GROUPS[id]) return;
         seen.add(id);
         ensure(id).catch(() => seen.delete(id));
-        // 🌙 v3.125.528 — module ke saath us page ka store data bhi (app.js DATA_WARM se)
+        // 🌙 v3.125.536 — module ke saath us page ka store data bhi (app.js DATA_WARM se)
         try { if (typeof FF !== 'undefined' && FF.warmPageData) FF.warmPageData(id); } catch { /* best-effort */ }
       } catch { /* prefetch is best-effort */ }
     };

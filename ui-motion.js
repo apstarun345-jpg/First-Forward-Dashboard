@@ -226,7 +226,7 @@ window.FF = window.FF || {};
     els.slice(0, 60).forEach((el) => {
       // Live totals, shares and splits must remain one exact snapshot (no interpolated counts).
       if (el.closest('[data-countup="off"]')) return;
-      if (el.dataset.cu || el.children.length) return; el.dataset.cu = '1';
+      if (el.dataset.cu || el.children.length || el.__ux || el.closest('#home-summary')) return; el.dataset.cu = '1';
       const t = el.textContent.trim(); const m = t.match(/^([^\d-]*)(-?[\d,]+(?:\.\d+)?)(.*)$/);
       if (!m) return; const raw = m[2]; const to = parseFloat(raw.replace(/,/g, '')); if (!isFinite(to)) return;
       const card = el.closest('.kpi'); const tt = card && card.querySelector('.kpi-title');

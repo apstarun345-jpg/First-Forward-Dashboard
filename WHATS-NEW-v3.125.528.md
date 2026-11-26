@@ -1,4 +1,3 @@
-# v3.125.528 — Raat ka save + click-turant rows
-- Server: roz IST 01:05 ke baad hot stock/issuance queries ek baar taaza (force) karke gviz Sheet snapshot + disk cache me save — subah/restart ke baad pehla click Google na dekhe.
-- Cache restore window 3h/12h → 26h (daily window ke saath): raat ka save din bhar chalta hai, stale-while-revalidate background me taaza karta hai.
-- Nav hover/tap par sirf module nahi, us page ka store data bhi warm: Stock · Issuance · Performance · Master Search ke rows click se pehle load hone lagte hain.
+# v3.125.528 — "Aaj ke tags" galat number ka permanent fix
+- Wajah: do count-up animation (ui-motion + ui-extra) ek hi number par chalte the; ek purani value likh deta, dusra wahi padh kar target bana leta → galat number (jaise 8455) atak jata.
+- Ab ek element par sirf ek animation; Home summary strip par count-up band (exact number).

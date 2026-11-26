@@ -56,6 +56,8 @@ html.mobile-ui .ux-fsheet.open>*{flex:1 1 100%;max-width:100%}
   function countUp(el) {
     if (el.__ux) return; el.__ux = 1;
     if (noAnim()) return;
+    // v3.125.528 — dono count-up (ui-motion + yahan) ek hi number par chalte the: ek '0/purani value' likh deta, dusra wahi padh kar target bana leta → galat number atak jata tha.
+    if (el.dataset.cu || el.closest('[data-countup="off"], #home-summary')) return;
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node && !/\d/.test(node.nodeValue)) node = walker.nextNode();

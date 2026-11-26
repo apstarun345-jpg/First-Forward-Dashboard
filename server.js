@@ -1499,7 +1499,7 @@ function headers(extra = {}) {
     // Voice search needs microphone access after an explicit user click; camera stays disabled.
     'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=(self)',
     ...(FRAME_PROTECTION ? { 'X-Frame-Options': 'SAMEORIGIN' } : {}),
-    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://tile.openstreetmap.org https://server.arcgisonline.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://docs.google.com",
+    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://tile.openstreetmap.org https://server.arcgisonline.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://docs.google.com",
     ...extra
   };
 }
@@ -1589,7 +1589,7 @@ const cache = new GvizCache();   // url → { at, body, status }
 // gzip NDJSON file me likha jata hai (stream — memory nahi badhti) aur boot par wapas padha jata hai. Purani
 // entries "stale" maani jati hain: user ko turant milti hain aur peeche se taaza hoti hain (stale-while-revalidate).
 const CACHE_FILE = path.join(DATA_DIR, 'gviz-cache.ndjson.gz');
-const CACHE_DISK_MAX_AGE_MS = 26 * 3600e3;  // 🌙 v3.125.528 — 26 ghante (daily window): raat ka save subah/din bhar chale; stale-while-revalidate neeche sambhalta hai
+const CACHE_DISK_MAX_AGE_MS = 26 * 3600e3;  // 🌙 v3.125.536 — 26 ghante (daily window): raat ka save subah/din bhar chale; stale-while-revalidate neeche sambhalta hai
 let cacheDiskBusy = false;
 async function cacheSaveDisk() {
   if (cacheDiskBusy || !cache.size || process.env.CACHE_DISK === '0') return 0;
@@ -3061,6 +3061,18 @@ function publicWorkspaceUser(username) {
 // (kabhi delete nahi) aur ⏪ sheet-history se recovery — taaki gayab requests wapas layi ja sakein.
 const TAG_REQUEST_CAP = 500; // per-agent requests chhoti hoti hain — notify blob ab bhi halka rehta hai
 const tagReqKeyOf = (r) => String((r && r.id) || '').trim();
+/** 🔢 v3.125.533 — Tag Request ka SERIES number (1, 2, 3 …): purani requests ko banne ke order me 1 se, nayi ko agla number. `id` (internal key) nahi badalta. */
+function ensureTagReqNos() {
+  const w = workspaceStore(), list = w.tagRequests || [];
+  const miss = list.filter((r) => r && typeof r === 'object' && !Number.isInteger(r.no));
+  if (!miss.length) return false;
+  let seq = Number(w.tagReqNoSeq) || 0;
+  list.forEach((r) => { if (r && Number.isInteger(r.no) && r.no > seq) seq = r.no; });
+  const idx = new Map(list.map((r, i) => [r, i]));
+  miss.sort((a, b) => ((Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0)) || idx.get(a) - idx.get(b));
+  miss.forEach((r) => { r.no = ++seq; });
+  w.tagReqNoSeq = seq; return true;
+}
 /** Valid request = numeric-ish ID + rows array — recovery bakiyon ko ignore karti hai. */
 const tagReqValid = (r) => !!r && typeof r === 'object' && /^[A-Za-z0-9_:-]{1,60}$/.test(tagReqKeyOf(r)) && Array.isArray(r.rows);
 const tagReqCount = () => (workspaceStore().tagRequests || []).length;
@@ -3091,6 +3103,7 @@ function mergeMissingTagRequests(incoming, { addressBook = null } = {}) {
   if (added.length) {
     // list ka tail = newest; recovery ke baad bhi wahi order rahe (same time par original order).
     w.tagRequests.sort((a, b) => (Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0));
+    ensureTagReqNos();
     capTagRequests();
   }
   let addresses = 0;
@@ -3954,9 +3967,9 @@ async function scanEirByTags(tags) {
   const s = db.settings || {}, e = s.eir || {};
   const sheetId = String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
   const sheet = s.eirSheet || e.sheet || 'EIR';
-  const L = { tag: colLetter(e.tagId, 'A'), date: colLetter(e.date, 'AA'), cls: colLetter(e.cls, 'D'), aid: colLetter(e.agentId, 'J'), an: colLetter(e.agentName, 'L'), tl: colLetter(e.tlName, 'BA'), type: colLetter(e.type, 'P'), status: colLetter(e.status, 'Z'), master: colLetter(e.masterId, 'AU'), gvn: colLetter(e.gvName, 'AX') };
-  const cols = [L.tag, L.date, L.cls, L.aid, L.an, L.tl, L.type, L.status, L.master, L.gvn];
-  const q = new URLSearchParams({ id: sheetId, sheet, tq: `select ${cols.join(', ')} where ${need.map((t) => `${L.tag} = '${t.replace(/'/g, '')}'`).join(' or ')} limit 100` });
+  const L = { tag: colLetter(e.tagId, 'A'), date: colLetter(e.date, 'AA'), cls: colLetter(e.cls, 'D'), aid: colLetter(e.agentId, 'J'), an: colLetter(e.agentName, 'L'), tl: colLetter(e.tlName, 'BA'), type: colLetter(e.type, 'P'), status: colLetter(e.status, 'Z'), master: colLetter(e.masterId, 'AU'), gvn: colLetter(e.gvName, 'AX'), vrn: colLetter(e.vrn, 'B') };
+  const cols = [L.tag, L.date, L.cls, L.aid, L.an, L.tl, L.type, L.status, L.master, L.gvn, L.vrn];
+  const q = new URLSearchParams({ id: sheetId, sheet, tq: `select ${cols.join(', ')} where ${need.map((t) => `${L.tag} = '${t.replace(/'/g, '')}'`).join(' or ')} limit 300` });
   const res = await gvizPageServer(q, sheet);
   const at = (c) => res.ids.indexOf(c);
   const gvMasterId = String(e.gvMasterId || '5845036');
@@ -3966,7 +3979,7 @@ async function scanEirByTags(tags) {
     const iso = dc ? (serverDate(dc.v) || serverDate(dc.f) || '') : '';
     const gv = idNorm(g(L.master)) === idNorm(gvMasterId);
     const tl = g(L.tl);
-    out.set(g(L.tag).toUpperCase(), { date: iso, cls: g(L.cls), agent: (gv ? g(L.gvn) : '') || g(L.an), agentId: g(L.aid), tl: /^(NA|N\/A|#N\/A|-|0)$/i.test(tl) ? '' : tl, type: g(L.type), status: g(L.status), ch: gv ? 'GV' : 'FF' });
+    out.set(g(L.tag).toUpperCase(), { date: iso, cls: g(L.cls), agent: (gv ? g(L.gvn) : '') || g(L.an), agentId: g(L.aid), tl: /^(NA|N\/A|#N\/A|-|0)$/i.test(tl) ? '' : tl, type: g(L.type), status: g(L.status), vrn: g(L.vrn), ch: gv ? 'GV' : 'FF' });
   }
   need.forEach((t) => scanEirCache.set(t, { at: Date.now(), row: out.get(t) || null }));
   if (scanEirCache.size > 5000) scanEirCache.clear();
@@ -3991,8 +4004,20 @@ async function scanInfoServer(codes) {
       const f = scanTagInfer(pts); if (f) { const t = f(BigInt(todo[i].replace(/\D/g, ''))); if (t) { tagOf[i] = t; inferred[i] = true; } }
     });
   }
-  let eir = new Map();
-  try { eir = await Promise.race([scanEirByTags([...new Set(tagOf.filter(Boolean))]), timeout(10000)]); } catch { /* issued check agli baar */ }
+  let eir = new Map(), eirLate = false;
+  // ⚡ v3.125.530 — pehle raat ka saved Issued register (turant), live EIR query sirf 1.2 s tak; der ho to stock wala jawab abhi, issued-check peeche se (client dobara poochhta hai)
+  try {
+    todo.forEach((b, i) => {
+      const rg = issuedStore.get(b); if (!rg) return;
+      if (rg.t && !tagOf[i]) tagOf[i] = String(rg.t).toUpperCase();
+      if (tagOf[i]) eir.set(tagOf[i], { date: rg.d || '', cls: rg.c || '', agent: rg.a || '', agentId: rg.ai || '', tl: rg.tl || '', type: '', status: '', ch: rg.s === 'gv' ? 'GV' : 'FF' });
+    });
+  } catch { /* register optional */ }
+  const needLive = [...new Set(tagOf.filter((x) => x && !eir.has(x)))];
+  if (needLive.length) {
+    const live = scanEirByTags(needLive); live.catch(() => {});
+    try { const m = await Promise.race([live, timeout(1200)]); m.forEach((v, k) => eir.set(k, v)); } catch { eirLate = true; }
+  }
   let disp = null;
   try { if (ledgerState.index) { const ix = ledgerState.index; disp = todo.map((b) => dispatchFor(ix, b)); } } catch { disp = null; }
   todo.forEach((b, i) => {
@@ -4008,6 +4033,7 @@ async function scanInfoServer(codes) {
     info.tagId = tagOf[i] || '';
     const d = disp && disp[i];
     if (d) { const parts = []; ['ff', 'gv'].forEach((ch) => (d[ch] || []).slice(0, 1).forEach((e) => parts.push(`${parts.length || (d.ff && d.ff.length && d.gv && d.gv.length) ? ch.toUpperCase() + ' · ' : ''}${e.date ? String(e.date).slice(0, 10) : ''} ${e.agent || ''}${e.agentId ? ' (' + e.agentId + ')' : ''}`.trim()))); info.dispatch = parts.join(' | '); } else info.dispatch = '';
+    if (eirLate && !is) { info.recheck = true; out[b] = info; return; }   // issued-check baaki — cache mat karo, client 2 s me dobara poochhega
     scanInfoCache.set(b, { at: Date.now(), info }); out[b] = info;
   });
   if (scanInfoCache.size > 3000) scanInfoCache.clear();
@@ -5594,7 +5620,7 @@ async function odSnapLoad() {
 // pehle 2-3 min har query Google par 45s+. Ab sabse garam queries ka gzip cache har 30 min Google Sheet (CACHE_GVIZ) me save
 // aur boot par wapas — restart ke baad bhi data turant (stale), naya peeche se (stale-while-revalidate).
 const clientHealth = { since: Date.now(), errors: [], pages: new Map() };
-const GVIZ_SNAP_TAB = 'CACHE_GVIZ', GVIZ_SNAP_MAX = 2.5 * 1048576, GVIZ_SNAP_AGE = 26 * 3600e3;   // 🌙 v3.125.528 — 12h → 26h: raat ka snapshot subah/din bhar restore ho
+const GVIZ_SNAP_TAB = 'CACHE_GVIZ', GVIZ_SNAP_MAX = 2.5 * 1048576, GVIZ_SNAP_AGE = 26 * 3600e3;   // 🌙 v3.125.536 — 12h → 26h: raat ka snapshot subah/din bhar restore ho
 const gvizSnap = { savedAt: 0, loadedAt: 0, loaded: 0, saved: 0, sig: '', err: '' };
 async function gvizSnapSave() {
   if (!sheetsStore || typeof sheetsStore.call !== 'function') { console.log('💾 gviz snapshot: Sheet storage nahi'); return false; }
@@ -7668,7 +7694,7 @@ async function hotWarm(reason, force) {
   console.log(`🔥 presave warm (${reason}): ${hotState.warmed} bhari · ${hotState.skipped} pehle se garam · ${hotState.failed} fail / ${hotState.total}`);
   return hotState;
 }
-// 🌙 v3.125.528 — RAAT KA SAVE: roz IST 01:05 ke baad ek baar saari hot queries taaza (force) karke
+// 🌙 v3.125.536 — RAAT KA SAVE: roz IST 01:05 ke baad ek baar saari hot queries taaza (force) karke
 //    gviz Sheet snapshot + disk cache me save. Subah / deploy / Render-sleep ke baad pehla click Google
 //    na dekhe: cache turant serve hota hai (stale-while-revalidate) aur baaki background me aata hai.
 //    Roz ek hi baar (istDay gate); memory ooncha ho to 10-min tick baad dobara.
@@ -10670,6 +10696,7 @@ async function handleApi(req, res, url) {
     return safe;
   };
   const visibleTagRequests = (user) => {
+    if (ensureTagReqNos()) setTimeout(() => { try { persistBackground('notify'); } catch { /* */ } }, 0);
     const all = workspaceStore().tagRequests || [];
     const list = user.role === 'admin' ? all : all.filter((r) => r.by === user.username);
     return list.slice(-TAG_REQUEST_CAP).reverse().map(tagRequestClientView);
@@ -10745,6 +10772,7 @@ async function handleApi(req, res, url) {
   function storeTagRequests(list) {
     const w = workspaceStore();
     w.tagRequests.push(...list);
+    ensureTagReqNos();
     capTagRequests();
     tagReqBaselineSync();
     tagReqForceVerify = true; // 💾 save se pehle storage verify — kisi doosre process ki requests safe rahein
@@ -10811,7 +10839,7 @@ async function handleApi(req, res, url) {
     const rows = r.rows || [];
     const names = [...new Set(rows.map((x) => x.agentName).filter(Boolean))];
     return {
-      id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '', itemName: normItemName(r.itemName), serialNumber: r.serialNumber || '', deviceName: r.deviceName || '', materialDescription: r.materialDescription || '',
+      id: r.id, no: r.no || null, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0, byName: r.byName || '', batch: r.batch || '', courier: r.courier || '', itemName: normItemName(r.itemName), serialNumber: r.serialNumber || '', deviceName: r.deviceName || '', materialDescription: r.materialDescription || '',
       agentName: (r.agent && r.agent.name) || names[0] || '', agentId: (r.agent && r.agent.agentId) || (rows[0] && rows[0].agentId) || '',
       rows: rows.length, agents: Math.max(1, names.length),
       classes: rows.map((x) => ({ cls: x.cls, requested: x.requested === undefined ? Number(x.approved) || 0 : Number(x.requested) || 0, approved: Number(x.approved) || 0, ...(names.length > 1 ? { agent: x.agentName || '' } : {}) })),
@@ -13058,7 +13086,9 @@ async function handleApi(req, res, url) {
   // v3.30 — naye format (agent block wali) requests bhi ID se mil jaati hain, chahe login form se bani hon.
   const publicTagFind = (id) => {
     const cleanId = String(id || '').replace(/^#/, '').trim();
-    return (workspaceStore().tagRequests || []).find((r) => String(r.id || '') === cleanId && (r.source === 'public-link' || (r.agent && typeof r.agent === 'object')));
+    const okRow = (r) => r.source === 'public-link' || (r.agent && typeof r.agent === 'object');
+    const all = workspaceStore().tagRequests || [];
+    return (/^\d{1,7}$/.test(cleanId) && all.find((r) => String(r.no || '') === cleanId && okRow(r))) || all.find((r) => String(r.id || '') === cleanId && okRow(r));
   };
   // 🔁 Duplicate detector (v3.27.1) — employee ke naam se 30 din ke andar ki active requests dhoondta hai
   // jisme koi same agent × class row ho. Employee ko submit se pehle warning dikhti hai ("already pending"),
@@ -13598,7 +13628,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, {
       ok: true,
       request: {
-        id: row.id, at: row.at, status: row.status, total: row.total, byName: row.byName,
+        id: row.id, no: row.no || null, at: row.at, status: row.status, total: row.total, byName: row.byName,
         rows: (row.rows || []).length, agents: new Set((row.rows || []).map((x) => x.agentName)).size,
         adminNote: row.adminNote || '', note: row.note || '',
         employee: row.employee ? { name: row.employee.name || '', mobile: row.employee.mobile || '', address: row.employee.address || '', pincode: row.employee.pincode || '' } : null,
@@ -14149,7 +14179,7 @@ async function handleApi(req, res, url) {
     const slim = (x) => ({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, tagType: x.tagType, inventory: x.inventoryName, bcAt: x.barcodeAllocatedAt, agentId: x.stockAgentId, agent: x.stockAgentName, agentAt: x.agentAllocatedAt, tl: x.tlName, ...gvMapInfo({ tagId: x.tagId, barcode: x.barcode, cls: x.vcType, agent: x.stockAgentName, agentId: x.stockAgentId, tl: x.tlName }) });
     try {
       const out = await mappingStock.lookup(list.map((b) => ({ type: 'barcode', barcode: b })), { fresh: !!(body && body.fresh) });
-      const results = list.map((b, i) => ({ barcode: b, rows: ((out.results[i] || {}).rows || []).map(slim) }));
+      const results = list.map((b, i) => ({ barcode: b, rows: ((out.results[i] || {}).rows || []).map(slim), reg: (() => { try { return issuedStore.get(b) || null; } catch { return null; } })() }));   // v3.125.532 — raat ka Issued register (turant)
       const miss = results.filter((r) => !r.rows.length && /^\d{4,}$/.test(r.barcode.replace(/\D/g, '')));
       if (miss.length) {
         const near = await mappingStock.lookup(miss.map((r) => { const d = r.barcode.replace(/\D/g, ''); const n = BigInt(d); const w = d.length; const f = (v) => (v < 0n ? 0n : v).toString().padStart(w, '0'); return { type: 'range', first: f(n - 40n), last: f(n + 40n) }; }), {});
@@ -14159,6 +14189,18 @@ async function handleApi(req, res, url) {
     } catch (err) {
       throw new HttpError(502, 'StockDataa index nahi ban paya: ' + String((err && err.message) || err).slice(0, 240));
     }
+  }
+  // ⚡ v3.125.535 — Barcode Checker: Issued (EIR) check SERVER se (cache + Google busy handle) — browser seedha Google ko nahi marta, isliye 429 nahi.
+  if (p === '/api/barcode-eir' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required');
+    const body = await readBody(req);
+    const tags = [...new Set((Array.isArray(body && body.tags) ? body.tags : []).map((t) => String(t || '').toUpperCase().replace(/[^0-9A-Z]/g, '')).filter((t) => /^[0-9A-F]{16,32}$/.test(t)))].slice(0, 3000);
+    const eir = {}, pending = [];
+    for (let i = 0; i < tags.length; i += 90) {
+      const part = tags.slice(i, i + 90);
+      try { (await scanEirByTags(part)).forEach((v, k) => { eir[k] = v; }); } catch { pending.push(...part); }
+    }
+    return sendJson(res, 200, { ok: true, eir, pending }, { 'Cache-Control': 'no-store' });
   }
   // 🔢 v215 — Barcode range checker (Master Search): range ke StockDataa rows (login wale sab users, read-only).
   if (p === '/api/barcode-range' && method === 'POST') {
@@ -15258,7 +15300,7 @@ async function serveStatic(req, res, pathname, search) {
       }
       // `?v=45` wala asset immutable ho gaya (index.html har deploy par bump karta hai) → repeat visits
       // par scripts ek baar hi download hote hain, phir 0 requests. HTML/manifest no-cache rehta hai.
-      const cache = isShell ? 'no-cache' : versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=600';
+      const cache = isShell ? 'no-cache' : (versioned || top === 'libs') ? 'public, max-age=31536000, immutable' : 'public, max-age=600';   // libs/ (OCR wasm + traineddata ~7 MB) ek baar download, phir hamesha cache
       // 🏷️ ETag: HTML/no-cache assets har baar revalidate hote hain — 304 me sirf headers jaate hain
       // (poore page ka HTML dobara transfer nahi hota), isliye repeat load noticeable fast ho jata hai.
       const etag = `W/"${stat.size.toString(36)}-${Math.round(Number(stat.mtimeMs)).toString(36)}"`;
@@ -15267,7 +15309,7 @@ async function serveStatic(req, res, pathname, search) {
         return res.end();
       }
       const type = MIME[ext] || 'application/octet-stream';
-      const extraHeaders = { 'Cache-Control': cache, ETag: etag, 'X-FF-Cache': versioned && !isShell ? 'immutable' : 'revalidate' };
+      const extraHeaders = { 'Cache-Control': cache, ETag: etag, 'X-FF-Cache': (versioned || top === 'libs') && !isShell ? 'immutable' : 'revalidate' };
       // ⚡ Compressible files (js/css/svg…): disk read + brotli/gzip ek baar, phir memory se (etag = size+mtime,
       // isliye file badalte hi naya slot). 100+ file wali first-visit burst me CPU/disk dobara nahi lagta.
       if (COMPRESSIBLE.test(type)) {
@@ -18802,7 +18844,7 @@ async function start() {
     setInterval(() => { cacheSaveDisk().catch(() => {}); }, 10 * 60e3).unref();
     setTimeout(() => { cacheSaveDisk().catch(() => {}); }, 3 * 60e3).unref?.();
     setTimeout(() => { hotWarm('boot').catch(() => {}); }, 30e3).unref?.();
-    setTimeout(() => { nightlyGvizSave('boot').catch(() => {}); }, 4 * 60e3).unref?.();   // 🌙 v3.125.528 agar 01:05+ ho chuka hai to boot par abhi save
+    setTimeout(() => { nightlyGvizSave('boot').catch(() => {}); }, 4 * 60e3).unref?.();   // 🌙 v3.125.536 agar 01:05+ ho chuka hai to boot par abhi save
     setInterval(() => { nightlyGvizSave('tick').catch(() => {}); }, 10 * 60e3).unref();   // 🌙 roz IST 01:05 ke baad ek baar
     setTimeout(() => { officeDispatched(false).then(() => officeDispatchedNightly()).catch(() => {}); }, 150e3).unref?.();   // 🟧 snapshot sheet se turant; aaj ka nahi bana to raat wali rebuild
     setInterval(() => { officeDispatchedNightly(); }, 10 * 60e3).unref();   // 🌙 roz IST 02:30 ke baad ek baar
