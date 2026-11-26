@@ -1561,7 +1561,13 @@ window.FF = window.FF || {};
       const btn = e.target.closest('[data-kd-raw]');
       btn.disabled = true; btn.textContent = 'Loading…';
       const el = U.$('#kd-raw-body'); if (el) el.innerHTML = U.spinner('Google Sheet se tag-level rows aa rahi hain…');
-      try { await loadRaw(); btn.remove(); renderRaw(''); } catch (err) { if (el) el.innerHTML = U.errorBox(err); btn.disabled = false; btn.textContent = '↻ Retry'; }
+      // v3.125.524 — Google 429 par chupchap 3 baar aur try (server ~30 s me reset hota hai), user ko error nahi dikhana.
+      let lastErr = null;
+      for (let i = 0; i < 4; i++) {
+        try { await loadRaw(); btn.remove(); renderRaw(''); lastErr = null; break; }
+        catch (err) { lastErr = err; if (!(err && (err.rateLimited || /429|rate limit|too many requests/i.test(String(err.message || ''))))) break; if (el && i < 3) el.innerHTML = U.spinner('Google Sheet se tag-level rows aa rahi hain…'); await new Promise((r) => setTimeout(r, 8000 * (i + 1))); }
+      }
+      if (lastErr) { if (el) el.innerHTML = U.errorBox(lastErr); btn.disabled = false; btn.textContent = '↻ Retry'; }
       return;
     }
     if (e.target.closest('[data-kd-xlsx]') && state.raw) { FF.xlsx.download(kdFileName('Tags', 'xlsx'), [{ name: 'Tags', header: RAW_HEAD, rows: state.raw }]); return; }

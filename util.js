@@ -608,10 +608,6 @@ window.FF = window.FF || {};
   }
   function errorBox(err, retryAttr) {
     const msg = err && err.message ? err.message : String(err);
-    // v3.125.523 — Google ka rate-limit (429) koi "error" nahi: purana data dikh raha hota hai. Lal box ki jagah naram note.
-    if ((err && err.rateLimited) || /429|rate limit|too many requests/i.test(msg)) {
-      return `<div class="soft-note" role="status" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-radius:12px;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.35);color:inherit;font-size:13px"><span aria-hidden="true">⏳</span><span style="flex:1 1 220px">Google Sheet abhi busy hai — purana data dikh raha hai, naya kuch hi der me aa jayega.</span>${retryAttr ? `<button class="btn small" ${retryAttr}>Retry</button>` : ''}</div>`;
-    }
     return `<div class="error-box"><div class="error-title">⚠️ Data load nahi hua</div><div class="error-msg">${esc(msg)}</div>${retryAttr ? `<button class="btn" ${retryAttr}>Retry</button>` : ''}</div>`;
   }
   function emptyState(opts) {
