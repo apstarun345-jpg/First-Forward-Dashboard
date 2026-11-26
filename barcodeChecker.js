@@ -95,8 +95,8 @@ FF.pages = FF.pages || {};
     bc: { label: '🏢 Master / BC stock', tone: 'gray' },
     nf: { label: '❓ Not found', tone: 'red' }
   };
-  const HEAD = ['Barcode', 'Tag ID', 'Status', 'Class', 'Agent', 'Agent ID', 'TL', 'Allocated / Issue date', 'VRN', 'Note', 'Dispatch date', 'Dispatched to'];
-  const cells = (r) => [r.barcode, r.tagId, STATUS[r.k].label, r.cls, r.agent, r.agentId, r.tl, r.date, r.vrn, r.note, r.dDate || '', r.dName || ''];
+  const HEAD = ['Barcode', 'Tag ID', 'Status', 'Class', 'Agent', 'Agent ID', 'TL', '🏢 Office stock', 'Allocated / Issue date', 'VRN', 'Note', 'Dispatch date', 'Dispatched to'];
+  const cells = (r) => [r.barcode, r.tagId, STATUS[r.k].label, r.cls, r.agent, r.agentId, r.tl, r.office || '', r.date, r.vrn, r.note, r.dDate || '', r.dName || ''];
   // 🔎 v3.85 — search haystack ek baar banta hai (lowercase + barcode ke sirf digits) → har key-press par bas includes().
   const hay = (r) => r._h || (r._h = `${cells(r).join(' ').toLowerCase()} ${bcDigits(r.barcode)}`);
   const statusPlain = (r) => STATUS[r.k].label.replace(/^[^A-Za-z]+/, '').trim();
@@ -133,7 +133,7 @@ FF.pages = FF.pages || {};
       const gvA = st.gvAgent || '', mapIn = st.mapIn || '';
       const ffMapped = !!st.agent, gvMapped = mapIn === 'gv' || mapIn === 'both';
       const where = !mapIn ? '' : mapIn === 'both' ? 'FF + GV dono me map' : mapIn === 'ff' ? 'FF StockDataa me map · GV Tag Assignment me nahi' : mapIn === 'gv' ? `GV Tag Assignment me map${gvA ? ' (' + gvA + (st.gvAgentId ? ' · ' + st.gvAgentId : '') + ')' : ''} · FF me agent nahi` : 'Na FF me agent, na GV Tag Assignment me map (office stock)';
-      return { barcode: label, k: ffMapped || gvMapped ? 'st' : 'bc', tagId: tag, cls: st.cls, agent: st.agent || (gvMapped ? gvA : '') || st.inventory || '', agentId: st.agentId || (gvMapped ? st.gvAgentId || '' : ''), tl: st.tl || (gvMapped ? st.gvTl || '' : ''), date: st.agentAt || st.bcAt || '', vrn: '', note: where || (ffMapped ? '' : 'Agent ko allocate nahi') };
+      return { barcode: label, k: ffMapped || gvMapped ? 'st' : 'bc', tagId: tag, cls: st.cls, agent: st.agent || (gvMapped ? gvA : '') || '', office: ffMapped || gvMapped ? '' : (st.inventory || 'Office stock'), agentId: st.agentId || (gvMapped ? st.gvAgentId || '' : ''), tl: st.tl || (gvMapped ? st.gvTl || '' : ''), date: st.agentAt || st.bcAt || '', vrn: '', note: where || (ffMapped ? '' : 'Agent ko allocate nahi') };
     }
     return { barcode: label, k: 'nf', tagId: tag, cls: '', agent: '', agentId: '', tl: '', date: '', vrn: '', note: tag ? 'Na stock me, na EIR me (tag ID anumaanit)' : 'Stock me nahi mila · tag ID ka andaza nahi laga' };
   }
@@ -238,7 +238,7 @@ FF.pages = FF.pages || {};
     if (!errs.length && src) return `<p class="dim small">📒 Dispatch ledger: ${src}</p>`;
     return errs.length ? `<p class="dim small">⚠️ Dispatch ledger — ${src ? src + ' · ' : ''}${errs.map(([, v]) => esc(v)).join(' · ')}</p>` : '';
   }
-  const rowsHtml = (show) => show.map((r) => `<tr class="bcc-${r.k}${r._new && Date.now() - r._new < 1600 ? ' bcc-new' : ''}${r._dup && Date.now() - r._dup < 1600 ? ' bcc-dupflash' : ''}" data-bcc-i="${r._i}"><td class="bcc-cp"><button type="button" class="bcc-rowcopy" data-bcc-row title="Copy Barcode + Tag ID + Status">📋</button></td>${cells(r).map((v, i) => `<td${i === 0 || i === 1 ? ` class="mono bcc-cell" data-bcc-cell="${i === 0 ? 'bc' : 'tag'}" title="Click = copy"` : ''}>${i === 2 ? (r.pending ? '<span class="wow-sk"></span>' : `<span class="badge ${STATUS[r.k].tone}">${esc(v)}</span>`) : (r.pending && i > 2 && i < 10 ? '<span class="wow-sk" style="width:48px"></span>' : esc(v))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${HEAD.length + 1}" class="empty">Is filter me kuch nahi</td></tr>`;
+  const rowsHtml = (show) => show.map((r) => `<tr class="bcc-${r.k}${r._new && Date.now() - r._new < 1600 ? ' bcc-new' : ''}${r._dup && Date.now() - r._dup < 1600 ? ' bcc-dupflash' : ''}" data-bcc-i="${r._i}"><td class="bcc-cp"><button type="button" class="bcc-rowcopy" data-bcc-row title="Copy Barcode + Tag ID + Status">📋</button></td>${cells(r).map((v, i) => `<td class="bcc-c${i}${i === 0 || i === 1 ? ' mono bcc-cell' : ''}"${i === 0 || i === 1 ? ` data-bcc-cell="${i === 0 ? 'bc' : 'tag'}" title="Click = copy"` : ''}>${i === 2 ? (r.pending ? '<span class="wow-sk"></span>' : `<span class="badge ${STATUS[r.k].tone}">${esc(v)}</span>`) : (r.pending && i > 2 && i < 11 ? '<span class="wow-sk" style="width:48px"></span>' : (i === 7 && v ? `<span class="bcc-office">🏢 ${esc(v)}</span>` : (i === 3 && v ? `<span class="bcc-cls cls-${esc(String(v).toLowerCase().replace(/[^a-z0-9]/g, ''))}">${esc(v)}</span>` : esc(v))))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${HEAD.length + 1}" class="empty">Is filter me kuch nahi</td></tr>`;
   const noteHtml = (vis, show) => `${U.fmt(vis.length)} rows${vis.length > show.length ? ` · pehli ${U.fmt(show.length)} dikh rahi — sab ke liye Copy / Excel` : ''}`;
   function resultsHtml() {
     const rows = state.rows;

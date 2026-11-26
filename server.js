@@ -12671,6 +12671,12 @@ async function handleApi(req, res, url) {
     await profilePackBuild(addressBookView);
     return sendJson(res, 200, { ok: true, n: (profilePack.addr || []).length });
   }
+  // ⚡ v3.125.536 — Agents Address pehle se garam: boot par + har 20 min + roz raat Sheet se force refresh (user ko kabhi 13 s ka intezaar nahi).
+  if (p === '/api/addr-warm' && method === 'GET') {
+    if (url.searchParams.get('t') !== profilePack.token) throw new HttpError(403, 'forbidden');
+    if (url.searchParams.get('force') === '1') await addressBookMap(true);
+    return sendJson(res, 200, { ok: true, n: (await addressBookView()).length });
+  }
   if (p === '/api/profile-pack' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required.');
     const chans = addrChannels(user);
@@ -18823,6 +18829,14 @@ async function start() {
     // 🗓️ v3.125.101 — daily sheets (EIR / StockDataa / Tag Assignment) me naya data aaya? har 10 min check
     setTimeout(() => checkDailyVersions('boot').catch(() => {}), 40e3).unref?.();
     setTimeout(() => { try { if (ledgerSources().length) ledgerDirect(['608116-039-0000001']).catch(() => {}); } catch { /* optional */ } }, 180e3).unref?.();   // ⚡ v425 — dispatch ledger ka pehla (cold) query boot par hi
+    {   // 📍 v3.125.536 — Agents Address: boot par garam, har 20 min tazaa, roz IST 02:20 ke baad Sheet se force refresh
+      let addrNightDay = '';
+      const addrWarm = (force) => fetch(`http://127.0.0.1:${PORT}/api/addr-warm?t=${profilePack.token}${force ? '&force=1' : ''}`, { signal: AbortSignal.timeout(120e3) }).then((r) => r.ok).catch(() => false);
+      setTimeout(() => { addrWarm(false); }, 35e3).unref?.();
+      setInterval(() => {
+        try { const ist = new Date(Date.now() + 5.5 * 3600e3), day = istTodayKey(); const nightly = ist.getUTCHours() >= 2 && ist.getUTCMinutes() >= 0 && addrNightDay !== day && (ist.getUTCHours() > 2 || ist.getUTCMinutes() >= 20); if (nightly) { addrNightDay = day; addrWarm(true); } else addrWarm(false); } catch { /* optional */ }
+      }, 20 * 60e3).unref();
+    }
     setTimeout(() => { eirRawSnapLoad().catch(() => {}); }, 20e3).unref?.();   // 💾 v3.125.527 — deploy ke baad EIR raw din Sheet snapshot se turant
     setTimeout(() => eirRawPrewarm('boot'), 240e3).unref?.();   // 🗂️ v3.125.291 — EIR din-wise raw cache pehle se
     setInterval(() => eirRawPrewarm('30 min'), 30 * 60e3).unref();   // jo din fail / missing hain wahi dobara (baaki disk se)

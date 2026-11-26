@@ -10,16 +10,28 @@ FF.pages = FF.pages || {};
   const chLabel = (c) => (c === 'gv' ? '🟩 GV' : '🟦 FF');
   const apiJson = (path) => FF.auth.api(path);
 
+  const SNAP_KEY = 'ff_ab_snap_v1';
+  const snapGet = () => { try { const j = JSON.parse(localStorage.getItem(SNAP_KEY) || 'null'); return j && j.d && Array.isArray(j.d.rows) ? j : null; } catch { return null; } };
+  const snapPut = (d) => { try { localStorage.setItem(SNAP_KEY, JSON.stringify({ at: Date.now(), d })); } catch { /* quota */ } };
+  const isDefault = () => !st.q && !st.kf && st.view === 'list' && st.channel === 'all' && !st.multi;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  /** ⚡ v3.125.536 — instant: pichla saved data turant dikhta hai; naya peeche se. 429 / busy par chupchap dobara try (error box nahi). */
   async function load(root) {
     const box = U.$('#ab-results', root);
     if (!box) return;
     st.busy = true;
-    if (st.data && box.firstChild) box.style.opacity = '.55'; else box.innerHTML = `<div class="abx-skel">${['b', 'g', 'r', 'a', 'o', 'p', 't'].map((c) => `<span class="abx-sk sk-${c}"></span>`).join('')}</div><div class="abx-skrow"></div><div class="abx-skrow"></div><div class="abx-skrow short"></div><p class="abx-skt">📍 Address dhundh rahe hain…</p>`;   // ⚡ purana result dikhta rahe, flash nahi
-    try {
-      const qs = `kf=${encodeURIComponent(st.kf || '')}&channel=${st.channel}&fields=${st.fields.join(',')}&q=${encodeURIComponent(st.q)}&limit=${st.view === 'map' ? 5000 : 300}${st.multi ? '&multi=1' : ''}${st.view === 'map' ? '&geo=1' : ''}`;
-      st.data = await apiJson(`/api/address-book?${qs}`);
-    } catch (err) { st.busy = false; box.style.opacity = ''; box.innerHTML = U.errorBox(err); return; }
+    const snap = isDefault() ? snapGet() : null;
+    if (!st.data && snap) { st.data = snap.d; st.fromSnap = snap.at; paint(root); }
+    if (st.data && box.firstChild) box.style.opacity = '.55'; else box.innerHTML = `<div class="abx-skel">${['b', 'g', 'r', 'a', 'o', 'p', 't'].map((c) => `<span class="abx-sk sk-${c}"></span>`).join('')}</div><div class="abx-skrow"></div><div class="abx-skrow short"></div><div class="abx-skt">Agents ka data aa raha hai…</div>`;
+    const qs = `kf=${encodeURIComponent(st.kf || '')}&channel=${st.channel}&fields=${st.fields.join(',')}&q=${encodeURIComponent(st.q)}&limit=${st.view === 'map' ? 5000 : 300}${st.multi ? '&multi=1' : ''}${st.view === 'map' ? '&geo=1' : ''}`;
+    let lastErr = null, got = false;
+    for (let i = 0; i < 5 && !got; i++) {
+      try { st.data = await apiJson(`/api/address-book?${qs}`); st.fromSnap = 0; got = true; }
+      catch (err) { lastErr = err; if (!/429|50\d|busy|timeout|fetch|network|load/i.test(String((err && err.message) || err))) break; await sleep(1500 * (i + 1)); }
+    }
     st.busy = false; box.style.opacity = '';
+    if (!got) { if (st.data) { paint(root); return; } box.innerHTML = U.errorBox(lastErr); return; }
+    if (isDefault()) snapPut(st.data);
     paint(root);
   }
   function paint(root) {
