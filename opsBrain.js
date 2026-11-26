@@ -593,7 +593,7 @@
     const brief = () => { try { const it = briefing(); if (it && M.push) M.push(it); } catch { bump('failed'); } };
     setTimeout(brief, 25e3); setInterval(brief, 15 * 60e3);
     // 🕵️ data quality — page load ke 2 min baad (idle me), phir har ghante
-    const dqRun = () => { (window.requestIdleCallback || setTimeout)(() => refreshDq(), 3000); };
+    const dqRun = () => { if (window.requestIdleCallback) window.requestIdleCallback(() => refreshDq(), { timeout: 3000 }); else setTimeout(() => refreshDq(), 3000); };   // v3.125.521 — pehle number pass hota tha → TypeError
     setTimeout(dqRun, 120e3); setInterval(dqRun, 60 * 60e3);
     if (M.addPageTips) M.addPageTips(PAGE);
     if (M.addContext) M.addContext(contextAnswer);
