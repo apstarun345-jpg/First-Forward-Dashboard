@@ -90,12 +90,12 @@ window.FF = window.FF || {};
   }
   // ---- 6 · friendly error messages ---------------------------------------------------------------
   const FRIENDLY = [
-    [/failed to fetch|networkerror|load failed|network request failed|err_internet/i, '📡 Server se connect nahi ho pa raha — internet check karke dobara try karo.'],
-    [/timeout|timed out|aborterror|aborted/i, '⏱ Server ne der kar di — ek baar dobara try karo.'],
+    [/failed to fetch|networkerror|load failed|network request failed|err_internet/i, '⏳ Server thoda busy hai — thodi der me khud ho jayega.'],
+    [/timeout|timed out|aborterror|aborted/i, '⏳ Server thoda busy hai — thodi der me khud ho jayega.'],
     [/\b401\b|unauthori[sz]ed|session (expired|invalid)|token (expired|invalid)/i, '🔒 Session khatam ho gaya — dobara login karo.'],
     [/\b403\b|forbidden|permission denied|not permitted/i, '🚫 Is kaam ki permission nahi hai — admin se poochho.'],
-    [/\b429\b|too many requests|rate limit/i, '🐢 Bahut zyada requests — 1 minute ruk ke try karo.'],
-    [/\b50[0-4]\b|internal server error|bad gateway|service unavailable|gateway timeout/i, '🛠 Server me dikkat aayi — thodi der baad try karo.'],
+    [/\b429\b|too many requests|rate limit/i, '⏳ Server thoda busy hai — thodi der me khud ho jayega.'],
+    [/\b50[0-4]\b|internal server error|bad gateway|service unavailable|gateway timeout/i, '⏳ Server thoda busy hai — thodi der me khud ho jayega.'],
     [/unexpected token|is not valid json|json\.parse|undefined|cannot read prop/i, '⚠️ Kuch gadbad hui — page refresh karke dobara try karo.']
   ];
   function friendly(msg) {
