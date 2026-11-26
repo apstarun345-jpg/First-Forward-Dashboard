@@ -855,6 +855,71 @@ window.FF = window.FF || {};
     if ((spec.agentId || spec.agent) && typeof G.agentIssuanceRows === 'function') return Array.isArray(G.agentIssuanceRows(spec.agentId, spec.agent));
     return true;
   }
+  // 💾 v3.125.526 — "Full data" tag list ki saved copy (browser IndexedDB, har user ki alag): click par turant dikhti hai,
+  // naya data peeche se aata hai. Pehle har baar Google se 7 hisson me aati thi (1-3 min).
+  const RAWSAVE = {
+    MAX_AGE: 48 * 3600e3, MAX_ROWS: 40000, KEEP: 25, db: null,
+    key(spec, p) {
+      try {
+        if (!spec || !p || !p.from) return '';
+        const u = (FF.auth && FF.auth.user && FF.auth.user.username) || ''; if (!u) return '';
+        const skip = new Set(['title', 'cardValue', 'foot', 'kicker', 'sub', '_pre', 'icon', 'tone']);
+        const s = {};
+        Object.keys(spec).sort().forEach((k) => { const v = spec[k]; if (!skip.has(k) && (v === null || ['string', 'number', 'boolean'].includes(typeof v))) s[k] = v; });
+        return `kdraw|${u}|${p.from}|${p.to}|${JSON.stringify(s)}`;
+      } catch { return ''; }
+    },
+    open() {
+      if (RAWSAVE.db) return RAWSAVE.db;
+      RAWSAVE.db = new Promise((resolve) => {
+        try {
+          if (typeof indexedDB === 'undefined') return resolve(null);
+          const rq = indexedDB.open('ffdash-sheets', 1);   // data.js jaisa hi db/store
+          rq.onupgradeneeded = () => { try { rq.result.createObjectStore('q'); } catch { /* ignore */ } };
+          rq.onsuccess = () => resolve(rq.result); rq.onerror = () => resolve(null); rq.onblocked = () => resolve(null);
+        } catch { resolve(null); }
+      });
+      return RAWSAVE.db;
+    },
+    async get(k) {
+      try {
+        if (!k) return null; const db = await RAWSAVE.open(); if (!db) return null;
+        const v = await new Promise((res) => { try { const r = db.transaction('q', 'readonly').objectStore('q').get(k); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); } catch { res(null); } });
+        return v && Array.isArray(v.rows) && v.rows.length && Date.now() - v.t < RAWSAVE.MAX_AGE ? v : null;
+      } catch { return null; }
+    },
+    async put(k, rows, extra) {
+      try {
+        if (!k || !Array.isArray(rows) || !rows.length || rows.length > RAWSAVE.MAX_ROWS) return;
+        const db = await RAWSAVE.open(); if (!db) return;
+        const st = db.transaction('q', 'readwrite').objectStore('q');
+        st.put({ t: Date.now(), rows, ...(extra || {}) }, k);
+        // purani saved copies hatao (sirf KEEP sabse nayi rakho)
+        const all = [];
+        const cur = st.openCursor(IDBKeyRange.bound('kdraw|', 'kdraw|\uffff'));
+        cur.onsuccess = () => { const c = cur.result; if (c) { all.push({ k: c.key, t: (c.value && c.value.t) || 0 }); c.continue(); } else if (all.length > RAWSAVE.KEEP) { all.sort((x, y) => y.t - x.t).slice(RAWSAVE.KEEP).forEach((o) => { try { st.delete(o.k); } catch { /* ignore */ } }); } };
+      } catch { /* quota / private mode — ignore */ }
+    }
+  };
+  /** Saved copy dikhao (agar hai) aur peeche se naya laao. true = saved dikha di gayi. */
+  async function showSavedRaw(spec, per) {
+    const rk = RAWSAVE.key(spec, per);
+    const saved = rk ? await RAWSAVE.get(rk) : null;
+    if (!saved || state.spec !== spec) return false;
+    state.raw = saved.rows; state.rawSrc = saved.src || 'EIR (saved copy)'; state.rawGv = saved.gv || 0; state.rawCache = null;
+    renderRaw('');
+    const el = U.$('#kd-raw-body');
+    if (el) el.insertAdjacentHTML('afterbegin', `<p class="dim small kd-raw-saved">💾 Saved copy dikh rahi hai (${new Date(saved.t).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}) · naya data peeche se aa raha hai…</p>`);
+    (async () => {
+      try {
+        const fresh = await loadRaw(spec, per);   // specArg ke saath: state / progress ko nahi chhedta
+        if (!Array.isArray(fresh)) return;
+        RAWSAVE.put(rk, fresh, { src: saved.src, gv: saved.gv });
+        if (state.spec === spec && U.$('#kd-raw-body')) { const q = (U.$('#kd-raw-q') || {}).value || ''; state.raw = fresh; renderRaw(q); }
+      } catch { /* saved copy hi sahi — error mat dikhao */ }
+    })();
+    return true;
+  }
   async function loadRaw(specArg, pArg) {
     const spec = specArg || state.spec, p = pArg || state.period, keep = !specArg;
     const out = [];
@@ -964,6 +1029,7 @@ window.FF = window.FF || {};
     out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
     if (!keep) return out;
     state.raw = out;
+    RAWSAVE.put(RAWSAVE.key(spec, p), out, { src: '', gv: gvRows.length });
     if (!needsEir) state.rawCache = null;
     state.rawGv = gvRows.length;
     state.rawSrc = eirOnly ? 'EIR (FF + GV · master ID rows = GV)' : gvFromMaster && wantGv ? (wantFf ? 'EIR (FF) + GV Master (GV)' : 'GV Master') : (wantGv && wantFf ? 'EIR (FF + GV)' : wantFf ? 'EIR' : 'EIR');
@@ -1502,6 +1568,8 @@ window.FF = window.FF || {};
         ? `${view.exportable ? '<button class="btn small" data-kd-summary-xlsx>⬇ Breakdown Excel</button>' : ''}<button class="btn small" data-drawer-csv>⬇ CSV</button><button class="btn small" data-drawer-pdf>📄 PDF</button>`
         : '';
       FF.app.openDrawer({ kicker: view.kicker, title: view.title, sub: view.sub, body: cardInfo + view.body, wide: true, actions: back + exportBtn, age: ageScopeOf(spec), replace: true });
+      // 💾 v3.125.526 — saved copy ho to "Full data" list drawer khulte hi dikh jaye (button dabane ki zaroorat nahi)
+      if (/data-kd-raw/.test(String(view.body || ''))) setTimeout(() => { const b = document.querySelector('[data-kd-raw]'); if (b && !b.disabled && state.spec) showSavedRaw(state.spec, state.period).then((ok) => { if (ok && b.isConnected) b.remove(); }).catch(() => {}); }, 60);
     } catch (err) {
       const back = state.history.length ? '<button class="btn small" data-kd-back>← Back</button>' : '';
       FF.app.openDrawer({ kicker: 'KPI detail', title: spec.title || 'KPI detail', body: U.errorBox(err), wide: true, actions: back, replace: true });
@@ -1559,6 +1627,7 @@ window.FF = window.FF || {};
     }
     if (e.target.closest('[data-kd-raw]')) {
       const btn = e.target.closest('[data-kd-raw]');
+      if (await showSavedRaw(state.spec, state.period)) { btn.remove(); return; }
       btn.disabled = true; btn.textContent = 'Loading…';
       const el = U.$('#kd-raw-body'); if (el) el.innerHTML = U.spinner('Google Sheet se tag-level rows aa rahi hain…');
       // v3.125.524 — Google 429 par chupchap 3 baar aur try (server ~30 s me reset hota hai), user ko error nahi dikhana.
