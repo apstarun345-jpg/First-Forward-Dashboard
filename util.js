@@ -1772,3 +1772,6 @@ window.FF = window.FF || {};
     wakeNorm, wakeWordMatch
   };
 })(window.FF);
+
+// v3.125.537 — koi bhi <form> bina action ke kabhi page ko POST na kare ("Method not allowed" page). Handlers apna kaam karte hain.
+try { document.addEventListener('submit', (e) => { const f = e.target; if (f && f.tagName === 'FORM' && !f.getAttribute('action')) e.preventDefault(); }, false); } catch (_) {}
