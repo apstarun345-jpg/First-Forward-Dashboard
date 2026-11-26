@@ -529,6 +529,8 @@ window.FF = window.FF || {};
   function toast(message, kind, opts) {
     let el = $('#toast');
     if (!el) { el = h('<div id="toast" class="toast" hidden></div>'); document.body.appendChild(el); }
+    // v3.125.550 — temporary server / network errors toast me kabhi raw (HTTP 429 / fetch failed) nahi
+    if ((kind === 'err' || kind === 'warn' || kind === 'error') && /HTTP\s*(429|5\d\d)|\b429\b|Failed to fetch|NetworkError|Load failed|did not load|timed out/i.test(String(message))) { message = '⏳ Server thoda busy hai — thodi der me khud ho jayega'; kind = 'warn'; }
     el.textContent = message;
     el.className = `toast ${kind || ''}`;
     const act = opts && opts.action;
@@ -607,9 +609,22 @@ window.FF = window.FF || {};
     return html + '</tbody></table></div>';
   }
   function errorBox(err, retryAttr) {
-    const msg = err && err.message ? err.message : String(err);
-    return `<div class="error-box"><div class="error-title">⚠️ Data load nahi hua</div><div class="error-msg">${esc(msg)}</div>${retryAttr ? `<button class="btn" ${retryAttr}>Retry</button>` : ''}</div>`;
+    const raw = err && err.message ? err.message : String(err);
+    // v3.125.550 — technical / temporary errors (429, 5xx, network, "Data did not load") user ko kabhi nahi dikhte: friendly line + khud dobara try.
+    const temp = /429|50\d|busy|timeout|timed out|fetch|network|did not load|failed to|abort|load nahi|temporar|try again|retry/i.test(raw) || Number(err && err.status) >= 429;
+    const msg = temp ? 'Data thodi der me aa jayega — khud dobara try ho raha hai…' : raw;
+    const title = temp ? '⏳ Data aa raha hai' : '⚠️ Data load nahi hua';
+    return `<div class="error-box${temp ? ' eb-soft' : ''}"><div class="error-title">${title}</div><div class="error-msg">${esc(msg)}</div>${retryAttr ? `<button class="btn" ${retryAttr}${temp ? ' data-eb-auto="1"' : ''}>${temp ? 'Abhi dobara try' : 'Retry'}</button>` : ''}</div>`;
   }
+  // auto-retry: soft error box ka retry button khud dabta hai (max 6 baar, 4 s ke antar)
+  try {
+    setInterval(() => {
+      document.querySelectorAll('.error-box.eb-soft [data-eb-auto]').forEach((b) => {
+        const n = Number(b.dataset.ebN || 0); if (n >= 6 || !b.isConnected || b.dataset.ebBusy) return;
+        b.dataset.ebN = String(n + 1); b.dataset.ebBusy = '1'; setTimeout(() => { try { b.click(); } catch (_) { /* gone */ } }, 100);
+      });
+    }, 4000);
+  } catch (_) { /* optional */ }
   function emptyState(opts) {
     const o = opts || {};
     const icon = o.icon || '🔍';

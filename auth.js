@@ -40,6 +40,10 @@ window.FF = window.FF || {};
       try { return await apiOnce(path, method, body); } catch (err) {
         const st = Number(err && err.status) || 0;
         const transient = st === 502 || st === 503 || st === 504 || (!st && err && (err.name === 'TypeError' || err.name === 'AbortError'));
+        // v3.125.550 — 429 (server ne kaam shuru hi nahi kiya) har call par safe: chupchap dobara. 500 sirf read calls par (3 baar).
+        const tooMany = st === 429 && !/^\/api\/auth\//.test(path) && i < 8;
+        const soft500 = st === 500 && retryable && i < 3;
+        if (tooMany || soft500) { await new Promise((r) => setTimeout(r, Math.min(8000, 1200 * (i + 1) + Math.random() * 400))); continue; }
         if (!retryable || !transient || i >= RETRY_WAITS.length) throw err;
         await new Promise((r) => setTimeout(r, RETRY_WAITS[i]));
       }
