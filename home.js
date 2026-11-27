@@ -1517,6 +1517,61 @@ FF.pages = FF.pages || {};
     return { apply, toggle, read };
   })();
 
+
+  // ---- v3.125.556 — professional Home flow: ek hi baar reveal + baad me sirf badla hua data (flicker nahi) -------------
+  const NATIVE_IH = typeof Element !== 'undefined' ? Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML') : null;
+  function morphKids(oldEl, newEl) {
+    const o = oldEl.childNodes, n = newEl.childNodes;
+    const max = Math.max(o.length, n.length);
+    for (let i = 0; i < max; i++) {
+      const a = oldEl.childNodes[i], b = newEl.childNodes[i];
+      if (!b) { while (oldEl.childNodes.length > n.length) oldEl.removeChild(oldEl.lastChild); break; }
+      if (!a) { oldEl.appendChild(b.cloneNode(true)); continue; }
+      if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) { oldEl.replaceChild(b.cloneNode(true), a); continue; }
+      if (a.nodeType === 3 || a.nodeType === 8) { if (a.data !== b.data) a.data = b.data; continue; }
+      if (a.nodeType !== 1) continue;
+      if (a.isEqualNode(b)) continue;
+      if (a === document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) continue;
+      const names = new Set([...a.getAttributeNames(), ...b.getAttributeNames()]);
+      names.forEach((nm) => { const bv = b.getAttribute(nm); if (bv === null) a.removeAttribute(nm); else if (a.getAttribute(nm) !== bv) a.setAttribute(nm, bv); });
+      if (a.tagName === 'IMG' || a.tagName === 'CANVAS') { if (a.tagName === 'CANVAS') oldEl.replaceChild(b.cloneNode(true), a); continue; }
+      morphKids(a, b);
+    }
+  }
+  function stabilize(el) {
+    if (!el || el._stab || !NATIVE_IH) return; el._stab = 1; el._last = null; el._live = false;
+    Object.defineProperty(el, 'innerHTML', {
+      configurable: true,
+      get() { return NATIVE_IH.get.call(this); },
+      set(html) {
+        html = String(html == null ? '' : html);
+        if (!this._live) { NATIVE_IH.set.call(this, html); this._last = html; return; }
+        if (html === this._last) return;      // same data → DOM ko chhua bhi nahi
+        this._last = html;
+        const t = document.createElement('template'); t.innerHTML = html;
+        try { morphKids(this, t.content); } catch { NATIVE_IH.set.call(this, html); }
+      }
+    });
+  }
+  function homeGate(root) {
+    root.classList.add('home-booting');
+    if (!document.getElementById('home-gate-css')) {
+      const st = document.createElement('style'); st.id = 'home-gate-css';
+      st.textContent = '.home-booting{position:relative;max-height:70vh;overflow:hidden}.home-booting>:not(.home-hero):not(#home-boot-msg){position:absolute!important;left:0;right:0;visibility:hidden!important;pointer-events:none}#home-boot-msg{display:none}.home-booting #home-boot-msg{display:flex;align-items:center;justify-content:center;gap:10px;padding:46px 12px;color:var(--muted,#64748b);font-weight:600}.home-revealed>:not(.home-hero){animation:homeIn .28s ease both}@keyframes homeIn{from{opacity:0}to{opacity:1}}';
+      document.head.appendChild(st);
+    }
+    const msg = document.createElement('div'); msg.id = 'home-boot-msg'; msg.innerHTML = '<span class="spinner"></span> Home ka poora data ek saath aa raha hai…';
+    root.appendChild(msg);
+    let done = false;
+    const reveal = () => {
+      if (done) return; done = true; clearTimeout(timer);
+      root.querySelectorAll('[id^="home-"]').forEach((el) => { stabilize(el); el._live = true; try { el._last = NATIVE_IH ? NATIVE_IH.get.call(el) : ''; } catch { /* */ } });
+      root.classList.remove('home-booting'); root.classList.add('home-revealed'); try { msg.remove(); } catch { /* */ }
+    };
+    const timer = setTimeout(reveal, 22000);
+    return reveal;
+  }
+
   async function render(root, params, renderCtx) {
     const u = FF.auth.user || {};
     const avatar = u.avatar ? `<img class="home-avatar" src="${esc(u.avatar)}" alt="">` : `<div class="home-avatar mono-logo">${esc((u.name || u.username || 'U').slice(0, 1).toUpperCase())}</div>`;
@@ -1567,6 +1622,8 @@ FF.pages = FF.pages || {};
 
     // ⚙ v3.79 — Customize Home: reorder / hide sections, saved per user on this device.
     homeLayout.apply(root);
+    const homeReveal = homeGate(root);
+    root.querySelectorAll('[id^="home-"]').forEach(stabilize);
     freshness.mount(root, false);
     mountDataVersions(U.$('#home-data-versions', root));
     // 💰 v3.125.234 — Payout refresh (mahine me ek baar) — admin / payout permission
@@ -2178,7 +2235,7 @@ FF.pages = FF.pages || {};
     await brk(); if (!root.isConnected) return;
     // ---- 📦 Stock (FF = StockDataa · GV = Tag Assignment) ----------------------------------------
     const [stockR, gvStockR] = await Promise.all([stockP, gvStockP]);
-    if (!root.isConnected || !stockMount) return;
+    if (!root.isConnected || !stockMount) { homeReveal(); return; }
     const ffStockRows = stockR ? (F() ? F().stock(stockR, { src: 'ff' }) : stockR) : [];
     const ffStock = {
       total: sumN(ffStockRows),
@@ -2206,6 +2263,7 @@ FF.pages = FF.pages || {};
     stageT('mountGvOnly+OffDisp', () => { mountGvOnly(stockMount); mountOffDisp(stockMount); });
     await brk(); if (!root.isConnected) return;
     stageT('paintPulse2', () => paintPulse({ total: ffStock.total + gvStock.total }));
+    homeReveal();
     // GV agent-wise stock (agar permission/load ho to) — top holders
     const gvStockAgentP = canGv ? G.need('stockAgent', { only: true }).catch(() => null) : Promise.resolve(null);
     gvStockAgentP.then((rows) => {
