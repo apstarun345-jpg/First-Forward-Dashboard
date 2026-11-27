@@ -170,8 +170,12 @@ FF.pages = FF.pages || {};
       row('Projected month-end', ffCur ? ffCur.projected : 0, gvCur ? gvCur.projected : 0, 'Current runrate se'),
       row('Active agents', ffAgentsCur, gvAgentsCur, 'Issuance karte agents'),
       row('<b>Stock in field</b>', ffStockTotal, gvStockTotal, 'StockDataa vs Tag Assignment'),
-      row('· VC4 stock', ffStockVc4, gvStockVc4, 'Payable class'),
-      row('· Commercial stock', ffStockTotal - ffStockVc4, gvStockTotal - gvStockVc4, 'NVC4 total')
+      ...(() => {   // class-wise stock (VC4, VC5, VC6, VC7, VC12, VC16 …)
+        const cn = (c) => { const m = String(c).match(/(\d+)/); return m ? Number(m[1]) : 999; };
+        const sumBy = (rows, c) => U.sum(rows.filter((r) => r.cls === c), (r) => r.n);
+        const cls = U.uniq([...ffStock, ...gvStockClass].map((r) => r.cls).filter((c) => c && !/VEHICLE|^CLASS$/i.test(c))).sort((a, b) => cn(a) - cn(b));
+        return cls.map((c) => row(`· ${c} stock`, sumBy(ffStock, c), sumBy(gvStockClass, c), c === 'VC4' ? 'Payable class' : 'Class-wise'));
+      })()
     ];
 
     const insight = [];

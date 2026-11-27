@@ -193,7 +193,7 @@ FF.pages = FF.pages || {};
     let kpis = '';
     if (src) {
       const tlLabel = sel.scope === 'agent' ? `TL ${FF.config.isExcludedTl(src.tl) ? FF.config.directLabel({ tlName: src.tl, channel: 'First Forward' }, 'ff') : src.tl}` : `${(pivot.list || []).length} agents holding stock`;
-      kpis = `<div class="kpis">${kpiBox('Total stock', U.fmt(src.total), tlLabel)}${kpiBox('VC4 stock', U.fmt(src.vc4), `${U.fmtPct(U.pctOf(src.vc4, src.total), 0)} of stock`)}${kpiBox('Commercial stock', U.fmt(src.comm))}${kpiBox('MTD issued', U.fmt(src.iss), P.cur ? U.labelYM(P.cur) : '')}${kpiBox('VC4 cover', src.cover === null ? '—' : `${U.fmt(src.cover)} days`, 'stock ÷ avg daily issuance')}</div>`;
+      kpis = `<div class="kpis">${kpiBox('Total stock', U.fmt(src.total), tlLabel)}${kpiBox('VC4 stock', U.fmt(src.vc4), `${U.fmtPct(U.pctOf(src.vc4, src.total), 0)} of stock`)}${kpiBox('Baaki class stock', U.fmt(src.comm), (() => { const bc = src.byClass; const ents = bc instanceof Map ? [...bc.entries()] : bc && typeof bc === 'object' ? Object.entries(bc) : []; return ents.filter(([c, n]) => !isVc4(c) && n).sort((a, b) => (Number(String(a[0]).replace(/\D/g, '')) || 999) - (Number(String(b[0]).replace(/\D/g, '')) || 999)).map(([c, n]) => `${esc(c)} <b>${U.fmt(n)}</b>`).join(' · '); })())}${kpiBox('MTD issued', U.fmt(src.iss), P.cur ? U.labelYM(P.cur) : '')}${kpiBox('VC4 cover', src.cover === null ? '—' : `${U.fmt(src.cover)} days`, 'stock ÷ avg daily issuance')}</div>`;
     } else if (sel.scope === 'cls') {
       const totalCls = P.byClass.get(sel.value) || 0;
       kpis = `<div class="kpis">${kpiBox(`${sel.value} stock`, U.fmt(totalCls), `${U.fmtPct(U.pctOf(totalCls, P.total), 1)} of all stock`)}${kpiBox('Total stock (all classes)', U.fmt(P.total))}${kpiBox('VC4 stock', U.fmt(P.vc4))}</div>`;
@@ -216,7 +216,7 @@ FF.pages = FF.pages || {};
       el.innerHTML = `<div class="kpi-grid">
           ${kpi('g9', 'Total stock', '📦', U.fmt(agent.total), `${esc(agent.name)} · TL ${esc(tlName)}`)}
           ${kpi('g1', 'VC4 stock', '🚗', U.fmt(agent.vc4), `${U.fmtPct(U.pctOf(agent.vc4, agent.total), 0)} of stock`)}
-          ${kpi('g4', 'Commercial stock', '🚚', U.fmt(agent.comm), P.classes.filter((c) => !isVc4(c) && agent.byClass.get(c)).map((c) => `${c} <b>${U.fmt(agent.byClass.get(c))}</b>`).join(' · ') || '—')}
+          ${kpi('g4', 'Baaki class stock', '🚚', U.fmt(agent.comm), P.classes.filter((c) => !isVc4(c) && agent.byClass.get(c)).map((c) => `${c} <b>${U.fmt(agent.byClass.get(c))}</b>`).join(' · ') || '—')}
           ${kpi('g6', `MTD issued${P.cur ? ` · ${U.labelYM(P.cur)}` : ''}`, '🏷️', U.fmt(agent.iss), `VC4 <b>${U.fmt(agent.issBins.VC4)}</b> · VC20 <b>${U.fmt(agent.issBins.VC20)}</b> · VC5+ <b>${U.fmt(agent.issBins['VC5+'])}</b> · ${perDay ? `${U.fmt(perDay, 1)}/day` : ''} · cover ${coverBadge(agent.cover)}`)}
         </div>
         <div class="grid g-2">
