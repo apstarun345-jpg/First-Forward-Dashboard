@@ -278,7 +278,11 @@
    *  aur ek digit badalne se anchor ke paas aa jaye to sudhaar. Pakke number kabhi nahi chhede jaate. */
   function seriesFix(found, add) {
     const tx = [...found.values()].filter((f) => f.how === 'text' && f.conf); if (tx.length < 2) return;
-    const maxC = Math.max(...tx.map((f) => f.conf)), strong = tx.filter((f) => f.conf >= Math.max(8, maxC * 0.6));
+    const maxC = Math.max(...tx.map((f) => f.conf)); let strong = tx.filter((f) => f.conf >= Math.max(8, maxC * 0.6));
+    // sabse bada cluster (12 ke andar ke numbers) = anchor; bahar wale (chahe conf zyada ho) fix hote hain
+    const num = (f) => Number(f.code.slice(11)); let best = null, bs = 0;
+    tx.forEach((a) => { const g = tx.filter((q) => q.code.slice(0, 11) === a.code.slice(0, 11) && Math.abs(num(q) - num(a)) <= 12), sc = g.length * 1000 + g.reduce((t, q) => t + q.conf, 0); if (sc > bs) { bs = sc; best = g; } });
+    if (best && best.length >= 2) strong = best;
     if (!strong.length) return;
     tx.filter((f) => !strong.includes(f)).forEach((f) => {
       const anc = strong.filter((q) => q.code.slice(0, 11) === f.code.slice(0, 11)); if (!anc.length) return;
