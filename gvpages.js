@@ -348,7 +348,7 @@ FF.pages = FF.pages || {};
     if (!root.isConnected) return;
     const byClass = G.get('stockClass') || [], byTl = G.get('stockTl') || [], byTlClass = G.get('stockTlClass') || [], byAgent = G.get('stockAgent') || [], byAgentClass = G.get('stockAgentClass') || [];
     const total = U.sum(byClass, (r) => r.n), vc4 = U.sum(byClass.filter((r) => r.group === 'VC4'), (r) => r.n), comm = total - vc4;
-    const classes = U.uniq(byClass.map((r) => r.cls)).sort((a, b) => G.clsNum(a) - G.clsNum(b));
+    const classes = U.uniq(byClass.map((r) => r.cls)).filter((c) => c && !/VEHICLE|^CLASS$/i.test(c)).sort((a, b) => G.clsNum(a) - G.clsNum(b));
     const latest = G.latestDate();
     const perDay = latest ? G.summary(U.ymKey(latest)).avgPerDay : 0;
     const people = G.people();
