@@ -2560,7 +2560,7 @@ window.FF = window.FF || {};
       ${isTl ? '' : cell('TL ID', esc((pr.tl && pr.tl.id) || '—'))}
       ${isTl ? '' : cell("TL's mobile", mobileCell(pr.tl && pr.tl.mobile))}
       ${cell('Status', esc(pr.status || '—'))}
-      ${cell('Last active', esc(pr.lastActive || '—'))}
+      ${cell('Last active', esc(String(pr.lastActive || '—').replace(/(\d+)\.\d+(\s*days?)/i, (a, n, u) => Math.round(parseFloat(a)) + u)))}
       ${embedded ? '' : growthCell(pr)}
     </div>`;
     // Embedded (Master Search): the hero + KPI strip already carry name / ID / growth / agents, so show only

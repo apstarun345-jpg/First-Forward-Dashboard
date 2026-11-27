@@ -45,6 +45,7 @@ window.FF = window.FF || {};
 
   // ------------------------------------------------------------------ analysis
   const cache = new WeakMap();
+  const GOOD = new Map();   // key → pichhla sahi analysis (data refresh ke dauran 0 na dikhe)
   const ui = new Map();        // per profile: { box, sort, top }
   const keyOf = (pr) => `${pr.kind}|${norm(pr.name)}|${normId(pr.id)}`;
   const uiOf = (pr) => { const k = keyOf(pr); if (!ui.has(k)) ui.set(k, { box: '', sort: '', top: 'cur' }); return ui.get(k); };
@@ -58,8 +59,9 @@ window.FF = window.FF || {};
   }
 
   function analyze(pr) {
+    const sig = (() => { try { const d = FF.store && FF.store.get && FF.store.get('daily'); const g = FF.gv && FF.gv.get && FF.gv.get('master'); return `${Array.isArray(d) ? d.length : -1}|${Array.isArray(g) ? g.length : -1}`; } catch { return ''; } })();
     const hit = cache.get(pr);
-    if (hit) return hit;
+    if (hit && hit.sig === sig) return hit;
     const ch = pr.ch === 'gv' ? 'gv' : 'ff';
     const isTl = /tl$/.test(pr.kind || '');
     const rows = (FF.masterProfile && FF.masterProfile.insightRows ? FF.masterProfile.insightRows(pr) : []) || [];
@@ -135,6 +137,11 @@ window.FF = window.FF || {};
       projected: Math.round(rate.t * dim), best, activeDays: days.filter((d) => d.t > 0).length,
       rowCount: rows.length, ready: dataReady(pr), me: isTl ? null : agents[0] || null
     };
+    out.sig = sig;
+    // data thodi der ke liye khali/adhura aaye (refresh ke beech) to pichhle sahi numbers ko 0 se mat badlo
+    let lk = ''; try { lk = keyOf(pr); } catch { lk = ''; }
+    if (rows.length) { if (lk) GOOD.set(lk, out); }
+    else if (lk && GOOD.has(lk)) return GOOD.get(lk);
     cache.set(pr, out);
     return out;
   }
