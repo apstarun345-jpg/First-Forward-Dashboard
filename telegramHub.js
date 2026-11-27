@@ -35,6 +35,7 @@
       return FF.perfWatch.prepRows('gv', FF.pages.gvPerformance.watchRows());
     } catch (e) { return []; }
   }
+  const own = (r) => /apna\s*pay/i.test(String(r.n || '')) || String(r.id || '') === '5845036';   // company ki apni master ID agent nahi
   const nm = (r) => `${r.n}${r.id ? ` (${r.id})` : ''}`;
   const lines = (list, f, n) => list.slice(0, n || 10).map((r, i) => `${i + 1}. ${f(r)}`).join('\n');
 
@@ -48,7 +49,7 @@
         if (cur) {
           const last = Ut.prevMonthKey(cur), day = latest.getDate(), s = M.summary(daily, cur), l = M.summary(daily, last, day);
           const today = daily.filter((r) => { const d = r.date || r.d; const dd = d instanceof Date ? d : Ut.parseDate(d); return dd && Ut.dateKey(dd) === Ut.dateKey(latest); }).reduce((t, r) => t + (Number(r.n) || 1), 0);
-          out.push(`🟦 <b>First Forward</b> · ${Ut.labelDateKey ? Ut.labelDateKey(Ut.dateKey(latest)) : ''}\nAaj: <b>${fmt(today)}</b> · MTD: <b>${fmt(s.total)}</b> (pichhle mahine same din tak ${fmt(l.total)})\nProjected: ${fmt(s.projected)}`);
+          out.push(`🟦 <b>First Forward</b> · ${Ut.labelDateKey ? Ut.labelDateKey(Ut.dateKey(latest)) : ''}\nAakhri din: <b>${fmt(today)}</b> · MTD: <b>${fmt(s.total)}</b> (pichhle mahine same din tak ${fmt(l.total)})\nProjected: ${fmt(s.projected)}`);
         }
       } catch (e) { /* FF skip */ }
       try {
@@ -70,7 +71,7 @@
     async priority() {
       const out = [];
       for (const [ch, lab] of [['ff', '🟦 FF'], ['gv', '🟩 GV']]) {
-        const rows = (await watch(ch)).filter((r) => !r.direct || true);
+        const rows = (await watch(ch)).filter((r) => !own(r));
         const hi = rows.filter((r) => r.pri === 'High').sort((a, b) => b.cur - a.cur), md = rows.filter((r) => r.pri === 'Medium');
         if (!rows.length) continue;
         out.push(`${lab} · 🔴 High <b>${hi.length}</b> · 🟠 Medium <b>${md.length}</b>\n${lines(hi, (r) => `${esc(nm(r))} — stock ${fmt(r.stock)}, MTD ${fmt(r.cur)}`, 10)}${hi.length > 10 ? `\n… +${hi.length - 10} aur` : ''}`);
@@ -80,7 +81,7 @@
     async inactive() {
       const out = [];
       for (const [ch, lab] of [['ff', '🟦 FF'], ['gv', '🟩 GV']]) {
-        const rows = (await watch(ch)).filter((r) => r.inact >= 7 && (r.stock > 0 || r.last > 0)).sort((a, b) => b.stock - a.stock);
+        const rows = (await watch(ch)).filter((r) => r.inact >= 7 && r.stock > 0 && !own(r)).sort((a, b) => b.stock - a.stock);
         if (!rows.length) continue;
         out.push(`${lab} · 7+ din inactive: <b>${rows.length}</b> agents\n${lines(rows, (r) => `${esc(nm(r))} — ${r.inact >= 99 ? 'is mahine 0' : r.inact + 'd'} · stock ${fmt(r.stock)}`, 12)}${rows.length > 12 ? `\n… +${rows.length - 12} aur` : ''}`);
       }
