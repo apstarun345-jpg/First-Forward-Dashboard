@@ -742,6 +742,48 @@ function notificationVisible(item, user) {
   if (item.target === 'broadcast') return true;
   return item.target === `user:${user.username}`;
 }
+
+// ✈️ v3.125.573 — Telegram alerts: important dashboard notifications (employee scans, tag requests, low stock, anomalies, daily digest) same bot/group par.
+//    Render env: TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (comma se kai chat). Optional: TELEGRAM_ROUTES (comma routeKeys) · PUBLIC_BASE_URL.
+const TG_ROUTES_DEFAULT = ['tagRequest', 'lowStock', 'zeroDay', 'agentAnomaly', 'tlAnomaly', 'smartAlert', 'midMonth', 'dailyDigest', 'monthlyReport', 'backupReminder'];
+const tgQueue = [], tgRecent = new Map(); let tgBusy = false;
+function tgCfg() {
+  const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  const chats = String(process.env.TELEGRAM_CHAT_ID || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const routes = String(process.env.TELEGRAM_ROUTES || '').split(',').map((x) => x.trim()).filter(Boolean);
+  return { token, chats, routes: routes.length ? routes : TG_ROUTES_DEFAULT, base: String(process.env.PUBLIC_BASE_URL || 'https://first-forward-dashboard.onrender.com').replace(/\/+$/, '') };
+}
+const tgEsc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+async function tgPump() {
+  if (tgBusy) return; tgBusy = true;
+  try {
+    while (tgQueue.length) {
+      const { token, chat, text } = tgQueue.shift();
+      try {
+        const ac = new AbortController(), tm = setTimeout(() => ac.abort(), 12000);
+        const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true }), signal: ac.signal });
+        clearTimeout(tm);
+        if (r.status === 429) { const j = await r.json().catch(() => ({})); tgQueue.unshift({ token, chat, text }); await new Promise((ok) => setTimeout(ok, Math.min(30, (j.parameters && j.parameters.retry_after) || 5) * 1000)); continue; }
+      } catch { /* best-effort */ }
+      await new Promise((ok) => setTimeout(ok, 1100));
+    }
+  } finally { tgBusy = false; }
+}
+function telegramNotify(item, force) {
+  try {
+    const c = tgCfg(); if (!c.token || !c.chats.length || !item) return false;
+    const rk = item.routeKey || (item.meta && item.meta.routeKey) || '';
+    if (!force && !c.routes.includes(rk)) return false;
+    const key = `${item.title}|${String(item.body || '').slice(0, 60)}`, now = Date.now();
+    if (!force && tgRecent.has(key) && now - tgRecent.get(key) < 60000) return false;   // ek hi alert baar-baar nahi
+    tgRecent.set(key, now); if (tgRecent.size > 200) for (const [k, t] of tgRecent) if (now - t > 60000) tgRecent.delete(k);
+    const link = item.meta && item.meta.link ? `${c.base}/${String(item.meta.link).replace(/^\/+/, '')}` : c.base;
+    const text = `<b>${tgEsc(item.title)}</b>${item.body ? `\n${tgEsc(String(item.body).slice(0, 900))}` : ''}\n🔗 ${tgEsc(link)}`.slice(0, 3900);
+    c.chats.forEach((chat) => tgQueue.push({ token: c.token, chat, text }));
+    tgPump();
+    return true;
+  } catch { return false; }
+}
 function recordNotification({ type = 'info', title, body, target = 'admin', meta = {}, routeKey = '' }) {
   let audience = '';
   if (routeKey && Object.hasOwn(DEFAULT_NOTIFICATION_ROUTES, routeKey)) {
@@ -754,6 +796,7 @@ function recordNotification({ type = 'info', title, body, target = 'admin', meta
   if (notifyItems().length > 250) db.notify.items = notifyItems().slice(-250);   // v3.125.92 — storage chhota (Apps Script slow / size limit)
   persist('notify');
   pushFanout(item); // 🔔 instant web push — app band ho tab bhi
+  if (routeKey) { try { item.routeKey = routeKey; telegramNotify(item); } catch { /* optional */ } }
   return item;
 }
   /** 📜 Audit log (sirf admin Settings → 📜 tab) — best-effort, kabhi action fail nahi karwana. */
@@ -9898,6 +9941,14 @@ async function handleApi(req, res, url) {
     const summary = sourceAwareDigestSummary(daily, dateKeyNow().slice(0, 7));
     const issuance = Object.keys(daily).sort().slice(-180).map((date) => { const v = digestDay(daily[date]); return { date, ff: Number(v.ff) || 0, gv: Number(v.gv) || 0 }; });
     return sendJson(res, 200, { points, issuance, cover: watch.cover || null, thresholds: db.settings.thresholds || {}, mtd: { ff: summary.ff, gv: summary.gv, total: summary.total, days: summary.activeDays, activeDays: summary.activeDays, observedDays: summary.observedDays, zeroDays: summary.zeroDays, ffDays: summary.ffDays, gvDays: summary.gvDays } });
+  }
+  if (p === '/api/notifications/telegram/test' && method === 'POST') {
+    requireAdmin(user);
+    const c = tgCfg();
+    if (!c.token || !c.chats.length) throw new HttpError(400, 'Telegram set nahi hai — Render env me TELEGRAM_BOT_TOKEN aur TELEGRAM_CHAT_ID daalo');
+    telegramNotify({ title: '✅ Telegram test · First Forward Dashboard', body: 'Dashboard ke important alerts ab yahan aayenge.', meta: { link: '' } }, true);
+    logAudit(user, 'telegram_test', { ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, chats: c.chats.length, routes: c.routes });
   }
   if (p === '/api/notifications/email/test' && method === 'POST') {
     requireAdmin(user);
