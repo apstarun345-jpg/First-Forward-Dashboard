@@ -2095,6 +2095,7 @@ body.colorful .from-hdr { color: #166534; }
           </div>
           ${qtyRows}
           <div class="tr-qty-foot"><span>Requested total</span><b data-tr-agent-total2>${fmt(total)}</b></div>
+          <div class="tr-stockwarn small" data-tr-stockwarn hidden></div>
         </div>
       </div>
     </div>`;
@@ -2168,6 +2169,21 @@ body.colorful .from-hdr { color: #166534; }
     if (card && row) {
       const t = fmt(isFastag() ? rowTotal(row) : 0);
       card.querySelectorAll('[data-tr-agent-total],[data-tr-agent-total2]').forEach((el) => { el.textContent = t; });
+      try {   // 📦 stock ki chetavani — agent ke paas pehle se kitna hai, kitne din chalega
+        const sw = card.querySelector('[data-tr-stockwarn]'), req = isFastag() ? rowTotal(row) : 0, rec = sw && req > 0 ? exactAgent(row) : null;
+        if (sw) {
+          if (!rec) { sw.hidden = true; sw.textContent = ''; } else {
+            const day = Math.max(1, new Date().getDate()), avg = num(rec.cur) > 0 ? num(rec.cur) / day : num(rec.last) > 0 ? num(rec.last) / 30 : 0, stock = num(rec.stock);
+            const d0 = avg > 0 ? stock / avg : null, d1 = avg > 0 ? (stock + req) / avg : null;
+            let msg = '', tone = '';
+            if (avg > 0 && d0 >= 20) { tone = '#b45309'; msg = `⚠️ ${esc(rec.name)} ke paas pehle se ${fmt(stock)} tags (~${fmt(Math.round(d0))} din ka). ${fmt(req)} aur milke ~${fmt(Math.round(d1))} din — zyada ho sakta hai.`; }
+            else if (avg > 0 && d1 > 45) { tone = '#b45309'; msg = `⚠️ Stock ${fmt(stock)} + ${fmt(req)} = ~${fmt(Math.round(d1))} din ka — itna zyada chahiye?`; }
+            else if (stock === 0 && avg > 0) { tone = '#b91c1c'; msg = `🔴 ${esc(rec.name)} ka stock 0 hai (roz ~${fmt(Math.round(avg))} issue) — bhejna sahi hai.`; }
+            else if (avg > 0 && d0 < 5) { tone = '#b91c1c'; msg = `🟠 Stock sirf ~${fmt(Math.round(d0 * 10) / 10, 1)} din ka bacha hai — bhejna sahi hai.`; }
+            if (msg) { sw.innerHTML = msg; sw.style.cssText = `margin-top:6px;padding:6px 10px;border-radius:8px;background:#fffbeb;color:${tone};font-weight:700`; sw.hidden = false; } else { sw.hidden = true; sw.textContent = ''; }
+          }
+        }
+      } catch { /* optional */ }
       const bcBox = card.querySelector(`[data-tr-bc-box="${row.id}"]`);
       if (bcBox) bcBox.innerHTML = barcodeRangeHtml(row);
     }

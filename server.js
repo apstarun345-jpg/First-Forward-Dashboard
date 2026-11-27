@@ -9946,9 +9946,16 @@ async function handleApi(req, res, url) {
     requireAdmin(user);
     const c = tgCfg();
     if (!c.token || !c.chats.length) throw new HttpError(400, 'Telegram set nahi hai — Render env me TELEGRAM_BOT_TOKEN aur TELEGRAM_CHAT_ID daalo');
-    telegramNotify({ title: '✅ Telegram test · First Forward Dashboard', body: 'Dashboard ke important alerts ab yahan aayenge.', meta: { link: '' } }, true);
-    logAudit(user, 'telegram_test', { ip: clientIp(req) });
-    return sendJson(res, 200, { ok: true, chats: c.chats.length, routes: c.routes });
+    const results = [];
+    for (const chat of c.chats) {
+      try {
+        const r = await fetch(`https://api.telegram.org/bot${c.token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat, text: '✅ Telegram test · First Forward Dashboard\nDashboard ke important alerts ab yahan aayenge.', disable_web_page_preview: true }) });
+        const j = await r.json().catch(() => ({}));
+        results.push({ chat: String(chat).replace(/.(?=.{3})/g, '•'), ok: !!j.ok, error: j.ok ? '' : String(j.description || r.status) });
+      } catch (e) { results.push({ chat: String(chat).replace(/.(?=.{3})/g, '•'), ok: false, error: String(e && e.message || e).slice(0, 100) }); }
+    }
+    logAudit(user, 'telegram_test', { ip: clientIp(req), note: results.map((x) => x.ok ? 'ok' : x.error).join(',').slice(0, 150) });
+    return sendJson(res, 200, { ok: results.every((x) => x.ok), results, routes: c.routes });
   }
   if (p === '/api/notifications/email/test' && method === 'POST') {
     requireAdmin(user);
