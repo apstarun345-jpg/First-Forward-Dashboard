@@ -147,13 +147,17 @@
     host.innerHTML = '<div class="dim">✈️ Telegram settings load ho rahe hain…</div>';
     let st;
     try { st = await api('/api/telegram/config', 'GET'); } catch (e) { host.innerHTML = `<div class="empty-state">Telegram settings load nahi hui — thodi der baad dobara kholo.</div>`; return; }
-    const cfg = st.cfg || {};
+    const cfg = st.cfg || {}, auto = st.auto || { enabled: false, routes: {} }, labels = st.routeLabels || {};
     const sel = new Set(cfg.reports || []);
     const hrs = [1, 2, 3, 4, 6, 8, 12];
     host.innerHTML = `
       <div class="card" style="padding:14px">
         <h3 style="margin:0 0 6px">✈️ Telegram</h3>
-        <div class="dim small">${st.configured ? '✅ Bot connected' : '⚠️ Render me TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID set nahi hain'} · alerts (scan, tag request, low stock…) apne aap jate hain. Neeche reports abhi ya schedule se bhejo.</div>
+        <div class="dim small">${st.configured ? '✅ Bot connected' : '⚠️ Render me TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID set nahi hain'} · <b>bina admin allow ke koi alert / report nahi jati</b>. Neeche pehle auto alerts allow karo, reports abhi ya schedule se bhejo.</div>
+        <h4 style="margin:14px 0 6px">🔐 Auto alerts — admin allow</h4>
+        <label class="card" style="padding:10px;display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" id="tg-auto-on" ${auto.enabled ? 'checked' : ''}><span><b>Auto alerts allow karo</b> <span class="dim small">(band = koi bhi site-alert Telegram par nahi jayegi)</span></span></label>
+        <div class="grid g-2" style="gap:8px;margin-top:8px">${Object.entries(labels).map(([k, l]) => `<label class="card" style="padding:8px 10px;display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" data-tg-route="${k}" ${auto.routes && auto.routes[k] ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>
+        <div class="btn-row" style="margin:8px 0"><button class="btn primary" data-tg="saveauto">💾 Alerts save</button></div>
         <div class="btn-row" style="margin:10px 0"><button class="btn" data-tg="test">🧪 Test message</button><button class="btn primary" data-tg="sendsel">📤 Selected abhi bhejo</button><button class="btn" data-tg="sendall">📤 Sab abhi bhejo</button></div>
         <div id="tg-msg" class="dim small" style="min-height:18px"></div>
         <h4 style="margin:14px 0 6px">📋 Kaun si report</h4>
@@ -179,6 +183,9 @@
           const ids = b.dataset.tgOne ? [b.dataset.tgOne] : b.dataset.tg === 'sendall' ? REPORTS.map((r) => r.id) : picked();
           if (!ids.length) { msg('Pehle koi report chuno', true); return; }
           msg('Report bana kar bhej raha hu…'); const r = await sendNow(ids); msg(r.ok ? `✅ ${r.sent} report bhej di` : `❌ ${r.error || 'nahi gayi'}`, !r.ok);
+        } else if (b.dataset.tg === 'saveauto') {
+          const routes = {}; host.querySelectorAll('[data-tg-route]').forEach((x) => { routes[x.dataset.tgRoute] = x.checked; });
+          await api('/api/telegram/auto', 'POST', { enabled: host.querySelector('#tg-auto-on').checked, routes }); msg('✅ Auto alerts setting save ho gayi');
         } else if (b.dataset.tg === 'save') {
           const body = { reports: picked(), mode: host.querySelector('#tg-mode').value, time: host.querySelector('#tg-time').value, everyHours: Number(host.querySelector('#tg-every').value), from: host.querySelector('#tg-from').value, to: host.querySelector('#tg-to').value };
           await api('/api/telegram/config', 'POST', body); msg('Save ho gaya — taaza snapshot bana raha hu…'); const n = body.reports.length ? await pushSnapshots(body.reports) : 0; msg(`✅ Save ho gaya${n ? ` · ${n} report ka snapshot ready` : ''}`);

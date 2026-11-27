@@ -759,11 +759,13 @@ async function tgPump() {
     }
   } finally { tgBusy = false; }
 }
+const TG_ROUTE_LABELS = { tagRequest: '🏷️ Tag request (naya / status)', lowStock: '📉 Low stock alert', zeroDay: '🟡 Zero-issuance din', agentAnomaly: '🚨 Agent anomaly', tlAnomaly: '🚨 TL anomaly', smartAlert: '🧠 Smart alert', midMonth: '📅 Mid-month report', dailyDigest: '🗞️ Daily digest', monthlyReport: '📊 Monthly report', backupReminder: '💾 Backup reminder' };
+function tgAutoAllowed(rk) { try { const a = tgStore().tgAuto; return !!(a && a.enabled === true && a.routes && a.routes[rk] === true); } catch { return false; } }
 function telegramNotify(item, force) {
   try {
     const c = tgCfg(); if (!c.token || !c.chats.length || !item) return false;
     const rk = item.routeKey || (item.meta && item.meta.routeKey) || '';
-    if (!force && !c.routes.includes(rk)) return false;
+    if (!force && (!c.routes.includes(rk) || !tgAutoAllowed(rk))) return false;   // 🔐 admin ne allow nahi kiya to koi alert nahi
     const key = `${item.title}|${String(item.body || '').slice(0, 60)}`, now = Date.now();
     if (!force && tgRecent.has(key) && now - tgRecent.get(key) < 60000) return false;   // ek hi alert baar-baar nahi
     tgRecent.set(key, now); if (tgRecent.size > 200) for (const [k, t] of tgRecent) if (now - t > 60000) tgRecent.delete(k);
@@ -782,6 +784,8 @@ function tgStore() {
   const w = db.notify.watch;
   if (!w.tg || typeof w.tg !== 'object') w.tg = { reports: [], mode: 'off', time: '09:00', everyHours: 3, from: '09:00', to: '21:00' };
   if (!w.tgSnap || typeof w.tgSnap !== 'object') w.tgSnap = {};
+  if (!w.tgAuto || typeof w.tgAuto !== 'object') w.tgAuto = { enabled: false, routes: {} };   // 🔐 auto alerts: default BAND — admin allow kare tabhi jayenge
+  if (!w.tgPaused584) { w.tgPaused584 = true; w.tg.mode = 'off'; w.tgAuto = { enabled: false, routes: {} }; try { persist('notify').catch(() => {}); } catch { /* optional */ } }   // user ne abhi ke liye Telegram band karwaya — admin khud allow karega
   return w;
 }
 const tgHm = (v, d) => (/^\d{2}:\d{2}$/.test(String(v || '')) ? String(v) : d);
@@ -9781,7 +9785,7 @@ async function handleApi(req, res, url) {
   if (p === '/api/telegram/config' && method === 'GET') {
     requireAdmin(user);
     const w = tgStore(), c = tgCfg(), snaps = Object.values(w.tgSnap || {}).map((x) => Date.parse(x.at || '') || 0);
-    return sendJson(res, 200, { ok: true, configured: !!(c.token && c.chats.length), cfg: w.tg, snapAt: snaps.length ? new Date(Math.max(...snaps)).toISOString() : '', lastSent: w.tgLastAt ? new Date(w.tgLastAt).toISOString() : '' });
+    return sendJson(res, 200, { ok: true, configured: !!(c.token && c.chats.length), cfg: w.tg, auto: w.tgAuto, routeLabels: TG_ROUTE_LABELS, snapAt: snaps.length ? new Date(Math.max(...snaps)).toISOString() : '', lastSent: w.tgLastAt ? new Date(w.tgLastAt).toISOString() : '' });
   }
   if (p === '/api/telegram/config' && method === 'POST') {
     requireAdmin(user);
@@ -9794,6 +9798,15 @@ async function handleApi(req, res, url) {
     persist('notify').catch(() => {});
     logAudit(user, 'telegram_config', { ip: clientIp(req), note: `${w.tg.mode} · ${w.tg.reports.length} reports` });
     return sendJson(res, 200, { ok: true, cfg: w.tg });
+  }
+  if (p === '/api/telegram/auto' && method === 'POST') {
+    requireAdmin(user);
+    const b = await readBody(req), w = tgStore(), routes = {};
+    Object.keys(TG_ROUTE_LABELS).forEach((k) => { routes[k] = !!(b.routes && b.routes[k] === true); });
+    w.tgAuto = { enabled: b.enabled === true, routes, by: user.username || '', at: new Date().toISOString() };
+    persist('notify').catch(() => {});
+    logAudit(user, 'telegram_auto', { ip: clientIp(req), note: `${w.tgAuto.enabled ? 'ON' : 'OFF'} · ${Object.values(routes).filter(Boolean).length} alerts` });
+    return sendJson(res, 200, { ok: true, auto: w.tgAuto });
   }
   if (p === '/api/telegram/snapshot' && method === 'POST') {
     requireAdmin(user);
