@@ -382,6 +382,7 @@ window.FF = window.FF || {};
   function recentPaint() {
     const nav = D.getElementById('nav'); if (!nav) return; let box = D.getElementById('nav-recent');
     let list = []; try { list = JSON.parse(lsGet('ff_recent') || '[]'); } catch { list = []; }
+    list = list.filter((x) => !/^(unusual|dualChannel|fastagChampions|gvPayout)$/.test(String(x && x.id)));   // hata di gayi pages
     if (!list.length) { if (box) box.remove(); return; }
     if (!box) { box = D.createElement('div'); box.id = 'nav-recent'; box.className = 'nav-recent'; nav.parentNode.insertBefore(box, nav); }
     box.innerHTML = '<small>🕘 Recent</small>' + list.map((x) => `<a href="#/${FF.util.esc(x.id)}">${FF.util.esc(x.label)}</a>`).join('');
