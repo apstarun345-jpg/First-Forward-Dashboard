@@ -1568,7 +1568,7 @@ FF.pages = FF.pages || {};
       root.querySelectorAll('[id^="home-"]').forEach((el) => { stabilize(el); el._live = true; try { el._last = NATIVE_IH ? NATIVE_IH.get.call(el) : ''; } catch { /* */ } });
       root.classList.remove('home-booting'); root.classList.add('home-revealed'); try { msg.remove(); } catch { /* */ }
     };
-    const timer = setTimeout(reveal, 22000);
+    const timer = setTimeout(reveal, 9000);
     return reveal;
   }
 
@@ -2233,6 +2233,7 @@ FF.pages = FF.pages || {};
     await brk(); if (!root.isConnected) return;
     stageT('paintCharts', paintCharts);
     await brk(); if (!root.isConnected) return;
+    homeReveal();   // upar ka poora data ready → ek saath dikhao; stock neeche chupchap patch hota hai
     // ---- 📦 Stock (FF = StockDataa · GV = Tag Assignment) ----------------------------------------
     const [stockR, gvStockR] = await Promise.all([stockP, gvStockP]);
     if (!root.isConnected || !stockMount) { homeReveal(); return; }
