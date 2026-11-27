@@ -393,7 +393,8 @@
         if (ranked[0]) { add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) { f.alts = ranked.slice(1).map((x) => x[0]).filter((c) => known.includes(c.slice(0, 6))); f.thumb = thumbOf(work, r, r.da); } }
       }
       if (ocr && retryJobs.length && found.size && left() > 1500) {   // series pata chal gayi — pichhle fail region dobara, prefix ke saath
-        const f1 = [...found.values()].find((f) => f.how === 'text') || [...found.values()][0], ctx = { g1: f1.code.slice(0, 6), g2: f1.code.slice(7, 10), g3: f1.code.slice(11) };
+        const fv = [...found.values()], cnt = {}; fv.forEach((f) => { const k = f.code.slice(0, 15); cnt[k] = (cnt[k] || 0) + 1; });
+        const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0][0], f1 = fv.find((f) => f.code.startsWith(top)), ctx = { g1: f1.code.slice(0, 6), g2: f1.code.slice(7, 10), g3: f1.code.slice(11) };
         for (const r of retryJobs) {
           if (left() < 900) break;
           try { const wv = await wideVote(work, r, ocr, known, left, ctx); if (wv.length && !found.has(wv[0][0])) { add(wv[0][0], 'text'); const f0 = found.get(wv[0][0]); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 4).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } } } catch { /* */ }
