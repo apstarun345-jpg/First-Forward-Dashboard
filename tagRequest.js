@@ -1306,7 +1306,7 @@ body.colorful .from-hdr { color: #166534; }
   }
   // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
   //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
-  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=570'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=571'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
 
   (function trRvStyle() {
     if (document.getElementById('trs-rv-style')) return;
@@ -2039,9 +2039,9 @@ body.colorful .from-hdr { color: #166534; }
         <span class="tr-qty-cls"><span class="badge-vc ${c.toLowerCase()}">${c}</span><small>${esc(CLASS_DESC(c))}</small></span>
         <div class="tr-qty-right">
           <div class="tr-qty-quick" data-tr-cls="${c}">
-            <button type="button" class="btn btn-xs tr-qadd" data-q="10" title="Add 10 to ${c}">+10</button>
+            <button type="button" class="btn btn-xs tr-qadd" data-q="3" title="Add 3 to ${c}">+3</button>
+            <button type="button" class="btn btn-xs tr-qadd" data-q="5" title="Add 5 to ${c}">+5</button>
             <button type="button" class="btn btn-xs tr-qadd" data-q="25" title="Add 25 to ${c}">+25</button>
-            <button type="button" class="btn btn-xs tr-qadd" data-q="50" title="Add 50 to ${c}">+50</button>
           </div>
           <input class="input tr-qty" data-tr-cls="${c}" inputmode="numeric" placeholder="0" maxlength="5" value="${esc(row.q[c])}" aria-label="${c} qty">
         </div>
@@ -2088,9 +2088,9 @@ body.colorful .from-hdr { color: #166534; }
           <div class="tr-qty-head"><span>Tag class</span><span>Qty</span></div>
           <div class="tr-qty-batch">
             <span class="dim small">⚡ Quick All:</span>
-            <button type="button" class="btn btn-xs tr-qall" data-q="10">+10</button>
+            <button type="button" class="btn btn-xs tr-qall" data-q="3">+3</button>
+            <button type="button" class="btn btn-xs tr-qall" data-q="5">+5</button>
             <button type="button" class="btn btn-xs tr-qall" data-q="25">+25</button>
-            <button type="button" class="btn btn-xs tr-qall" data-q="50">+50</button>
             <button type="button" class="btn btn-xs tr-qclear">Clear</button>
           </div>
           ${qtyRows}
