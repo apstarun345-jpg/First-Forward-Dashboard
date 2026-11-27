@@ -784,6 +784,59 @@ function telegramNotify(item, force) {
     return true;
   } catch { return false; }
 }
+
+// ✈️ v3.125.577 — Telegram Hub: config + snapshots (browser se) + schedule (server) + turant send
+const TG_REPORT_IDS = ['issuance', 'stock', 'priority', 'inactive', 'direct', 'degrowth', 'top'];
+function tgStore() {
+  if (!db.notify.watch || typeof db.notify.watch !== 'object') db.notify.watch = {};
+  const w = db.notify.watch;
+  if (!w.tg || typeof w.tg !== 'object') w.tg = { reports: [], mode: 'off', time: '09:00', everyHours: 3, from: '09:00', to: '21:00' };
+  if (!w.tgSnap || typeof w.tgSnap !== 'object') w.tgSnap = {};
+  return w;
+}
+const tgHm = (v, d) => (/^\d{2}:\d{2}$/.test(String(v || '')) ? String(v) : d);
+async function tgSendNow(text) {
+  const c = tgCfg();
+  if (!c.token || !c.chats.length) return { ok: false, error: 'Render me TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID set nahi hai' };
+  const plain = String(text || '').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  let err = '';
+  for (const chat of c.chats) {
+    for (const [body, mode] of [[String(text).slice(0, 3900), 'HTML'], [plain.slice(0, 3900), '']]) {
+      try {
+        const r = await fetch(`https://api.telegram.org/bot${c.token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat, text: body, ...(mode ? { parse_mode: mode } : {}), disable_web_page_preview: true }) });
+        const j = await r.json().catch(() => ({}));
+        if (j.ok) { err = ''; break; }
+        err = String(j.description || r.status);
+        if (!/parse|entit/i.test(err)) break;
+      } catch (e) { err = String((e && e.message) || e).slice(0, 100); break; }
+    }
+    await new Promise((ok) => setTimeout(ok, 400));
+  }
+  return err ? { ok: false, error: err } : { ok: true };
+}
+async function tgScheduleTick() {
+  try {
+    const w = tgStore(), cfg = w.tg;
+    if (!cfg || cfg.mode === 'off' || !(cfg.reports || []).length) return;
+    const c = tgCfg(); if (!c.token || !c.chats.length) return;
+    const ist = istNow(), pad = (n) => String(n).padStart(2, '0');
+    const dateKey = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`, hm = `${pad(ist.getUTCHours())}:${pad(ist.getUTCMinutes())}`;
+    let due = false;
+    if (cfg.mode === 'daily') due = hm >= tgHm(cfg.time, '09:00') && w.tgLastDate !== dateKey;
+    else if (cfg.mode === 'hourly') due = hm >= tgHm(cfg.from, '09:00') && hm <= tgHm(cfg.to, '21:00') && Date.now() - (Number(w.tgLastAt) || 0) >= Math.max(1, Number(cfg.everyHours) || 3) * 3600e3 - 60e3;
+    if (!due) return;
+    const parts = [];
+    for (const id of cfg.reports) {
+      const sn = w.tgSnap[id]; if (!sn || !sn.text) continue;
+      const ageH = (Date.now() - Date.parse(sn.at || '')) / 3600e3;
+      parts.push(`${sn.text}${ageH > 12 ? `\n⚠️ data ~${Math.round(ageH)} ghante purana (site kholne par taaza hota hai)` : ''}`);
+    }
+    w.tgLastDate = dateKey; w.tgLastAt = Date.now();
+    if (!parts.length) { persist('notify').catch(() => {}); return; }
+    for (const t of parts) { await tgSendNow(t); await new Promise((ok) => setTimeout(ok, 600)); }
+    persist('notify').catch(() => {});
+  } catch (err) { console.warn('telegram schedule:', err && err.message); }
+}
 function recordNotification({ type = 'info', title, body, target = 'admin', meta = {}, routeKey = '' }) {
   let audience = '';
   if (routeKey && Object.hasOwn(DEFAULT_NOTIFICATION_ROUTES, routeKey)) {
@@ -9942,6 +9995,41 @@ async function handleApi(req, res, url) {
     const issuance = Object.keys(daily).sort().slice(-180).map((date) => { const v = digestDay(daily[date]); return { date, ff: Number(v.ff) || 0, gv: Number(v.gv) || 0 }; });
     return sendJson(res, 200, { points, issuance, cover: watch.cover || null, thresholds: db.settings.thresholds || {}, mtd: { ff: summary.ff, gv: summary.gv, total: summary.total, days: summary.activeDays, activeDays: summary.activeDays, observedDays: summary.observedDays, zeroDays: summary.zeroDays, ffDays: summary.ffDays, gvDays: summary.gvDays } });
   }
+  if (p === '/api/telegram/config' && method === 'GET') {
+    requireAdmin(user);
+    const w = tgStore(), c = tgCfg(), snaps = Object.values(w.tgSnap || {}).map((x) => Date.parse(x.at || '') || 0);
+    return sendJson(res, 200, { ok: true, configured: !!(c.token && c.chats.length), cfg: w.tg, snapAt: snaps.length ? new Date(Math.max(...snaps)).toISOString() : '', lastSent: w.tgLastAt ? new Date(w.tgLastAt).toISOString() : '' });
+  }
+  if (p === '/api/telegram/config' && method === 'POST') {
+    requireAdmin(user);
+    const b = await readBody(req), w = tgStore();
+    w.tg = {
+      reports: (Array.isArray(b.reports) ? b.reports : []).map(String).filter((x) => TG_REPORT_IDS.includes(x)),
+      mode: ['off', 'daily', 'hourly'].includes(b.mode) ? b.mode : 'off', time: tgHm(b.time, '09:00'), from: tgHm(b.from, '09:00'), to: tgHm(b.to, '21:00'),
+      everyHours: Math.min(24, Math.max(1, Number(b.everyHours) || 3))
+    };
+    persist('notify').catch(() => {});
+    logAudit(user, 'telegram_config', { ip: clientIp(req), note: `${w.tg.mode} · ${w.tg.reports.length} reports` });
+    return sendJson(res, 200, { ok: true, cfg: w.tg });
+  }
+  if (p === '/api/telegram/snapshot' && method === 'POST') {
+    requireAdmin(user);
+    const b = await readBody(req), w = tgStore(), at = new Date().toISOString();
+    Object.entries(b.reports && typeof b.reports === 'object' ? b.reports : {}).forEach(([id, v]) => {
+      if (TG_REPORT_IDS.includes(id) && v && typeof v.text === 'string') w.tgSnap[id] = { title: String(v.title || id).slice(0, 80), text: v.text.slice(0, 3800), at };
+    });
+    persist('notify').catch(() => {});
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/telegram/send' && method === 'POST') {
+    requireAdmin(user);
+    const b = await readBody(req), items = (Array.isArray(b.items) ? b.items : []).slice(0, 10);
+    if (!items.length) throw new HttpError(400, 'Koi report nahi mili');
+    let fail = '';
+    for (const it of items) { const r = await tgSendNow(String((it && it.text) || '')); if (!r.ok) { fail = r.error; break; } await new Promise((ok) => setTimeout(ok, 500)); }
+    logAudit(user, 'telegram_send', { ip: clientIp(req), note: `${items.length} reports${fail ? ' · ' + fail : ''}`.slice(0, 150) });
+    return sendJson(res, 200, fail ? { ok: false, error: fail } : { ok: true, sent: items.length });
+  }
   if (p === '/api/notifications/telegram/test' && method === 'POST') {
     requireAdmin(user);
     const c = tgCfg();
@@ -19016,6 +19104,7 @@ async function start() {
     //    weekly inactive users + 🔴 cover alert / 📉 stock history — boot par aur har 30 min.
     setTimeout(() => runScheduledChecks(), 15000);
     setInterval(() => runScheduledChecks(), 30 * 60e3).unref();
+    setInterval(() => { tgScheduleTick(); }, 5 * 60e3).unref();   // ✈️ Telegram report schedule
     // 🎯 v3.125.358 — direct agents + TLs (GV/FF) ke issuance / stock updates (sheet cache ke andar, har 3 min)
     setTimeout(() => entityWatchTick().catch(() => {}), 25000).unref?.();
     setInterval(() => entityWatchTick().catch(() => {}), 180e3).unref();

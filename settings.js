@@ -6,9 +6,9 @@ FF.pages = FF.pages || {};
   'use strict';
   const U = FF.util, A = FF.auth;
   const esc = U.esc;
-  const TABS = [['account', '👤 My account'], ['diagnostics', '🩺 Site diagnostics'], ['sound', '🔊 Sound & voice'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['direct', '🧍 Direct agents'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup']];
+  const TABS = [['account', '👤 My account'], ['diagnostics', '🩺 Site diagnostics'], ['sound', '🔊 Sound & voice'], ['brand', '🎨 Branding & images'], ['sources', '🗂️ Sheets & tabs'], ['access', '🔐 Access matrix'], ['data', '🔌 Data source'], ['direct', '🧍 Direct agents'], ['rules', '📐 Thresholds'], ['features', '🎛 Features'], ['contacts', '📲 Contacts & sharing'], ['users', '👥 Users & access'], ['links', '🔗 Personal links'], ['audit', '📜 Audit log'], ['backup', '☁️ Storage & backup'], ['telegram', '✈️ Telegram']];
   // 🗂️ v229 — 15 tabs → 5 saaf groups
-  const TAB_GROUPS = [['My account', ['account', 'sound']], ['Data & Sheets', ['sources', 'data', 'direct', 'rules']], ['Users & Access', ['users', 'access', 'links', 'audit']], ['Alerts & Look', ['features', 'contacts', 'brand']], ['System', ['diagnostics', 'backup']]];
+  const TAB_GROUPS = [['My account', ['account', 'sound']], ['Data & Sheets', ['sources', 'data', 'direct', 'rules']], ['Users & Access', ['users', 'access', 'links', 'audit']], ['Alerts & Look', ['features', 'telegram', 'contacts', 'brand']], ['System', ['diagnostics', 'backup']]];
   let tab = 'account';
   let storage = null;
   let settings = null, defaults = null, usersCache = null, permsCache = [];
@@ -2876,6 +2876,7 @@ FF.pages = FF.pages || {};
       else if (tab === 'links') { body.innerHTML = U.spinner('Personal links…'); await linksTab(body, draw); }
       else if (tab === 'contacts') body.innerHTML = contactsTab();
       else if (tab === 'backup') body.innerHTML = backupTab();
+      else if (tab === 'telegram') { body.innerHTML = ''; if (FF.telegram && FF.telegram.mount) await FF.telegram.mount(body); else body.innerHTML = '<div class="dim">Telegram module load ho raha hai — page refresh karo.</div>'; }
       else if (tab === 'users') { body.innerHTML = U.spinner('Users…'); await usersTab(body); }
       bindTab();
     };
