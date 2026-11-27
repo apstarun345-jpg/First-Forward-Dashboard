@@ -780,7 +780,7 @@ FF.pages = FF.pages || {};
   // v3.125.554 — stock class-wise (VC4, VC5, VC6 … VC20) — 'Commercial' ek bucket nahi
   const clsNum = (c) => { const m = String(c || '').match(/\d+/); return m ? Number(m[0]) : 999; };
   const clsName = (c) => { const t = String(c || '').trim().toUpperCase().replace(/\s+/g, ''); return t || '—'; };
-  function clsTotals(rows) { const m = new Map(); (rows || []).forEach((r) => { const k = clsName(r.cls); m.set(k, (m.get(k) || 0) + (Number(r.n) || 0)); }); return [...m.entries()].filter(([, n]) => n > 0).sort((a, b) => clsNum(a[0]) - clsNum(b[0]) || a[0].localeCompare(b[0])); }
+  function clsTotals(rows) { const m = new Map(); (rows || []).forEach((r) => { const k = clsName(r.cls); m.set(k, (m.get(k) || 0) + (Number(r.n) || 0)); }); return [...m.entries()].filter(([k, n]) => n > 0 && !/VEHICLE|^CLASS$/.test(k)).sort((a, b) => clsNum(a[0]) - clsNum(b[0]) || a[0].localeCompare(b[0])); }
   function stockHtml(ffStock, gvStock, sf) {
     const ff = ffStock || { total: 0, vc4: 0, comm: 0, rows: [] };
     const gv = gvStock || { total: 0, vc4: 0, comm: 0, rows: [] };
