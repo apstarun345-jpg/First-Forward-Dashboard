@@ -125,10 +125,22 @@
     for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
       let jxx = 0, jyy = 0, jxy = 0;
       for (let y = by * B; y < by * B + B; y++) for (let xx = bx * B; xx < bx * B + B; xx++) { const i = y * w + xx; jxx += gx[i] * gx[i]; jyy += gy[i] * gy[i]; jxy += gx[i] * gy[i]; }
-      const e = jxx + jyy; blk.push({ e: e / (B * B), coh: e > 0 ? Math.sqrt((jxx - jyy) ** 2 + 4 * jxy * jxy) / e : 0, ang: 0.5 * Math.atan2(2 * jxy, jxx - jyy) });
+      const e = jxx + jyy; const bang = 0.5 * Math.atan2(2 * jxy, jxx - jyy);
+      // v3.125.560 — "lakeeron ki ginti": barcode me ek block (14 px) me kai ulte-seedhe kinare aate hain; card ka kinara / haath me 1-2 hi.
+      // Gradient ke dishaa (bang) me projection ka sign-change count — bars = zyada, kinara = kam.
+      const cA = Math.cos(bang), sA = Math.sin(bang); let alt = 0, rows = 0;
+      const dirsX = Math.abs(cA) >= Math.abs(sA);
+      for (let q = 0; q < B; q += 2) {
+        let last = 0, ch = 0, mx = 0;
+        for (let t = 0; t < B; t++) { const xx2 = dirsX ? bx * B + t : bx * B + q, yy2 = dirsX ? by * B + q : by * B + t, i2 = yy2 * w + xx2; const v = gx[i2] * cA + gy[i2] * sA; if (Math.abs(v) > mx) mx = Math.abs(v); }
+        const th2 = Math.max(10, mx * 0.3);
+        for (let t = 0; t < B; t++) { const xx2 = dirsX ? bx * B + t : bx * B + q, yy2 = dirsX ? by * B + q : by * B + t, i2 = yy2 * w + xx2; const v = gx[i2] * cA + gy[i2] * sA; const sg = v > th2 ? 1 : v < -th2 ? -1 : 0; if (sg && last && sg !== last) ch++; if (sg) last = sg; }
+        alt += ch; rows++;
+      }
+      blk.push({ e: e / (B * B), coh: e > 0 ? Math.sqrt((jxx - jyy) ** 2 + 4 * jxy * jxy) / e : 0, ang: bang, alt: rows ? alt / rows : 0 });
     }
     const en = blk.map((b) => b.e).sort((a, b) => a - b), thr = Math.max(300, en[Math.floor(en.length * 0.6)] || 0);
-    blk.forEach((b) => { b.ok = b.coh > 0.78 && b.e > thr; });
+    blk.forEach((b) => { b.ok = b.coh > 0.78 && b.e > thr && b.alt >= 2.5; });
     const lab = new Int32Array(bw * bh).fill(-1), comps = [];
     for (let i = 0; i < blk.length; i++) {
       if (!blk[i].ok || lab[i] >= 0) continue;
