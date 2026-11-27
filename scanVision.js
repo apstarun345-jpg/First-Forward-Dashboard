@@ -286,8 +286,17 @@
       if (near(Number(f.code.slice(11))) <= 12) return;
       const tail = f.code.slice(11); let bestC = null, bd = 1e9;
       for (let i = 0; i < tail.length; i++) for (const ch of (CONF[tail[i]] || '')) { const c2 = tail.slice(0, i) + ch + tail.slice(i + 1), d = near(Number(c2)); if (d <= 12 && d < bd && !found.has(f.code.slice(0, 11) + c2)) { bd = d; bestC = c2; } }
+      if (!bestC) {   // ek digit se na bane to do digit (jaise 0820086 → 0620066)
+        for (let i = 0; i < tail.length; i++) for (const ci of (CONF[tail[i]] || '')) for (let j = i + 1; j < tail.length; j++) for (const cj of (CONF[tail[j]] || '')) { const c2 = tail.slice(0, i) + ci + tail.slice(i + 1, j) + cj + tail.slice(j + 1), d = near(Number(c2)); if (d <= 12 && d < bd && !found.has(f.code.slice(0, 11) + c2)) { bd = d; bestC = c2; } }
+      }
       if (bestC) { const old = f.code; found.delete(old); const nc = old.slice(0, 11) + bestC; found.set(nc, { code: nc, how: 'text', votes: f.votes, conf: f.conf, thumb: f.thumb, alts: [old, ...(f.alts || [])] }); try { add && add.onFix && add.onFix(old, nc); } catch { /* */ } }
     });
+  }
+  /** OCR ke aam confuse (6↔8, 0↔8, 1↔7…): ek digit badal ke bane number — server check me jo sahi nikle wahi chunna */
+  function confAlts(code, max) {
+    const tail = code.slice(11), out = [];
+    for (let i = tail.length - 1; i >= 0; i--) for (const ch of (CONF[tail[i]] || '')) out.push(code.slice(0, 11) + tail.slice(0, i) + ch + tail.slice(i + 1));
+    return out.slice(0, max || 8);
   }
   async function read(src, sw, sh, opt = {}) {
     const budget = opt.budgetMs || 14000, t0 = now(), left = () => budget - (now() - t0);
@@ -386,6 +395,7 @@
     if (!found.size && opt.ocr !== false && left() > 2500) {
       try { const ocr = await ocrLib(); const c = enhance(toWork(src, sw, sh), 'stretch'); textCodes(await ocr.recognize(c, 11)).forEach((k) => add(k, 'text')); } catch { /* */ }
     }
+    found.forEach((f) => { if (f.how === 'text') { const a = [...(f.alts || [])]; confAlts(f.code, 6).forEach((c) => { if (!a.includes(c) && c !== f.code) a.push(c); }); f.alts = a.slice(0, 10); } });
     return [...found.values()];
   }
 

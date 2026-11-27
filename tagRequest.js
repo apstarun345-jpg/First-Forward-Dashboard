@@ -1306,7 +1306,7 @@ body.colorful .from-hdr { color: #166534; }
   }
   // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
   //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
-  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=564'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=565'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
 
   (function trRvStyle() {
     if (document.getElementById('trs-rv-style')) return;
@@ -1377,7 +1377,7 @@ body.colorful .from-hdr { color: #166534; }
     const dg = String(x.code || '').replace(/\D/g, '');
     const majAlt = mid && dg.length === 16 && dg.slice(6, 9) !== mid ? `${dg.slice(0, 6)}-${mid}-${dg.slice(9)}` : '';
     const c0 = x.code;
-    const list = [x.code, ...(x.alts || []), majAlt].filter((v, i, a) => v && scValid(v) && a.indexOf(v) === i).slice(0, 6);
+    const list = [x.code, ...(x.alts || []), majAlt].filter((v, i, a) => v && scValid(v) && a.indexOf(v) === i).slice(0, 12);
     try {
       const j = await scApi('POST', '/api/public/scan-info', { codes: list });
       if (x.code !== c0) { scRvCheck(card, x); return; }   // beech me number sudhar gaya (series fix) — naye number ko check karo
