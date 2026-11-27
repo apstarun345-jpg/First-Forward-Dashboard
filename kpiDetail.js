@@ -983,18 +983,20 @@ window.FF = window.FF || {};
         // auth.api ka 60s timeout yahan chhota — pehli baar (din save nahi) server Google se laata hai, 3 min tak ruko.
         const t0 = Date.now(); const tick = setInterval(() => prog(`⏳ Rows aa rahi hain… ${Math.round((Date.now() - t0) / 1000)}s (pehli baar save ho rahi hain — agli baar turant)`), 1000);
         const ac = new AbortController(); const tmo = setTimeout(() => ac.abort(), 180000);
+        // v3.125.584 — agent / TL report: server par hi filter (pre ke wahi shabd / ID) — payload chhota, turant
+        const who = spec._pre ? `${spec.agent ? `&agent=${encodeURIComponent(spec.agent)}` : ''}${spec.tl ? `&tl=${encodeURIComponent(spec.tl)}` : ''}${spec.agentId ? `&agentId=${encodeURIComponent(spec.agentId)}` : ''}${spec.tlId ? `&tlId=${encodeURIComponent(spec.tlId)}` : ''}` : '';
         let j;
         try {
           // v3.125.527 — pehle sirf saved din (turant); poora ho to wahi, nahi to neeche poora load
           try {
             const ac0 = new AbortController(); const t0m = setTimeout(() => ac0.abort(), 12000);
-            const r0 = await fetch(`/api/eir-raw?fast=1&from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`, { credentials: 'same-origin', cache: 'no-store', signal: ac0.signal });
+            const r0 = await fetch(`/api/eir-raw?fast=1&from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}${who}`, { credentials: 'same-origin', cache: 'no-store', signal: ac0.signal });
             clearTimeout(t0m);
             const j0 = r0.ok ? await r0.json().catch(() => null) : null;
             if (j0 && Array.isArray(j0.rows) && !j0.partial) j = j0;
           } catch { /* poora load neeche */ }
           if (!j) {
-          const res = await fetch(`/api/eir-raw?from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`, { credentials: 'same-origin', cache: 'no-store', signal: ac.signal });
+          const res = await fetch(`/api/eir-raw?from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}${who}`, { credentials: 'same-origin', cache: 'no-store', signal: ac.signal });
           j = await res.json().catch(() => null);
           if (!res.ok) throw new Error((j && j.error) || `HTTP ${res.status}`);
           }

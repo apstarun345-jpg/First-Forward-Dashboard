@@ -12569,14 +12569,25 @@ async function handleApi(req, res, url) {
     const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1;
     if (days > 124) throw new HttpError(400, 'Ek baar me 4 mahine tak.');
     const t0 = Date.now();
+    // ⚡ v3.125.584 — agent / TL ki report: server par hi filter (poore 2 mahine ke sab agents ka data browser ko nahi bhejte)
+    const wantTok = String(url.searchParams.get('tl') || url.searchParams.get('agent') || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length >= 3).sort((a, b) => b.length - a.length)[0] || '';
+    const wantId = String(url.searchParams.get('agentId') || url.searchParams.get('tlId') || '').replace(/[^A-Za-z0-9]/g, '');
+    const cv = (c) => (c && c.v != null ? String(c.v) : '');
+    const eirFilter = (rows) => {
+      if (!wantTok && !wantId) return rows;
+      return rows.filter((r) => {
+        if (wantTok && (cv(r[7]).toLowerCase().includes(wantTok) || cv(r[9]).toLowerCase().includes(wantTok) || cv(r[11]).toLowerCase().includes(wantTok))) return true;
+        return !!wantId && (cv(r[8]).replace(/[^A-Za-z0-9]/g, '') === wantId || cv(r[12]).replace(/[^A-Za-z0-9]/g, '') === wantId);
+      });
+    };
     if (url.searchParams.get('fast') === '1') {
       const f = await eirRawRows(from, to, { cacheOnly: true });
       if (f.missingDays && !gvizCooldownActive()) eirRawRows(from, to, { noCollect: true, parallel: 1, spanDays: 8 }).then(() => eirRawSnapSave().catch(() => {})).catch(() => {});   // baaki din peeche se bharo
-      return sendJson(res, 200, { ok: true, rows: f.rows, cachedDays: f.cachedDays, fetchedDays: 0, missingDays: f.missingDays, partial: f.missingDays > 0, errors: [], ms: Date.now() - t0 });
+      return sendJson(res, 200, { ok: true, rows: eirFilter(f.rows), cachedDays: f.cachedDays, fetchedDays: 0, missingDays: f.missingDays, partial: f.missingDays > 0, errors: [], ms: Date.now() - t0 });
     }
     const r = await eirRawRows(from, to);
     if (r.errors.length && !r.rows.length) throw new HttpError(502, `Google Sheet se rows nahi aayi: ${r.errors[0]}`);
-    return sendJson(res, 200, { ok: true, rows: r.rows, cachedDays: r.cachedDays, fetchedDays: r.fetchedDays, errors: r.errors, ms: Date.now() - t0 });
+    return sendJson(res, 200, { ok: true, rows: eirFilter(r.rows), cachedDays: r.cachedDays, fetchedDays: r.fetchedDays, errors: r.errors, ms: Date.now() - t0 });
   }
   // 💰 v3.125.234 — Payout SNAPSHOT: mahine me ek baar Home se "Payout refresh" → browser poori APN/FNF tabs padhta hai
   // (server sirf raw stream aage bhejta hai, parse nahi karta = memory safe), compact + masked snapshot banakar yahan PUT karta hai.
