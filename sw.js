@@ -1,7 +1,7 @@
 // Versioned app shell + offline data cache.
 // Auth login/logout/password endpoints are NEVER cached. Stable feed snapshots (/api/today),
 // /api/auth/me and /api/settings are network-first with a cached fallback; raw /api/gviz stays live-only.
-const CACHE_NAME = 'apnapayment-v313086';
+const CACHE_NAME = 'apnapayment-v313087';
 const DATA_CACHE = 'ff-data-v5';
 const STASH_CACHE = 'ff-push-stash-v1'; // pushsubscriptionchange ke waqt bani subscription yahan rakho
 // A same-origin browser tab and an installed PWA are both WindowClients. Remember the display
@@ -308,17 +308,16 @@ self.addEventListener('fetch', e => {
     e.respondWith((async () => {
       const cache = await caches.open(DATA_CACHE);
       const wantsFresh = url.searchParams.get('fresh') === '1';
-      try {
-        const response = await fetch(e.request);
-        if (response.ok) await cache.put(e.request, response.clone());
-        return response;
-      } catch (err) {
-        if (!wantsFresh) {
-          const hit = await cache.match(e.request);
-          if (hit) return hit;
-        }
-        throw err;
+      // ⚡ v3.125.587 — server dheere (Render sleep/cold) ho to 1.6s baad cached data turant; network ka jawab peeche cache ko taaza karta rahe.
+      const netP = fetch(e.request).then(async (response) => { if (response.ok) await cache.put(e.request, response.clone()); return response; });
+      const hit = wantsFresh ? null : await cache.match(e.request);
+      if (hit) {
+        const first = await Promise.race([netP.catch(() => null), new Promise((r) => setTimeout(() => r('slow'), 1600))]);
+        if (first && first !== 'slow') return first;
+        e.waitUntil(netP.catch(() => {}));
+        return hit;
       }
+      return await netP;
     })());
     return;
   }

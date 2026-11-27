@@ -18825,9 +18825,9 @@ async function start() {
     }
     // ⏰ v3.125.103 — Render free 15 min traffic na ho to so jaata hai → subah sheet update ho tab bhi koi check nahi.
     // Har 10 min apne public URL par chhota ping (KEEP_AWAKE=0 se band). Free plan ke 750 ghante/mahina me ek service 24×7 aa jaati hai.
-    const selfUrl = String(process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+    const selfUrl = String(process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
     if (selfUrl && process.env.KEEP_AWAKE !== '0') {
-      setInterval(() => { fetch(`${selfUrl}/api/version`, { headers: { 'User-Agent': 'ff-keepawake' } }).catch(() => {}); }, 10 * 60e3).unref();
+      setInterval(() => { fetch(`${selfUrl}/api/version`, { headers: { 'User-Agent': 'ff-keepawake' } }).catch(() => {}); }, 8 * 60e3).unref();
     }
     // 💾 gviz cache: boot par disk se wapas, phir har 10 min disk par
     cacheLoadDisk().then((n) => { if (n) console.log(`💾 gviz cache: ${n} entries disk se wapas (deploy ke baad turant garam)`); }).catch(() => {});
