@@ -156,7 +156,7 @@ window.FF = window.FF || {};
       const cls = `sc-pill ${prio === 'High' ? 'hi' : 'md'}`;
       if (!can) return `<span class="${cls}">${inner}</span>`;
       const q = kind === 'direct' ? 'view=agents&type=direct' : 'view=tls&type=managed';
-      return `<a class="${cls}" href="#/dispatchPlan?channel=${ch}&${q}&priority=${prio}" title="Dispatch Planner · ${ch.toUpperCase()} · ${prio} · ${label}">${inner} <i>›</i></a>`;
+      return `<a class="${cls}" href="#/dispatchPlan?reset=1&channel=${ch}&${q}&priority=${prio}" title="Dispatch Planner · ${ch.toUpperCase()} · ${prio} · ${label}">${inner} <i>›</i></a>`;
     };
     const seg = (ch, label, icon) => {
       const v = c[ch];

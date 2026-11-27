@@ -664,6 +664,8 @@ FF.pages = FF.pages || {};
     // URL / assistant se aaye params
     const legacy = { channel: 'ch', pool: '' };
     const incoming = {};
+    // Smart Center link: purane saved filters (need / TL / search / tag-basis) hata do, warna count aur page ka data alag dikhta hai
+    if (params.reset) { SET_DIMS.forEach((k) => { state[k] = emptySet(); }); state.tl = []; state.q = ''; state.basis = 'total'; }
     FILTER_KEYS.forEach((k) => { if (params[k] !== undefined && params[k] !== '') incoming[k] = params[k]; });
     if (params.channel && ['ff', 'gv', 'all'].includes(params.channel)) incoming.ch = params.channel;
     if (params.pool === 'direct') incoming.type = 'direct';

@@ -228,13 +228,12 @@
     } catch (e) { /* best-effort */ }
   }
   function boot() {
-    ensurePill();
-    setInterval(ensurePill, 6000);   // login ke baad admin pata chalte hi button aa jaye
-    window.addEventListener('hashchange', () => { closeMenu(); ensurePill(); });
+    // ✈️ floating button hata diya (user ki request) — Telegram sirf Settings → ✈️ Telegram se.
+    try { const old = document.getElementById('tg-pill'); if (old) old.remove(); } catch (e) { /* ignore */ }
     setTimeout(snapTick, 90e3);
     snapTimer = setInterval(snapTick, 10 * 60e3);
     void snapTimer;
   }
-  FF.telegram = { REPORTS, build, buildMany, sendNow, pushSnapshots, mount, ensurePill };
+  FF.telegram = { REPORTS, build, buildMany, sendNow, pushSnapshots, mount };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 3000)); else setTimeout(boot, 3000);
 })();
