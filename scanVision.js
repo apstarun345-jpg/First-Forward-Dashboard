@@ -375,6 +375,6 @@
     return () => { stop = true; };
   }
 
-  FF.scanVision = { read, parse16, textCodes, lenientCodes, fixPrefix, locate, cropRegion, refineAngle, layoutOf, textStrip, _env: env, warm: () => { zbarLib().catch(() => {}); ocrLib().catch(() => {}); }, live };
+  FF.scanVision = { _dbg: () => ({ toWork, zbarScan, enhance, ocrLib, zbarLib, nativeDet }), read, parse16, textCodes, lenientCodes, fixPrefix, locate, cropRegion, refineAngle, layoutOf, textStrip, _env: env, warm: () => { zbarLib().catch(() => {}); ocrLib().catch(() => {}); }, live };
   if (typeof module !== 'undefined' && module.exports) module.exports = FF.scanVision;
 })(typeof window !== 'undefined' ? window : globalThis);
