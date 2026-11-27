@@ -246,13 +246,16 @@
 
   // ---------- v3.125.562: chhote / dhundhle barcode ka NUMBER — seedha kiya hua 'wide' crop (bars + neeche number), kai kaat / size / contrast par OCR, vote ----------
   const CONF = { 6: '850', 8: '6039', 0: '86', 1: '7', 7: '1', 5: '63', 3: '85', 9: '84', 2: '7', 4: '9' };
-  async function wideVote(work, r, ocr, known, left) {
+  async function wideVote(work, r, ocr, known, left, ctx) {
     const da = r.da || 0, one = async (cv, a, b, th, psm) => {
       const y0 = Math.round(cv.height * a), y1 = Math.round(cv.height * b), h = Math.max(8, y1 - y0), sc = th / h, o = mk(Math.max(20, Math.round(cv.width * sc)), th);
       ctx2(o).drawImage(cv, 0, y0, cv.width, h, 0, 0, o.width, th);
       let txt = ''; try { txt = await ocr.recognize(o, psm || 7); } catch { return []; }
       const seen = new Set(), ks = [];
       lenientCodes(txt).forEach((x) => { const g1 = fixPrefix(x.g1, known); if (!g1) return; const k = `${g1}-${x.g2}-${x.g3}`; if (!seen.has(k)) { seen.add(k); ks.push(k); } });
+      if (!ks.length && ctx) {   // series pata hai: prefix padha na gaya ho to sirf 7 digit ka number (series ke pehle 4 digit se mel) le lo
+        String(txt).split(/\n/).forEach((ln) => { const d = ln.replace(/\D/g, ''); for (let i = 0; i + 7 <= d.length; i++) { const g3 = d.slice(i, i + 7); if (g3.slice(0, 3) === ctx.g3.slice(0, 3) || ham(g3.slice(0, 4), ctx.g3.slice(0, 4)) <= 1) { const k = `${ctx.g1}-${ctx.g2}-${g3.slice(0, 4) === ctx.g3.slice(0, 4) ? g3 : ctx.g3.slice(0, 4) + g3.slice(4)}`; if (!seen.has(k)) { seen.add(k); ks.push(k); } break; } } });
+      }
       return ks;
     };
     // 1) disha: seedha ya ulta — jisme pehle number mile
@@ -337,12 +340,13 @@
       let ocr = null; try { ocr = await ocrLib(); } catch { ocr = null; }
       const known = (opt.prefixes && opt.prefixes.length ? opt.prefixes : ['608116']).slice();
       for (const f of found.values()) { const p = f.code.slice(0, 6); if (!known.includes(p)) known.push(p); }
-      const reads = [];   // { reg, g1, g2, g3 }
+      const reads = []; const retryJobs = [];   // { reg, g1, g2, g3 }
       const VARS = [[7, 2, 0], [7, 3, 0], [6, 2, 0], [7, 2, 0.06], [7, 4, 0], [6, 3, -0.06], [7, 3, 0.06], [7, 2, -0.06]];
       if (ocr) for (const r of ocrJobs) {
         if (left() < 600) break;
         try {
           const wv = await wideVote(work, r, ocr, known, left);
+          if (!wv.length) retryJobs.push(r);
           if (wv.length) { const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 4).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } continue; }
         } catch { /* purana tareeka neeche */ }
         const votes = new Map(); let flip = false, tried = 0, da0 = 0;
@@ -387,6 +391,13 @@
           if (!ranked.some((x) => x[0] === mix)) ranked.unshift([mix, 1]); else ranked.sort((a, b) => (a[0] === mix ? -1 : b[0] === mix ? 1 : b[1] - a[1]));
         }
         if (ranked[0]) { add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) { f.alts = ranked.slice(1).map((x) => x[0]).filter((c) => known.includes(c.slice(0, 6))); f.thumb = thumbOf(work, r, r.da); } }
+      }
+      if (ocr && retryJobs.length && found.size && left() > 1500) {   // series pata chal gayi — pichhle fail region dobara, prefix ke saath
+        const f1 = [...found.values()].find((f) => f.how === 'text') || [...found.values()][0], ctx = { g1: f1.code.slice(0, 6), g2: f1.code.slice(7, 10), g3: f1.code.slice(11) };
+        for (const r of retryJobs) {
+          if (left() < 900) break;
+          try { const wv = await wideVote(work, r, ocr, known, left, ctx); if (wv.length && !found.has(wv[0][0])) { add(wv[0][0], 'text'); const f0 = found.get(wv[0][0]); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 4).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } } } catch { /* */ }
+        }
       }
       try { seriesFix(found, { onFix: (o, n) => { try { opt.onFixed && opt.onFixed(o, n); } catch { /* ui */ } } }); } catch { /* */ }
       // photo ke andar sabka common middle group (jaise 039): ek-do digit ka farak ho to sahi wala alt me daalo
