@@ -40,16 +40,21 @@
     const out = [];
     String(text || '').split(/\n/).forEach((line) => {
       const l = line.replace(/\s+/g, '').replace(/[–—_.]/g, '-'); const re = /(\d{2,9})-(\d{3})-(\d{6,9})/g; let m;
-      while ((m = re.exec(l))) { const g3 = m[3].slice(0, 7); if (g3.length < 7) continue; out.push({ g1: m[1], g2: m[2], g3 }); re.lastIndex = m.index + 1; }
+      let full = 0;
+      while ((m = re.exec(l))) { const g3 = m[3].slice(0, 7); if (g3.length < 7) continue; out.push({ g1: m[1], g2: m[2], g3 }); full++; re.lastIndex = m.index + 1; }
+      // v3.125.586 — number ka sirf peechhe ka hissa (…039-0777306) padha gaya, 608116 kat gaya → g1 khaali, series se bharega
+      if (!full) { const re2 = /(\d{3})-(\d{7})(?!\d)/g; let m2; while ((m2 = re2.exec(l))) out.push({ g1: '', g2: m2[1], g3: m2[2], partial: true }); }
     });
     return out;
   }
   function fixPrefix(d, known) {
+    if (!d) return known && known.length ? known[0] : '';   // partial number: prefix kata hua — pehla known
     if (d.length === 6 && known.includes(d)) return d;
     let best = '', bh = 9;
     for (const p of known) for (let i = 0; i + 6 <= d.length; i++) { const h = ham(d.slice(i, i + 6), p); if (h < bh) { bh = h; best = p; } }
     if (bh <= 2) return best;
     if (d.length >= 3 && d.length < 6) for (const p of known) if (p.endsWith(d)) return p;
+    if (d.length >= 2 && d.length < 6) for (const p of known) if (ham(d, p.slice(-d.length)) <= 1) return p;   // '15' / '8116' jaisa kata hua prefix (aakhri digit ek-do galat)
     return d.length >= 6 ? d.slice(-6) : '';
   }
 
@@ -69,7 +74,8 @@
       const b = baseUrl();
       const w = await root.Tesseract.createWorker('eng', 1, { workerPath: b + 'ocr-worker.min.js?v=1', corePath: b + 'tesseract-core-simd-lstm.wasm.js', langPath: b, gzip: true, workerBlobURL: false, cacheMethod: 'none' });
       await w.setParameters({ tessedit_char_whitelist: '0123456789-', tessedit_pageseg_mode: '6', user_defined_dpi: '200' });
-      ocrWorker = w; env.ocr = { recognize: async (c, psm) => { if (psm) await w.setParameters({ tessedit_pageseg_mode: String(psm) }); return (await w.recognize(c)).data.text; } };
+      ocrWorker = w; env.ocr = { recognize: async (c, psm) => { if (psm) await w.setParameters({ tessedit_pageseg_mode: String(psm) }); return (await w.recognize(c)).data.text; },
+        recognizeC: async (c, psm) => { if (psm) await w.setParameters({ tessedit_pageseg_mode: String(psm) }); const d = (await w.recognize(c)).data; return { text: d.text, conf: d.confidence || 0 }; } };
       return env.ocr;
     })().catch((e) => { oP = null; throw e; });
     return oP;
@@ -246,6 +252,22 @@
 
   // ---------- v3.125.562: chhote / dhundhle barcode ka NUMBER — seedha kiya hua 'wide' crop (bars + neeche number), kai kaat / size / contrast par OCR, vote ----------
   const CONF = { 6: '850', 8: '6039', 0: '86', 1: '7', 7: '1', 5: '63', 3: '85', 9: '84', 2: '7', 4: '9' };
+  /** v3.125.586 — kai padhai (votes: code → count) se har position ka vote ginkar sabse mumkin number + uske sabse nazdeeki vikalp
+   *  (2 jagah ek saath galat padha ho — jaise 038→039 aur …435→…439 — to bhi sahi wala alts me aata hai). return [[code, score]] */
+  function jointRank(votes) {
+    const ents = [...votes.entries()].sort((a, b) => b[1] - a[1]); if (ents.length < 2) return ents;
+    const g1s = {}; ents.forEach(([k, n]) => { g1s[k.slice(0, 6)] = (g1s[k.slice(0, 6)] || 0) + n; });
+    const g1 = Object.entries(g1s).sort((a, b) => b[1] - a[1])[0][0], pool = ents.filter(([k]) => k.startsWith(g1));
+    const L = 10, cnt = Array.from({ length: L }, () => ({})), tot = new Array(L).fill(0);
+    pool.forEach(([k, n]) => { const t = (k.slice(7, 10) + k.slice(11)); for (let i = 0; i < L; i++) { cnt[i][t[i]] = (cnt[i][t[i]] || 0) + n; tot[i] += n; } });
+    const opts = cnt.map((c, i) => Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([d, n]) => [d, Math.log((n + 0.4) / (tot[i] + 0.8))]));
+    let beam = [{ s: '', sc: 0 }];
+    for (let i = 0; i < L; i++) { const nx = []; beam.forEach((b) => opts[i].forEach(([d, lp]) => nx.push({ s: b.s + d, sc: b.sc + lp }))); nx.sort((a, b) => b.sc - a.sc); beam = nx.slice(0, 24); }
+    const out = [], seen = new Set();
+    beam.forEach((b) => { const k = `${g1}-${b.s.slice(0, 3)}-${b.s.slice(3)}`; if (!seen.has(k)) { seen.add(k); out.push([k, votes.get(k) || 0.5]); } });
+    ents.forEach(([k, n]) => { if (!seen.has(k) && out.length < 12) { seen.add(k); out.push([k, n]); } });
+    return out;
+  }
   async function wideVote(work, r, ocr, known, left, ctx) {
     const da = r.da || 0, one = async (cv, a, b, th, psm) => {
       const y0 = Math.round(cv.height * a), y1 = Math.round(cv.height * b), h = Math.max(8, y1 - y0), sc = th / h, o = mk(Math.max(20, Math.round(cv.width * sc)), th);
@@ -275,7 +297,7 @@
     const votes = new Map(), bump = (ks) => ks.forEach((k) => votes.set(k, (votes.get(k) || 0) + 1));
     const cvs = [best.cv]; try { cvs.push(enhance(best.cv, 'stretch')); } catch { /* */ }
     for (const cv of cvs) for (const [a, b] of [[0.5, 1], [0.58, 1], [0.64, 1], [0.7, 1], [0.6, 0.96], [0.66, 0.98]]) for (const th of [60, 80, 100]) { if (left() < 300) break; bump(await one(cv, a, b, th)); }
-    return [...votes.entries()].sort((a, b) => b[1] - a[1]);
+    return jointRank(votes);
   }
   /** photo ke tag ek series me hote hain: pakke (zyada vote wale) number "anchor" — kamzor read (6↔8, 1↔7…) agar kisi anchor se door ho
    *  aur ek digit badalne se anchor ke paas aa jaye to sudhaar. Pakke number kabhi nahi chhede jaate. */
@@ -347,7 +369,7 @@
         try {
           const wv = await wideVote(work, r, ocr, known, left);
           if (!wv.length) retryJobs.push(r);
-          if (wv.length) { const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 4).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } continue; }
+          if (wv.length) { const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 9).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } continue; }
         } catch { /* purana tareeka neeche */ }
         const votes = new Map(); let flip = false, tried = 0, da0 = 0;
         // v3.125.533 — pehle angle theek karo, number ki patti alag kaato (seedhi + ulti), OCR line mode
@@ -397,7 +419,7 @@
         const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0][0], f1 = fv.find((f) => f.code.startsWith(top)), ctx = { g1: f1.code.slice(0, 6), g2: f1.code.slice(7, 10), g3: f1.code.slice(11) };
         for (const r of retryJobs) {
           if (left() < 900) break;
-          try { const wv = await wideVote(work, r, ocr, known, left, ctx); if (wv.length && !found.has(wv[0][0])) { add(wv[0][0], 'text'); const f0 = found.get(wv[0][0]); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 4).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } } } catch { /* */ }
+          try { const wv = await wideVote(work, r, ocr, known, left, ctx); if (wv.length && !found.has(wv[0][0])) { add(wv[0][0], 'text'); const f0 = found.get(wv[0][0]); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 9).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } } } catch { /* */ }
         }
       }
       try { seriesFix(found, { onFix: (o, n) => { try { opt.onFixed && opt.onFixed(o, n); } catch { /* ui */ } } }); } catch { /* */ }
@@ -407,9 +429,33 @@
       if (topG2 && tx.length >= 2) tx.forEach((f) => { const g = f.code.slice(7, 10); if (g !== topG2[0] && ham(g, topG2[0]) <= 1) { const alt = `${f.code.slice(0, 7)}${topG2[0]}${f.code.slice(10)}`; f.alts = [f.code, ...(f.alts || []).filter((x) => x !== alt && x !== f.code)]; if (topG2[1] >= 3) { found.delete(f.code); f.code = alt; found.set(alt, f); } else f.alts = [alt, ...f.alts.filter((x) => x !== f.code)]; } });
       // photo ke tag aksar ek series me hote hain — aakhri 7 digit ke pehle 4 digit sabke same; ek-do digit ka farak ho to majority wala
     }
-    // 5) kuch bhi na mila — poori photo par OCR (sirf number likha ho / barcode kata ho)
-    if (!found.size && opt.ocr !== false && left() > 2500) {
-      try { const ocr = await ocrLib(); const c = enhance(toWork(src, sw, sh), 'stretch'); textCodes(await ocr.recognize(c, 11)).forEach((k) => add(k, 'text')); } catch { /* */ }
+    // 5) kuch bhi na mila — poori photo par OCR (sirf number likha ho / barcode kata ho / sheesha-glass par tag / patti dhundhli)
+    //    v3.125.586: tukdon (tiles) me padhta hai, har tukde ka confidence; partial number (…039-0777306) series se bhar jata hai
+    if (!found.size && opt.ocr !== false && left() > 2200) {
+      try {
+        const ocr = await ocrLib(), known5 = (opt.prefixes && opt.prefixes.length ? opt.prefixes : ['608116']).slice();
+        const base = toWork(src, sw, sh), S5 = Math.min(1, 1900 / Math.max(base.width, base.height));
+        const rot = (cv, deg) => { const w = Math.round(cv.width * S5), h = Math.round(cv.height * S5), sw2 = deg % 180 ? h : w, sh2 = deg % 180 ? w : h, o = mk(sw2, sh2), x = ctx2(o); x.fillStyle = '#fff'; x.fillRect(0, 0, sw2, sh2); x.translate(sw2 / 2, sh2 / 2); x.rotate((deg * Math.PI) / 180); x.drawImage(cv, -w / 2, -h / 2, w, h); return o; };
+        const cand = new Map();   // code → { sc, n }
+        const take = (txt, conf) => lenientCodes(txt).forEach((x) => { const g1 = fixPrefix(x.g1, known5); if (!g1) return; const k = `${g1}-${x.g2}-${x.g3}`, c = cand.get(k) || { sc: 0, n: 0 }; c.sc += 0.5 + Math.max(0, conf) / 100; c.n++; cand.set(k, c); });
+        outer: for (const deg of [0, 180, 90, 270]) {
+          if (left() < 1500) break;
+          const o = rot(base, deg);
+          { const c2 = mk(o.width, o.height); ctx2(c2).drawImage(o, 0, 0); const r0 = await ocr.recognizeC(enhance(c2, 'stretch'), 11); take(r0.text, r0.conf); if (cand.size) break outer; }
+          const tw = Math.round(Math.max(480, o.width / 3)), th = Math.round(tw * 0.5), sx = Math.round(tw / 2), sy = Math.round(th / 2);
+          for (let y = 0; y < o.height; y += sy) for (let xx = 0; xx < o.width; xx += sx) {
+            if (left() < 900) break outer;
+            const cw = Math.min(tw, o.width - xx), ch = Math.min(th, o.height - y); if (cw < 200 || ch < 80) continue;
+            const sc = Math.min(2.2, 380 / ch), t = mk(cw * sc, ch * sc); ctx2(t).drawImage(o, xx, y, cw, ch, 0, 0, t.width, t.height);
+            try { const rr = await ocr.recognizeC(t, 6); take(rr.text, rr.conf); } catch { /* */ }
+          }
+          if (cand.size) break;
+        }
+        // milte-julte (g2 same, g3 me ≤2 digit ka farak) ek hi tag: sabse zyada score wala, baaki alts
+        const list = [...cand.entries()].sort((a, b) => b[1].sc - a[1].sc), groups = [];
+        list.forEach(([k, v]) => { const g = groups.find((q) => q.k.slice(0, 10) === k.slice(0, 10) && ham(q.k.slice(10), k.slice(10)) <= 2); if (g) g.alts.push(k); else groups.push({ k, sc: v.sc, n: v.n, alts: [] }); });
+        groups.filter((g) => g.n >= 1).slice(0, 6).forEach((g) => { add(g.k, 'text'); const f = found.get(g.k); if (f) { f.alts = g.alts.slice(0, 4); f.conf = Math.round(g.sc * 4); } });
+      } catch { /* */ }
     }
     found.forEach((f) => { if (f.how === 'text') { const a = [...(f.alts || [])]; confAlts(f.code, 6).forEach((c) => { if (!a.includes(c) && c !== f.code) a.push(c); }); f.alts = a.slice(0, 10); } });
     return [...found.values()];
