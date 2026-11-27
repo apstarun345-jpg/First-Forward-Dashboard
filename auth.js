@@ -33,11 +33,33 @@ window.FF = window.FF || {};
   //    Read calls (GET + read-only POST) ab chup-chaap retry karte hain: 2s · 5s · 10s · 20s · 30s.
   const READ_POSTS = /^\/api\/(dispatch-by|dispatch-status|dispatch-lookup|dispatch-test|stock-age|gv-agent-commission|kyc|barcode-lookup|barcode-range|sheet-freshness|offdisp|office-dispatched|profile-pack)/;
   const RETRY_WAITS = [2000, 4000, 8000, 15000, 25000, 30000, 30000];   // ~2 min: Render restart 30-90 s leta hai
+  // v3.125.558 — edge (Cloudflare/Render) 429 se bachav: ek-jaisi GET ek saath ek hi baar jaye, 3s ke andar wahi jawab,
+  // 429 aaye to saari calls thodi der ruk jayein, aur background (hidden) tab polling band rahe — itni requests hi na jayein.
+  const POLL_RE = /^\/api\/(presence|public\/live-presence|activity|notifications|complaints\/live|live-assist\/inbox|office-dispatched|robot\/dispatch|tag-requests|toll-import-info|data\/versions|personal-links)(\?|$)/;
+  const inflight = new Map(), recent = new Map(); let coolUntil = 0;
+  const waitVisible = () => new Promise((r) => { if (typeof document === 'undefined' || !document.hidden) return r(); const t = setTimeout(done, 180000); function done() { clearTimeout(t); document.removeEventListener('visibilitychange', onv); r(); } function onv() { if (!document.hidden) done(); } document.addEventListener('visibilitychange', onv); });
+  const clone = (v) => { try { return typeof structuredClone === 'function' ? structuredClone(v) : JSON.parse(JSON.stringify(v)); } catch { return v; } };
   async function api(path, method, body) {
+    const m = String(method || 'GET').toUpperCase();
+    if (m === 'GET' && !/^\/api\/auth\//.test(path)) {
+      const hit = recent.get(path); if (hit && Date.now() - hit.at < 3000) return clone(hit.v);
+      const fl = inflight.get(path); if (fl) return fl.then(clone);
+      const pr = (async () => {
+        if (POLL_RE.test(path)) await waitVisible();
+        const v = await apiCore(path, method, body);
+        recent.set(path, { at: Date.now(), v }); if (recent.size > 80) recent.delete(recent.keys().next().value);
+        return v;
+      })();
+      inflight.set(path, pr); pr.then(() => inflight.delete(path), () => inflight.delete(path));
+      return pr.then(clone);
+    }
+    return apiCore(path, method, body);
+  }
+  async function apiCore(path, method, body) {
     const m = String(method || 'GET').toUpperCase();
     const retryable = !/^\/api\/auth\//.test(path) && (m === 'GET' || READ_POSTS.test(path));
     for (let i = 0; ; i++) {
-      try { return await apiOnce(path, method, body); } catch (err) {
+      try { const w = coolUntil - Date.now(); if (w > 0 && !/^\/api\/auth\//.test(path)) await new Promise((r) => setTimeout(r, Math.min(w, 60000))); return await apiOnce(path, method, body); } catch (err) {
         const st = Number(err && err.status) || 0;
         const transient = st === 502 || st === 503 || st === 504 || (!st && err && (err.name === 'TypeError' || err.name === 'AbortError'));
         // v3.125.550 — 429 (server ne kaam shuru hi nahi kiya) har call par safe: chupchap dobara. 500 sirf read calls par (3 baar).
@@ -58,6 +80,7 @@ window.FF = window.FF || {};
     try { res = await fetch(path, { signal: controller.signal, method: method || 'GET', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin', cache: 'no-store' }); } finally { clearTimeout(timer); }
     let json = null;
     try { json = await res.json(); } catch { /* ignore */ }
+    if (res.status === 429) { const ra = Number(res.headers.get('Retry-After')) || 0; coolUntil = Math.max(coolUntil, Date.now() + Math.min(60000, Math.max(8000, ra * 1000)) + Math.random() * 2000); }
     if (!res.ok) { const err = new Error((json && json.error) || `HTTP ${res.status}`); err.status = res.status; err.data = json; throw err; }
     return json || {};
   }
