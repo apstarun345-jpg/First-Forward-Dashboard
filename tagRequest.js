@@ -1306,7 +1306,7 @@ body.colorful .from-hdr { color: #166534; }
   }
   // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
   //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
-  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=569'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=570'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
 
   (function trRvStyle() {
     if (document.getElementById('trs-rv-style')) return;
@@ -1415,7 +1415,12 @@ body.colorful .from-hdr { color: #166534; }
         scRvPaint(); setTimeout(() => scRvCheck(card, x), 0);
       } }).then((res) => { res.forEach((r) => { const x = card.cands.find((c2) => c2.code === r.code); if (x && r.thumb) { x.thumb = r.thumb; scRvPaint(); } if (x && r.alts && r.alts.length) { x.alts = r.alts; if (x.info && x.info.k === 'nf') { x.info = null; scRvCheck(card, x); } } }); });
     } catch (e) { card.err = String((e && e.message) || e); }
-    card.busy = false; scRvPaint();
+    // OCR ka jana-pehchana galat: sab tags me ek hi jagah 8 (asal me 6) — photo ke baad khud theek karo, ulta karne ka button rehta hai
+    try {
+      const t = card.cands.filter((x) => x.how === 'text' && /^\d{6}-\d{3}-\d{7}$/.test(x.code));
+      if (t.length >= 3) for (const col of [4, 5, 6]) { if (new Set(t.map((x) => x.code[11 + col])).size === 1 && t[0].code[11 + col] === '8') { const p = 11 + col; t.forEach((x) => { x.alts = [x.code, ...(x.alts || [])]; x.code = x.code.slice(0, p) + '6' + x.code.slice(p + 1); x.info = null; x.err = ''; x.rc = 0; }); break; } }
+    } catch { /* */ }
+    card.busy = false; scRvPaint(); card.cands.forEach((x) => { if (!x.info) scRvCheck(card, x); });
     if (!card.cands.length) scBeep('bad');
   }
   async function scImages(files) {
