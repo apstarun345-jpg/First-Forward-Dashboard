@@ -1306,7 +1306,7 @@ body.colorful .from-hdr { color: #166534; }
   }
   // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
   //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
-  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=568'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=569'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
 
   (function trRvStyle() {
     if (document.getElementById('trs-rv-style')) return;
@@ -1333,6 +1333,13 @@ body.colorful .from-hdr { color: #166534; }
     document.head.appendChild(st);
   })();
   SC.rv = []; SC.rvId = 0;
+  /** OCR aksar 6↔8 ek hi jagah sab me galat padhta hai — number ke aakhri 3 digit me jis jagah sab me 6/8 ek jaisa ho wahan ek tap se palat do */
+  function scSwapBtns(c) {
+    const t = c.cands.filter((x) => x.how === 'text' && /^\d{6}-\d{3}-\d{7}$/.test(x.code)); if (t.length < 3) return '';
+    let h = '';
+    for (const col of [4, 5, 6]) { const ds = new Set(t.map((x) => x.code[11 + col])); if (ds.size !== 1) continue; const d = [...ds][0]; if (d !== '6' && d !== '8') continue; const to = d === '8' ? '6' : '8'; h += `<button class="btn" data-rv-swap="${c.id}|${col}" title="Sab me ye digit ${d} se ${to} karo">🔁 Sab me ${d}→${to} (digit ${col + 1})</button>`; }
+    return h;
+  }
   const scRvPaint = () => {
     const host = scQ('[data-sc-review]'); if (!host) return;
     const parts = SC.rv.map((c) => {
@@ -1342,7 +1349,7 @@ body.colorful .from-hdr { color: #166534; }
         return `<tr class="${i && (i.k === 'iss' || i.k === 'nf') ? 'bad' : i ? 'ok' : ''}"><td class="c"><input type="checkbox" data-rv-ck="${c.id}|${k}"${x.on ? ' checked' : ''}></td><td class="c">${k + 1}</td><td><input class="input mono" data-rv-code="${c.id}|${k}" value="${esc(x.code)}" inputmode="numeric" autocomplete="off" aria-label="Barcode number"></td><td class="c">${x.how === 'text' ? '🔤 number' : '▮▮ barcode'}</td><td class="c">${st}</td><td class="c">${i && i.cls ? `<span class="trs-cls">${esc(i.cls)}</span>` : '—'}</td><td class="c">${i && i.agent ? esc(i.agent) : '—'}</td><td class="c">${x.thumb ? `<img class="trs-thumb" src="${x.thumb}" alt="">` : '—'}</td></tr>`;
       }).join('');
       const n = c.cands.filter((x) => x.on && scValid(x.code)).length;
-      return { id: c.id, n: c.cands.length, busy: !!c.busy, html: `<div class="trs-rv" data-rv="${c.id}"><div class="trs-rvhead"><img src="${esc(c.url)}" alt="" class="trs-rvimg"><div><b>${esc(c.name)}</b><div class="dim small">${c.busy ? '🔎 Photo padh raha hu… ' + esc(c.step || '') : c.cands.length ? `${c.cands.length} barcode mile` : '❌ Is photo me barcode nahi mila — photo paas / seedhi lo, ya 16 digit type karo'}</div></div><button class="btn small" data-rv-del="${c.id}" title="Hatao">✖</button></div>${c.cands.length ? `<div class="trs-rvwrap"><table class="trs-rvtbl"><thead><tr><th>✔</th><th>#</th><th>Barcode</th><th>Padha</th><th>Status</th><th>Class</th><th>Agent</th><th>Photo</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}${c.cands.length && !c.busy ? `<div class="btn-row"><button class="btn primary" data-rv-ok="${c.id}"${n ? '' : ' disabled'}>✅ Confirm · ${n} add karo</button></div>` : ''}</div>` };
+      return { id: c.id, n: c.cands.length, busy: !!c.busy, html: `<div class="trs-rv" data-rv="${c.id}"><div class="trs-rvhead"><img src="${esc(c.url)}" alt="" class="trs-rvimg"><div><b>${esc(c.name)}</b><div class="dim small">${c.busy ? '🔎 Photo padh raha hu… ' + esc(c.step || '') : c.cands.length ? `${c.cands.length} barcode mile` : '❌ Is photo me barcode nahi mila — photo paas / seedhi lo, ya 16 digit type karo'}</div></div><button class="btn small" data-rv-del="${c.id}" title="Hatao">✖</button></div>${c.cands.length ? `<div class="trs-rvwrap"><table class="trs-rvtbl"><thead><tr><th>✔</th><th>#</th><th>Barcode</th><th>Padha</th><th>Status</th><th>Class</th><th>Agent</th><th>Photo</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}${c.cands.length && !c.busy ? `<div class="btn-row"><button class="btn primary" data-rv-ok="${c.id}"${n ? '' : ' disabled'}>✅ Confirm · ${n} add karo</button>${scSwapBtns(c)}</div>` : ''}</div>` };
     });
     // v3.125.549 — flicker band: poora innerHTML dobara nahi; sirf jo cell badli wahi update (thumb / input / focus bachte hain)
     const sig = parts.map((q) => q.id + ':' + q.n + ':' + q.busy).join(',');
@@ -1420,6 +1427,7 @@ body.colorful .from-hdr { color: #166534; }
     const find = (id) => SC.rv.find((c) => String(c.id) === String(id));
     host.addEventListener('click', (e) => {
       const del = e.target.closest('[data-rv-del]'); if (del) { SC.rv = SC.rv.filter((c) => String(c.id) !== del.dataset.rvDel); scRvPaint(); return; }
+      const sw = e.target.closest('[data-rv-swap]'); if (sw) { const [id, col] = sw.dataset.rvSwap.split('|'), cc = find(id); if (cc) { cc.cands.forEach((x) => { if (x.how !== 'text' || !/^\d{6}-\d{3}-\d{7}$/.test(x.code)) return; const p = 11 + Number(col), d = x.code[p]; if (d !== '6' && d !== '8') return; x.code = x.code.slice(0, p) + (d === '8' ? '6' : '8') + x.code.slice(p + 1); x.info = null; x.err = ''; x.rc = 0; }); scRvPaint(); cc.cands.forEach((x) => scRvCheck(cc, x)); } return; }
       const ok = e.target.closest('[data-rv-ok]'); if (!ok) return; const c = find(ok.dataset.rvOk); if (!c) return;
       let n = 0; c.cands.forEach((x) => { if (x.on) { const k = scValid(x.code); if (k && scAdd(k)) n++; } });
       SC.rv = SC.rv.filter((c2) => c2 !== c); scRvPaint(); scNote(`✅ ${n} barcode add hue`, false);
