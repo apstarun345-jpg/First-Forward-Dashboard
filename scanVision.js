@@ -257,12 +257,15 @@
     };
     // 1) disha: seedha ya ulta — jisme pehle number mile
     let best = null;
-    for (const fl of [false, true]) {
-      if (left() < 600) break;
-      const cv = cropRegion(work, r, da, 3, 'wide', fl); let hit = 0;
-      for (const [a, b, th] of [[0.62, 1, 72], [0.7, 1, 72], [0.55, 1, 88]]) { if ((await one(cv, a, b, th)).length) hit++; }
-      if (hit && (!best || hit > best.hit)) best = { fl, cv, hit };
-      if (hit >= 2) break;
+    for (const [dd, sc] of [[0, 3], [0, 4.5], [0.06, 4], [-0.06, 4]]) {
+      for (const fl of [false, true]) {
+        if (left() < 600) break;
+        const cv = cropRegion(work, r, da + dd, sc, 'wide', fl); let hit = 0;
+        for (const [a, b, th] of [[0.62, 1, 72], [0.7, 1, 72], [0.55, 1, 88]]) { if ((await one(cv, a, b, th)).length) hit++; }
+        if (hit && (!best || hit > best.hit)) best = { fl, cv, hit };
+        if (hit >= 2) break;
+      }
+      if (best) break;
     }
     if (!best) return [];
     // 2) pakki disha par kai variant par vote (har variant se ek hi baar ginti)
@@ -271,19 +274,19 @@
     for (const cv of cvs) for (const [a, b] of [[0.5, 1], [0.58, 1], [0.64, 1], [0.7, 1], [0.6, 0.96], [0.66, 0.98]]) for (const th of [60, 80, 100]) { if (left() < 300) break; bump(await one(cv, a, b, th)); }
     return [...votes.entries()].sort((a, b) => b[1] - a[1]);
   }
-  /** photo ke tag ek series me hote hain: ek-do digit ka (6↔8, 1↔7…) OCR galat ho aur baaki ka beech (median) door ho to sudhaar */
+  /** photo ke tag ek series me hote hain: pakke (zyada vote wale) number "anchor" — kamzor read (6↔8, 1↔7…) agar kisi anchor se door ho
+   *  aur ek digit badalne se anchor ke paas aa jaye to sudhaar. Pakke number kabhi nahi chhede jaate. */
   function seriesFix(found, add) {
-    const tx = [...found.values()].filter((f) => f.how === 'text'); if (tx.length < 3) return;
-    const grp = new Map(); tx.forEach((f) => { const k = f.code.slice(0, 11); (grp.get(k) || grp.set(k, []).get(k)).push(f); });
-    grp.forEach((list) => {
-      if (list.length < 3) return;
-      const tails = list.map((f) => Number(f.code.slice(11))).sort((a, b) => a - b), med = tails[Math.floor(tails.length / 2)];
-      list.forEach((f) => {
-        const t = Number(f.code.slice(11)); if (Math.abs(t - med) <= 12) return;
-        const tail = f.code.slice(11); let bestC = null, bd = 1e9;
-        for (let i = 0; i < tail.length; i++) for (const ch of (CONF[tail[i]] || '')) { const c2 = tail.slice(0, i) + ch + tail.slice(i + 1), d = Math.abs(Number(c2) - med); if (d <= 12 && d < bd && !found.has(f.code.slice(0, 11) + c2)) { bd = d; bestC = c2; } }
-        if (bestC) { const old = f.code; found.delete(old); const nc = old.slice(0, 11) + bestC; found.set(nc, { code: nc, how: 'text', votes: f.votes, thumb: f.thumb, alts: [old, ...(f.alts || [])] }); try { add && add.onFix && add.onFix(old, nc); } catch { /* */ } }
-      });
+    const tx = [...found.values()].filter((f) => f.how === 'text' && f.conf); if (tx.length < 2) return;
+    const maxC = Math.max(...tx.map((f) => f.conf)), strong = tx.filter((f) => f.conf >= Math.max(8, maxC * 0.6));
+    if (!strong.length) return;
+    tx.filter((f) => !strong.includes(f)).forEach((f) => {
+      const anc = strong.filter((q) => q.code.slice(0, 11) === f.code.slice(0, 11)); if (!anc.length) return;
+      const near = (t) => Math.min(...anc.map((q) => Math.abs(Number(q.code.slice(11)) - t)));
+      if (near(Number(f.code.slice(11))) <= 12) return;
+      const tail = f.code.slice(11); let bestC = null, bd = 1e9;
+      for (let i = 0; i < tail.length; i++) for (const ch of (CONF[tail[i]] || '')) { const c2 = tail.slice(0, i) + ch + tail.slice(i + 1), d = near(Number(c2)); if (d <= 12 && d < bd && !found.has(f.code.slice(0, 11) + c2)) { bd = d; bestC = c2; } }
+      if (bestC) { const old = f.code; found.delete(old); const nc = old.slice(0, 11) + bestC; found.set(nc, { code: nc, how: 'text', votes: f.votes, conf: f.conf, thumb: f.thumb, alts: [old, ...(f.alts || [])] }); try { add && add.onFix && add.onFix(old, nc); } catch { /* */ } }
     });
   }
   async function read(src, sw, sh, opt = {}) {
@@ -327,7 +330,7 @@
         if (left() < 600) break;
         try {
           const wv = await wideVote(work, r, ocr, known, left);
-          if (wv.length) { const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.alts = wv.slice(1, 4).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } continue; }
+          if (wv.length) { const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 4).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } continue; }
         } catch { /* purana tareeka neeche */ }
         const votes = new Map(); let flip = false, tried = 0, da0 = 0;
         // v3.125.533 — pehle angle theek karo, number ki patti alag kaato (seedhi + ulti), OCR line mode
