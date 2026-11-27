@@ -279,9 +279,9 @@
       if (list.length < 3) return;
       const tails = list.map((f) => Number(f.code.slice(11))).sort((a, b) => a - b), med = tails[Math.floor(tails.length / 2)];
       list.forEach((f) => {
-        const t = Number(f.code.slice(11)); if (Math.abs(t - med) <= 30) return;
+        const t = Number(f.code.slice(11)); if (Math.abs(t - med) <= 12) return;
         const tail = f.code.slice(11); let bestC = null, bd = 1e9;
-        for (let i = 0; i < tail.length; i++) for (const ch of (CONF[tail[i]] || '')) { const c2 = tail.slice(0, i) + ch + tail.slice(i + 1), d = Math.abs(Number(c2) - med); if (d <= 30 && d < bd && !found.has(f.code.slice(0, 11) + c2)) { bd = d; bestC = c2; } }
+        for (let i = 0; i < tail.length; i++) for (const ch of (CONF[tail[i]] || '')) { const c2 = tail.slice(0, i) + ch + tail.slice(i + 1), d = Math.abs(Number(c2) - med); if (d <= 12 && d < bd && !found.has(f.code.slice(0, 11) + c2)) { bd = d; bestC = c2; } }
         if (bestC) { const old = f.code; found.delete(old); const nc = old.slice(0, 11) + bestC; found.set(nc, { code: nc, how: 'text', votes: f.votes, thumb: f.thumb, alts: [old, ...(f.alts || [])] }); try { add && add.onFix && add.onFix(old, nc); } catch { /* */ } }
       });
     });
@@ -437,6 +437,6 @@
     return () => { stop = true; };
   }
 
-  FF.scanVision = { _dbg: () => ({ toWork, zbarScan, enhance, ocrLib, zbarLib, nativeDet }), read, parse16, textCodes, lenientCodes, fixPrefix, locate, cropRegion, refineAngle, layoutOf, textStrip, _env: env, warm: () => { zbarLib().catch(() => {}); ocrLib().catch(() => {}); }, live };
+  FF.scanVision = { _dbg: () => ({ wideVote, toWork, zbarScan, enhance, ocrLib, zbarLib, nativeDet }), read, parse16, textCodes, lenientCodes, fixPrefix, locate, cropRegion, refineAngle, layoutOf, textStrip, _env: env, warm: () => { zbarLib().catch(() => {}); ocrLib().catch(() => {}); }, live };
   if (typeof module !== 'undefined' && module.exports) module.exports = FF.scanVision;
 })(typeof window !== 'undefined' ? window : globalThis);
