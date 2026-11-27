@@ -243,6 +243,49 @@
    * opt: { onFound(code, how), budgetMs (default 14000), ocr (default true), quick (sirf tez tareeke) }
    * Return: [{ code, how: 'barcode'|'text', votes }]
    */
+
+  // ---------- v3.125.562: chhote / dhundhle barcode ka NUMBER — seedha kiya hua 'wide' crop (bars + neeche number), kai kaat / size / contrast par OCR, vote ----------
+  const CONF = { 6: '850', 8: '6039', 0: '86', 1: '7', 7: '1', 5: '63', 3: '85', 9: '84', 2: '7', 4: '9' };
+  async function wideVote(work, r, ocr, known, left) {
+    const da = r.da || 0, one = async (cv, a, b, th, psm) => {
+      const y0 = Math.round(cv.height * a), y1 = Math.round(cv.height * b), h = Math.max(8, y1 - y0), sc = th / h, o = mk(Math.max(20, Math.round(cv.width * sc)), th);
+      ctx2(o).drawImage(cv, 0, y0, cv.width, h, 0, 0, o.width, th);
+      let txt = ''; try { txt = await ocr.recognize(o, psm || 7); } catch { return []; }
+      const seen = new Set(), ks = [];
+      lenientCodes(txt).forEach((x) => { const g1 = fixPrefix(x.g1, known); if (!g1) return; const k = `${g1}-${x.g2}-${x.g3}`; if (!seen.has(k)) { seen.add(k); ks.push(k); } });
+      return ks;
+    };
+    // 1) disha: seedha ya ulta — jisme pehle number mile
+    let best = null;
+    for (const fl of [false, true]) {
+      if (left() < 600) break;
+      const cv = cropRegion(work, r, da, 3, 'wide', fl); let hit = 0;
+      for (const [a, b, th] of [[0.62, 1, 72], [0.7, 1, 72], [0.55, 1, 88]]) { if ((await one(cv, a, b, th)).length) hit++; }
+      if (hit && (!best || hit > best.hit)) best = { fl, cv, hit };
+      if (hit >= 2) break;
+    }
+    if (!best) return [];
+    // 2) pakki disha par kai variant par vote (har variant se ek hi baar ginti)
+    const votes = new Map(), bump = (ks) => ks.forEach((k) => votes.set(k, (votes.get(k) || 0) + 1));
+    const cvs = [best.cv]; try { cvs.push(enhance(best.cv, 'stretch')); } catch { /* */ }
+    for (const cv of cvs) for (const [a, b] of [[0.5, 1], [0.58, 1], [0.64, 1], [0.7, 1], [0.6, 0.96], [0.66, 0.98]]) for (const th of [60, 80, 100]) { if (left() < 300) break; bump(await one(cv, a, b, th)); }
+    return [...votes.entries()].sort((a, b) => b[1] - a[1]);
+  }
+  /** photo ke tag ek series me hote hain: ek-do digit ka (6↔8, 1↔7…) OCR galat ho aur baaki ka beech (median) door ho to sudhaar */
+  function seriesFix(found, add) {
+    const tx = [...found.values()].filter((f) => f.how === 'text'); if (tx.length < 3) return;
+    const grp = new Map(); tx.forEach((f) => { const k = f.code.slice(0, 11); (grp.get(k) || grp.set(k, []).get(k)).push(f); });
+    grp.forEach((list) => {
+      if (list.length < 3) return;
+      const tails = list.map((f) => Number(f.code.slice(11))).sort((a, b) => a - b), med = tails[Math.floor(tails.length / 2)];
+      list.forEach((f) => {
+        const t = Number(f.code.slice(11)); if (Math.abs(t - med) <= 30) return;
+        const tail = f.code.slice(11); let bestC = null, bd = 1e9;
+        for (let i = 0; i < tail.length; i++) for (const ch of (CONF[tail[i]] || '')) { const c2 = tail.slice(0, i) + ch + tail.slice(i + 1), d = Math.abs(Number(c2) - med); if (d <= 30 && d < bd && !found.has(f.code.slice(0, 11) + c2)) { bd = d; bestC = c2; } }
+        if (bestC) { const old = f.code; found.delete(old); const nc = old.slice(0, 11) + bestC; found.set(nc, { code: nc, how: 'text', votes: f.votes, thumb: f.thumb, alts: [old, ...(f.alts || [])] }); try { add && add.onFix && add.onFix(old, nc); } catch { /* */ } }
+      });
+    });
+  }
   async function read(src, sw, sh, opt = {}) {
     const budget = opt.budgetMs || 14000, t0 = now(), left = () => budget - (now() - t0);
     const found = new Map(); const boxes = [];
@@ -260,9 +303,9 @@
     await tick();
     if (opt.quick) return [...found.values()];
     // 3) jagah dhoondh kar seedha crop + zbar ; 4) number ka OCR
-    let regions = []; try { regions = locate(work); } catch { regions = []; }
+    let regions = []; try { regions = locate(work, { alt: 2, coh: 0.6, minBlocks: 4 }); } catch { regions = []; }
     const inBox = (r) => boxes.some((b) => { const xs = b.map((p) => p[0]), ys = b.map((p) => p[1]); return r.cx >= Math.min(...xs) - 40 && r.cx <= Math.max(...xs) + 40 && r.cy >= Math.min(...ys) - 60 && r.cy <= Math.max(...ys) + 60; });
-    const cand = regions.filter((r) => r.w > 60 && r.w / Math.max(1, r.h) >= 0.9 && r.w / Math.max(1, r.h) <= 9 && !inBox(r)).slice(0, 10);
+    const cand = regions.filter((r) => r.w > 50 && r.w / Math.max(1, r.h) >= 1.5 && r.w / Math.max(1, r.h) <= 9 && !inBox(r)).slice(0, 12);
     const ocrJobs = [];
     for (const r of cand) {
       if (left() < 0) break;
@@ -282,6 +325,10 @@
       const VARS = [[7, 2, 0], [7, 3, 0], [6, 2, 0], [7, 2, 0.06], [7, 4, 0], [6, 3, -0.06], [7, 3, 0.06], [7, 2, -0.06]];
       if (ocr) for (const r of ocrJobs) {
         if (left() < 600) break;
+        try {
+          const wv = await wideVote(work, r, ocr, known, left);
+          if (wv.length) { const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.alts = wv.slice(1, 4).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } continue; }
+        } catch { /* purana tareeka neeche */ }
         const votes = new Map(); let flip = false, tried = 0, da0 = 0;
         // v3.125.533 — pehle angle theek karo, number ki patti alag kaato (seedhi + ulti), OCR line mode
         da0 = r.da || 0;
@@ -325,6 +372,7 @@
         }
         if (ranked[0]) { add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) { f.alts = ranked.slice(1).map((x) => x[0]).filter((c) => known.includes(c.slice(0, 6))); f.thumb = thumbOf(work, r, r.da); } }
       }
+      try { seriesFix(found, { onFix: (o, n) => { try { opt.onFixed && opt.onFixed(o, n); } catch { /* ui */ } } }); } catch { /* */ }
       // photo ke andar sabka common middle group (jaise 039): ek-do digit ka farak ho to sahi wala alt me daalo
       const tx = [...found.values()].filter((f) => f.how === 'text'); const g2c = new Map(); tx.forEach((f) => { const g = f.code.slice(7, 10); g2c.set(g, (g2c.get(g) || 0) + 1); });
       const topG2 = [...g2c.entries()].sort((a, b) => b[1] - a[1])[0];

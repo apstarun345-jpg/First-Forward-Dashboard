@@ -1306,7 +1306,7 @@ body.colorful .from-hdr { color: #166534; }
   }
   // 🖼️ v3.125.531 — PHOTO se scan (WhatsApp / gallery / screenshot / paste / drag-drop): ek photo me kai tag bhi. scanVision.js (barcode + neeche likha number OCR).
   //    Mile hue numbers "review" card me aate hain — server check (Stock / Issued / Not found) ke saath, user confirm karke add karta hai.
-  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=561'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
+  const scLoadVision = () => (window.FF && FF.scanVision ? Promise.resolve(FF.scanVision) : new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'scanVision.js?v=562'; s.onload = () => (FF.scanVision ? ok(FF.scanVision) : no(new Error('vision'))); s.onerror = () => no(new Error('vision')); document.head.appendChild(s); }));
 
   (function trRvStyle() {
     if (document.getElementById('trs-rv-style')) return;
@@ -1376,9 +1376,11 @@ body.colorful .from-hdr { color: #166534; }
     const mid = (() => { const cnt = {}; (card.cands || []).forEach((y) => { const g = String(y.code || '').replace(/\D/g, '').slice(6, 9); if (g.length === 3) cnt[g] = (cnt[g] || 0) + 1; }); const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0]; return top && top[1] >= 3 ? top[0] : ''; })();
     const dg = String(x.code || '').replace(/\D/g, '');
     const majAlt = mid && dg.length === 16 && dg.slice(6, 9) !== mid ? `${dg.slice(0, 6)}-${mid}-${dg.slice(9)}` : '';
+    const c0 = x.code;
     const list = [x.code, ...(x.alts || []), majAlt].filter((v, i, a) => v && scValid(v) && a.indexOf(v) === i).slice(0, 6);
     try {
       const j = await scApi('POST', '/api/public/scan-info', { codes: list });
+      if (x.code !== c0) { scRvCheck(card, x); return; }   // beech me number sudhar gaya (series fix) — naye number ko check karo
       const inf = (j && j.info) || {}; let pick = x.code;
       if (x.how === 'text' && inf[x.code] && inf[x.code].k === 'nf') { const alt = list.find((c2) => inf[c2] && inf[c2].k !== 'nf'); if (alt) pick = alt; }   // OCR ne ek digit galat padha ho to sahi wala chuno
       x.code = pick; const nInfo = inf[pick] || null;
@@ -1400,7 +1402,7 @@ body.colorful .from-hdr { color: #166534; }
       let bmp = null; try { bmp = await createImageBitmap(file); } catch { /* Image se */ }
       if (!bmp) bmp = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error('img')); im.src = card.url; });
       const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
-      await V.read(bmp, w, h, { budgetMs: 20000, onFound: (code, how) => {
+      await V.read(bmp, w, h, { budgetMs: 20000, onFixed: (o, n) => { const x = card.cands.find((c2) => c2.code === o); if (x) { x.alts = [o, ...(x.alts || [])]; x.code = n; x.info = null; x.err = ''; scRvPaint(); setTimeout(() => scRvCheck(card, x), 0); } }, onFound: (code, how) => {
         if (card.cands.some((x) => x.code === code)) return;
         const x = { code, how, on: true, info: null, err: '', alts: [] }; card.cands.push(x); scBeep('ok'); try { navigator.vibrate && navigator.vibrate(30); } catch { /* */ }
         scRvPaint(); setTimeout(() => scRvCheck(card, x), 0);
