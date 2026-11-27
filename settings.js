@@ -2552,6 +2552,9 @@ FF.pages = FF.pages || {};
   async function runCardParityProbe(body) {
     const out = U.$('#diag-parity-out', body);
     if (!out) return [];
+    out.innerHTML = '<p class="dim small">Unusual Activity page hata di gayi hai — ye probe ab nahi chalta.</p>';
+    return [];
+    // eslint-disable-next-line no-unreachable
     const app = FF.app;
     if (!app || !app.navigate) throw new Error('App shell ready nahi hai');
     const back = (app.current && app.current.page) || 'settings';

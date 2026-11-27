@@ -77,24 +77,20 @@ window.FF = window.FF || {};
     gvTrend: ['gvpages'],
     gvStock: ['gvpages'],
     gvStockReport: ['gvpages'],
-    gvPayout: ['gvPayout'],
     gvApiReport: ['gvApiReport'],
     fastagMapping: ['fastagMapping', 'masterSearch'],
     gvPerformance: ['perfWatch', 'gvpages'],
-    dualChannel: [...INSIGHT_DEPS],
     dataQuality: [...INSIGHT_DEPS],
-    fastagChampions: [...INSIGHT_DEPS],
     dispatchPlan: [...PROFILE_DEPS, 'dispatchPlanner'],
     directAgents: ['kpiDetail', 'directAgents'],
     tollDebit: ['tollDebit'],
     agentsOverview: ['kpiDetail', 'performance', 'agentsOverview'],   // KPI drill lists kpiDetail me register hoti hain
     aiAnalyst: [...INSIGHT_DEPS, 'aiAnalyst'],
-    unusual: ['pdf', 'unusual-scan', 'unusual'],
     npciStatus: ['npciStatus'],
     addressBook: ['addressBook'],
     ffAgentSummary: [...SUMMARY_DEPS, 'agentSummary', 'gvTruth', 'summaryUI'],
     gvAgentSummary: [...SUMMARY_DEPS, 'gvpages', 'agentSummary', 'gvTruth', 'agentBoard', 'masterSearch', 'summaryUI'],
-    settings: [...PROFILE_DEPS, 'agentSummary', 'unusual-scan', 'unusual', 'settings']
+    settings: [...PROFILE_DEPS, 'agentSummary', 'settings']
   };
 
   // Background warm order (login ke baad idle me) — jo pages sabse zyada khulte hain wo pehle.

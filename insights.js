@@ -1491,110 +1491,6 @@ FF.pages = FF.pages || {};
     return GHOST_ID_RE.test(i) || /^not\s*assigned/i.test(`${i} ${n}`);
   };
 
-  async function renderDualChannel(root, params) {
-    const data = await buildCross();
-    const q = clean(params.q).toLowerCase(), method = ['all','barcode','gv-id','both'].includes(params.method) ? params.method : 'all';
-    const onlyDouble = params.dup === 'double';
-    const rows = data.rows.filter((r) => (!q || [r.ff.name,r.ff.id,r.gv.name,r.gv.id,r.ff.tlName,r.gv.tlName].join(' ').toLowerCase().includes(q)) && (method === 'all' || method === 'both' ? (method === 'all' || r.methods.length > 1) : r.methods.includes(method)));
-    const barcodeRows = (data.barcodeAudit || []).filter((b) => (!q || [b.ff && b.ff.name,b.ff && b.ff.id,b.ff && b.ff.tlName,b.gv && b.gv.name,b.gv && b.gv.id,b.gv && b.gv.tlName, b.ffBarcode, b.gvSerial].join(' ').toLowerCase().includes(q)) && (method === 'all' || method === 'barcode' || (method === 'both' ? b.methods.length > 1 : b.methods.includes(method)))).map((b) => ({ ...b, ffAgent: b.ff && (b.ff.name || b.ff.id) || b.ffAgentName, ffId: b.ff && b.ff.id || b.ffAgentId, ffTl: b.ff && b.ff.tlName || b.ffTlName || '', gvAgent: b.gv && (b.gv.name || b.gv.id) || b.gvAgentName, gvId: b.gv && b.gv.id || b.gvAgentId, gvTl: b.gv && b.gv.tlName || b.gvTlName || '' }));
-    // ---- double-mapping flags: repeated inside a source, owner change, ya FF ↔ GV owner alag ----
-    // Rule (v3.8.3): barcode "double" TAB HI hai jab FF holder Apna Payment (GV master) NAHI hai
-    // aur GV side ke paas not-assigned ke alawa ek asli ID hai. Ghost-holder matches = normal flow.
-    const flaggedBarcodeRows = barcodeRows.map((b) => {
-      const ffDup = b.ffOccurrences > 1 || b.ffOwnerCount > 1;
-      const gvDup = b.gvOccurrences > 1 || b.gvOwnerCount > 1;
-      const crossOwner = barcodeOwnerKey('ff', b) !== barcodeOwnerKey('gv', b);
-      const ffTl = b.ffTl || (b.ff && b.ff.tlName) || b.ffTlName || '';
-      const ffGhost = isGvMasterFfHolder(b.ffAgent, b.ffId) || isGvChannelTl(ffTl);
-      const gvGhost = isUnassignedGvHolder(b.gvAgent, b.gvId);
-      if (ffGhost || gvGhost) {
-        const reasons = [ffGhost ? 'FF side GV master / TL ApnaPayment — GV channel stock, not double counted' : '', gvGhost ? 'GV side not-assigned/blank — not with any agent right now' : ''].filter(Boolean);
-        return { ...b, ffDup, gvDup, crossOwner, ffGhost, gvGhost, ghost: true, doubleMapped: false, reasons };
-      }
-      const reasons = [ffDup ? 'FF me ek se zyada rows/owners' : '', gvDup ? 'GV me ek se zyada rows/owners' : '', crossOwner ? 'FF aur GV me alag agent' : ''].filter(Boolean);
-      return { ...b, ffDup, gvDup, crossOwner, ffGhost, gvGhost, ghost: false, doubleMapped: reasons.length > 0, reasons };
-    });
-    const doubleRows = flaggedBarcodeRows.filter((b) => b.doubleMapped);
-    const ghostRows = flaggedBarcodeRows.filter((b) => b.ghost);
-    const matchedRows = flaggedBarcodeRows.filter((b) => !b.doubleMapped);
-    const duplicateBarcodeRows = flaggedBarcodeRows.filter((b) => b.ffDup || b.gvDup);
-    const todayKey = U.dateKey(new Date());
-    const allocatedToday = (value) => { const date = value ? U.parseDate(value) : null; return !!(date && U.dateKey(date) === todayKey); };
-    const dailyDuplicateRows = duplicateBarcodeRows.filter((b) => allocatedToday(b.ffBarcodeAllocatedAt) || allocatedToday(b.ffAgentAllocatedAt) || allocatedToday(b.gvAllocatedAt));
-    const gvAllocationDateMapped = !!(FF.config.gv && FF.config.gv.assignment && FF.config.gv.assignment.allocatedAt);
-    const ffIssue = sum(rows, (r) => r.ffIssuance), gvIssue = sum(rows, (r) => r.gvIssuance), ffStock = sum(rows, (r) => r.ffStock), gvStock = sum(rows, (r) => r.gvStock);
-    const doubleAgents = new Set(doubleRows.flatMap((b) => [b.ffId || b.ffAgent, b.gvId || b.gvAgent]).filter(Boolean)).size;
-    const tlSummary = new Map(); rows.forEach((r) => {
-      const key = `${r.ff.tlName || 'Direct / Unmapped'} ↔ ${r.gv.tlName || 'Direct / Unmapped'}`;
-      if (!tlSummary.has(key)) tlSummary.set(key, { label: key, agentRows: [], agents: 0, ff: 0, gv: 0, ffStock: 0, gvStock: 0, commission: 0, amount: 0, barcodes: 0 });
-      const x = tlSummary.get(key); x.agents++; x.agentRows.push(r); x.ff += r.ffIssuance; x.gv += r.gvIssuance; x.ffStock += r.ffStock; x.gvStock += r.gvStock; x.commission += r.commission; x.amount += r.amount; x.barcodes += r.barcodeCount;
-    });
-    const netIssuance = gvIssue - ffIssue, netStock = gvStock - ffStock;
-    const doubleRowHtml = (b) => `<tr class="${b.doubleMapped ? 'dup-row' : ''}"><td><b>${esc(U.barcode(b.ffBarcode))}</b><small>GV serial: ${esc(U.barcode(b.gvSerial) || '—')}</small></td><td>${b.doubleMapped ? statusPill('YES · review', 'red') : statusPill('Matched once', 'green')}</td><td class="wrap">${b.reasons.length ? esc(b.reasons.join(' · ')) : '<span class="dim">Same owner, one row per channel</span>'}</td><td><b>${esc(b.ffAgent || '—')}</b><small>${esc(b.ffId || '')} · TL ${esc(b.ffTl || 'Direct / Unmapped')} · ${esc(b.ffClass || '—')}</small></td><td><b>${esc(b.gvAgent || '—')}</b><small>${esc(b.gvId || '')} · TL ${esc(b.gvTl || 'Direct / Unmapped')} · ${esc(b.gvClass || '—')}</small></td><td class="num">${U.fmt(b.ffOccurrences)} / ${U.fmt(b.ffOwnerCount)}</td><td class="num">${U.fmt(b.gvOccurrences)} / ${U.fmt(b.gvOwnerCount)}</td><td>${b.verified ? statusPill('Resolved pair', 'green') : statusPill('Ambiguous pair · review', 'red')}</td></tr>`;
-    root.innerHTML = head('🔗', 'Cross Channel · Dual-Agent Intelligence', 'Verified joins only: normalized barcode (StockDataa ↔ Tag Assignment) and/or FF “GV ID Found” ↔ GV unique ID · name-only guesses never used', `<button class="btn primary" id="cross-double-csv">⬇ Double-mapped barcodes CSV</button> ${exportButtons('cross-export')} ${printButton}`) + `
-      <div class="source-row">${sourceChip('StockDataa', `${U.fmt(data.scanned.ffStock)} barcode rows`)}${sourceChip('Tag Assignment', `${U.fmt(data.scanned.gvAssignment)} serial rows`)}${sourceChip('FF REPORT', `${U.fmt(data.scanned.ffAgents)} identities`)}${sourceChip('GV Master', `${U.fmt(data.scanned.gvAgents)} identities`)}<span class="dim small">Double-mapped = ek hi tag 2 jagah (cross-channel owner change ya ek hi source me repeat)</span></div>
-      ${data.truncated && (data.truncated.stock || data.truncated.assignment) ? `<div class="mapping-state warn"><b>Detailed identity scan reached the 250,000-row safety cap.</b><span>Results are explicitly partial; archive old assignment rows or narrow the source tab.</span></div>` : ''}
-      ${vividMetrics([
-        { label: 'Dual (verified) agents', value: U.fmt(rows.length), foot: `${U.fmt(rows.filter((r) => r.methods.length > 1).length)} verified by both signals`, tone: 'g6', icon: '🔗' },
-        { label: 'Double-mapped barcodes', value: U.fmt(doubleRows.length), foot: `${U.fmt(doubleAgents)} agents involved · ${U.fmt(matchedRows.length)} clean · ${U.fmt(ghostRows.length)} ghost-holder ignore (Apna Payment / not-assigned)`, tone: doubleRows.length ? 'g7' : 'g9', icon: '🚨' },
-        { label: 'FF issuance · dual agents', value: U.fmt(ffIssue), foot: `${U.fmt(ffStock)} tags abhi stock me (First Forward)`, tone: 'g1', icon: '🟦' },
-        { label: 'GV issuance · dual agents', value: U.fmt(gvIssue), foot: `${U.fmt(gvStock)} tags abhi stock me (GV Partner)`, tone: 'g5', icon: '🟩' },
-        { label: 'Combined footprint', value: U.fmt(ffIssue + gvIssue), foot: `${U.fmt(ffStock + gvStock)} stock · gap GV − FF ${netIssuance > 0 ? '+' : ''}${U.fmt(netIssuance)}`, tone: 'g3', icon: '📊' },
-        { label: 'Shared / matched barcodes', value: U.fmt(barcodeRows.length), foot: `Repeated rows: ${U.fmt(duplicateBarcodeRows.length)} · today (allocation date): ${U.fmt(dailyDuplicateRows.length)}`, tone: 'g4', icon: '🧾' }
-      ])}
-      <div class="ins-filters">
-        <label>Evidence<select class="select" data-param="method"><option value="all">All verified matches</option><option value="both" ${method === 'both' ? 'selected' : ''}>Both signals</option><option value="barcode" ${method === 'barcode' ? 'selected' : ''}>Barcode</option><option value="gv-id" ${method === 'gv-id' ? 'selected' : ''}>GV unique ID</option></select></label>
-        <label>Barcode list<select class="select" data-param="dup"><option value="all">All shared barcodes</option><option value="double" ${onlyDouble ? 'selected' : ''}>Only double-mapped</option></select></label>
-        <form id="cross-search" class="ins-search"><input class="input" name="q" value="${esc(params.q || '')}" placeholder="FF/GV agent, ID, TL ya barcode…"><button class="btn">Search</button></form>
-      </div>
-      ${data.ambiguousIds || data.ambiguousPairs ? `<div class="mapping-state"><b>${U.fmt(data.ambiguousIds + data.ambiguousPairs)} ambiguous identities were not auto-joined.</b><span>${U.fmt(data.ambiguousIds)} non-unique GV IDs · ${U.fmt(data.ambiguousPairs)} conflicting barcode owners. Corroboration is required to prevent false overlap.</span></div>` : ''}
-      ${!data.rows.length ? `<div class="mapping-state warn"><div class="mapping-icon">🔎</div><div><h3>No verified overlap in the loaded snapshot</h3><p>The join completed, but no normalized StockDataa barcode matched Tag Assignment serial and no unique “GV ID Found” matched exactly one GV identity. No name-based records were added.</p></div></div>` : ''}
-      <div class="card card-danger"><div class="card-head"><h3>🚨 Double-mapped barcodes · same tag do jagah</h3>${doubleRows.length ? statusPill(`${U.fmt(doubleRows.length)} review required`, 'red') : statusPill('Koi double mapping nahi mili', 'green')}<div class="btn-row"><button class="btn primary" id="cross-double-csv-2">⬇ Double-mapped barcodes CSV</button><button class="btn small" id="cross-barcode-csv">⬇ Saari shared barcodes CSV</button></div></div>
-        <p class="dim small">Rows jahan (a) FF aur GV me <b>alag agent</b> hai, ya (b) ek hi source me wahi barcode <b>ek se zyada rows/owners</b> me hai. Yehi "double map" cases hote hain jinme tag pehle verify karna chahiye. Allocation dates ke saath poori list CSV me milti hai. <b>Exclude rule:</b> FF side <b>Apna Payment / master ID ${esc(FF.config.eir.gvMasterId || '5845036')}</b> holder aur GV side <b>not-assigned / blank ID</b> matches double nahi maane jaate — wo normal channel flow hai (${U.fmt(ghostRows.length)} aise matches ignore hue).</p>
-        <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-rose">Barcode (FF) ↔ Serial (GV)</th><th class="tone-rose">Double-mapped?</th><th class="tone-rose">Why</th><th class="tone-rose">FF agent · TL · class</th><th class="tone-rose">GV agent · TL · class</th><th class="tone-rose num">FF rows / owners</th><th class="tone-rose num">GV rows / owners</th><th class="tone-rose">Agent pair</th></tr></thead><tbody>${doubleRows.slice(0, 150).map(doubleRowHtml).join('') || `<tr><td colspan="8">${empty('No double-mapped barcode', 'Har shared barcode ka FF aur GV owner same hai aur dono sources me ek hi row hai. 👍')}</td></tr>`}</tbody></table></div>
-        ${doubleRows.length > 150 ? `<p class="dim small">Preview me pehli 150 rows — <b>⬇ Double-mapped barcodes CSV</b> me poori list (${U.fmt(doubleRows.length)} rows) hai.</p>` : ''}
-      </div>
-      <div class="split-cards"><div class="card card-primary"><div class="card-head"><h3>Channel-wise summary</h3></div><div class="summary-grid"><div><small>FF tags issued</small><b>${U.fmt(ffIssue)}</b></div><div><small>GV tags issued</small><b>${U.fmt(gvIssue)}</b></div><div><small>FF stock tags</small><b>${U.fmt(ffStock)}</b></div><div><small>GV stock tags</small><b>${U.fmt(gvStock)}</b></div></div></div><div class="card card-success"><div class="card-head"><h3>Combined commercial summary</h3></div><div class="summary-grid"><div><small>Total issuance</small><b>${U.fmt(ffIssue + gvIssue)}</b></div><div><small>Total stock</small><b>${U.fmt(ffStock + gvStock)}</b></div><div><small>GV amount</small><b>${money(sum(rows, (r) => r.amount))}</b></div><div><small>GV commission</small><b>${money(sum(rows, (r) => r.commission), 2)}</b></div></div></div></div>
-      <div class="card card-violet"><div class="card-head"><h3>👥 Dual agents · agent naam, TL naam aur dono channel ke tags</h3><span class="dim small">${U.fmt(rows.length)} verified pairs · GV month ${esc(U.labelYM(data.month))}</span></div>
-        <div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-violet">FF agent</th><th class="tone-violet">FF TL</th><th class="tone-violet num">FF tags</th><th class="tone-violet num">FF stock</th><th class="tone-violet">GV agent</th><th class="tone-violet">GV TL</th><th class="tone-violet num">GV tags</th><th class="tone-violet num">GV stock</th><th class="tone-violet num">Shared barcodes</th><th class="tone-violet">Evidence</th><th class="tone-violet num">GV commission</th><th class="tone-violet">Class mix · FF / GV</th></tr></thead><tbody>
-        ${rows.map((r) => `<tr><td><b class="agent-link" data-agent360="${esc(r.ff.name || r.ff.id)}" data-agent360-id="${esc(r.ff.id || '')}" title="Agent 360 kholo">${esc(r.ff.name || r.ff.id)}</b><small>${esc(r.ff.id || '')} · ${esc(r.segment)}</small></td><td>${esc(r.ff.tlName || 'Direct / Unmapped')}</td><td class="num"><span class="tag-count">${U.fmt(r.ffIssuance)}</span></td><td class="num">${U.fmt(r.ffStock)}</td><td><b class="agent-link" data-agent360="${esc(r.gv.name || r.gv.id)}" data-agent360-id="${esc(r.gv.id || '')}" title="Agent 360 kholo">${esc(r.gv.name || r.gv.id)}</b><small>${esc(r.gv.id || '')}</small></td><td>${esc(r.gv.tlName || 'Direct / Unmapped')}</td><td class="num"><span class="tag-count">${U.fmt(r.gvIssuance)}</span></td><td class="num">${U.fmt(r.gvStock)}</td><td class="num"><b>${U.fmt(r.barcodeCount)}</b>${r.barcodes.size ? `<small>${esc([...r.barcodes].slice(0, 2).map((b) => U.barcode(b)).join(', '))}${r.barcodes.size > 2 ? '…' : ''}</small>` : ''}</td><td>${statusPill(r.confidence, r.methods.length > 1 ? 'green' : 'blue')}<small>${esc(r.methods.join(' + '))}</small></td><td class="num">${money(r.commission, 2)}</td><td class="tiny-mix">${esc(classMix(r.ffClasses))}<small>GV: ${esc(classMix(r.gvClasses))}</small></td></tr>`).join('') || `<tr><td colspan="12">${empty('No matching verified agents', 'Evidence/search filter change karke dekhein.')}</td></tr>`}
-      </tbody><tfoot><tr class="row-total"><td colspan="2">Total · ${U.fmt(rows.length)} dual agents</td><td class="num">${U.fmt(ffIssue)}</td><td class="num">${U.fmt(ffStock)}</td><td colspan="2"></td><td class="num">${U.fmt(gvIssue)}</td><td class="num">${U.fmt(gvStock)}</td><td class="num">${U.fmt(sum(rows, (r) => r.barcodeCount))}</td><td colspan="2" class="num">${money(sum(rows, (r) => r.commission), 2)}</td><td></td></tr></tfoot></table></div></div>
-      <div class="card card-info"><div class="card-head"><h3>TL-wise matched-channel comparison</h3><span class="dim small">GV − FF gaps · matched identities only</span></div><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-blue">FF TL ↔ GV TL</th><th class="tone-blue num">Agents</th><th class="tone-blue num">Shared barcodes</th><th class="tone-blue num">FF issuance</th><th class="tone-blue num">GV issuance</th><th class="tone-blue num">Issuance gap</th><th class="tone-blue num">FF stock</th><th class="tone-blue num">GV stock</th><th class="tone-blue num">Stock gap</th><th class="tone-blue num">GV commission</th><th class="tone-blue">Agent drill-down</th></tr></thead><tbody>${[...tlSummary.values()].sort((a,b)=>b.ff+b.gv-a.ff-a.gv).map((t)=>`<tr><td><b>${esc(t.label)}</b></td><td class="num">${U.fmt(t.agents)}</td><td class="num">${U.fmt(t.barcodes)}</td><td class="num">${U.fmt(t.ff)}</td><td class="num">${U.fmt(t.gv)}</td><td class="num"><b>${t.gv-t.ff>0?'+':''}${U.fmt(t.gv-t.ff)}</b></td><td class="num">${U.fmt(t.ffStock)}</td><td class="num">${U.fmt(t.gvStock)}</td><td class="num"><b>${t.gvStock-t.ffStock>0?'+':''}${U.fmt(t.gvStock-t.ffStock)}</b></td><td class="num">${money(t.commission,2)}</td><td><details class="tl-drill"><summary>Show ${U.fmt(t.agents)} agents</summary><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th>FF Agent / ID</th><th>GV Agent / ID</th><th>Evidence</th><th>Barcodes</th><th>FF tags / stock</th><th>GV tags / stock</th><th>GV commission</th></tr></thead><tbody>${t.agentRows.slice(0,20).map((r)=>`<tr><td><b>${esc(r.ff.name||r.ff.id)}</b><small>${esc(r.ff.id||'')} · ${esc(r.ff.tlName||'Direct / Unmapped')}</small></td><td><b>${esc(r.gv.name||r.gv.id)}</b><small>${esc(r.gv.id||'')} · ${esc(r.gv.tlName||'Direct / Unmapped')}</small></td><td>${esc(r.methods.join(' + '))}</td><td>${U.fmt(r.barcodeCount)}</td><td>${U.fmt(r.ffIssuance)} / ${U.fmt(r.ffStock)}</td><td>${U.fmt(r.gvIssuance)} / ${U.fmt(r.gvStock)}</td><td>${money(r.commission,2)}</td></tr>`).join('')}</tbody></table></div>${t.agents>20?`<small class="dim">Showing first 20 of ${U.fmt(t.agents)} agent pairs; use the full Dual Channel CSV for all rows.</small>`:''}</details></td></tr>`).join('') || `<tr><td colspan="11">No TL overlap data</td></tr>`}</tbody></table></div></div>
-      <div class="card card-warning"><div class="card-head"><h3>Barcode overlap audit · exact FF ↔ GV matches</h3><span class="dim small">${U.fmt(onlyDouble ? doubleRows.length : barcodeRows.length)} rows ${onlyDouble ? '· only double-mapped' : `· ${U.fmt(doubleRows.length)} double-mapped`}</span></div><p class="dim small">“Repeated in FF/GV” means the normalized barcode occurs more than once in that source; owner count highlights assignment across multiple agents. Today’s review uses allocation dates. ${gvAllocationDateMapped ? 'GV allocation-date mapping is active.' : 'GV assignment date is not mapped; configure it in Settings → Data source → Tag Assignment allocation-date column for complete daily coverage.'} Preview is capped for smooth loading.</p><div class="table-wrap"><table class="data-table ins-table"><thead><tr><th class="tone-slate">Barcode (FF) ↔ Serial (GV)</th><th class="tone-slate">Double-mapped?</th><th class="tone-slate">Why</th><th class="tone-slate">FF agent · TL · class</th><th class="tone-slate">GV agent · TL · class</th><th class="tone-slate num">FF rows / owners</th><th class="tone-slate num">GV rows / owners</th><th class="tone-slate">Agent pair</th></tr></thead><tbody>${(onlyDouble ? doubleRows : flaggedBarcodeRows).slice(0, 300).map(doubleRowHtml).join('') || `<tr><td colspan="8">No exact barcode join found for this filter.</td></tr>`}</tbody></table></div>${(onlyDouble ? doubleRows : flaggedBarcodeRows).length > 300 ? `<p class="dim small">Showing first 300 of ${U.fmt((onlyDouble ? doubleRows : flaggedBarcodeRows).length)} matched barcodes; use the CSV buttons for the full list.</p>` : ''}</div>`;
-    U.$('#cross-search', root).addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(e.currentTarget).get('q') || '' }); });
-    // Barcode display/export me dash wala format (608116-011-0558601) — matching normalized hi rehti hai.
-    const doubleExportRows = (list) => list.map((b) => [U.barcode(b.ffBarcode), U.barcode(b.gvSerial), b.doubleMapped ? 'YES' : 'NO', b.reasons.join(' · '), b.ffId, b.ffAgent, b.ffTl, b.ffClass, b.ffBarcodeAllocatedAt, b.ffAgentAllocatedAt, b.gvId, b.gvAgent, b.gvTl, b.gvClass, b.gvAllocatedAt, b.ffOccurrences, b.ffOwnerCount, b.gvOccurrences, b.gvOwnerCount, b.verified ? 'Resolved' : 'Ambiguous - review']);
-    const allBarcodeRows = doubleExportRows(flaggedBarcodeRows);
-    const doubleCsvRows = doubleExportRows(doubleRows);
-    const downloadDouble = () => {
-      U.downloadCsv(`dual-channel-double-mapped-barcodes-${U.dateKey(new Date())}.csv`, DUAL_BARCODE_HEADERS, doubleCsvRows);
-      if (!doubleCsvRows.length) U.toast('Is snapshot me koi double-mapped barcode nahi mila — CSV sirf header ke saath download hui', 'warn');
-    };
-    ['#cross-double-csv', '#cross-double-csv-2'].forEach((sel) => { const btn = U.$(sel, root); if (btn) btn.addEventListener('click', downloadDouble); });
-    const barcodeCsv = U.$('#cross-barcode-csv', root); if (barcodeCsv) barcodeCsv.addEventListener('click', () => U.downloadCsv(`dual-channel-barcodes-${U.stamp()}.csv`, DUAL_BARCODE_HEADERS, allBarcodeRows));
-    const agentExportRows = rows.map((r) => [r.ff.name, r.ff.id, r.ff.tlName || 'Direct / Unmapped', r.ffIssuance, r.ffStock, r.gv.name, r.gv.id, r.gv.tlName || 'Direct / Unmapped', r.gvIssuance, r.gvStock, r.barcodeCount, r.methods.join(' + '), r.confidence, r.commission, classMix(r.ffClasses), classMix(r.gvClasses)]);
-    bindExports(root, 'cross-export', `dual-channel-${U.stamp()}`, 'Dual Agents', DUAL_AGENT_HEADERS, agentExportRows, [
-      { name: 'Double-Mapped Barcodes', header: DUAL_BARCODE_HEADERS, rows: doubleCsvRows.length ? doubleCsvRows : allBarcodeRows },
-      { name: 'All Shared Barcodes', header: DUAL_BARCODE_HEADERS, rows: allBarcodeRows }
-    ]);
-    const fullCrossHeaders = DUAL_AGENT_HEADERS;
-    const barcodeReviewHeaders = DUAL_BARCODE_HEADERS;
-    const barcodeReviewDetailRows = doubleExportRows(duplicateBarcodeRows);
-    const dailyReviewRows = doubleExportRows(dailyDuplicateRows);
-    bindMetricDetails(root, 'Dual-channel agent summary', fullCrossHeaders, agentExportRows, {
-      'Dual (verified) agents': { title: 'Verified FF ↔ GV agent pairs', headers: fullCrossHeaders, rows: agentExportRows },
-      'Double-mapped barcodes': { title: `${U.fmt(doubleRows.length)} double-mapped barcode rows`, headers: barcodeReviewHeaders, rows: doubleCsvRows, stats: [`${U.fmt(ghostRows.length)} ghost-holder matches ignore hue (FF Apna Payment / GV not-assigned)`, 'Sirf asli agent ↔ asli agent conflicts double maane gaye'] },
-      'FF issuance · dual agents': { title: 'First Forward tags of matched agents', headers: fullCrossHeaders, rows: agentExportRows },
-      'GV issuance · dual agents': { title: 'GV Partner tags of matched agents', headers: fullCrossHeaders, rows: agentExportRows },
-      'Combined footprint': { title: 'Combined channel footprint by matched agent', headers: fullCrossHeaders, rows: agentExportRows },
-      'Shared / matched barcodes': { title: 'Every shared barcode with mapping flags', headers: barcodeReviewHeaders, rows: allBarcodeRows },
-      'Matched FF issuance': { title: 'First Forward side of matched agents', headers: fullCrossHeaders, rows: agentExportRows },
-      'Matched GV issuance': { title: 'GV Partner side of matched agents', headers: fullCrossHeaders, rows: agentExportRows },
-      'Net issuance gap · GV − FF': { title: 'GV minus FF per matched agent', headers: fullCrossHeaders, rows: agentExportRows },
-      'Barcode review flags': { title: 'Repeated or multi-owner matched barcodes', headers: barcodeReviewHeaders, rows: barcodeReviewDetailRows },
-      'Today’s duplicate review': { title: `Duplicate barcode assignments dated ${todayKey}`, headers: barcodeReviewHeaders, rows: dailyReviewRows }
-    });
-  }
 
   // ---- stock forecasting + historical accuracy backtest -----------------------------------------
   const forecastTabs = (view) => `<div class="forecast-tabs seg" role="tablist"><a class="seg-btn ${view !== 'accuracy' && view !== 'balance' ? 'on' : ''}" href="#/forecast" role="tab" aria-selected="${view !== 'accuracy' && view !== 'balance'}">🔭 Live projection</a><a class="seg-btn ${view === 'accuracy' ? 'on' : ''}" href="#/forecast?view=accuracy" role="tab" aria-selected="${view === 'accuracy'}">🎯 Forecast accuracy</a><a class="seg-btn ${view === 'balance' ? 'on' : ''}" href="#/forecast?view=balance" role="tab" aria-selected="${view === 'balance'}">⚖️ Stock balance</a></div>`;
@@ -2428,7 +2324,7 @@ FF.pages = FF.pages || {};
         { label: 'GV earned commission', value: money(commission, 2), foot: `${money(amount)} transaction amount · ${U.fmt(sum(gvEirRows, (r) => r.n))} EIR tags`, tone: 'g5', icon: '💰' },
         { label: 'FF commission', value: ffCommission === null ? 'Unavailable' : money(ffCommission, 2), foot: esc(ffCommissionSrc), tone: ffCommission === null ? 'g7' : 'g1', icon: '💸' }
       ])}
-      <div class="cockpit-grid"><div class="card card-primary span2"><div class="card-head"><h3>14-day channel pulse</h3><span class="dim small">Sheet-recorded issuances</span></div>${C.bars({labels,series:[{name:'First Forward',values:ffVals},{name:'GV Partner',values:gvVals}],height:230,showValues:false})}</div><div class="card card-warning"><div class="card-head"><h3>Management focus</h3></div><a class="focus-row ${lowFf+lowGv?'risk':''}" href="#/forecast?risk=High"><span>Stock cover ≤ 7 days</span><b>${U.fmt(lowFf+lowGv)}</b><small>FF ${lowFf} · GV ${lowGv}</small></a><a class="focus-row" href="#/dataQuality"><span>Run data quality checks</span><b>Open</b><small>Six source families</small></a><a class="focus-row" href="#/dualChannel"><span>Verified dual-channel agents</span><b>Review</b><small>Barcode + unique-ID evidence</small></a><a class="focus-row" href="#/followups?status=open"><span>Agent/TL follow-ups</span><b>Open</b><small>Owner and due-date timeline</small></a></div></div>
+      <div class="cockpit-grid"><div class="card card-primary span2"><div class="card-head"><h3>14-day channel pulse</h3><span class="dim small">Sheet-recorded issuances</span></div>${C.bars({labels,series:[{name:'First Forward',values:ffVals},{name:'GV Partner',values:gvVals}],height:230,showValues:false})}</div><div class="card card-warning"><div class="card-head"><h3>Management focus</h3></div><a class="focus-row ${lowFf+lowGv?'risk':''}" href="#/forecast?risk=High"><span>Stock cover ≤ 7 days</span><b>${U.fmt(lowFf+lowGv)}</b><small>FF ${lowFf} · GV ${lowGv}</small></a><a class="focus-row" href="#/dataQuality"><span>Run data quality checks</span><b>Open</b><small>Six source families</small></a><a class="focus-row" href="#/followups?status=open"><span>Agent/TL follow-ups</span><b>Open</b><small>Owner and due-date timeline</small></a></div></div>
       <div class="split-cards"><div class="card card-primary"><div class="card-head"><h3>Channel operating summary</h3></div><div class="exec-channel"><div><b>First Forward</b><span>${U.fmt(ff.total)} issued · ${U.fmt(ffStock)} stock</span><small>${U.fmt(ff.vc4)} VC4 · ${U.fmt(ff.comm)} commercial · ${ff.activeDays} active days · StockDataa me GV-parked stock (${U.fmt(ffStockExcluded)} tags — ID ${esc(FF.config.eir.gvMasterId || '5845036')} / Apna Payment) FF me count nahi hota</small></div><div><b>GV Partner</b><span>${U.fmt(gv.total)} issued · ${U.fmt(gvStock)} stock</span><small>${U.fmt(gv.vc4)} VC4 · ${U.fmt(gv.comm)} commercial · ${gv.activeAgents} agents · stock = GV agents ke paas (Tag Assignment)</small></div></div></div><div class="card card-success"><div class="card-head"><h3>Top GV commission contributors</h3><a href="#/gvCommission">Full analysis →</a></div>${C.hbars({items:top.map((r)=>({label:r.label,sub:`${r.issuances} tags`,value:r.commission})),format:(v)=>money(v,0),valueLabel:'Commission'})}</div></div>`;
     bindExports(root, 'exec-export', `executive-cockpit-${U.stamp()}`, 'Executive Summary', ['Metric','First Forward','GV Partner','Combined'], [
       ['Month-to-date issuance',ff.total,gv.total,ff.total+gv.total],['Projected month-end',ff.projected,gv.projected,ff.projected+gv.projected],['Field stock',ffStock,gvStock,ffStock+gvStock],['VC4 issuance',ff.vc4,gv.vc4,ff.vc4+gv.vc4],['Commercial issuance',ff.comm,gv.comm,ff.comm+gv.comm],['Stock cover ≤ 7 days',lowFf,lowGv,lowFf+lowGv],['FF commission (earned / rate × tags)',ffCommission===null?'Unavailable':ffCommission,commission,ffCommission===null?'Partial · GV only':ffCommission+commission]
@@ -2499,7 +2395,7 @@ FF.pages = FF.pages || {};
 
   async function renderReportStudio(root) {
     const f = FF.config.features || {}, email = (FF.auth.settings && FF.auth.settings.email) || {};
-    const reports = [['executive','Executive Cockpit'],['gvCommission','GV Commission Intelligence'],['ffCommission','FF Commission Intelligence'],['fastagChampions','FASTag Champions Leaderboards'],['dualChannel','Dual-channel Agents'],['forecast','Stock Forecast & Balance'],['dataQuality','Data Quality Center']];
+    const reports = [['executive','Executive Cockpit'],['gvCommission','GV Commission Intelligence'],['ffCommission','FF Commission Intelligence'],['forecast','Stock Forecast & Balance'],['dataQuality','Data Quality Center']];
     root.innerHTML = head('🗓️','Professional Report Studio','Open, export, print/PDF, share and deliver scheduled management reports','') + `
       <div class="ins-metrics">${metric('Daily HTML + CSV email',f.emailReport===true?'Active':'Off',`At ${Number(f.emailReportHour??21)}:00 IST`,f.emailReport===true?'good':'')}${metric('Weekly management digest',f.weeklyEmail===true?'Active':'Off',`Monday ${Number(f.weeklyEmailHour??9)}:00 IST`,f.weeklyEmail===true?'good':'')}${metric('Recipients',email.to?esc(String(email.to).split(',').length):'Not configured',email.to?esc(email.to):'Settings → SMTP')}${metric('Delivery engine',email.host?'SMTP configured':'SMTP required',email.host?esc(email.host):'Configure host/user/app password')}</div>
       <div class="report-studio-grid"><div class="card card-primary"><div class="card-head"><h3>Build / export now</h3></div><div class="ins-form"><label>Report<select class="select" id="studio-report">${reports.map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join('')}</select></label><div class="button-row"><button class="btn primary" id="studio-open">Open report</button><button class="btn" id="studio-copy">🔗 Copy share link</button><button class="btn" id="studio-print">🖨 PDF / Print</button></div><p class="dim small">CSV/Excel buttons selected report ke header me available hain. PDF uses the browser's print-to-PDF so charts and management cards stay visual.</p></div></div>
@@ -2560,186 +2456,18 @@ FF.pages = FF.pages || {};
   //   FF → S.need('agentClass') EIR agent×class×type×vrnType rows (channel 'First Forward' only,
   //        GV rows / master-ID 5845036 yahin se exclude hote hain — double count nahi)
   //   GV → G.need('master') GV Master rows (cls/group + tagType chassis + status replacement)
-  async function renderFastagChampions(root, params) {
-    const [agentClass, ffAgentsRaw] = await Promise.all([S.need('agentClass'), S.need('agents')]);
-    await S.need('daily').catch(() => []);
-    const issuance = G.issuanceRows ? G.issuanceRows() : [];
-    const months = [...new Set([...(agentClass || []).map((r) => r.ym), ...issuance.map((r) => r.ym)].filter(Boolean))].sort();
-    const month = months.includes(params.month) ? params.month : (months.at(-1) || U.reportYm());
-    const scope = ['all', 'ff', 'gv'].includes(params.scope) ? params.scope : 'all';
-    const topN = Math.max(1, Math.min(50, Number(params.top) || 10));
-    const q = clean(params.q).toLowerCase();
-    const certStore = new Map(); // 🏆 board → certificate metadata (top-3 PDF)
-    // FF agent-class rows me agentId nahi hota — REPORT/EIR agents store se naam→ID map banao.
-    const ffIdByName = new Map((ffAgentsRaw || []).filter((r) => r.channel === 'First Forward').map((r) => [normName(r.name), r.id || r.name]));
-    const ffRows = (agentClass || []).filter((r) => r.ym === month && r.channel === 'First Forward').map((r) => ({ ...r, agentId: ffIdByName.get(normName(r.name)) || '' }));
-    const gvRows = issuance.filter((r) => r.ym === month);
-
-    // ---- classification helpers (FF = EIR vrnType/type; GV = tagType/status) ----
-    const isChassis = (r) => /chassis/i.test(r.vrnType || r.tagType || '');
-    const isWrongVrn = (r) => /wrong/i.test(r.vrnType || '');
-    const isReplacement = (r) => /replacement/i.test(r.type || r.status || '');
-    const isVc4Row = (r) => (r.group || M.classGroup(r.cls)) === 'VC4';
-
-    // ---- month-scoped rows per channel (FF/GV identity conflict-free: FF = channelOf 'First Forward') ----
-    const scopeRows = (ch) => (scope === 'ff' ? (ch === 'ff' ? ffRows : []) : scope === 'gv' ? (ch === 'gv' ? gvRows : []) : (ch === 'ff' ? ffRows : gvRows));
-
-    // ---- generic ranker: full aggregation first, THEN sort + slice (category boards never truncated early) ----
-    const aggregate = (rows, keyOf, nameOf, channel) => {
-      const map = new Map();
-      for (const r of rows) {
-        const name = nameOf(r);
-        if (!name) continue;
-        if (q && ![name, String(r.agentId || ''), r.tlName || ''].join(' ').toLowerCase().includes(q)) continue;
-        const key = keyOf(r);
-        // 🧍 Direct agent ko uske TL naam se nahi, direct label se dikhao (FF: APS · GV: blank TL).
-        const tlLabel = FF.config.isDirectAgent(r, channel) ? FF.config.directLabel(r, channel) : (clean(r.tlName) || 'Unknown TL');
-        if (!map.has(key)) map.set(key, { key, name, id: clean(r.agentId || '') || '', tlName: tlLabel, total: 0, vc4: 0, commercial: 0, chassis: 0, replacement: 0, wrongVrn: 0 });
-        const o = map.get(key);
-        o.total += Number(r.n) || 1;
-        if (isVc4Row(r)) o.vc4 += Number(r.n) || 1; else o.commercial += Number(r.n) || 1;
-        if (isChassis(r)) o.chassis += Number(r.n) || 1;
-        if (isReplacement(r)) o.replacement += Number(r.n) || 1;
-        if (isWrongVrn(r)) o.wrongVrn += Number(r.n) || 1;
-      }
-      return map;
-    };
-    const board = (map, metric) => [...map.values()].filter((r) => r[metric] > 0).sort((a, b) => b[metric] - a[metric] || b.total - a.total || a.name.localeCompare(b.name)).slice(0, topN);
-
-    const med = (i) => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `<span class="dim">${i + 1}</span>`;
-    const CHAMP_HEADERS = ['Rank', 'Agent', 'ID', 'TL', 'Total', 'VC4', 'Comm', 'Chassis', 'Repl', 'Wrong VRN'];
-    const championTable = (title, icon, variant, rows, certKey) => {
-      if (!rows.length) return `<div class="card ${variant}"><div class="card-head"><h3>${icon} ${esc(title)}</h3>${statusPill('No data', 'amber')}</div><div class="card-body empty">${empty('Is period me koi row nahi', 'Month/channel change karke dekhein.')}</div></div>`;
-      return `<div class="card ${variant}"><div class="card-head"><h3>${icon} ${esc(title)}</h3><span class="dim small">Top ${U.fmt(rows.length)} · ${esc(U.labelYM(month))}</span>${certKey ? `<button class="btn small" data-cert="${esc(certKey)}" title="Top-3 champion certificates (print → Save as PDF)">🏅 Certificates</button>` : ''}</div>
-        <div class="table-wrap"><table class="data-table ins-table"><thead><tr>${CHAMP_HEADERS.map((h, i) => `<th${i >= 4 ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>
-        ${rows.map((r, i) => `<tr${i < 3 ? ' class="champ-top"' : ''}><td>${med(i)}</td><td><b>${esc(r.name)}</b>${r.id ? `<small>${esc(r.id)}</small>` : ''}</td><td>${esc(r.id || '—')}</td><td>${esc(r.tlName || '—')}</td><td class="num"><b>${U.fmt(r.total)}</b></td><td class="num">${U.fmt(r.vc4)}</td><td class="num">${U.fmt(r.commercial)}</td><td class="num">${U.fmt(r.chassis)}</td><td class="num">${U.fmt(r.replacement)}</td><td class="num">${U.fmt(r.wrongVrn)}</td></tr>`).join('')}
-        </tbody></table></div></div>`;
-    };
-
-    const boards = [];
-    const def = (key, label, icon, variant) => ({ key, label, icon, variant });
-    const agentDefs = [
-      def('total', 'Top Agents — Total Issuance', '🏆', 'card-primary'),
-      def('vc4', 'Top Agents — VC4 (Car/Jeep)', '🚗', 'card-info'),
-      def('commercial', 'Top Agents — Commercial (VC20/VC5+)', '📦', 'card-warning'),
-      def('chassis', 'Top Agents — Chassis', '🚛', 'card-violet'),
-      def('replacement', 'Top Agents — Replacement', '🔄', 'card-teal'),
-      def('wrongVrn', 'Top Agents — Wrong VRN', '❌', 'card-danger')
-    ];
-    const tlDefs = [
-      def('total', 'Top TLs — Total Issuance', '👥', 'card-success'),
-      def('vc4', 'Top TLs — VC4', '🚗', 'card-info'),
-      def('commercial', 'Top TLs — Commercial', '📦', 'card-warning')
-    ];
-    const csvRows = [];
-    for (const d of agentDefs) {
-      const ffBoard = board(aggregate(scopeRows('ff'), (r) => `FF|${clean(r.name)}`, (r) => clean(r.name), 'ff'), d.key);
-      const gvBoard = board(aggregate(scopeRows('gv'), (r) => `GV|${clean(r.agentId)}|${clean(r.agentName)}`, (r) => clean(r.agentName) || clean(r.agentId), 'gv'), d.key);
-      certStore.set(`ff|${d.key}`, { rows: ffBoard, category: d.label, channel: 'First Forward', metric: d.key, isTl: false });
-      certStore.set(`gv|${d.key}`, { rows: gvBoard, category: d.label, channel: 'GV Partner', metric: d.key, isTl: false });
-      boards.push(championTable(`${d.label} · First Forward`, d.icon, d.variant, ffBoard, d.key));
-      boards.push(championTable(`${d.label} · GV Partner`, d.icon, d.variant === 'card-primary' ? 'card-success' : d.variant, gvBoard, d.key));
-      ffBoard.forEach((r, i) => csvRows.push([`FF · ${d.label}`, i + 1, r.name, r.id, r.tlName, r.total, r.vc4, r.commercial, r.chassis, r.replacement, r.wrongVrn]));
-      gvBoard.forEach((r, i) => csvRows.push([`GV · ${d.label}`, i + 1, r.name, r.id, r.tlName, r.total, r.vc4, r.commercial, r.chassis, r.replacement, r.wrongVrn]));
-    }
-    for (const d of tlDefs) {
-      // 🧍 TL board me direct agents ek labelled "Direct pool" row banate hain — kisi asli TL me nahi ghulte.
-      const tlPool = (row, channel) => (FF.config.isDirectAgent(row, channel)
-        ? `🚫 ${FF.config.directLabel(row, channel)} (Direct pool)`
-        : (clean(row.tlName) || 'Unknown TL'));
-      const ffBoard = board(aggregate(scopeRows('ff'), (r) => `FF-TL|${tlPool(r, 'ff')}`, (r) => tlPool(r, 'ff'), 'ff'), d.key);
-      const gvBoard = board(aggregate(scopeRows('gv'), (r) => `GV-TL|${tlPool(r, 'gv')}`, (r) => tlPool(r, 'gv'), 'gv'), d.key);
-      certStore.set(`fftl|${d.key}`, { rows: ffBoard, category: d.label, channel: 'First Forward', metric: d.key, isTl: true });
-      certStore.set(`gvtl|${d.key}`, { rows: gvBoard, category: d.label, channel: 'GV Partner', metric: d.key, isTl: true });
-      boards.push(championTable(`${d.label} · First Forward`, d.icon, d.variant, ffBoard, d.key));
-      boards.push(championTable(`${d.label} · GV Partner`, d.icon, d.variant, gvBoard, d.key));
-      ffBoard.forEach((r, i) => csvRows.push([`FF TL · ${d.label}`, i + 1, r.name, '', '', r.total, r.vc4, r.commercial, r.chassis, r.replacement, r.wrongVrn]));
-      gvBoard.forEach((r, i) => csvRows.push([`GV TL · ${d.label}`, i + 1, r.name, '', '', r.total, r.vc4, r.commercial, r.chassis, r.replacement, r.wrongVrn]));
-    }
-
-    const sumAgg = (rows) => rows.reduce((n, r) => n + (Number(r.n) || 1), 0);
-    const ffAll = sumAgg(ffRows), gvAll = sumAgg(gvRows);
-    const bins = (rows) => ({
-      vc4: rows.filter(isVc4Row).reduce((n, r) => n + (Number(r.n) || 1), 0),
-      comm: rows.filter((r) => !isVc4Row(r)).reduce((n, r) => n + (Number(r.n) || 1), 0),
-      chassis: rows.filter(isChassis).reduce((n, r) => n + (Number(r.n) || 1), 0),
-      repl: rows.filter(isReplacement).reduce((n, r) => n + (Number(r.n) || 1), 0),
-      wrong: rows.filter(isWrongVrn).reduce((n, r) => n + (Number(r.n) || 1), 0)
-    });
-    const fb = bins(scopeRows('ff')), gb = bins(scopeRows('gv'));
-    // 🏆 Top-3 champion certificates — print dialog me "Save as PDF" chun kar official PDF banao.
-    const certPages = (keys) => {
-      const brand = (FF.config && FF.config.brand) || 'First Forward';
-      const pages = [];
-      (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
-        const meta = certStore.get(k);
-        if (meta && meta.rows.length) FF.certificates.topRows(meta.rows, meta.metric, 3).forEach((c) => pages.push(FF.certificates.page({ ...c, category: meta.category, channel: meta.channel, monthLabel: U.labelYM(month), brand, isTl: meta.isTl })));
-      });
-      return pages;
-    };
-    const printCerts = (keys) => {
-      const pages = certPages(keys);
-      if (!pages.length) { U.toast('Is scope me winner data nahi — channel/month badal kar try karo.', 'warn'); return; }
-      if (FF.certificates.print(FF.certificates.doc(pages, `Champions ${U.labelYM(month)}`)) === null) U.toast('Print window block hua — popup allow karke retry karo.', 'err');
-    };
-    const actions = `${exportButtons('fastag-export')} ${printButton} <button class="btn" id="cert-winners" title="FF + GV total-issuance ke top-3 certificates">🏅 Winners PDF</button>`;
-    root.innerHTML = head('🏆', 'FASTag Champions', 'Top agents & TLs — VC4, Commercial, Chassis, Replacement, Wrong VRN · FF + GV · month-wise hall of fame', actions) + `
-      <div class="source-row">${sourceChip('FF EIR agent-class', `${U.fmt(ffRows.length)} agent rows`)}${sourceChip('GV EIR issuance', `${U.fmt(sum(gvRows, (r) => r.n))} quantity units · master ID ${esc(FF.config.eir.gvMasterId || '5845036')}`)}<span class="dim small">All issuance counts EIR se · Chassis = VRN/Tag type "chassis" · Wrong VRN = FF VRN type "wrong"</span></div>
-      <div class="ins-filters">
-        <label>Month<select class="select" data-param="month">${months.slice().reverse().map((m) => `<option value="${m}" ${m === month ? 'selected' : ''}>${esc(U.labelYM(m))}</option>`).join('')}</select></label>
-        <label>Channel<select class="select" data-param="scope"><option value="all" ${scope === 'all' ? 'selected' : ''}>FF + GV</option><option value="ff" ${scope === 'ff' ? 'selected' : ''}>First Forward</option><option value="gv" ${scope === 'gv' ? 'selected' : ''}>GV Partner</option></select></label>
-        <label>Top N<input class="input" type="number" min="1" max="50" data-param="top" value="${topN}" style="width:80px"></label>
-        <form id="fc-search" class="ins-search"><input class="input" name="q" value="${esc(params.q || '')}" placeholder="Agent / TL / ID…"><button class="btn">Search</button></form>
-      </div>
-      ${vividMetrics([
-        { label: 'FF issuance (month)', value: U.fmt(ffAll), foot: `VC4 ${U.fmt(fb.vc4)} · Comm ${U.fmt(fb.comm)}`, tone: 'g1', icon: '🟦' },
-        { label: 'GV issuance (month)', value: U.fmt(gvAll), foot: `VC4 ${U.fmt(gb.vc4)} · Comm ${U.fmt(gb.comm)}`, tone: 'g5', icon: '🟩' },
-        { label: 'Chassis tags', value: `${U.fmt(fb.chassis)} <small>/ ${U.fmt(gb.chassis)}</small>`, foot: 'FF / GV · VRN–Tag type match', tone: 'g6', icon: '🚛' },
-        { label: 'Replacement tags', value: `${U.fmt(fb.repl)} <small>/ ${U.fmt(gb.repl)}</small>`, foot: 'FF / GV · type/status match', tone: 'g3', icon: '🔄' },
-        { label: 'Wrong VRN tags', value: `${U.fmt(fb.wrong)} <small>/ ${U.fmt(gb.wrong)}</small>`, foot: 'FF VRN type me "wrong"', tone: 'g7', icon: '❌' },
-        { label: 'Champion boards', value: U.fmt(boards.length), foot: `${topN} deep · medals top 3`, tone: 'g4', icon: '🏆' }
-      ])}
-      <div class="grid g-2">${boards.join('')}</div>
-      <div class="method-card"><b>Methodology</b><span>Boards month granularity par hain (EIR agent-class store). FF agents = sirf First Forward channel rows (GV master-ID rows exclude — GV side alag GV Master se, double count nahi). VC4 = class VC4; Commercial = VC20 + VC5+; Chassis = VRN/Tag type me "chassis"; Replacement = type/status me "replacement"; Wrong VRN = FF VRN type me "wrong" (GV Master me wrong-VRN flag nahi hai). Category boards poori month ke aggregate se rank hote hain — pehle top-10 total lo uske baad filter nahi.</span></div>`;
-
-    U.$('#fc-search', root).addEventListener('submit', (e) => { e.preventDefault(); FF.app.updateParams({ q: new FormData(e.currentTarget).get('q') || '' }); });
-    U.$('#cert-winners', root).addEventListener('click', () => printCerts(['ff|total', 'gv|total']));
-    U.$$('[data-cert]', root).forEach((b) => b.addEventListener('click', () => printCerts(b.dataset.cert)));
-    bindExports(root, 'fastag-export', `fastag-champions-${month}-${U.stamp()}`, 'FASTag Champions', ['Category', 'Rank', 'Name', 'ID', 'TL', 'Total', 'VC4', 'Commercial', 'Chassis', 'Replacement', 'Wrong VRN'], csvRows);
-    // 🖱 KPI cards clickable — click = us metric ka POORA data (top-N board nahi, saare agents).
-    const CH_HEADERS = ['Channel', 'Agent', 'ID', 'TL', 'Total', 'VC4', 'Commercial', 'Chassis', 'Replacement', 'Wrong VRN'];
-    const toChRows = (list, channel) => list.map((r) => [channel, r.name, r.id || '—', r.tlName || 'Direct', r.total, r.vc4, r.commercial, r.chassis, r.replacement, r.wrongVrn]);
-    const allAgg = (ch) => [...aggregate(scopeRows(ch), ch === 'ff' ? (r) => `FF|${clean(r.name)}` : (r) => `GV|${clean(r.agentId)}|${clean(r.agentName)}`, ch === 'ff' ? (r) => clean(r.name) : (r) => clean(r.agentName) || clean(r.agentId)).values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
-    const ffAllAgg = allAgg('ff'), gvAllAgg = allAgg('gv');
-    const withMetric = (list, key) => list.filter((r) => r[key] > 0).sort((a, b) => b[key] - a[key] || b.total - a.total || a.name.localeCompare(b.name));
-    const catRows = (key) => [...toChRows(withMetric(ffAllAgg, key), 'First Forward'), ...toChRows(withMetric(gvAllAgg, key), 'GV Partner')];
-    const boardRows = [];
-    certStore.forEach((meta) => {
-      meta.rows.forEach((r, i) => boardRows.push([meta.category, meta.channel, meta.isTl ? 'TL' : 'Agent', i + 1, r.name, r.id || '—', r.tlName || 'Direct', U.fmt(r[meta.metric] ?? r.total), U.fmt(r.total)]));
-    });
-    bindMetricDetails(root, `FASTag Champions · ${U.labelYM(month)}`, CH_HEADERS, [...toChRows(ffAllAgg, 'First Forward'), ...toChRows(gvAllAgg, 'GV Partner')], {
-      'FF issuance (month)': { title: 'First Forward — saare agents', headers: CH_HEADERS, rows: toChRows(ffAllAgg, 'First Forward'), stats: [`${U.fmt(ffAllAgg.length)} agents · ${esc(U.labelYM(month))}`, `Scope: ${scope === 'all' ? 'FF + GV' : scope === 'ff' ? 'First Forward' : 'GV Partner'}`] },
-      'GV issuance (month)': { title: 'GV Partner — saare agents', headers: CH_HEADERS, rows: toChRows(gvAllAgg, 'GV Partner'), stats: [`${U.fmt(gvAllAgg.length)} agents · ${esc(U.labelYM(month))}`] },
-      'Chassis tags': { title: 'Agent-wise chassis tags (FF + GV)', headers: CH_HEADERS, rows: catRows('chassis'), stats: [`FF ${U.fmt(fb.chassis)} · GV ${U.fmt(gb.chassis)}`, 'VRN/Tag type me "chassis"'] },
-      'Replacement tags': { title: 'Agent-wise replacement tags (FF + GV)', headers: CH_HEADERS, rows: catRows('replacement'), stats: [`FF ${U.fmt(fb.repl)} · GV ${U.fmt(gb.repl)}`, 'type/status me "replacement"'] },
-      'Wrong VRN tags': { title: 'Agent-wise Wrong VRN tags', headers: CH_HEADERS, rows: catRows('wrongVrn'), stats: [`FF ${U.fmt(fb.wrong)} · GV ${U.fmt(gb.wrong)}`, 'FF VRN type me "wrong"'] },
-      'Champion boards': { title: 'Har board ka poora ranked data', headers: ['Board', 'Channel', 'Level', 'Rank', 'Name', 'ID', 'TL', 'Metric value', 'Total'], rows: boardRows, stats: [`${U.fmt(boards.length)} boards · top ${topN} deep`] }
-    });
-  }
 
   function reset() { mem.details = null; mem.detailsPromise = null; mem.masterIndex = null; mem.ffComm = null; mem.ffCommPromise = null; mem.cross = null; mem.quality = null; mem.workspaceVersion++; mem.workspace = null; mem.workspacePromise = null; mem.forecastHistory = null; mem.forecastHistoryPromise = null; mem.payout = null; mem.payoutPromise = null; }
 
   FF.pages.executive = { title: 'Executive Cockpit', render: renderExecutive };
   FF.pages.gvCommission = { title: 'GV Commission', render: renderGvCommission };
   FF.pages.ffCommission = { title: 'FF Commission', render: renderFfCommission };
-  FF.pages.dualChannel = { title: 'Dual-channel Agents', render: renderDualChannel };
   FF.pages.masterStock = { title: 'Master Stock', render: renderMasterStock };
   FF.pages.forecast = { title: 'Stock Forecast', render: renderForecast };
   FF.pages.dataQuality = { title: 'Data Quality', render: renderDataQuality };
   FF.pages.savedViews = { title: 'Saved Views', render: renderSavedViews };
   FF.pages.reportStudio = { title: 'Report Studio', render: renderReportStudio };
   FF.pages.followups = { title: 'Notes & Follow-ups', render: renderFollowups };
-  FF.pages.fastagChampions = { title: 'FASTag Champions', render: renderFastagChampions };
   // v3.8.3: FF.data.clearCache() ho (fresh sync / smoke) to commission analysis cache bhi invalidate ho.
   if (FF.data && typeof FF.data.clearCache === 'function' && !FF.data.clearCache.__insightsWrapped) {
     const origClear = FF.data.clearCache;

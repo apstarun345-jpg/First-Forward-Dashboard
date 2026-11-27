@@ -130,20 +130,16 @@ window.FF = window.FF || {};
     { id: 'gvStock', icon: '📦', label: 'GV Stock', desc: 'Tag Assignment stock search', perm: 'gvStock', group: 'Reports', twinOf: 'stock' },
     { id: 'gvStockReport', icon: '📋', label: 'GV Stock Report', desc: 'GV REPORT · agent, TL, class & dispatch', perm: 'gvStockReport', group: 'GV Partner' },
     { id: 'gvApiReport', icon: '🛰️', label: 'GV API Report', desc: 'Direct API · date range · agent/TL filter · VRN/tag multi-search · commission class-wise', perm: 'gvApiReport', group: 'GV Partner', adminOnly: true },
-    { id: 'gvPayout', icon: '💸', label: 'Commission Payout', desc: 'Agent / TL commission · class · last & current month tags', perm: 'gvPayout', group: 'GV Partner', adminOnly: true },
     { id: 'fastagMapping', icon: '🔗', label: 'FASTag Mapping', desc: 'StockDataa lookup · barcode range / tag ID / agent mapping · CSV', perm: 'fastagMapping', group: 'GV Partner', adminOnly: true },
-    { id: 'dualChannel', icon: '🔗', label: 'Dual-channel Agents', desc: 'Verified GV + FF overlap · separate & combined', perm: 'dualChannel', group: 'Cross Channel' },
     { id: 'dataQuality', icon: '🕵️', label: 'Anomaly Detective', desc: 'Issuance drops · zero-activity agents · duplicate IDs · data mismatches', perm: 'dataQuality', group: 'Cross Channel' },
     { id: 'dispatchPlan', icon: '🚚', label: 'Dispatch Planner', desc: 'Auto box plan · printable pick-list · WhatsApp', perm: 'dispatchPlan', group: 'Cross Channel' },
     { id: 'multiCustomer', icon: '👥', label: 'Multiple Customer ID', desc: 'EIR customer ID jinke 2+ tags — month-wise count, issuing agent (GV Master se bhi), channel', perm: 'multiCustomer', group: 'Cross Channel' },
     { id: 'directAgents', icon: '🧍', label: 'Direct Agents & TLs', desc: 'FF: TL Name APS · GV: TL ID + Name blank — ek hi rule poore site par', perm: 'directAgents', group: 'Cross Channel' },
     { id: 'npciStatus', icon: '🛰️', label: 'NPCI Status', desc: 'Tag ID / VRN / Chassis → NPCI status · bulk + CSV', perm: 'npci', group: 'Cross Channel' },
-    { id: 'unusual', icon: '🚨', label: 'Unusual Activity', desc: 'High Wrong VRN · Replacement · Chassis · single-day spike — agent-wise flags (FF + GV)', perm: 'unusual', group: 'Cross Channel' },
     { id: 'tollDebit', icon: '🛣', label: 'Toll Debit', desc: 'Roz ka toll debit · date-wise · class-wise (TVC) · ginti + ₹', perm: 'tollDebit', group: 'Reports' },
     { id: 'agentsOverview', icon: '🧮', label: 'GV & FF Agents Summary', desc: 'Agents with stock · direct vs TL · active vs inactive · clickable lists', perm: 'agentsOverview', group: 'Reports' },
     { id: 'ffAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'FF + GV · agent or TL → stock · issuance · ageing · PDF', perm: 'ffAgentSummary', group: 'Reports', twin: 'gvAgentSummary' },
     { id: 'gvAgentSummary', icon: '📄', label: 'Agent / TL Summary', desc: 'GV agent or TL → stock · issuance · ageing · PDF', perm: 'gvAgentSummary', group: 'Reports', twinOf: 'ffAgentSummary' },
-    { id: 'fastagChampions', icon: '🏆', label: 'FASTag Champions', desc: 'Top agents/TLs by VC4, Commercial, Chassis, Replacement, Wrong VRN — FF & GV', perm: 'fastagChampions', group: 'Cross Channel' },
   ];
   const GROUP_ICON = { 'Reports': '📊', 'Management': '🧭', 'First Forward': '🟦', 'GV Partner': '🟩', 'Cross Channel': '🔗', 'Workspace': '🗂️', 'Account': '👤', 'Wow Zone': '🎉' };
   // ── 🧹 v3.62 · RETIRED PAGES ────────────────────────────────────────────────────────────────────
@@ -161,6 +157,7 @@ window.FF = window.FF || {};
     radar: 'home', reportCards: 'home', sprints: 'home',
     // v242 — site halki: ye pages / sheet tabs sidebar se hata diye (purana link khule to Home)
     rangeReport: 'home', teamMap: 'home', masterStock: 'home', newAgents: 'home',
+    fastagChampions: 'performance', unusual: 'home', dualChannel: 'home', gvPayout: 'gvDashboard',   // v3.125.579 — pages hata di gayi
     // v3.80 — GV vs First Forward page hata diya (purana link khule to Dashboard)
     compare: 'dashboard'
   };

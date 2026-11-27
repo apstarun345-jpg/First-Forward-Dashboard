@@ -28,6 +28,7 @@ const RETIRED = {
   arena: 'home', fame: 'home', warRoom: 'home', activity: 'home', network: 'home',
   radar: 'home', reportCards: 'home', sprints: 'home',
   rangeReport: 'home', teamMap: 'home', masterStock: 'home', newAgents: 'home',   // v242
+  fastagChampions: 'performance', unusual: 'home', dualChannel: 'home', gvPayout: 'gvDashboard',   // v3.125.579
   compare: 'dashboard'   // v3.80
 };
 
@@ -41,8 +42,8 @@ test('sidebar me retired pages nahi hain (aur naya page add karne par bhi ye loc
   // 👀 jo bache hain wo bache rehne chahiye (galti se kuch zyada na kat jaaye)
   for (const keep of ['home', 'tagIssued', 'targets', 'tagRequest', 'masterSearch',
     'dashboard', 'trend', 'performance', 'stock', 'gvDashboard', 'gvTrend', 'gvPerformance', 'gvStock',
-    'gvStockReport', 'dualChannel', 'dataQuality', 'dispatchPlan', 'directAgents',
-    'unusual', 'fastagChampions', 'ffAgentSummary', 'gvAgentSummary']) {
+    'gvStockReport', 'dataQuality', 'dispatchPlan', 'directAgents',
+    'ffAgentSummary', 'gvAgentSummary']) {
     assert.ok(ids.includes(keep), `"${keep}" sidebar me rehna chahiye`);
   }
   assert.ok(!/group: 'Wow Zone'/.test(block), 'Wow Zone group gaya');

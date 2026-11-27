@@ -267,12 +267,12 @@ test('lazy.js: page ka module load karta hai, order sahi, dobara load nahi', asy
   const lazy = win.FF.lazy;
   assert.ok(lazy && typeof lazy.ensure === 'function');
   assert.equal((lazy.GROUPS.trend || []).join(','), 'trend');
-  // 🧹 v3.62 — `executive` page retire ho gayi, isliye yahi INSIGHT_DEPS check ab dualChannel par
+  // 🧹 v3.62 — `executive` page retire ho gayi, isliye yahi INSIGHT_DEPS check ab dataQuality par
   // hota hai (dono ka module set same hai: insights → directAgents → certificates → cockpit).
-  assert.equal((lazy.GROUPS.dualChannel || []).join(','), 'insights,directAgents,certificates,cockpit', 'transitive dependencies resolve before page module');
-  await lazy.ensure('dualChannel');
+  assert.equal((lazy.GROUPS.dataQuality || []).join(','), 'insights,directAgents,certificates,cockpit', 'transitive dependencies resolve before page module');
+  await lazy.ensure('dataQuality');
   assert.deepEqual(requested, ['./insights.js?v=45', './directAgents.js?v=45', './certificates.js?v=45', './cockpit.js?v=45'], 'order + version sahi');
-  await lazy.ensure('dualChannel');
+  await lazy.ensure('dataQuality');
   assert.equal(requested.length, 4, 'dedup: dobara request nahi');
   assert.ok(lazy.WARM.length >= 5 && lazy.WARM.includes('insights'), 'warm list me bhaari modules aakhir me');
   assert.ok(lazy.GROUPS.settings.includes('settings'), 'settings page ka module lazy hai');
