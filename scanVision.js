@@ -100,22 +100,24 @@
   }
 
   /** Barcode jaisi (seedhi, ek hi disha ki) lakeeron wali jagah — gradient coherence se. Return: [{n, ang, cx, cy, pts, w, h}] (work-canvas px) */
-  function locate(work) {
+  function locate(work, opt) {
+    opt = opt || {};
     // bada photo / collage: 1000px ke overlapping tukdon me (barcode ki lakeeren chhoti na hon), phir milte-julte regions ek
     const T = 1000, STEP = 750, W0 = work.width, H0 = work.height;
-    if (Math.max(W0, H0) <= 1300) return locateTile(work, 0, 0);
+    if (Math.max(W0, H0) <= 1300) return locateTile(work, 0, 0, opt);
     const all = [];
     for (let y = 0; y < H0; y += STEP) for (let x = 0; x < W0; x += STEP) {
       const tw = Math.min(T, W0 - x), th = Math.min(T, H0 - y); if (tw < 200 || th < 200) continue;
       const c = mk(tw, th), cx = ctx2(c); cx.drawImage(work, x, y, tw, th, 0, 0, tw, th);
-      all.push(...locateTile(c, x, y));
+      all.push(...locateTile(c, x, y, opt));
       if (x + T >= W0) break;
     }
     const out = []; all.sort((a, b) => b.n - a.n);
     for (const r of all) if (!out.some((o) => Math.hypot(o.cx - r.cx, o.cy - r.cy) < Math.max(70, 0.35 * Math.max(o.w, r.w)))) out.push(r);
     return out;
   }
-  function locateTile(work, ox, oy) {
+  function locateTile(work, ox, oy, opt) {
+    opt = opt || {}; const ALT = opt.alt != null ? opt.alt : 2.5, COH = opt.coh != null ? opt.coh : 0.78, MINB = opt.minBlocks != null ? opt.minBlocks : 8;
     const S = Math.min(1, 1000 / Math.max(work.width, work.height)), w = Math.round(work.width * S), h = Math.round(work.height * S);
     const c = mk(w, h), x = ctx2(c); x.drawImage(work, 0, 0, w, h); const d = x.getImageData(0, 0, w, h).data;
     const g = new Float32Array(w * h); for (let i = 0; i < w * h; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) / 256;
@@ -140,7 +142,7 @@
       blk.push({ e: e / (B * B), coh: e > 0 ? Math.sqrt((jxx - jyy) ** 2 + 4 * jxy * jxy) / e : 0, ang: bang, alt: rows ? alt / rows : 0 });
     }
     const en = blk.map((b) => b.e).sort((a, b) => a - b), thr = Math.max(300, en[Math.floor(en.length * 0.6)] || 0);
-    blk.forEach((b) => { b.ok = b.coh > 0.78 && b.e > thr && b.alt >= 2.5; });
+    blk.forEach((b) => { b.ok = b.coh > COH && b.e > thr && b.alt >= ALT; });
     const lab = new Int32Array(bw * bh).fill(-1), comps = [];
     for (let i = 0; i < blk.length; i++) {
       if (!blk[i].ok || lab[i] >= 0) continue;
@@ -156,7 +158,7 @@
       }
       comps.push(m);
     }
-    return comps.filter((m) => m.length >= 8).map((m) => {
+    return comps.filter((m) => m.length >= MINB).map((m) => {
       let sx = 0, sy = 0; m.forEach((k) => { sx += Math.cos(2 * blk[k].ang); sy += Math.sin(2 * blk[k].ang); });
       const ang = 0.5 * Math.atan2(sy, sx), pts = m.map((k) => [((k % bw) * B + B / 2) / S + ox, (((k / bw) | 0) * B + B / 2) / S + oy]);
       const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length, cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
