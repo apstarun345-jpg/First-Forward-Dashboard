@@ -777,23 +777,31 @@ FF.pages = FF.pages || {};
       </div>`;
   }
 
+  // v3.125.554 — stock class-wise (VC4, VC5, VC6 … VC20) — 'Commercial' ek bucket nahi
+  const clsNum = (c) => { const m = String(c || '').match(/\d+/); return m ? Number(m[0]) : 999; };
+  const clsName = (c) => { const t = String(c || '').trim().toUpperCase().replace(/\s+/g, ''); return t || '—'; };
+  function clsTotals(rows) { const m = new Map(); (rows || []).forEach((r) => { const k = clsName(r.cls); m.set(k, (m.get(k) || 0) + (Number(r.n) || 0)); }); return [...m.entries()].filter(([, n]) => n > 0).sort((a, b) => clsNum(a[0]) - clsNum(b[0]) || a[0].localeCompare(b[0])); }
   function stockHtml(ffStock, gvStock, sf) {
     const ff = ffStock || { total: 0, vc4: 0, comm: 0, rows: [] };
     const gv = gvStock || { total: 0, vc4: 0, comm: 0, rows: [] };
     const ffRate = M.summary(sf.ff, U.reportYm(TODAY())).avgPerDay || 0;
     const gvRate = M.summary(sf.gv, U.reportYm(TODAY())).avgPerDay || 0;
     const cover = (total, rate) => (rate > 0 ? U.fmt(total / rate, true) : '—');
+    const allCls = [...new Set([...(ff.byCls || []), ...(gv.byCls || [])].map((x) => x[0]))].sort((a, b) => clsNum(a) - clsNum(b) || a.localeCompare(b));
+    const clsLabels = allCls.length ? allCls : ['VC4', 'Commercial'];
+    const pick = (st, fb) => (allCls.length ? allCls.map((c) => ((st.byCls || []).find((x) => x[0] === c) || [0, 0])[1]) : fb);
     const bars = C.bars({
-      labels: ['VC4', 'Commercial'],
+      labels: clsLabels,
       height: 190,
       series: [
-        { name: 'First Forward · StockDataa', values: [ff.vc4, ff.comm], color: '#6366f1' },
-        { name: 'GV Partner · Tag Assignment', values: [gv.vc4, gv.comm], color: '#0d9488' }
+        { name: 'First Forward · StockDataa', values: pick(ff, [ff.vc4, ff.comm]), color: '#6366f1' },
+        { name: 'GV Partner · Tag Assignment', values: pick(gv, [gv.vc4, gv.comm]), color: '#0d9488' }
       ],
       legendAlways: true
     });
-    const ffDonut = C.donut({ items: [{ label: 'VC4', value: ff.vc4 }, { label: 'Commercial', value: ff.comm }], subtitle: 'FF stock' });
-    const gvDonut = C.donut({ items: [{ label: 'VC4', value: gv.vc4 }, { label: 'Commercial', value: gv.comm }], subtitle: 'GV stock' });
+    const clsItems = (st) => ((st.byCls || []).length ? st.byCls.map(([label, value]) => ({ label, value })) : [{ label: 'VC4', value: st.vc4 }, { label: 'Commercial', value: st.comm }]);
+    const ffDonut = C.donut({ items: clsItems(ff), subtitle: 'FF stock' });
+    const gvDonut = C.donut({ items: clsItems(gv), subtitle: 'GV stock' });
     const topList = (rows, cls) => {
       const list = (rows || []).slice(0, 5);
       if (!list.length) return '<p class="dim small">Koi stock row nahi mili.</p>';
@@ -2176,6 +2184,7 @@ FF.pages = FF.pages || {};
       total: sumN(ffStockRows),
       vc4: sumN(ffStockRows.filter((r) => r.group === 'VC4')),
       comm: sumN(ffStockRows.filter((r) => r.group !== 'VC4')),
+      byCls: clsTotals(ffStockRows),
       rows: (() => {
         const byTl = new Map();
         for (const r of ffStockRows) byTl.set(r.tlName || '—', (byTl.get(r.tlName || '—') || 0) + (Number(r.n) || 0));
@@ -2187,6 +2196,7 @@ FF.pages = FF.pages || {};
       total: sumN(gvStockRows),
       vc4: sumN(gvStockRows.filter((r) => r.group === 'VC4')),
       comm: sumN(gvStockRows.filter((r) => r.group !== 'VC4')),
+      byCls: clsTotals(gvStockRows),
       rows: []
     };
     stageT('stockHtml', () => { stockMount.innerHTML = stockHtml(ffStock, gvStock, sf); });

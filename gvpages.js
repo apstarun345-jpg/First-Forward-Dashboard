@@ -386,7 +386,7 @@ FF.pages = FF.pages || {};
     const bigCls = clsRank.length ? clsRank[0][0] : '';
     const topTl = byTl.find((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true) || {};
     const kpis = [
-      kpi('g9', 'GV Stock in Field', '📦', U.fmt(total), `VC4 <b>${U.fmt(vc4)}</b> (${U.fmtPct(U.pctOf(vc4, total), 0)}) · Commercial <b>${U.fmt(comm)}</b>`),
+      kpi('g9', 'GV Stock in Field', '📦', U.fmt(total), clsRank.map(([c, n]) => `${esc(c)} <b>${U.fmt(n)}</b>`).join(' · ')),
       kpi('g12', 'Stock Days Cover', '⏳', perDay ? U.fmt(total / perDay) : '—', perDay ? `GV avg ${U.fmt(perDay)} tags/day par` : 'Issuance data load nahi hua'),
       kpi('g10', 'TLs with Stock', '👥', U.fmt(byTl.filter((r) => FF.config.isRealTl(r.tlName) && r.directAgent !== true).length), `🚫 Direct agents (no TL): <b>${U.fmt((byTl.filter((r) => !FF.config.isRealTl(r.tlName) || r.directAgent === true).reduce((a, r) => a + r.n, 0)))}</b> tags`),
       kpi('g8', 'Agents with Stock', '🧑‍💼', U.fmt(byAgent.length), `Avg <b>${U.fmt(byAgent.length ? total / byAgent.length : 0)}</b> tags / agent`),
@@ -398,7 +398,7 @@ FF.pages = FF.pages || {};
     if (stockView === 'overview') {
       viewHtml = `<div class="grid g-2">
         ${card('🍩 Stock by Class', C.donut({ items: byClass.map((r) => ({ label: r.cls, value: r.n })), subtitle: 'in stock' }))}
-        ${card('⚖️ VC4 vs Commercial', `<div class="grid g-2" style="margin-bottom:0"><div>${C.bars({ labels: ['VC4', 'Commercial'], height: 200, series: [{ name: 'Stock', values: [vc4, comm], color: '#0d9488' }], showValues: true })}</div><div>${tableHtml(['Class', 'Stock', 'Share'], byClass.map((r) => `<tr><td>${esc(r.cls)} <span class="dim">${esc(r.group)}</span></td><td class="num"><b>${U.fmt(r.n)}</b></td><td class="num">${U.fmtPct(U.pctOf(r.n, total), 0)}</td></tr>`), 1)}</div></div>`)}
+        ${card('⚖️ Class-wise stock', `<div class="grid g-2" style="margin-bottom:0"><div>${C.bars({ labels: clsRank.map((x) => x[0]), height: 200, series: [{ name: 'Stock', values: clsRank.map((x) => x[1]), color: '#0d9488' }], showValues: true })}</div><div>${tableHtml(['Class', 'Stock', 'Share'], byClass.map((r) => `<tr><td>${esc(r.cls)} <span class="dim">${esc(r.group)}</span></td><td class="num"><b>${U.fmt(r.n)}</b></td><td class="num">${U.fmtPct(U.pctOf(r.n, total), 0)}</td></tr>`), 1)}</div></div>`)}
       </div>
       ${card('🏬 TL-wise GV Stock', tableHtml(['#', 'TL', 'Stock', 'VC4', 'Commercial', 'Share', ''], byTl.slice(0, 60).map((t, i) => {
         const cls = byTlClass.filter((r) => norm(r.tlName) === norm(t.tlName));
