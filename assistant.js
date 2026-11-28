@@ -121,6 +121,18 @@ window.FF = window.FF || {};
     // thode dashboard facts de do (rule-based jawab se) taaki AI hawa me number na bole
     let facts = '';
     for (const fq of ['aaj ka total issuance', 'stock kya hai']) { try { facts += fq + ': ' + plain(await answer(fq)).slice(0, 900) + '\n'; } catch { /* optional */ } }
+    // 🆓 Chrome ka built-in on-device AI (Gemini Nano) — bina key, bina internet kharch. Sirf desktop Chrome jab model available ho.
+    try {
+      const LM = window.LanguageModel || (window.ai && window.ai.languageModel);
+      if (LM && LM.create) {
+        const av = LM.availability ? await LM.availability() : 'available';
+        if (av === 'available' || av === 'readily') {
+          const sess = await LM.create({ initialPrompts: [{ role: 'system', content: 'Tum JARVIS ho, ApnaPayment FASTag dashboard ke assistant. Hinglish me 2-3 line jawab do. Sirf diye gaye facts se bolo; nahi pata to bolo "ye mere paas nahi hai". Number mat banao.\nFACTS:\n' + facts }] });
+          const txt = String(await sess.prompt(q) || '').trim(); try { sess.destroy && sess.destroy(); } catch { /* ok */ }
+          if (txt) { const html = esc(txt).replace(/\n/g, '<br>'); return ans(`🤖 ${html}`, `🤖 ${html}`); }
+        }
+      }
+    } catch { /* built-in AI na ho to aage */ }
     try {
       const r = await A('/api/jarvis/ask', 'POST', { q, facts, history: jvHist });
       if (r && r.ok && r.text) {
@@ -128,7 +140,7 @@ window.FF = window.FF || {};
         const html = esc(r.text).replace(/\n/g, '<br>');
         return ans(`🤖 ${html}`, `🤖 ${html}`);
       }
-      if (r && r.reason === 'no_key') return ans('🤖 JARVIS AI abhi off hai — Render env me <b>ANTHROPIC_API_KEY</b> daalo, phir har sawaal ka jawab milega.', '🤖 JARVIS AI is off — add <b>ANTHROPIC_API_KEY</b> in Render env.');
+      if (r && r.reason === 'no_key') return ans('🤖 JARVIS AI abhi off hai — desktop Chrome me built-in AI chalu karo (chrome://flags → Prompt API for Gemini Nano) ya Render env me free <b>GEMINI_API_KEY</b> daalo (aistudio.google.com, card nahi lagta).', '🤖 JARVIS AI is off — enable Chrome built-in AI (chrome://flags → Prompt API for Gemini Nano) or add a free <b>GEMINI_API_KEY</b> in Render env.');
     } catch { /* fallback */ }
     return null;
   }

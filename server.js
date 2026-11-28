@@ -9802,30 +9802,29 @@ async function handleApi(req, res, url) {
   // 🤖 v3.125.588 — JARVIS: free-form sawaal ka AI jawab (ANTHROPIC_API_KEY env chahiye) + kaam ki queue (portal/report tasks)
   if (p === '/api/jarvis/status' && method === 'GET') {
     requireAdmin(user);
-    return sendJson(res, 200, { ok: true, ai: !!process.env.ANTHROPIC_API_KEY, model: process.env.JARVIS_MODEL || 'claude-sonnet-5-5' });
+    return sendJson(res, 200, { ok: true, ai: !!process.env.GEMINI_API_KEY, provider: 'gemini-free' });
   }
+  // 🆓 Optional free brain: Google Gemini free tier (GEMINI_API_KEY, card nahi lagta). Key na ho to browser ka built-in AI / rule engine chalta hai.
   if (p === '/api/jarvis/ask' && method === 'POST') {
     requireAdmin(user);
-    const key = process.env.ANTHROPIC_API_KEY;
+    const key = process.env.GEMINI_API_KEY;
     if (!key) return sendJson(res, 200, { ok: false, reason: 'no_key' });
     const b = await readBody(req), q = String(b.q || '').slice(0, 800).trim();
     if (!q) throw new HttpError(400, 'Sawaal khaali hai');
-    const facts = String(b.facts || '').slice(0, 4000), hist = (Array.isArray(b.history) ? b.history : []).slice(-6)
-      .map((m) => ({ role: m && m.role === 'assistant' ? 'assistant' : 'user', content: String((m && m.content) || '').slice(0, 800) })).filter((m) => m.content);
-    const sys = 'Tum JARVIS ho — ApnaPayment (FASTag, IDFC FIRST Bank) ke owner Tarun ka assistant. Hinglish me, bahut chhota (2-4 line) jawab do. '
-      + 'Sirf neeche diye dashboard facts aur sawaal ke hisaab se bolo; data na ho to saaf bolo "ye mere paas nahi hai", number kabhi mat banao. '
-      + 'Portal login/report download jaise kaam ke liye bolo ki main task queue me daal sakta hoon.\n\nDASHBOARD FACTS:\n' + (facts || '(koi nahi)');
+    const facts = String(b.facts || '').slice(0, 4000);
+    const sys = 'Tum JARVIS ho — ApnaPayment (FASTag) ke owner Tarun ka assistant. Hinglish me 2-4 line ka jawab. Sirf neeche diye facts se bolo; data na ho to bolo "ye mere paas nahi hai", number mat banao.\n\nFACTS:\n' + (facts || '(koi nahi)');
+    const contents = [...(Array.isArray(b.history) ? b.history : []).slice(-6).map((m) => ({ role: m && m.role === 'assistant' ? 'model' : 'user', parts: [{ text: String((m && m.content) || '').slice(0, 800) }] })), { role: 'user', parts: [{ text: q }] }];
     const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 25e3);
     try {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST', signal: ctl.signal,
-        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: process.env.JARVIS_MODEL || 'claude-sonnet-5-5', max_tokens: 500, system: sys, messages: [...hist, { role: 'user', content: q }] })
+      const model = process.env.JARVIS_MODEL || 'gemini-2.0-flash';
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST', signal: ctl.signal, headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig: { maxOutputTokens: 500 } })
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) return sendJson(res, 200, { ok: false, reason: 'api', error: String((j.error && j.error.message) || r.status).slice(0, 160) });
-      const text = (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
-      return sendJson(res, 200, { ok: true, text });
+      const text = (((j.candidates || [])[0] || {}).content || {}).parts;
+      return sendJson(res, 200, { ok: true, text: (text || []).map((x) => x.text || '').join('\n').trim() });
     } catch (err) {
       return sendJson(res, 200, { ok: false, reason: 'net', error: String((err && err.message) || err).slice(0, 120) });
     } finally { clearTimeout(to); }
