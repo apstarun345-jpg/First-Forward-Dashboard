@@ -308,7 +308,27 @@ FF.pages = FF.pages || {};
       const ORDER = ['ffReport', 'agents', 'stockAgents', 'gvMaster', 'gvReport', 'gvStockAgent', 'gvStockTl'];
       const settled = await settleSoon(sources, LIMITS.lightSoftMs);
       for (const name of ORDER) if (settled[name] && settled[name].status === 'fulfilled') await ingest[name](settled[name].value);
+      // v3.125.622 — Sheet4 (agent master) ke agents jinka stock/issuance nahi: unka bhi profile (search me aaye).
+      const ingestRegistry = (rows) => {
+        let added = 0;
+        for (const r of rows || []) {
+          const a = clean(r.a || r.b), nm = clean(r.n);
+          if (!a || !nm || /^na$/i.test(a)) continue;
+          if (idx.ids.has(normId(a))) continue;
+          const p = person(idx, 'ff-agent', nm, r.tn, '', a);
+          if (!p) continue;
+          rememberId(p, a); if (clean(r.b) && clean(r.b) !== a) rememberId(p, r.b); rememberTlId(p, r.tid);
+          indexId(a, { name: nm, kind: 'ff-agent', tl: clean(r.tn) });
+          addMobile(r.mo, nm, 'ff-agent', r.tn);
+          added++;
+        }
+        return added;
+      };
+      try { if (FF.aliases && FF.aliases.all) ingestRegistry(FF.aliases.all()); } catch { /* optional */ }
       indexLookups(idx);
+      try {   // list abhi load nahi hui thi → aate hi jodo
+        if (FF.aliases && FF.aliases.load && !(FF.aliases.all && FF.aliases.all().length)) FF.aliases.load().then(() => { if (generation !== state.generation) return; if (ingestRegistry(FF.aliases.all())) { indexLookups(idx); emit(); } }).catch(() => {});
+      } catch { /* optional */ }
       if (generation !== state.generation) return state.light;
       state.light = idx;
       state.lightPromise = null;

@@ -273,7 +273,7 @@
     }, true);
     // data login ke baad lazily load (idle)
     window.addEventListener('ff:data-loaded', () => { setTimeout(() => { load().catch(() => {}); }, 2500); }, { once: true });
-    return { load, resolve, hits, map, of, mobileOf, chipsHtml, paint, _build: build };
+    return { load, resolve, hits, map, of, mobileOf, chipsHtml, paint, all: () => list || [], _build: build };
   })();
   FF.aliases = Aliases;
   FF.newAgentTag = NewAgent;
