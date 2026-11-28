@@ -709,20 +709,22 @@ FF.pages = FF.pages || {};
     box.innerHTML = `<div class="bcc-emp-cards">${card('Aaj ke scan', U.fmt(emp.today), 'IST aaj', 'blue')}${card('Abhi active', U.fmt(active.length), active.slice(0, 3).join(', ') || 'koi nahi (5 min)', active.length ? 'green' : '')}${card('Kul scan', U.fmt(emp.total), U.fmt(names.length) + ' employee')}${card('🔁 Duplicate koshish', U.fmt(dupAll), 'pehle se scan hue', dupAll ? 'amber' : '')}${card('⛔ Galat scan', U.fmt(wrongAll), 'issued / stock me nahi', wrongAll ? 'red' : '')}</div>
       <details class="bcc-emp-det" open><summary>👥 Employee-wise live</summary><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Employee</th><th class="num">Aaj</th><th class="num">1 ghanta</th><th class="num">Kul</th><th>Last scan</th><th class="num">Duplicate</th><th class="num">Issued</th><th class="num">Not found</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
   }
+  // 📸 v3.125.610 — photo se padhe (confirm se pehle) barcode seedhe table me, poore data ke saath; confirm hone par pakke ho jate hain
   function empPrevPaint() {
-    const box = state.root && state.root.querySelector('[data-emp-prev]'); if (!box) return;
-    const list = emp.prev || [];
-    box.innerHTML = list.map((p) => `<div class="bcc-emp-pv"><b>📸 ${esc(p.name)}</b> — photo se ${U.fmt(p.codes.length)} barcode padhe, confirm ka wait <small>${esc(empTime(p.at))}</small><div class="bcc-emp-pvc">${p.codes.slice(0, 60).map((c) => `<span class="mono">${esc(c)}</span>`).join('')}</div></div>`).join('');
+    const box = state.root && state.root.querySelector('[data-emp-prev]'); if (box) box.innerHTML = '';
+    emp.prevRows = [];
+    (emp.prev || []).forEach((p) => p.codes.forEach((c) => { if (!emp.rows.some((r) => r.code === c)) emp.prevRows.push({ code: c, name: p.name, at: p.at, pre: 1, _f: 0 }); }));
+    empPaint(); empEnrich();
   }
   function empPaint() {
     const root = state.root, body = root && root.querySelector('[data-emp-body]'); if (!body) return;
     const q = emp.q.trim().toLowerCase();
-    const list = emp.rows.filter((r) => (!emp.name || r.name === emp.name) && (!q || `${r.name} ${r.code} ${(emp.cache.get(r.code) || {}).agent || ''}`.toLowerCase().includes(q) || (/\d/.test(q) && r.code.replace(/\D/g, '').includes(q.replace(/\D/g, '')))));
+    const list = [...(emp.prevRows || []), ...emp.rows].filter((r) => (!emp.name || r.name === emp.name) && (!q || `${r.name} ${r.code} ${(emp.cache.get(r.code) || {}).agent || ''}`.toLowerCase().includes(q) || (/\d/.test(q) && r.code.replace(/\D/g, '').includes(q.replace(/\D/g, '')))));
     body.innerHTML = list.slice(0, 1500).map((r) => {
       const c = emp.cache.get(r.code), fresh = r._f && Date.now() - r._f < 4000;
       const st = c ? `<span class="badge ${STATUS[c.k].tone}">${esc(STATUS[c.k].label || STATUS[c.k].text || c.k)}</span>` : '<span class="dim">⏳</span>';
       const hist = emp.open.has(r.code) ? `<tr class="bcc-emp-hist"><td colspan="10">${empHist(r, c)}</td></tr>` : '';
-      return `<tr class="${c ? 'bcc-' + c.k : ''}${fresh ? ' bcc-new' : ''}"><td>${esc(empTime(r.at))}</td><td><b>${esc(r.name)}</b></td><td class="mono bcc-cell" data-emp-hist="${esc(r.code)}" title="Click = itihaas (kisne kab scan kiya)">${esc(r.code)}${r.dups ? ` <span class="badge amber" title="${r.dups} baar dobara scan hua">🔁 ${r.dups}</span>` : ''}</td><td class="mono">${esc(c ? c.tagId : '')}</td><td>${st}</td><td>${esc(c ? c.cls : '')}</td><td>${esc(c ? c.agent : '')}</td><td>${esc(c ? c.agentId : '')}</td><td>${esc(c ? c.tl : '')}</td><td>${esc(c ? c.office || '' : '')}</td><td>${esc(c ? c.date || '' : '')}</td><td>${esc(c ? c.vrn || '' : '')}</td><td>${esc(c ? c.note || '' : '')}</td><td>${esc(c && c.dDate && c.dDate !== SEARCHING ? c.dDate : '')}</td><td>${esc(c && c.dName && c.dName !== SEARCHING ? c.dName : '')}</td></tr>${hist}`;
+      return `<tr class="${c ? 'bcc-' + c.k : ''}${fresh ? ' bcc-new' : ''}"><td>${esc(empTime(r.at))}</td><td><b>${esc(r.name)}</b>${r.pre ? ' <span class="badge amber" title="Photo se padha — employee ke confirm ka wait">📸 review</span>' : ''}</td><td class="mono bcc-cell" data-emp-hist="${esc(r.code)}" title="Click = itihaas (kisne kab scan kiya)">${esc(r.code)}${r.dups ? ` <span class="badge amber" title="${r.dups} baar dobara scan hua">🔁 ${r.dups}</span>` : ''}</td><td class="mono">${esc(c ? c.tagId : '')}</td><td>${st}</td><td>${esc(c ? c.cls : '')}</td><td>${esc(c ? c.agent : '')}</td><td>${esc(c ? c.agentId : '')}</td><td>${esc(c ? c.tl : '')}</td><td>${esc(c ? c.office || '' : '')}</td><td>${esc(c ? c.date || '' : '')}</td><td>${esc(c ? c.vrn || '' : '')}</td><td>${esc(c ? c.note || '' : '')}</td><td>${esc(c && c.dDate && c.dDate !== SEARCHING ? c.dDate : '')}</td><td>${esc(c && c.dName && c.dName !== SEARCHING ? c.dName : '')}</td></tr>${hist}`;
     }).join('') || '<tr><td colspan="14" class="empty">Abhi kisi employee ne scan nahi kiya</td></tr>';
     empDash(root);
     const cnt = root.querySelector('[data-emp-count]'); if (cnt) cnt.textContent = `${U.fmt(list.length)} scan · ${U.fmt(Object.keys(emp.by).length)} employee`;
@@ -730,7 +732,7 @@ FF.pages = FF.pages || {};
     if (ch) ch.innerHTML = `<button type="button" class="seg-btn${emp.name ? '' : ' on'}" data-emp-name="">Sab (${U.fmt(emp.total)})</button>` + Object.entries(emp.by).sort((a, b) => b[1] - a[1]).map(([n, c]) => `<button type="button" class="seg-btn${emp.name === n ? ' on' : ''}" data-emp-name="${esc(n)}">👤 ${esc(n)} · ${U.fmt(c)}</button>`).join('');
   }
   async function empEnrich() {
-    const need = [...new Set(emp.rows.filter((r) => !emp.cache.has(r.code)).map((r) => r.code))].slice(0, 400);
+    const need = [...new Set([...(emp.prevRows || []), ...emp.rows].filter((r) => !emp.cache.has(r.code)).map((r) => r.code))].slice(0, 400);
     if (!need.length) return;
     try {
       const rows = await checkMulti(need);
