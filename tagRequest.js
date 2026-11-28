@@ -1435,13 +1435,28 @@ body.colorful .from-hdr { color: #166534; }
   // 🔎 v3.125.618 — photo ka AI (free Gemini vision, server se) padhna: chhote number jo OCR nahi padh pata
   const scHam = (a, b) => { if (a.length !== b.length) return 99; let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n; };
   async function scAiRead(file, bmp, w, h) {
-    try {
-      const S = Math.min(1, 2400 / Math.max(w, h)), c = document.createElement('canvas'); c.width = Math.round(w * S); c.height = Math.round(h * S);
-      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-      const image = c.toDataURL('image/jpeg', 0.88);
-      const j = await scApi('POST', '/api/public/scan-ocr', { name: clean(state.employee && state.employee.name), image });
-      return (j && j.ok && Array.isArray(j.codes)) ? j.codes : [];
-    } catch { return []; }
+    // poori photo + baayen / daayen aadha (bada karke) — 3 padhai ek saath; milte-julte number me bahumat wala le lete hain (chhote tag zyada saaf padhe jate hain)
+    const one = async (sx, sy, sw, sh) => {
+      try {
+        const S = Math.min(2.2, 2400 / Math.max(sw, sh)), c = document.createElement('canvas'); c.width = Math.round(sw * S); c.height = Math.round(sh * S);
+        c.getContext('2d').drawImage(bmp, sx, sy, sw, sh, 0, 0, c.width, c.height);
+        const j = await scApi('POST', '/api/public/scan-ocr', { name: clean(state.employee && state.employee.name), image: c.toDataURL('image/jpeg', 0.9) });
+        return (j && j.ok && Array.isArray(j.codes)) ? j.codes.map((x) => scValid(x)).filter(Boolean) : [];
+      } catch { return []; }
+    };
+    const wide = w >= h * 1.3, tall = h >= w * 1.3;
+    const parts = [one(0, 0, w, h)];
+    if (wide) { parts.push(one(0, 0, Math.round(w * 0.56), h), one(Math.round(w * 0.44), 0, w - Math.round(w * 0.44), h)); }
+    else if (tall) { parts.push(one(0, 0, w, Math.round(h * 0.56)), one(0, Math.round(h * 0.44), w, h - Math.round(h * 0.44))); }
+    else { parts.push(one(0, 0, Math.round(w * 0.56), h), one(Math.round(w * 0.44), 0, w - Math.round(w * 0.44), h)); }
+    const lists = await Promise.all(parts);
+    const cl = [];   // { code, n }
+    lists.forEach((lst, li) => lst.forEach((code) => {
+      const c = cl.find((q) => scHam(q.code, code) <= 2);
+      if (c) { c.votes.set(code, (c.votes.get(code) || 0) + (li ? 1.2 : 1)); }
+      else cl.push({ code, votes: new Map([[code, li ? 1.2 : 1]]) });
+    }));
+    return cl.map((c) => [...c.votes.entries()].sort((a, b) => b[1] - a[1])[0][0]);
   }
   async function scReadPhoto(file) {
     const card = { id: ++SC.rvId, name: file.name || 'Photo', url: URL.createObjectURL(file), cands: [], busy: true, step: '' };
