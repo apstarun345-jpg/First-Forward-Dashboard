@@ -11519,33 +11519,40 @@ async function handleApi(req, res, url) {
     }
     return out;
   }
+  // v3.125.624 — Outbox: sheet me jaane wali cheezein (address …) turant local me dikhti hain, Google par bhejna peeche
+  // serialized chain me hota hai, fail ho to apne aap retry (5 s / 20 s / 1 min / 3 min) — user ko na error, na intezaar.
+  let sheetOutboxChain = Promise.resolve();
+  function sheetOutbox(label, job, attempt = 0) {
+    sheetOutboxChain = sheetOutboxChain.then(async () => {
+      try { await job(); }
+      catch (err) {
+        const delays = [5e3, 20e3, 60e3, 180e3];
+        console.warn(`sheet outbox ${label} (try ${attempt + 1}):`, String((err && err.message) || err).slice(0, 160));
+        if (attempt < delays.length) { const t = setTimeout(() => sheetOutbox(label, job, attempt + 1), delays[attempt]); if (t.unref) t.unref(); }
+      }
+    }).catch(() => {});
+    return sheetOutboxChain;
+  }
   async function syncAddressBookToSheet(requests) {
     const fresh = (Array.isArray(requests) ? requests : [requests]).map(addressEntryFromRequest).filter(Boolean);
-    // Sheet ka maujooda data (Address tab — jahan mobile haath se bhi bhara ja sakta hai) bhi merge me lo.
-    let sheetMap = null; try { sheetMap = await addressBookMap(); } catch { sheetMap = null; }
-    const mem = rememberAddressBook(fresh);
-    // Sheet me hamesha MERGED entry jaaye — har field me jo bhi non-empty mile (request → memory → sheet). Khaali value kabhi purana mobile/address nahi mitati.
-    const pick = (...vals) => { for (const v of vals) { const t = String(v ?? '').trim(); if (t && t !== '+') return t; } return ''; };
-    const entries = fresh.map((e) => {
-      const m = mem[e.key] || {}, sh = (sheetMap && sheetMap.get(e.key)) || {};
-      const out = { ...sh, ...m, ...e };
-      ['mobile', 'address', 'pincode', 'tl', 'dispatchName', 'agentId', 'agent'].forEach((k) => { out[k] = pick(e[k], m[k], sh[k]); });
-      if (mem[e.key]) Object.assign(mem[e.key], { mobile: out.mobile, address: out.address, pincode: out.pincode });
-      return out;
-    });
-    /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
+    if (!fresh.length) return { ok: true, local: true, synced: false, count: 0 };
+    rememberAddressBook(fresh);                      // ⚡ turant local (memory overlay) — site par abhi dikhta hai
     const store = sheetSyncStore();
-    if (!store || !entries.length) return { ok: true, local: true, synced: false, count: entries.length };
-    const cfg = tagSheetConfig();
-    const targetId = sheetIdFromLink(cfg.sheetLink) || String(cfg.spreadsheetId || '').trim() || '';
-    try {
-      const out = await store.call('upsertaddresses', { tab: ADDRESS_BOOK_TAB, rows: entries });
-      /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
-      return { ok: true, local: true, synced: true, count: entries.length, sheet: out };
-    } catch (err) {
-      console.warn('address book sync:', err.message);
-      return { ok: false, local: true, synced: false, count: entries.length, error: String(err.message || err).slice(0, 180) };
-    }
+    if (!store) return { ok: true, local: true, synced: false, count: fresh.length };
+    sheetOutbox('address', async () => {
+      let sheetMap = null; try { sheetMap = await addressBookMap(); } catch { sheetMap = null; }
+      const mem = rememberAddressBook(fresh);
+      const pick = (...vals) => { for (const v of vals) { const t = String(v ?? '').trim(); if (t && t !== '+') return t; } return ''; };
+      const entries = fresh.map((e) => {
+        const m = mem[e.key] || {}, sh = (sheetMap && sheetMap.get(e.key)) || {};
+        const out = { ...sh, ...m, ...e };
+        ['mobile', 'address', 'pincode', 'tl', 'dispatchName', 'agentId', 'agent'].forEach((k) => { out[k] = pick(e[k], m[k], sh[k]); });
+        if (mem[e.key]) Object.assign(mem[e.key], { mobile: out.mobile, address: out.address, pincode: out.pincode });
+        return out;
+      });
+      await store.call('upsertaddresses', { tab: ADDRESS_BOOK_TAB, rows: entries });
+    });
+    return { ok: true, local: true, queued: true, synced: false, count: fresh.length };
   }
   async function lookupAgentAddress(q) {
     let r = await lookupAgentAddressRaw(q);
@@ -12118,7 +12125,22 @@ async function handleApi(req, res, url) {
     return x ? `${String(x.agentId || '').trim()}|${String(x.agentName || '').trim().toLowerCase()}` : '';
   };
 
+  // v3.125.624 — ek request ke liye ek hi waqt me EK sheet push. Auto-sync + manual 📗 button (ya retry) saath chalte the,
+  // marker push khatam hone par hi lagta tha → dono append karte (duplicate) aur manual wala 45 s timeout par "failed" dikhata.
+  const sheetInflight = new Map();   // request id → running push promise
   async function pushTagRequestsToSheet(list, event, throwOnFail) {
+    let reqs = (Array.isArray(list) ? list : [list]).filter(Boolean);
+    const busy = [...new Set(reqs.map((r) => sheetInflight.get(r.id)).filter(Boolean))];
+    if (busy.length) {
+      await Promise.allSettled(busy);                      // pehle wali push ka intezaar — phir dekho ho gayi ya nahi
+      reqs = reqs.filter((r) => !isSheetSynced(r));
+      if (!reqs.length) return { added: 0, tab: '', waited: true };
+    }
+    const job = pushTagRequestsToSheetInner(reqs, event, throwOnFail);
+    reqs.forEach((r) => sheetInflight.set(r.id, job));
+    try { return await job; } finally { reqs.forEach((r) => { if (sheetInflight.get(r.id) === job) sheetInflight.delete(r.id); }); }
+  }
+  async function pushTagRequestsToSheetInner(list, event, throwOnFail) {
     const reqs = (Array.isArray(list) ? list : [list]).filter(Boolean);
     // Central guard protects against stale paths/buttons: only an approval or approved manual retry.
     const validEvent = event === 'status:approved' || event === 'manual';
@@ -12266,7 +12288,7 @@ async function handleApi(req, res, url) {
         console.warn(`tag-request sheet sync (${todo.length} rows, try ${attempt + 1}):`, msg);
         todo.forEach((r) => { r.sheetSync = { at: new Date().toISOString(), event, error: msg }; });
         persist('notify').catch(() => {});
-        const delays = [20e3, 60e3, 180e3];
+        const delays = [5e3, 20e3, 60e3, 180e3];
         // v3.125.62 — retry chain ko block nahi karta: nayi approvals turant jaati hain, purani alag timer se retry hoti hain.
         if (attempt < delays.length) setTimeout(() => { sheetSyncChain = sheetSyncChain.then(() => run(attempt + 1)).catch(() => {}); }, delays[attempt]).unref?.();
       }
@@ -12298,7 +12320,7 @@ async function handleApi(req, res, url) {
       } catch (err) { console.warn('tag-request sheet sweep:', err && err.message); }
     };
     const t1 = setTimeout(sweep, 60e3); if (t1.unref) t1.unref();
-    const t2 = setInterval(sweep, 5 * 60e3); if (t2.unref) t2.unref();
+    const t2 = setInterval(sweep, 60e3); if (t2.unref) t2.unref();
   }
   // 🔎 v3.125.372 — Master Search profile ke extra cards: ek agent/TL ki Tag Requests · Complaints · Notes (har ek apni permission se).
   if (p === '/api/master/agent-extras' && method === 'GET') {
@@ -12460,7 +12482,7 @@ async function handleApi(req, res, url) {
       // v3.125.621 — re-approval (pending → approved dobara) par sheet marker NAHI hatate: entry pehle ja chuki ho to dobara nahi likhte (duplicate band). Marker na ho (kabhi gayi hi nahi) to bhejte hain.
       if (status === 'approved' && prev !== 'approved') toSheet.push(row);
     }
-    if (updated.length) persistBackground('notify');
+    if (updated.length) await Promise.race([persist('notify').catch(() => {}), new Promise((r) => { const t = setTimeout(r, 8000); if (t.unref) t.unref(); })]);
     // 📗 Sheet sync sirf pehli baar Approved par (PUT wala rule) — background me ek-ek karke.
     if (toSheet.length && tagSheetAnyEnabled()) syncApprovedToSheet(toSheet);
     // Requester ko ek notification (apni requests ke count ke saath), har request ka alag nahi.
@@ -12545,8 +12567,8 @@ async function handleApi(req, res, url) {
     if (body.itemName !== undefined) row.itemName = normItemName(body.itemName);
     for (const [k, n] of [['serialNumber', 100], ['deviceName', 120], ['materialDescription', 200]]) if (body[k] !== undefined) row[k] = shortText(body[k], n);
     row.updatedAt = new Date().toISOString(); row.updatedBy = user.username;
-    if (Object.keys(body).every((k) => k === 'status')) persistBackground('notify'); // status-only → instant reply
-    else await persist('notify');
+    // v3.125.624 — status bhi durable save hone ke baad hi reply (max 8 s): deploy/restart beech me aaye to approve wapas pending na ho.
+    await Promise.race([persist('notify').catch(() => {}), new Promise((r) => { const t = setTimeout(r, 8000); if (t.unref) t.unref(); })]);
     // 📗 v5: Sheet sync ONLY on the first transition to Approved.
     // Pending submit, Dispatched, Rejected, and later status changes never append another row.
     if (body.status === 'approved' && prevStatus !== 'approved' && tagSheetAnyEnabled()) {
@@ -14119,10 +14141,12 @@ async function handleApi(req, res, url) {
     const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map((x) => String(x || '')));
     const rows = (w.tagRequests || []).filter((r) => ids.has(r.id) && r.status === 'approved' && !isSheetSynced(r));
     if (!rows.length) return sendJson(res, 200, { ok: true, added: 0, requests: 0, note: 'Nothing to send — all selected approved requests are already in the sheet.' });
-    const out = await pushTagRequestsToSheet(rows, 'manual', true);
-    await persist('notify');
-    logAudit(user, 'tag_sheet_push', { target: `${rows.length} requests`, note: `${out.added} rows → ${out.tab || ''}`, ip: clientIp(req) });
-    return sendJson(res, 200, { ok: true, added: out.added, requests: rows.length, ids: rows.map((r) => r.id), tab: out.tab });
+    // v3.125.624 — turant jawab: queue me daalo (serialized + auto-retry), sheet par bhejna peeche chalta hai.
+    if (!sheetSyncStore() || !tagSheetAnyEnabled()) throw new HttpError(400, !sheetSyncStore() ? 'Apps Script connect nahi hai — Settings → Backup me set karo.' : 'Sheet sync OFF hai — Tag Request page par Google Sheet sync ON karo.');
+    rows.forEach((r) => { if (r.sheetSync && r.sheetSync.error) r.sheetSync = undefined; });
+    syncApprovedToSheet(rows, 'manual');
+    logAudit(user, 'tag_sheet_push', { target: `${rows.length} requests`, note: 'queued', ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, pending: true, queued: true, added: 0, requests: rows.length, ids: rows.map((r) => r.id) });
   }
   if (p === '/api/tag-request-sheet/push' && method === 'POST') {
     requireAdmin(user);
@@ -14130,10 +14154,13 @@ async function handleApi(req, res, url) {
     const w = workspaceStore();
     const row = (w.tagRequests || []).find((r) => r.id === String(body.id || ''));
     if (!row) throw new HttpError(404, 'Tag request nahi mili.');
-    const out = await pushTagRequestToSheet(row, body.event === 'status' ? `status:${row.status}` : 'manual', true);
-    await persist('notify');
-    logAudit(user, 'tag_sheet_push', { target: row.id, note: `${out.added} rows → ${out.tab || ''}`, ip: clientIp(req) });
-    return sendJson(res, 200, { ok: true, added: out.added, tab: out.tab, atRow: out.atRow, url: out.url || '' });
+    if (!sheetSyncStore() || !tagSheetAnyEnabled()) throw new HttpError(400, !sheetSyncStore() ? 'Apps Script connect nahi hai — Settings → Backup me set karo.' : 'Sheet sync OFF hai — Tag Request page par Google Sheet sync ON karo.');
+    if (row.status !== 'approved') throw new HttpError(400, 'Pehle Tag Request ko Approved karo.');
+    if (isSheetSynced(row)) return sendJson(res, 200, { ok: true, added: 0, note: 'Pehle se sheet me hai.' });
+    if (row.sheetSync && row.sheetSync.error) row.sheetSync = undefined;
+    syncApprovedToSheet([row], 'manual');
+    logAudit(user, 'tag_sheet_push', { target: row.id, note: 'queued', ip: clientIp(req) });
+    return sendJson(res, 200, { ok: true, pending: true, queued: true, added: 0 });
   }
 
   // ---- 🎙️ LIVE ASSIST (v3.26) — admin user ki awaaz/video live sun/dekh sakta hai ---------------

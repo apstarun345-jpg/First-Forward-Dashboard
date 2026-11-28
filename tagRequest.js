@@ -4283,9 +4283,19 @@ body.colorful .from-hdr { color: #166534; }
         }
         return out;
       })
-      .catch((err) => {
+      .catch(async (err) => {
         if (reqMutationSeq.get(r.id) === local.token) {
           reqMutationSeq.delete(r.id);
+          // v3.125.624 — timeout / busy (502-504, network) par server ne change apply kar diya ho sakta hai: purana status wapas mat dikhao,
+          // server se asli status lo (warna "approve → wapas pending" dikhta tha jabki approve ho chuka tha).
+          const st = Number(err && err.status) || 0;
+          if (!st || st >= 500) {
+            try {
+              const d = await FF.auth.api('/api/tag-requests');
+              const fresh = ((d && d.requests) || []).find((x) => x.id === r.id);
+              if (fresh) { replaceRequest(fresh); if (payload && payload.status && fresh.status === payload.status) return { ok: true, request: fresh, recovered: true }; throw err; }
+            } catch (e2) { if (e2 === err) throw err; /* server unreachable → neeche purana restore */ }
+          }
           if (local.before && local.before.id) replaceRequest(local.before);
         }
         throw err;
@@ -4473,7 +4483,7 @@ body.colorful .from-hdr { color: #166534; }
           if (!ids.length) return;
           bulk.disabled = true;
           FF.auth.api('/api/tag-request-sheet/push-many', 'POST', { ids })
-            .then((out) => { U.toast(`📗 ${out.added || 0} rows added to the sheet (${out.requests || 0} requests)`, 'ok'); const at = new Date().toISOString(); state.requests.forEach((r) => { if (ids.includes(r.id)) r.sheetSync = { at, event: 'manual', tab: out.tab }; }); renderReqTable(); })
+            .then((out) => { if (out && out.pending) { U.toast('📗 Queued — the sheet entry goes automatically (retries on its own)', 'ok'); [6000, 20000, 60000].forEach((ms) => setTimeout(() => { try { loadRequests(true); } catch { /* ignore */ } }, ms)); bulk.disabled = false; return; } U.toast(`📗 ${out.added || 0} rows added to the sheet (${out.requests || 0} requests)`, 'ok'); const at = new Date().toISOString(); state.requests.forEach((r) => { if (ids.includes(r.id)) r.sheetSync = { at, event: 'manual', tab: out.tab }; }); renderReqTable(); })
             .catch((err) => { U.toast('Sheet entry failed: ' + ((err && err.message) || ''), 'err'); bulk.disabled = false; });
         }
         else if (op === 'csv') exportCsv();
@@ -4517,7 +4527,7 @@ body.colorful .from-hdr { color: #166534; }
       else if (op === 'push') {
         opEl.disabled = true;
         FF.auth.api('/api/tag-request-sheet/push', 'POST', { id: dr.req.id })
-          .then((out) => { U.toast(`📗 Sheet me ${out.added} rows add ho gayi (tab: ${out.tab || ''})`, 'ok'); dr.req.sheetSync = { at: new Date().toISOString(), event: 'manual', added: out.added, tab: out.tab }; renderReqTable(); })
+          .then((out) => { if (out && out.pending) { U.toast('📗 Queued — the sheet entry goes automatically (retries on its own)', 'ok'); [6000, 20000, 60000].forEach((ms) => setTimeout(() => { try { loadRequests(true); } catch { /* ignore */ } }, ms)); opEl.disabled = false; return; } U.toast(`📗 Sheet me ${out.added} rows add ho gayi (tab: ${out.tab || ''})`, 'ok'); dr.req.sheetSync = { at: new Date().toISOString(), event: 'manual', added: out.added, tab: out.tab }; renderReqTable(); })
           .catch((err) => { U.toast('Sheet push fail: ' + ((err && err.message) || ''), 'err'); opEl.disabled = false; });
       } else if (op === 'del') {
         if (!window.confirm(`${dr.agent.name} ki request delete karein? (${fmt(dr.req.total)} tags${dr.siblings > 1 ? ` · poori request ${dr.siblings} agents ki` : ''})`)) return;

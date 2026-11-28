@@ -1,0 +1,8 @@
+import test from 'node:test';
+import assert from 'node:assert';
+import fs from 'node:fs';
+const rd = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+test('sheet push has per-request in-flight lock', () => { const s = rd('server.js'); assert.match(s, /const sheetInflight = new Map\(\)/); assert.match(s, /pushTagRequestsToSheetInner/); assert.match(s, /Promise\.allSettled\(busy\)/); });
+test('manual push is queued instantly (outbox) — no waiting on Google', () => { const s = rd('server.js'); assert.match(s, /pending: true, queued: true, added: 0, requests: rows\.length/); assert.match(s, /function sheetOutbox/); assert.match(s, /queued: true, synced: false/); });
+test('status save is durable before reply', () => { const s = rd('server.js'); assert.doesNotMatch(s, /status-only → instant reply/); });
+test('client re-reads server status on timeout instead of reverting', () => { const s = rd('tagRequest.js'); assert.match(s, /recovered: true/); });
