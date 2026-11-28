@@ -309,7 +309,9 @@
     // 2) pakki disha par kai variant par vote (har variant se ek hi baar ginti)
     const votes = new Map(), bump = (ks) => ks.forEach((k) => votes.set(k, (votes.get(k) || 0) + 1));
     const cvs = [best.cv]; try { cvs.push(enhance(best.cv, 'stretch')); } catch { /* */ }
-    for (const cv of cvs) for (const [a, b] of [[0.5, 1], [0.58, 1], [0.64, 1], [0.7, 1], [0.6, 0.96], [0.66, 0.98]]) for (const th of [60, 80, 100]) { if (left() < 300) break; bump(await one(cv, a, b, th)); }
+    // ⚡ v3.125.617 — jaise hi ek number saaf bahumat se jeet jaye (≥4 vote, doosre se ≥3 aage) ruk jao — pehle hamesha 36 padhai hoti thi
+    const lead = () => { const v = [...votes.values()].sort((x, y) => y - x); return v.length && v[0] >= 4 && v[0] - (v[1] || 0) >= 3; };
+    vote2: for (const cv of cvs) for (const [a, b] of [[0.5, 1], [0.58, 1], [0.64, 1], [0.7, 1], [0.6, 0.96], [0.66, 0.98]]) for (const th of [60, 80, 100]) { if (left() < 300) break vote2; bump(await one(cv, a, b, th)); if (lead()) break vote2; }
     return jointRank(votes);
   }
   /** photo ke tag ek series me hote hain: pakke (zyada vote wale) number "anchor" — kamzor read (6↔8, 1↔7…) agar kisi anchor se door ho
