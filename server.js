@@ -4141,6 +4141,7 @@ async function scanInfoServer(codes) {
   return out;
 }
 /** Ek (ya kai) customer ke tag-level EIR rows. */
+const mcTagCache = new Map();
 async function multiCustomerTags(ids) {
   const s = db.settings || {}, e = s.eir || {};
   const sheetId = String(s.sheetId || '').replace(/[^A-Za-z0-9_-]/g, '');
@@ -4148,14 +4149,16 @@ async function multiCustomerTags(ids) {
   const C = mcCols();
   const want = [...new Set(ids.map((x) => String(x || '').replace(/[^0-9A-Za-z]/g, '')).filter(Boolean))].slice(0, 40);
   if (!want.length) return [];
+  const ckey = want.slice().sort().join(',');
+  const hit = mcTagCache.get(ckey); if (hit && Date.now() - hit.at < 10 * 60e3) return hit.list;
   const cond = want.map((id) => `${C.cust} = '${id}'`).concat(want.filter((id) => /^\d{1,15}$/.test(id)).map((id) => `${C.cust} = ${id}`)).join(' or ');
   const sel = [C.cust, C.tag, C.vrn, C.cls, C.date, C.type, C.status, C.agentId, C.agentName, C.master, C.first, C.last, C.corp, C.tlName];
   const q = new URLSearchParams({ id: sheetId, sheet, tq: `select ${[...new Set(sel)].join(', ')} where ${cond} limit 5000` });
   let out;
-  try { out = await gvizPageServer(q, sheet); }
+  try { out = await gvizPageQuick(q, sheet); }
   catch (err) {   // text-only compare (numeric compare galat type par error deta hai)
     const q2 = new URLSearchParams({ id: sheetId, sheet, tq: `select ${[...new Set(sel)].join(', ')} where ${want.map((id) => `${C.cust} = '${id}'`).join(' or ')} limit 5000` });
-    out = await gvizPageServer(q2, sheet);
+    out = await gvizPageQuick(q2, sheet);
   }
   const at = (L) => out.ids.indexOf(L);
   const g = (r, L) => (at(L) >= 0 ? mcCell(r, at(L)) : '');
@@ -4187,7 +4190,7 @@ async function multiCustomerTags(ids) {
       try {
         const qp = new URLSearchParams({ id: gvSheet, tq: `select ${L.uid}, ${L.name}, ${L.vrn}, ${L.tag}, ${L.tl} where ${conds.join(' or ')} limit 2000` });
         if (/^\d+$/.test(String(gm.gid || ''))) qp.set('gid', String(gm.gid)); else qp.set('sheet', gm.tab || 'GV Master');
-        const res = await gvizPageServer(qp, 'GV Master');
+        const res = await gvizPageQuick(qp, 'GV Master');
         const ix = (Lt) => res.ids.indexOf(Lt);
         const byTag = new Map(), byVrn = new Map();
         res.rows.forEach((r) => { const hit = { id: mcCell(r, ix(L.uid)), name: mcCell(r, ix(L.name)), tl: mcCell(r, ix(L.tl)) }; const tg = idNorm(mcCell(r, ix(L.tag))), vr = idNorm(mcCell(r, ix(L.vrn))); if (tg) byTag.set(tg, hit); if (vr) byVrn.set(vr, hit); });
@@ -4195,6 +4198,7 @@ async function multiCustomerTags(ids) {
       } catch (err) { console.warn('multi-customer tags GV lookup:', String((err && err.message) || err).slice(0, 160)); }
     }
   }
+  mcTagCache.set(ckey, { at: Date.now(), list }); if (mcTagCache.size > 200) mcTagCache.delete(mcTagCache.keys().next().value);
   return list;
 }
 // ---------------------------------------------------------------------------------------------
@@ -4713,6 +4717,14 @@ async function bgScanAcquire() {
 function bgScanRelease() {
   const next = bgScanGate.queue.shift();
   if (next) next(); else bgScanGate.active = Math.max(0, bgScanGate.active - 1);
+}
+/** v3.125.622 — interactive (drawer) query: queue/heavy-scan ke peeche nahi, 1 koshish, 40 s — browser 60 s se pehle jawab/error mile. */
+async function gvizPageQuick(params, sheet) {
+  const out = await fetchUpstream(upstreamUrl(params), { timeoutMs: 40000 });
+  if (out.rateLimited) { const e = new Error(gvizLimitMessage(out.retryAfterMs)); e.rateLimited = true; throw e; }
+  if (out.status < 200 || out.status >= 300) throw new Error(`${sheet}: Google responded ${out.status}`);
+  const table = parseGvizServer(out.body);
+  return { rows: table.rows || [], ids: (table.cols || []).map((c) => String(c.id || '').toUpperCase()) };
 }
 async function gvizPageServer(params, sheet) {
   await bgScanAcquire();

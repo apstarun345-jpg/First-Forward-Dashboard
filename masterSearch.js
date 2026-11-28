@@ -561,10 +561,12 @@ FF.pages = FF.pages || {};
     return p;
   }
 
-  function canonicalPeople(list, idx) {
+  function canonicalPeople(list, idx, askedNi) {
     const out = [], seen = new Set();
     for (const p of list || []) {
-      const cp = canonicalPerson(p, idx);
+      // v3.125.622 — FF agent ki apni ID (jaise 18-digit) type ki ho to FF card hi rahe, GV card se replace na ho.
+      const keepFf = askedNi && askedNi.length >= 8 && /^ff-/.test(String(p.kind || '')) && normId(p.sub || '') === askedNi;
+      const cp = keepFf ? p : canonicalPerson(p, idx);
       const key = `${cp.kind}|${normName(cp.name)}|${normId(cp.sub || '')}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -939,7 +941,7 @@ FF.pages = FF.pages || {};
       }
     }
     if (out.tags.length > 1) out.tags = mergeTagEntries(out.tags);
-    out.people = canonicalPeople(out.people, idx);
+    out.people = canonicalPeople(out.people, idx, ni);
     suppressFalseFfMatches(out);
     out.matched = out.people.length + out.ids.length + out.tags.length;
     return out;

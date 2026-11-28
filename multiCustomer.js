@@ -85,7 +85,11 @@ FF.pages = FF.pages || {};
         <tbody>${tags.map((t) => `<tr><td class="mono">${esc(t.tagId)}</td><td class="mono">${esc(t.vrn)}</td><td><span class="cg-tag cg-${esc(String(t.cls).toLowerCase().replace(/[^a-z0-9]/g, ''))}">${esc(t.cls || '—')}</span></td><td>${esc(dShort(t))}</td><td>${esc(t.type)}</td><td>${esc(t.status)}</td><td>${t.agentName ? esc(t.agentName) : '<span class="dim">—</span>'}${t.agentSource === 'GV Master' ? ' <small class="mc-src" title="EIR me naam khaali tha — GV Master se mila">GV Master</small>' : ''}</td><td class="mono">${esc(t.agentId || '—')}</td><td>${t.tlName ? esc(t.tlName) : '<span class="dim">—</span>'}</td><td>${chBadge(t.channel)}</td></tr>`).join('')}</tbody></table></div>`;
       open(body);
       state.lastTags = { id, tags };
-    } catch (err) { open(`<p class="dim">❌ ${esc((err && err.message) || err)}</p>`); }
+    } catch (err) {
+      const m = String((err && err.message) || err);
+      const msg = /abort|timeout|timed out/i.test(m) ? 'EIR sheet abhi slow hai (Google ne der ki)' : m;
+      open(`<p class="dim">❌ ${esc(msg)}</p><p><button class="btn small primary" data-mc-open="${esc(id)}">↻ Dobara try karo</button></p>`);
+    }
   }
   document.addEventListener('click', (e) => {
     const b = e.target.closest && e.target.closest('[data-mc-tagcsv]');
