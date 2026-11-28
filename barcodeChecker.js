@@ -741,10 +741,10 @@ FF.pages = FF.pages || {};
       await attachDispatch(rows, dp); empPaint();
     } catch { /* agli baar dobara try */ }
   }
-  async function empLoad() {
-    if (emp.busy || !state.root || document.hidden) return; emp.busy = true;
+  async function empLoad(force) {
+    if (emp.busy || !state.root || (document.hidden && !force)) return; emp.busy = true;
     try {
-      const j = await FF.auth.api('/api/scan-log?limit=1500', 'GET');
+      const j = await FF.auth.api('/api/scan-log?limit=1500&_=' + Date.now(), 'GET');
       const prev = new Set(emp.rows.map((r) => r.code));
       emp.rows = (j.rows || []).map((r) => { if (emp.seen && !prev.has(r.code)) r._f = Date.now(); return r; }); emp.by = j.byName || {}; emp.stats = j.stats || {}; emp.today = j.today || 0; emp.total = j.total || 0; emp.seen = 1;
       const bd = state.root.querySelector('[data-emp-badge]'); if (bd) { bd.hidden = !emp.total; bd.textContent = U.fmt(emp.total); }
@@ -753,8 +753,31 @@ FF.pages = FF.pages || {};
     } catch (err) { const b = state.root && state.root.querySelector('[data-emp-body]'); if (b && !emp.rows.length) b.innerHTML = `<tr><td colspan="10" class="empty">⚠️ ${esc(String((err && err.message) || err))}</td></tr>`; }
     emp.busy = false;
   }
-  function empStart() { empStop(); empLoad(); emp.timer = setInterval(() => { if (state.tab === 'emp') empLoad(); else empStop(); }, 3000); }
-  function empStop() { clearInterval(emp.timer); emp.timer = 0; }
+  // ⚡ v3.125.609 — live push (SSE): scan hote hi admin ki table me, bina poll ke. SSE na chale to 3 sec poll (fallback).
+  function empLive() {
+    if (emp.es || typeof EventSource === 'undefined') return;
+    try {
+      const es = new EventSource('/api/scan-stream'); emp.es = es;
+      es.onopen = () => { emp.live = 1; clearInterval(emp.timer); emp.timer = setInterval(() => { if (state.tab === 'emp') empLoad(); else empStop(); }, 20000); empLoad(true); };
+      es.onerror = () => { emp.live = 0; clearInterval(emp.timer); emp.timer = setInterval(() => { if (state.tab === 'emp') empLoad(); else empStop(); }, 3000); };
+      es.onmessage = (ev) => {
+        let m; try { m = JSON.parse(ev.data); } catch { return; }
+        if (!m || state.tab !== 'emp') return;
+        if (m.type === 'scan' && m.row) {
+          if (emp.rows.some((r) => r.code === m.row.code)) return;
+          const r = { ...m.row, _f: Date.now() }; emp.rows.unshift(r); emp.total++; emp.by[r.name] = (emp.by[r.name] || 0) + 1;
+          const o = emp.stats[r.name] || (emp.stats[r.name] = { total: 0, today: 0, last: '', m5: 0, h1: 0, dupTries: 0, first: '' });
+          o.total++; o.today++; o.m5++; o.h1++; o.last = r.at; if (!o.first) o.first = r.at; emp.today++;
+          if (emp.prev) { emp.prev = emp.prev.map((p) => ({ ...p, codes: p.codes.filter((c) => c !== r.code) })).filter((p) => p.codes.length); empPrevPaint(); }
+          const bd = state.root && state.root.querySelector('[data-emp-badge]'); if (bd) { bd.hidden = !emp.total; bd.textContent = U.fmt(emp.total); }
+          empPaint(); empEnrich();
+        } else if (m.type === 'preview') { emp.prev = m.previews || []; empPrevPaint(); }
+        else { empLoad(true); }   // dup / del / reload — poori list taaza
+      };
+    } catch { /* poll fallback */ }
+  }
+  function empStart() { empStop(); empLoad(); emp.timer = setInterval(() => { if (state.tab === 'emp') empLoad(); else empStop(); }, 3000); empLive(); }
+  function empStop() { clearInterval(emp.timer); emp.timer = 0; if (emp.es) { try { emp.es.close(); } catch { /* ignore */ } emp.es = null; emp.live = 0; } }
   function empCsv() {
     const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
     const lines = [['Scan time', 'Employee', 'Barcode', 'Status', 'Class', 'Agent', 'Agent ID', 'TL', 'Tag ID', 'Office stock', 'Issue date', 'VRN', 'Note', 'Dispatch date', 'Dispatched to'].map(q).join(',')];

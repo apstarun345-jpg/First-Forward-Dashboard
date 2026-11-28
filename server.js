@@ -13317,6 +13317,18 @@ async function handleApi(req, res, url) {
   };
   let scanPersistT = null;
   const scanPersistSoon = () => { if (scanPersistT) return; scanPersistT = setTimeout(() => { scanPersistT = null; persist('notify').catch(() => {}); }, 4000); };
+  // ⚡ v3.125.609 — admin ko scan turant (poll nahi): Server-Sent Events. Har scan / duplicate / delete / photo-review par sabko push.
+  const scanSse = (globalThis.__scanSse = globalThis.__scanSse || new Set());
+  const scanPush = (type, data) => { const msg = `data: ${JSON.stringify({ type, ...data })}\n\n`; scanSse.forEach((r) => { try { r.write(msg); } catch { scanSse.delete(r); } }); };
+  if (p === '/api/scan-stream' && method === 'GET') {
+    if (!user || (user.role !== 'admin' && !(user.permissions || []).includes('barcodeChecker'))) throw new HttpError(403, 'Access nahi hai.');
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    res.write('retry: 2000\n\n: connected\n\n');
+    scanSse.add(res);
+    const ka = setInterval(() => { try { res.write(': ka\n\n'); } catch { /* close handles */ } }, 15000);
+    req.on('close', () => { clearInterval(ka); scanSse.delete(res); });
+    return;
+  }
   if (p === '/api/public/scan' && method === 'POST') {
     const body = await readBody(req);
     const name = cleanVisitorName(body.name);
@@ -13333,13 +13345,14 @@ async function handleApi(req, res, url) {
     const hit = log.find((r) => r.k === key);
     if (hit) {
       const mine = scanNameKey(hit.name) === scanNameKey(name);
-      if (!(mine && body.retry)) { hit.dups = (hit.dups || 0) + 1; if (!Array.isArray(hit.hits)) hit.hits = []; hit.hits.push({ name, at: atIso }); if (hit.hits.length > 30) hit.hits.splice(0, hit.hits.length - 30); scanPersistSoon(); }
+      if (!(mine && body.retry)) { hit.dups = (hit.dups || 0) + 1; if (!Array.isArray(hit.hits)) hit.hits = []; hit.hits.push({ name, at: atIso }); if (hit.hits.length > 30) hit.hits.splice(0, hit.hits.length - 30); scanPersistSoon(); scanPush('dup', { code: hit.code, name, by: hit.name, dups: hit.dups || 0, at: atIso }); }
       return sendJson(res, 200, { ok: true, dup: true, by: hit.name, at: hit.at, mine });
     }
     const row = { k: key, code, name, at: atIso, ip: String(ip || '').slice(0, 45) };
     log.push(row);
     if (log.length > 30000) log.splice(0, log.length - 30000);
     scanPrune(); scanNotifyAdd(name, code, atIso);
+    scanPush('scan', { row: { code, name, at: row.at, dups: 0, hits: [] } });
     scanPersistSoon();
     return sendJson(res, 200, { ok: true, dup: false, at: row.at });
   }
@@ -13352,6 +13365,7 @@ async function handleApi(req, res, url) {
     const codes = [...new Set((Array.isArray(body.codes) ? body.codes : []).map(scanCodeOf).filter(Boolean))].slice(0, 200);
     const k = scanNameKey(name);
     if (!codes.length) scanPrev.delete(k); else scanPrev.set(k, { name, codes, at: new Date().toISOString(), t: Date.now() });
+    scanPush('preview', { previews: [...scanPrev.values()].filter((v) => Date.now() - v.t < 10 * 60e3).map((v) => ({ name: v.name, codes: v.codes, at: v.at })) });
     return sendJson(res, 200, { ok: true });
   }
   if (p === '/api/public/scan-info' && method === 'POST') {
@@ -13376,7 +13390,7 @@ async function handleApi(req, res, url) {
     if (!name || !code) throw new HttpError(400, 'Naam aur barcode chahiye.');
     const log = scanLogStore(), key = code.replace(/\D/g, '');
     const i = log.findIndex((r) => r.k === key && scanNameKey(r.name) === scanNameKey(name));
-    if (i >= 0) { log.splice(i, 1); scanPersistSoon(); }
+    if (i >= 0) { log.splice(i, 1); scanPersistSoon(); scanPush('del', { code }); }
     return sendJson(res, 200, { ok: true, removed: i >= 0 });
   }
   if (p === '/api/scan-log' && method === 'GET') {
@@ -13403,7 +13417,7 @@ async function handleApi(req, res, url) {
     const log = scanLogStore(); const before = log.length;
     if (body.all === true) log.length = 0;
     else if (body.name) { const w = scanNameKey(body.name); for (let i = log.length - 1; i >= 0; i--) if (scanNameKey(log[i].name) === w) log.splice(i, 1); }
-    scanPersistSoon();
+    scanPersistSoon(); scanPush('reload', {});
     return sendJson(res, 200, { ok: true, removed: before - log.length });
   }
   if (p === '/api/public/tag-request' && method === 'GET') {
