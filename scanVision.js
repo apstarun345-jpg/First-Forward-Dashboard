@@ -366,7 +366,7 @@
       let hit = false; try { r.da = refineAngle(work, r); } catch { r.da = 0; }
       for (const [da, sc, md] of [[0, 1, ''], [0, 1.7, 'e'], [0.05, 1.3, ''], [-0.05, 1.3, '']]) {
         let c = cropRegion(work, r, (r.da || 0) + da, sc, 'bars'); if (md) c = enhance(c, md);
-        try { const rs = await zbarScan(c); if (rs.length) { rs.forEach((q) => { add(q.code, 'barcode', null); const f2 = found.get(q.code); if (f2 && !f2.thumb) f2.thumb = thumbOf(work, r); }); hit = true; break; } } catch { break; }
+        try { const rs = await zbarScan(c); if (rs.length) { rs.forEach((q) => { add(q.code, 'barcode', null); const f2 = found.get(q.code); if (f2 && !f2.thumb) f2.thumb = thumbOf(work, r); }); hit = true; r._ok = true; break; } } catch { break; }
       }
       if (!hit) ocrJobs.push(r);
       await tick();
@@ -382,7 +382,7 @@
         try {
           const wv = await wideVote(work, r, ocr, known, left);
           if (!wv.length) retryJobs.push(r);
-          if (wv.length) { const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 9).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } return; }
+          if (wv.length) { r._ok = true; const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 9).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } return; }
         } catch { /* purana tareeka neeche */ }
         const votes = new Map(); let flip = false, tried = 0, da0 = 0;
         // v3.125.533 — pehle angle theek karo, number ki patti alag kaato (seedhi + ulti), OCR line mode
@@ -425,7 +425,7 @@
           const g1 = ranked[0][0].slice(0, 6), mix = `${g1}-${pos((x) => x.g2, 3)}-${pos((x) => x.g3, 7)}`;
           if (!ranked.some((x) => x[0] === mix)) ranked.unshift([mix, 1]); else ranked.sort((a, b) => (a[0] === mix ? -1 : b[0] === mix ? 1 : b[1] - a[1]));
         }
-        if (ranked[0]) { add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) { f.alts = ranked.slice(1).map((x) => x[0]).filter((c) => known.includes(c.slice(0, 6))); f.thumb = thumbOf(work, r, r.da); } }
+        if (ranked[0]) { r._ok = true; add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) { f.alts = ranked.slice(1).map((x) => x[0]).filter((c) => known.includes(c.slice(0, 6))); f.thumb = thumbOf(work, r, r.da); } }
       };
       if (ocr) {
         const pool = await ocrPool(ocr).catch(() => [ocr]); let qi = 0;
@@ -436,7 +436,7 @@
         const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0][0], f1 = fv.find((f) => f.code.startsWith(top)), ctx = { g1: f1.code.slice(0, 6), g2: f1.code.slice(7, 10), g3: f1.code.slice(11) };
         for (const r of retryJobs) {
           if (left() < 900) break;
-          try { const wv = await wideVote(work, r, ocr, known, left, ctx); if (wv.length && !found.has(wv[0][0])) { add(wv[0][0], 'text'); const f0 = found.get(wv[0][0]); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 9).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } } } catch { /* */ }
+          try { const wv = await wideVote(work, r, ocr, known, left, ctx); if (wv.length && !found.has(wv[0][0])) { r._ok = true; add(wv[0][0], 'text'); const f0 = found.get(wv[0][0]); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 9).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } } } catch { /* */ }
         }
       }
       try { seriesFix(found, { onFix: (o, n) => { try { opt.onFixed && opt.onFixed(o, n); } catch { /* ui */ } } }); } catch { /* */ }
@@ -475,7 +475,10 @@
       } catch { /* */ }
     }
     found.forEach((f) => { if (f.how === 'text') { const a = [...(f.alts || [])]; confAlts(f.code, 6).forEach((c) => { if (!a.includes(c) && c !== f.code) a.push(c); }); f.alts = a.slice(0, 10); } });
-    return [...found.values()];
+    // ✍️ v3.125.615 — jahan barcode ki jagah mili par number nahi padha gaya (chhote / dhundhle tag): thumbnail ke saath wapas, taaki koi tag chhoote nahi
+    const outAll = [...found.values()];
+    try { outAll.unread = cand.filter((r) => !r._ok).slice(0, 24).map((r) => ({ thumb: thumbOf(work, r, r.da), cx: r.cx, cy: r.cy })); } catch { outAll.unread = []; }
+    return outAll;
   }
 
 

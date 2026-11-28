@@ -1444,14 +1444,14 @@ body.colorful .from-hdr { color: #166534; }
         if (card.cands.some((x) => x.code === code)) return;
         const x = { code, how, on: true, info: null, err: '', alts: [] }; card.cands.push(x); scBeep('ok'); try { navigator.vibrate && navigator.vibrate(30); } catch { /* */ }
         scRvPaint(); setTimeout(() => scRvCheck(card, x), 0);
-      } }).then((res) => { res.forEach((r) => { const x = card.cands.find((c2) => c2.code === r.code); if (x && r.thumb) { x.thumb = r.thumb; scRvPaint(); } if (x && r.alts && r.alts.length) { x.alts = r.alts; if (x.info && x.info.k === 'nf') { x.info = null; scRvCheck(card, x); } } }); });
+      } }).then((res) => { (res.unread || []).forEach((u) => { if (u.thumb) card.cands.push({ code: '', how: 'manual', on: false, info: null, err: '✍️ number padh nahi paya — thumbnail dekh kar 16 digit likho', alts: [], thumb: u.thumb, manual: true }); }); res.forEach((r) => { const x = card.cands.find((c2) => c2.code === r.code); if (x && r.thumb) { x.thumb = r.thumb; scRvPaint(); } if (x && r.alts && r.alts.length) { x.alts = r.alts; if (x.info && x.info.k === 'nf') { x.info = null; scRvCheck(card, x); } } }); });
     } catch (e) { card.err = String((e && e.message) || e); }
     // OCR ka jana-pehchana galat: sab tags me ek hi jagah 8 (asal me 6) — photo ke baad khud theek karo, ulta karne ka button rehta hai
     try {
       const t = card.cands.filter((x) => x.how === 'text' && /^\d{6}-\d{3}-\d{7}$/.test(x.code));
       if (t.length >= 3) for (const col of [4, 5, 6]) { if (new Set(t.map((x) => x.code[11 + col])).size === 1 && t[0].code[11 + col] === '8') { const p = 11 + col; t.forEach((x) => { x.alts = [x.code, ...(x.alts || [])]; x.code = x.code.slice(0, p) + '6' + x.code.slice(p + 1); x.info = null; x.err = ''; x.rc = 0; }); break; } }
     } catch { /* */ }
-    card.busy = false; scRvPaint(); card.cands.forEach((x) => { if (!x.info) scRvCheck(card, x); });
+    card.busy = false; scRvPaint(); card.cands.forEach((x) => { if (!x.info && !x.manual) scRvCheck(card, x); });
     if (!card.cands.length) scBeep('bad');
   }
   async function scImages(files) {
