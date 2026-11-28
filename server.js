@@ -9802,7 +9802,15 @@ async function handleApi(req, res, url) {
   // 🤖 v3.125.588 — JARVIS: free-form sawaal ka AI jawab (ANTHROPIC_API_KEY env chahiye) + kaam ki queue (portal/report tasks)
   if (p === '/api/jarvis/status' && method === 'GET') {
     requireAdmin(user);
-    return sendJson(res, 200, { ok: true, ai: !!process.env.GEMINI_API_KEY, provider: 'gemini-free' });
+    let models = null;
+    if (process.env.GEMINI_API_KEY && url.searchParams.get('models') === '1') {
+      try {
+        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100', { headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY }, signal: AbortSignal.timeout(10e3) });
+        const j = await r.json().catch(() => ({}));
+        models = r.ok ? (j.models || []).filter((m) => (m.supportedGenerationMethods || []).includes('generateContent')).map((m) => String(m.name).replace('models/', '')).filter((n) => /flash/.test(n)) : 'HTTP ' + r.status;
+      } catch (e) { models = 'ERR ' + String((e && e.message) || e).slice(0, 60); }
+    }
+    return sendJson(res, 200, { ok: true, ai: !!process.env.GEMINI_API_KEY, provider: 'gemini-free', models });
   }
   // 🆓 Optional free brain: Google Gemini free tier (GEMINI_API_KEY, card nahi lagta). Key na ho to browser ka built-in AI / rule engine chalta hai.
   if (p === '/api/jarvis/ask' && method === 'POST') {
