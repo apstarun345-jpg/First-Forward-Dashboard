@@ -360,7 +360,7 @@ FF.pages = FF.pages || {};
           <div class="bcc-scan-bar"><span class="bcc-scan-count" data-emp-count></span><input class="input" data-emp-q placeholder="🔎 Naam / barcode / agent…" style="max-width:260px"><button type="button" class="btn small" data-emp-rf>↻ Refresh</button><button type="button" class="btn small" data-emp-link title="Employee ko ye link bhejo">🔗 Employee scan link copy</button><button type="button" class="btn small" data-emp-csv>⬇ CSV</button></div>
           <div class="bcc-emp-dash" data-emp-dash></div>
           <div class="bcc-emp-chips" data-emp-chips></div>
-          <div class="table-wrap tall"><table class="tbl compact bcc-tbl"><thead><tr><th>Scan time</th><th>👤 Employee</th><th>Barcode</th><th>Status</th><th>Class</th><th>Agent</th><th>Agent ID</th><th>TL</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody data-emp-body><tr><td colspan="10" class="empty">Loading…</td></tr></tbody></table></div>
+          <div class="table-wrap tall"><table class="tbl compact bcc-tbl"><thead><tr><th>Scan time</th><th>👤 Employee</th><th>Barcode</th><th>Tag ID</th><th>Status</th><th>Class</th><th>Agent</th><th>Agent ID</th><th>TL</th><th>🏢 Office stock</th><th>Allocated / Issue date</th><th>VRN</th><th>Note</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody data-emp-body><tr><td colspan="14" class="empty">Loading…</td></tr></tbody></table></div>
         </div>
         <p class="dim small bcc-note">Max ${MAX.toLocaleString('en-IN')} barcodes ek baar me. Jo tag stock me nahi, uska Tag ID aas-paas ke stock tags se anumaan lagaya jaata hai (note me likha aata hai). Range ka koi bhi tag stock me na ho to first barcode ka Tag ID daal do.</p>
       </div></div>
@@ -717,8 +717,8 @@ FF.pages = FF.pages || {};
       const c = emp.cache.get(r.code), fresh = r._f && Date.now() - r._f < 4000;
       const st = c ? `<span class="badge ${STATUS[c.k].tone}">${esc(STATUS[c.k].label || STATUS[c.k].text || c.k)}</span>` : '<span class="dim">⏳</span>';
       const hist = emp.open.has(r.code) ? `<tr class="bcc-emp-hist"><td colspan="10">${empHist(r, c)}</td></tr>` : '';
-      return `<tr class="${c ? 'bcc-' + c.k : ''}${fresh ? ' bcc-new' : ''}"><td>${esc(empTime(r.at))}</td><td><b>${esc(r.name)}</b></td><td class="mono bcc-cell" data-emp-hist="${esc(r.code)}" title="Click = itihaas (kisne kab scan kiya)">${esc(r.code)}${r.dups ? ` <span class="badge amber" title="${r.dups} baar dobara scan hua">🔁 ${r.dups}</span>` : ''}</td><td>${st}</td><td>${esc(c ? c.cls : '')}</td><td>${esc(c ? c.agent : '')}</td><td>${esc(c ? c.agentId : '')}</td><td>${esc(c ? c.tl : '')}</td><td>${esc(c && c.dDate && c.dDate !== SEARCHING ? c.dDate : '')}</td><td>${esc(c && c.dName && c.dName !== SEARCHING ? c.dName : '')}</td></tr>${hist}`;
-    }).join('') || '<tr><td colspan="10" class="empty">Abhi kisi employee ne scan nahi kiya</td></tr>';
+      return `<tr class="${c ? 'bcc-' + c.k : ''}${fresh ? ' bcc-new' : ''}"><td>${esc(empTime(r.at))}</td><td><b>${esc(r.name)}</b></td><td class="mono bcc-cell" data-emp-hist="${esc(r.code)}" title="Click = itihaas (kisne kab scan kiya)">${esc(r.code)}${r.dups ? ` <span class="badge amber" title="${r.dups} baar dobara scan hua">🔁 ${r.dups}</span>` : ''}</td><td class="mono">${esc(c ? c.tagId : '')}</td><td>${st}</td><td>${esc(c ? c.cls : '')}</td><td>${esc(c ? c.agent : '')}</td><td>${esc(c ? c.agentId : '')}</td><td>${esc(c ? c.tl : '')}</td><td>${esc(c ? c.office || '' : '')}</td><td>${esc(c ? c.date || '' : '')}</td><td>${esc(c ? c.vrn || '' : '')}</td><td>${esc(c ? c.note || '' : '')}</td><td>${esc(c && c.dDate && c.dDate !== SEARCHING ? c.dDate : '')}</td><td>${esc(c && c.dName && c.dName !== SEARCHING ? c.dName : '')}</td></tr>${hist}`;
+    }).join('') || '<tr><td colspan="14" class="empty">Abhi kisi employee ne scan nahi kiya</td></tr>';
     empDash(root);
     const cnt = root.querySelector('[data-emp-count]'); if (cnt) cnt.textContent = `${U.fmt(list.length)} scan · ${U.fmt(Object.keys(emp.by).length)} employee`;
     const ch = root.querySelector('[data-emp-chips]');
@@ -751,8 +751,8 @@ FF.pages = FF.pages || {};
   function empStop() { clearInterval(emp.timer); emp.timer = 0; }
   function empCsv() {
     const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-    const lines = [['Scan time', 'Employee', 'Barcode', 'Status', 'Class', 'Agent', 'Agent ID', 'TL'].map(q).join(',')];
-    emp.rows.filter((r) => !emp.name || r.name === emp.name).forEach((r) => { const c = emp.cache.get(r.code) || {}; lines.push([empTime(r.at), r.name, r.code, c.k ? (STATUS[c.k].label || STATUS[c.k].text || c.k) : '', c.cls, c.agent, c.agentId, c.tl].map(q).join(',')); });
+    const lines = [['Scan time', 'Employee', 'Barcode', 'Status', 'Class', 'Agent', 'Agent ID', 'TL', 'Tag ID', 'Office stock', 'Issue date', 'VRN', 'Note', 'Dispatch date', 'Dispatched to'].map(q).join(',')];
+    emp.rows.filter((r) => !emp.name || r.name === emp.name).forEach((r) => { const c = emp.cache.get(r.code) || {}; lines.push([empTime(r.at), r.name, r.code, c.k ? (STATUS[c.k].label || STATUS[c.k].text || c.k) : '', c.cls, c.agent, c.agentId, c.tl, c.tagId, c.office, c.date, c.vrn, c.note, c.dDate !== SEARCHING ? c.dDate : '', c.dName !== SEARCHING ? c.dName : ''].map(q).join(',')); });
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' })); a.download = 'employee-scans.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
   function scanInit(root) {
