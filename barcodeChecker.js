@@ -626,6 +626,15 @@ FF.pages = FF.pages || {};
       scanCount();
     });
   }
+  // 👥 v3.125.606 — app ke andar jo bhi (employee / admin) scan kare, uska naam + time admin ki "Employee scans" table me turant
+  function scanShare(code) {
+    try {
+      const d = String(code || '').replace(/\D/g, ''); if (!/^\d{16}$/.test(d)) return;
+      const u = FF.auth && FF.auth.user; const name = String((u && (u.name || u.username)) || '').trim(); if (name.length < 2) return;
+      const body = JSON.stringify({ name, code: `${d.slice(0, 6)}-${d.slice(6, 9)}-${d.slice(9)}`, at: new Date().toISOString() });
+      fetch('/api/public/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).then(() => { if (state.tab === 'emp') empLoad(); }).catch(() => {});
+    } catch { /* scan ko kabhi nahi rokta */ }
+  }
   const scanOk = (c) => /^[\d-]+$/.test(String(c || '').trim()) && /^\d{12,20}$/.test(String(c || '').replace(/\D/g, ''));
   function scanAdd(code) {
     if (!scanOk(code)) { U.toast && U.toast('Ye FASTag barcode nahi hai — skip', 'warn'); return false; }
@@ -634,6 +643,7 @@ FF.pages = FF.pages || {};
     scan.order.push(k); scan.map.set(k, pendingRow(code)); scan.queue.push(code);
     if (!scan.want) scanBeep('ok'); scanSave(); scanPaint();
     try { window.dispatchEvent(new CustomEvent('ff-scan', { detail: { kind: 'ok', code } })); } catch { /* optional */ }
+    scanShare(code);
     if (!scan.t) scan.t = setTimeout(scanFlush, 220);
     return true;
   }
@@ -729,7 +739,7 @@ FF.pages = FF.pages || {};
   async function empLoad() {
     if (emp.busy || !state.root || document.hidden) return; emp.busy = true;
     try {
-      const j = await FF.auth.api('/api/scan-log', 'GET');
+      const j = await FF.auth.api('/api/scan-log?limit=1500', 'GET');
       const prev = new Set(emp.rows.map((r) => r.code));
       emp.rows = (j.rows || []).map((r) => { if (emp.seen && !prev.has(r.code)) r._f = Date.now(); return r; }); emp.by = j.byName || {}; emp.stats = j.stats || {}; emp.today = j.today || 0; emp.total = j.total || 0; emp.seen = 1;
       const bd = state.root.querySelector('[data-emp-badge]'); if (bd) { bd.hidden = !emp.total; bd.textContent = U.fmt(emp.total); }
@@ -737,7 +747,7 @@ FF.pages = FF.pages || {};
     } catch (err) { const b = state.root && state.root.querySelector('[data-emp-body]'); if (b && !emp.rows.length) b.innerHTML = `<tr><td colspan="10" class="empty">⚠️ ${esc(String((err && err.message) || err))}</td></tr>`; }
     emp.busy = false;
   }
-  function empStart() { empStop(); empLoad(); emp.timer = setInterval(() => { if (state.tab === 'emp') empLoad(); else empStop(); }, 8000); }
+  function empStart() { empStop(); empLoad(); emp.timer = setInterval(() => { if (state.tab === 'emp') empLoad(); else empStop(); }, 3000); }
   function empStop() { clearInterval(emp.timer); emp.timer = 0; }
   function empCsv() {
     const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
