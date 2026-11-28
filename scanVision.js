@@ -357,7 +357,7 @@
     await tick();
     if (opt.quick) return [...found.values()];
     // 3) jagah dhoondh kar seedha crop + zbar ; 4) number ka OCR
-    let regions = []; try { regions = locate(work, { alt: 2, coh: 0.6, minBlocks: 4 }); } catch { regions = []; }
+    let regions = []; try { regions = locate(work, { alt: 2, coh: 0.6, minBlocks: 4 }); if (!opt.live && regions.filter((r) => r.w > 50 && r.w / Math.max(1, r.h) >= 1.5 && r.w / Math.max(1, r.h) <= 9).length < 10) { const r2 = locate(work, { alt: 2, coh: 0.5, minBlocks: 3 }); const keep = r2.filter((q) => !regions.some((o) => Math.hypot(o.cx - q.cx, o.cy - q.cy) < Math.max(60, 0.4 * Math.max(o.w, q.w)))); regions = [...regions, ...keep]; } } catch { regions = []; }
     const inBox = (r) => boxes.some((b) => { const xs = b.map((p) => p[0]), ys = b.map((p) => p[1]); return r.cx >= Math.min(...xs) - 40 && r.cx <= Math.max(...xs) + 40 && r.cy >= Math.min(...ys) - 60 && r.cy <= Math.max(...ys) + 60; });
     const cand = regions.filter((r) => r.w > 50 && r.w / Math.max(1, r.h) >= 1.5 && r.w / Math.max(1, r.h) <= 9 && !inBox(r)).slice(0, 24);
     const ocrJobs = [];
