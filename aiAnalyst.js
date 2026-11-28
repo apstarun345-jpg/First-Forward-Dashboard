@@ -446,7 +446,7 @@ FF.pages = FF.pages || {};
     const tMax = Math.max(1, ...tAvg), tMean = tAvg.reduce((x, y) => x + y, 0) / 7 || 1;
     const bestI = tAvg.indexOf(Math.max(...tAvg)), weakI = tAvg.indexOf(Math.min(...tAvg));
     const wCards = `<div class="ax-wd">${WD.map(([d, l], i) => `<div class="ax-wd-c ${i === bestI ? 'best' : i === weakI ? 'weak' : ''}"><small>${l}</small><b>${fmt(tAvg[i])}</b><em>${tAvg[i] >= tMean ? '+' : '−'}${Math.abs(((tAvg[i] - tMean) / tMean) * 100).toFixed(0)}% vs avg</em><span class="ax-wd-bar"><i style="height:${((tAvg[i] / tMax) * 100).toFixed(0)}%"></i></span></div>`).join('')}</div>`;
-    const heat = (v, mx) => `style="background:rgba(99,102,241,${(0.06 + 0.5 * (mx ? v / mx : 0)).toFixed(2)})"`;
+    const heat = (v, mx) => `style="background:rgba(37,99,235,${(0.06 + 0.5 * (mx ? v / mx : 0)).toFixed(2)})"`;
     const wCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, ...C_MOB(),
       ...WD.map(([d, l]) => ({ k: 'd' + d, h: l, v: (e) => wdAvg(e, d), t: (e) => wdAvg(e, d).toFixed(1), c: (e) => { const row = WD.map(([x]) => wdAvg(e, x)); return `<span class="ax-hc" ${heat(wdAvg(e, d), Math.max(...row))}>${wdAvg(e, d).toFixed(1)}</span>`; }, cls: 'c' })),
       { k: 'best', h: '🔥 Best din', v: (e) => Math.max(...WD.map(([d]) => wdAvg(e, d))), t: (e) => WD.reduce((b, x) => (wdAvg(e, x[0]) > wdAvg(e, b[0]) ? x : b))[1], c: (e) => `<span class="ax-days hot2">${WD.reduce((b, x) => (wdAvg(e, x[0]) > wdAvg(e, b[0]) ? x : b))[1]}</span>`, cls: 'c' },
