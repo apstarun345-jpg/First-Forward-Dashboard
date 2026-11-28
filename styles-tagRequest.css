@@ -412,3 +412,5 @@ html.mobile-ui .tr-req-tbl .tr-c-suggest .tr-grp { font-size: 16px; }
 .page-tagRequest .tr-qty-row, .page-tagRequest .tr-qty-head, .page-tagRequest .tr-qty-foot { padding-top: 5px; padding-bottom: 5px; }
 .page-tagRequest .tr-qty-row .input { height: 34px; font-weight: 700; }
 .page-tagRequest .tr-boxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+
+.tr-st-no { background: #eff6ff; color: #1d4ed8; border-radius: 6px; padding: 1px 7px; font-size: 12px; }

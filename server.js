@@ -10895,7 +10895,7 @@ async function handleApi(req, res, url) {
   };
   /** Submit response me har agent ki chhoti summary (done screen par Request ID list). */
   const tagBatchSummary = (r) => ({
-    id: r.id, at: r.at, status: r.status, total: r.total, rows: (r.rows || []).length, byName: r.byName,
+    id: r.id, no: r.no || null, at: r.at, status: r.status, total: r.total, rows: (r.rows || []).length, byName: r.byName,
     agentName: (r.agent && r.agent.name) || '', agentId: (r.agent && r.agent.agentId) || '', mobile: (r.agent && r.agent.mobile) || '',
     pincode: (r.agent && r.agent.pincode) || '', classes: (r.rows || []).map((x) => ({ cls: x.cls, qty: x.approved })),
     duplicates: r.dupCount || 0, sheetSync: !!r.sheetSync
@@ -13718,7 +13718,7 @@ async function handleApi(req, res, url) {
         const classes = Array.isArray(r.rows) ? r.rows : [];
         const first = classes[0] || {};
         return {
-          id: r.id, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0,
+          id: r.id, no: r.no || null, at: r.at, status: r.status || 'pending', total: Number(r.total) || 0,
           employeeName: (r.employee && r.employee.name) || r.byName || '',
           rows: classes.length,
           agentName: (r.agent && r.agent.name) || first.agentName || '',

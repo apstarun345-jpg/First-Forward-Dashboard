@@ -11060,3 +11060,5 @@ html[data-theme="dark"] .ax-days.hot2 { background: #064e3b; color: #6ee7b7; }
 .bcc-emp-pv { margin: 8px 0; padding: 10px 12px; border-radius: 12px; border: 1px dashed #1d4ed8; background: color-mix(in srgb, #1d4ed8 7%, var(--card)); font-size: 13px; }
 .bcc-emp-pvc { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .bcc-emp-pvc span { padding: 2px 8px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); font-size: 12px; }
+
+.tr-st-no { background: #eff6ff; color: #1d4ed8; border-radius: 6px; padding: 1px 7px; font-size: 12px; }
