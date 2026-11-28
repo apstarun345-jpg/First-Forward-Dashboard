@@ -429,7 +429,7 @@
       };
       if (ocr) {
         const pool = await ocrPool(ocr).catch(() => [ocr]); let qi = 0;
-        await Promise.all(pool.map(async (o) => { while (qi < ocrJobs.length) { const r = ocrJobs[qi++]; if (left() < 600) break; await runJob(r, o); } }));
+        await Promise.all(pool.map(async (o) => { while (qi < ocrJobs.length) { const r = ocrJobs[qi++]; if (left() < 600) break; try { await runJob(r, o); } catch { /* ek tag fail — baaki chalte rahein */ } } }));
       }
       if (ocr && retryJobs.length && found.size && left() > 1500) {   // series pata chal gayi — pichhle fail region dobara, prefix ke saath
         const fv = [...found.values()], cnt = {}; fv.forEach((f) => { const k = f.code.slice(0, 15); cnt[k] = (cnt[k] || 0) + 1; });
