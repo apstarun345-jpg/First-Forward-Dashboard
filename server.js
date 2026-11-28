@@ -9820,10 +9820,11 @@ async function handleApi(req, res, url) {
       const models = [process.env.JARVIS_MODEL, 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest'].filter(Boolean);
       let last = null;
       for (const model of models) {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: 'POST', signal: ctl.signal, headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
-          body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig: { maxOutputTokens: 500 } })
-        });
+        const c1 = new AbortController(), t1 = setTimeout(() => c1.abort(), 11e3);
+        let r; try { r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST', signal: c1.signal, headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig: { maxOutputTokens: 800 } })
+        }); } catch (e) { last = model + ': ' + String((e && e.message) || e).slice(0, 60); continue; } finally { clearTimeout(t1); }
         const j = await r.json().catch(() => ({}));
         if (r.ok) {
           const parts = (((j.candidates || [])[0] || {}).content || {}).parts;
