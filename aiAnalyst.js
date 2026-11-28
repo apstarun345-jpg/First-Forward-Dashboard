@@ -210,6 +210,21 @@ FF.pages = FF.pages || {};
       if (/chassis/i.test(vt)) qAdd(qualMap.gv, k, 'chassis', 1);
       if (/wrong/i.test(vt)) qAdd(qualMap.gv, k, 'wrong', 1);
     });
+    // 📅 weekday pattern: har agent ke last ~3 mahine (cur, last, m2) ke tags weekday-wise (0=Sun..6=Sat)
+    const wdMap = { ff: new Map(), gv: new Map() };
+    const wdAdd = (m, k, date) => { if (!date || !date.getDay) return; let o = m.get(k); if (!o) m.set(k, o = [0, 0, 0, 0, 0, 0, 0]); o[date.getDay()]++; };
+    const wdAddN = (m, k, date, n) => { if (!date || !date.getDay) return; let o = m.get(k); if (!o) m.set(k, o = [0, 0, 0, 0, 0, 0, 0]); o[date.getDay()] += n; };
+    const wdMonths = new Set([out.cur, out.last, out.m2]);
+    if (ffDaily) ffDaily.forEach((r) => { if (wdMonths.has(r.ym)) wdAddN(wdMap.ff, qKey(r.agentId, r.agentName), r.d || r.date, r.n); });
+    if (gvOk) wdMonths.forEach((ym) => (gvIdx.byYm.get(ym) || []).forEach((r) => wdAdd(wdMap.gv, qKey(r.agentId, r.agentName), r.date)));
+    const wdOcc = (chLatest) => {
+      const n = [0, 0, 0, 0, 0, 0, 0]; if (!chLatest) return n;
+      [out.m2, out.last, out.cur].forEach((ym) => {
+        const [y, m] = ym.split('-').map(Number); const lim = U.ymKey(chLatest) === ym ? chLatest.getDate() : (ym > U.ymKey(chLatest) ? 0 : U.daysInMonth(ym));
+        for (let d = 1; d <= lim; d++) n[new Date(y, m - 1, d).getDay()]++;
+      });
+      return n;
+    };
     const stockRows = { ff: stockR.status === 'fulfilled' ? stockR.value : [], gv: gvStockR.status === 'fulfilled' ? gvStockR.value : [] };
     const build = (ch) => {
       const isFf = ch === 'ff';
@@ -224,7 +239,7 @@ FF.pages = FF.pages || {};
       promoteTls(en.people);
       const dd = day || out.day;
       const dAll = drivers(en.people, dd, out.dimCur);
-      dAll.rows.forEach((r) => { const q = qualMap[ch].get(r.key) || qualMap[ch].get(qKey(r.id, r.name)) || {}; r.repl = q.repl || 0; r.chassis = q.chassis || 0; r.wrong = q.wrong || 0; });
+      dAll.rows.forEach((r) => { const q = qualMap[ch].get(r.key) || qualMap[ch].get(qKey(r.id, r.name)) || {}; r.repl = q.repl || 0; r.chassis = q.chassis || 0; r.wrong = q.wrong || 0; r.wd = wdMap[ch].get(r.key) || wdMap[ch].get(qKey(r.id, r.name)) || null; });
       const stockOn = en.hasStock && out.isCurrent;
       const sv = stockViews(dAll.rows, dd, stockOn);
       const split = { tl: segStats(dAll.rows.filter((r) => !r.direct)), direct: segStats(dAll.rows.filter((r) => r.direct)) };
@@ -247,7 +262,7 @@ FF.pages = FF.pages || {};
       const whole = seg === 'all';
       return { ch, seg, day, latest: chLatest, source: isFf ? 'EIR' : 'GV Master', cur: curS, last: lastS, lastMtd: lastMtdS, proj, projGrowth: lastS.total ? pct(proj, lastS.total) : null, mtdGrowth: whole ? pct(cur.total, lastMtd.total) : null, d,
         tls: tlRoll(d.rows), conc: concentration(d.rows, curS.total), mo, curSeries, lastSeries, stock, stockRows: stockRows[ch], cover: avg ? stock / avg : 0, avg, mon, noLast: !lastS.total,
-        hasStock: stockOn, sv: sw, split, whole,
+        hasStock: stockOn, sv: sw, split, whole, wdN: wdOcc(chLatest),
         vc4Share: whole && cur.total ? (cur.vc4 / cur.total) * 100 : 0, vc4ShareLast: whole && last.total ? (last.vc4 / last.total) * 100 : 0,
         replShare: cur.total ? (cur.replacement / cur.total) * 100 : 0, wrongShare: whole && cur.total ? (cur.wrongVrn / cur.total) * 100 : 0 };
     };
@@ -280,7 +295,9 @@ FF.pages = FF.pages || {};
     const inact = c.hasStock && inacts.length ? Math.min(...inacts) : null;
     const st = statusOf(cur, last, proj, m2, m3), day = Math.max(1, c.day || 1);
     const avg = cur / day, cover = avg > 0 ? stock / avg : (stock > 0 ? Infinity : 0);
-    return { ch, type, name, id, agents: type === 'tl' ? rows.filter((r) => r.cur > 0 || r.last > 0 || r.stock > 0).length : 1, cur, last, m2, m3, proj, delta: proj - last, g: st.g, st: st.k,
+    const wd = [0, 0, 0, 0, 0, 0, 0]; rows.forEach((r) => { if (r.wd) for (let i = 0; i < 7; i++) wd[i] += r.wd[i]; });
+    if (type === 'tl') { const own = rows.find((r) => norm(r.name) === norm(name)); id = own ? own.id : ''; }
+    return { ch, type, name, id, wd, wdN: c.wdN || [1, 1, 1, 1, 1, 1, 1], agents: type === 'tl' ? rows.filter((r) => r.cur > 0 || r.last > 0 || r.stock > 0).length : 1, cur, last, m2, m3, proj, delta: proj - last, g: st.g, st: st.k,
       stock, inact, avg, cover, repl: sum('repl'), chassis: sum('chassis'), wrong: sum('wrong'), day: c.day, hasStock: !!c.hasStock };
   }
   function entitiesOf(a) {
@@ -299,14 +316,14 @@ FF.pages = FF.pages || {};
 
   let AX = { key: '', a: null, at: 0 };
   const UIKEY = 'ff-ax-ui-v2';
-  const defUi = () => ({ old: false, ch: 'all', seg: 'all', q: '', gst: 'all', t: { g: { sort: 'proj', dir: 'desc' }, q: { sort: 'wrong', dir: 'desc' }, i: { sort: 'stock', dir: 'desc' }, s: { sort: 'stock', dir: 'desc' } } });
+  const defUi = () => ({ old: false, ch: 'all', seg: 'all', q: '', gst: 'all', t: { g: { sort: 'proj', dir: 'desc' }, q: { sort: 'wrong', dir: 'desc' }, i: { sort: 'stock', dir: 'desc' }, s: { sort: 'stock', dir: 'desc' }, w: { sort: 'tot', dir: 'desc' } } });
   function loadUi() {
     const u = defUi();
     try {
       const s = JSON.parse(localStorage.getItem(UIKEY) || '{}');
       if (['gv', 'ff'].includes(s.ch)) u.ch = s.ch; if (['tl', 'direct'].includes(s.seg)) u.seg = s.seg;
       if (typeof s.q === 'string') u.q = s.q.slice(0, 60); if (typeof s.gst === 'string' && (s.gst === 'all' || ST[s.gst])) u.gst = s.gst; u.old = s.old === true;
-      ['g', 'q', 'i', 's'].forEach((k) => { const t = s.t && s.t[k]; if (t && typeof t.sort === 'string') u.t[k] = { sort: t.sort.slice(0, 12), dir: t.dir === 'asc' ? 'asc' : 'desc', all: t.all === true }; });
+      ['g', 'q', 'i', 's', 'w'].forEach((k) => { const t = s.t && s.t[k]; if (t && typeof t.sort === 'string') u.t[k] = { sort: t.sort.slice(0, 12), dir: t.dir === 'asc' ? 'asc' : 'desc', all: t.all === true }; });
     } catch { /* default */ }
     return u;
   }
@@ -314,6 +331,28 @@ FF.pages = FF.pages || {};
   function scroller(el) {
     try { for (let n = el; n && n !== document.body; n = n.parentElement) { const o = getComputedStyle(n).overflowY; if ((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n; } } catch { /* ignore */ }
     return document.scrollingElement || document.documentElement;
+  }
+  // 📞 mobile (sirf admin / 'contacts' permission) — Agent Details sheet + Address book se; TL ka bhi (naam / ID se)
+  const canMob = () => { try { return !!(FF.auth && (FF.auth.isAdmin() || FF.auth.can('contacts'))); } catch { return false; } };
+  function mobOf(e) {
+    if (!canMob()) return '';
+    let m = '';
+    try { if (FF.masterProfile && FF.masterProfile.mobileFor) m = FF.masterProfile.mobileFor(e.name, e.id, '') || ''; } catch { /* optional */ }
+    if (!m) try { m = (FF.agentMobiles && FF.agentMobiles.of && FF.agentMobiles.of({ id: e.id, name: e.name })) || ''; } catch { /* optional */ }
+    m = clean(m); return /^na$/i.test(m) ? '' : m;
+  }
+  const mobCell = (e) => { const m = mobOf(e); return m ? `<a class="ax-mob" href="tel:${esc(m)}" title="Call ${esc(e.name)}">📞 ${esc(m)}</a>` : '<span class="dim">—</span>'; };
+  const C_MOB = () => (canMob() ? [{ k: 'mob', h: '📞 Mobile', t: (e) => mobOf(e), c: (e) => mobCell(e), cls: 'c' }] : []);
+  const TBL = {};   // har table ka poora (filtered + sorted) data CSV ke liye
+  const WD = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']];
+  const wdAvg = (e, d) => (e.wdN[d] ? e.wd[d] / e.wdN[d] : 0);
+  const plain = (html) => { try { const t = document.createElement('div'); t.innerHTML = html; return (t.textContent || '').replace(/\s+/g, ' ').trim(); } catch { return String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); } };
+  function csvTable(id) {
+    const t = TBL[id]; if (!t) return;
+    const cols = t.cols.filter((c) => c.k !== '#');
+    const head = ['Channel', 'Type', ...cols.map((c) => plain(c.h))];
+    const rows = t.rows.map((e) => [e.ch.toUpperCase(), e.type === 'tl' ? 'TL' : 'Direct', ...cols.map((c) => (c.t ? c.t(e, t.ctx) : plain(c.c(e, t.ctx))))]);
+    U.downloadCsv(`ai-analyst-${t.name}-${U.stamp()}.csv`, head, rows);
   }
   const cnt0 = (arr, k) => arr.filter((e) => e.st === k).length;
   const badge = (e) => `<span class="ax-b ${e.ch}">${e.ch === 'gv' ? 'GV' : 'FF'}</span><span class="ax-b ${e.type}">${e.type === 'tl' ? 'TL' : 'Direct'}</span>`;
@@ -330,13 +369,14 @@ FF.pages = FF.pages || {};
     const sorted = rows.slice();
     const sc = cols.find((c) => c.k === st.sort) || cols.find((c) => c.v);
     if (sc && sc.v) { const dir = st.dir === 'asc' ? 1 : -1; sorted.sort((x, y) => { const a = sc.v(x), b = sc.v(y); return (a === b ? 0 : a > b ? 1 : -1) * dir || (y.cur - x.cur); }); }
+    TBL[id] = { cols, rows: sorted, ctx, name: ({ g: 'growth', q: 'quality', i: 'inactive', s: 'stock', w: 'weekday' })[id] || id };
     const shown = st.all ? sorted : sorted.slice(0, limit || 15);
     const head = cols.map((c) => `<th class="${c.cls || ''} ${c.v ? 'ax-sortable' : ''} ${sc && sc.k === c.k ? 'on ' + (st.dir === 'asc' ? 'asc' : 'desc') : ''}" ${c.v ? `data-sort="${id}|${c.k}"` : ''}>${c.h}</th>`).join('');
     const body = shown.map((e, i) => `<tr>${cols.map((c) => `<td class="${c.cls || ''}">${c.k === '#' ? i + 1 : c.c(e, ctx)}</td>`).join('')}</tr>`).join('');
     const more = sorted.length > (limit || 15) ? `<button type="button" class="ax-more" data-more="${id}">${st.all ? '▲ Kam dikhao' : `▼ Sab ${sorted.length} dikhao`}</button>` : '';
     return `<div class="ax-scroll"><table class="ax-table"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${cols.length}" class="ax-empty">Is filter me koi nahi 🎉</td></tr>`}</tbody></table></div>${more}`;
   }
-  const C_NAME = { k: 'name', h: 'Naam', v: (e) => e.name.toLowerCase(), c: (e) => nameCell(e), cls: 'l' };
+  const C_NAME = { k: 'name', h: 'Naam', v: (e) => e.name.toLowerCase(), t: (e) => e.name, c: (e) => nameCell(e), cls: 'l' };
   const C_NUM = (k, h, f, extra) => ({ k, h, v: f, c: (e) => fmt(f(e)), cls: 'r', ...(extra || {}) });
 
   function sections(a, ent, ui) {
@@ -367,40 +407,53 @@ FF.pages = FF.pages || {};
     const gList = act.filter((e) => gSt === 'all' || e.st === gSt || (gSt === 'growth' && e.st === 'new'));
     const gChips = [['all', 'Sab', act.length], ['growth', '🟢 Growth', cnt('growth') + cnt('new')], ['stable', '🔵 Stable', cnt('stable')], ['degrowth', '🟠 De-growth', cnt('degrowth')], ['high', '🔴 High de-growth', cnt('high')], ['inact1', '⏸️ Inactive — is mahine', cnt('inact1')], ['inact2', '💤 Inactive 2 mahine', cnt('inact2')], ['inact3', '🪦 Inactive 3 mahine', cnt('inact3')]]
       .map(([k, l, n]) => `<button type="button" class="ax-fchip ${gSt === k ? 'on' : ''}" data-gst="${k}">${l} <b>${n}</b></button>`).join('');
-    const gCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, { k: 'agents', h: 'Agents', v: (e) => e.agents, c: (e) => (e.type === 'tl' ? e.agents : '—'), cls: 'r' },
+    const gCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, ...C_MOB(), { k: 'agents', h: 'Agents', v: (e) => e.agents, c: (e) => (e.type === 'tl' ? e.agents : '—'), cls: 'r' },
       C_NUM('m3', U.labelYM(a.m3), (e) => e.m3), C_NUM('m2', U.labelYM(a.m2), (e) => e.m2), C_NUM('last', 'Pichhla mahina', (e) => e.last), C_NUM('cur', 'Ab tak', (e) => e.cur), { k: 'proj', h: 'Projection', v: (e) => e.proj, c: (e) => `<b>${fmt(e.proj)}</b>`, cls: 'r' },
       { k: 'delta', h: 'Farak', v: (e) => e.delta, c: (e) => `<span class="ax-d ${tone(e.delta)}">${sgn(e.delta)}</span>`, cls: 'r' },
       { k: 'g', h: 'Growth %', v: (e) => (e.g === null ? (e.st === 'new' ? 1e6 : 0) : e.g), c: (e) => `<span class="ax-gcell ${e.st}">${gTxt(e)}</span>`, cls: 'r' },
       { k: 'st', h: 'Status', v: (e) => ST[e.st].rank, c: (e) => stChip(e.st), cls: 'c' }];
-    const s1 = `<section class="ax-sec s-growth"><header><h3>📈 Growth · De-growth</h3><p>TL = TL + uski poori team ka total · Direct agent alag · "Inactive" = jinka issuance 0 hai (is mahine / 2 / 3 mahine se)</p></header><div class="ax-filters">${gChips}</div>${tableHtml('g', gCols, gList, ui.t.g, null, 20)}</section>`;
+    const s1 = `<section class="ax-sec s-growth"><header><button type="button" class="ax-csvb" data-csv="g">⬇ CSV</button><h3>📈 Growth · De-growth</h3><p>TL = TL + uski poori team ka total · Direct agent alag · "Inactive" = jinka issuance 0 hai (is mahine / 2 / 3 mahine se)</p></header><div class="ax-filters">${gChips}</div>${tableHtml('g', gCols, gList, ui.t.g, null, 20)}</section>`;
 
     // 2) Quality
     const qMax = (f) => Math.max(1, ...list.map(f));
     const mxR = qMax((e) => e.repl), mxC = qMax((e) => e.chassis), mxW = qMax((e) => e.wrong);
     const qCell = (e, f, mx, cls) => `<div class="ax-qc"><b>${fmt(f(e))}</b><em>${pctOf(f(e), e.cur)}</em>${bar(f(e), mx, cls)}</div>`;
-    const qCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, C_NUM('cur', 'Total tags', (e) => e.cur),
+    const qCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, ...C_MOB(), C_NUM('cur', 'Total tags', (e) => e.cur),
       { k: 'repl', h: '♻️ Replacement', v: (e) => e.repl, c: (e) => qCell(e, (x) => x.repl, mxR, 'amber'), cls: 'q' },
       { k: 'chassis', h: '🚗 Chassis', v: (e) => e.chassis, c: (e) => qCell(e, (x) => x.chassis, mxC, 'violet'), cls: 'q' },
       { k: 'wrong', h: '❌ Wrong VRN', v: (e) => e.wrong, c: (e) => qCell(e, (x) => x.wrong, mxW, 'rose'), cls: 'q' }];
     const qL = list.filter((e) => e.cur > 0);
     const qPick = [['repl', '♻️ Replacement'], ['chassis', '🚗 Chassis'], ['wrong', '❌ Wrong VRN']].map(([k, l]) => `<button type="button" class="ax-fchip ${ui.t.q.sort === k ? 'on' : ''}" data-qsort="${k}">${l} ↓</button>`).join('');
-    const s2 = `<section class="ax-sec s-quality"><header><h3>🧪 Quality — kiske Replacement · Chassis · Wrong VRN jyada</h3><p>Is mahine ke tags me se (count + % of total)</p></header><div class="ax-filters">${qPick}</div>${tableHtml('q', qCols, qL, ui.t.q, null, 15)}</section>`;
+    const s2 = `<section class="ax-sec s-quality"><header><button type="button" class="ax-csvb" data-csv="q">⬇ CSV</button><h3>🧪 Quality — kiske Replacement · Chassis · Wrong VRN jyada</h3><p>Is mahine ke tags me se (count + % of total)</p></header><div class="ax-filters">${qPick}</div>${tableHtml('q', qCols, qL, ui.t.q, null, 15)}</section>`;
 
     // 3) Inactive
-    const iCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, { k: 'agents', h: 'Agents', v: (e) => e.agents, c: (e) => (e.type === 'tl' ? e.agents : '—'), cls: 'r' },
+    const iCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, ...C_MOB(), { k: 'agents', h: 'Agents', v: (e) => e.agents, c: (e) => (e.type === 'tl' ? e.agents : '—'), cls: 'r' },
       { k: 'inact', h: 'Inactive', v: (e) => e.inact, c: (e) => `<span class="ax-days ${e.inact >= 30 ? 'hot' : e.inact >= 14 ? 'warm' : ''}">${inactTxt(e.inact)}</span>`, cls: 'c' },
       C_NUM('stock', '📦 Stock', (e) => e.stock), C_NUM('last', 'Pichhla mahina', (e) => e.last), C_NUM('cur', 'Is mahine', (e) => e.cur)];
-    const s3 = `<section class="ax-sec s-inactive"><header><h3>⏸️ Inactive — 7+ din se koi issuance nahi</h3><p>Poora group (TL + uske agents) ruka ho tabhi gina jaata hai · pichhle 2 mahine me jo chal rahe the</p></header>${hasStockAll ? `<div class="ax-filters"><button type="button" class="ax-fchip ${ui.old ? 'on' : ''}" data-old="1">60+ din purane (dormant) bhi dikhao</button></div>` : ''}${hasStockAll ? tableHtml('i', iCols, inactiveL, ui.t.i, null, 15) : '<div class="ax-note">Inactive din sirf current month me aur stock data load hone par dikhte hain.</div>'}</section>`;
+    const s3 = `<section class="ax-sec s-inactive"><header><button type="button" class="ax-csvb" data-csv="i">⬇ CSV</button><h3>⏸️ Inactive — 7+ din se koi issuance nahi</h3><p>Poora group (TL + uske agents) ruka ho tabhi gina jaata hai · pichhle 2 mahine me jo chal rahe the</p></header>${hasStockAll ? `<div class="ax-filters"><button type="button" class="ax-fchip ${ui.old ? 'on' : ''}" data-old="1">60+ din purane (dormant) bhi dikhao</button></div>` : ''}${hasStockAll ? tableHtml('i', iCols, inactiveL, ui.t.i, null, 15) : '<div class="ax-note">Inactive din sirf current month me aur stock data load hone par dikhte hain.</div>'}</section>`;
 
     // 4) Stock vs issuance
     const mxS = Math.max(1, ...stockL.map((e) => e.stock));
-    const sCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME,
+    const sCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, ...C_MOB(),
       { k: 'stock', h: '📦 Stock', v: (e) => e.stock, c: (e) => `<div class="ax-qc"><b>${fmt(e.stock)}</b>${bar(e.stock, mxS, 'amber')}</div>`, cls: 'q' },
       C_NUM('cur', 'Is mahine issuance', (e) => e.cur), { k: 'avg', h: 'Roz ka average', v: (e) => e.avg, c: (e) => e.avg.toFixed(1), cls: 'r' },
       { k: 'cover', h: 'Stock kitne din ka', v: (e) => (e.cover === Infinity ? 1e9 : e.cover), c: (e) => `<span class="ax-days ${e.cover >= 90 ? 'hot' : 'warm'}">${coverTxt(e.cover)}</span>`, cls: 'c' },
       { k: 'inact', h: 'Inactive', v: (e) => (e.inact === null ? -1 : e.inact), c: (e) => inactTxt(e.inact), cls: 'c' }];
-    const s4 = `<section class="ax-sec s-stock"><header><h3>📦 Stock jyada · issuance kam</h3><p>Stock ${COVER_HIGH}+ din ka (roz ke average se) · kam se kam ${MIN_STOCK} tags ka stock — stock hai par kaam nahi</p></header>${hasStockAll ? tableHtml('s', sCols, stockL, ui.t.s, null, 15) : '<div class="ax-note">Stock data load nahi hua.</div>'}</section>`;
-    return { kHtml, html: `${s1}${s2}<div class="ax-two">${s3}${s4}</div>`, list, inactiveL, stockL };
+    const s4 = `<section class="ax-sec s-stock"><header><button type="button" class="ax-csvb" data-csv="s">⬇ CSV</button><h3>📦 Stock jyada · issuance kam</h3><p>Stock ${COVER_HIGH}+ din ka (roz ke average se) · kam se kam ${MIN_STOCK} tags ka stock — stock hai par kaam nahi</p></header>${hasStockAll ? tableHtml('s', sCols, stockL, ui.t.s, null, 15) : '<div class="ax-note">Stock data load nahi hua.</div>'}</section>`;
+    // 5) Weekday pattern — kis din kitne tags (roz ka average, pichhle ~3 mahine)
+    const wL = act.filter((e) => e.wd.some((x) => x > 0));
+    const tAvg = WD.map(([d]) => wL.reduce((t, e) => t + wdAvg(e, d), 0));
+    const tMax = Math.max(1, ...tAvg), tMean = tAvg.reduce((x, y) => x + y, 0) / 7 || 1;
+    const bestI = tAvg.indexOf(Math.max(...tAvg)), weakI = tAvg.indexOf(Math.min(...tAvg));
+    const wCards = `<div class="ax-wd">${WD.map(([d, l], i) => `<div class="ax-wd-c ${i === bestI ? 'best' : i === weakI ? 'weak' : ''}"><small>${l}</small><b>${fmt(tAvg[i])}</b><em>${tAvg[i] >= tMean ? '+' : '−'}${Math.abs(((tAvg[i] - tMean) / tMean) * 100).toFixed(0)}% vs avg</em><span class="ax-wd-bar"><i style="height:${((tAvg[i] / tMax) * 100).toFixed(0)}%"></i></span></div>`).join('')}</div>`;
+    const heat = (v, mx) => `style="background:rgba(99,102,241,${(0.06 + 0.5 * (mx ? v / mx : 0)).toFixed(2)})"`;
+    const wCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, ...C_MOB(),
+      ...WD.map(([d, l]) => ({ k: 'd' + d, h: l, v: (e) => wdAvg(e, d), t: (e) => wdAvg(e, d).toFixed(1), c: (e) => { const row = WD.map(([x]) => wdAvg(e, x)); return `<span class="ax-hc" ${heat(wdAvg(e, d), Math.max(...row))}>${wdAvg(e, d).toFixed(1)}</span>`; }, cls: 'c' })),
+      { k: 'best', h: '🔥 Best din', v: (e) => Math.max(...WD.map(([d]) => wdAvg(e, d))), t: (e) => WD.reduce((b, x) => (wdAvg(e, x[0]) > wdAvg(e, b[0]) ? x : b))[1], c: (e) => `<span class="ax-days hot2">${WD.reduce((b, x) => (wdAvg(e, x[0]) > wdAvg(e, b[0]) ? x : b))[1]}</span>`, cls: 'c' },
+      { k: 'weak', h: '🧊 Weak din', t: (e) => WD.reduce((b, x) => (wdAvg(e, x[0]) < wdAvg(e, b[0]) ? x : b))[1], c: (e) => `<span class="ax-days">${WD.reduce((b, x) => (wdAvg(e, x[0]) < wdAvg(e, b[0]) ? x : b))[1]}</span>`, cls: 'c' },
+      { k: 'tot', h: 'Hafte ka avg', v: (e) => WD.reduce((t, [d]) => t + wdAvg(e, d), 0), t: (e) => WD.reduce((t, [d]) => t + wdAvg(e, d), 0).toFixed(1), c: (e) => `<b>${WD.reduce((t, [d]) => t + wdAvg(e, d), 0).toFixed(1)}</b>`, cls: 'r' }];
+    const s5 = `<section class="ax-sec s-weekday"><header><button type="button" class="ax-csvb" data-csv="w">⬇ CSV</button><h3>📅 Weekday pattern — kis din kitne tags</h3><p>Roz ka average tags (pichhle ~3 mahine ka data) · 🔥 sabse strong din, 🧊 sabse weak din</p></header>${wCards}${tableHtml('w', wCols, wL, ui.t.w, null, 15)}</section>`;
+    return { kHtml, html: `${s1}${s2}<div class="ax-two">${s3}${s4}</div>${s5}`, list, inactiveL, stockL };
   }
 
   function csvOf(list) {
@@ -419,7 +472,7 @@ FF.pages = FF.pages || {};
     root.innerHTML = `<div class="ax-hero"><div class="ax-hero-t"><span class="ax-hero-ico">🧠</span><div><h1>AI Business Analyst</h1><p>TL aur Direct agents ka seedha scorecard — growth, quality, inactive aur stock</p></div></div><div class="ax-hero-a" id="ax-actions"></div></div><div id="ax-body">${U.spinner('Analyst poora data padh raha hai…')}</div>`;
     const body = U.$('#ax-body', root);
     const key = String(p.month || '');
-    let firstPaint = true;
+    let firstPaint = true, redraw = null, mobTried = false;
     const paint = (a) => {
     if (!root.isConnected) return;
     if (a.empty) { body.innerHTML = '<div class="empty-state">Abhi analysis ke liye data nahi mila.</div>'; return; }
@@ -445,10 +498,11 @@ FF.pages = FF.pages || {};
       body.querySelectorAll('[data-ch]').forEach((b) => b.classList.toggle('on', b.dataset.ch === ui.ch));
       body.querySelectorAll('[data-seg]').forEach((b) => b.classList.toggle('on', b.dataset.seg === ui.seg));
     };
-    draw();
+    draw(); redraw = draw; if (!mobTried) { mobTried = true; loadMob(); }
     if (root.__axClick) root.removeEventListener('click', root.__axClick);
     root.__axClick = (e) => {
       const t = e.target;
+      const cb = t.closest('[data-csv]'); if (cb) { csvTable(cb.dataset.csv); return; }
       const dr = t.closest('[data-drill]'); if (dr) { openDrill(dr.dataset.drill); return; }
       const so = t.closest('[data-sort]'); if (so) { const [id, k] = so.dataset.sort.split('|'), s = ui.t[id]; s.dir = s.sort === k && s.dir === 'desc' ? 'asc' : 'desc'; s.sort = k; draw(); return; }
       const mo = t.closest('[data-more]'); if (mo) { const s = ui.t[mo.dataset.more]; s.all = !s.all; draw(); return; }
@@ -465,6 +519,7 @@ FF.pages = FF.pages || {};
     U.$('#ax-csv', root).addEventListener('click', () => { const [h, r] = csvOf(cur ? cur.list : ent); U.downloadCsv(`ai-analyst-${U.stamp()}.csv`, h, r); });
     const sc = scroller(root); if (sc && top) { sc.scrollTop = top; setTimeout(() => { sc.scrollTop = top; }, 120); }
     };
+    const loadMob = () => { if (!canMob()) return; Promise.resolve(FF.lazy && FF.lazy.ensure ? FF.lazy.ensure('kpiDetail') : null).then(() => (FF.agentMobiles && FF.agentMobiles.load ? FF.agentMobiles.load() : null)).then(() => { if (root.isConnected && redraw) redraw(); }).catch(() => {}); };
     // pehle cache se turant (spinner nahi, filter + scroll wahi), phir peeche se taaza data
     const hit = AX.a && AX.key === key ? AX.a : null;
     if (hit) paint(hit);

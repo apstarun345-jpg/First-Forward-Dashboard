@@ -60,3 +60,14 @@ test('filter state localStorage me yaad rehta hai + cache se turant render', () 
   assert.match(src, /localStorage\.getItem\(UIKEY/);
   assert.match(src, /AX\.a && AX\.key === key/);
 });
+test('weekday: TL ke saare members ka wd jodta hai; TL ka id apni row se; CSV/mobile hooks', () => {
+  const { entitiesOf } = load();
+  const rows = [
+    { name: 'TL Raj', id: 'T1', tl: 'TL Raj', direct: false, cur: 5, last: 5, proj: 5, wd: [0, 4, 2, 0, 0, 0, 0] },
+    { name: 'A1', id: 'A1', tl: 'TL Raj', direct: false, cur: 2, last: 0, proj: 2, wd: [0, 1, 3, 0, 0, 0, 0] }
+  ];
+  const e = entitiesOf({ channels: { ff: { hasStock: false, day: 10, wdN: [4, 4, 4, 4, 4, 4, 4], d: { rows } }, gv: null } })[0];
+  assert.deepEqual(e.wd, [0, 5, 5, 0, 0, 0, 0]);
+  assert.equal(e.id, 'T1');
+  assert.match(src, /function csvTable/); assert.match(src, /data-csv=/); assert.match(src, /function mobOf/); assert.match(src, /s-weekday/);
+});
