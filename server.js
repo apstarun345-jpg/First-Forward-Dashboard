@@ -4154,12 +4154,10 @@ async function multiCustomerTags(ids) {
   const cond = want.map((id) => `${C.cust} = '${id}'`).concat(want.filter((id) => /^\d{1,15}$/.test(id)).map((id) => `${C.cust} = ${id}`)).join(' or ');
   const sel = [C.cust, C.tag, C.vrn, C.cls, C.date, C.type, C.status, C.agentId, C.agentName, C.master, C.first, C.last, C.corp, C.tlName];
   const q = new URLSearchParams({ id: sheetId, sheet, tq: `select ${[...new Set(sel)].join(', ')} where ${cond} limit 5000` });
-  let out;
-  try { out = await gvizPageQuick(q, sheet); }
-  catch (err) {   // text-only compare (numeric compare galat type par error deta hai)
-    const q2 = new URLSearchParams({ id: sheetId, sheet, tq: `select ${[...new Set(sel)].join(', ')} where ${want.map((id) => `${C.cust} = '${id}'`).join(' or ')} limit 5000` });
-    out = await gvizPageQuick(q2, sheet);
-  }
+  // v3.125.622 — text-compare aur mixed (numeric) query PARALLEL; jo pehle sahi jawab de wahi (ek ka error/slow doosre ko nahi rokta).
+  const q2 = new URLSearchParams({ id: sheetId, sheet, tq: `select ${[...new Set(sel)].join(', ')} where ${want.map((id) => `${C.cust} = '${id}'`).join(' or ')} limit 5000` });
+  const nonEmpty = (p) => p.then((r) => { if (!r.rows.length) throw Object.assign(new Error('empty'), { empty: r }); return r; });
+  const out = await Promise.any([nonEmpty(gvizPageQuick(q2, sheet)), nonEmpty(gvizPageQuick(q, sheet))]).catch((agg) => { const errs = (agg && agg.errors) || []; const emp = errs.find((x) => x && x.empty); if (emp) return emp.empty; throw errs[0] || agg; });
   const at = (L) => out.ids.indexOf(L);
   const g = (r, L) => (at(L) >= 0 ? mcCell(r, at(L)) : '');
   const gvMasterId = String(e.gvMasterId || '5845036');
