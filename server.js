@@ -9816,15 +9816,23 @@ async function handleApi(req, res, url) {
     const contents = [...(Array.isArray(b.history) ? b.history : []).slice(-6).map((m) => ({ role: m && m.role === 'assistant' ? 'model' : 'user', parts: [{ text: String((m && m.content) || '').slice(0, 800) }] })), { role: 'user', parts: [{ text: q }] }];
     const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 25e3);
     try {
-      const model = process.env.JARVIS_MODEL || 'gemini-2.0-flash';
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST', signal: ctl.signal, headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig: { maxOutputTokens: 500 } })
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) return sendJson(res, 200, { ok: false, reason: 'api', error: String((j.error && j.error.message) || r.status).slice(0, 160) });
-      const text = (((j.candidates || [])[0] || {}).content || {}).parts;
-      return sendJson(res, 200, { ok: true, text: (text || []).map((x) => x.text || '').join('\n').trim() });
+      // model Google badalta rehta hai → pehla chalne wala le (env JARVIS_MODEL sabse pehle)
+      const models = [process.env.JARVIS_MODEL, 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest'].filter(Boolean);
+      let last = null;
+      for (const model of models) {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST', signal: ctl.signal, headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig: { maxOutputTokens: 500 } })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) {
+          const parts = (((j.candidates || [])[0] || {}).content || {}).parts;
+          return sendJson(res, 200, { ok: true, text: (parts || []).map((x) => x.text || '').join('\n').trim(), model });
+        }
+        last = String((j.error && j.error.message) || r.status).slice(0, 160);
+        if (r.status !== 404 && !/no longer available|not found|not supported/i.test(last)) break;
+      }
+      return sendJson(res, 200, { ok: false, reason: 'api', error: last });
     } catch (err) {
       return sendJson(res, 200, { ok: false, reason: 'net', error: String((err && err.message) || err).slice(0, 120) });
     } finally { clearTimeout(to); }
