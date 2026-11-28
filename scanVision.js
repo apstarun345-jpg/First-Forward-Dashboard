@@ -343,23 +343,6 @@
     try { for (const r of await zbarScan(work)) add(r.code, 'barcode', r.pts.map((p) => [p.x, p.y])); } catch { /* lib nahi */ }
     await tick();
     if (opt.quick) return [...found.values()];
-    // 2b) v3.125.610 — bahut tags wali bade photo: barcode chhote hote hain, poori photo par zbar sirf 3-4 pakadta hai.
-    //     Photo ko overlapping tukdon me kaat kar har tukde ko bada karke (2x) zbar — baaki sab barcode seedhe mil jate hain.
-    try {
-      const tw = Math.max(520, Math.round(work.width / 3)), th = Math.max(380, Math.round(work.height / 2.2));
-      const sx = Math.round(tw * 0.5), sy = Math.round(th * 0.5);
-      outerT: for (let y = 0; y < work.height - 120; y += sy) for (let x = 0; x < work.width - 160; x += sx) {
-        if (left() < 6000) break outerT;
-        const cw = Math.min(tw, work.width - x), ch = Math.min(th, work.height - y); if (cw < 220 || ch < 160) continue;
-        const sc = Math.min(2.4, 1500 / cw);
-        for (const md of ['', 'e']) {
-          const t = mk(cw * sc, ch * sc); ctx2(t).drawImage(work, x, y, cw, ch, 0, 0, t.width, t.height); if (md) enhance(t, md);
-          const rs = await zbarScan(t); rs.forEach((q) => add(q.code, 'barcode', (q.pts || []).map((p) => [x + p.x / sc, y + p.y / sc])));
-          if (rs.length) break;
-        }
-        await tick();
-      }
-    } catch { /* lib nahi / tile fail — neeche ka tareeka chalega */ }
     // 3) jagah dhoondh kar seedha crop + zbar ; 4) number ka OCR
     let regions = []; try { regions = locate(work, { alt: 2, coh: 0.6, minBlocks: 4 }); } catch { regions = []; }
     const inBox = (r) => boxes.some((b) => { const xs = b.map((p) => p[0]), ys = b.map((p) => p[1]); return r.cx >= Math.min(...xs) - 40 && r.cx <= Math.max(...xs) + 40 && r.cy >= Math.min(...ys) - 60 && r.cy <= Math.max(...ys) + 60; });
