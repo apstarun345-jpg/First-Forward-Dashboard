@@ -1353,8 +1353,11 @@ body.colorful .from-hdr { color: #166534; }
       } catch { /* optional */ }
     }, 600);
   }
+  let scRvLast = 0, scRvT = 0;
   const scRvPaint = () => {
-    scPrevSend();
+    const now = Date.now();
+    if (now - scRvLast < 220) { if (!scRvT) scRvT = setTimeout(() => { scRvT = 0; scRvPaint(); }, 230); return; }
+    scRvLast = now; scPrevSend();
     const host = scQ('[data-sc-review]'); if (!host) return;
     const parts = SC.rv.map((c) => {
       const rows = c.cands.map((x, k) => {
@@ -1367,9 +1370,8 @@ body.colorful .from-hdr { color: #166534; }
     });
     // v3.125.549 — flicker band: poora innerHTML dobara nahi; sirf jo cell badli wahi update (thumb / input / focus bachte hain)
     const sig = parts.map((q) => q.id + ':' + q.n + ':' + q.busy).join(',');
-    if (host._sig === sig && host.children.length === parts.length) {
-      parts.forEach((q, ix) => {
-        const el = host.children[ix]; if (!el || el._html === q.html) return;
+    const updCard = (el, q) => {
+      if (!el || el._html === q.html) return;
         const t = document.createElement('div'); t.innerHTML = q.html; const nu = t.firstElementChild; if (!nu) return;
         const oR = el.querySelectorAll('tbody tr'), nR = nu.querySelectorAll('tbody tr');
         oR.forEach((r, ri) => {
@@ -1385,11 +1387,26 @@ body.colorful .from-hdr { color: #166534; }
         const oh = el.querySelector('.trs-rvhead > div'), nh = nu.querySelector('.trs-rvhead > div'); if (oh && nh && oh.innerHTML !== nh.innerHTML) oh.innerHTML = nh.innerHTML;
         const ob = el.querySelector('.btn-row'), nb = nu.querySelector('.btn-row');
         if (ob && nb) { if (ob.innerHTML !== nb.innerHTML) ob.innerHTML = nb.innerHTML; } else if (!ob && nb) el.appendChild(nb); else if (ob && !nb) ob.remove();
-        el._html = q.html;
-      });
+      el._html = q.html;
+    };
+    if (host._sig === sig && host.children.length === parts.length) {
+      parts.forEach((q, ix) => { const el = host.children[ix]; if (el) el._key = q.n + ':' + q.busy; updCard(el, q); });
     } else {
-      host.innerHTML = parts.map((q) => q.html).join(''); host._sig = sig;
-      [...host.children].forEach((el, ix) => { el._html = parts[ix] && parts[ix].html; });
+      // ⚡ v3.125.610 — jis photo-card me kuch nahi badla use chhedte nahi; badle huye card ko hi badalte hain; scroll + height wahi rehti hai (screen jump / blank flash band)
+      const y = window.scrollY, hh = host.offsetHeight; if (hh) host.style.minHeight = hh + 'px';
+      const old = new Map([...host.children].map((e) => [String(e.dataset.rv), e]));
+      const list = parts.map((q) => {
+        const prev = old.get(String(q.id)), key = q.n + ':' + q.busy;
+        if (prev && prev._key === key) { updCard(prev, q); return prev; }
+        const tmp = document.createElement('div'); tmp.innerHTML = q.html; const nu = tmp.firstElementChild;
+        nu._key = key; nu._html = q.html;
+        if (prev) { nu._tops = [...prev.querySelectorAll('*')].map((n) => n.scrollTop); }
+        return nu;
+      });
+      host.replaceChildren(...list);
+      list.forEach((el) => { if (el._tops) { const all = el.querySelectorAll('*'); el._tops.forEach((v, n) => { if (v && all[n]) all[n].scrollTop = v; }); el._tops = null; } });
+      host._sig = sig; window.scrollTo(window.scrollX, y);
+      requestAnimationFrame(() => { host.style.minHeight = ''; if (Math.abs(window.scrollY - y) > 2) window.scrollTo(window.scrollX, y); });
     }
   };
   async function scRvCheck(card, x) {
@@ -1423,7 +1440,7 @@ body.colorful .from-hdr { color: #166534; }
       let bmp = null; try { bmp = await createImageBitmap(file); } catch { /* Image se */ }
       if (!bmp) bmp = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error('img')); im.src = card.url; });
       const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
-      await V.read(bmp, w, h, { budgetMs: 20000, onFixed: (o, n) => { const x = card.cands.find((c2) => c2.code === o); if (x) { x.alts = [o, ...(x.alts || [])]; x.code = n; x.info = null; x.err = ''; scRvPaint(); setTimeout(() => scRvCheck(card, x), 0); } }, onFound: (code, how) => {
+      await V.read(bmp, w, h, { budgetMs: 40000, onFixed: (o, n) => { const x = card.cands.find((c2) => c2.code === o); if (x) { x.alts = [o, ...(x.alts || [])]; x.code = n; x.info = null; x.err = ''; scRvPaint(); setTimeout(() => scRvCheck(card, x), 0); } }, onFound: (code, how) => {
         if (card.cands.some((x) => x.code === code)) return;
         const x = { code, how, on: true, info: null, err: '', alts: [] }; card.cands.push(x); scBeep('ok'); try { navigator.vibrate && navigator.vibrate(30); } catch { /* */ }
         scRvPaint(); setTimeout(() => scRvCheck(card, x), 0);

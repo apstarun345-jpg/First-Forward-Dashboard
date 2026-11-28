@@ -731,15 +731,34 @@ FF.pages = FF.pages || {};
     const ch = root.querySelector('[data-emp-chips]');
     if (ch) ch.innerHTML = `<button type="button" class="seg-btn${emp.name ? '' : ' on'}" data-emp-name="">Sab (${U.fmt(emp.total)})</button>` + Object.entries(emp.by).sort((a, b) => b[1] - a[1]).map(([n, c]) => `<button type="button" class="seg-btn${emp.name === n ? ' on' : ''}" data-emp-name="${esc(n)}">👤 ${esc(n)} · ${U.fmt(c)}</button>`).join('');
   }
+  // ⚡ v3.125.610 — admin ko data turant: server ka raat me saved register + stock (scan-info) se pehle 12-12 ke group me, saath-saath.
+  //    Poora detail (VRN / office stock / dispatch) peeche se checkMulti se upgrade hota hai.
+  const empFast = new Set();
   async function empEnrich() {
-    const need = [...new Set([...(emp.prevRows || []), ...emp.rows].filter((r) => !emp.cache.has(r.code)).map((r) => r.code))].slice(0, 400);
-    if (!need.length) return;
+    const all = [...(emp.prevRows || []), ...emp.rows];
+    const need = [...new Set(all.filter((r) => !emp.cache.has(r.code)).map((r) => r.code))].slice(0, 400);
+    if (need.length) {
+      const chunks = []; for (let k = 0; k < need.length; k += 12) chunks.push(need.slice(k, k + 12));
+      await Promise.all(chunks.slice(0, 10).map(async (codes) => {
+        try {
+          const j = await FF.auth.api('/api/public/scan-info', 'POST', { codes });
+          Object.entries(j.info || {}).forEach(([code, x]) => {
+            if (!x || emp.cache.has(code)) return;
+            emp.cache.set(code, { barcode: code, k: x.k, cls: x.cls || '', agent: x.agent || '', agentId: x.agentId || '', tl: x.tl || '', tagId: x.tagId || '', office: '', date: x.date || '', vrn: '', note: x.note || '', dDate: '', dName: x.dispatch || '', _fast: 1 });
+            empFast.add(code);
+          });
+          empPaint();
+        } catch { /* neeche ka poora tareeka */ }
+      }));
+    }
+    const full = [...new Set(all.filter((r) => { const c = emp.cache.get(r.code); return !c || (c._fast && empFast.has(r.code)); }).map((r) => r.code))].slice(0, 400);
+    if (!full.length) return;
     try {
-      const rows = await checkMulti(need);
+      const rows = await checkMulti(full);
       rows.forEach((r) => { r.dDate = r.dName = SEARCHING; });
-      rows.forEach((r) => emp.cache.set(r.barcode, r));
+      rows.forEach((r) => { emp.cache.set(r.barcode, r); empFast.delete(r.barcode); });
       empPaint();
-      const dp = FF.data.dispatchLookup(need); dp.catch(() => {});
+      const dp = FF.data.dispatchLookup(full); dp.catch(() => {});
       await attachDispatch(rows, dp); empPaint();
     } catch { /* agli baar dobara try */ }
   }
