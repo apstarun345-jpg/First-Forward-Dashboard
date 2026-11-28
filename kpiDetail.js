@@ -1444,7 +1444,19 @@ window.FF = window.FF || {};
     const nk = String((a && a.name) || '').toLowerCase().replace(/[^a-z]/g, '');
     return (d && nk.length >= 4 && d.names[nk]) || '';
   }
-  FF.agentMobiles = { load: loadMobiles, of: (a) => mobileOf(MOB.data, a) || mobileByName(MOB.data, a), canSee: canSeeMobile };
+  /** ✍️ v3.125.605 — jis agent ka number kahin nahi mila, haath se bharo (server me save, sabko dikhta hai) */
+  async function setMobile(a, mobile) {
+    const r = await FF.auth.api('/api/agent-mobiles/set', 'POST', { id: a.id || '', name: a.name || '', channel: a.ch || '', mobile });
+    const m = (r && r.mobile) || '';
+    if (m && MOB.data) {
+      const raw = String(a.id || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (raw) MOB.data.ids[raw] = m;
+      const dg = raw.replace(/\D/g, '').replace(/^0+/, ''); if (dg.length >= 3) MOB.data.ids[`#${dg}`] = m;
+      const nk = String(a.name || '').toLowerCase().replace(/[^a-z]/g, ''); if (nk.length >= 4 && !MOB.data.names[nk]) MOB.data.names[nk] = m;
+    }
+    return m;
+  }
+  FF.agentMobiles = { load: loadMobiles, set: setMobile, of: (a) => mobileOf(MOB.data, a) || mobileByName(MOB.data, a), canSee: canSeeMobile };
   async function listDetail(spec) {
     const fn = LISTS.get(String(spec.list || ''));
     if (!fn) return peopleDetail(spec);

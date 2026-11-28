@@ -11314,6 +11314,8 @@ async function handleApi(req, res, url) {
           put([a.agentId, a.id], a.name, a.mobile, 'requests', true, isGv ? 'gv' : 'ff');
         }
       }
+      // 4) ✍️ v3.125.605 — Analyst / Agent page se haath se bhare number (sabse upar)
+      for (const o of Object.values(workspaceStore().manualMobiles || {})) { if (o && o.mobile) put([o.id], o.name, o.mobile, 'requests', true, o.channel || ''); }
       nameClash.forEach((k) => { delete names[k]; });   // ek naam ke do alag number → naam se mat batao
       return { ok: true, at: new Date().toISOString(), ids, names, byMobile, count: Object.keys(ids).length, sources, sheetError };
     })().then((d) => { agentMobileRt.data = d; agentMobileRt.at = Date.now(); return d; }).finally(() => { agentMobileRt.promise = null; });
@@ -12950,6 +12952,20 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { ok: true, sync: syncInfo() });
     }
     throw new HttpError(404, 'Not found');
+  }
+  if (p === '/api/agent-mobiles/set' && method === 'POST') {
+    if (!user) throw new HttpError(401, 'Login required.');
+    if (user.role !== 'admin' && !(Array.isArray(user.permissions) && user.permissions.includes('contacts'))) throw new HttpError(403, 'Mobile number bharne ki permission nahi hai.');
+    const body = await readBody(req);
+    const id = shortText(String(body.id || '').trim().toUpperCase(), 40), name = shortText(String(body.name || '').replace(/\s+/g, ' ').trim(), 120);
+    const mobile = last10(body.mobile);
+    if (!id && !name) throw new HttpError(400, 'ID ya naam chahiye.');
+    if (!/^[6-9]\d{9}$/.test(mobile)) throw new HttpError(400, 'Mobile number 10 digit ka sahi likho (6-9 se shuru).');
+    const ws = workspaceStore(); ws.manualMobiles = ws.manualMobiles || {};
+    ws.manualMobiles[id || name.toLowerCase()] = { id, name, mobile, channel: body.channel === 'ff' ? 'ff' : body.channel === 'gv' ? 'gv' : '', by: user.name || user.username || '', at: new Date().toISOString() };
+    try { if (typeof resetAgentMobiles === 'function') resetAgentMobiles(); } catch { /* optional */ }
+    persist('notify').catch((err) => console.warn('mobile persist:', err && err.message));
+    return sendJson(res, 200, { ok: true, mobile });
   }
   if (p === '/api/agent-mobiles' && method === 'GET') {
     if (!user) throw new HttpError(401, 'Login required.');

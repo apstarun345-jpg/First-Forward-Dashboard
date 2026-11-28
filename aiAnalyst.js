@@ -349,7 +349,7 @@ FF.pages = FF.pages || {};
     if (!m) try { m = (FF.agentMobiles && FF.agentMobiles.of && FF.agentMobiles.of({ id: e.id, name: e.name })) || ''; } catch { /* optional */ }
     m = clean(m); return /^na$/i.test(m) ? '' : m;
   }
-  const mobCell = (e) => { const m = mobOf(e); return m ? `<a class="ax-mob" href="tel:${esc(m)}" title="Call ${esc(e.name)}">📞 ${esc(m)}</a>` : '<span class="dim">—</span>'; };
+  const mobCell = (e) => { const m = mobOf(e); return m ? `<a class="ax-mob" href="tel:${esc(m)}" title="Call ${esc(e.name)}">📞 ${esc(m)}</a>` : `<button type="button" class="ax-addmob" data-addmob="1" data-id="${esc(e.id || '')}" data-name="${esc(e.name)}" data-ch="${esc(e.ch || '')}" title="Number nahi mila — yahan bharo">＋ add</button>`; };
   const C_MOB = () => (canMob() ? [{ k: 'mob', h: '📞 Mobile', t: (e) => mobOf(e), c: (e) => mobCell(e), cls: 'c' }] : []);
   const TBL = {};   // har table ka poora (filtered + sorted) data CSV ke liye
   const WD = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']];
@@ -512,6 +512,12 @@ FF.pages = FF.pages || {};
     root.__axClick = (e) => {
       const t = e.target;
       const cb = t.closest('[data-csv]'); if (cb) { csvTable(cb.dataset.csv); return; }
+      const am = t.closest('[data-addmob]');
+      if (am) {
+        const v = window.prompt(`${am.dataset.name} (${am.dataset.id || 'ID nahi'}) ka 10 digit mobile number:`, '');
+        if (v && v.trim()) { am.disabled = true; Promise.resolve(FF.agentMobiles.set({ id: am.dataset.id, name: am.dataset.name, ch: am.dataset.ch }, v.trim())).then(() => { U.toast('📞 Number save ho gaya', 'ok'); if (redraw) redraw(); }).catch((err) => { am.disabled = false; U.toast((err && err.message) || 'Save nahi hua', 'warn'); }); }
+        return;
+      }
       const dr = t.closest('[data-drill]'); if (dr) { openDrill(dr.dataset.drill); return; }
       const so = t.closest('[data-sort]'); if (so) { const [id, k] = so.dataset.sort.split('|'), s = ui.t[id]; s.dir = s.sort === k && s.dir === 'desc' ? 'asc' : 'desc'; s.sort = k; draw(); return; }
       const mo = t.closest('[data-more]'); if (mo) { const s = ui.t[mo.dataset.more]; s.all = !s.all; draw(); return; }
