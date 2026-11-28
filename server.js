@@ -13343,6 +13343,17 @@ async function handleApi(req, res, url) {
     scanPersistSoon();
     return sendJson(res, 200, { ok: true, dup: false, at: row.at });
   }
+  // 📸 v3.125.608 — photo se padhe barcode (abhi confirm nahi hue) admin ko live dikhte hain; confirm / hatane par khud saaf (10 min me expire)
+  const scanPrev = (globalThis.__scanPrev = globalThis.__scanPrev || new Map());
+  if (p === '/api/public/scan-preview' && method === 'POST') {
+    const body = await readBody(req);
+    const name = cleanVisitorName(body.name); if (!name) throw new HttpError(400, 'Employee name zaroori hai.');
+    if (!publicRateOk(`scanprev:${clientIp(req)}`, 600, 10 * 60e3)) throw new HttpError(429, 'Bahut tez — thoda ruk kar try karo.');
+    const codes = [...new Set((Array.isArray(body.codes) ? body.codes : []).map(scanCodeOf).filter(Boolean))].slice(0, 200);
+    const k = scanNameKey(name);
+    if (!codes.length) scanPrev.delete(k); else scanPrev.set(k, { name, codes, at: new Date().toISOString(), t: Date.now() });
+    return sendJson(res, 200, { ok: true });
+  }
   if (p === '/api/public/scan-info' && method === 'POST') {
     const body = await readBody(req);
     const codes = [...new Set((Array.isArray(body && body.codes) ? body.codes : []).map(scanCodeOf).filter(Boolean))].slice(0, 12);
@@ -13383,7 +13394,8 @@ async function handleApi(req, res, url) {
       (r.hits || []).forEach((h) => { const q = st(h.name); q.dupTries++; if (h.at > q.last) q.last = h.at; });
     });
     const byName = {}; Object.entries(stats).forEach(([n, o]) => { if (o.total) byName[n] = o.total; });
-    return sendJson(res, 200, { ok: true, total: all.length, today: Object.values(stats).reduce((a, o) => a + o.today, 0), now: nowMs, byName, stats, rows });
+    const previews = []; scanPrev.forEach((v, k) => { if (Date.now() - v.t > 10 * 60e3) scanPrev.delete(k); else previews.push({ name: v.name, codes: v.codes, at: v.at }); });
+    return sendJson(res, 200, { ok: true, previews, total: all.length, today: Object.values(stats).reduce((a, o) => a + o.today, 0), now: nowMs, byName, stats, rows });
   }
   if (p === '/api/scan-log' && method === 'DELETE') {
     if (!user || user.role !== 'admin') throw new HttpError(403, 'Sirf admin.');

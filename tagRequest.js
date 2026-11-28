@@ -1340,7 +1340,21 @@ body.colorful .from-hdr { color: #166534; }
     for (const col of [4, 5, 6]) { const ds = new Set(t.map((x) => x.code[11 + col])); if (ds.size !== 1) continue; const d = [...ds][0]; if (d !== '6' && d !== '8') continue; const to = d === '8' ? '6' : '8'; h += `<button class="btn" data-rv-swap="${c.id}|${col}" title="Sab me ye digit ${d} se ${to} karo">🔁 Sab me ${d}→${to} (digit ${col + 1})</button>`; }
     return h;
   }
+  // 📸 v3.125.608 — review me padhe (confirm nahi hue) barcode admin ko live bhejo
+  let scPrevT = 0, scPrevLast = '';
+  function scPrevSend() {
+    clearTimeout(scPrevT);
+    scPrevT = setTimeout(() => {
+      try {
+        const name = clean(state.employee && state.employee.name); if (!name) return;
+        const codes = []; SC.rv.forEach((c) => c.cands.forEach((x) => { if (x.on) { const k = scValid(x.code); if (k) codes.push(k); } }));
+        const sig = name + '|' + codes.join(','); if (sig === scPrevLast) return; scPrevLast = sig;
+        scApi('POST', '/api/public/scan-preview', { name, codes }).catch(() => { scPrevLast = ''; });
+      } catch { /* optional */ }
+    }, 600);
+  }
   const scRvPaint = () => {
+    scPrevSend();
     const host = scQ('[data-sc-review]'); if (!host) return;
     const parts = SC.rv.map((c) => {
       const rows = c.cands.map((x, k) => {

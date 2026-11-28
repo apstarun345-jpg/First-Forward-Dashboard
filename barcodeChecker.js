@@ -358,7 +358,7 @@ FF.pages = FF.pages || {};
         </div>
         <div class="bcc-emp" data-bcc-form="emp" ${state.tab === 'emp' ? '' : 'hidden'}>
           <div class="bcc-scan-bar"><span class="bcc-scan-count" data-emp-count></span><input class="input" data-emp-q placeholder="🔎 Naam / barcode / agent…" style="max-width:260px"><button type="button" class="btn small" data-emp-rf>↻ Refresh</button><button type="button" class="btn small" data-emp-link title="Employee ko ye link bhejo">🔗 Employee scan link copy</button><button type="button" class="btn small" data-emp-csv>⬇ CSV</button></div>
-          <div class="bcc-emp-dash" data-emp-dash></div>
+          <div class="bcc-emp-prev" data-emp-prev></div><div class="bcc-emp-dash" data-emp-dash></div>
           <div class="bcc-emp-chips" data-emp-chips></div>
           <div class="table-wrap tall"><table class="tbl compact bcc-tbl"><thead><tr><th>Scan time</th><th>👤 Employee</th><th>Barcode</th><th>Tag ID</th><th>Status</th><th>Class</th><th>Agent</th><th>Agent ID</th><th>TL</th><th>🏢 Office stock</th><th>Allocated / Issue date</th><th>VRN</th><th>Note</th><th>Dispatch date</th><th>Dispatched to</th></tr></thead><tbody data-emp-body><tr><td colspan="14" class="empty">Loading…</td></tr></tbody></table></div>
         </div>
@@ -709,6 +709,11 @@ FF.pages = FF.pages || {};
     box.innerHTML = `<div class="bcc-emp-cards">${card('Aaj ke scan', U.fmt(emp.today), 'IST aaj', 'blue')}${card('Abhi active', U.fmt(active.length), active.slice(0, 3).join(', ') || 'koi nahi (5 min)', active.length ? 'green' : '')}${card('Kul scan', U.fmt(emp.total), U.fmt(names.length) + ' employee')}${card('🔁 Duplicate koshish', U.fmt(dupAll), 'pehle se scan hue', dupAll ? 'amber' : '')}${card('⛔ Galat scan', U.fmt(wrongAll), 'issued / stock me nahi', wrongAll ? 'red' : '')}</div>
       <details class="bcc-emp-det" open><summary>👥 Employee-wise live</summary><div class="table-wrap"><table class="tbl compact"><thead><tr><th>Employee</th><th class="num">Aaj</th><th class="num">1 ghanta</th><th class="num">Kul</th><th>Last scan</th><th class="num">Duplicate</th><th class="num">Issued</th><th class="num">Not found</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
   }
+  function empPrevPaint() {
+    const box = state.root && state.root.querySelector('[data-emp-prev]'); if (!box) return;
+    const list = emp.prev || [];
+    box.innerHTML = list.map((p) => `<div class="bcc-emp-pv"><b>📸 ${esc(p.name)}</b> — photo se ${U.fmt(p.codes.length)} barcode padhe, confirm ka wait <small>${esc(empTime(p.at))}</small><div class="bcc-emp-pvc">${p.codes.slice(0, 60).map((c) => `<span class="mono">${esc(c)}</span>`).join('')}</div></div>`).join('');
+  }
   function empPaint() {
     const root = state.root, body = root && root.querySelector('[data-emp-body]'); if (!body) return;
     const q = emp.q.trim().toLowerCase();
@@ -743,6 +748,7 @@ FF.pages = FF.pages || {};
       const prev = new Set(emp.rows.map((r) => r.code));
       emp.rows = (j.rows || []).map((r) => { if (emp.seen && !prev.has(r.code)) r._f = Date.now(); return r; }); emp.by = j.byName || {}; emp.stats = j.stats || {}; emp.today = j.today || 0; emp.total = j.total || 0; emp.seen = 1;
       const bd = state.root.querySelector('[data-emp-badge]'); if (bd) { bd.hidden = !emp.total; bd.textContent = U.fmt(emp.total); }
+      emp.prev = j.previews || []; empPrevPaint();
       empPaint(); await empEnrich();
     } catch (err) { const b = state.root && state.root.querySelector('[data-emp-body]'); if (b && !emp.rows.length) b.innerHTML = `<tr><td colspan="10" class="empty">⚠️ ${esc(String((err && err.message) || err))}</td></tr>`; }
     emp.busy = false;
