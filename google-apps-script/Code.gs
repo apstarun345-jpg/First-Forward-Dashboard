@@ -75,7 +75,7 @@ const CHUNK = 45000; // a Google Sheets cell holds max 50,000 characters
 const KINDS = ['users', 'sessions', 'settings', 'resets', 'notify'];
 const HISTORY_TAB = 'APP_STORAGE_HISTORY';
 const HISTORY_MAX_ROWS = 30; // 30 snapshots tak — sheet size limit se bachao (live data APP_STORAGE me alag rehta hai, history sirf purane backup copies hain)
-const CODE_VERSION = 'v3.81';
+const CODE_VERSION = 'v3.82';
 
 /** Run this ONCE from the Apps Script editor (▶ Run) to grant the "send email" permission. */
 function authorizeMail() { Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota()); }
@@ -497,8 +497,17 @@ function doPost(e) {
       var tabT = String(body.tab || 'Tag Requests').slice(0, 80);
       return json_({ ok: true, spreadsheet: ssT.getName(), spreadsheetId: ssT.getId(), url: ssT.getUrl(), tab: tabT, exists: !!ssT.getSheetByName(tabT) });
     }
+    // v3.82 — timeout ke baad: kya ye requestKey wali entry sheet me ja chuki hai? (dashboard retry se pehle poochta hai)
+    if (body.action === 'appendstatus') {
+      var stKey = appendKeyGet_(String(body.requestKey || '').slice(0, 200));
+      return json_(stKey ? { ok: true, exists: true, added: stKey.added, tab: stKey.tab, atRow: stKey.atRow } : { ok: true, exists: false });
+    }
     if (body.action === 'appendrows') {
       var tabName = String(body.tab || TAG_REQUEST_DEFAULT_TAB).slice(0, 80);
+      // v3.82 — IDEMPOTENCY: dashboard har push ke saath ek stable requestKey bhejta hai. Wahi key dobara aaye (timeout ke baad retry)
+      // to row DOBARA nahi likhi jaati — pehle wala jawab hi lauta diya jata hai. Duplicate rows hamesha ke liye band.
+      var reqKey = String(body.requestKey || '').slice(0, 200);
+      if (reqKey) { var seenKey = appendKeyGet_(reqKey); if (seenKey) { seenKey.ok = true; seenKey.duplicate = true; return json_(seenKey); } }
       if (tabName === TAB && !body.spreadsheetId) return json_({ ok: false, error: 'APP_STORAGE tab me likhna allowed nahi — koi doosra tab naam do.' });
       var ss = target_(body.spreadsheetId || TAG_REQUEST_SPREADSHEET_ID);
       var sh = ss.getSheetByName(tabName);
@@ -542,7 +551,7 @@ function doPost(e) {
           if (vals.length) sh.getRange(startAt, b.first + 1, vals.length, b.items.length).setValues(vals);
         });
         SpreadsheetApp.flush();
-        return json_({ ok: true, positional: true, tab: tabName, added: rows.length, atRow: startAt, columns: pos, spreadsheet: ss.getName(), spreadsheetId: ss.getId(), url: ss.getUrl() });
+        return appendDone_(reqKey, { ok: true, positional: true, tab: tabName, added: rows.length, atRow: startAt, columns: pos, spreadsheet: ss.getName(), spreadsheetId: ss.getId(), url: ss.getUrl() });
       }
       // Admin setting can control exact column order. The same API works with
       // { columnOrder: ['Name', 'Agent ID', 'Date', ...] } from the dashboard.
@@ -632,7 +641,7 @@ function doPost(e) {
         added = padded.length;
       }
       SpreadsheetApp.flush();
-      return json_({
+      return appendDone_(reqKey, {
         ok: true,
         tab: tabName,
         added: added,
@@ -1457,4 +1466,27 @@ function json_(obj) {
 function authorizeComplaints() {
   const n = GmailApp.search('subject:"POS Related-Request"', 0, 1).length;
   Logger.log('Gmail read OK · test search threads: ' + n + ' · account: ' + Session.getEffectiveUser().getEmail());
+}
+
+// ---- v3.82: append idempotency log (last ~60 keys, ScriptProperties) -----------------------------------
+var APPEND_KEYS_PROP = 'APPEND_KEYS_V1';
+function appendKeysLoad_() {
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty(APPEND_KEYS_PROP) || '{}') || {}; } catch (e) { return {}; }
+}
+function appendKeyGet_(key) {
+  if (!key) return null;
+  var m = appendKeysLoad_();
+  return m[key] ? { added: m[key].a, tab: m[key].t, atRow: m[key].r, spreadsheet: m[key].s || '', spreadsheetId: m[key].i || '', url: m[key].u || '' } : null;
+}
+function appendDone_(key, result) {
+  try {
+    if (key && result && result.ok) {
+      var m = appendKeysLoad_();
+      m[key] = { a: result.added, t: result.tab, r: result.atRow, s: result.spreadsheet || '', i: result.spreadsheetId || '', u: result.url || '', at: Date.now() };
+      var ks = Object.keys(m);
+      if (ks.length > 60) { ks.sort(function (a, b) { return m[a].at - m[b].at; }); ks.slice(0, ks.length - 60).forEach(function (k) { delete m[k]; }); }
+      PropertiesService.getScriptProperties().setProperty(APPEND_KEYS_PROP, JSON.stringify(m));
+    }
+  } catch (e) { /* log optional — entry already written */ }
+  return json_(result);
 }

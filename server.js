@@ -12245,7 +12245,7 @@ async function handleApi(req, res, url) {
       // Column-letter mode needs Code.gs v3.74+ — an older script would map by heading names and shuffle columns.
       let ver = store.__okVer || '', pingErr = '';
       if (!ver) {
-        try { const pong = await store.call('ping'); ver = String((pong && pong.version) || ''); if (/3\.(7[4-9]|[89]\d)|^([4-9]|\d{2,})\./.test(ver)) store.__okVer = ver; } catch (e) { pingErr = String((e && e.message) || e); }
+        try { const pong = await store.call('ping'); ver = String((pong && pong.version) || ''); if (/3\.(7[4-9]|[89]\d)|^([4-9]|\d{2,})\./.test(ver)) store.__okVer = ver; store.__idem = /3\.(8[2-9]|9\d)|^([4-9]|\d{2,})\./.test(ver); } catch (e) { pingErr = String((e && e.message) || e); }
       }
       const vn = (ver.match(/(\d+)\.(\d+)/) || []).slice(1).map(Number);
       if (pingErr || !vn.length || vn[0] < 3 || (vn[0] === 3 && vn[1] < 74)) {
@@ -12258,13 +12258,17 @@ async function handleApi(req, res, url) {
         throw new Error(msg);
       }
     }
+    const requestKey = 'trs|' + reqs.map((r) => `${r.id}:${(r.rows || []).map((x) => `${x.cls}${Number(x.approved) || 0}`).join('')}`).sort().join(',') + '|' + ch + (event === 'manual' ? '|m' + Math.floor(Date.now() / 6e5) : '');
     let out;
     try {
-      out = await store.call('appendrows', { tab: tabName, header, rows, ...(positions ? { positions } : {}), ...(targetId ? { spreadsheetId: targetId } : {}) }, { attempts: 4, timeoutMs: 90e3, noRetryAmbiguous: true });
+      // v3.125.626 — Code.gs v3.82+: stable requestKey → script khud duplicate rok deta hai, isliye retry bhi safe. Purane script par blind retry band.
+      out = await store.call('appendrows', { tab: tabName, header, rows, requestKey, ...(positions ? { positions } : {}), ...(targetId ? { spreadsheetId: targetId } : {}) }, { attempts: 4, timeoutMs: 90e3, noRetryAmbiguous: !store.__idem });
     } catch (err) {
       if (!err || !err.ambiguous) throw err;
       // Jawab nahi aaya par row likhi gayi ho sakti hai — sheet me dekh kar tay karo (blind retry = duplicate).
-      const seen = await verifyTagRowsInSheet(targetId, tabName, positions, rows).catch(() => null);
+      let seen = null;
+      if (store.__idem) { try { const st = await store.call('appendstatus', { requestKey }, { attempts: 3, timeoutMs: 40e3 }); seen = !!(st && st.exists); } catch { seen = null; } }
+      if (seen === null) seen = await verifyTagRowsInSheet(targetId, tabName, positions, rows).catch(() => null);
       if (seen === true) out = { tab: tabName, added: rows.length, verified: true };
       else if (seen === false) throw err;                      // sheet me nahi hai → retry safe
       else {                                                    // verify nahi ho paya → auto-resend NAHI (duplicate ka khatra)
