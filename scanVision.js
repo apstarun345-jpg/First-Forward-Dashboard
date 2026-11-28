@@ -71,14 +71,27 @@
     if (env.ocr) return env.ocr;
     if (!oP) oP = (async () => {
       if (!root.Tesseract) await loadScript(baseUrl() + 'tesseract.min.js?v=1');
-      const b = baseUrl();
-      const w = await root.Tesseract.createWorker('eng', 1, { workerPath: b + 'ocr-worker.min.js?v=1', corePath: b + 'tesseract-core-simd-lstm.wasm.js', langPath: b, gzip: true, workerBlobURL: false, cacheMethod: 'none' });
-      await w.setParameters({ tessedit_char_whitelist: '0123456789-', tessedit_pageseg_mode: '6', user_defined_dpi: '200' });
-      ocrWorker = w; env.ocr = { recognize: async (c, psm) => { if (psm) await w.setParameters({ tessedit_pageseg_mode: String(psm) }); return (await w.recognize(c)).data.text; },
-        recognizeC: async (c, psm) => { if (psm) await w.setParameters({ tessedit_pageseg_mode: String(psm) }); const d = (await w.recognize(c)).data; return { text: d.text, conf: d.confidence || 0 }; } };
+      const o = await mkOcrWorker(); ocrWorker = o.w; env.ocr = o.api;
       return env.ocr;
     })().catch((e) => { oP = null; throw e; });
     return oP;
+  }
+  async function mkOcrWorker() {
+    const b = baseUrl();
+    const w = await root.Tesseract.createWorker('eng', 1, { workerPath: b + 'ocr-worker.min.js?v=1', corePath: b + 'tesseract-core-simd-lstm.wasm.js', langPath: b, gzip: true, workerBlobURL: false, cacheMethod: 'none' });
+    await w.setParameters({ tessedit_char_whitelist: '0123456789-', tessedit_pageseg_mode: '6', user_defined_dpi: '200' });
+    return { w, api: { recognize: async (c, psm) => { if (psm) await w.setParameters({ tessedit_pageseg_mode: String(psm) }); return (await w.recognize(c)).data.text; },
+      recognizeC: async (c, psm) => { if (psm) await w.setParameters({ tessedit_pageseg_mode: String(psm) }); const d = (await w.recognize(c)).data; return { text: d.text, conf: d.confidence || 0 }; } } };
+  }
+  // ⚡ v3.125.613 — bahut tags wali photo: kai OCR worker saath me (phone par 2, computer par 3) — har tag ka number alag worker padhta hai
+  let extraOcr = null;
+  async function ocrPool(first) {
+    let n = 1;
+    try { const hc = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4, mob = typeof navigator !== 'undefined' && /Mobi|Android|iPhone/i.test(navigator.userAgent || ''); n = Math.max(1, Math.min(mob ? 2 : 3, hc - 1)); } catch { n = 1; }
+    if (env.noPool) n = 1;
+    if (!extraOcr) extraOcr = [];
+    while (extraOcr.length < n - 1) { try { const o = await mkOcrWorker(); extraOcr.push(o.api); } catch { break; } }
+    return [first, ...extraOcr.slice(0, n - 1)];
   }
   async function nativeDet() {
     if (env.native !== undefined) return env.native;
@@ -364,12 +377,12 @@
       for (const f of found.values()) { const p = f.code.slice(0, 6); if (!known.includes(p)) known.push(p); }
       const reads = []; const retryJobs = [];   // { reg, g1, g2, g3 }
       const VARS = [[7, 2, 0], [7, 3, 0], [6, 2, 0], [7, 2, 0.06], [7, 4, 0], [6, 3, -0.06], [7, 3, 0.06], [7, 2, -0.06]];
-      if (ocr) for (const r of ocrJobs) {
-        if (left() < 600) break;
+      const runJob = async (r, ocr) => {
+        if (left() < 600) return;
         try {
           const wv = await wideVote(work, r, ocr, known, left);
           if (!wv.length) retryJobs.push(r);
-          if (wv.length) { const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 9).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } continue; }
+          if (wv.length) { const top = wv[0][0]; add(top, 'text'); const f0 = found.get(top); if (f0) { f0.conf = wv[0][1]; f0.alts = wv.slice(1, 9).map((x) => x[0]); f0.thumb = thumbOf(work, r, r.da); } return; }
         } catch { /* purana tareeka neeche */ }
         const votes = new Map(); let flip = false, tried = 0, da0 = 0;
         // v3.125.533 — pehle angle theek karo, number ki patti alag kaato (seedhi + ulti), OCR line mode
@@ -413,6 +426,10 @@
           if (!ranked.some((x) => x[0] === mix)) ranked.unshift([mix, 1]); else ranked.sort((a, b) => (a[0] === mix ? -1 : b[0] === mix ? 1 : b[1] - a[1]));
         }
         if (ranked[0]) { add(ranked[0][0], 'text'); const f = found.get(ranked[0][0]); if (f) { f.alts = ranked.slice(1).map((x) => x[0]).filter((c) => known.includes(c.slice(0, 6))); f.thumb = thumbOf(work, r, r.da); } }
+      };
+      if (ocr) {
+        const pool = await ocrPool(ocr).catch(() => [ocr]); let qi = 0;
+        await Promise.all(pool.map(async (o) => { while (qi < ocrJobs.length) { const r = ocrJobs[qi++]; if (left() < 600) break; await runJob(r, o); } }));
       }
       if (ocr && retryJobs.length && found.size && left() > 1500) {   // series pata chal gayi — pichhle fail region dobara, prefix ke saath
         const fv = [...found.values()], cnt = {}; fv.forEach((f) => { const k = f.code.slice(0, 15); cnt[k] = (cnt[k] || 0) + 1; });
