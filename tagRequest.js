@@ -1432,6 +1432,17 @@ body.colorful .from-hdr { color: #166534; }
     }
     scRvPaint();
   }
+  // 🔎 v3.125.618 — photo ka AI (free Gemini vision, server se) padhna: chhote number jo OCR nahi padh pata
+  const scHam = (a, b) => { if (a.length !== b.length) return 99; let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n; };
+  async function scAiRead(file, bmp, w, h) {
+    try {
+      const S = Math.min(1, 2400 / Math.max(w, h)), c = document.createElement('canvas'); c.width = Math.round(w * S); c.height = Math.round(h * S);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      const image = c.toDataURL('image/jpeg', 0.88);
+      const j = await scApi('POST', '/api/public/scan-ocr', { name: clean(state.employee && state.employee.name), image });
+      return (j && j.ok && Array.isArray(j.codes)) ? j.codes : [];
+    } catch { return []; }
+  }
   async function scReadPhoto(file) {
     const card = { id: ++SC.rvId, name: file.name || 'Photo', url: URL.createObjectURL(file), cands: [], busy: true, step: '' };
     SC.rv.unshift(card); scRvPaint();
@@ -1440,11 +1451,27 @@ body.colorful .from-hdr { color: #166534; }
       let bmp = null; try { bmp = await createImageBitmap(file); } catch { /* Image se */ }
       if (!bmp) bmp = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error('img')); im.src = card.url; });
       const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
+      const aiP = scAiRead(file, bmp, w, h);
       await V.read(bmp, w, h, { budgetMs: 40000, onFixed: (o, n) => { const x = card.cands.find((c2) => c2.code === o); if (x) { x.alts = [o, ...(x.alts || [])]; x.code = n; x.info = null; x.err = ''; scRvPaint(); setTimeout(() => scRvCheck(card, x), 0); } }, onFound: (code, how) => {
         if (card.cands.some((x) => x.code === code)) return;
         const x = { code, how, on: true, info: null, err: '', alts: [] }; card.cands.push(x); scBeep('ok'); try { navigator.vibrate && navigator.vibrate(30); } catch { /* */ }
         scRvPaint(); setTimeout(() => scRvCheck(card, x), 0);
       } }).then((res) => { (res.unread || []).forEach((u) => { if (u.thumb) card.cands.push({ code: '', how: 'manual', on: false, info: null, err: '✍️ number padh nahi paya — thumbnail dekh kar 16 digit likho', alts: [], thumb: u.thumb, manual: true }); }); res.forEach((r) => { const x = card.cands.find((c2) => c2.code === r.code); if (x && r.thumb) { x.thumb = r.thumb; scRvPaint(); } if (x && r.alts && r.alts.length) { x.alts = r.alts; if (x.info && x.info.k === 'nf') { x.info = null; scRvCheck(card, x); } } }); });
+      // AI ke number milao: local OCR ke kamzor (text) number se ≤3 digit ka farak ho to AI wala sahi maano; naya ho to jodo
+      card.step = '🤖 AI se bhi padh raha hu…'; scRvPaint();
+      const ai = (await aiP).map((c) => scValid(c)).filter(Boolean);
+      if (ai.length) {
+        const before = card.cands.length;
+        ai.forEach((code) => {
+          if (card.cands.some((x) => x.code === code)) return;
+          const near = card.cands.find((x) => x.code && x.how === 'text' && !x.ai && scHam(x.code, code) <= 3);
+          if (near) { near.alts = [near.code, ...(near.alts || [])]; near.code = code; near.ai = true; near.info = null; near.err = ''; setTimeout(() => scRvCheck(card, near), 0); return; }
+          const x = { code, how: 'text', on: true, info: null, err: '', alts: [], ai: true }; card.cands.push(x); setTimeout(() => scRvCheck(card, x), 0);
+        });
+        const real = card.cands.filter((x) => !x.manual).length;
+        if (ai.length >= before * 0.8) card.cands = card.cands.filter((x) => !x.manual);   // AI ne sab pakad liye — khaali rows hatao
+        scBeep('ok'); scNote(`🤖 AI ne ${ai.length} number padhe (kul ${real})`, false);
+      }
     } catch (e) { card.err = String((e && e.message) || e); }
     // OCR ka jana-pehchana galat: sab tags me ek hi jagah 8 (asal me 6) — photo ke baad khud theek karo, ulta karne ka button rehta hai
     try {

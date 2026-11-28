@@ -13368,6 +13368,37 @@ async function handleApi(req, res, url) {
     scanPush('preview', { previews: [...scanPrev.values()].filter((v) => Date.now() - v.t < 10 * 60e3).map((v) => ({ name: v.name, codes: v.codes, at: v.at })) });
     return sendJson(res, 200, { ok: true });
   }
+  // 🔎 v3.125.618 — photo me bahut chhote barcode numbers: free Gemini vision (GEMINI_API_KEY) se saare tag numbers padhna. Public form hai → naam + IP rate-limit.
+  if (p === '/api/public/scan-ocr' && method === 'POST') {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) return sendJson(res, 200, { ok: false, reason: 'no_key', codes: [] });
+    const body = await readBody(req);
+    if (!cleanVisitorName(body.name)) throw new HttpError(400, 'Employee name zaroori hai.');
+    if (!publicRateOk(`scanocr:${clientIp(req)}`, 40, 10 * 60e3)) throw new HttpError(429, 'Bahut zyada photo — thoda ruk kar try karo.');
+    const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(body.image || ''));
+    if (!m || m[2].length > 5.5e6) throw new HttpError(400, 'Photo sahi nahi / bahut badi.');
+    const prompt = 'Is photo me FASTag (IDFC FIRST Bank) ke kai stickers hain. Har sticker par ek barcode ke neeche 16 digit ka number chhapa hai, format 6-3-7 digit jaise 608116-021-0357262. '
+      + 'Photo ke SAARE stickers ke number padho (upar se neeche, baayen se daayen), koi sticker mat chhodo, ek hi number do baar mat likho. Jo digit dhundhla ho uska best guess likho. '
+      + 'Sirf JSON array do, jaise ["608116-021-0357262","608116-021-0357261"]. Koi aur text nahi.';
+    const models = [process.env.JARVIS_MODEL, 'gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'].filter(Boolean);
+    const errs = [];
+    for (const model of models) {
+      const c1 = new AbortController(), t1 = setTimeout(() => c1.abort(), 28e3);
+      let r; try { r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST', signal: c1.signal, headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: m[1], data: m[2] } }] }], generationConfig: { temperature: 0, maxOutputTokens: 1200 } })
+      }); } catch (e) { errs.push(model + ': ' + String((e && e.message) || e).slice(0, 50)); continue; } finally { clearTimeout(t1); }
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        const txt = ((((j.candidates || [])[0] || {}).content || {}).parts || []).map((x) => x.text || '').join(' ');
+        const codes = [...new Set([...txt.matchAll(/(\d{6})\s*-?\s*(\d{3})\s*-?\s*(\d{7})/g)].map((x) => `${x[1]}-${x[2]}-${x[3]}`))].slice(0, 80);
+        return sendJson(res, 200, { ok: true, codes, model });
+      }
+      const msg = String((j.error && j.error.message) || r.status).slice(0, 120); errs.push(model + ' ' + r.status + ': ' + msg.slice(0, 60));
+      if (r.status !== 404 && !/no longer available|not found|not supported/i.test(msg)) break;
+    }
+    return sendJson(res, 200, { ok: false, reason: 'api', error: errs.join(' | ').slice(0, 300), codes: [] });
+  }
   if (p === '/api/public/scan-info' && method === 'POST') {
     const body = await readBody(req);
     const codes = [...new Set((Array.isArray(body && body.codes) ? body.codes : []).map(scanCodeOf).filter(Boolean))].slice(0, 12);
