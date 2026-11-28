@@ -10964,7 +10964,9 @@ async function handleApi(req, res, url) {
       rememberAddressBook(addressEntries);
       /* v3.125.325: local change memory-overlay se dikhta hai — sheet dobara nahi padhte */
     }
-    persistBackground('notify');
+    // v3.125.627 — request tabhi "bheji" maani jaye jab durable save ho chuka ho (pehle background save tha →
+    // restart/deploy/spin-down beech me aaye to request khud gayab ho jati thi). Max 8s wait, phir bhi background retry.
+    try { await Promise.race([persist('notify'), new Promise((r) => setTimeout(r, 8000))]); } catch { persistBackground('notify'); }
     if (addressEntries.length) {
       syncAddressBookToSheet(created).then(() => persist('notify').catch(() => {})).catch((err) => console.warn('tag request address sync:', err && err.message));
     }
@@ -12480,7 +12482,7 @@ async function handleApi(req, res, url) {
     };
     storeTagRequests([row]);
        rememberAddressBook([addressEntryFromRequest(row)].filter(Boolean));
-    persistBackground('notify'); // reply instantly; the Google Sheet save runs in the background (with retry)
+    try { await Promise.race([persist('notify'), new Promise((r) => setTimeout(r, 8000))]); } catch { persistBackground('notify'); } // v3.125.627 durable save pehle; Sheet save background me
        syncAddressBookToSheet([row]).then(() => persist('notify').catch(() => {})).catch(() => {});
     // v5: Pending submission sirf dashboard me save hoti hai; Google Sheet entry Approved par hogi.
     // Admin ko notification (routed: Settings → notification routes se off ho sakta hai) + requester ko confirmation.

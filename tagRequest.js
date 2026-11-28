@@ -3674,7 +3674,7 @@ body.colorful .from-hdr { color: #166534; }
       let html = list.join('');
       if (other > 0) {
         const left = extraClasses(field).filter(([c]) => !used.has(c)).map(([c, v]) => `${c} ${fmt(v)}`).join(' · ');
-        html += `<span title="${esc(left ? `TVC mapping me nahi: ${left}` : 'Jo CCH Settings → TVC mapping me nahi hai')}"><b>Other</b> <strong>${fmt(other)}</strong></span>`;
+        html += `<span title="${esc(left ? `TVC mapping me nahi: ${left}` : 'VC5+ (commercial) — class-wise split report me nahi aaya, isliye total yahan dikh raha hai')}"><b>${left ? 'Other' : 'VC5+'}</b> <strong>${fmt(other)}</strong></span>`;
       }
       return html;
     };
