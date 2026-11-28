@@ -4525,6 +4525,7 @@ body.colorful .from-hdr { color: #166534; }
       else if (op === 'pdf1') downloadPdf([dr.req], { colorful: true });
       else if (op === 'copy') U.copyText(labelText(dr.req)).then((ok) => U.toast(ok ? '📋 Label text copy ho gaya' : 'Copy nahi hua', ok ? 'ok' : 'warn'));
       else if (op === 'push') {
+        if (dr.req.sheetSyncHold && !window.confirm('The last sheet entry for this request was unconfirmed (Google was slow). Check the sheet first — send again only if the row is missing. Send now?')) return;
         opEl.disabled = true;
         FF.auth.api('/api/tag-request-sheet/push', 'POST', { id: dr.req.id })
           .then((out) => { if (out && out.pending) { U.toast('📗 Queued — the sheet entry goes automatically (retries on its own)', 'ok'); [6000, 20000, 60000].forEach((ms) => setTimeout(() => { try { loadRequests(true); } catch { /* ignore */ } }, ms)); opEl.disabled = false; return; } U.toast(`📗 Sheet me ${out.added} rows add ho gayi (tab: ${out.tab || ''})`, 'ok'); dr.req.sheetSync = { at: new Date().toISOString(), event: 'manual', added: out.added, tab: out.tab }; renderReqTable(); })

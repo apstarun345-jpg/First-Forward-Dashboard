@@ -6,3 +6,4 @@ test('sheet push has per-request in-flight lock', () => { const s = rd('server.j
 test('manual push is queued instantly (outbox) — no waiting on Google', () => { const s = rd('server.js'); assert.match(s, /pending: true, queued: true, added: 0, requests: rows\.length/); assert.match(s, /function sheetOutbox/); assert.match(s, /queued: true, synced: false/); });
 test('status save is durable before reply', () => { const s = rd('server.js'); assert.doesNotMatch(s, /status-only → instant reply/); });
 test('client re-reads server status on timeout instead of reverting', () => { const s = rd('tagRequest.js'); assert.match(s, /recovered: true/); });
+test('appendrows never blind-retries on timeout (ambiguous) — verify in sheet first', () => { const a = rd('apps-script-storage.js'), s = rd('server.js'); assert.match(a, /noRetryAmbiguous/); assert.match(s, /verifyTagRowsInSheet\(targetId, tabName, positions, rows\)/); assert.match(s, /sheetSyncHold/); });

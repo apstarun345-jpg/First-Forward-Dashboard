@@ -12182,6 +12182,26 @@ async function handleApi(req, res, url) {
     if (firstErr) throw firstErr;
     return last;
   }
+  /** Timeout ke baad: kya ye rows sheet me aa chuki hain? true / false / null (verify nahi ho paya). Google gviz se, aaj ki date + agent + class jaise text cells match. */
+  async function verifyTagRowsInSheet(targetId, tabName, positions, rows) {
+    if (!targetId || !Array.isArray(positions) || !rows.length) return null;
+    const colL = (i) => { let n = Number(i) + 1, o = ''; while (n > 0) { const m = (n - 1) % 26; o = String.fromCharCode(65 + m) + o; n = Math.floor((n - 1) / 26); } return o; };
+    const data = rows.filter((r) => r.some((c) => String(c || '').trim()));
+    if (!data.length) return null;
+    let found = 0;
+    for (const r of data.slice(0, 4)) {
+      const conds = [];
+      r.forEach((v, i) => { const t = String(v == null ? '' : v).trim(); if (t && t.length <= 60 && /[A-Za-z]/.test(t) && !/['"\\]/.test(t) && conds.length < 4) conds.push(`${colL(positions[i])} = '${t}'`); });
+      if (conds.length < 2) return null;
+      const dateV = r.map((v) => String(v || '').trim()).find((t) => /^\d{1,2}[-\/]\d{1,2}[-\/]\d{4}$/.test(t));
+      if (!dateV) return null;   // date ke bina purani rows se match ho sakta hai → verify nahi
+      { const i = r.findIndex((v) => String(v || '').trim() === dateV); if (!conds.some((c) => c.startsWith(colL(positions[i]) + ' '))) conds.push(`${colL(positions[i])} = '${dateV}'`); }
+      const qp = new URLSearchParams({ id: targetId, sheet: tabName, tq: `select ${colL(positions[0])} where ${conds.join(' and ')} limit 50` });
+      const out = await gvizPageQuick(qp, tabName);
+      if (out.rows.length) found++;
+    }
+    return found === Math.min(4, data.length) ? true : (found === 0 ? false : null);
+  }
   async function pushTagRequestsToSheetGroup(reqs, event, throwOnFail, cfg, ch, gvSep) {
     const store = sheetSyncStore();
     const view = (r) => (gvSep ? { ...r, rows: (Array.isArray(r.rows) ? r.rows : []).filter((x) => tagRowChannel(x, r) === ch) } : r);
@@ -12238,7 +12258,21 @@ async function handleApi(req, res, url) {
         throw new Error(msg);
       }
     }
-    const out = await store.call('appendrows', { tab: tabName, header, rows, ...(positions ? { positions } : {}), ...(targetId ? { spreadsheetId: targetId } : {}) });
+    let out;
+    try {
+      out = await store.call('appendrows', { tab: tabName, header, rows, ...(positions ? { positions } : {}), ...(targetId ? { spreadsheetId: targetId } : {}) }, { attempts: 4, timeoutMs: 90e3, noRetryAmbiguous: true });
+    } catch (err) {
+      if (!err || !err.ambiguous) throw err;
+      // Jawab nahi aaya par row likhi gayi ho sakti hai — sheet me dekh kar tay karo (blind retry = duplicate).
+      const seen = await verifyTagRowsInSheet(targetId, tabName, positions, rows).catch(() => null);
+      if (seen === true) out = { tab: tabName, added: rows.length, verified: true };
+      else if (seen === false) throw err;                      // sheet me nahi hai → retry safe
+      else {                                                    // verify nahi ho paya → auto-resend NAHI (duplicate ka khatra)
+        const at0 = new Date().toISOString();
+        reqs.forEach((r) => { r.sheetSync = { at: at0, event, error: 'Unconfirmed (Google slow) — check the sheet', tab: tabName, hold: true }; r.sheetSyncHold = true; });
+        throw Object.assign(new Error('Sheet entry unconfirmed — check the sheet before resending'), { hold: true });
+      }
+    }
     // Purana Code.gs deploy (v3.25) spreadsheetId ignore karta hai — tab wo chup-chaap APP_STORAGE
     // wali sheet me likh deta. Isliye response ke URL se verify karo ki entry SAHI sheet me gayi.
     if (targetId && out && out.url && !String(out.url).includes(targetId)) {
@@ -12258,7 +12292,7 @@ async function handleApi(req, res, url) {
       // Saare (ON) channel-parts ho gaye to hi request "synced" maani jaye — warna doosra part retry ho (pehla dobara nahi likhta).
       const pending = tagReqChannels(r).filter((c) => !r.sheetPartsDone[c] && tagSheetCfgFor(c).enabled);
       if (pending.length) { r.sheetSync = { at, event, error: `${pending.join('+').toUpperCase()} part baaki`, tab: out.tab || tabName }; return; }
-      r.sheetSync = syncInfo;
+      r.sheetSync = syncInfo; delete r.sheetSyncHold;
       // Persistent marker prevents future status toggles/manual clicks creating a duplicate.
       r.sheetApprovalSync = { ...syncInfo, event: 'approved' };
     });
@@ -12276,7 +12310,7 @@ async function handleApi(req, res, url) {
     const list = (rows || []).filter(Boolean);
     if (!list.length || !tagSheetAnyEnabled()) return Promise.resolve();
     const run = async (attempt) => {
-      const todo = list.filter((r) => r.status === 'approved' && !isSheetSynced(r) && tagReqNeedsSheet(r));
+      const todo = list.filter((r) => r.status === 'approved' && !isSheetSynced(r) && tagReqNeedsSheet(r) && !(r.sheetSyncHold && event !== 'manual'));
       if (!todo.length) return;
       const startedAt = new Date().toISOString();
       todo.forEach((r) => { r.sheetSyncStartedAt = startedAt; });
@@ -12290,7 +12324,8 @@ async function handleApi(req, res, url) {
         persist('notify').catch(() => {});
         const delays = [5e3, 20e3, 60e3, 180e3];
         // v3.125.62 — retry chain ko block nahi karta: nayi approvals turant jaati hain, purani alag timer se retry hoti hain.
-        if (attempt < delays.length) setTimeout(() => { sheetSyncChain = sheetSyncChain.then(() => run(attempt + 1)).catch(() => {}); }, delays[attempt]).unref?.();
+        if (err && err.hold) { try { recordNotification({ type: 'alert', title: '📗 Sheet entry unconfirmed', body: 'Google was slow and the entry may or may not be in the sheet. Check the sheet, then use 📗 Sheet entry only if the row is missing (no automatic resend, to avoid duplicates).', target: 'admin', meta: { link: '#/tagRequest?view=requests' } }); } catch { /* optional */ } }
+        if (!(err && err.hold) && attempt < delays.length) setTimeout(() => { sheetSyncChain = sheetSyncChain.then(() => run(attempt + 1)).catch(() => {}); }, delays[attempt]).unref?.();
       }
     };
     sheetSyncChain = sheetSyncChain.then(() => run(0)).catch(() => {});
@@ -12305,7 +12340,7 @@ async function handleApi(req, res, url) {
         if (!tagSheetAnyEnabled()) return;
         const now = Date.now(), cutoff = now - 3 * 864e5;
         const ts = (v) => Date.parse(v || '') || 0;
-        const rows = (workspaceStore().tagRequests || []).filter((r) => r && r.status === 'approved' && !isSheetSynced(r) && tagReqNeedsSheet(r)
+        const rows = (workspaceStore().tagRequests || []).filter((r) => r && r.status === 'approved' && !isSheetSynced(r) && tagReqNeedsSheet(r) && !r.sheetSyncHold
           && ts(r.updatedAt || r.at) > cutoff && now - ts(r.updatedAt || r.at) > 90e3
           && !(r.sheetSyncStartedAt && now - ts(r.sheetSyncStartedAt) < 10 * 60e3));
         // 🚨 v3.125.371 — 30 min se zyada atki sheet entry → admin ko ek alert (6 ghante me ek baar).

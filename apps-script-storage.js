@@ -80,13 +80,13 @@ export class AppsScriptStore {
           body: JSON.stringify({ secret: this.secret, action, ...extra })
         });
         const text = await response.text();
-        if (response.status === 429 || response.status >= 500) throw Object.assign(new Error(`Apps Script HTTP ${response.status}`), { retry: true });
+        if (response.status === 429 || response.status >= 500) throw Object.assign(new Error(`Apps Script HTTP ${response.status}`), { retry: true, safe: response.status === 429 });
         let json;
         try { json = JSON.parse(text); } catch {
           // 🌐 HTML page kabhi UI me nahi: rate-limit page ko saaf message banao (ek-do retry bhi).
           const limited = /too many requests|rate.?limit|\b429\b/i.test(text);
           if (limited) {
-            throw Object.assign(new Error('Google/Apps Script ne rate limit kiya (Too Many Requests) — thodi der baad dobara try karo. Sheet ka data safe hai.'), { retry: true });
+            throw Object.assign(new Error('Google/Apps Script ne rate limit kiya (Too Many Requests) — thodi der baad dobara try karo. Sheet ka data safe hai.'), { retry: true, safe: true });
           }
           throw new Error(/<html/i.test(text)
             ? 'Apps Script returned an HTML page. Deploy it as Web app → Execute as: Me, Who has access: Anyone, and use the /exec URL.'
@@ -105,6 +105,9 @@ export class AppsScriptStore {
         lastErr = err.name === 'AbortError' ? Object.assign(new Error(`${this.label || 'Apps Script storage'} timeout`), { retry: true }) : err;
         // 'busy, retry' = Apps Script lock contention (another write in flight) — retryable by design.
         const retry = lastErr.retry || /busy, retry|fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|socket/i.test(String(lastErr.message) + String(lastErr.cause || ''));
+        // v3.125.624 — non-idempotent writes (appendrows): timeout / 5xx / network-cut par script ne row likh di ho sakti hai →
+        // blind retry duplicate row banata tha. Sirf "script ne kaam shuru hi nahi kiya" (busy / 429 / rate-limit) par retry; baaki par ambiguous error.
+        if (opts.noRetryAmbiguous && retry && !lastErr.safe && !/busy, retry/i.test(String(lastErr.message))) { lastErr.ambiguous = true; break; }
         if (!retry || attempt === maxAttempts - 1) break;
         // 'busy, retry' = doosra Apps Script kaam lock pakde hai → thoda lamba ruko (2s, 4s, 8s…), warna turant fir busy
         const busy = /busy, retry/i.test(String(lastErr.message));
