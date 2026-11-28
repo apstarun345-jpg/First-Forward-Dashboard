@@ -17,7 +17,10 @@ test('statusOf: growth / stable / de-growth / high de-growth / new / lost', () =
   assert.equal(statusOf(100, 100, 102).k, 'stable');
   assert.equal(statusOf(80, 100, 85).k, 'degrowth');
   assert.equal(statusOf(50, 100, 60).k, 'high');
-  assert.equal(statusOf(0, 100, 0).k, 'high');
+  assert.equal(statusOf(0, 100, 0, 0, 0).k, 'inact1');
+  assert.equal(statusOf(0, 0, 0, 7, 0).k, 'inact2');
+  assert.equal(statusOf(0, 0, 0, 0, 3).k, 'inact3');
+  assert.equal(statusOf(1, 100, 1).k, 'high');
   assert.equal(statusOf(10, 0, 10).k, 'new');
 });
 test('entitiesOf: TL = uski team ka total; direct alag; ek agent inactive ho to TL inactive nahi', () => {
@@ -33,7 +36,7 @@ test('entitiesOf: TL = uski team ka total; direct alag; ek agent inactive ho to 
   assert.equal(tl.name, 'TL Raj'); assert.equal(tl.cur, 10); assert.equal(tl.last, 13); assert.equal(tl.stock, 25);
   assert.equal(tl.inact, 0, 'TL ka ek agent 40 din inactive par TL khud active hai');
   assert.equal(tl.repl, 1); assert.equal(tl.chassis, 1); assert.equal(tl.wrong, 2);
-  assert.equal(d.name, 'Dir X'); assert.equal(d.inact, 12); assert.equal(d.st, 'high');
+  assert.equal(d.name, 'Dir X'); assert.equal(d.inact, 12); assert.equal(d.st, 'inact1');
   assert.ok(tl.cover > 0 && tl.cover < 30);
 });
 test('UI: koi TL-agent row nahi, 4 tables, source markers', () => {
@@ -41,4 +44,19 @@ test('UI: koi TL-agent row nahi, 4 tables, source markers', () => {
   assert.match(src, /function openDrill/);
   assert.match(src, /data-drill/);
   for (const id of ['s-growth', 's-quality', 's-inactive', 's-stock']) assert.ok(src.includes(id), id);
+});
+
+test('promoteTls: jo naam kisi aur ke TL ke roop me aata hai wo direct nahi, TL hai', () => {
+  const { promoteTls } = load();
+  const people = [
+    { name: 'Hemal', tl: '', direct: true }, { name: 'A1', tl: 'Hemal', direct: false }, { name: 'Solo', tl: '', direct: true }
+  ];
+  promoteTls(people);
+  assert.equal(people[0].direct, false); assert.equal(people[0].tl, 'Hemal');
+  assert.equal(people[2].direct, true);
+});
+test('filter state localStorage me yaad rehta hai + cache se turant render', () => {
+  assert.match(src, /localStorage\.setItem\(UIKEY/);
+  assert.match(src, /localStorage\.getItem\(UIKEY/);
+  assert.match(src, /AX\.a && AX\.key === key/);
 });

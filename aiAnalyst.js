@@ -20,13 +20,13 @@ FF.pages = FF.pages || {};
   const healthOf = (g) => (g === null ? ['Naya', 'flat'] : g >= 5 ? ['Growing', 'up'] : g <= -5 ? ['Declining', 'down'] : ['Stable', 'flat']);
 
   // ---------------------------------------------------------------- analysis core
-  function peopleFromFf(agents, cur, last, isFfRow) {
+  function peopleFromFf(agents, cur, last, isFfRow, m2, m3) {
     const map = new Map();
-    (agents || []).filter((r) => isFfRow(r) && (r.ym === cur || r.ym === last)).forEach((r) => {
+    (agents || []).filter((r) => isFfRow(r) && (r.ym === cur || r.ym === last || r.ym === m2 || r.ym === m3)).forEach((r) => {
       const key = clean(r.id) ? 'I' + norm(r.id) : 'N' + norm(r.name);
-      if (!map.has(key)) map.set(key, { key, name: r.name, id: clean(r.id), tl: '', cur: 0, last: 0, tlCurN: 0 });
+      if (!map.has(key)) map.set(key, { key, name: r.name, id: clean(r.id), tl: '', cur: 0, last: 0, m2: 0, m3: 0, tlCurN: 0 });
       const o = map.get(key);
-      if (r.ym === cur) { o.cur += r.n; if (r.n >= o.tlCurN) { o.tlCurN = r.n; o.tl = r.tlName; } } else { o.last += r.n; if (!o.tl) o.tl = r.tlName; }
+      if (r.ym === cur) { o.cur += r.n; if (r.n >= o.tlCurN) { o.tlCurN = r.n; o.tl = r.tlName; } } else if (r.ym === last) { o.last += r.n; if (!o.tl) o.tl = r.tlName; } else { if (r.ym === m2) o.m2 += r.n; else o.m3 += r.n; if (!o.tl) o.tl = r.tlName; }
     });
     return [...map.values()].map((o) => ({ ...o, direct: FF.config.isDirectAgent ? !!FF.config.isDirectAgent({ tlName: o.tl, name: o.name, agentName: o.name }, 'ff') : false }));
   }
@@ -81,6 +81,12 @@ FF.pages = FF.pages || {};
       return FF.perfWatch.prepRows('gv', FF.pages.gvPerformance.watchRows());
     })();
     try { return await Promise.race([job, new Promise((res) => setTimeout(() => res(null), 25000))]); } catch { return null; }
+  }
+  /** v3.125.601 — jo naam kisi aur ke TL ke roop me aata hai wo TL hai (direct nahi): "TL = khud" ya TL ID khaali wali rows ko direct na gino. */
+  function promoteTls(people) {
+    const names = new Set();
+    people.forEach((p) => { if (!p.direct && clean(p.tl) && norm(p.tl) !== norm(p.name)) names.add(norm(p.tl)); });
+    people.forEach((p) => { if (p.direct && names.has(norm(p.name))) { p.direct = false; p.tl = p.name; p.promoted = true; } });
   }
   /** people + watch rows → stock / inactive days / dormant (stock hai par pichhle 2 mahine kuch nahi) */
   function enrich(people, watch) {
@@ -146,14 +152,14 @@ FF.pages = FF.pages || {};
     (idx.byYm.get(ym) || []).forEach((r) => { if (r.day) t[r.day - 1]++; });
     return t;
   }
-  function gvPeople(idx, cur, last) {
+  function gvPeople(idx, cur, last, m2, m3) {
     const map = new Map();
     const add = (ym, f) => (idx.byYm.get(ym) || []).forEach((r) => {
       const id = clean(r.agentId), key = id ? 'I' + norm(id) : 'N' + norm(r.agentName);
-      if (!map.has(key)) map.set(key, { key, name: r.agentName, id, tl: r.tlName || '', cur: 0, last: 0, direct: false, directAll: true });
+      if (!map.has(key)) map.set(key, { key, name: r.agentName, id, tl: r.tlName || '', cur: 0, last: 0, m2: 0, m3: 0, direct: false, directAll: true });
       const o = map.get(key); o[f]++; if (!isDirectGv(r)) o.directAll = false; if (r.tlName && (f === 'cur' || !o.tl)) o.tl = r.tlName;
     });
-    add(cur, 'cur'); add(last, 'last');
+    add(cur, 'cur'); add(last, 'last'); add(m2, 'm2'); add(m3, 'm3');
     return [...map.values()].map((o) => ({ ...o, direct: o.directAll }));
   }
 
@@ -183,6 +189,7 @@ FF.pages = FF.pages || {};
     out.cur = out.months.includes(monthParam) ? monthParam : latestYM;
     out.isCurrent = out.cur === latestYM;
     out.last = U.prevMonthKey(out.cur);
+    out.m2 = U.prevMonthKey(out.last); out.m3 = U.prevMonthKey(out.m2);
     out.dimCur = U.daysInMonth(out.cur); out.dimLast = U.daysInMonth(out.last);
     out.day = out.isCurrent ? latest.getDate() : out.dimCur;
     out.latest = latest;
@@ -212,8 +219,9 @@ FF.pages = FF.pages || {};
       const day = chLatest && U.ymKey(chLatest) === out.cur ? chLatest.getDate() : (out.isCurrent && chLatest && U.ymKey(chLatest) < out.cur ? 0 : out.day);
       const sum = (ym, d) => (isFf ? M.summary(ffDaily, ym, d) : gvSummary(gvIdx, ym, d));
       const cur = sum(out.cur), last = sum(out.last), lastMtd = day ? sum(out.last, day) : last;
-      const people0 = isFf ? peopleFromFf(agents, out.cur, out.last, isFfRow) : gvPeople(gvIdx, out.cur, out.last);
+      const people0 = isFf ? peopleFromFf(agents, out.cur, out.last, isFfRow, out.m2, out.m3) : gvPeople(gvIdx, out.cur, out.last, out.m2, out.m3);
       const en = enrich(people0, watchRes[ch]);
+      promoteTls(en.people);
       const dd = day || out.day;
       const dAll = drivers(en.people, dd, out.dimCur);
       dAll.rows.forEach((r) => { const q = qualMap[ch].get(r.key) || qualMap[ch].get(qKey(r.id, r.name)) || {}; r.repl = q.repl || 0; r.chassis = q.chassis || 0; r.wrong = q.wrong || 0; });
@@ -255,24 +263,24 @@ FF.pages = FF.pages || {};
   // Inactive = TL ke poore group (TL + agents) me 7+ din koi issuance nahi — ek agent inactive ho to TL inactive nahi gina jaata.
   const DEG = -5, HIGH = -30, GROW = 5, COVER_HIGH = 30, MIN_STOCK = 10;
   const ST = {
-    growth: { label: 'Growth', icon: '🟢', rank: 3 }, new: { label: 'Naya', icon: '✨', rank: 4 }, stable: { label: 'Stable', icon: '🔵', rank: 2 },
-    degrowth: { label: 'De-growth', icon: '🟠', rank: 1 }, high: { label: 'High de-growth', icon: '🔴', rank: 0 }
+    growth: { label: 'Growth', icon: '🟢', rank: 6 }, new: { label: 'Naya', icon: '✨', rank: 7 }, stable: { label: 'Stable', icon: '🔵', rank: 5 },
+    degrowth: { label: 'De-growth', icon: '🟠', rank: 4 }, high: { label: 'High de-growth', icon: '🔴', rank: 3 },
+    inact1: { label: 'Is mahine inactive', icon: '⏸️', rank: 2 }, inact2: { label: 'Inactive 2 mahine', icon: '💤', rank: 1 }, inact3: { label: 'Inactive 3 mahine', icon: '🪦', rank: 0 }
   };
-  function statusOf(cur, last, proj) {
-    if (!cur && !last) return { k: 'stable', g: null };
+  function statusOf(cur, last, proj, m2, m3) {
+    if (!cur) { if (last > 0) return { k: 'inact1', g: -100 }; if (m2 > 0) return { k: 'inact2', g: null }; if (m3 > 0) return { k: 'inact3', g: null }; return { k: 'stable', g: null }; }
     if (!last) return { k: 'new', g: null };
-    if (!cur) return { k: 'high', g: -100 };
     const g = pct(proj, last);
     return { k: g >= GROW ? 'growth' : g > DEG ? 'stable' : g > HIGH ? 'degrowth' : 'high', g };
   }
   function mkEntity(ch, type, name, id, rows, c) {
     const sum = (f) => rows.reduce((t, r) => t + (Number(r[f]) || 0), 0);
-    const cur = sum('cur'), last = sum('last'), proj = sum('proj'), stock = sum('stock');
+    const cur = sum('cur'), last = sum('last'), proj = sum('proj'), stock = sum('stock'), m2 = sum('m2'), m3 = sum('m3');
     const inacts = rows.map((r) => r.inact).filter((x) => x !== undefined && x !== null);
     const inact = c.hasStock && inacts.length ? Math.min(...inacts) : null;
-    const st = statusOf(cur, last, proj), day = Math.max(1, c.day || 1);
+    const st = statusOf(cur, last, proj, m2, m3), day = Math.max(1, c.day || 1);
     const avg = cur / day, cover = avg > 0 ? stock / avg : (stock > 0 ? Infinity : 0);
-    return { ch, type, name, id, agents: type === 'tl' ? rows.filter((r) => r.cur > 0 || r.last > 0 || r.stock > 0).length : 1, cur, last, proj, delta: proj - last, g: st.g, st: st.k,
+    return { ch, type, name, id, agents: type === 'tl' ? rows.filter((r) => r.cur > 0 || r.last > 0 || r.stock > 0).length : 1, cur, last, m2, m3, proj, delta: proj - last, g: st.g, st: st.k,
       stock, inact, avg, cover, repl: sum('repl'), chassis: sum('chassis'), wrong: sum('wrong'), day: c.day, hasStock: !!c.hasStock };
   }
   function entitiesOf(a) {
@@ -286,9 +294,28 @@ FF.pages = FF.pages || {};
       });
       groups.forEach((rows, k) => out.push(mkEntity(ch, 'tl', k, '', rows, c)));
     });
-    return out.filter((e) => e.cur > 0 || e.last > 0 || e.stock > 0);
+    return out.filter((e) => e.cur > 0 || e.last > 0 || e.m2 > 0 || e.m3 > 0 || e.stock > 0);
   }
 
+  let AX = { key: '', a: null, at: 0 };
+  const UIKEY = 'ff-ax-ui-v2';
+  const defUi = () => ({ old: false, ch: 'all', seg: 'all', q: '', gst: 'all', t: { g: { sort: 'proj', dir: 'desc' }, q: { sort: 'wrong', dir: 'desc' }, i: { sort: 'stock', dir: 'desc' }, s: { sort: 'stock', dir: 'desc' } } });
+  function loadUi() {
+    const u = defUi();
+    try {
+      const s = JSON.parse(localStorage.getItem(UIKEY) || '{}');
+      if (['gv', 'ff'].includes(s.ch)) u.ch = s.ch; if (['tl', 'direct'].includes(s.seg)) u.seg = s.seg;
+      if (typeof s.q === 'string') u.q = s.q.slice(0, 60); if (typeof s.gst === 'string' && (s.gst === 'all' || ST[s.gst])) u.gst = s.gst; u.old = s.old === true;
+      ['g', 'q', 'i', 's'].forEach((k) => { const t = s.t && s.t[k]; if (t && typeof t.sort === 'string') u.t[k] = { sort: t.sort.slice(0, 12), dir: t.dir === 'asc' ? 'asc' : 'desc', all: t.all === true }; });
+    } catch { /* default */ }
+    return u;
+  }
+  const saveUi = (u) => { try { localStorage.setItem(UIKEY, JSON.stringify({ ch: u.ch, seg: u.seg, q: u.q, gst: u.gst, old: u.old, t: u.t })); } catch { /* optional */ } };
+  function scroller(el) {
+    try { for (let n = el; n && n !== document.body; n = n.parentElement) { const o = getComputedStyle(n).overflowY; if ((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n; } } catch { /* ignore */ }
+    return document.scrollingElement || document.documentElement;
+  }
+  const cnt0 = (arr, k) => arr.filter((e) => e.st === k).length;
   const badge = (e) => `<span class="ax-b ${e.ch}">${e.ch === 'gv' ? 'GV' : 'FF'}</span><span class="ax-b ${e.type}">${e.type === 'tl' ? 'TL' : 'Direct'}</span>`;
   const nameCell = (e) => `<button type="button" class="ax-name" data-drill="${esc(e.name)}">${esc(e.name)}</button>${badge(e)}`;
   const stChip = (k) => `<span class="ax-chip ${k}">${ST[k].icon} ${ST[k].label}</span>`;
@@ -318,17 +345,19 @@ FF.pages = FF.pages || {};
     const q = norm(ui.q); if (q) list = list.filter((e) => norm(e.name).includes(q));
     const hasStockAll = chs.some((ch) => a.channels[ch] && a.channels[ch].hasStock);
     const maxCur = Math.max(1, ...list.map((e) => e.cur));
-    const tot = (f) => list.reduce((t, e) => t + f(e), 0);
-    const act = list.filter((e) => e.cur > 0 || e.last > 0);   // jisne is / pichhle mahine kuch kiya (sirf stock wale dormant alag)
     const cnt = (k) => act.filter((e) => e.st === k).length;
+    const tot = (f) => list.reduce((t, e) => t + f(e), 0);
+    const act = list.filter((e) => e.cur > 0 || e.last > 0 || e.m2 > 0 || e.m3 > 0);   // pichhle 4 mahine me kabhi kaam kiya (sirf stock wale dormant alag)
+    const inactN = cnt0(act, 'inact1') + cnt0(act, 'inact2') + cnt0(act, 'inact3');
     const inactiveL = hasStockAll ? list.filter((e) => e.inact !== null && e.inact >= 7 && (ui.old || e.inact < 99)) : [];
     const stockL = hasStockAll ? list.filter((e) => e.stock >= MIN_STOCK && e.cover >= COVER_HIGH) : [];
     const kpis = [
       ['k1', '📈', 'Is mahine (projection)', fmt(tot((e) => e.proj)), `pichhla mahina ${fmt(tot((e) => e.last))} · ${(() => { const g = pct(tot((e) => e.proj), tot((e) => e.last)); return g === null ? 'new' : (g >= 0 ? '+' : '−') + Math.abs(g).toFixed(0) + '%'; })()}`],
       ['k2', '🟢', 'Growth', cnt('growth') + cnt('new'), 'TL / Direct badh rahe'],
       ['k3', '🟠', 'De-growth', cnt('degrowth'), '5% se 30% tak gire'],
-      ['k4', '🔴', 'High de-growth', cnt('high'), '30%+ gire ya band'],
-      ['k5', '⏸️', 'Inactive 7+ din', hasStockAll ? inactiveL.length : '—', hasStockAll ? 'poora group ruka hua' : 'sirf current month'],
+      ['k4', '🔴', 'High de-growth', cnt('high'), '30%+ gire (abhi chal rahe)'],
+      ['k7', '⏸️', 'Issuance band (0)', inactN, `is mahine ${cnt('inact1')} · 2 mahine ${cnt('inact2')} · 3 mahine ${cnt('inact3')}`],
+      ['k5', '🕒', 'Inactive 7+ din', hasStockAll ? inactiveL.length : '—', hasStockAll ? 'poora group ruka hua' : 'sirf current month'],
       ['k6', '📦', 'Stock jyada, issuance kam', hasStockAll ? stockL.length : '—', hasStockAll ? `${fmt(stockL.reduce((t, e) => t + e.stock, 0))} tags phase hue` : 'stock data nahi']
     ];
     const kHtml = `<div class="ax-kpis">${kpis.map(([c, i, t, v, s]) => `<div class="ax-kpi ${c}"><div class="ax-kpi-i">${i}</div><div><small>${t}</small><b>${v}</b><em>${s}</em></div></div>`).join('')}</div>`;
@@ -336,14 +365,14 @@ FF.pages = FF.pages || {};
     // 1) Growth
     const gSt = ui.gst || 'all';
     const gList = act.filter((e) => gSt === 'all' || e.st === gSt || (gSt === 'growth' && e.st === 'new'));
-    const gChips = [['all', 'Sab', act.length], ['growth', '🟢 Growth', cnt('growth') + cnt('new')], ['stable', '🔵 Stable', cnt('stable')], ['degrowth', '🟠 De-growth', cnt('degrowth')], ['high', '🔴 High de-growth', cnt('high')]]
+    const gChips = [['all', 'Sab', act.length], ['growth', '🟢 Growth', cnt('growth') + cnt('new')], ['stable', '🔵 Stable', cnt('stable')], ['degrowth', '🟠 De-growth', cnt('degrowth')], ['high', '🔴 High de-growth', cnt('high')], ['inact1', '⏸️ Inactive — is mahine', cnt('inact1')], ['inact2', '💤 Inactive 2 mahine', cnt('inact2')], ['inact3', '🪦 Inactive 3 mahine', cnt('inact3')]]
       .map(([k, l, n]) => `<button type="button" class="ax-fchip ${gSt === k ? 'on' : ''}" data-gst="${k}">${l} <b>${n}</b></button>`).join('');
     const gCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, { k: 'agents', h: 'Agents', v: (e) => e.agents, c: (e) => (e.type === 'tl' ? e.agents : '—'), cls: 'r' },
-      C_NUM('last', 'Pichhla mahina', (e) => e.last), C_NUM('cur', 'Ab tak', (e) => e.cur), { k: 'proj', h: 'Projection', v: (e) => e.proj, c: (e) => `<b>${fmt(e.proj)}</b>`, cls: 'r' },
+      C_NUM('m3', U.labelYM(a.m3), (e) => e.m3), C_NUM('m2', U.labelYM(a.m2), (e) => e.m2), C_NUM('last', 'Pichhla mahina', (e) => e.last), C_NUM('cur', 'Ab tak', (e) => e.cur), { k: 'proj', h: 'Projection', v: (e) => e.proj, c: (e) => `<b>${fmt(e.proj)}</b>`, cls: 'r' },
       { k: 'delta', h: 'Farak', v: (e) => e.delta, c: (e) => `<span class="ax-d ${tone(e.delta)}">${sgn(e.delta)}</span>`, cls: 'r' },
       { k: 'g', h: 'Growth %', v: (e) => (e.g === null ? (e.st === 'new' ? 1e6 : 0) : e.g), c: (e) => `<span class="ax-gcell ${e.st}">${gTxt(e)}</span>`, cls: 'r' },
       { k: 'st', h: 'Status', v: (e) => ST[e.st].rank, c: (e) => stChip(e.st), cls: 'c' }];
-    const s1 = `<section class="ax-sec s-growth"><header><h3>📈 Growth · De-growth</h3><p>TL = TL + uski poori team ka total · Direct agent alag</p></header><div class="ax-filters">${gChips}</div>${tableHtml('g', gCols, gList, ui.t.g, null, 20)}</section>`;
+    const s1 = `<section class="ax-sec s-growth"><header><h3>📈 Growth · De-growth</h3><p>TL = TL + uski poori team ka total · Direct agent alag · "Inactive" = jinka issuance 0 hai (is mahine / 2 / 3 mahine se)</p></header><div class="ax-filters">${gChips}</div>${tableHtml('g', gCols, gList, ui.t.g, null, 20)}</section>`;
 
     // 2) Quality
     const qMax = (f) => Math.max(1, ...list.map(f));
@@ -383,14 +412,18 @@ FF.pages = FF.pages || {};
 
   async function render(root, params) {
     const p = params || {};
-    const ui = { old: false, ch: ['ff', 'gv'].includes(p.ch) ? p.ch : 'all', seg: ['tl', 'direct'].includes(p.seg) ? p.seg : 'all', q: '', gst: 'all',
-      t: { g: { sort: 'proj', dir: 'desc' }, q: { sort: 'wrong', dir: 'desc' }, i: { sort: 'stock', dir: 'desc' }, s: { sort: 'stock', dir: 'desc' } } };
+    const sc0 = scroller(root), keepTop = sc0 ? sc0.scrollTop : 0;   // refresh/re-render par jagah wahi rahe
+    const ui = loadUi();
+    if (['ff', 'gv'].includes(p.ch)) ui.ch = p.ch;
+    if (['tl', 'direct'].includes(p.seg)) ui.seg = p.seg;
     root.innerHTML = `<div class="ax-hero"><div class="ax-hero-t"><span class="ax-hero-ico">🧠</span><div><h1>AI Business Analyst</h1><p>TL aur Direct agents ka seedha scorecard — growth, quality, inactive aur stock</p></div></div><div class="ax-hero-a" id="ax-actions"></div></div><div id="ax-body">${U.spinner('Analyst poora data padh raha hai…')}</div>`;
     const body = U.$('#ax-body', root);
-    let a;
-    try { a = await analyse(p.month, 'all'); } catch (err) { body.innerHTML = U.errorBox(err); return; }
+    const key = String(p.month || '');
+    let firstPaint = true;
+    const paint = (a) => {
     if (!root.isConnected) return;
     if (a.empty) { body.innerHTML = '<div class="empty-state">Abhi analysis ke liye data nahi mila.</div>'; return; }
+    const top = firstPaint ? keepTop : (scroller(root) || {}).scrollTop || 0; firstPaint = false;
     const ent = entitiesOf(a);
     const monthOpts = a.months.slice().reverse().map((m) => `<option value="${m}" ${m === a.cur ? 'selected' : ''}>${esc(U.labelYM(m, true))}</option>`).join('');
     U.$('#ax-actions', root).innerHTML = `<label class="ax-month">📅 <select id="ax-month" class="input">${monthOpts}</select></label><button class="btn small" id="ax-csv">⬇ CSV</button><button class="btn small" id="ax-refresh">↻</button>`;
@@ -399,13 +432,14 @@ FF.pages = FF.pages || {};
       <div class="ax-bar-top">
         <div class="ax-seg" id="ax-ch">${[['all', '🌐 GV + FF'], ['gv', '🟩 GV Partner'], ['ff', '🟦 First Forward']].map(([k, l]) => `<button type="button" data-ch="${k}">${l}</button>`).join('')}</div>
         <div class="ax-seg" id="ax-seg">${[['all', '👥🧍 TL + Direct'], ['tl', '👥 Sirf TL'], ['direct', '🧍 Sirf Direct']].map(([k, l]) => `<button type="button" data-seg="${k}">${l}</button>`).join('')}</div>
-        <input id="ax-q" class="input ax-search" type="search" placeholder="🔎 TL / agent ka naam…">
+        <input id="ax-q" class="input ax-search" type="search" value="${esc(ui.q)}" placeholder="🔎 TL / agent ka naam…">
         <span class="ax-fresh">🟩 GV ${esc(dl(a.gvLatest))} · 🟦 FF ${esc(dl(a.ffLatest))} tak</span>
       </div>
       <div id="ax-main"></div>
       <p class="foot-note">Projection = ab tak ÷ din × mahine ke din. Growth ≥ +5%, Stable −5% se +5%, De-growth −5% se −30%, High de-growth −30% se neeche (ya is mahine 0). TL ka number = TL + uski poori team. FF = EIR (master ID ≠ ${esc(a.gvId)}), GV = GV Master.</p>`;
     let cur = null;
     const draw = () => {
+      saveUi(ui);
       cur = sections(a, ent, ui);
       U.$('#ax-main', root).innerHTML = cur.kHtml + cur.html;
       body.querySelectorAll('[data-ch]').forEach((b) => b.classList.toggle('on', b.dataset.ch === ui.ch));
@@ -418,7 +452,7 @@ FF.pages = FF.pages || {};
       const dr = t.closest('[data-drill]'); if (dr) { openDrill(dr.dataset.drill); return; }
       const so = t.closest('[data-sort]'); if (so) { const [id, k] = so.dataset.sort.split('|'), s = ui.t[id]; s.dir = s.sort === k && s.dir === 'desc' ? 'asc' : 'desc'; s.sort = k; draw(); return; }
       const mo = t.closest('[data-more]'); if (mo) { const s = ui.t[mo.dataset.more]; s.all = !s.all; draw(); return; }
-      const gs = t.closest('[data-gst]'); if (gs) { ui.gst = gs.dataset.gst; const g = ui.t.g; if (ui.gst === 'degrowth' || ui.gst === 'high') { g.sort = 'delta'; g.dir = 'asc'; } else if (ui.gst === 'growth') { g.sort = 'delta'; g.dir = 'desc'; } else { g.sort = 'proj'; g.dir = 'desc'; } g.all = false; draw(); return; }
+      const gs = t.closest('[data-gst]'); if (gs) { ui.gst = gs.dataset.gst; const g = ui.t.g; if (ui.gst === 'degrowth' || ui.gst === 'high') { g.sort = 'delta'; g.dir = 'asc'; } else if (ui.gst === 'inact1') { g.sort = 'last'; g.dir = 'desc'; } else if (ui.gst === 'inact2') { g.sort = 'm2'; g.dir = 'desc'; } else if (ui.gst === 'inact3') { g.sort = 'm3'; g.dir = 'desc'; } else if (ui.gst === 'growth') { g.sort = 'delta'; g.dir = 'desc'; } else { g.sort = 'proj'; g.dir = 'desc'; } g.all = false; draw(); return; }
       const od = t.closest('[data-old]'); if (od) { ui.old = !ui.old; draw(); return; }
       const qs = t.closest('[data-qsort]'); if (qs) { ui.t.q.sort = qs.dataset.qsort; ui.t.q.dir = 'desc'; draw(); return; }
       const ch = t.closest('[data-ch]'); if (ch) { ui.ch = ch.dataset.ch; draw(); return; }
@@ -427,10 +461,18 @@ FF.pages = FF.pages || {};
     root.addEventListener('click', root.__axClick);
     U.$('#ax-q', root).addEventListener('input', (e) => { ui.q = e.target.value; draw(); });
     U.$('#ax-month', root).addEventListener('change', (e) => FF.app.updateParams({ month: e.target.value, ch: p.ch || '' }));
-    U.$('#ax-refresh', root).addEventListener('click', () => { if (FF.app.refresh) FF.app.refresh(); else render(root, params); });
+    U.$('#ax-refresh', root).addEventListener('click', () => { AX = { key: '', a: null, at: 0 }; if (FF.app.refresh) FF.app.refresh(); else render(root, params); });
     U.$('#ax-csv', root).addEventListener('click', () => { const [h, r] = csvOf(cur ? cur.list : ent); U.downloadCsv(`ai-analyst-${U.stamp()}.csv`, h, r); });
+    const sc = scroller(root); if (sc && top) { sc.scrollTop = top; setTimeout(() => { sc.scrollTop = top; }, 120); }
+    };
+    // pehle cache se turant (spinner nahi, filter + scroll wahi), phir peeche se taaza data
+    const hit = AX.a && AX.key === key ? AX.a : null;
+    if (hit) paint(hit);
+    if (!hit || Date.now() - AX.at > 120000) {
+      try { const a = await analyse(p.month, 'all'); AX = { key, a, at: Date.now() }; paint(a); } catch (err) { if (!hit) body.innerHTML = U.errorBox(err); }
+    }
   }
 
-  FF.aiAnalyst = { analyse, entitiesOf, statusOf, drivers };
+  FF.aiAnalyst = { analyse, entitiesOf, statusOf, drivers, promoteTls };
   FF.pages.aiAnalyst = { title: 'AI Business Analyst', render };
 })(window.FF);

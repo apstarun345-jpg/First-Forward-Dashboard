@@ -11024,3 +11024,8 @@ html[data-theme="dark"] .ax-chip.stable { background: #1e3a8a; color: #bfdbfe; }
 html[data-theme="dark"] .ax-chip.high { background: #881337; color: #fecdd3; } html[data-theme="dark"] .ax-days { background: #334155; color: #cbd5e1; }
 html[data-theme="dark"] .ax-days.warm { background: #78350f; color: #fde68a; } html[data-theme="dark"] .ax-days.hot { background: #881337; color: #fecdd3; }
 @media (max-width: 640px) { .ax-hero { padding: 16px; } .ax-hero h1 { font-size: 18px; } .ax-fresh { margin-left: 0; } .ax-kpi b { font-size: 21px; } .ax-table th, .ax-table td { padding: 8px 8px; } }
+
+.ax-chip.inact1 { background: #e2e8f0; color: #334155; } .ax-chip.inact2 { background: #e9d5ff; color: #6b21a8; } .ax-chip.inact3 { background: #1e293b; color: #e2e8f0; }
+.ax-gcell.inact1 { color: #64748b; } .ax-gcell.inact2, .ax-gcell.inact3 { color: var(--muted); }
+.ax-kpi.k7 { background: linear-gradient(135deg, #7c3aed, #a855f7); }
+html[data-theme="dark"] .ax-chip.inact1 { background: #334155; color: #e2e8f0; } html[data-theme="dark"] .ax-chip.inact2 { background: #581c87; color: #e9d5ff; } html[data-theme="dark"] .ax-chip.inact3 { background: #0f172a; color: #94a3b8; border: 1px solid #334155; }
