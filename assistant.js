@@ -140,7 +140,7 @@ window.FF = window.FF || {};
         const html = esc(r.text).replace(/\n/g, '<br>');
         return ans(`🤖 ${html}`, `🤖 ${html}`);
       }
-      if (r && r.reason === 'no_key') return ans('🤖 JARVIS AI abhi off hai — desktop Chrome me built-in AI chalu karo (chrome://flags → Prompt API for Gemini Nano) ya Render env me free <b>GEMINI_API_KEY</b> daalo (aistudio.google.com, card nahi lagta).', '🤖 JARVIS AI is off — enable Chrome built-in AI (chrome://flags → Prompt API for Gemini Nano) or add a free <b>GEMINI_API_KEY</b> in Render env.');
+      if (r && r.reason === 'no_key') return ans('🤖 JARVIS ka AI abhi off hai. Desktop Chrome me <b>chrome://flags</b> kholo → <b>Prompt API for Gemini Nano</b> aur <b>Optimization Guide On Device Model</b> ko Enabled karo → Chrome restart → <b>chrome://components</b> me "Optimization Guide On Device Model" ko Update karo. Sab kuch aapke computer par hi chalta hai, koi key nahi.', '🤖 JARVIS AI is off. In desktop Chrome open <b>chrome://flags</b> → enable <b>Prompt API for Gemini Nano</b> and <b>Optimization Guide On Device Model</b> → restart → update the model in <b>chrome://components</b>. Runs fully on your computer, no key.');
     } catch { /* fallback */ }
     return null;
   }
