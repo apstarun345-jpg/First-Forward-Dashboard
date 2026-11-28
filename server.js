@@ -8805,6 +8805,23 @@ async function handleApi(req, res, url) {
   const method = req.method;
   const user = sessionUser(req);
 
+  // 🤖 v3.125.598 — JARVIS Helper (Mac par chalne wala chhota app) ke liye: secret token se pending tasks lo / done likho. Token = env JARVIS_HELPER_TOKEN.
+  if (p === '/api/jarvis/helper/tasks' || p === '/api/jarvis/helper/done') {
+    const want = String(process.env.JARVIS_HELPER_TOKEN || ''), got = String(req.headers['x-jarvis-token'] || '');
+    const okTok = want.length >= 16 && got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
+    if (!okTok) throw new HttpError(401, 'Helper token galat / set nahi hai');
+    const w = (db.notify.watch = db.notify.watch || {}); w.jarvis = w.jarvis || { tasks: [] };
+    if (p.endsWith('/tasks') && method === 'GET') return sendJson(res, 200, { ok: true, tasks: w.jarvis.tasks.filter((t) => t.status === 'pending').slice(0, 10) });
+    if (p.endsWith('/done') && method === 'POST') {
+      const b = await readBody(req), t = w.jarvis.tasks.find((x) => x.id === String(b.id || ''));
+      if (!t) throw new HttpError(404, 'Task nahi mila');
+      t.status = ['done', 'failed', 'needs_login', 'needs_recipe'].includes(b.status) ? b.status : 'done';
+      t.note = String(b.note || '').slice(0, 300); t.file = String(b.file || '').slice(0, 200); t.doneAt = new Date().toISOString();
+      persist('notify').catch(() => {});
+      return sendJson(res, 200, { ok: true });
+    }
+    throw new HttpError(405, 'Method not allowed');
+  }
   // Backward compatibility for PWAs installed from the API-hosted manifest before its start_url
   // was made root-relative. That manifest resolved "./#/home" to /api/pwa/#/home, which hit the
   // API router and returned 404. Serve the public app shell at that old launch path so existing

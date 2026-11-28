@@ -1,0 +1,14 @@
+{
+  "name": "example-portal",
+  "keywords": ["example portal"],
+  "loginUrl": "https://portal.example.com/login",
+  "saveAs": "example-report-{today:YYYY-MM-DD}.xlsx",
+  "steps": [
+    { "goto": "https://portal.example.com/reports" },
+    { "loginCheck": "#reportsMenu" },
+    { "select": "#reportType", "value": "daily" },
+    { "type": "#fromDate", "text": "{yesterday:DD/MM/YYYY}" },
+    { "click": "#search" },
+    { "download": "#downloadExcel" }
+  ]
+}

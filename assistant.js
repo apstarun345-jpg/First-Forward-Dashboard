@@ -111,11 +111,19 @@ window.FF = window.FF || {};
   async function jarvisFallback(qRaw) {
     const A = FF.auth && FF.auth.api; if (!A || !(FF.auth.user && FF.auth.user.role === 'admin')) return null;
     const q = clean(qRaw);
+    if (/\btasks?\b.*(dikha|list|status|kya hua|batao)|(dikha|list|status|batao).*\btasks?\b/i.test(q)) {
+      try {
+        const r = await A('/api/jarvis/tasks');
+        const ic = { pending: '⏳', done: '✅', failed: '❌', needs_login: '🔑', needs_recipe: '🧩' };
+        const rows = (r.tasks || []).slice(0, 8).map((t) => `${ic[t.status] || '•'} ${esc(t.text)}${t.note ? ' — ' + esc(t.note) : ''}`).join('<br>') || 'Koi task nahi.';
+        return ans(`📋 <b>JARVIS tasks</b><br>${rows}`, `📋 <b>JARVIS tasks</b><br>${rows}`);
+      } catch { return null; }
+    }
     if (TASK_RE.test(q) && /(portal|download|report|login|sheet|task)/i.test(q)) {
       try {
         await A('/api/jarvis/tasks', 'POST', { text: q });
-        return ans(`📝 Task queue me daal diya: <b>${esc(q)}</b><br>Portal/Chrome ke kaam Claude (Chrome extension on ho) ke session se chalte hain — wahan bolo <i>"JARVIS tasks chalao"</i>.`,
-          `📝 Task queued: <b>${esc(q)}</b><br>Portal/Chrome tasks run from the Claude session with the Chrome extension on — say <i>"run JARVIS tasks"</i> there.`);
+        return ans(`📝 Task queue me daal diya: <b>${esc(q)}</b><br>Mac par <b>JARVIS Helper</b> chalu hoga to wo ise utha kar kar dega. Status dekhne ko bolo <i>"tasks dikhao"</i>.`,
+          `📝 Task queued: <b>${esc(q)}</b><br>The <b>JARVIS Helper</b> on your Mac picks it up when running. Say <i>"show tasks"</i> for status.`);
       } catch { return null; }
     }
     // thode dashboard facts de do (rule-based jawab se) taaki AI hawa me number na bole
