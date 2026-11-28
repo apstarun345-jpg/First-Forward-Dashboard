@@ -9799,6 +9799,55 @@ async function handleApi(req, res, url) {
     logAudit(user, 'telegram_config', { ip: clientIp(req), note: `${w.tg.mode} · ${w.tg.reports.length} reports` });
     return sendJson(res, 200, { ok: true, cfg: w.tg });
   }
+  // 🤖 v3.125.588 — JARVIS: free-form sawaal ka AI jawab (ANTHROPIC_API_KEY env chahiye) + kaam ki queue (portal/report tasks)
+  if (p === '/api/jarvis/status' && method === 'GET') {
+    requireAdmin(user);
+    return sendJson(res, 200, { ok: true, ai: !!process.env.ANTHROPIC_API_KEY, model: process.env.JARVIS_MODEL || 'claude-sonnet-5-5' });
+  }
+  if (p === '/api/jarvis/ask' && method === 'POST') {
+    requireAdmin(user);
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (!key) return sendJson(res, 200, { ok: false, reason: 'no_key' });
+    const b = await readBody(req), q = String(b.q || '').slice(0, 800).trim();
+    if (!q) throw new HttpError(400, 'Sawaal khaali hai');
+    const facts = String(b.facts || '').slice(0, 4000), hist = (Array.isArray(b.history) ? b.history : []).slice(-6)
+      .map((m) => ({ role: m && m.role === 'assistant' ? 'assistant' : 'user', content: String((m && m.content) || '').slice(0, 800) })).filter((m) => m.content);
+    const sys = 'Tum JARVIS ho — ApnaPayment (FASTag, IDFC FIRST Bank) ke owner Tarun ka assistant. Hinglish me, bahut chhota (2-4 line) jawab do. '
+      + 'Sirf neeche diye dashboard facts aur sawaal ke hisaab se bolo; data na ho to saaf bolo "ye mere paas nahi hai", number kabhi mat banao. '
+      + 'Portal login/report download jaise kaam ke liye bolo ki main task queue me daal sakta hoon.\n\nDASHBOARD FACTS:\n' + (facts || '(koi nahi)');
+    const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 25e3);
+    try {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST', signal: ctl.signal,
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: process.env.JARVIS_MODEL || 'claude-sonnet-5-5', max_tokens: 500, system: sys, messages: [...hist, { role: 'user', content: q }] })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return sendJson(res, 200, { ok: false, reason: 'api', error: String((j.error && j.error.message) || r.status).slice(0, 160) });
+      const text = (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
+      return sendJson(res, 200, { ok: true, text });
+    } catch (err) {
+      return sendJson(res, 200, { ok: false, reason: 'net', error: String((err && err.message) || err).slice(0, 120) });
+    } finally { clearTimeout(to); }
+  }
+  if (p === '/api/jarvis/tasks' && method === 'GET') {
+    requireAdmin(user);
+    const w = (db.notify.watch = db.notify.watch || {}); w.jarvis = w.jarvis || { tasks: [] };
+    return sendJson(res, 200, { ok: true, tasks: w.jarvis.tasks.slice(-50).reverse() });
+  }
+  if (p === '/api/jarvis/tasks' && method === 'POST') {
+    requireAdmin(user);
+    const b = await readBody(req), w = (db.notify.watch = db.notify.watch || {}); w.jarvis = w.jarvis || { tasks: [] };
+    if (b.done) { const t = w.jarvis.tasks.find((x) => x.id === String(b.done)); if (t) { t.status = 'done'; t.doneAt = new Date().toISOString(); } }
+    else {
+      const text = String(b.text || '').trim().slice(0, 400); if (!text) throw new HttpError(400, 'Task khaali hai');
+      w.jarvis.tasks.push({ id: 'jt' + Date.now().toString(36), text, status: 'pending', by: user.username || '', at: new Date().toISOString() });
+      w.jarvis.tasks = w.jarvis.tasks.slice(-200);
+    }
+    persist('notify').catch(() => {});
+    logAudit(user, 'jarvis_task', { ip: clientIp(req), note: String(b.text || b.done || '').slice(0, 100) });
+    return sendJson(res, 200, { ok: true, tasks: w.jarvis.tasks.slice(-50).reverse() });
+  }
   if (p === '/api/telegram/auto' && method === 'POST') {
     requireAdmin(user);
     const b = await readBody(req), w = tgStore(), routes = {};

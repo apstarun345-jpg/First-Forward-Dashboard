@@ -60,3 +60,16 @@
 .ask-head .ask-ico { width: 26px; height: 26px; }
 }
 html.mobile-ui .ask-fab.fab-hide { translate: 0 160%; opacity: 0; pointer-events: none; }
+
+/* 🤖 v3.125.588 — JARVIS HUD theme (dark glass + cyan arc-reactor glow) */
+#ask-panel { background: linear-gradient(160deg, rgba(6, 18, 34, .96), rgba(8, 28, 52, .96)); color: #d9f4ff; border: 1px solid rgba(34, 211, 238, .55);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, .15), 0 0 28px rgba(34, 211, 238, .28), 0 18px 50px rgba(0, 0, 0, .55); backdrop-filter: blur(10px); }
+#ask-panel .ask-head { background: linear-gradient(90deg, rgba(14, 116, 144, .55), rgba(250, 204, 21, .12)); color: #e6fbff; border-bottom: 1px solid rgba(34, 211, 238, .4); letter-spacing: .06em; text-transform: uppercase; }
+#ask-panel .ask-msg.bot { background: rgba(14, 40, 66, .75); color: #d9f4ff; border: 1px solid rgba(34, 211, 238, .28); }
+#ask-panel .ask-msg.me { background: linear-gradient(135deg, #0e7490, #0891b2); color: #fff; border: 1px solid rgba(250, 204, 21, .45); }
+#ask-panel .ask-input { background: rgba(4, 14, 28, .9); color: #e6fbff; border: 1px solid rgba(34, 211, 238, .45); }
+#ask-panel .ask-input:focus { outline: 2px solid rgba(34, 211, 238, .5); border-color: #22d3ee; }
+#ask-panel .ask-chips button, #ask-panel .ask-followups button { background: rgba(8, 47, 73, .8); color: #7dd3fc; border: 1px solid rgba(34, 211, 238, .4); }
+#ask-panel .ask-chips button:hover, #ask-panel .ask-followups button:hover { box-shadow: 0 0 10px rgba(34, 211, 238, .5); }
+#ask-panel a { color: #fde047; }
+.ask-fab { box-shadow: 0 0 0 2px rgba(34, 211, 238, .6), 0 0 22px rgba(34, 211, 238, .55); }

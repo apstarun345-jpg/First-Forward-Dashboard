@@ -104,6 +104,35 @@ window.FF = window.FF || {};
     return T(hi, en);
   };
 
+  // ---------- 🤖 JARVIS (AI + task queue) ----------
+  const TASK_RE = /(portal|login|download|report\s*(nikal|download|laa)|daily\s*report|sheet\s*(me|mein)\s*(daal|update)|bhej\s*do|kar\s*do|task)/i;
+  const jvHist = [];
+  const plain = (h) => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  async function jarvisFallback(qRaw) {
+    const A = FF.auth && FF.auth.api; if (!A || !(FF.auth.user && FF.auth.user.role === 'admin')) return null;
+    const q = clean(qRaw);
+    if (TASK_RE.test(q) && /(portal|download|report|login|sheet|task)/i.test(q)) {
+      try {
+        await A('/api/jarvis/tasks', 'POST', { text: q });
+        return ans(`📝 Task queue me daal diya: <b>${esc(q)}</b><br>Portal/Chrome ke kaam Claude (Chrome extension on ho) ke session se chalte hain — wahan bolo <i>"JARVIS tasks chalao"</i>.`,
+          `📝 Task queued: <b>${esc(q)}</b><br>Portal/Chrome tasks run from the Claude session with the Chrome extension on — say <i>"run JARVIS tasks"</i> there.`);
+      } catch { return null; }
+    }
+    // thode dashboard facts de do (rule-based jawab se) taaki AI hawa me number na bole
+    let facts = '';
+    for (const fq of ['aaj ka total issuance', 'stock kya hai']) { try { facts += fq + ': ' + plain(await answer(fq)).slice(0, 900) + '\n'; } catch { /* optional */ } }
+    try {
+      const r = await A('/api/jarvis/ask', 'POST', { q, facts, history: jvHist });
+      if (r && r.ok && r.text) {
+        jvHist.push({ role: 'user', content: q }, { role: 'assistant', content: r.text }); while (jvHist.length > 8) jvHist.shift();
+        const html = esc(r.text).replace(/\n/g, '<br>');
+        return ans(`🤖 ${html}`, `🤖 ${html}`);
+      }
+      if (r && r.reason === 'no_key') return ans('🤖 JARVIS AI abhi off hai — Render env me <b>ANTHROPIC_API_KEY</b> daalo, phir har sawaal ka jawab milega.', '🤖 JARVIS AI is off — add <b>ANTHROPIC_API_KEY</b> in Render env.');
+    } catch { /* fallback */ }
+    return null;
+  }
+
   async function answer(qRaw) {
     const q = norm(qRaw);
     const words = new Set(q.split(' '));
@@ -521,6 +550,9 @@ window.FF = window.FF || {};
       );
     }
 
+    // 🤖 v3.125.588 JARVIS — rule se jawab na mile to AI (admin) ya kaam ki queue
+    const jv = await jarvisFallback(qRaw);
+    if (jv) return jv;
     return ans('Ye samajh nahi aaya 🤔. Ye puch sakte hain — "aaj ka total issuance", "Rahul ka issuance", "stock kya hai", "Rahul ka stock", "chassis ke kitne", "wrong VRN", "replacement kitne", "Rahul ki commission", "top agent kaun". Ya <b>help</b> bolo.',
       'I did not understand that 🤔. Try — "today\'s total issuance", "Rahul\'s issuance", "what is the stock", "Rahul\'s stock", "how many chassis", "wrong VRN", "how many replacements", "Rahul\'s commission", "who is the top agent". Or say <b>help</b>.',
       [['help', 'Help dekho'], ['aaj ka total issuance', 'Aaj ka total']]);
