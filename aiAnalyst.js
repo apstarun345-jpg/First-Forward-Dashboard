@@ -253,7 +253,7 @@ FF.pages = FF.pages || {};
   // ---------------------------------------------------------------- v3.125.599 — nayi Analyst: sirf TL aur Direct agents, sab table me
   // TL = TL ka khud ka kaam + uski team ka total (agents alag se kabhi nahi dikhte). Direct agent = apna.
   // Inactive = TL ke poore group (TL + agents) me 7+ din koi issuance nahi — ek agent inactive ho to TL inactive nahi gina jaata.
-  const DEG = -5, HIGH = -30, GROW = 5, COVER_HIGH = 30;
+  const DEG = -5, HIGH = -30, GROW = 5, COVER_HIGH = 30, MIN_STOCK = 10;
   const ST = {
     growth: { label: 'Growth', icon: '🟢', rank: 3 }, new: { label: 'Naya', icon: '✨', rank: 4 }, stable: { label: 'Stable', icon: '🔵', rank: 2 },
     degrowth: { label: 'De-growth', icon: '🟠', rank: 1 }, high: { label: 'High de-growth', icon: '🔴', rank: 0 }
@@ -319,9 +319,10 @@ FF.pages = FF.pages || {};
     const hasStockAll = chs.some((ch) => a.channels[ch] && a.channels[ch].hasStock);
     const maxCur = Math.max(1, ...list.map((e) => e.cur));
     const tot = (f) => list.reduce((t, e) => t + f(e), 0);
-    const cnt = (k) => list.filter((e) => e.st === k).length;
-    const inactiveL = hasStockAll ? list.filter((e) => e.inact !== null && e.inact >= 7) : [];
-    const stockL = hasStockAll ? list.filter((e) => e.stock > 0 && e.cover >= COVER_HIGH) : [];
+    const act = list.filter((e) => e.cur > 0 || e.last > 0);   // jisne is / pichhle mahine kuch kiya (sirf stock wale dormant alag)
+    const cnt = (k) => act.filter((e) => e.st === k).length;
+    const inactiveL = hasStockAll ? list.filter((e) => e.inact !== null && e.inact >= 7 && (ui.old || e.inact < 99)) : [];
+    const stockL = hasStockAll ? list.filter((e) => e.stock >= MIN_STOCK && e.cover >= COVER_HIGH) : [];
     const kpis = [
       ['k1', '📈', 'Is mahine (projection)', fmt(tot((e) => e.proj)), `pichhla mahina ${fmt(tot((e) => e.last))} · ${(() => { const g = pct(tot((e) => e.proj), tot((e) => e.last)); return g === null ? 'new' : (g >= 0 ? '+' : '−') + Math.abs(g).toFixed(0) + '%'; })()}`],
       ['k2', '🟢', 'Growth', cnt('growth') + cnt('new'), 'TL / Direct badh rahe'],
@@ -334,8 +335,8 @@ FF.pages = FF.pages || {};
 
     // 1) Growth
     const gSt = ui.gst || 'all';
-    const gList = list.filter((e) => gSt === 'all' || e.st === gSt || (gSt === 'growth' && e.st === 'new'));
-    const gChips = [['all', 'Sab', list.length], ['growth', '🟢 Growth', cnt('growth') + cnt('new')], ['stable', '🔵 Stable', cnt('stable')], ['degrowth', '🟠 De-growth', cnt('degrowth')], ['high', '🔴 High de-growth', cnt('high')]]
+    const gList = act.filter((e) => gSt === 'all' || e.st === gSt || (gSt === 'growth' && e.st === 'new'));
+    const gChips = [['all', 'Sab', act.length], ['growth', '🟢 Growth', cnt('growth') + cnt('new')], ['stable', '🔵 Stable', cnt('stable')], ['degrowth', '🟠 De-growth', cnt('degrowth')], ['high', '🔴 High de-growth', cnt('high')]]
       .map(([k, l, n]) => `<button type="button" class="ax-fchip ${gSt === k ? 'on' : ''}" data-gst="${k}">${l} <b>${n}</b></button>`).join('');
     const gCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, { k: 'agents', h: 'Agents', v: (e) => e.agents, c: (e) => (e.type === 'tl' ? e.agents : '—'), cls: 'r' },
       C_NUM('last', 'Pichhla mahina', (e) => e.last), C_NUM('cur', 'Ab tak', (e) => e.cur), { k: 'proj', h: 'Projection', v: (e) => e.proj, c: (e) => `<b>${fmt(e.proj)}</b>`, cls: 'r' },
@@ -360,7 +361,7 @@ FF.pages = FF.pages || {};
     const iCols = [{ k: '#', h: '#', cls: 'c' }, C_NAME, { k: 'agents', h: 'Agents', v: (e) => e.agents, c: (e) => (e.type === 'tl' ? e.agents : '—'), cls: 'r' },
       { k: 'inact', h: 'Inactive', v: (e) => e.inact, c: (e) => `<span class="ax-days ${e.inact >= 30 ? 'hot' : e.inact >= 14 ? 'warm' : ''}">${inactTxt(e.inact)}</span>`, cls: 'c' },
       C_NUM('stock', '📦 Stock', (e) => e.stock), C_NUM('last', 'Pichhla mahina', (e) => e.last), C_NUM('cur', 'Is mahine', (e) => e.cur)];
-    const s3 = `<section class="ax-sec s-inactive"><header><h3>⏸️ Inactive — 7+ din se koi issuance nahi</h3><p>Poora group (TL + uske agents) ruka ho tabhi gina jaata hai</p></header>${hasStockAll ? tableHtml('i', iCols, inactiveL, ui.t.i, null, 15) : '<div class="ax-note">Inactive din sirf current month me aur stock data load hone par dikhte hain.</div>'}</section>`;
+    const s3 = `<section class="ax-sec s-inactive"><header><h3>⏸️ Inactive — 7+ din se koi issuance nahi</h3><p>Poora group (TL + uske agents) ruka ho tabhi gina jaata hai · pichhle 2 mahine me jo chal rahe the</p></header>${hasStockAll ? `<div class="ax-filters"><button type="button" class="ax-fchip ${ui.old ? 'on' : ''}" data-old="1">60+ din purane (dormant) bhi dikhao</button></div>` : ''}${hasStockAll ? tableHtml('i', iCols, inactiveL, ui.t.i, null, 15) : '<div class="ax-note">Inactive din sirf current month me aur stock data load hone par dikhte hain.</div>'}</section>`;
 
     // 4) Stock vs issuance
     const mxS = Math.max(1, ...stockL.map((e) => e.stock));
@@ -369,7 +370,7 @@ FF.pages = FF.pages || {};
       C_NUM('cur', 'Is mahine issuance', (e) => e.cur), { k: 'avg', h: 'Roz ka average', v: (e) => e.avg, c: (e) => e.avg.toFixed(1), cls: 'r' },
       { k: 'cover', h: 'Stock kitne din ka', v: (e) => (e.cover === Infinity ? 1e9 : e.cover), c: (e) => `<span class="ax-days ${e.cover >= 90 ? 'hot' : 'warm'}">${coverTxt(e.cover)}</span>`, cls: 'c' },
       { k: 'inact', h: 'Inactive', v: (e) => (e.inact === null ? -1 : e.inact), c: (e) => inactTxt(e.inact), cls: 'c' }];
-    const s4 = `<section class="ax-sec s-stock"><header><h3>📦 Stock jyada · issuance kam</h3><p>Stock ${COVER_HIGH}+ din ka (roz ke average ke hisaab se) — stock hai par kaam nahi</p></header>${hasStockAll ? tableHtml('s', sCols, stockL, ui.t.s, null, 15) : '<div class="ax-note">Stock data load nahi hua.</div>'}</section>`;
+    const s4 = `<section class="ax-sec s-stock"><header><h3>📦 Stock jyada · issuance kam</h3><p>Stock ${COVER_HIGH}+ din ka (roz ke average se) · kam se kam ${MIN_STOCK} tags ka stock — stock hai par kaam nahi</p></header>${hasStockAll ? tableHtml('s', sCols, stockL, ui.t.s, null, 15) : '<div class="ax-note">Stock data load nahi hua.</div>'}</section>`;
     return { kHtml, html: `${s1}${s2}<div class="ax-two">${s3}${s4}</div>`, list, inactiveL, stockL };
   }
 
@@ -382,8 +383,8 @@ FF.pages = FF.pages || {};
 
   async function render(root, params) {
     const p = params || {};
-    const ui = { ch: ['ff', 'gv'].includes(p.ch) ? p.ch : 'all', seg: ['tl', 'direct'].includes(p.seg) ? p.seg : 'all', q: '', gst: 'all',
-      t: { g: { sort: 'g', dir: 'asc' }, q: { sort: 'wrong', dir: 'desc' }, i: { sort: 'stock', dir: 'desc' }, s: { sort: 'stock', dir: 'desc' } } };
+    const ui = { old: false, ch: ['ff', 'gv'].includes(p.ch) ? p.ch : 'all', seg: ['tl', 'direct'].includes(p.seg) ? p.seg : 'all', q: '', gst: 'all',
+      t: { g: { sort: 'proj', dir: 'desc' }, q: { sort: 'wrong', dir: 'desc' }, i: { sort: 'stock', dir: 'desc' }, s: { sort: 'stock', dir: 'desc' } } };
     root.innerHTML = `<div class="ax-hero"><div class="ax-hero-t"><span class="ax-hero-ico">🧠</span><div><h1>AI Business Analyst</h1><p>TL aur Direct agents ka seedha scorecard — growth, quality, inactive aur stock</p></div></div><div class="ax-hero-a" id="ax-actions"></div></div><div id="ax-body">${U.spinner('Analyst poora data padh raha hai…')}</div>`;
     const body = U.$('#ax-body', root);
     let a;
@@ -417,7 +418,8 @@ FF.pages = FF.pages || {};
       const dr = t.closest('[data-drill]'); if (dr) { openDrill(dr.dataset.drill); return; }
       const so = t.closest('[data-sort]'); if (so) { const [id, k] = so.dataset.sort.split('|'), s = ui.t[id]; s.dir = s.sort === k && s.dir === 'desc' ? 'asc' : 'desc'; s.sort = k; draw(); return; }
       const mo = t.closest('[data-more]'); if (mo) { const s = ui.t[mo.dataset.more]; s.all = !s.all; draw(); return; }
-      const gs = t.closest('[data-gst]'); if (gs) { ui.gst = gs.dataset.gst; draw(); return; }
+      const gs = t.closest('[data-gst]'); if (gs) { ui.gst = gs.dataset.gst; const g = ui.t.g; if (ui.gst === 'degrowth' || ui.gst === 'high') { g.sort = 'delta'; g.dir = 'asc'; } else if (ui.gst === 'growth') { g.sort = 'delta'; g.dir = 'desc'; } else { g.sort = 'proj'; g.dir = 'desc'; } g.all = false; draw(); return; }
+      const od = t.closest('[data-old]'); if (od) { ui.old = !ui.old; draw(); return; }
       const qs = t.closest('[data-qsort]'); if (qs) { ui.t.q.sort = qs.dataset.qsort; ui.t.q.dir = 'desc'; draw(); return; }
       const ch = t.closest('[data-ch]'); if (ch) { ui.ch = ch.dataset.ch; draw(); return; }
       const sg = t.closest('[data-seg]'); if (sg) { ui.seg = sg.dataset.seg; draw(); }
