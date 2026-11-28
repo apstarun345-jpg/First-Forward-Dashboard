@@ -9818,22 +9818,22 @@ async function handleApi(req, res, url) {
     try {
       // model Google badalta rehta hai → pehla chalne wala le (env JARVIS_MODEL sabse pehle)
       const models = [process.env.JARVIS_MODEL, 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest'].filter(Boolean);
-      let last = null;
+      let last = null; const errs = [];
       for (const model of models) {
         const c1 = new AbortController(), t1 = setTimeout(() => c1.abort(), 11e3);
         let r; try { r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: 'POST', signal: c1.signal, headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
           body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig: { maxOutputTokens: 800 } })
-        }); } catch (e) { last = model + ': ' + String((e && e.message) || e).slice(0, 60); continue; } finally { clearTimeout(t1); }
+        }); } catch (e) { last = model + ': ' + String((e && e.message) || e).slice(0, 60); errs.push(last); continue; } finally { clearTimeout(t1); }
         const j = await r.json().catch(() => ({}));
         if (r.ok) {
           const parts = (((j.candidates || [])[0] || {}).content || {}).parts;
           return sendJson(res, 200, { ok: true, text: (parts || []).map((x) => x.text || '').join('\n').trim(), model });
         }
-        last = String((j.error && j.error.message) || r.status).slice(0, 160);
+        last = String((j.error && j.error.message) || r.status).slice(0, 160); errs.push(model + ' ' + r.status + ': ' + last.slice(0, 70));
         if (r.status !== 404 && !/no longer available|not found|not supported/i.test(last)) break;
       }
-      return sendJson(res, 200, { ok: false, reason: 'api', error: last });
+      return sendJson(res, 200, { ok: false, reason: 'api', error: errs.join(' | ').slice(0, 400) || last });
     } catch (err) {
       return sendJson(res, 200, { ok: false, reason: 'net', error: String((err && err.message) || err).slice(0, 120) });
     } finally { clearTimeout(to); }
