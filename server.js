@@ -9817,10 +9817,10 @@ async function handleApi(req, res, url) {
     const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 25e3);
     try {
       // model Google badalta rehta hai → pehla chalne wala le (env JARVIS_MODEL sabse pehle)
-      const models = [process.env.JARVIS_MODEL, 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest'].filter(Boolean);
+      const models = [process.env.JARVIS_MODEL, 'gemini-3.8-flash', 'gemini-flash-latest'].filter(Boolean);
       let last = null; const errs = [];
       for (const model of models) {
-        const c1 = new AbortController(), t1 = setTimeout(() => c1.abort(), 11e3);
+        const c1 = new AbortController(), t1 = setTimeout(() => c1.abort(), 28e3);
         let r; try { r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: 'POST', signal: c1.signal, headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
           body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig: { maxOutputTokens: 800 } })
