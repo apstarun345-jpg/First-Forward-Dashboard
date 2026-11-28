@@ -12446,7 +12446,8 @@ async function handleApi(req, res, url) {
       const prev = row.status;
       row.status = status; row.updatedAt = now; row.updatedBy = user.username;
       updated.push(row);
-      if (status === 'approved' && prev !== 'approved') { delete row.sheetApprovalSync; delete row.sheetSync; delete row.sheetPartsDone; toSheet.push(row); }
+      // v3.125.621 — re-approval (pending → approved dobara) par sheet marker NAHI hatate: entry pehle ja chuki ho to dobara nahi likhte (duplicate band). Marker na ho (kabhi gayi hi nahi) to bhejte hain.
+      if (status === 'approved' && prev !== 'approved') toSheet.push(row);
     }
     if (updated.length) persistBackground('notify');
     // 📗 Sheet sync sirf pehli baar Approved par (PUT wala rule) — background me ek-ek karke.
@@ -12538,8 +12539,7 @@ async function handleApi(req, res, url) {
     // 📗 v5: Sheet sync ONLY on the first transition to Approved.
     // Pending submit, Dispatched, Rejected, and later status changes never append another row.
     if (body.status === 'approved' && prevStatus !== 'approved' && tagSheetAnyEnabled()) {
-      // Re-approval (e.g. Pending → Approved again) = admin ka naya intent: purana sync marker hata do, entry dobara jaye.
-      delete row.sheetApprovalSync; delete row.sheetSync; delete row.sheetPartsDone;
+      // v3.125.621 — re-approval par marker nahi hatate: sheet me entry pehle se hai to dobara nahi jaati (syncApprovedToSheet khud skip karta hai).
       syncApprovedToSheet([row]);
     }
     // Requester ko status update ka notification (admin ne kuch badla to).
