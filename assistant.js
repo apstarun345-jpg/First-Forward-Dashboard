@@ -686,13 +686,13 @@ window.FF = window.FF || {};
     busy = false;
   }
 
-  // ---------- 👂 Wake word ("Hey Gems" → assistant active) ----------
-  // Settings: U.voicePrefs().wake (on/off, default ON) + .wakeWord (default "Hey Gems").
+  // ---------- 👂 Wake word ("Hey JARVIS" → assistant active) ----------
+  // Settings: U.voicePrefs().wake (on/off, default ON) + .wakeWord (default "Hey JARVIS").
   // Web Speech recognition continuous chalata hai; word sunte hi panel khulta hai aur mic question sunta hai.
   let wakeRec = null, wakeRestartTimer = null, wakeCooldownUntil = 0, wakeDeniedToast = false, wakeGestureBound = false;
   const wakeCfg = () => {
     let p = {}; try { p = U.voicePrefs(); } catch { /* optional */ }
-    return { on: p.wake !== false, word: String(p.wakeWord || '').trim() || 'Hey Gems' };
+    return { on: p.wake !== false, word: (/^\s*(hey|hii?)\s+gems?\s*$/i.test(String(p.wakeWord || '')) ? '' : String(p.wakeWord || '').trim()) || 'Hey JARVIS' };
   };
   const wakeSupported = () => typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   const wakeAllowed = () => !(FF.auth && FF.auth.can) || FF.auth.can('voiceAssistant'); // admin-gated
@@ -708,7 +708,7 @@ window.FF = window.FF || {};
   function startWake() {
     const cfg = wakeCfg();
     if (!cfg.on || !wakeSupported() || !wakeAllowed()) { stopWake(); return; }
-    try { if (FF.mascot && FF.mascot.wakeOwns && FF.mascot.wakeOwns()) { stopWake(); return; } } catch { /* optional */ } // 🤖 Gems robot khud "Hey Gems" sun raha hai — do mic ek saath nahi chalte
+    try { if (FF.mascot && FF.mascot.wakeOwns && FF.mascot.wakeOwns()) { stopWake(); return; } } catch { /* optional */ } // 🤖 JARVIS robot khud "Hey JARVIS" sun raha hai — do mic ek saath nahi chalte
     if (wakeRec || wakeRestartTimer) return;
     if (convMode) return; // hands-free already listening
     if (Date.now() < wakeCooldownUntil) { wakeRestartTimer = setTimeout(() => { wakeRestartTimer = null; startWake(); }, Math.max(400, wakeCooldownUntil - Date.now())); return; }
@@ -960,9 +960,9 @@ window.FF = window.FF || {};
           <div class="btn-row"><button class="btn primary" data-apply hidden>✅ Meri awaaz lagao</button><button class="btn small" data-test-mine hidden>🔊 Test meri awaaz me</button>${prof ? '<button class="btn small danger" data-clear>🗑 Profile hatao</button>' : ''}</div>
         </div>
         <div class="ask-studio-pane" data-pane="wake">
-          <p class="ask-studio-note"><b>Wake word 👂</b> — jab aap ye word bolenge (jaise <b>"Hey Gems"</b>), assistant khud active ho jayega aur aapka sawaal sunega. Alexa/Siri jaisa hands-free start. Word apna khud ka bhi rakh sakte ho.</p>
+          <p class="ask-studio-note"><b>Wake word 👂</b> — jab aap ye word bolenge (jaise <b>"Hey JARVIS"</b>), assistant khud active ho jayega aur aapka sawaal sunega. Alexa/Siri jaisa hands-free start. Word apna khud ka bhi rakh sakte ho.</p>
           <label class="check" style="display:flex;gap:8px;align-items:center;font-weight:750"><input type="checkbox" data-wake-on ${p.wake !== false ? 'checked' : ''}> <span>👂 Wake word <b>ON</b> — word bolte hi assistant active</span></label>
-          <label class="fld"><span>🗣 Wake word (konsa word sunna hai)</span><input class="input" data-wake-word value="${esc(p.wakeWord || 'Hey Gems')}" maxlength="30" placeholder="Hey Gems"></label>
+          <label class="fld"><span>🗣 Wake word (konsa word sunna hai)</span><input class="input" data-wake-word value="${esc(p.wakeWord || 'Hey JARVIS')}" maxlength="30" placeholder="Hey JARVIS"></label>
           <div class="ask-voice-chips"><span class="ins-pill" data-wake-status>…</span></div>
           <div class="btn-row"><button class="btn small" data-wake-test>🧪 Abhi test karo (10 sec sunega)</button></div>
           <p class="ask-studio-note dim">Note: wake word browser ki speech recognition se suna jaata hai — Chrome/Edge me best chalta hai aur mic permission maangega. Word 2–3 shabdon ka rakho taaki galat trigger na ho.</p>
@@ -1150,7 +1150,7 @@ window.FF = window.FF || {};
     if (wakeOn) wakeOn.addEventListener('change', () => {
       U.setVoicePrefs({ wake: wakeOn.checked });
       wakeStatus();
-      U.toast(wakeOn.checked ? `👂 Wake word ON — "${(wakeWordInput && wakeWordInput.value.trim()) || 'Hey Gems'}" bolo to assistant active.` : '🔕 Wake word OFF.', 'ok');
+      U.toast(wakeOn.checked ? `👂 Wake word ON — "${(wakeWordInput && wakeWordInput.value.trim()) || 'Hey JARVIS'}" bolo to assistant active.` : '🔕 Wake word OFF.', 'ok');
     });
     if (wakeWordInput) {
       let saveTimer = null;
@@ -1258,7 +1258,7 @@ window.FF = window.FF || {};
     fab.id = 'ask-fab';
     fab.className = 'ask-fab';
     fab.type = 'button';
-    fab.title = '🤖 Gems assistant — pucho kuch bhi';
+    fab.title = '🤖 JARVIS assistant — pucho kuch bhi';
     fab.setAttribute('aria-label', 'Dashboard assistant kholo');
     fab.dataset.state = 'idle';
     fab.innerHTML = '<span class="ask-ring"></span><span class="ask-ring r2"></span>' + robotSvg('fab-robot') + '<span class="ask-fab-mic" aria-hidden="true">🎙</span>';
@@ -1284,7 +1284,7 @@ window.FF = window.FF || {};
     wrap.id = 'ask-panel';
     wrap.hidden = true;
     wrap.innerHTML = `
-      <div class="ask-head"><span class="ask-avatar">${robotSvg('head-robot')}</span><div class="ask-title"><b>Gems Assistant</b><small>${STATE_TXT().idle}</small></div>
+      <div class="ask-head"><span class="ask-avatar">${robotSvg('head-robot')}</span><div class="ask-title"><b>JARVIS Assistant</b><small>${STATE_TXT().idle}</small></div>
         <button class="ask-ico" data-act="lang" title="${lang === 'en' ? 'Switch to Hinglish' : 'English me switch karo'}">${lang === 'en' ? 'हिं' : 'EN'}</button>
         <button class="ask-ico" data-act="voice" title="🎛 Voice Studio — default voices / meri awaaz">🎛️</button>
         <button class="ask-ico${convMode ? ' on' : ''}" data-act="conv" title="${convMode ? '🎧 Hands-free ON — jawab ke baad khud sunta hai' : '🎧 Hands-free mode chalu karo (Alexa-style)'}">🎧</button>
@@ -1304,7 +1304,7 @@ window.FF = window.FF || {};
       if (!wrap.hidden && !log.children.length) {
         const hero = document.createElement('div');
         hero.className = 'ask-hero';
-        hero.innerHTML = robotSvg('hero-robot') + `<div><b>${T('Namaste! Main Gems hoon 👋', 'Hi! I am Gems 👋')}</b><small>${esc(HINT[lang])}</small></div>`;
+        hero.innerHTML = robotSvg('hero-robot') + `<div><b>${T('Namaste! Main JARVIS hoon 👋', 'Hi! I am JARVIS 👋')}</b><small>${esc(HINT[lang])}</small></div>`;
         log.appendChild(hero);
         bubble(WELCOME[lang], 'bot');
       }
@@ -1363,7 +1363,7 @@ window.FF = window.FF || {};
 
     // Popup stays closed on app startup. User can open it from the floating 🎙 button.
     // Do not auto-run login/restore greeting here; it previously forced the panel open on launch.
-    // 👂 Wake word ("Hey Gems") — first user gesture ke baad sunna shuru.
+    // 👂 Wake word ("Hey JARVIS") — first user gesture ke baad sunna shuru.
     bindWakeGesture();
   }
 

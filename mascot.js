@@ -1,8 +1,8 @@
-/* 🤖 v3.125.121 — Gems robot (assistant ka hi robot) site par
+/* 🤖 v3.125.121 — JARVIS robot (assistant ka hi robot) site par
    Purana 🎙 FAB ki jagah yahi robot kone me rehta hai, beech-beech me idhar-udhar ghoomta/naachta hai,
    aur naya update ho to board leke batata hai (growth / de-growth agents & TLs, inactive, low cover,
    wapas aaye agents, girawat, scoreboard, naya data). Click → last 24h ki unique history; drag → jagah
-   badlo. Gems se baat: history board → 🎙. Sound ON → bol kar. Settings per viewer (localStorage). */
+   badlo. JARVIS se baat: history board → 🎙. Sound ON → bol kar. Settings per viewer (localStorage). */
 (function (FF) {
   'use strict';
   if (!FF || typeof document === 'undefined' || FF.mascot) return;
@@ -17,7 +17,7 @@
   const LS = 'ff_mascot_v1';
   const load = () => { try { return JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch { return {}; } };
   const cfg = Object.assign({ on: true, sound: false, everySec: 10, idx: 0, seen: {}, snoozeDay: '' }, load());
-  // 🔋 v3.125.177 — "Hey Gems" sunna ab default BAND (mic hamesha on = battery). User khud ON kare tabhi.
+  // 🔋 v3.125.177 — "Hey JARVIS" sunna ab default BAND (mic hamesha on = battery). User khud ON kare tabhi.
   if (!cfg.wakeV2) { cfg.wake = false; cfg.wakeV2 = 1; try { localStorage.setItem('ffMascotWakeV2', '1'); } catch { /* ignore */ } }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(cfg)); } catch { /* private mode */ } };
   // 🤖 v3.125.486 — robot ab default BAND (app me lag karta tha). Settings → ⚡ Speed & Robot se ON.
@@ -857,7 +857,7 @@
   }
   function openAssistant() { const f = document.getElementById('ask-fab'); if (f) f.click(); }
 
-  // ---------------------------------------------------------------- DOM — assistant ka hi robot (Gems) site par
+  // ---------------------------------------------------------------- DOM — assistant ka hi robot (JARVIS) site par
   let el = null, bot = null, board = null, stick = null, bubble = null, bubbleTimer = null, mode = 'dock', busy = false, timer = 0;
   let current = null, hover = false, skip = null, pos = [0, 0], dragged = false;
   const root = document.documentElement;
@@ -951,8 +951,8 @@
       <div class="mc-stick" aria-hidden="true"></div>
       <div class="mc-board" role="status" aria-live="polite"></div>
       <div class="mc-bubble" role="status" aria-live="polite" hidden><span class="mc-bubble-txt"></span><i class="mc-bubble-tail"></i></div>
-      <div class="mc-orbit-hud" role="toolbar" aria-label="Gems Command HUD">
-        <button type="button" class="mc-hud-btn" data-hud="ask" title="Talk with Gems AI" aria-label="Ask AI"><span class="mc-hud-ico">🎙</span><span class="mc-hud-tip">Gems AI</span></button>
+      <div class="mc-orbit-hud" role="toolbar" aria-label="JARVIS Command HUD">
+        <button type="button" class="mc-hud-btn" data-hud="ask" title="Talk with JARVIS AI" aria-label="Ask AI"><span class="mc-hud-ico">🎙</span><span class="mc-hud-tip">JARVIS AI</span></button>
         <button type="button" class="mc-hud-btn" data-hud="stock" title="FASTag Stock" aria-label="Stock"><span class="mc-hud-ico">📦</span><span class="mc-hud-tip">Stock</span></button>
         <button type="button" class="mc-hud-btn" data-hud="analytics" title="AI Analyst" aria-label="AI Analyst"><span class="mc-hud-ico">🧠</span><span class="mc-hud-tip">Analyst</span></button>
         <button type="button" class="mc-hud-btn" data-hud="mapping" title="FASTag Mapping Hub" aria-label="Mapping"><span class="mc-hud-ico">⚡</span><span class="mc-hud-tip">Mapping</span></button>
@@ -960,7 +960,7 @@
       </div>
       <div class="mc-chhotu" aria-hidden="true"><img src="${ASSET('robot.png')}" alt="" draggable="false"><span class="mc-cb"></span></div>
       <span class="mc-mb" aria-hidden="true"></span>
-      <button type="button" class="mc-bot" aria-label="Gems robot — kya kya bataya (24h history)" title="🤖 Gems — click: maine kya bataya (24h) · drag: jagah badlo">
+      <button type="button" class="mc-bot" aria-label="JARVIS robot — kya kya bataya (24h history)" title="🤖 JARVIS — click: maine kya bataya (24h) · drag: jagah badlo">
         <i class="mc-glow" aria-hidden="true"></i>
         <i class="mc-halo" aria-hidden="true"></i>
         <span class="mc-arm l"><img src="${ASSET('robot-arm-l.png')}" alt="" draggable="false"></span>
@@ -1056,7 +1056,7 @@
       }
     });
     window.addEventListener('resize', () => { if (mode === 'dock') place(dockPos()); });
-    // Gems assistant ki state robot par bhi: sun raha / soch raha / bol raha
+    // JARVIS assistant ki state robot par bhi: sun raha / soch raha / bol raha
     const fab = document.getElementById('ask-fab');
     if (fab && window.MutationObserver) {
       const sync = () => { el.dataset.astate = fab.dataset.state || 'idle'; };
@@ -1108,7 +1108,7 @@
         <button type="button" data-mc="hide">🙈 Aaj ke liye robot chhupao (kone me 🤖 se wapas)</button>
         <button type="button" data-mc="today">😴 Aaj ke liye updates band</button>
         <button type="button" data-mc="off">⛔ Robot band karo (purana 🎙 button)</button>
-        <small>Wapas chalu: Settings → 🔔 Sound → 🤖 Robot dost (ya Gems panel → 🤖)</small>
+        <small>Wapas chalu: Settings → 🔔 Sound → 🤖 Robot dost (ya JARVIS panel → 🤖)</small>
       </div>`;
   // 🔗 v3.125.353 — har khabar ke saath uske related clickable buttons: 🖥️ Live screen · 👤 agent · 🧑‍💼 TL · 🔍 search
   function actsOf(it) {
@@ -1202,10 +1202,10 @@
       <div class="mc-bh"><span class="mc-ic">🕘</span><b>Maine kya bataya · 24h</b><small class="mc-cnt">${a.length} unique</small></div>
       <form class="mc-askf" data-mcf="ask"><input type="text" name="q" placeholder="Robot se poochho… (jaise: Rahul ka stock / kal 9 baje yaad dilana)" autocomplete="off"><button type="button" data-mc="mic" title="Bolkar poochho">🎙</button><button type="submit" title="Poochho">➤</button></form>
       <div class="mc-smart-pills"><div class="mc-pills-row">${smartPills}</div></div>
-      <div class="mc-quick"><button type="button" data-mc="talk">🎙 Hey Gems — baat karo</button><button type="button" data-mc="wake" title="ON: mic hamesha sunta hai (battery zyada). OFF: sirf 🎙 dabane par.">${cfg.wake === true ? '🟢 "Hey Gems" sunna: ON' : '⚪ "Hey Gems" sunna: OFF'}</button><button type="button" data-mc="todo">📋 Aaj ke kaam</button><button type="button" data-mc="rems">⏰ Reminders</button><button type="button" data-mc="badges">🎖 Badges</button></div>
+      <div class="mc-quick"><button type="button" data-mc="talk">🎙 Hey JARVIS — baat karo</button><button type="button" data-mc="wake" title="ON: mic hamesha sunta hai (battery zyada). OFF: sirf 🎙 dabane par.">${cfg.wake === true ? '🟢 "Hey JARVIS" sunna: ON' : '⚪ "Hey JARVIS" sunna: OFF'}</button><button type="button" data-mc="todo">📋 Aaj ke kaam</button><button type="button" data-mc="rems">⏰ Reminders</button><button type="button" data-mc="badges">🎖 Badges</button></div>
       <div class="mc-bb">${list}</div>
       <div class="mc-ctl wide">
-        <button type="button" class="mc-pill" data-mc="ask">🎙 Gems se poochho</button>
+        <button type="button" class="mc-pill" data-mc="ask">🎙 JARVIS se poochho</button>
         <button type="button" class="mc-pill" data-mc="now">✨ Naya update</button>
         <button type="button" class="mc-pill" data-mc="tower" title="Robot Control Tower — robot sach me kaam kar raha hai?">🛰 Control Tower</button>
         <button type="button" class="mc-pill" data-mc="follows">📌 Follow-ups</button>
@@ -1238,7 +1238,7 @@
     else if (k === 'popin') { closeHist(); popIn(); }
     else if (k === 'mic') { closeHist(); wakeFlow(''); }
     else if (k === 'talk') { closeHist(); wakeFlow(''); }
-    else if (k === 'wake') { cfg.wake = !(cfg.wake === true); wakeDenied = false; wakeNoted = false; save(); if (!cfg.wake) wakeStop(); else wakeTick(); b.textContent = cfg.wake ? '🟢 "Hey Gems" sunna: ON' : '⚪ "Hey Gems" sunna: OFF'; note(cfg.wake ? '🎙 Ab "Hey Gems" bolne par sunega (mic on rahega)' : '🔋 Mic band — baat karne ke liye 🎙 dabao'); }
+    else if (k === 'wake') { cfg.wake = !(cfg.wake === true); wakeDenied = false; wakeNoted = false; save(); if (!cfg.wake) wakeStop(); else wakeTick(); b.textContent = cfg.wake ? '🟢 "Hey JARVIS" sunna: ON' : '⚪ "Hey JARVIS" sunna: OFF'; note(cfg.wake ? '🎙 Ab "Hey JARVIS" bolne par sunega (mic on rahega)' : '🔋 Mic band — baat karne ke liye 🎙 dabao'); }
     else if (k === 'todo') { closeHist(); const t = srvItem(/^srv:todo:/); if (t) show(t); else show({ key: 'todo-none', fun: true, mood: 'curious', icon: '📋', title: 'Aaj ke kaam', head: 'Abhi koi kaam list nahi bani — server data aane do (subah).', view: 'text', stay: 5000 }); }
     else if (k === 'badges') { closeHist(); const t = srvItem(/^srv:badges:/); if (t) show(t); else show({ key: 'bdg-none', fun: true, mood: 'curious', icon: '🎖', title: 'Badges', head: 'Abhi koi naya badge nahi.', view: 'text', stay: 5000 }); }
     else if (k === 'rems') { closeHist(); showReminders(); }
@@ -1504,11 +1504,11 @@
     const d = w.document;
     d.documentElement.className = `${document.documentElement.className} mc-pip`.replace('mc-on', '');
     [...document.documentElement.attributes].forEach((a) => { if (/^data-/.test(a.name)) d.documentElement.setAttribute(a.name, a.value); });
-    d.title = '🤖 Gems — live updates';
+    d.title = '🤖 JARVIS — live updates';
     document.querySelectorAll('link[rel="stylesheet"], style').forEach((n) => {
       if (n.tagName === 'LINK') { const l = d.createElement('link'); l.rel = 'stylesheet'; l.href = n.href; d.head.appendChild(l); } else d.head.appendChild(n.cloneNode(true));
     });
-    const tip = d.createElement('div'); tip.className = 'mc-tip'; tip.textContent = '🤖 Gems live — har tab / app ke upar · band karne ko ✕ (window)'; d.body.appendChild(tip);
+    const tip = d.createElement('div'); tip.className = 'mc-tip'; tip.textContent = '🤖 JARVIS live — har tab / app ke upar · band karne ko ✕ (window)'; d.body.appendChild(tip);
     if (skip) skip(); closeHist();
     d.body.appendChild(el);
     d.addEventListener('click', (e) => { if (mode === 'hist' && !el.contains(e.target)) closeHist(); });
@@ -2138,13 +2138,13 @@
     const finish = (it) => it && { ...it, key: `ans:${Date.now()}`, qkey: it.key, fun: true, stay: Math.max(Number(it.stay) || 0, 14000) };
     const byKey = (...ks) => { let L = []; try { L = insights(); } catch { L = []; } for (const k of ks) { const f = L.find((x) => x.key === k); if (f) return finish(f); } return null; };
     if (has(/ (thank|thanks|thank you|shukriya|dhanyawad|धन्यवाद|शुक्रिया|थैंक) /)) return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', cls: 'greet', icon: '😊', title: 'Koi baat nahi!', head: 'Kabhi bhi poochho, main yahin hoon.', view: 'text', stay: 5000, say: `कोई बात नहीं ${firstName() || 'Tarun'} सर, कभी भी पूछिए।` };
-    if (has(/ (kaun ho|kaun hai tu|who are you|tum kaun|aap kaun|तुम कौन|आप कौन) /)) return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', cls: 'greet', icon: '🤖', title: 'Main Gems hoon', head: 'ApnaPayment dashboard ka robot — site ka har data bata sakta hoon.', view: 'text', stay: 7000, say: 'मैं जेम्स हूँ, आपकी साइट का रोबोट। यहाँ का हर डेटा पूछिए।' };
+    if (has(/ (kaun ho|kaun hai tu|who are you|tum kaun|aap kaun|तुम कौन|आप कौन) /)) return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', cls: 'greet', icon: '🤖', title: 'Main JARVIS hoon', head: 'ApnaPayment dashboard ka robot — site ka har data bata sakta hoon.', view: 'text', stay: 7000, say: 'मैं जेम्स हूँ, आपकी साइट का रोबोट। यहाँ का हर डेटा पूछिए।' };
     const txt = (title, head, say, extra) => ({ key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '🤖', title, head, view: 'text', stay: 9000, say, ...(extra || {}) });
     // 🎛 robot ko control: awaaz / band / chup
     if (has(/ (sound|awaaz|आवाज़|आवाज) /) && has(/ (band|off|mute|बंद|chup|चुप) /)) { cfg.sound = false; save(); return txt('Awaaz band', 'Ab main bolunga nahi, sirf board dikhaunga.', ''); }
     if (has(/ (sound|awaaz|आवाज़|आवाज) /) && has(/ (on|chalu|start|चालू|shuru|शुरू) /)) { cfg.sound = true; save(); return txt('Awaaz chalu', 'Ab main bolunga bhi.', 'ठीक है, अब मैं बोलूँगा भी।'); }
     if (has(/ (aaj|आज) /) && has(/ (chup|chhupo|snooze|mat dikhao|चुप|छुप) /)) { cfg.snoozeDay = today(); save(); return txt('Aaj chhutti', 'Aaj ke liye main chup rahunga.', 'ठीक है, आज मैं चुप रहूँगा।'); }
-    if (has(/ (hey gems|wake word|hii gems) /) && has(/ (band|off|बंद) /)) { cfg.wake = false; save(); wakeStop(); return txt('Hey Gems band', 'Settings → Sound & voice se wapas chalu kar sakte ho.', 'ठीक है, अब मैं नहीं सुनूँगा।'); }
+    if (has(/ (hey gems|wake word|hii gems) /) && has(/ (band|off|बंद) /)) { cfg.wake = false; save(); wakeStop(); return txt('Hey JARVIS band', 'Settings → Sound & voice se wapas chalu kar sakte ho.', 'ठीक है, अब मैं नहीं सुनूँगा।'); }
     // 🧭 site ke pages: "performance kholo", "stock dikhao"
     if (has(/ (kholo|khol|open|chalo|jao|jaao|le chalo|go to|खोलो|चलो|जाओ) /) || has(/ (page|tab|section|पेज|टैब) /)) {
       let tabs = []; try { tabs = FF.config.allTabs(true); } catch { tabs = []; }
@@ -2154,7 +2154,7 @@
       if (has(/ (setting|settings|सेटिंग|सेटिंग्स) /) ) { location.hash = '#/settings'; return txt('Settings khol di', 'Tabs: My account · Diagnostics · Sound & voice · Branding · Sheets & tabs · Access · Data source · Direct agents · Thresholds · Features · Contacts · Users · Links · Audit log · Backup', 'सेटिंग्स खोल दी हैं। यहाँ अकाउंट, साउंड और वॉइस, ब्रांडिंग, डेटा सोर्स, थ्रेशोल्ड, फीचर्स, यूज़र्स, ऑडिट लॉग और बैकअप के टैब हैं।', { closeVoice: true }); }
       if (hit) { location.hash = `#/${hit.tb.id}`; return txt(`${hit.tb.label} khol diya`, 'Page khul gaya — ab iske data ke baare me bhi poochh sakte ho.', `${hit.tb.label} खोल दिया।`, { closeVoice: true }); }
     }
-    if (has(/ (setting|settings|सेटिंग|सेटिंग्स) /)) return txt('Settings me kya kya hai', 'My account · Site diagnostics · Sound & voice (robot, Hey Gems, extension) · Branding · Sheets & tabs · Access matrix · Data source · Direct agents · Thresholds · Features · Contacts & sharing · Users & access · Personal links · Audit log · Storage & backup. "settings kholo" bolo to main khol dunga.', 'सेटिंग्स में अकाउंट, साउंड और वॉइस, ब्रांडिंग, डेटा सोर्स, थ्रेशोल्ड, फीचर्स, यूज़र्स, ऑडिट लॉग और बैकअप हैं। कहिए तो खोल दूँ।', { stay: 14000 });
+    if (has(/ (setting|settings|सेटिंग|सेटिंग्स) /)) return txt('Settings me kya kya hai', 'My account · Site diagnostics · Sound & voice (robot, Hey JARVIS, extension) · Branding · Sheets & tabs · Access matrix · Data source · Direct agents · Thresholds · Features · Contacts & sharing · Users & access · Personal links · Audit log · Storage & backup. "settings kholo" bolo to main khol dunga.', 'सेटिंग्स में अकाउंट, साउंड और वॉइस, ब्रांडिंग, डेटा सोर्स, थ्रेशोल्ड, फीचर्स, यूज़र्स, ऑडिट लॉग और बैकअप हैं। कहिए तो खोल दूँ।', { stay: 14000 });
     if (has(/ (kya kya|options?|features?|help|madad|मदद|kar sakte|कर सकते|kya kar sakta|क्या क्या) /)) {
       let names = ''; try { names = FF.config.allTabs(true).map((x) => x.label).slice(0, 14).join(' · '); } catch { names = ''; }
       return txt('Main kya kya kar sakta hoon', `${names ? `Pages: ${names}. ` : ''}Poochho: run-rate, andaza, total, top agents/TL, stock, dispatch, inactive, KYC, de-growth, FF vs GV, kisi agent ka issuance. Bolo: "performance kholo", "settings kholo", "awaaz band", "aaj chup", "reminder lagao".`, 'मैं साइट का हर पेज खोल सकता हूँ, रन रेट, अंदाज़ा, टोटल, टॉप एजेंट, स्टॉक, डिस्पैच, इनएक्टिव, केवाईसी, सब बता सकता हूँ। रिमाइंडर भी लगा सकता हूँ।', { stay: 16000 });
@@ -2350,7 +2350,7 @@
     tmp.querySelectorAll('script,style,iframe').forEach((n) => n.remove());
     const tx = tmp.cloneNode(true); tx.querySelectorAll('td,th,li,p,div,tr,br,b').forEach((n) => n.append(' ')); tx.querySelectorAll('tr,li,p').forEach((n) => n.append(' · '));
     const text = (tx.textContent || '').replace(/\s+/g, ' ').replace(/(\s·\s*)+/g, ' · ').trim();
-    return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '💬', title: 'Gems ka jawab', head: q, view: 'html', html: tmp.innerHTML, text: text.slice(0, 900), stay: Math.min(25000, 6000 + text.length * 40), say: text.slice(0, 400) };
+    return { key: `ans:${Date.now()}`, fun: true, mood: 'happy', icon: '💬', title: 'JARVIS ka jawab', head: q, view: 'html', html: tmp.innerHTML, text: text.slice(0, 900), stay: Math.min(25000, 6000 + text.length * 40), say: text.slice(0, 400) };
   }
   let asking = false;
   async function askRobot(q, inConvo) {
@@ -2375,10 +2375,10 @@
     r.onerror = () => { if (btn) btn.classList.remove('rec'); };
     try { r.start(); } catch { /* already */ }
   }
-  // 🎙 v3.125.156 — "Hey Gems / Hii Gems" bolo → "hii Tarun Sir, main aapki kya help karu?" → phir kuch bhi poochho
+  // 🎙 v3.125.156 — "Hey JARVIS / Hii JARVIS" bolo → "hii Tarun Sir, main aapki kya help karu?" → phir kuch bhi poochho
   let convo = false, lastSpoken = null;
   let wakeR = null, wakeLastErr = '', wakeLang = 'hi-IN', wakeDenied = false, wakeBusy = false, wakeNoted = false;
-  const WAKE_RE = /(gems?|jems?|jem|james|games|जेम्स?|जैम्स?|जेम्ज|जेमस|जेंस|जिम्स|जेम|जैम|गेम्स|जेन्स)/i;
+  const WAKE_RE = /(jarvis|jarvish|jaarvis|जार्विस|जारविस|जर्विस|जार्विज|gems?|jems?|jem|james|games|जेम्स?|जैम्स?|जेम्ज|जेमस|जेंस|जिम्स|जेम|जैम|गेम्स|जेन्स)/i;
   const SRC = () => window.SpeechRecognition || window.webkitSpeechRecognition;
   function wakeStop() { const r = wakeR; wakeR = null; if (r) { try { r.onresult = r.onend = r.onerror = null; r.abort(); } catch { /* ignore */ } } }
   function listenOnce(ms) { // ek sawaal sunke text lauta do ('' = kuch nahi bola)
@@ -2392,7 +2392,7 @@
       try { r.start(); } catch { end(); }
     });
   }
-  // 💬 v3.125.164 — Gems Voice: ChatGPT / Google Assistant jaisa baat-cheet screen (live bolna, typing jawab, orb animation)
+  // 💬 v3.125.164 — JARVIS Voice: ChatGPT / Google Assistant jaisa baat-cheet screen (live bolna, typing jawab, orb animation)
   const GV_CSS = `#gems-voice{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;background:rgba(10,14,30,.99);color:#eef2ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;animation:gvIn .22s ease}
 @media(min-width:760px){#gems-voice{inset:auto 18px 18px auto;width:420px;height:min(680px,86vh);border-radius:22px;box-shadow:0 20px 60px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12)}}
 @keyframes gvIn{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
@@ -2506,7 +2506,7 @@
       if (res.err === 'not-allowed' || res.err === 'service-not-allowed') { if (live) live.remove(); gvMsg('bot', '🎙 Mic ki permission band hai — browser / phone Settings me Microphone allow karo, ya neeche likhkar poochho.'); gvSet('idle'); return; }
       if (res.err === 'nosr') { if (live) live.remove(); gvMsg('bot', 'Is browser me bolkar poochhna nahi chalta — neeche likhkar poochho.'); gvSet('idle'); return; }
       const heard = (res.text || '').trim();
-      if (!heard) { if (live) live.remove(); if (Date.now() - idle > 15000) { gvMsg('bot', 'Theek hai, jab zarurat ho "Hey Gems" bol dena. 👋'); gvSet('idle'); await wait(1400); if (gen === gvGen) gvClose(); return; } continue; }
+      if (!heard) { if (live) live.remove(); if (Date.now() - idle > 15000) { gvMsg('bot', 'Theek hai, jab zarurat ho "Hey JARVIS" bol dena. 👋'); gvSet('idle'); await wait(1400); if (gen === gvGen) gvClose(); return; } continue; }
       idle = Date.now();
       if (live) { live.classList.remove('live'); live.textContent = heard; }
       if (BYE_RE.test(` ${heard.toLowerCase()} `) && heard.split(/\s+/).length <= 4) { const b = gvMsg('bot', ''); gvSet('speak'); const sp = say('ठीक है, कभी भी बुलाइए।', { force: true }); await gvType(b, 'Theek hai, kabhi bhi bulana. 👋', gen); await sp; gvClose(); return; }
@@ -2518,7 +2518,7 @@
     const want = show0 && allowed() && cfg.on && !pipWin && cfg.fab !== false;
     if (!want) { if (f) f.remove(); return; }
     if (f) return;
-    f = document.createElement('button'); f.id = 'gems-fab'; f.type = 'button'; f.title = 'Gems se baat karo'; f.textContent = '🎙';
+    f = document.createElement('button'); f.id = 'gems-fab'; f.type = 'button'; f.title = 'JARVIS se baat karo'; f.textContent = '🎙';
     f.addEventListener('click', () => wakeFlow(''));
     document.body.appendChild(f);
   }
@@ -2533,7 +2533,7 @@
       gvFab(false);
       const nm = firstName() || 'Tarun';
       gvEl = document.createElement('div'); gvEl.id = 'gems-voice'; gvEl.dataset.s = 'idle';
-      gvEl.innerHTML = `<div class="gv-h"><span class="gv-orb"></span><b>Gems</b><button type="button" class="gv-x" aria-label="Band karo">✕</button></div>
+      gvEl.innerHTML = `<div class="gv-h"><span class="gv-orb"></span><b>JARVIS</b><button type="button" class="gv-x" aria-label="Band karo">✕</button></div>
         <div class="gv-wave-wrap" aria-hidden="true"><div class="gv-wave"><i class="wv-1"></i><i class="wv-2"></i><i class="wv-3"></i><i class="wv-4"></i><i class="wv-5"></i><i class="wv-6"></i><i class="wv-7"></i><i class="wv-8"></i><i class="wv-9"></i><i class="wv-10"></i><i class="wv-11"></i><i class="wv-12"></i></div></div>
         <div class="gv-log"></div>
         <form class="gv-f"><input type="text" name="q" placeholder="Ya yahan likhkar poochho…" autocomplete="off"><button type="button" class="gv-mic" aria-label="Bolo">🎙</button></form>`;
@@ -2577,7 +2577,7 @@
     };
     r.onerror = (e) => {
       const er = e && e.error; wakeLastErr = er || '';
-      if (er === 'not-allowed' || er === 'service-not-allowed') { wakeDenied = true; if (!wakeNoted) { wakeNoted = true; note('🎙 "Hey Gems" ke liye mic ki permission do (address bar ka 🔒 / app Settings → Microphone), phir robot menu → 🎙 dabao'); } }
+      if (er === 'not-allowed' || er === 'service-not-allowed') { wakeDenied = true; if (!wakeNoted) { wakeNoted = true; note('🎙 "Hey JARVIS" ke liye mic ki permission do (address bar ka 🔒 / app Settings → Microphone), phir robot menu → 🎙 dabao'); } }
       else if (er === 'network' && !wakeNoted) { wakeNoted = true; note('🎙 Bolna samajhne ke liye internet / Google voice service chahiye — net check karo'); }
       else if (er === 'audio-capture' && !wakeNoted) { wakeNoted = true; note('🎙 Mic dusri app use kar rahi hai — usse band karo'); }
       else if (er === 'language-not-supported') { wakeLang = 'en-IN'; }
@@ -2593,7 +2593,7 @@
   ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => {
     try {
       if (!allowed() || !cfg.on) return;
-      if (!SRC()) { if (!noSrNoted) { noSrNoted = true; note('🎙 Is app / browser me "Hey Gems" sunna supported nahi. Neeche-left 🎙 dabao → likhne wale box me keyboard ka mic use karo.'); } return; }
+      if (!SRC()) { if (!noSrNoted) { noSrNoted = true; note('🎙 Is app / browser me "Hey JARVIS" sunna supported nahi. Neeche-left 🎙 dabao → likhne wale box me keyboard ka mic use karo.'); } return; }
       if (cfg.wake !== true) return;
       if (wakeDenied && wakeRetry < 3) { wakeRetry += 1; wakeDenied = false; wakeNoted = false; } // permission ab touch ke saath dobara maango
       if (!wakeR && !wakeDenied) wakeTick();
@@ -2889,7 +2889,7 @@
     timerWin = tw();
     timer = timerWin.setTimeout(tick, ms == null ? gapMs() : ms);
   }
-  // 🧩 Chrome extension "Gems Robot" laga ho → baaki saare tabs par sirf robot (bina window); ye tab dimaag
+  // 🧩 Chrome extension "JARVIS Robot" laga ho → baaki saare tabs par sirf robot (bina window); ye tab dimaag
   const extOn = () => document.documentElement.dataset.ffRobotExt === '1';
   function extEnd(it) { if (!extOn() || !it) return; try { window.postMessage({ source: 'ff-robot-page', msg: { type: 'end', key: it.key } }, location.origin); } catch { /* ignore */ } }
   function toExt(it, stageOnly) {
@@ -3179,10 +3179,10 @@
       const u = FF.auth && FF.auth.user ? String(FF.auth.user.name || FF.auth.user.username || '').split(/\s+/)[0] : '';
       if (cfg.greetDay !== today()) {
         cfg.greetDay = today(); save();
-        setTimeout(() => { if (!busy && !blocked()) show({ key: 'greet', fun: true, cls: 'greet', mood: 'happy', icon: '👋', title: `Namaste ${u}!`.trim(), head: 'Main Gems hoon — aaj site ki har khabar main board par dunga 😎', view: 'text', stay: 5500, say: `नमस्ते ${nm(u)}! मैं जेम्स हूँ। आज साइट की हर ख़बर मैं दूँगा।` }); }, 2500);
+        setTimeout(() => { if (!busy && !blocked()) show({ key: 'greet', fun: true, cls: 'greet', mood: 'happy', icon: '👋', title: `Namaste ${u}!`.trim(), head: 'Main JARVIS hoon — aaj site ki har khabar main board par dunga 😎', view: 'text', stay: 5500, say: `नमस्ते ${nm(u)}! मैं जेम्स हूँ। आज साइट की हर ख़बर मैं दूँगा।` }); }, 2500);
       }
       schedule(9e3);
-      // 🧠 v3.125.221 — Gems AI Operations Manager (alerts + TL + root cause + dispatch + prediction + briefing)
+      // 🧠 v3.125.221 — JARVIS AI Operations Manager (alerts + TL + root cause + dispatch + prediction + briefing)
       setTimeout(async () => { try { if (!FF.smartQ && FF.lazy) await FF.lazy.inject('smartQ'); if (!FF.ops && FF.lazy) await FF.lazy.inject('opsBrain'); } catch { /* optional */ } }, 6e3);
       setTimeout(checkVersions, 12e3);
       setInterval(checkVersions, 10 * 60e3);

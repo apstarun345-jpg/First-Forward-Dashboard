@@ -428,7 +428,7 @@ FF.pages = FF.pages || {};
     return section('🎙 Assistant awaaz & bhasha', `<p class="dim small">Voice assistant ka jawab kis awaaz me bole — Hindi / English voice, speed aur pitch yahan se set karo. Har language ki apni voice choose hoti hai; assistant panel ke 🌐 button se language turant switch hoti hai (mic ki bhasha bhi saath me badalti hai — hi-IN ⇄ en-IN). Test karke sun lo, pasand aaye to bas.</p>
       <div class="form-grid">${langSel}${voiceSel('hi', '🗣 Hindi / Hinglish awaaz')}${voiceSel('en', '🗣 English awaaz')}${slider('rate', '⚡ Speed', 1.02)}${slider('pitch', '🎵 Pitch', 1)}</div>
       <div class="form-grid"><label class="check"><input type="checkbox" id="voice-greet" ${p.greet !== false ? 'checked' : ''}> 🌅 <b>Login par voice greeting</b> — "Good morning &lt;naam&gt;, kaise ho aap?" bol kar welcome</label><label class="check"><input type="checkbox" id="voice-conv" ${p.convMode === true ? 'checked' : ''}> 🎧 <b>Hands-free conversation mode</b> — har jawab ke baad khud sunta rahega (Alexa-style)</label></div>
-      <div class="form-grid"><label class="check"><input type="checkbox" id="voice-wake" ${p.wake !== false ? 'checked' : ''}> 👂 <b>Wake word ON</b> — word bolte hi voice assistant active (Alexa/Siri style)</label><label class="fld"><span>🗣 Wake word (konsa word sunna hai)</span><input class="input" id="voice-wake-word" value="${esc(p.wakeWord || 'Hey Gems')}" maxlength="30" placeholder="Hey Gems"></label></div>
+      <div class="form-grid"><label class="check"><input type="checkbox" id="voice-wake" ${p.wake !== false ? 'checked' : ''}> 👂 <b>Wake word ON</b> — word bolte hi voice assistant active (Alexa/Siri style)</label><label class="fld"><span>🗣 Wake word (konsa word sunna hai)</span><input class="input" id="voice-wake-word" value="${esc(p.wakeWord || 'Hey JARVIS')}" maxlength="30" placeholder="Hey JARVIS"></label></div>
       <p class="dim small" id="voice-wake-status"></p>
       <div class="btn-row"><button class="btn small" id="voice-test-hi">🔊 Hindi test</button><button class="btn small" id="voice-test-en">🔊 English test</button><button class="btn small" id="voice-refresh">🔄 Voice list refresh</button><button class="btn small" id="voice-reset">↺ Default</button></div>
       <p class="dim small" id="voice-count"></p>
@@ -464,7 +464,7 @@ FF.pages = FF.pages || {};
     const wakeInfo = () => {
       if (!wakeStatusEl) return;
       const A2 = FF.assistant;
-      const word = String((U.voicePrefs().wakeWord || 'Hey Gems')).trim() || 'Hey Gems';
+      const word = String((U.voicePrefs().wakeWord || 'Hey JARVIS')).trim() || 'Hey JARVIS';
       const on = U.voicePrefs().wake !== false;
       const supported = !A2 || !A2.wakeSupported || A2.wakeSupported();
       if (!supported) wakeStatusEl.textContent = '⚠️ Is browser me speech recognition nahi hai — wake word Chrome/Edge me best chalta hai.';
@@ -475,7 +475,7 @@ FF.pages = FF.pages || {};
     if (wakeCb) wakeCb.addEventListener('change', () => {
       U.setVoicePrefs({ wake: wakeCb.checked });
       wakeInfo();
-      U.toast(wakeCb.checked ? `👂 Wake word ON — "${(wakeWordEl && wakeWordEl.value.trim()) || 'Hey Gems'}" bolo to assistant active.` : '🔕 Wake word OFF.', 'ok');
+      U.toast(wakeCb.checked ? `👂 Wake word ON — "${(wakeWordEl && wakeWordEl.value.trim()) || 'Hey JARVIS'}" bolo to assistant active.` : '🔕 Wake word OFF.', 'ok');
     });
     if (wakeWordEl) {
       let wakeTimer = null;
@@ -821,13 +821,13 @@ FF.pages = FF.pages || {};
   }
   // ---- 🔊 Sound & voice (Office Bell + Voice Announcer) — v3.18 ----------------------------------
   /** Naye tags ki awaaz yahan se test / configure hoti hai (topbar 🔊 menu ka hi doosra darwaza). */
-  // 🤖 v3.125.123 — Robot dost (sirf admin): site par ghoomta Gems robot — on/off, kitni der me, sound, masti
+  // 🤖 v3.125.123 — Robot dost (sirf admin): site par ghoomta JARVIS robot — on/off, kitni der me, sound, masti
   function mascotSection() {
     if (!A.isAdmin()) return '';
     const M = FF.mascot;
     const c = M ? M.getCfg() : { on: true, sound: false, everySec: 10, roam: true, fun: true, autoPip: true, notify: true, voice: {} };
     const opts = [[10, '10 sec'], [20, '20 sec'], [30, '30 sec'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']];
-    return section('🤖 Robot dost (sirf admin ko dikhta hai)', `<p class="dim small">Gems robot site par ghoomta, naachta aur board par <b>site ki har khabar</b> batata hai — agents/TL growth &amp; de-growth, inactive, low stock, naya data, 🔔 alerts (tag request, search, login…), ⚙️ settings / users ke badlaav (audit), kaun online aaya, naya site version. Robot par click → last 24h ki unique history.</p>
+    return section('🤖 Robot dost (sirf admin ko dikhta hai)', `<p class="dim small">JARVIS robot site par ghoomta, naachta aur board par <b>site ki har khabar</b> batata hai — agents/TL growth &amp; de-growth, inactive, low stock, naya data, 🔔 alerts (tag request, search, login…), ⚙️ settings / users ke badlaav (audit), kaun online aaya, naya site version. Robot par click → last 24h ki unique history.</p>
       <div class="form-grid mc-set">
         <label class="check"><input type="checkbox" data-mcs="on" ${c.on ? 'checked' : ''}> 🤖 <b>Robot ON</b></label>
         <label class="check"><input type="checkbox" data-mcs="updates" ${c.updates !== false ? 'checked' : ''}> 📣 <b>Updates ON</b> — ON: robot lagatar site ki khabar / update deta rahega (sab khabar bata chuka ho to bhi purani dobara). OFF: koi update, alert, briefing ya notification nahi — sirf robot dikhega.</label>
@@ -836,7 +836,7 @@ FF.pages = FF.pages || {};
         <label class="check"><input type="checkbox" data-mcs="brief" ${c.brief !== false ? 'checked' : ''}> 🗞 <b>Subah ki briefing</b> — din me pehli baar site kholte hi robot ek baar poora haal bataye (total, run-rate, andaza, top agent, stock, alerts). Phone par roz ka 🌅 Daily digest push alag se aata hai (Features → digest hour).</label>
         <label class="check"><input type="checkbox" data-mcs="keyOnly" ${c.keyOnly ? 'checked' : ''}> 🎚 <b>Sirf zaruri updates</b> — robot sirf dhyan-dene wali baat (stock, band agent, girawat) aur mukhya number (total, run-rate, top) bataye; chhoti-moti khabar nahi</label>
         <label class="check"><input type="checkbox" data-mcs="alerts" ${c.alerts !== false ? 'checked' : ''}> 🚨 <b>Alerts khud bataye</b> — stock khatam hone wala, bada agent band, kal ka din kamzor (2 ghante me ek baar)</label>
-        <label class="check"><input type="checkbox" data-mcs="wake" ${c.wake === true ? 'checked' : ''}> 🎙 <b>"Hey Gems / Hii Gems" bolo</b> — robot jawab dega "hii Tarun Sir, main aapki kya help karu?" phir site ka kuch bhi poochho (dashboard tab khula + mic permission). <b>Default OFF</b> — ON karne par mic hamesha sunta hai (battery zyada lagti hai); OFF me bhi 🎙 button dabakar baat kar sakte ho.</label>
+        <label class="check"><input type="checkbox" data-mcs="wake" ${c.wake === true ? 'checked' : ''}> 🎙 <b>"Hey JARVIS / Hii JARVIS" bolo</b> — robot jawab dega "hii Tarun Sir, main aapki kya help karu?" phir site ka kuch bhi poochho (dashboard tab khula + mic permission). <b>Default OFF</b> — ON karne par mic hamesha sunta hai (battery zyada lagti hai); OFF me bhi 🎙 button dabakar baat kar sakte ho.</label>
         <label class="check"><input type="checkbox" data-mcs="roam" ${c.roam ? 'checked' : ''}> 🛸 <b>Idhar-udhar ghoomna</b></label>
         <label class="check"><input type="checkbox" data-mcs="fun" ${c.fun ? 'checked' : ''}> 🕺 <b>Masti</b> — dance, moonwalk, jokes (jab nayi khabar na ho)</label>
         <label class="check"><input type="checkbox" data-mcs="push" ${c.push !== false ? 'checked' : ''}> 📱 <b>Robot ki har khabar app + web notification me</b> — agent ke TL naam ke saath (phone app band ho tab bhi; dashboard kahin khula hona chahiye)</label>
