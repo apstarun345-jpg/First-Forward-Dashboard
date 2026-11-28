@@ -1450,13 +1450,13 @@ body.colorful .from-hdr { color: #166534; }
     else if (tall) { parts.push(one(0, 0, w, Math.round(h * 0.56)), one(0, Math.round(h * 0.44), w, h - Math.round(h * 0.44))); }
     else { parts.push(one(0, 0, Math.round(w * 0.56), h), one(Math.round(w * 0.44), 0, w - Math.round(w * 0.44), h)); }
     const lists = await Promise.all(parts);
-    const cl = [];   // { code, n }
-    lists.forEach((lst, li) => lst.forEach((code) => {
-      const c = cl.find((q) => scHam(q.code, code) <= 2);
-      if (c) { c.votes.set(code, (c.votes.get(code) || 0) + (li ? 1.2 : 1)); }
-      else cl.push({ code, votes: new Map([[code, li ? 1.2 : 1]]) });
-    }));
-    return cl.map((c) => [...c.votes.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+    // ek hi list me jo do number saath aaye wo alag-alag tag hain (jaise ...261 aur ...262) — unhe kabhi mat milao.
+    // Sirf alag-alag padhai me ≤2 digit ke farak wale (kabhi saath nahi aaye) ek hi tag ka galat-sahi padhna maano → bahumat wala.
+    const vote = new Map(); lists.forEach((lst, li) => new Set(lst).forEach((c) => vote.set(c, (vote.get(c) || 0) + (li ? 1.2 : 1))));
+    const together = (a, b) => lists.some((l) => l.includes(a) && l.includes(b));
+    const codes = [...vote.keys()].sort((a, b) => vote.get(b) - vote.get(a)), keep = [];
+    codes.forEach((c) => { if (!keep.some((k) => scHam(k, c) <= 2 && !together(k, c))) keep.push(c); });
+    return keep;
   }
   async function scReadPhoto(file) {
     const card = { id: ++SC.rvId, name: file.name || 'Photo', url: URL.createObjectURL(file), cands: [], busy: true, step: '' };
