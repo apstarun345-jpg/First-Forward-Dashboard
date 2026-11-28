@@ -4718,7 +4718,8 @@ function bgScanRelease() {
 }
 /** v3.125.622 — interactive (drawer) query: queue/heavy-scan ke peeche nahi, 1 koshish, 40 s — browser 60 s se pehle jawab/error mile. */
 async function gvizPageQuick(params, sheet) {
-  const out = await fetchUpstream(upstreamUrl(params), { timeoutMs: 40000 });
+  const uurl = upstreamUrl(params); GVIZ_PRIORITY_URLS.add(uurl);   // limit 5000 hai par interactive — heavy-scan queue ke aage
+  let out; try { out = await fetchUpstream(uurl, { timeoutMs: 40000 }); } finally { GVIZ_PRIORITY_URLS.delete(uurl); }
   if (out.rateLimited) { const e = new Error(gvizLimitMessage(out.retryAfterMs)); e.rateLimited = true; throw e; }
   if (out.status < 200 || out.status >= 300) throw new Error(`${sheet}: Google responded ${out.status}`);
   const table = parseGvizServer(out.body);
